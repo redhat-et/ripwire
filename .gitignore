@@ -1,0 +1,29 @@
+# build / sanitizer output dirs
+build*/
+asan*/
+tsan*/
+/fuzz/
+/fuzz_llvm/
+/relbuild/
+
+# incremental index caches (--cache=PATH)
+*.cache
+*.cache.tmp
+.ctxpack-cache
+.ripwire-cache
+
+# generated sidecars (--arch --baseline / --quality-baseline / --note-add in the CWD)
+.ctxpack_*
+.ripwire_*
+*.pptx.inspect.ndjson
+
+# macOS
+.DS_Store
+
+# python
+__pycache__/
+*.pyc
+
+# bench/multiswe: downloaded raw Multi-SWE-bench per-repo JSONL (CC0, cachable, but not committed —
+# see bench/multiswe/README.md; dataset.lock is the committed, derived, reproducible artifact)
+/bench/multiswe/.raw-cache/

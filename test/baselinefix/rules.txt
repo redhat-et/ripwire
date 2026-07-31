@@ -1,0 +1,3 @@
+# rules.txt — two built-in layer names; game must not import infra.
+# This produces exactly 2 violations: player.cpp and world.cpp each include an infra header.
+deny game -> infra

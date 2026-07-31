@@ -1,0 +1,12 @@
+# `not-inside`: flag a log() call, but NOT when it lives inside a function whose name starts with "skip".
+# Positive: log() on L33 (inside normalCaller) is KEPT.
+# Negative: log() on L38 (inside skipMe) is DROPPED — its enclosing function_definition matches ^skip.
+- id: log-not-in-skip
+  language: cpp
+  severity: info
+  message: log() call outside skip* functions
+  query: |
+    (call_expression function: (identifier) @f (#match? @f "^log$")) @hit
+  not-inside: |
+    (function_definition
+      declarator: (function_declarator declarator: (identifier) @n (#match? @n "^skip"))) @scope

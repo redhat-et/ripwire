@@ -1,0 +1,3 @@
+# rules.txt — uses BUILT-IN layer names (no `layer` declarations needed).
+# The test layer must not include from the render layer.
+deny test -> render

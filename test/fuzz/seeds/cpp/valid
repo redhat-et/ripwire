@@ -1,0 +1,2 @@
+int leaf() { return 1; }
+int root() { return leaf(); }

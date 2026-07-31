@@ -1,0 +1,1 @@
+struct Decoy { int y; };

@@ -1,0 +1,13 @@
+# `not-matches`: flag a raw `new`, but NOT when the created type name starts with "Pool".
+# The not-matches query captures the OUTER new_expression (@m), so its span EQUALS the candidate's
+# and the drop fires (per the documented contract: capture the node you want compared).
+# Positive: `new Widget` on L19 is KEPT (type is Widget).
+# Negative: `new PoolThing()` on L25 is DROPPED (type_identifier starts with Pool).
+- id: new-not-pool
+  language: cpp
+  severity: warn
+  message: raw new of a non-Pool type
+  query: |
+    (new_expression) @hit
+  not-matches: |
+    (new_expression (type_identifier) @t (#match? @t "^Pool")) @m

@@ -1,0 +1,2 @@
+func leaf() -> Int { 1 }
+func root() -> Int { leaf() }

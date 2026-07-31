@@ -1,0 +1,129 @@
+bench/bench_convergence.cpp	chrono::steady_clock::now
+bench/bench_convergence.cpp	chrono::duration&lt;double, std::milli&gt;
+bench/bench_convergence.cpp	chrono::steady_clock::now
+bench/bench_convergence.cpp	thread::hardware_concurrency
+bench/bench_fixedstr.cpp	chrono::duration_cast&lt;std::chrono::nanoseconds&gt;
+bench/bench_ordered_map.cpp	chrono::steady_clock::now
+bench/bench_ordered_map.cpp	chrono::duration&lt;double, std::milli&gt;
+bench/bench_ordered_map.cpp	chrono::steady_clock::now
+bench/bench_ordered_map.cpp	dyn::dynamic_map&lt;std::uint64_t, std::uint32_t, 16&gt;
+bench/bench_ordered_map.cpp	dyn::dynamic_map&lt;std::uint64_t, std::uint32_t, 32&gt;
+bench/bench_ordered_map.cpp	dyn::dynamic_map&lt;std::uint64_t, std::uint8_t, 16&gt;
+bench/bench_ordered_map.cpp	dyn::dynamic_map&lt;std::uint64_t, std::uint8_t, 32&gt;
+bench/bench_radix_ab.cpp	chrono::steady_clock::now
+bench/bench_radix_ab.cpp	chrono::duration&lt;double, std::milli&gt;
+bench/bench_radix_ab.cpp	chrono::steady_clock::now
+bench/bench_radix_ab.cpp	sortutil::lessByScoreDescId
+bench/bench_radix_ab.cpp	sortutil::nonNegativeFloatDescKey
+bench/bench_radix_ab.cpp	sortutil::nonNegativeFloatDescKey
+bench/bench_radix_ab.cpp	sortutil::nonNegativeFloatDescKey
+bench/bench_sort_large.cpp	chrono::steady_clock::now
+bench/bench_sort_large.cpp	chrono::duration&lt;double, std::milli&gt;
+bench/bench_sort_large.cpp	chrono::steady_clock::now
+bench/bench_sort_large.cpp	sortutil::lessByFromTo
+bench/bench_sort_large.cpp	sortutil::radixSortByFromTo
+bench/bench_sort_large.cpp	sort::unstable
+bench/bench_sort_large.cpp	sortutil::radixSortByFromTo
+bench/bench_sort_large.cpp	sortutil::lessByScoreDescId
+bench/bench_sort_large.cpp	sortutil::lessByScoreDescId
+bench/bench_sort_large.cpp	sort::unstable
+bench/bench_sort_large.cpp	sortutil::lessByScoreDescId
+bench/bench_sort_large.cpp	sortutil::radixSortByScoreDescId
+bench/bench_svector3.cpp	chrono::steady_clock::now
+bench/bench_svector3.cpp	chrono::duration&lt;double, std::milli&gt;
+bench/bench_svector3.cpp	chrono::steady_clock::now
+bench/bench_svector3.cpp	thread::hardware_concurrency
+src/crossref.h	thread::hardware_concurrency
+src/csrverify.h	numeric_limits&lt;std::uint32_t&gt;::max
+src/darkflags.h	filesystem::exists
+src/docdrift.h	filesystem::exists
+src/docdrift.h	thread::hardware_concurrency
+src/docdrift.h	thread::hardware_concurrency
+src/hashutil.h	numeric_limits&lt;std::uint64_t&gt;::max
+src/ingest.cpp	chrono::duration_cast&lt;std::chrono::nanoseconds&gt;
+src/ingest.cpp	chrono::system_clock::now
+src/ingest.cpp	thread::hardware_concurrency
+src/ingest.cpp	thread::hardware_concurrency
+src/ingest.cpp	thread::hardware_concurrency
+src/ingest.cpp	numeric_limits&lt;std::uint32_t&gt;::max
+src/ingest.cpp	thread::hardware_concurrency
+src/ingest.cpp	thread::hardware_concurrency
+src/lexical.h	thread::hardware_concurrency
+src/main.cpp	hashutil::fnv1aMultiply
+src/main.cpp	hashutil::fnv1aMultiply
+src/main.cpp	quality::popenTrimmed
+src/main.cpp	embedded_queries::queryFor
+src/main.cpp	sortutil::radixSortByScoreDescId
+src/main.cpp	sortutil::radixSortByScoreDescId
+src/main.cpp	quality::gitCommitterDateIso
+src/main.cpp	quality::gitHeadSha
+src/main.cpp	quality::gitOneLine
+src/main.cpp	gitoracle::probeNameHistory
+src/main.cpp	mcpdetail::jsonEscape
+src/main.cpp	filesystem::file_size
+src/main.cpp	filesystem::path
+src/main.cpp	notes::loadNoteIndex
+src/mcp.h	chrono::steady_clock::now
+src/mcp.h	chrono::duration&lt; double, std::milli &gt;
+src/mcp.h	chrono::steady_clock::now
+src/mcpindex.h	quality::computeHeadSnapshot
+src/mcpjson.h	numeric_limits&lt;long long&gt;::max
+src/mcpjson.h	jsonesc::escapeMcp
+src/mcpserver.h	chrono::steady_clock::now
+src/mcpserver.h	chrono::duration&lt; double, std::milli &gt;
+src/mcpserver.h	chrono::steady_clock::now
+src/mcpverbs.h	filesystem::status
+src/mcpverbs.h	filesystem::path
+src/mcpverbs.h	filesystem::exists
+src/mcpverbs.h	filesystem::is_directory
+src/mcpverbs.h	quality::baselinePath
+src/mcpverbs.h	quality::acksPath
+src/mcpverbs.h	filesystem::exists
+src/mcpverbs.h	filesystem::path
+src/mcpverbs.h	quality::selectBaseline
+src/mcpverbs.h	quality::computeHeadSnapshot
+src/mcpverbs.h	quality::computeDelta
+src/mcpverbs.h	quality::readAckRecords
+src/mcpverbs.h	quality::applyAckRatchet
+src/mcpverbs.h	quality::displaySym
+src/mcpverbs.h	quality::displaySym
+src/mcpverbs.h	quality::gitHeadSha
+src/mcpverbs.h	quality::writeBaseline
+src/mcpverbs.h	quality::computeSnapshot
+src/quality.h	chrono::duration_cast&lt;fs::file_time_type::duration&gt;
+src/quality.h	chrono::duration&lt;double, std::ratio&lt;86400&gt;&gt;
+src/quality.h	file_time_type::clock::now
+src/quality.h	numeric_limits&lt;std::size_t&gt;::max
+src/quality.h	numeric_limits&lt;std::size_t&gt;::max
+src/quality.h	filesystem::remove
+src/quality.h	filesystem::path
+src/quality.h	filesystem::remove
+src/quality.h	filesystem::path
+src/quality.h	filesystem::remove_all
+src/quality.h	filesystem::path
+src/quality.h	filesystem::remove
+src/quality.h	filesystem::path
+src/recall.h	char_traits&lt;char&gt;::length
+src/search.h	detail::readWholeFile
+src/search.h	thread::hardware_concurrency
+src/search.h	detail::readWholeFile
+src/skilleval.h	filesystem::directory_iterator
+src/skilleval.h	filesystem::exists
+src/skilleval.h	numeric_limits&lt;std::size_t&gt;::max
+src/skillscan.h	filesystem::is_directory
+src/testmap.h	detail::readWholeFile
+src/tracelocus.h	detail::trim
+src/tracelocus.h	detail::trim
+test/fuzz/fuzz_ingest.cpp	numeric_limits&lt;std::uint32_t&gt;::max
+test/jsonwalk_unit.cpp	mcpdetail::stringEnd
+test/jsonwalk_unit.cpp	minedjson::skipString
+test/jsonwalk_unit.cpp	mcpdetail::stringEnd
+test/jsonwalk_unit.cpp	minedjson::skipString
+test/jsonwalk_unit.cpp	mcpdetail::stringEnd
+test/jsonwalk_unit.cpp	minedjson::skipString
+test/jsonwalk_unit.cpp	minedjson::skipString
+test/verify_csr.cpp	numeric_limits&lt;float&gt;::quiet_NaN
+test/verify_radix.cpp	sortutil::lessByScoreDescId
+test/verify_radix.cpp	sortutil::radixSortByScoreDescId
+test/verify_radix.cpp	sortutil::radixSortNonNegativeFloatsDesc
+test/verify_radix.cpp	sortutil::radixSortByFromTo

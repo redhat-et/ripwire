@@ -1,0 +1,8 @@
+// game/enemy.cpp — violation 3: introduced by the gate test to verify exit 2 on new violations.
+#include "../infra/allocator.h"
+
+void spawnEnemy( int x, int y )
+{
+    void* mem = arenaAlloc( 128 );
+    (void)x; (void)y; (void)mem;
+}

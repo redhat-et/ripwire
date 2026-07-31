@@ -1,0 +1,2811 @@
+{
+  "paired": [
+    {
+      "instance_id": "huggingface__transformers-22496",
+      "repo": "huggingface/transformers",
+      "n_gold_files": 4,
+      "gold_files": [
+        "src/transformers/models/whisper/modeling_whisper.py",
+        "src/transformers/models/whisper/processing_whisper.py",
+        "src/transformers/models/whisper/tokenization_whisper.py",
+        "src/transformers/models/whisper/tokenization_whisper_fast.py"
+      ],
+      "ctxpack": {
+        "worst": 13,
+        "first": 0
+      },
+      "aider": {
+        "worst": 207,
+        "first": 150,
+        "n_files_seen": 3299
+      },
+      "aider_plain": {
+        "worst": 708,
+        "first": 256
+      },
+      "cbm": {
+        "worst": 17,
+        "first": 4,
+        "total_results": 1310
+      },
+      "ctx_ranks": [
+        0,
+        13,
+        13,
+        13
+      ],
+      "aider_ranks": [
+        207,
+        160,
+        150,
+        156
+      ],
+      "cbm_ranks": [
+        17,
+        4,
+        5,
+        6
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 163
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-24145",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 1,
+      "gold_files": [
+        "sklearn/preprocessing/_polynomial.py"
+      ],
+      "ctxpack": {
+        "worst": 1,
+        "first": 1
+      },
+      "aider": {
+        "worst": 132,
+        "first": 132,
+        "n_files_seen": 1542
+      },
+      "aider_plain": {
+        "worst": 203,
+        "first": 203
+      },
+      "cbm": {
+        "worst": 0,
+        "first": 0,
+        "total_results": 1004
+      },
+      "ctx_ranks": [
+        1
+      ],
+      "aider_ranks": [
+        132
+      ],
+      "cbm_ranks": [
+        0
+      ],
+      "graphify": {
+        "worst": 112,
+        "first": 112,
+        "n_ranked": 209
+      }
+    },
+    {
+      "instance_id": "avantifellows__quiz-backend-84",
+      "repo": "avantifellows/quiz-backend",
+      "n_gold_files": 3,
+      "gold_files": [
+        "app/models.py",
+        "app/routers/session_answers.py",
+        "app/routers/sessions.py"
+      ],
+      "ctxpack": {
+        "worst": 7,
+        "first": 0
+      },
+      "aider": {
+        "worst": 13,
+        "first": 2,
+        "n_files_seen": 43
+      },
+      "aider_plain": {
+        "worst": 13,
+        "first": 2
+      },
+      "cbm": {
+        "worst": 7,
+        "first": 0,
+        "total_results": 13
+      },
+      "ctx_ranks": [
+        0,
+        7,
+        7
+      ],
+      "aider_ranks": [
+        12,
+        13,
+        2
+      ],
+      "cbm_ranks": [
+        7,
+        4,
+        0
+      ],
+      "graphify": {
+        "worst": 12,
+        "first": 1,
+        "n_ranked": 15
+      }
+    },
+    {
+      "instance_id": "internetarchive__openlibrary-7929",
+      "repo": "internetarchive/openlibrary",
+      "n_gold_files": 5,
+      "gold_files": [
+        "openlibrary/core/lending.py",
+        "openlibrary/core/models.py",
+        "openlibrary/core/waitinglist.py",
+        "openlibrary/macros/LoanStatus.html",
+        "openlibrary/plugins/upstream/borrow.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 0
+      },
+      "aider": {
+        "worst": null,
+        "first": 25,
+        "n_files_seen": 1690
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 64
+      },
+      "cbm": {
+        "worst": null,
+        "first": 0,
+        "total_results": 1007
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        25,
+        56,
+        62,
+        null,
+        37
+      ],
+      "cbm_ranks": [
+        0,
+        31,
+        33,
+        null,
+        5
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 0
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-6836",
+      "repo": "modin-project/modin",
+      "n_gold_files": 4,
+      "gold_files": [
+        "modin/core/dataframe/algebra/binary.py",
+        "modin/core/dataframe/pandas/dataframe/dataframe.py",
+        "modin/core/dataframe/pandas/partitioning/partition_manager.py",
+        "modin/core/execution/ray/common/engine_wrapper.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 12
+      },
+      "aider": {
+        "worst": 89,
+        "first": 14,
+        "n_files_seen": 786
+      },
+      "aider_plain": {
+        "worst": 203,
+        "first": 22
+      },
+      "cbm": {
+        "worst": null,
+        "first": 4,
+        "total_results": 1442
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        14,
+        15,
+        18,
+        89
+      ],
+      "cbm_ranks": [
+        25,
+        null,
+        9,
+        4
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 44,
+        "n_ranked": 83
+      }
+    },
+    {
+      "instance_id": "Open-MSS__MSS-1967",
+      "repo": "Open-MSS/MSS",
+      "n_gold_files": 3,
+      "gold_files": [
+        "mslib/msui/mscolab.py",
+        "mslib/msui/socket_control.py",
+        "mslib/utils/airdata.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 41
+      },
+      "aider": {
+        "worst": 83,
+        "first": 26,
+        "n_files_seen": 644
+      },
+      "aider_plain": {
+        "worst": 125,
+        "first": 21
+      },
+      "cbm": {
+        "worst": null,
+        "first": 1,
+        "total_results": 1416
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        83,
+        68,
+        26
+      ],
+      "cbm_ranks": [
+        1,
+        16,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 22,
+        "n_ranked": 106
+      }
+    },
+    {
+      "instance_id": "tardis-sn__tardis-2782",
+      "repo": "tardis-sn/tardis",
+      "n_gold_files": 2,
+      "gold_files": [
+        "benchmarks/opacities_opacity.py",
+        "benchmarks/transport_montecarlo_packet_trackers.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 0
+      },
+      "aider": {
+        "worst": 214,
+        "first": 176,
+        "n_files_seen": 660
+      },
+      "aider_plain": {
+        "worst": 181,
+        "first": 142
+      },
+      "cbm": {
+        "worst": 19,
+        "first": 5,
+        "total_results": 1208
+      },
+      "ctx_ranks": [
+        null,
+        null
+      ],
+      "aider_ranks": [
+        176,
+        214
+      ],
+      "cbm_ranks": [
+        19,
+        5
+      ],
+      "graphify": {
+        "worst": 105,
+        "first": 92,
+        "n_ranked": 137
+      }
+    },
+    {
+      "instance_id": "sopel-irc__sopel-2285",
+      "repo": "sopel-irc/sopel",
+      "n_gold_files": 1,
+      "gold_files": [
+        "sopel/builtins/url.py"
+      ],
+      "ctxpack": {
+        "worst": 0,
+        "first": 0
+      },
+      "aider": {
+        "worst": 12,
+        "first": 12,
+        "n_files_seen": 232
+      },
+      "aider_plain": {
+        "worst": 65,
+        "first": 65
+      },
+      "cbm": {
+        "worst": 10,
+        "first": 10,
+        "total_results": 1458
+      },
+      "ctx_ranks": [
+        0
+      ],
+      "aider_ranks": [
+        12
+      ],
+      "cbm_ranks": [
+        10
+      ],
+      "graphify": {
+        "worst": 17,
+        "first": 17,
+        "n_ranked": 27
+      }
+    },
+    {
+      "instance_id": "mesonbuild__meson-11366",
+      "repo": "mesonbuild/meson",
+      "n_gold_files": 2,
+      "gold_files": [
+        "docs/markdown/Installing.md",
+        "mesonbuild/minstall.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 0
+      },
+      "aider": {
+        "worst": null,
+        "first": 19,
+        "n_files_seen": 4471
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 26
+      },
+      "cbm": {
+        "worst": null,
+        "first": 34,
+        "total_results": 465
+      },
+      "ctx_ranks": [
+        null,
+        null
+      ],
+      "aider_ranks": [
+        null,
+        19
+      ],
+      "cbm_ranks": [
+        null,
+        34
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 63,
+        "n_ranked": 122
+      }
+    },
+    {
+      "instance_id": "pypa__pip-13085",
+      "repo": "pypa/pip",
+      "n_gold_files": 1,
+      "gold_files": [
+        "src/pip/_internal/commands/install.py"
+      ],
+      "ctxpack": {
+        "worst": 3,
+        "first": 3
+      },
+      "aider": {
+        "worst": 366,
+        "first": 366,
+        "n_files_seen": 999
+      },
+      "aider_plain": {
+        "worst": 268,
+        "first": 268
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 1396
+      },
+      "ctx_ranks": [
+        3
+      ],
+      "aider_ranks": [
+        366
+      ],
+      "cbm_ranks": [
+        null
+      ],
+      "graphify": {
+        "worst": 26,
+        "first": 26,
+        "n_ranked": 242
+      }
+    },
+    {
+      "instance_id": "gammasim__simtools-1183",
+      "repo": "gammasim/simtools",
+      "n_gold_files": 3,
+      "gold_files": [
+        "simtools/applications/db_get_parameter_from_db.py",
+        "simtools/db/db_array_elements.py",
+        "simtools/db/db_handler.py"
+      ],
+      "ctxpack": {
+        "worst": 52,
+        "first": 13
+      },
+      "aider": {
+        "worst": 78,
+        "first": 11,
+        "n_files_seen": 629
+      },
+      "aider_plain": {
+        "worst": 88,
+        "first": 15
+      },
+      "cbm": {
+        "worst": 82,
+        "first": 9,
+        "total_results": 1173
+      },
+      "ctx_ranks": [
+        13,
+        52,
+        52
+      ],
+      "aider_ranks": [
+        78,
+        21,
+        11
+      ],
+      "cbm_ranks": [
+        82,
+        80,
+        9
+      ],
+      "graphify": {
+        "worst": 118,
+        "first": 15,
+        "n_ranked": 121
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-25186",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 1,
+      "gold_files": [
+        "sklearn/ensemble/_iforest.py"
+      ],
+      "ctxpack": {
+        "worst": 60,
+        "first": 60
+      },
+      "aider": {
+        "worst": 107,
+        "first": 107,
+        "n_files_seen": 1535
+      },
+      "aider_plain": {
+        "worst": 208,
+        "first": 208
+      },
+      "cbm": {
+        "worst": 8,
+        "first": 8,
+        "total_results": 1180
+      },
+      "ctx_ranks": [
+        60
+      ],
+      "aider_ranks": [
+        107
+      ],
+      "cbm_ranks": [
+        8
+      ],
+      "graphify": {
+        "worst": 59,
+        "first": 59,
+        "n_ranked": 104
+      }
+    },
+    {
+      "instance_id": "gitpython-developers__GitPython-1636",
+      "repo": "gitpython-developers/GitPython",
+      "n_gold_files": 1,
+      "gold_files": [
+        "git/cmd.py"
+      ],
+      "ctxpack": {
+        "worst": 10,
+        "first": 10
+      },
+      "aider": {
+        "worst": 14,
+        "first": 14,
+        "n_files_seen": 181
+      },
+      "aider_plain": {
+        "worst": 14,
+        "first": 14
+      },
+      "cbm": {
+        "worst": 23,
+        "first": 23,
+        "total_results": 1152
+      },
+      "ctx_ranks": [
+        10
+      ],
+      "aider_ranks": [
+        14
+      ],
+      "cbm_ranks": [
+        23
+      ],
+      "graphify": {
+        "worst": 5,
+        "first": 5,
+        "n_ranked": 48
+      }
+    },
+    {
+      "instance_id": "TagStudioDev__TagStudio-735",
+      "repo": "TagStudioDev/TagStudio",
+      "n_gold_files": 2,
+      "gold_files": [
+        "tagstudio/src/qt/modals/tag_search.py",
+        "tagstudio/src/qt/widgets/tag.py"
+      ],
+      "ctxpack": {
+        "worst": 36,
+        "first": 20
+      },
+      "aider": {
+        "worst": 47,
+        "first": 16,
+        "n_files_seen": 278
+      },
+      "aider_plain": {
+        "worst": 38,
+        "first": 32
+      },
+      "cbm": {
+        "worst": null,
+        "first": 9,
+        "total_results": 451
+      },
+      "ctx_ranks": [
+        20,
+        36
+      ],
+      "aider_ranks": [
+        47,
+        16
+      ],
+      "cbm_ranks": [
+        9,
+        null
+      ],
+      "graphify": {
+        "worst": 34,
+        "first": 20,
+        "n_ranked": 75
+      }
+    },
+    {
+      "instance_id": "micropython__micropython-lib-947",
+      "repo": "micropython/micropython-lib",
+      "n_gold_files": 1,
+      "gold_files": [
+        "python-ecosys/requests/requests/__init__.py"
+      ],
+      "ctxpack": {
+        "worst": 34,
+        "first": 34
+      },
+      "aider": {
+        "worst": 17,
+        "first": 17,
+        "n_files_seen": 539
+      },
+      "aider_plain": {
+        "worst": 157,
+        "first": 157
+      },
+      "cbm": {
+        "worst": 1,
+        "first": 1,
+        "total_results": 1076
+      },
+      "ctx_ranks": [
+        34
+      ],
+      "aider_ranks": [
+        17
+      ],
+      "cbm_ranks": [
+        1
+      ],
+      "graphify": {
+        "worst": 12,
+        "first": 12,
+        "n_ranked": 148
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-29130",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 1,
+      "gold_files": [
+        "build_tools/update_environments_and_lock_files.py"
+      ],
+      "ctxpack": {
+        "worst": 113,
+        "first": 113
+      },
+      "aider": {
+        "worst": 4,
+        "first": 4,
+        "n_files_seen": 1609
+      },
+      "aider_plain": {
+        "worst": 234,
+        "first": 234
+      },
+      "cbm": {
+        "worst": 9,
+        "first": 9,
+        "total_results": 1468
+      },
+      "ctx_ranks": [
+        113
+      ],
+      "aider_ranks": [
+        4
+      ],
+      "cbm_ranks": [
+        9
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 151
+      }
+    },
+    {
+      "instance_id": "Bears-R-Us__arkouda-1969",
+      "repo": "Bears-R-Us/arkouda",
+      "n_gold_files": 4,
+      "gold_files": [
+        "arkouda/dataframe.py",
+        "arkouda/io.py",
+        "src/ArrowFunctions.cpp",
+        "src/ArrowFunctions.h"
+      ],
+      "ctxpack": {
+        "worst": 10,
+        "first": 0
+      },
+      "aider": {
+        "worst": 42,
+        "first": 14,
+        "n_files_seen": 989
+      },
+      "aider_plain": {
+        "worst": 91,
+        "first": 15
+      },
+      "cbm": {
+        "worst": null,
+        "first": 0,
+        "total_results": 1359
+      },
+      "ctx_ranks": [
+        0,
+        10,
+        10,
+        10
+      ],
+      "aider_ranks": [
+        15,
+        14,
+        41,
+        42
+      ],
+      "cbm_ranks": [
+        5,
+        8,
+        0,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 4,
+        "n_ranked": 96
+      }
+    },
+    {
+      "instance_id": "aiortc__aiortc-795",
+      "repo": "aiortc/aiortc",
+      "n_gold_files": 1,
+      "gold_files": [
+        "src/aiortc/rtcsctptransport.py"
+      ],
+      "ctxpack": {
+        "worst": 1,
+        "first": 1
+      },
+      "aider": {
+        "worst": 32,
+        "first": 32,
+        "n_files_seen": 152
+      },
+      "aider_plain": {
+        "worst": 31,
+        "first": 31
+      },
+      "cbm": {
+        "worst": 3,
+        "first": 3,
+        "total_results": 194
+      },
+      "ctx_ranks": [
+        1
+      ],
+      "aider_ranks": [
+        32
+      ],
+      "cbm_ranks": [
+        3
+      ],
+      "graphify": {
+        "worst": 5,
+        "first": 5,
+        "n_ranked": 48
+      }
+    },
+    {
+      "instance_id": "mathesar-foundation__mathesar-3117",
+      "repo": "mathesar-foundation/mathesar",
+      "n_gold_files": 4,
+      "gold_files": [
+        "db/install.py",
+        "docs/docs/installation/build-from-source/index.md",
+        "docs/docs/installation/docker/index.md",
+        "docs/docs/snippets/docker-compose-prerequisites.md"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 116
+      },
+      "aider": {
+        "worst": null,
+        "first": 420,
+        "n_files_seen": 1459
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 196
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 1146
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        420,
+        null,
+        null,
+        null
+      ],
+      "cbm_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 176
+      }
+    },
+    {
+      "instance_id": "huggingface__transformers-22498",
+      "repo": "huggingface/transformers",
+      "n_gold_files": 3,
+      "gold_files": [
+        "src/transformers/modeling_utils.py",
+        "src/transformers/trainer.py",
+        "src/transformers/training_args.py"
+      ],
+      "ctxpack": {
+        "worst": 48,
+        "first": 0
+      },
+      "aider": {
+        "worst": 1277,
+        "first": 4,
+        "n_files_seen": 3167
+      },
+      "aider_plain": {
+        "worst": 213,
+        "first": 6
+      },
+      "cbm": {
+        "worst": 110,
+        "first": 1,
+        "total_results": 1239
+      },
+      "ctx_ranks": [
+        0,
+        48,
+        48
+      ],
+      "aider_ranks": [
+        4,
+        160,
+        1277
+      ],
+      "cbm_ranks": [
+        1,
+        17,
+        110
+      ],
+      "graphify": {
+        "worst": 117,
+        "first": 13,
+        "n_ranked": 139
+      }
+    },
+    {
+      "instance_id": "JackPlowman__repo_standards_validator-137",
+      "repo": "JackPlowman/repo_standards_validator",
+      "n_gold_files": 2,
+      "gold_files": [
+        "validator/__main__.py",
+        "validator/repository_checks.py"
+      ],
+      "ctxpack": {
+        "worst": 19,
+        "first": 0
+      },
+      "aider": {
+        "worst": 8,
+        "first": 4,
+        "n_files_seen": 57
+      },
+      "aider_plain": {
+        "worst": 8,
+        "first": 4
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 4
+      },
+      "ctx_ranks": [
+        0,
+        19
+      ],
+      "aider_ranks": [
+        4,
+        8
+      ],
+      "cbm_ranks": [
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": 1,
+        "first": 0,
+        "n_ranked": 17
+      }
+    },
+    {
+      "instance_id": "huggingface__transformers-35453",
+      "repo": "huggingface/transformers",
+      "n_gold_files": 1,
+      "gold_files": [
+        "src/transformers/optimization.py"
+      ],
+      "ctxpack": {
+        "worst": 19,
+        "first": 19
+      },
+      "aider": {
+        "worst": 877,
+        "first": 877,
+        "n_files_seen": 5007
+      },
+      "aider_plain": {
+        "worst": 338,
+        "first": 338
+      },
+      "cbm": {
+        "worst": 0,
+        "first": 0,
+        "total_results": 879
+      },
+      "ctx_ranks": [
+        19
+      ],
+      "aider_ranks": [
+        877
+      ],
+      "cbm_ranks": [
+        0
+      ],
+      "graphify": {
+        "worst": 93,
+        "first": 93,
+        "n_ranked": 129
+      }
+    },
+    {
+      "instance_id": "python__cpython-7926",
+      "repo": "python/cpython",
+      "n_gold_files": 1,
+      "gold_files": [
+        "Lib/idlelib/macosx.py"
+      ],
+      "ctxpack": {
+        "worst": 18,
+        "first": 18
+      },
+      "aider": {
+        "worst": 21,
+        "first": 21,
+        "n_files_seen": 4482
+      },
+      "aider_plain": {
+        "worst": 1174,
+        "first": 1174
+      },
+      "cbm": {
+        "worst": 12,
+        "first": 12,
+        "total_results": 1519
+      },
+      "ctx_ranks": [
+        18
+      ],
+      "aider_ranks": [
+        21
+      ],
+      "cbm_ranks": [
+        12
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 140
+      }
+    },
+    {
+      "instance_id": "pandas-dev__pandas-29944",
+      "repo": "pandas-dev/pandas",
+      "n_gold_files": 2,
+      "gold_files": [
+        "pandas/plotting/_core.py",
+        "pandas/plotting/_matplotlib/core.py"
+      ],
+      "ctxpack": {
+        "worst": 28,
+        "first": 0
+      },
+      "aider": {
+        "worst": 316,
+        "first": 314,
+        "n_files_seen": 2432
+      },
+      "aider_plain": {
+        "worst": 398,
+        "first": 285
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 1764
+      },
+      "ctx_ranks": [
+        0,
+        28
+      ],
+      "aider_ranks": [
+        316,
+        314
+      ],
+      "cbm_ranks": [
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": 134,
+        "first": 50,
+        "n_ranked": 166
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-16948",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 4,
+      "gold_files": [
+        "examples/applications/plot_topics_extraction_with_nmf_lda.py",
+        "sklearn/decomposition/__init__.py",
+        "sklearn/decomposition/_nmf.py",
+        "sklearn/utils/estimator_checks.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 3
+      },
+      "aider": {
+        "worst": null,
+        "first": 53,
+        "n_files_seen": 1466
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 127
+      },
+      "cbm": {
+        "worst": null,
+        "first": 6,
+        "total_results": 1327
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        600,
+        null,
+        53,
+        232
+      ],
+      "cbm_ranks": [
+        15,
+        null,
+        6,
+        23
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 3,
+        "n_ranked": 207
+      }
+    },
+    {
+      "instance_id": "internetarchive__openlibrary-3196",
+      "repo": "internetarchive/openlibrary",
+      "n_gold_files": 3,
+      "gold_files": [
+        "openlibrary/plugins/upstream/utils.py",
+        "openlibrary/templates/lists/widget.html",
+        "openlibrary/templates/type/edition/view.html"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 1
+      },
+      "aider": {
+        "worst": null,
+        "first": 10,
+        "n_files_seen": 1564
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 23
+      },
+      "cbm": {
+        "worst": null,
+        "first": 34,
+        "total_results": 1037
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        10,
+        null,
+        null
+      ],
+      "cbm_ranks": [
+        34,
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 1,
+        "n_ranked": 96
+      }
+    },
+    {
+      "instance_id": "pandas-dev__pandas-21401",
+      "repo": "pandas-dev/pandas",
+      "n_gold_files": 2,
+      "gold_files": [
+        "pandas/core/generic.py",
+        "pandas/io/sql.py"
+      ],
+      "ctxpack": {
+        "worst": 1,
+        "first": 0
+      },
+      "aider": {
+        "worst": 104,
+        "first": 13,
+        "n_files_seen": 1425
+      },
+      "aider_plain": {
+        "worst": 102,
+        "first": 23
+      },
+      "cbm": {
+        "worst": 18,
+        "first": 4,
+        "total_results": 1676
+      },
+      "ctx_ranks": [
+        0,
+        1
+      ],
+      "aider_ranks": [
+        13,
+        104
+      ],
+      "cbm_ranks": [
+        18,
+        4
+      ],
+      "graphify": {
+        "worst": 48,
+        "first": 45,
+        "n_ranked": 76
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-14012",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 1,
+      "gold_files": [
+        "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py"
+      ],
+      "ctxpack": {
+        "worst": 0,
+        "first": 0
+      },
+      "aider": {
+        "worst": 20,
+        "first": 20,
+        "n_files_seen": 1192
+      },
+      "aider_plain": {
+        "worst": 68,
+        "first": 68
+      },
+      "cbm": {
+        "worst": 1,
+        "first": 1,
+        "total_results": 1114
+      },
+      "ctx_ranks": [
+        0
+      ],
+      "aider_ranks": [
+        20
+      ],
+      "cbm_ranks": [
+        1
+      ],
+      "graphify": {
+        "worst": 7,
+        "first": 7,
+        "n_ranked": 52
+      }
+    },
+    {
+      "instance_id": "pulp__pulp_rpm-3224",
+      "repo": "pulp/pulp_rpm",
+      "n_gold_files": 2,
+      "gold_files": [
+        "pulp_rpm/app/tasks/publishing.py",
+        "pulp_rpm/app/tasks/synchronizing.py"
+      ],
+      "ctxpack": {
+        "worst": 6,
+        "first": 4
+      },
+      "aider": {
+        "worst": 110,
+        "first": 48,
+        "n_files_seen": 308
+      },
+      "aider_plain": {
+        "worst": 110,
+        "first": 47
+      },
+      "cbm": {
+        "worst": 29,
+        "first": 3,
+        "total_results": 230
+      },
+      "ctx_ranks": [
+        4,
+        6
+      ],
+      "aider_ranks": [
+        110,
+        48
+      ],
+      "cbm_ranks": [
+        29,
+        3
+      ],
+      "graphify": {
+        "worst": 7,
+        "first": 0,
+        "n_ranked": 62
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-6116",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 1,
+      "gold_files": [
+        "sklearn/ensemble/gradient_boosting.py"
+      ],
+      "ctxpack": {
+        "worst": 2,
+        "first": 2
+      },
+      "aider": {
+        "worst": 45,
+        "first": 45,
+        "n_files_seen": 1064
+      },
+      "aider_plain": {
+        "worst": 45,
+        "first": 45
+      },
+      "cbm": {
+        "worst": 3,
+        "first": 3,
+        "total_results": 1096
+      },
+      "ctx_ranks": [
+        2
+      ],
+      "aider_ranks": [
+        45
+      ],
+      "cbm_ranks": [
+        3
+      ],
+      "graphify": {
+        "worst": 23,
+        "first": 23,
+        "n_ranked": 138
+      }
+    },
+    {
+      "instance_id": "scipy__scipy-5647",
+      "repo": "scipy/scipy",
+      "n_gold_files": 10,
+      "gold_files": [
+        "benchmarks/benchmarks/spatial.py",
+        "scipy/spatial/ckdtree/src/build.cxx",
+        "scipy/spatial/ckdtree/src/ckdtree_decl.h",
+        "scipy/spatial/ckdtree/src/ckdtree_methods.h",
+        "scipy/spatial/ckdtree/src/count_neighbors.cxx",
+        "scipy/spatial/ckdtree/src/query.cxx",
+        "scipy/spatial/ckdtree/src/query_ball_point.cxx",
+        "scipy/spatial/ckdtree/src/query_ball_tree.cxx",
+        "scipy/spatial/ckdtree/src/query_pairs.cxx",
+        "scipy/spatial/ckdtree/src/sparse_distances.cxx"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 2
+      },
+      "aider": {
+        "worst": 607,
+        "first": 41,
+        "n_files_seen": 2303
+      },
+      "aider_plain": {
+        "worst": 481,
+        "first": 42
+      },
+      "cbm": {
+        "worst": 47,
+        "first": 2,
+        "total_results": 1658
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        463,
+        179,
+        41,
+        142,
+        607,
+        50,
+        294,
+        325,
+        231,
+        557
+      ],
+      "cbm_ranks": [
+        47,
+        24,
+        27,
+        9,
+        41,
+        2,
+        7,
+        8,
+        3,
+        6
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 69,
+        "n_ranked": 144
+      }
+    },
+    {
+      "instance_id": "rucio__rucio-4930",
+      "repo": "rucio/rucio",
+      "n_gold_files": 1,
+      "gold_files": [
+        "lib/rucio/web/ui/flask/common/utils.py"
+      ],
+      "ctxpack": {
+        "worst": 3,
+        "first": 3
+      },
+      "aider": {
+        "worst": 286,
+        "first": 286,
+        "n_files_seen": 887
+      },
+      "aider_plain": {
+        "worst": 270,
+        "first": 270
+      },
+      "cbm": {
+        "worst": 7,
+        "first": 7,
+        "total_results": 939
+      },
+      "ctx_ranks": [
+        3
+      ],
+      "aider_ranks": [
+        286
+      ],
+      "cbm_ranks": [
+        7
+      ],
+      "graphify": {
+        "worst": 48,
+        "first": 48,
+        "n_ranked": 117
+      }
+    },
+    {
+      "instance_id": "home-assistant__core-15182",
+      "repo": "home-assistant/core",
+      "n_gold_files": 2,
+      "gold_files": [
+        "homeassistant/components/http/__init__.py",
+        "homeassistant/components/http/real_ip.py"
+      ],
+      "ctxpack": {
+        "worst": 62,
+        "first": 1
+      },
+      "aider": {
+        "worst": 160,
+        "first": 7,
+        "n_files_seen": 2131
+      },
+      "aider_plain": {
+        "worst": 152,
+        "first": 6
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 1696
+      },
+      "ctx_ranks": [
+        1,
+        62
+      ],
+      "aider_ranks": [
+        7,
+        160
+      ],
+      "cbm_ranks": [
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 28,
+        "n_ranked": 168
+      }
+    },
+    {
+      "instance_id": "jazzband__django-two-factor-auth-390",
+      "repo": "jazzband/django-two-factor-auth",
+      "n_gold_files": 2,
+      "gold_files": [
+        "CHANGELOG.md",
+        "two_factor/views/profile.py"
+      ],
+      "ctxpack": {
+        "worst": 42,
+        "first": 1
+      },
+      "aider": {
+        "worst": null,
+        "first": 22,
+        "n_files_seen": 215
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 22
+      },
+      "cbm": {
+        "worst": null,
+        "first": 7,
+        "total_results": 393
+      },
+      "ctx_ranks": [
+        1,
+        42
+      ],
+      "aider_ranks": [
+        null,
+        22
+      ],
+      "cbm_ranks": [
+        null,
+        7
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 5,
+        "n_ranked": 45
+      }
+    },
+    {
+      "instance_id": "zulip__zulip-14091",
+      "repo": "zulip/zulip",
+      "n_gold_files": 1,
+      "gold_files": [
+        "zerver/lib/rate_limiter.py"
+      ],
+      "ctxpack": {
+        "worst": 1,
+        "first": 1
+      },
+      "aider": {
+        "worst": 22,
+        "first": 22,
+        "n_files_seen": 4235
+      },
+      "aider_plain": {
+        "worst": 154,
+        "first": 154
+      },
+      "cbm": {
+        "worst": 0,
+        "first": 0,
+        "total_results": 180
+      },
+      "ctx_ranks": [
+        1
+      ],
+      "aider_ranks": [
+        22
+      ],
+      "cbm_ranks": [
+        0
+      ],
+      "graphify": {
+        "worst": 40,
+        "first": 40,
+        "n_ranked": 111
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-3404",
+      "repo": "modin-project/modin",
+      "n_gold_files": 2,
+      "gold_files": [
+        "modin/experimental/xgboost/xgboost.py",
+        "modin/experimental/xgboost/xgboost_ray.py"
+      ],
+      "ctxpack": {
+        "worst": 8,
+        "first": 6
+      },
+      "aider": {
+        "worst": 149,
+        "first": 74,
+        "n_files_seen": 550
+      },
+      "aider_plain": {
+        "worst": 144,
+        "first": 124
+      },
+      "cbm": {
+        "worst": 5,
+        "first": 1,
+        "total_results": 992
+      },
+      "ctx_ranks": [
+        6,
+        8
+      ],
+      "aider_ranks": [
+        74,
+        149
+      ],
+      "cbm_ranks": [
+        5,
+        1
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 0,
+        "n_ranked": 12
+      }
+    },
+    {
+      "instance_id": "pandas-dev__pandas-35029",
+      "repo": "pandas-dev/pandas",
+      "n_gold_files": 1,
+      "gold_files": [
+        "pandas/io/excel/_base.py"
+      ],
+      "ctxpack": {
+        "worst": 1,
+        "first": 1
+      },
+      "aider": {
+        "worst": 282,
+        "first": 282,
+        "n_files_seen": 2042
+      },
+      "aider_plain": {
+        "worst": 198,
+        "first": 198
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 1853
+      },
+      "ctx_ranks": [
+        1
+      ],
+      "aider_ranks": [
+        282
+      ],
+      "cbm_ranks": [
+        null
+      ],
+      "graphify": {
+        "worst": 57,
+        "first": 57,
+        "n_ranked": 147
+      }
+    },
+    {
+      "instance_id": "pyca__pyopenssl-578",
+      "repo": "pyca/pyopenssl",
+      "n_gold_files": 2,
+      "gold_files": [
+        "src/OpenSSL/SSL.py",
+        "src/OpenSSL/_util.py"
+      ],
+      "ctxpack": {
+        "worst": 9,
+        "first": 0
+      },
+      "aider": {
+        "worst": 3,
+        "first": 0,
+        "n_files_seen": 76
+      },
+      "aider_plain": {
+        "worst": 3,
+        "first": 2
+      },
+      "cbm": {
+        "worst": 3,
+        "first": 2,
+        "total_results": 782
+      },
+      "ctx_ranks": [
+        0,
+        9
+      ],
+      "aider_ranks": [
+        0,
+        3
+      ],
+      "cbm_ranks": [
+        2,
+        3
+      ],
+      "graphify": {
+        "worst": 5,
+        "first": 0,
+        "n_ranked": 12
+      }
+    },
+    {
+      "instance_id": "latchset__jwcrypto-195",
+      "repo": "latchset/jwcrypto",
+      "n_gold_files": 3,
+      "gold_files": [
+        "README.md",
+        "jwcrypto/jwe.py",
+        "jwcrypto/jwt.py"
+      ],
+      "ctxpack": {
+        "worst": 8,
+        "first": 1
+      },
+      "aider": {
+        "worst": null,
+        "first": 3,
+        "n_files_seen": 27
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 3
+      },
+      "cbm": {
+        "worst": null,
+        "first": 3,
+        "total_results": 485
+      },
+      "ctx_ranks": [
+        1,
+        8,
+        8
+      ],
+      "aider_ranks": [
+        null,
+        3,
+        5
+      ],
+      "cbm_ranks": [
+        null,
+        8,
+        3
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 3,
+        "n_ranked": 8
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-25114",
+      "repo": "jax-ml/jax",
+      "n_gold_files": 3,
+      "gold_files": [
+        "CHANGELOG.md",
+        "jax/_src/compiler.py",
+        "jax/_src/config.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 3
+      },
+      "aider": {
+        "worst": null,
+        "first": 5,
+        "n_files_seen": 1301
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 3
+      },
+      "cbm": {
+        "worst": null,
+        "first": 36,
+        "total_results": 1144
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        null,
+        235,
+        5
+      ],
+      "cbm_ranks": [
+        null,
+        36,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 72,
+        "n_ranked": 160
+      }
+    },
+    {
+      "instance_id": "aio-libs__aiohttp-7829",
+      "repo": "aio-libs/aiohttp",
+      "n_gold_files": 1,
+      "gold_files": [
+        "aiohttp/web_urldispatcher.py"
+      ],
+      "ctxpack": {
+        "worst": 3,
+        "first": 3
+      },
+      "aider": {
+        "worst": 15,
+        "first": 15,
+        "n_files_seen": 357
+      },
+      "aider_plain": {
+        "worst": 14,
+        "first": 14
+      },
+      "cbm": {
+        "worst": 14,
+        "first": 14,
+        "total_results": 1686
+      },
+      "ctx_ranks": [
+        3
+      ],
+      "aider_ranks": [
+        15
+      ],
+      "cbm_ranks": [
+        14
+      ],
+      "graphify": {
+        "worst": 8,
+        "first": 8,
+        "n_ranked": 130
+      }
+    },
+    {
+      "instance_id": "PlasmaPy__PlasmaPy-2542",
+      "repo": "PlasmaPy/PlasmaPy",
+      "n_gold_files": 1,
+      "gold_files": [
+        "plasmapy/formulary/lengths.py"
+      ],
+      "ctxpack": {
+        "worst": 2,
+        "first": 2
+      },
+      "aider": {
+        "worst": 42,
+        "first": 42,
+        "n_files_seen": 525
+      },
+      "aider_plain": {
+        "worst": 40,
+        "first": 40
+      },
+      "cbm": {
+        "worst": 0,
+        "first": 0,
+        "total_results": 1106
+      },
+      "ctx_ranks": [
+        2
+      ],
+      "aider_ranks": [
+        42
+      ],
+      "cbm_ranks": [
+        0
+      ],
+      "graphify": {
+        "worst": 16,
+        "first": 16,
+        "n_ranked": 37
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-24076",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 5,
+      "gold_files": [
+        "setup.py",
+        "sklearn/metrics/_pairwise_distances_reduction/__init__.py",
+        "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+        "sklearn/neighbors/_base.py",
+        "sklearn/neighbors/_classification.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 3
+      },
+      "aider": {
+        "worst": null,
+        "first": 20,
+        "n_files_seen": 1528
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 73
+      },
+      "cbm": {
+        "worst": null,
+        "first": 31,
+        "total_results": 798
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        456,
+        null,
+        221,
+        67,
+        20
+      ],
+      "cbm_ranks": [
+        null,
+        null,
+        null,
+        81,
+        31
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 35,
+        "n_ranked": 137
+      }
+    },
+    {
+      "instance_id": "fractal-analytics-platform__fractal-tasks-core-889",
+      "repo": "fractal-analytics-platform/fractal-tasks-core",
+      "n_gold_files": 2,
+      "gold_files": [
+        "CHANGELOG.md",
+        "fractal_tasks_core/tasks/cellpose_segmentation.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 4
+      },
+      "aider": {
+        "worst": null,
+        "first": 64,
+        "n_files_seen": 355
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 29
+      },
+      "cbm": {
+        "worst": null,
+        "first": 49,
+        "total_results": 423
+      },
+      "ctx_ranks": [
+        null,
+        null
+      ],
+      "aider_ranks": [
+        null,
+        64
+      ],
+      "cbm_ranks": [
+        null,
+        49
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 0,
+        "n_ranked": 54
+      }
+    },
+    {
+      "instance_id": "Deltares__imod-python-1159",
+      "repo": "Deltares/imod-python",
+      "n_gold_files": 3,
+      "gold_files": [
+        "imod/mf6/simulation.py",
+        "imod/schemata.py",
+        "imod/typing/grid.py"
+      ],
+      "ctxpack": {
+        "worst": 57,
+        "first": 2
+      },
+      "aider": {
+        "worst": 35,
+        "first": 0,
+        "n_files_seen": 577
+      },
+      "aider_plain": {
+        "worst": 38,
+        "first": 2
+      },
+      "cbm": {
+        "worst": 36,
+        "first": 6,
+        "total_results": 1904
+      },
+      "ctx_ranks": [
+        2,
+        57,
+        57
+      ],
+      "aider_ranks": [
+        35,
+        0,
+        4
+      ],
+      "cbm_ranks": [
+        15,
+        36,
+        6
+      ],
+      "graphify": {
+        "worst": 6,
+        "first": 0,
+        "n_ranked": 80
+      }
+    },
+    {
+      "instance_id": "ivadomed__ivadomed-1081",
+      "repo": "ivadomed/ivadomed",
+      "n_gold_files": 5,
+      "gold_files": [
+        "ivadomed/config/config_default.json",
+        "ivadomed/config/config_microscopy.json",
+        "ivadomed/evaluation.py",
+        "ivadomed/main.py",
+        "ivadomed/metrics.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 6
+      },
+      "aider": {
+        "worst": null,
+        "first": 1,
+        "n_files_seen": 179
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 3
+      },
+      "cbm": {
+        "worst": null,
+        "first": 3,
+        "total_results": 752
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        null,
+        null,
+        48,
+        31,
+        1
+      ],
+      "cbm_ranks": [
+        null,
+        null,
+        71,
+        3,
+        72
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 1,
+        "n_ranked": 44
+      }
+    },
+    {
+      "instance_id": "zulip__zulip-31168",
+      "repo": "zulip/zulip",
+      "n_gold_files": 2,
+      "gold_files": [
+        "zerver/lib/users.py",
+        "zerver/views/streams.py"
+      ],
+      "ctxpack": {
+        "worst": 63,
+        "first": 12
+      },
+      "aider": {
+        "worst": 357,
+        "first": 108,
+        "n_files_seen": 7969
+      },
+      "aider_plain": {
+        "worst": 742,
+        "first": 153
+      },
+      "cbm": {
+        "worst": null,
+        "first": 2,
+        "total_results": 41
+      },
+      "ctx_ranks": [
+        12,
+        63
+      ],
+      "aider_ranks": [
+        108,
+        357
+      ],
+      "cbm_ranks": [
+        2,
+        null
+      ],
+      "graphify": {
+        "worst": 77,
+        "first": 62,
+        "n_ranked": 179
+      }
+    },
+    {
+      "instance_id": "kiasambrook__tfl-live-tracker-7",
+      "repo": "kiasambrook/tfl-live-tracker",
+      "n_gold_files": 2,
+      "gold_files": [
+        "app/api/tfl_api.py",
+        "app/ui/main_window.py"
+      ],
+      "ctxpack": {
+        "worst": 7,
+        "first": 3
+      },
+      "aider": {
+        "worst": 2,
+        "first": 0,
+        "n_files_seen": 20
+      },
+      "aider_plain": {
+        "worst": 2,
+        "first": 0
+      },
+      "cbm": {
+        "worst": 6,
+        "first": 1,
+        "total_results": 22
+      },
+      "ctx_ranks": [
+        3,
+        7
+      ],
+      "aider_ranks": [
+        0,
+        2
+      ],
+      "cbm_ranks": [
+        1,
+        6
+      ],
+      "graphify": {
+        "worst": 2,
+        "first": 1,
+        "n_ranked": 5
+      }
+    },
+    {
+      "instance_id": "twisted__klein-773",
+      "repo": "twisted/klein",
+      "n_gold_files": 1,
+      "gold_files": [
+        "src/klein/_resource.py"
+      ],
+      "ctxpack": {
+        "worst": 1,
+        "first": 1
+      },
+      "aider": {
+        "worst": 7,
+        "first": 7,
+        "n_files_seen": 115
+      },
+      "aider_plain": {
+        "worst": 9,
+        "first": 9
+      },
+      "cbm": {
+        "worst": 21,
+        "first": 21,
+        "total_results": 744
+      },
+      "ctx_ranks": [
+        1
+      ],
+      "aider_ranks": [
+        7
+      ],
+      "cbm_ranks": [
+        21
+      ],
+      "graphify": {
+        "worst": 9,
+        "first": 9,
+        "n_ranked": 38
+      }
+    },
+    {
+      "instance_id": "hyeneung__tech-blog-hub-site-49",
+      "repo": "hyeneung/tech-blog-hub-site",
+      "n_gold_files": 10,
+      "gold_files": [
+        "serverless/apis/recommend/lambda_function.py",
+        "serverless/apis/recommend/opensearch/article_analyze.py",
+        "serverless/apis/recommend/recommend.py",
+        "serverless/apis/search/internal/handler/handler.go",
+        "serverless/apis/search/internal/service/search.go",
+        "serverless/apis/search/main.go",
+        "serverless/crawler/config/config.go",
+        "serverless/crawler/internal/crawler/crawler.go",
+        "serverless/crawler/internal/db/opensearch.go",
+        "serverless/crawler/main.go"
+      ],
+      "ctxpack": {
+        "worst": 53,
+        "first": 4
+      },
+      "aider": {
+        "worst": 105,
+        "first": 11,
+        "n_files_seen": 237
+      },
+      "aider_plain": {
+        "worst": 109,
+        "first": 4
+      },
+      "cbm": {
+        "worst": null,
+        "first": 4,
+        "total_results": 222
+      },
+      "ctx_ranks": [
+        4,
+        53,
+        53,
+        53,
+        53,
+        53,
+        53,
+        53,
+        53,
+        53
+      ],
+      "aider_ranks": [
+        68,
+        21,
+        69,
+        13,
+        16,
+        12,
+        11,
+        96,
+        91,
+        105
+      ],
+      "cbm_ranks": [
+        24,
+        41,
+        48,
+        51,
+        18,
+        46,
+        58,
+        45,
+        4,
+        null
+      ],
+      "graphify": {
+        "worst": 74,
+        "first": 7,
+        "n_ranked": 102
+      }
+    },
+    {
+      "instance_id": "aio-libs__aiohttp-9692",
+      "repo": "aio-libs/aiohttp",
+      "n_gold_files": 1,
+      "gold_files": [
+        "aiohttp/client_reqrep.py"
+      ],
+      "ctxpack": {
+        "worst": 27,
+        "first": 27
+      },
+      "aider": {
+        "worst": 26,
+        "first": 26,
+        "n_files_seen": 426
+      },
+      "aider_plain": {
+        "worst": 29,
+        "first": 29
+      },
+      "cbm": {
+        "worst": 39,
+        "first": 39,
+        "total_results": 1577
+      },
+      "ctx_ranks": [
+        27
+      ],
+      "aider_ranks": [
+        26
+      ],
+      "cbm_ranks": [
+        39
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 0
+      }
+    },
+    {
+      "instance_id": "home-assistant__core-136739",
+      "repo": "home-assistant/core",
+      "n_gold_files": 4,
+      "gold_files": [
+        "homeassistant/components/fritzbox/climate.py",
+        "homeassistant/components/fritzbox/cover.py",
+        "homeassistant/components/fritzbox/light.py",
+        "homeassistant/components/fritzbox/switch.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 4
+      },
+      "aider": {
+        "worst": 5054,
+        "first": 85,
+        "n_files_seen": 19594
+      },
+      "aider_plain": {
+        "worst": 6501,
+        "first": 170
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 1251
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        85,
+        5054,
+        3435,
+        4709
+      ],
+      "cbm_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 157
+      }
+    },
+    {
+      "instance_id": "celery__django-celery-beat-835",
+      "repo": "celery/django-celery-beat",
+      "n_gold_files": 1,
+      "gold_files": [
+        "django_celery_beat/schedulers.py"
+      ],
+      "ctxpack": {
+        "worst": 0,
+        "first": 0
+      },
+      "aider": {
+        "worst": 4,
+        "first": 4,
+        "n_files_seen": 128
+      },
+      "aider_plain": {
+        "worst": 31,
+        "first": 31
+      },
+      "cbm": {
+        "worst": 4,
+        "first": 4,
+        "total_results": 498
+      },
+      "ctx_ranks": [
+        0
+      ],
+      "aider_ranks": [
+        4
+      ],
+      "cbm_ranks": [
+        4
+      ],
+      "graphify": {
+        "worst": 4,
+        "first": 4,
+        "n_ranked": 46
+      }
+    },
+    {
+      "instance_id": "Standard-Labs__real-intent-27",
+      "repo": "Standard-Labs/real-intent",
+      "n_gold_files": 2,
+      "gold_files": [
+        "bigdbm/validate/email.py",
+        "bigdbm/validate/phone.py"
+      ],
+      "ctxpack": {
+        "worst": 4,
+        "first": 0
+      },
+      "aider": {
+        "worst": 9,
+        "first": 0,
+        "n_files_seen": 33
+      },
+      "aider_plain": {
+        "worst": 6,
+        "first": 4
+      },
+      "cbm": {
+        "worst": null,
+        "first": 2,
+        "total_results": 27
+      },
+      "ctx_ranks": [
+        0,
+        4
+      ],
+      "aider_ranks": [
+        0,
+        9
+      ],
+      "cbm_ranks": [
+        2,
+        null
+      ],
+      "graphify": {
+        "worst": 8,
+        "first": 6,
+        "n_ranked": 12
+      }
+    },
+    {
+      "instance_id": "Standard-Labs__real-intent-102",
+      "repo": "Standard-Labs/real-intent",
+      "n_gold_files": 2,
+      "gold_files": [
+        "real_intent/deliver/followupboss/vanilla.py",
+        "real_intent/deliver/kvcore/__init__.py"
+      ],
+      "ctxpack": {
+        "worst": 14,
+        "first": 13
+      },
+      "aider": {
+        "worst": 11,
+        "first": 5,
+        "n_files_seen": 54
+      },
+      "aider_plain": {
+        "worst": 11,
+        "first": 5
+      },
+      "cbm": {
+        "worst": null,
+        "first": null,
+        "total_results": 0
+      },
+      "ctx_ranks": [
+        13,
+        14
+      ],
+      "aider_ranks": [
+        5,
+        11
+      ],
+      "cbm_ranks": [
+        null,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": null,
+        "n_ranked": 0
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-8478",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 3,
+      "gold_files": [
+        "examples/plot_missing_values.py",
+        "sklearn/impute.py",
+        "sklearn/utils/estimator_checks.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 36
+      },
+      "aider": {
+        "worst": null,
+        "first": 9,
+        "n_files_seen": 1115
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 198
+      },
+      "cbm": {
+        "worst": null,
+        "first": 30,
+        "total_results": 1180
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        null,
+        9,
+        70
+      ],
+      "cbm_ranks": [
+        null,
+        112,
+        30
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 8,
+        "n_ranked": 128
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-17443",
+      "repo": "scikit-learn/scikit-learn",
+      "n_gold_files": 4,
+      "gold_files": [
+        "examples/calibration/plot_calibration_curve.py",
+        "examples/calibration/plot_compare_calibration.py",
+        "sklearn/calibration.py",
+        "sklearn/metrics/_plot/base.py"
+      ],
+      "ctxpack": {
+        "worst": null,
+        "first": 3
+      },
+      "aider": {
+        "worst": null,
+        "first": 1,
+        "n_files_seen": 1462
+      },
+      "aider_plain": {
+        "worst": null,
+        "first": 168
+      },
+      "cbm": {
+        "worst": null,
+        "first": 4,
+        "total_results": 906
+      },
+      "ctx_ranks": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "aider_ranks": [
+        2,
+        null,
+        1,
+        281
+      ],
+      "cbm_ranks": [
+        4,
+        null,
+        17,
+        null
+      ],
+      "graphify": {
+        "worst": null,
+        "first": 20,
+        "n_ranked": 213
+      }
+    },
+    {
+      "instance_id": "Happy-Algorithms-League__hal-cgp-180",
+      "repo": "Happy-Algorithms-League/hal-cgp",
+      "n_gold_files": 2,
+      "gold_files": [
+        "cgp/genome.py",
+        "cgp/population.py"
+      ],
+      "ctxpack": {
+        "worst": 3,
+        "first": 0
+      },
+      "aider": {
+        "worst": 7,
+        "first": 3,
+        "n_files_seen": 58
+      },
+      "aider_plain": {
+        "worst": 6,
+        "first": 4
+      },
+      "cbm": {
+        "worst": 16,
+        "first": 3,
+        "total_results": 157
+      },
+      "ctx_ranks": [
+        0,
+        3
+      ],
+      "aider_ranks": [
+        3,
+        7
+      ],
+      "cbm_ranks": [
+        3,
+        16
+      ],
+      "graphify": {
+        "worst": 6,
+        "first": 0,
+        "n_ranked": 20
+      }
+    },
+    {
+      "instance_id": "sgkit-dev__sgkit-447",
+      "repo": "sgkit-dev/sgkit",
+      "n_gold_files": 2,
+      "gold_files": [
+        "sgkit/distance/api.py",
+        "sgkit/distance/metrics.py"
+      ],
+      "ctxpack": {
+        "worst": 29,
+        "first": 2
+      },
+      "aider": {
+        "worst": 34,
+        "first": 0,
+        "n_files_seen": 191
+      },
+      "aider_plain": {
+        "worst": 30,
+        "first": 11
+      },
+      "cbm": {
+        "worst": 27,
+        "first": 0,
+        "total_results": 158
+      },
+      "ctx_ranks": [
+        2,
+        29
+      ],
+      "aider_ranks": [
+        34,
+        0
+      ],
+      "cbm_ranks": [
+        0,
+        27
+      ],
+      "graphify": {
+        "worst": 66,
+        "first": 54,
+        "n_ranked": 70
+      }
+    },
+    {
+      "instance_id": "Ouranosinc__xclim-477",
+      "repo": "Ouranosinc/xclim",
+      "n_gold_files": 5,
+      "gold_files": [
+        "xclim/sdba/adjustment.py",
+        "xclim/sdba/base.py",
+        "xclim/sdba/detrending.py",
+        "xclim/sdba/processing.py",
+        "xclim/sdba/utils.py"
+      ],
+      "ctxpack": {
+        "worst": 19,
+        "first": 0
+      },
+      "aider": {
+        "worst": 27,
+        "first": 3,
+        "n_files_seen": 154
+      },
+      "aider_plain": {
+        "worst": 35,
+        "first": 6
+      },
+      "cbm": {
+        "worst": 34,
+        "first": 2,
+        "total_results": 673
+      },
+      "ctx_ranks": [
+        0,
+        19,
+        19,
+        19,
+        19
+      ],
+      "aider_ranks": [
+        21,
+        3,
+        14,
+        27,
+        13
+      ],
+      "cbm_ranks": [
+        4,
+        34,
+        20,
+        33,
+        2
+      ],
+      "graphify": {
+        "worst": 27,
+        "first": 3,
+        "n_ranked": 58
+      }
+    }
+  ],
+  "excluded": [],
+  "summary": {
+    "ctxpack": {
+      "n": 60,
+      "f1": 3,
+      "f3": 11,
+      "f5": 16,
+      "f10": 22,
+      "any10": 45
+    },
+    "aider": {
+      "n": 60,
+      "f1": 0,
+      "f3": 1,
+      "f5": 4,
+      "f10": 8,
+      "any10": 20
+    },
+    "aider_plain": {
+      "n": 60,
+      "f1": 0,
+      "f3": 1,
+      "f5": 2,
+      "f10": 6,
+      "any10": 16
+    },
+    "cbm": {
+      "n": 60,
+      "f1": 4,
+      "f3": 6,
+      "f5": 10,
+      "f10": 16,
+      "any10": 40
+    },
+    "graphify": {
+      "n": 60,
+      "f1": 0,
+      "f3": 2,
+      "f5": 3,
+      "f10": 13,
+      "any10": 25
+    }
+  }
+}

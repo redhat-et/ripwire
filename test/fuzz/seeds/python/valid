@@ -1,0 +1,5 @@
+def leaf():
+    return 1
+
+def root():
+    return leaf()

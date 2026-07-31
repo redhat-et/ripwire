@@ -1,0 +1,26 @@
+{
+  "what": "R1-cpp anchor-hop α/θ calibration sweep on the C++ TRAIN split (GATE_DECISION_r1cpp.md: train = bench/cppbench SFML, held-out = bench/multiswe C++; calibrate on train ONLY)",
+  "date": "2026-07-23",
+  "dataset": "bench/cppbench dataset.lock — SFML @ a91a7f6a, n=120 mined / 115 scored, single repo, commit-message queries",
+  "harness": "bench/cppbench/run_cppbench.py --arms for (top-k 200); binary = audit5r2-r1cpp build (R1 patch + MaxScore-pruning restoration, ea03181)",
+  "baseline": "same binary with CTXPACK_NO_ANCHORHOP=1 (gate-proven byte-identical to a main-built binary on the conceptual route)",
+  "determinism_note": "every arm run is verified byte-identical twice by the harness; single-run sweep points are exact, not sampled",
+  "train_baseline_absolute": { "strict1": 6.96, "strict3": 14.78, "strict5": 20.00, "strict10": 31.30, "any10": 45.22, "mrr": 0.2195 },
+  "sweep": [
+    { "alpha": 0.05, "theta": 0.50, "strict1_pp": 0.00, "strict3_pp": 0.00, "strict5_pp": 0.87, "strict10_pp": 2.61, "any10_pp": 2.61, "mrr_delta": 0.0020 },
+    { "alpha": 0.10, "theta": 0.50, "strict1_pp": 0.00, "strict3_pp": 0.00, "strict5_pp": 0.87, "strict10_pp": 2.61, "any10_pp": 2.61, "mrr_delta": 0.0029 },
+    { "alpha": 0.15, "theta": 0.50, "strict1_pp": 0.00, "strict3_pp": 0.87, "strict5_pp": 1.74, "strict10_pp": 2.61, "any10_pp": 2.61, "mrr_delta": 0.0026 },
+    { "alpha": 0.20, "theta": 0.50, "strict1_pp": 0.00, "strict3_pp": 0.87, "strict5_pp": 3.48, "strict10_pp": 2.61, "any10_pp": 2.61, "mrr_delta": 0.0052 },
+    { "alpha": 0.30, "theta": 0.50, "strict1_pp": 0.87, "strict3_pp": 6.09, "strict5_pp": 5.22, "strict10_pp": 2.61, "any10_pp": 3.48, "mrr_delta": 0.0242 },
+    { "alpha": 0.40, "theta": 0.50, "strict1_pp": 0.00, "strict3_pp": 4.35, "strict5_pp": 5.22, "strict10_pp": 3.48, "any10_pp": 4.35, "mrr_delta": 0.0125 },
+    { "alpha": 0.50, "theta": 0.50, "strict1_pp": 5.22, "strict3_pp": 3.48, "strict5_pp": 4.35, "strict10_pp": 2.61, "any10_pp": 3.48, "mrr_delta": 0.0439 },
+    { "alpha": 0.60, "theta": 0.50, "strict1_pp": 3.48, "strict3_pp": 5.22, "strict5_pp": 5.22, "strict10_pp": 0.87, "any10_pp": 3.48, "mrr_delta": 0.0315 },
+    { "alpha": 0.80, "theta": 0.50, "strict1_pp": 6.09, "strict3_pp": 3.48, "strict5_pp": 4.35, "strict10_pp": -0.87, "any10_pp": 1.74, "mrr_delta": 0.0327 },
+    { "alpha": 0.40, "theta": 0.25, "strict1_pp": 0.00, "strict3_pp": 4.35, "strict5_pp": 5.22, "strict10_pp": 3.48, "any10_pp": 4.35, "mrr_delta": 0.0125 },
+    { "alpha": 0.40, "theta": 0.75, "strict1_pp": 0.87, "strict3_pp": 4.35, "strict5_pp": 4.35, "strict10_pp": 3.48, "any10_pp": 4.35, "mrr_delta": 0.0148 }
+  ],
+  "deviation_logged": "the pre-registered α grid {0.05..0.40} had its strict@10 maximum ON the boundary (α=0.40), so the TRAIN-side grid was extended to {0.50, 0.60, 0.80} before choosing — this touches train only (held-out untouched) and is logged per the GATE doc's deviation rule; the extension confirms 0.40 is a genuine interior maximum (decline to +2.61 / +0.87 / −0.87)",
+  "chosen": { "alpha": 0.40, "theta": 0.75 },
+  "rationale": "pre-registered selection rule applied mechanically: maximize train strict@10 (α=0.40, +3.48pp, unique max) → θ ties on strict@10 (0.25/0.50/0.75 all +3.48) → @1/MRR tiebreak picks θ=0.75 (+0.87pp @1, MRR +0.0148 vs +0.0125). Note the C++ surface has NO α damage region below 0.8 (unlike Python, where α=0.40 was −1.58pp strict@10 with monotone @1/MRR damage) — consistent with the R1-cpp premise that call-graph evidence is denser in C++.",
+  "python_risk_noted_before_heldout": "the Python train sweep (anchorhop_calib.json) measured α=0.40 at −1.58pp strict@10 on LocBench train — the pre-registered Python no-regression guard is therefore expected to be at genuine risk at these constants; per the GATE doc's decision tree that outcome ships as opt-in (default off), not always-on. Recorded here BEFORE the held-out or guard runs."
+}

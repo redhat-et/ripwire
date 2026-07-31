@@ -1,0 +1,432 @@
+diff --git a/SPEC.md b/SPEC.md
+index 4d4d440..f763166 100644
+--- a/SPEC.md
++++ b/SPEC.md
+@@ -329,6 +329,26 @@ struct Config
+   Header shape: `<quality-delta baseline=".." regressions="N" minor="K" acked="M">`; a minor `<r>` carries
+   `sev="minor"` (absent = major). MCP `quality_delta` mirrors both (`"sev":"minor"`, top-level `"acked"`).
+   The qsnap cache scheme was bumped (v2) because rule 2 changes a cached Snapshot's dead-set semantics.
++- **`--for` retrieval addendum — R1 anchor-hop expansion (decided 2026-07-22, PLAN_audit5Public2026
++  "Hard parts — R1"; LARGER-style, arXiv 2605.16352):** on the **conceptual (subtoken+body) route
++  only**, the top-m (m=10) ranked anchors each propagate `α·anchorScore·ω(edge)` to their 1-hop
++  call / import / decl-use neighbours; `ω = 1/(1+ambOut)` at the edge's **call site** (the resolver-
++  honesty counter discounts low-confidence sites); candidates below `θ ×` the largest propagated mass
++  are dropped; total additions are capped at `2m`; the union is re-ranked (`score = BM25 + hop mass`,
++  where a candidate's hop mass is the **MAX over its supporting edges, not the sum** — summing lets a
++  hub shared by many anchors outrank the true top hits, measured train strict@1 27.1%→8.2%)
++  and the budget cut is unchanged. Non-call decl-use/import neighbours resolve conservatively at query
++  time (exactly one langCompatible in-corpus def, else no mass). **α and θ are calibrated on the
++  LocBench TRAIN split only** (repo-disjoint A7 split) and baked as constants
++  (`graph.h anchorhopcfg`); the sweep record is `bench/locbench/anchorhop_calib.json`. Contract: the
++  **name-exact route and `--no-route` are byte-identical to pre-R1** (expansion never fires there);
++  expansion is query-time only (no index/cache format change); the conceptual route is a
++  full-distribution consumer, so MaxScore pruning is disabled exactly when expansion is active (the
++  `CTXPACK_NO_PRUNE` byte-identity gate stays sound). The header self-declares what was lifted
++  (`[anchor-hop: …]`). Ablation escape hatch: `CTXPACK_NO_ANCHORHOP=1` (gate + eval use only, not a
++  user surface); `CTXPACK_ANCHORHOP_ALPHA/THETA` exist solely for the calibration sweep. Gate:
++  `test/anchorhopcheck.sh`; acceptance was the A7 two-tier discipline (held-out strict@10 must
++  improve, token p50 within +5%, det-gate green) — numbers in the PLAN ledger.
+ - **`--mcp` (Phase 5, last, optional — must not perturb any other path):** newline-delimited
+   JSON over stdio (one JSON object per line, LF; **no** Content-Length headers). Blocking
+   read loop on stdin; exit on EOF/SIGINT. Implement exactly three JSON-RPC 2.0 handlers:
+diff --git a/src/cli.h b/src/cli.h
+index d57d43b..2f119c5 100644
+--- a/src/cli.h
++++ b/src/cli.h
+@@ -329,7 +329,11 @@ inline void printUsage( std::FILE* out ) noexcept
+         "    --no-route                 (with --for/--query) force plain subtoken+body BM25. Routing is now the DEFAULT: a deterministic,\n"
+         "                               confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier\n"
+         "                               syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the\n"
+-        "                               header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior.\n"
++        "                               header. On the conceptual (subtoken+body) route, --for additionally expands the rank one hop:\n"
++        "                               the top-10 anchors lift their direct call/use neighbors by resolver-confidence-weighted evidence\n"
++        "                               (anchor-hop, calibrated on the LocBench train split; the header notes what was lifted). It only\n"
++        "                               routes with a query (the plain map is unaffected). --no-route restores the old pre-routing behavior\n"
++        "                               (plain subtoken+body, no expansion, byte-identical).\n"
+         "    --adaptive                 (with --for/--query) cut the result at the relevance CLIFF — the largest relative score gap\n"
+         "                               (Adaptive-k), floor 5, ceiling = the existing top-k; a sharp query returns few, a flat/broad one\n"
+         "                               hits the ceiling. Prints [adaptive: kept K of N ...] in the header. Without it, output is unchanged.\n"
+diff --git a/src/graph.h b/src/graph.h
+index 5df032d..76fff5c 100644
+--- a/src/graph.h
++++ b/src/graph.h
+@@ -17,6 +17,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdint>
++#include <cstdlib>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+@@ -1395,6 +1396,187 @@ inline std::vector<float> anchoredLexicalRank( const Graph& g, const std::vector
+     return blendMaxNorm( lex, ppr, anchorcfg::kGraphBlend );
+ }
+ 
++// ---- R1: anchor-hop expansion (LARGER-style; DEFAULT on the conceptual --for route) ------------------
++// PLAN_audit5Public2026 "Hard parts — R1 anchor-hop expansion design" — implemented as decided there.
++// Different beast from anchoredLexicalRank above (--anchor, the EXPERIMENTAL PPR blend): this is a
++// bounded, transparent ONE-hop propagation, not a random walk, and it ships ON by default for the
++// conceptual (subtoken+body) route only — the name-exact route and --no-route stay byte-identical.
++//
++// Mechanics (all decided): the top-m anchors of the base BM25 rank each propagate α·anchorScore·ω(edge)
++// to their 1-hop call / import / decl-use neighbours; ω = 1/(1+ambOut) at the edge's CALL SITE (the
++// resolver-confidence honesty counter — a site whose calls the resolver had to guess propagates less);
++// candidates below θ of the largest propagated mass are dropped (θ-filter); total additions are capped
++// at 2m to bound token cost; the union is re-ranked (out = lex + propagated mass) and the downstream
++// budget cut is unchanged. α and θ are TRAIN-split-calibrated constants (bench/locbench/
++// anchorhop_calib.json records the sweep); the env overrides below exist ONLY for that calibration
++// sweep and the ablation gate — they are not a user surface.
++//
++// Determinism: anchors picked by (score desc, id asc); propagation iterates anchors in that order, CSR
++// rows in storage order, references in ingest order — single-threaded float adds in a fixed order.
++// Decl-use/import edges resolve conservatively: a use-site name must have exactly ONE langCompatible
++// in-corpus def to propagate (an ambiguous name-spray never manufactures hop mass).
++namespace anchorhopcfg
++{
++    // m: top-m base-rank anchors seed the hop (decided: 10 — tighter than --anchor's 20; one hop from a
++    // wrong anchor costs more than teleport mass does, so the seed set stays small).
++    inline constexpr std::size_t kHopAnchorCount = 10;
++    // cap: at most 2m candidates ever receive hop mass (bounds new entrants ⇒ bounds token cost).
++    inline constexpr std::size_t kHopMaxAdditionCount = 2 * kHopAnchorCount;
++    // α, θ — TRAIN-split-calibrated 2026-07-22 (LocBench train n=317, repo-disjoint A7 split; the full
++    // sweep is bench/locbench/anchorhop_calib.json). α scales anchor score into hop mass; θ drops
++    // candidates below θ×(max propagated mass). The α surface on train: strict@10 delta +0.95pp flat
++    // across α∈[0.05,0.15], then declining (+0.63 @ 0.2, 0.0 @ 0.3, −1.58 @ 0.4) with @1/MRR damage
++    // growing monotonically with α — 0.10 is the mid-plateau point with @1 flat and MRR within noise.
++    // θ is NOT binding under the max-combination rule (θ=0.25/0.5/0.75 byte-equal metrics at α=0.2);
++    // 0.50 is kept as decided in PLAN_audit5Public2026 "Hard parts — R1".
++    inline constexpr float kHopAlpha = 0.10f;
++    inline constexpr float kHopTheta = 0.50f;
++}
++
++struct AnchorHopInfo
++{
++    std::uint32_t anchorCount   = 0;   // anchors that actually seeded (≤ kHopAnchorCount, positive-score only)
++    std::uint32_t liftedCount   = 0;   // candidates that received hop mass after θ-filter + cap
++    std::uint32_t newCount      = 0;   // of those, how many had ZERO base lexical score (truly hop-only finds)
++};
++
++// calibration-sweep-only env override: a non-negative float in `name`, else `fallback`. NOT a user surface.
++inline float anchorHopEnvOverride( const char* name, float fallback ) noexcept
++{
++    const char* e = std::getenv( name );
++    if( !e || !*e ) return fallback;
++    char*       end = nullptr;
++    const float v   = std::strtof( e, &end );
++    return ( end != e && v >= 0.f && v == v ) ? v : fallback;
++}
++
++inline std::vector<float> anchorHopExpandedRank( const IngestResult& ing, const Graph& g,
++                                                 const std::vector<float>& lex, AnchorHopInfo* info = nullptr )
++{
++    const std::size_t N = lex.size();
++    if( N == 0 || N != ing.symbols.size() || g.outOff.size() != N + 1 ) return lex;
++    if( std::getenv( "CTXPACK_NO_ANCHORHOP" ) ) return lex;               // ablation escape hatch (gate + evals)
++
++    const float alpha = anchorHopEnvOverride( "CTXPACK_ANCHORHOP_ALPHA", anchorhopcfg::kHopAlpha );
++    const float theta = anchorHopEnvOverride( "CTXPACK_ANCHORHOP_THETA", anchorhopcfg::kHopTheta );
++
++    // ── 1) top-m anchors by (lex desc, id asc), positive scores only — same shape as anchoredLexicalRank
++    std::vector<NodeId> anchorIds( N );
++    for( NodeId i = 0; i < N; ++i ) anchorIds[i] = NodeId( i );
++    const std::size_t anchorCount = std::min( anchorhopcfg::kHopAnchorCount, N );
++    std::partial_sort( anchorIds.begin(), anchorIds.begin() + anchorCount, anchorIds.end(),
++                       [ & ]( NodeId a, NodeId b ) { return lex[a] != lex[b] ? lex[a] > lex[b] : a < b; } );
++    anchorIds.resize( anchorCount );
++    while( !anchorIds.empty() && !( lex[ anchorIds.back() ] > 0.f ) ) anchorIds.pop_back();
++    if( anchorIds.empty() ) return lex;                                   // no lexical signal → expansion is a no-op
++
++    std::vector<char> isAnchor( N, 0 );
++    for( NodeId a : anchorIds ) isAnchor[a] = 1;
++
++    // ω at a call site: the resolver-confidence discount — 1/(1+ambOut[site]).
++    const bool haveAmb = g.ambOut.size() == N;
++    const auto siteOmega = [ & ]( NodeId site ) noexcept
++    { return 1.0f / ( 1.0f + float( haveAmb ? g.ambOut[ site ] : 0u ) ); };
++
++    // ── 2) propagate α·anchorScore·ω over 1-hop CALL edges (both directions of the resolved CSR).
++    //      Anchors never receive mass (they are the evidence source, not an "addition"); self-loops skipped.
++    //      COMBINATION RULE = MAX over supporting edges, not SUM (calibration finding, train split
++    //      2026-07-22): summing lets a hub symbol shared by many anchors (a utility helper, an
++    //      __init__ import target) accumulate several anchors' worth of mass and OUTRANK the true top
++    //      lexical hits — measured strict@1 27.1%→8.2% on train with sum at α=0.2. Max bounds any
++    //      candidate at α·topAnchorScore (α<1 ⇒ a hop-only candidate can never displace the #1 hit)
++    //      and scores a neighbour by its single BEST evidence edge. Deterministic either way; max is
++    //      also order-independent, so accumulation order cannot matter at all.
++    std::vector<float> hopMass( N, 0.f );
++    const auto  bump = [ & ]( NodeId c, float m ) { if( m > hopMass[c] ) hopMass[c] = m; };
++    const auto* inRo = g.inEdges.rowOffsets();
++    const auto* inCi = g.inEdges.colIndices();
++    for( NodeId a : anchorIds )
++    {
++        // callees of the anchor — the call site is the anchor itself
++        const float outContrib = alpha * lex[a] * siteOmega( a );
++        for( std::uint32_t k = g.outOff[a]; k < g.outOff[ a + 1 ]; ++k )
++        {
++            const NodeId c = g.outTargets[k];
++            if( c < N && c != a && !isAnchor[c] ) bump( c, outContrib );
++        }
++        // callers of the anchor — the call site is the CALLER (its resolver confidence discounts the edge)
++        for( std::uint32_t k = inRo[a]; k < inRo[ a + 1 ]; ++k )
++        {
++            const NodeId c = inCi[k];
++            if( c < N && c != a && !isAnchor[c] ) bump( c, alpha * lex[a] * siteOmega( c ) );
++        }
++    }
++
++    // ── 3) decl-use / import 1-hop neighbours (query-time only — these roles never enter the call CSR).
++    //      Conservative resolution: the use-site name must map to exactly ONE langCompatible in-corpus def.
++    {
++        // name → def-ids map, built once per query (the CSR has no read/write/import edges to reuse)
++        HashMap<std::string_view, ctx::svector<NodeId, 2>> defsByName;
++        defsByName.reserve( N );
++        for( const Symbol& s : ing.symbols ) defsByName[ std::string_view( s.name ) ].push_back( s.id );
++
++        for( const Reference& r : ing.references )
++        {
++            if( r.fromSymbol == kNoNode || r.fromSymbol >= N ) continue;
++            if( r.isInherit || r.isDocLink || r.isCompose ) continue;
++            if( r.role != RefRole::Read && r.role != RefRole::Write && r.role != RefRole::Import ) continue;
++            const bool fromIsAnchor = isAnchor[ r.fromSymbol ] != 0;
++            const auto it = defsByName.find( std::string_view( r.calleeName ) );
++            if( it == defsByName.end() ) continue;
++
++            // exactly one langCompatible def, else the site is ambiguous → no hop mass (honesty over recall)
++            NodeId target = kNoNode;
++            for( NodeId d : it->second )
++            {
++                if( d == r.fromSymbol || !langCompatible( ing.symbols[d].lang, r.lang ) ) continue;
++                if( target != kNoNode ) { target = kNoNode; break; }
++                target = d;
++            }
++            if( target == kNoNode ) continue;
++
++            const float omega = siteOmega( r.fromSymbol );                // the use site IS the "call site" here
++            if( fromIsAnchor && !isAnchor[ target ] )                     // anchor uses/imports the neighbour
++                bump( target, alpha * lex[ r.fromSymbol ] * omega );
++            else if( !fromIsAnchor && isAnchor[ target ] )                // the neighbour uses/imports an anchor
++                bump( r.fromSymbol, alpha * lex[ target ] * omega );
++        }
++    }
++
++    // ── 4) θ-filter at θ×maxMass, cap total additions at 2m (mass desc, id asc), re-rank the union
++    std::vector<NodeId> candidateIds;
++    float               maxMass = 0.f;
++    for( NodeId c = 0; c < N; ++c )
++        if( hopMass[c] > 0.f ) { candidateIds.push_back( c ); if( hopMass[c] > maxMass ) maxMass = hopMass[c]; }
++    if( candidateIds.empty() ) return lex;
++
++    const float cut = theta * maxMass;
++    candidateIds.erase( std::remove_if( candidateIds.begin(), candidateIds.end(),
++                        [ & ]( NodeId c ) { return hopMass[c] < cut; } ), candidateIds.end() );
++    if( candidateIds.size() > anchorhopcfg::kHopMaxAdditionCount )
++    {
++        std::partial_sort( candidateIds.begin(), candidateIds.begin() + anchorhopcfg::kHopMaxAdditionCount,
++                           candidateIds.end(),
++                           [ & ]( NodeId a, NodeId b ) { return hopMass[a] != hopMass[b] ? hopMass[a] > hopMass[b] : a < b; } );
++        candidateIds.resize( anchorhopcfg::kHopMaxAdditionCount );
++    }
++
++    std::vector<float> out = lex;
++    std::uint32_t      newCount = 0;
++    for( NodeId c : candidateIds )
++    {
++        if( !( lex[c] > 0.f ) ) ++newCount;
++        out[c] = lex[c] + hopMass[c];
++    }
++    if( info )
++    {
++        info->anchorCount = std::uint32_t( anchorIds.size() );
++        info->liftedCount = std::uint32_t( candidateIds.size() );
++        info->newCount    = newCount;
++    }
++    return out;
++}
++
+ // all symbols whose final-segment name matches `name` (overloads + same-name across files), in id
+ // order — for --expand ("give me every def called X"), so nothing is silently missed.
+ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::string_view name )
+diff --git a/src/main.cpp b/src/main.cpp
+index ee96a2a..9cd877a 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -1037,6 +1037,7 @@ struct LensRanking
+ {
+     std::vector<float> rank;         // per-symbol lens score (score desc == rank order)
+     std::string        routeNote;    // " [routed: …]" (empty under --no-route)
++    std::string        hopNote;      // " [anchor-hop: …]" (R1; empty unless the conceptual route actually expanded)
+     std::string        mentionNote;  // " [mention anchor: …]" (empty when the task named nothing indexed)
+     std::string        boostNote;    // " [cochange boost: …]" (empty unless the opt-in prior promoted something)
+ };
+@@ -1054,12 +1055,26 @@ LensRanking computeLensRanking( const MainDispatch& d, std::string_view task )
+     const bool                        multiRoot = d.multiRoot;
+     const std::vector<WorkspaceRoot>& ws        = d.ws;
+ 
++    // R1: route FIRST — the anchor-hop expansion (DEFAULT on the conceptual subtoken+body route,
++    // PLAN_audit5Public2026 "Hard parts — R1") re-ranks the union of base rank + hop mass, so it is a
++    // full-distribution consumer exactly like --adaptive/--anchor: a hop candidate's base score must be
++    // its EXACT BM25 score, not a pruned 0 (CTXPACK_NO_PRUNE byte-identity would break otherwise).
++    // Name-exact route and --no-route never expand → their pruning + bytes are unchanged.
++    RouteChoice rc;
++    bool        routedConceptual = false;
++    if( !cfg.noRoute )
++    {
++        rc               = chooseForRanker( ing, task );
++        routedConceptual = rc.which == LexMode::SubtokenBody;
++    }
++    const bool hopActive = routedConceptual && !std::getenv( "CTXPACK_NO_ANCHORHOP" );
++
+     // H2 (B0 r2): --for's consumers only read the top-K of this rank, so lexicalScores may skip symbols that
+     // provably cannot enter that top-K (exact MaxScore pruning — emitted bytes identical). --adaptive/--anchor
+-    // are full-distribution consumers and force exhaustive scoring.
++    // (and R1 hop expansion, above) are full-distribution consumers and force exhaustive scoring.
+     std::size_t       forPruneK = 0;
+     std::vector<char> ifaceExact;
+-    if( !cfg.adaptive && !cfg.anchor )
++    if( !cfg.adaptive && !cfg.anchor && !hopActive )
+     {
+         forPruneK = cfg.candidates ? ( cfg.topK > 0 ? std::size_t( cfg.topK ) : 0 )
+                                    : std::size_t( cfg.packTopN > 0 ? cfg.packTopN : 40 );
+@@ -1076,10 +1091,25 @@ LensRanking computeLensRanking( const MainDispatch& d, std::string_view task )
+     std::vector<float>& lensRank = out.rank;
+     if( !cfg.noRoute )
+     {
+-        const RouteChoice rc = chooseForRanker( ing, task );
+         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExact( ing, task )
+                                                            : lexicalScores( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr );
+         out.routeNote = " [routed: " + rc.reason + "]";
++
++        // R1 anchor-hop expansion — conceptual route ONLY (the name-exact route and --no-route are
++        // byte-identical to pre-R1 by construction). Inert (byte-identical) when no anchor has a
++        // surviving 1-hop neighbour; the note appears only when something was actually lifted.
++        if( routedConceptual )
++        {
++            AnchorHopInfo hopInfo;
++            lensRank = anchorHopExpandedRank( ing, g, lensRank, &hopInfo );
++            if( hopInfo.liftedCount > 0 )
++            {
++                char nb[ 200 ];
++                std::snprintf( nb, sizeof( nb ), " [anchor-hop: %u 1-hop neighbor%s of the top %u anchors lifted by call/use evidence (%u lexically invisible)]",
++                               hopInfo.liftedCount, hopInfo.liftedCount == 1 ? "" : "s", hopInfo.anchorCount, hopInfo.newCount );
++                out.hopNote = nb;
++            }
++        }
+     }
+     else
+         lensRank = lexicalScores( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr );
+@@ -1176,6 +1206,7 @@ std::optional<int> runForLens( const MainDispatch& d )
+         LensRanking        lr        = computeLensRanking( d, cfg.forTask );
+         std::vector<float> lensRank  = std::move( lr.rank );
+         std::string        routeNote = std::move( lr.routeNote );    // mutated below (G4 "--" collapse) → not const
++        const std::string  hopNote( std::move( lr.hopNote ) );       // R1 (single hyphens only — G4-safe by construction)
+         const std::string  mentionNote( std::move( lr.mentionNote ) );
+         const std::string  boostNote( std::move( lr.boostNote ) );
+ 
+@@ -1238,11 +1269,12 @@ std::optional<int> runForLens( const MainDispatch& d )
+         // remainder. Emission ORDER is unchanged (header, sigs, lego, compose, bodies, </ctx>): when
+         // nothing trims, the output is byte-identical to the pre-H1 path.
+         std::string headerStr;
+-        headerStr.reserve( 512 + taskNote.size() + routeNote.size() + adaptiveNote.size() + boostNote.size() + mentionNote.size() );
++        headerStr.reserve( 512 + taskNote.size() + routeNote.size() + hopNote.size() + adaptiveNote.size() + boostNote.size() + mentionNote.size() );
+         headerStr += "<ctx><!-- ctxpack lens for \"";
+         headerStr += taskNote;
+         headerStr += "\"";
+         headerStr += routeNote;
++        headerStr += hopNote;       // R1: present only when the conceptual route actually lifted a 1-hop neighbour (else "")
+         headerStr += adaptiveNote;
+         headerStr += mentionNote;   // B8: present only when the task named something indexed (else "")
+         headerStr += boostNote;     // B3: present only when the co-change prior actually promoted something (else "")
+@@ -3756,6 +3788,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
+     };
+     const std::string taskNote    = collapseDashes( task );
+     const std::string routeNote   = collapseDashes( lr.routeNote );
++    const std::string hopNote     = collapseDashes( lr.hopNote );      // R1
+     const std::string mentionNote = collapseDashes( lr.mentionNote );
+     const std::string boostNote   = collapseDashes( lr.boostNote );
+ 
+@@ -3780,6 +3813,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
+     headerStr += taskNote;
+     headerStr += "\"";
+     headerStr += routeNote;
++    headerStr += hopNote;       // R1: present only when the conceptual route actually lifted a 1-hop neighbour
+     headerStr += mentionNote;
+     headerStr += boostNote;
+     headerStr += ": one-call orientation under ONE budget — sections in FIXED order ranking > bodies > callers > notes > tests, "
+diff --git a/src/mcpverbs.h b/src/mcpverbs.h
+index fafab4e..de8a978 100644
+--- a/src/mcpverbs.h
++++ b/src/mcpverbs.h
+@@ -249,6 +249,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
+     // (lexical.h chooseForRanker). MCP-only agents get the same optimization the CLI ships.
+     const RouteChoice        rc        = chooseForRanker( ing, task );
+     const int                forTopN   = topK > 0 ? topK : 40;
++    // R1: same contract as the CLI --for — the conceptual route expands via anchor-hop, which is a
++    // full-distribution consumer (a hop candidate's base score must be its EXACT BM25 score, not a
++    // pruned 0), so pruning is disabled exactly when expansion is active. Name-exact stays pruned + byte-identical.
++    const bool hopActive = rc.which == LexMode::SubtokenBody && !std::getenv( "CTXPACK_NO_ANCHORHOP" );
+     // H2 (B0 r2): the MCP `for` bundle reads only the top-forTopN of this rank plus every interface
+     // (packLego) — same exact MaxScore pruning contract as the CLI --for (byte-identical output).
+     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
+@@ -256,7 +260,23 @@ inline std::string forTaskText( const std::string& root, const std::string& task
+         if( !ix.g.implementors[i].empty() ) ifaceExact[i] = 1;
+     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
+                                        ? lexicalScoresNameExact( ing, task )
+-                                       : lexicalScores( ing, ix.g.outOff, ix.g.outTargets, task, std::size_t( forTopN ), &ifaceExact );
++                                       : lexicalScores( ing, ix.g.outOff, ix.g.outTargets, task,
++                                                        hopActive ? std::size_t( 0 ) : std::size_t( forTopN ), &ifaceExact );
++
++    // R1 anchor-hop expansion (conceptual route only) — identical mechanics + note contract to the CLI --for.
++    std::string hopNote;
++    if( hopActive )
++    {
++        AnchorHopInfo hopInfo;
++        lensRank = anchorHopExpandedRank( ing, ix.g, lensRank, &hopInfo );
++        if( hopInfo.liftedCount > 0 )
++        {
++            char nb[ 200 ];
++            std::snprintf( nb, sizeof( nb ), " [anchor-hop: %u 1-hop neighbor%s of the top %u anchors lifted by call/use evidence (%u lexically invisible)]",
++                           hopInfo.liftedCount, hopInfo.liftedCount == 1 ? "" : "s", hopInfo.anchorCount, hopInfo.newCount );
++            hopNote = nb;
++        }
++    }
+ 
+     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
+     // Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1
+@@ -326,7 +346,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
+     // (serialize.h kForPayloadBudgetBytes). Lego + compose are rendered into memory FIRST so the <sigs>
+     // budget is the exact remainder; emission ORDER is unchanged (header, sigs, lego, compose, </ctx>),
+     // and when nothing trims the bytes are identical to the pre-H1 path.
+-    std::string headerStr = "<ctx><!-- ctxpack lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + mentionNote + boostNote
++    std::string headerStr = "<ctx><!-- ctxpack lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + hopNote + mentionNote + boostNote
+                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->";
+     const auto renderToString = [ ]( auto&& emitFn ) -> std::string
+     {
+diff --git a/test/anchorcheck.sh b/test/anchorcheck.sh
+index 1502383..1d994c2 100755
+--- a/test/anchorcheck.sh
++++ b/test/anchorcheck.sh
+@@ -49,7 +49,10 @@ diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
+     || no "plain --for --no-route drifted from test/anchorfix/golden_for.xml (--anchor leaked into the default lens)"
+ 
+ # ── 2) the targeted expansion case — a lexically-invisible direct callee, top-4 window ────────────────
+-PLAIN="$( "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 2>/dev/null )"
++# R1 (2026-07-22): the DEFAULT conceptual route now carries anchor-hop expansion, which surfaces this very
++# fixture shape by design — so the PLAIN (un-expanded lexical) reference arm is the --no-route path, the
++# same byte-stable pre-routing path step 1's golden already pins. --anchor's PPR blend is measured against it.
++PLAIN="$( "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 --no-route 2>/dev/null )"
+ ANCH="$(  "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 --anchor 2>/dev/null )"
+ printf '%s' "$PLAIN" | grep -q 'flushEvictionQueue' \
+     && no "plain lexical top-4 wrongly contains the zero-overlap callee (fixture no longer discriminates)" \
+diff --git a/test/regression.sh b/test/regression.sh
+index eec4cd6..18e0a16 100755
+--- a/test/regression.sh
++++ b/test/regression.sh
+@@ -178,7 +178,7 @@ if CTXPACK_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then o
+ 
+ # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
+ #     dedicated standalone gate; run with the binary under test (skip any not yet present).
+-for _g in archcheck lintcheck swiftcheck ownerscheck baselinecheck resolvecheck canoncheck deadcheck hasacheck zoomcheck situdiffcheck xmlwellformed localitycheck mcpverbscheck regexcheck narrowcheck usescheck archmetricscheck querycheck qualitycheck clicheck grepcheck emptycorpuscheck bm25check rankbycheck callerscheck prcheck mcprobustcheck hostilecheck langcheck lintrulescheck prcontextcheck ccjsoncheck scipcheck mcpeditcheck redactcheck mcpstalecheck baselineportcheck clonecachecheck cachehashcheck tornreadcheck metricscheck propcostcheck coplintcheck forlenscheck exemplarcheck tokenbudgetcheck paginationcheck portablecachecheck mcphandlecheck fillordercheck jslangcheck expandrangecheck importnarrowcheck mcpreloadcheck reachcheck mapdiffcheck affectedcheck reportcheck evalcheck outlinecheck recallrelcheck treecheck javarubycheck jsonlangcheck type3clonecheck zonecheck sincecheck jsmetricscheck jsverbscheck mcprangeedgecheck narrowlangcheck rangecomposecheck unreachablecheck grepcontextcheck cyclecutcheck rubymetricscheck type3check sincewindowcheck zoneconsistencycheck w2verbscheck sincecochangecheck includeanglecheck includeprecisecheck crossdirincludecheck legocheck pyimportprecisecheck tsimportprecisecheck rustimportprecisecheck unresolvedcheck resolverhonestycheck depsprecisecheck cppoperatorcheck skillinstallcheck skilltruthcheck qualitystalecheck qualitykindscheck mcpeditkindcheck mcpeditracecheck swiftmemberscheck gointerfacecheck mcpflagshipcheck didyoumeancheck routecheck writetargetcheck clonelexcheck qualityexcludecheck prrenamecheck gitquotepathcheck mcpaudit4hardencheck mcpremotecheck regexbombcheck adaptivecutshapecheck columnarcommacheck overbudgetcommentcheck utf8scrubcheck wrapverbscheck cachesplitcheck testgatecheck headsnapcachecheck qsnapcachecheck qsnapprefetchcheck fficheck statgatecheck prbudgetcheck detailcheck candidatescheck batchcheck traceminecheck connectcheck artifactcheck indexoutcheck spectimingcheck multirootcheck cachefuzzcheck clonededupcheck doctorcheck evictioncheck adaptivecheck anchorcheck columnarcheck connectcorecheck expandtokencheck knownitemcheck mcpeditmodecheck mcpredactcheck mcpwatchercheck savecachecheck manifestcheck selfcontainedcheck dependencypincheck g1configcheck communitylabelcheck lintprecisioncheck isolateprovenancecheck deadprecisioncheck retrievalqualitycheck postingscheck chacheck cochangeboostcheck qualitysignalcheck hookcheck mentioncheck csharpcheck routeedgecheck relinkcheck mergescoutcheck editcheckcheck tracecheck notescheck packtaskcheck cppbenchcheck versioncheck aritycheck qchurncheck qschemetripcheck qualifiedresolvecheck racymtimecheck; do
++for _g in archcheck lintcheck swiftcheck ownerscheck baselinecheck resolvecheck canoncheck deadcheck hasacheck zoomcheck situdiffcheck xmlwellformed localitycheck mcpverbscheck regexcheck narrowcheck usescheck archmetricscheck querycheck qualitycheck clicheck grepcheck emptycorpuscheck bm25check rankbycheck callerscheck prcheck mcprobustcheck hostilecheck langcheck lintrulescheck prcontextcheck ccjsoncheck scipcheck mcpeditcheck redactcheck mcpstalecheck baselineportcheck clonecachecheck cachehashcheck tornreadcheck metricscheck propcostcheck coplintcheck forlenscheck exemplarcheck tokenbudgetcheck paginationcheck portablecachecheck mcphandlecheck fillordercheck jslangcheck expandrangecheck importnarrowcheck mcpreloadcheck reachcheck mapdiffcheck affectedcheck reportcheck evalcheck outlinecheck recallrelcheck treecheck javarubycheck jsonlangcheck type3clonecheck zonecheck sincecheck jsmetricscheck jsverbscheck mcprangeedgecheck narrowlangcheck rangecomposecheck unreachablecheck grepcontextcheck cyclecutcheck rubymetricscheck type3check sincewindowcheck zoneconsistencycheck w2verbscheck sincecochangecheck includeanglecheck includeprecisecheck crossdirincludecheck legocheck pyimportprecisecheck tsimportprecisecheck rustimportprecisecheck unresolvedcheck resolverhonestycheck depsprecisecheck cppoperatorcheck skillinstallcheck skilltruthcheck qualitystalecheck qualitykindscheck mcpeditkindcheck mcpeditracecheck swiftmemberscheck gointerfacecheck mcpflagshipcheck didyoumeancheck routecheck writetargetcheck clonelexcheck qualityexcludecheck prrenamecheck gitquotepathcheck mcpaudit4hardencheck mcpremotecheck regexbombcheck adaptivecutshapecheck columnarcommacheck overbudgetcommentcheck utf8scrubcheck wrapverbscheck cachesplitcheck testgatecheck headsnapcachecheck qsnapcachecheck qsnapprefetchcheck fficheck statgatecheck prbudgetcheck detailcheck candidatescheck batchcheck traceminecheck connectcheck artifactcheck indexoutcheck spectimingcheck multirootcheck cachefuzzcheck clonededupcheck doctorcheck evictioncheck adaptivecheck anchorcheck columnarcheck connectcorecheck expandtokencheck knownitemcheck mcpeditmodecheck mcpredactcheck mcpwatchercheck savecachecheck manifestcheck selfcontainedcheck dependencypincheck g1configcheck communitylabelcheck lintprecisioncheck isolateprovenancecheck deadprecisioncheck retrievalqualitycheck postingscheck chacheck cochangeboostcheck qualitysignalcheck hookcheck mentioncheck csharpcheck routeedgecheck relinkcheck mergescoutcheck editcheckcheck tracecheck notescheck packtaskcheck cppbenchcheck versioncheck aritycheck qchurncheck qschemetripcheck qualifiedresolvecheck racymtimecheck anchorhopcheck; do
+     [ -f "$ROOT/test/$_g.sh" ] || continue
+     if CTXPACK_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then ok "absorb gate ($_g.sh)"; else no "absorb gate ($_g.sh failed)"; fi
+ done

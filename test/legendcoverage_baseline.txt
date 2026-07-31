@@ -1,0 +1,217 @@
+# legendcoverage_baseline.txt — THE FIRST-SCREEN LEGEND-GAP FLOOR (capture-audit-4, §B7 lane).
+#
+# One line per "verb | element@attribute" that a reader meets on a first screen WITHOUT the attribute's name
+# appearing anywhere in that document's own legend. Produced mechanically by test/legendcoveragecheck.sh,
+# which FAILS on any line NOT recorded here — so this file is a RATCHET: a new undefined attribute cannot be
+# added to any first screen without a red gate naming it, and this list may only be edited DOWNWARD.
+#
+# It is an INVENTORY OF KNOWN DEBT, not an approval. Every line is a real gap. Deleting one means the verb's
+# legend now defines the attribute; delete it in the same commit that adds the text, not separately.
+#
+# WHICH PREDICATE DECIDES WHAT, because the two directions are not the same question (CA4-F5.F1). A line is
+# ADDED here under the generous predicate — the attribute's bare name appears nowhere in the legend — so
+# every line is a gap by the weakest possible standard. A line is REMOVED only under the definitional one:
+# the legend spells `name=`, the house convention. That asymmetry exists because being wrong about a gap is
+# a false alarm, while being wrong about a CLOSURE silently discards recorded debt. It is not hypothetical:
+# `edit-check | edit-check@at` was reported closed by the bare-name search because §B11.3's new sentence
+# contains the English word ("defs= is how many DEFINITIONS *at* this site"), while lines 36-38 of THIS file
+# said correctly, in the same wave, that --edit-check still does not define the stamp. The gate now agrees
+# with this file. Same shape on `stray-content | stray-content@head` and `test-gate | test-gate@impacted`;
+# all three are still here, on purpose.
+#
+# What is NOT counted: the seven v1 core row keys (p n t id l k c), which every map legend defines verbatim
+# and every row dictionary restates. Everything else on the root element and on the first instance of every
+# distinct child element is in scope — EVERY, not the first six. The gate used to stop after six distinct
+# tags with nothing disclosing it (CA4-F5.F2); that hid 8 real gaps, including --pack-task's own
+# `<bodies shown= total= capped=>`, which is §B8.3 verbatim and the very shape the note below calls the
+# cheapest bulk win. The window widened on 2026-07-31 and this file was re-derived against it: 7 lines
+# closed, 7 previously-invisible lines recorded, 156 either way. That re-derivation is the ONE sanctioned
+# upward edit on record, and it widened the WINDOW, not the debt.
+#
+# ZERO-GAP verbs, deliberately absent from this file — the state every other verb should reach: all eight map
+# shapes (default, --metrics, the four --rank-by values, --map-diff, --max-tokens), --quality-delta,
+# --doc-drift, --tree, --report, --around, --notes. (--pr-context left this list in the same re-derivation:
+# it is zero-gap on its ROOT, and its <cochange commits=>/<owners bf=>/<no-ref-work note=> children were
+# simply never reached under the six-tag cap. Its roster entry is now pinned to HEAD~1 — see the gate's
+# roster comment: the bare working-tree form's element set depends on whether the agent running the suite
+# has uncommitted edits, which is a flake, and HEAD~1 is both deterministic and strictly wider.)
+#
+# Recurring shapes in this list, for whoever works it down:
+#   * shown= / capped= / total= — defined normatively in src/pageview.h and restated in FEW verb legends,
+#     so a reader holding only the document has often never been told what they mean. ~20 lines here are
+#     this one shape, and it is the cheapest bulk win available. --pack-task closed its four (far@shown,
+#     far@total, and the bodies@/callers@ pair the cap was hiding) with one clause in packtask.h; --whereis
+#     closed shown=/capped= the same way. Both are the worked example.
+#   * of= / defs= / count= on the navigate verbs — CLOSED 2026-07-31 by the §H4 disclosure lane
+#     (PLAN_h4QualifiedCalls_2026-07-30.md §3.4). --callers and --callees used to ship NO legend at all
+#     (0 bytes), which is why every one of their root attributes was listed here; they now share ONE legend
+#     (src/graphlegend.h, kCallHierarchyLegendOpen) that defines all three: "of= is the selector you passed,
+#     defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and count=
+#     the total number of DISTINCT neighbour symbols". Ten lines deleted on that evidence — the three
+#     attributes × {callers, callees, callers-columnar}, plus 'uses | uses@count', which the same lane's
+#     shared floor clause defines ("a larger count= there for the same symbol …"). --impact's five lines
+#     STAY: its legend gained the floor tail but still never spells of=/defs=/reaches=/shown=/capped=.
+#   * --path likewise ships no legend: 8 attributes, none defined.
+#   * --scan-skills ships no legend: verdict= on a SECURITY verb is undefined at the point of use.
+#   * SHAPE-DEPENDENT lines, and this is the one thing to know before editing this file: the git-reading
+#     verbs (--merge-scout, --stray-content, --whereis) emit different ELEMENTS depending on the tree, so
+#     their gap sets come and go. Lines like these are pre-seeded so the ratchet does not red on tree state.
+#     'stray-content | more@files' USED to be one of them and was deleted in the re-derivation: the
+#     stray-content legend now says "a ref row ends with a more element (more files=N)", so the attribute is
+#     both mentioned and defined and cannot become a gap when a ref finally overflows.
+#   * SHAPE-DEPENDENT lines: --merge-scout's pair@ rows only exist when HEAD~1 actually conflicts with HEAD,
+#     so those two lines come and go with the tree. That is exactly why arm (B) of the gate reports closed
+#     lines instead of failing on them — observed live during this lane, not predicted.
+#   * at= now has ONE definition (serialize.h kAtStampLegend) shared by the map, --hotspots, --owners and
+#     both --cochange forms. --test-gate, --edit-check and --whereis print the identical stamp and still do
+#     not define it; those files belong to other lanes, so their lines stay here.
+#   * NEWLY VISIBLE, and named with their owning file so the next lane can find them: 'for | field@owner|
+#     rel|type' is the <field name= type= owner= rel=/> row emitted at src/serialize.h:3071, and the four
+#     --pr-context lines live in src/prcontext.h. Both files were owned by other lanes when the cap came off,
+#     which is why they are recorded rather than closed.
+affected | affected@seeds
+clones | group@tokens
+cochange | cochange@capped
+cochange | cochange@shown
+cochange | pair@b
+cochange-file | cochange@capped
+cochange-file | cochange@partners
+cochange-file | cochange@shown
+communities | bridge@b
+communities | bridge@from_label
+communities | bridge@to_label
+communities | communities@bridges
+communities | communities@bridges_capped
+communities | communities@connected_singletons
+communities | communities@isolated_decl
+communities | communities@isolated_doc
+communities | communities@isolated_header
+communities | communities@isolated_source
+communities | communities@modules_capped
+communities | communities@shown_bridges
+communities | communities@shown_modules
+communities | community@dir
+communities | community@label
+community | bridge@to_label
+community | community@bridges
+community | community@bridges_capped
+community | community@dir
+community | community@shown_bridges
+connect | connect@est_tokens
+connect | connect@groups
+connect | connect@nodes
+connect | connect@radius
+connect | connect@terminals
+connect | g@terminals
+connect | s@sig
+dead-code | dead-code@count
+deps | deps@capped
+deps | deps@shown
+deps | f@afferent
+deps | godfiles@capped
+deps | godfiles@shown
+deps | godfiles@total
+deps | health@shape
+deps | stabledeps@violations
+deps | v@from
+deps | v@gap
+edit-check | edit-check@at
+edit-check | edit-check@sym
+exemplar | bodies@capped
+exemplar | bodies@shown
+exemplar | bodies@total
+exemplar | calls@total
+exercises | exercises@capped
+exercises | exercises@note
+exercises | exercises@reaches
+exercises | exercises@seed_files
+exercises | exercises@seed_files_capped
+exercises | exercises@shown
+exercises | exercises@shown_seed_files
+exercises | exercises@test_symbols
+external-surface | external-surface@capped
+external-surface | external-surface@shown
+external-surface | x@lang
+for | ctx@route
+for | ctx@task
+for | field@owner
+for | field@rel
+for | field@type
+for | sigs@capped
+grep | grep@pattern
+hotspots | f@top_ccx
+hotspots | f@top_l
+hotspots | hotspots@capped
+hotspots | hotspots@ranked
+hotspots | hotspots@shown
+impact | impact@capped
+impact | impact@defs
+impact | impact@of
+impact | impact@reaches
+impact | impact@shown
+layout | caveat@d
+layout | def@agg
+layout | def@fields
+layout | f@al
+layout | f@off
+layout | f@sz
+layout | f@ty
+layout | layout@conflicts
+layout | layout@defs
+layout | layout@found
+layout | layout@mirror
+layout | layout@scanned
+layout | layout@sym
+lint | lint@findings
+lint | rule@name
+mentions | mentions@defs
+mentions | mentions@of
+merge-scout | arm@ok
+merge-scout | landing@order
+merge-scout | merge-scout@head
+merge-scout | no-work@note
+merge-scout | pair@b
+merge-scout | pair@risks
+owners | f@share
+owners | f@top
+pack-task | ctx@route
+path | path@from
+path | path@from_defs
+path | path@from_p
+path | path@hops
+path | path@reachable
+path | path@to
+path | path@to_defs
+path | path@to_p
+pr-context | cochange@commits
+pr-context | no-ref-work@note
+pr-context | owners@bf
+pr-context | pr-context@base_sha
+scan-skills | skillscan@files
+scan-skills | skillscan@findings
+scan-skills | skillscan@skipped
+scan-skills | skillscan@verdict
+seams | seams@bridges
+seams | seams@capped
+seams | seams@modules
+seams | seams@seam_pairs
+seams | seams@shown
+seams | seams@test_files
+stray-content | file@head-touched
+stray-content | file@sim
+stray-content | ref@date
+stray-content | ref@name
+stray-content | ref@tip
+stray-content | stray-content@blobs
+stray-content | stray-content@head
+stray-content | stray-content@head_ref
+test-gate | test-gate@at
+test-gate | test-gate@changed
+test-gate | test-gate@impacted
+test-gate | test-gate@tests_capped
+test-gate | test-gate@untested_capped
+uses | u@in_id
+whereis | hit@date
+whereis | hit@tip
+whereis | whereis@sym
+zoom | zoom@levels

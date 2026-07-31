@@ -1,0 +1,7 @@
+# A single well-formed rule that fires on printf( ... ) in C++ files.
+- id: no-printf
+  language: cpp
+  severity: warn
+  message: use LOG() instead of printf
+  query: |
+    (call_expression function: (identifier) @fn (#match? @fn "^printf$")) @hit

@@ -1,0 +1,12 @@
+paired corrected LocBench: arm=for n=243 repos=78
+  strict file@10 delta +0.41pp; clustered bootstrap 95% lower +0.00pp
+  lenient file@10 delta +0.82pp; symbol MRR delta -0.0012
+  multi-file strict@10 delta +0.00pp (n=55)
+  warm latency p50 delta +2.8%; p95 delta +10.2%
+  production payload token ceiling p50 +0.2%; p95 +2.7%
+  cold p50/p95 +1.6%/+11.1%; index p50/p95 +1.8%/+12.7%
+  category deltas single strict/lenient +0.53pp/+0.53pp; multi +0.00pp/+1.82pp
+  all-patch secondary strict@10 delta +0.41pp (zero-primary rows count as failures)
+  [two-tier] tier1 absolute SLA: warm p95 761.5ms (ceiling 775.0ms) PASS; cold p95 1623.8ms (ceiling 1650.0ms) PASS
+  [two-tier] tier2 utility: quality LB +0.00pp / weighted cost delta +1.50% (weights warm=0.5 token=0.5) = 0.000 vs min 2.5 FAIL
+REJECT

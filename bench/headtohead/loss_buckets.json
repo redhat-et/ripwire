@@ -1,0 +1,58 @@
+{
+ "scikit-learn__scikit-learn-25186": {
+  "bucket": "path/module-mention unexploited",
+  "note": "Issue text contains the literal gold path sklearn/ensemble/_iforest.py (in GitHub URLs) and the class name IsolationForest; ctxpack ranked it 60 while BM25-over-symbols (cbm) hit 8. Secondary: top-10 crowded by test files."
+ },
+ "micropython__micropython-lib-947": {
+  "bucket": "path/module-mention unexploited",
+  "note": "Issue names 'the requests module'; gold is python-ecosys/requests/requests/__init__.py whose path components literally spell 'requests'. cbm BM25 rank 1; ctxpack 34 (top-10 was unix-ffi email/http files matching 'header/auth' vocabulary)."
+ },
+ "huggingface__transformers-35453": {
+  "bucket": "path/module-mention unexploited",
+  "note": "Issue names the dotted module 'transformers.optimization'; gold src/transformers/optimization.py. cbm rank 0; ctxpack 19 (near-miss). Dotted-module-to-file mapping not exploited."
+ },
+ "scikit-learn__scikit-learn-29130": {
+  "bucket": "non-code/infra gold",
+  "note": "Gold is build_tools/update_environments_and_lock_files.py \u2014 a CI/lockfile maintenance script with weak call-graph presence. ctxpack 113; aider 4 (its PageRank+ident personalization favored build_tools); cbm 9."
+ },
+ "JackPlowman__repo_standards_validator-137": {
+  "bucket": "multi-file strict near-miss",
+  "note": "ctxpack put gold repository_checks.py at 0 but the sibling gold validator/__main__.py (thin entrypoint wiring) at 19 \u2014 strict@10 fails on the entrypoint. aider got both within 8. Ultra-short issue (7 words) secondary."
+ },
+ "zulip__zulip-31168": {
+  "bucket": "multi-file strict near-miss",
+  "note": "views/streams.py at 12 (near-miss), lib/users.py at 63. cbm surfaced a gold at 2 (lenient win) but also strict-missed. Perf issue vocabulary ('slow', 'large organizations') matches web/ JS files first."
+ },
+ "modin-project__modin-6836": {
+  "bucket": "multi-file strict near-miss",
+  "note": "4-file gold. ctxpack first-hit 12; 3 of 4 gold within 52 but dataframe.py fell outside the 200-symbol candidate export (truncation). cbm first-hit 4, also strict-miss. Nobody solves 4-file strict."
+ },
+ "TagStudioDev__TagStudio-735": {
+  "bucket": "multi-file strict near-miss",
+  "note": "Gold tag_search.py at 20, tag.py at 36; cbm first-hit 9 (lenient win). Perf-degradation issue: vocabulary generic ('slower', 'tags'), library.py hub files outrank the modal widget files."
+ },
+ "Standard-Labs__real-intent-102": {
+  "bucket": "ultra-short/vague query",
+  "note": "Entire issue: 'Improve integration efficiency Multithreading'. ctxpack 13/14; aider hit both within 11 (5 first) \u2014 its structure-only PageRank is immune to query poverty; cbm returned 0 results."
+ },
+ "Open-MSS__MSS-1967": {
+  "bucket": "indirect gold (named file != fixed file)",
+  "note": "Issue names conftest.py L227 explicitly; ctxpack correctly ranked conftest.py #1 \u2014 but the accepted fix edited mscolab.py/socket_control.py/airdata.py (the files whose popups triggered the warning). Needs a 1-hop 'who triggers this' expansion, not better lexical match. cbm lenient-hit at 1."
+ },
+ "gammasim__simtools-1183": {
+  "bucket": "test/doc-file crowding",
+  "note": "Profiling-output issue names array_model; gold is the db layer (db_handler.py 13, db_array_elements.py 30, application 52). ctxpack top-10 = io_handler, docs/conf.py and 5 test files. Tests mentioning the profiled symbols outrank the implementation."
+ },
+ "scikit-learn__scikit-learn-8478": {
+  "bucket": "vocabulary gap (feature-request)",
+  "note": "Feature request for a MICE imputer \u2014 the term 'MICE' does not exist in the repo at base_commit, so no lexical signal reaches the gold files (impute.py 42, estimator_checks.py 36, plot_missing_values.py outside top-200 candidates; ALL of them ARE in the indexed universe \u2014 deep-rank miss, not a parse gap). No arm strict-hit; aider's query-independent structural rank lenient-hit at 9."
+ },
+ "gitpython-developers__GitPython-1636": {
+  "bucket": "ultra-short/vague query",
+  "note": "[graphify loss] CVE stub issue \u2014 'Untrusted search path on Windows... arbitrary code execution' + advisory URL, near-zero code vocabulary. Gold git/cmd.py at ctx rank 10 (misses @10 by one position); graphify 5 \u2014 its BFS surfaces the repo's biggest hub (cmd.py) early regardless of query. Secondary: 4 test files in ctx top-10."
+ },
+ "Deltares__imod-python-1159": {
+  "bucket": "multi-file strict near-miss",
+  "note": "[graphify loss] 3-file gold; ctx first-hit 2 (simulation.py) but imod/schemata.py at 57 EVEN THOUGH the issue names 'DTypeSchema.validate' verbatim (DTypeSchema is defined in schemata.py), and grid.py at 29 ('xu.DataArray.from_structured' named too). graphify strict-hit @6 by seeding BFS on those named symbols. Symbol-mention anchoring (B1 family, symbol flavor) would likely fix."
+ }
+}

@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "esnext",
+    "strict": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
+}

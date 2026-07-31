@@ -1,0 +1,6 @@
+{
+  "name": "retrieval-fixture",
+  "dependencies": {
+    "telemetry-bridge": "1.0.0"
+  }
+}

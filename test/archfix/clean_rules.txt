@@ -1,0 +1,2 @@
+# clean_rules.txt — no violations (allows the direction that the fixture actually uses).
+allow test -> render

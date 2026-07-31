@@ -1,0 +1,72 @@
+# labels_ranking.tsv — held-out labels for the RANKING lane (PLAN_outputAudit_2026-07-28.md §Sequencing:
+# the measuring instrument that must exist before §P4's ranking half — fixture/present de-prioritization
+# in the ranking lenses — may be evaluated). One row per query: query<TAB>primary<TAB>acceptable<TAB>class
+#   primary    = comma-separated repo-relative CODE path(s), each optionally `path#SymbolName` — a
+#                candidate matches when its p= path equals/suffix-matches the path AND (when #Symbol is
+#                given) its n= name equals the symbol. A hit on ANY primary target is primary credit.
+#   acceptable = comma-separated targets earning lenient (graded) credit, or `-` for none.
+#   class      = name | concept | task | adversarial
+#                name        — the query IS the symbol's exact name (exercises the name-exact route)
+#                concept     — conceptual phrase describing what one symbol does
+#                task        — an agent's task wording, the on-task symbol is the labelled answer
+#                adversarial — vocabulary that today lets test/*fix fixtures or present/ deck scripts
+#                              outrank the real source (the §P4 pollution class: the plan's own example
+#                              is --for="pagerank power iteration" ranking a fixture Robot::speak above
+#                              pageRankDouble); the labelled answer is the real source symbol.
+#
+# LABELING PROTOCOL (held-out means held out): every gold symbol below was chosen by READING the source
+# (src/*.h, src/*.cpp — the definitions and their header comments) and deciding which symbol IS the
+# on-task answer — never by running --for/--format=candidates and transcribing the current top ranks.
+# The ranker was run on these queries only AFTER this file was complete, to produce baseline numbers.
+# The eval is therefore allowed to say the current ranker is wrong.
+#
+# RECALIBRATION 2026-07-29 (capture-audit-4 Phase 0, R21 owner ruling — per-label reasons, protocol
+# unchanged: every decision below was made by re-READING the source, never by running the ranker):
+#   * "redact secrets…" — primary widened to a MULTI-ANSWER (redactInPlace + redactSecrets). The redact
+#     family grew during the audit-3 fix round (sig-text redaction raised src/redact.h fan-in) and the
+#     single-answer premise was the recorded 0.670→0.654 drift's largest term. By source reading BOTH
+#     symbols ARE the on-task answer: redactInPlace is the wrapper every body-emission seam calls on
+#     emitted bodies; redactSecrets is the credential-shape transform itself. acceptable stays redact.h.
+#   * "make recall refuse to emit when over the token budget" — label CONFIRMED UNCHANGED.
+#     emitRecallBudgeted is, by reading, exactly the budget-refusal seam (the withheld: path). The
+#     recorded 1→2 movement is instrument drift — the gold's own doc comment grew (ce5392a) and BM25
+#     length normalization sank it — not a wrong label; the re-frozen bars absorb it.
+#   * "map sanitizer stack trace frames to indexed symbols" — re-ANCHORED from path-only to symbols.
+#     The path-only label credited ANY new symbol in tracein.h (the recorded strict absent→4
+#     "improvement" was §B10's frames-seen tally landing in the file — a label artifact, refuted in
+#     audit-3's final verifier M11). By source reading the frame→indexed-symbol mapping is
+#     tracelocus.h's corpus resolution: partitionTraceFrames orchestrates it (primary); extractFrames
+#     (pure extraction) and the per-frame resolvers traceResolveByName/traceEnclosingSymbol earn
+#     lenient credit.
+pageRankDouble	src/pagerank.cpp#pageRankDouble	src/pagerank.h#pageRankDouble	name
+chooseForRanker	src/lexical.h#chooseForRanker	-	name
+closeOpenMarkdownFence	src/recall.h#closeOpenMarkdownFence	-	name
+anchoredLexicalRank	src/graph.h#anchoredLexicalRank	-	name
+recallTopFiles	src/recall.h#recallTopFiles	-	name
+applyMentionBoost	src/mention.h#applyMentionBoost	-	name
+isTestPath	src/filter.h#isTestPath	-	name
+editCheckContractVsHead	src/editcheck.h#editCheckContractVsHead	-	name
+power iteration rank convergence damping factor	src/pagerank.cpp#pageRankDouble	src/graph.h#rankGraphTeleport,src/pagerank.h#pageRankDouble	concept
+BM25 lexical scoring of symbols for a task query	src/lexical.h#lexicalScores	src/lexindex.h,src/eval.h#bm25Seeded	concept
+reciprocal rank fusion combining rankings	src/graph.h#rrfFuse	-	concept
+split camelCase and snake_case identifiers into subtokens	src/lexical.h#subtokens	src/lexindex.h#forEachLexSubtoken	concept
+close an open markdown code fence left by truncation	src/recall.h#closeOpenMarkdownFence	src/recall.h#truncateRecallBody	concept
+redact secrets and credentials from emitted bodies	src/redact.h#redactInPlace,src/redact.h#redactSecrets	src/redact.h	concept
+utf-8 safe truncation with an ellipsis	src/serialize.h#truncateUtf8WithEllipsis	-	concept
+calibrated bytes per token estimate	src/serialize.h#bytesPerTokenFor	-	concept
+known item retrieval eval MRR per ranker	src/eval.h#runEvalRetrieval	src/eval.h#rankOfSymbol	concept
+co-change eval over historical git commits	src/eval.h#runEval	src/gitmine.h#gitCommitFileSets	concept
+exemplar selection penalizes fixture paths	src/exemplar.h#isFixturePath	src/exemplar.h#selectExemplar	concept
+extract the first doc comment line as a query phrase	src/eval.h#docPhraseFirstLine	-	concept
+make recall refuse to emit when over the token budget	src/recall.h#emitRecallBudgeted	src/recall.h#buildRecall	task
+route an identifier query to the exact name ranker	src/lexical.h#chooseForRanker	src/lexical.h#lexicalScoresNameExact	task
+exclude test files from the ranked map	src/filter.h#applyIgnoreTests	src/filter.h#isTestPath	task
+plan the landing order for several branches	src/mergescout.h#computeMergeScout	src/mergescout.h	task
+surface saved notes when their symbol is emitted	src/notes.h#buildNoteIndex	src/notes.h#loadNoteIndex,src/notes.h	task
+map sanitizer stack trace frames to indexed symbols	src/tracelocus.h#partitionTraceFrames	src/tracein.h#extractFrames,src/tracelocus.h#traceResolveByName,src/tracelocus.h#traceEnclosingSymbol	task
+detect near duplicate function bodies	src/clones.h#cloneSketchSig	src/clones.h	task
+pagerank power iteration	src/pagerank.cpp#pageRankDouble	src/pagerank.h#pageRankDouble,src/graph.h#rankGraphTeleport	adversarial
+add a new output format flag to the CLI	src/cli.h	src/main.cpp	adversarial
+list the implementors of an interface	src/serialize.h#legoImplementorsOnSurface	src/mcpverbs.h#legoText,src/serialize.h	adversarial
+resolve a virtual speak call by receiver class hierarchy	src/resolve.h	-	adversarial
+stale index cache detect and rebuild	src/ingest.cpp,src/mcpindex.h	src/binstale.h	adversarial

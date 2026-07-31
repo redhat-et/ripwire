@@ -1,0 +1,7 @@
+def leaf
+  1
+end
+
+def root
+  leaf
+end

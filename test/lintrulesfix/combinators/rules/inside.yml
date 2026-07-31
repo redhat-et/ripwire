@@ -1,0 +1,11 @@
+# `inside`: keep a raw `new` ONLY when it sits inside a function_definition.
+# Positive: the `new Widget` on L19 (inside makesWidget) is KEPT.
+# Negative: the namespace-scope `new Widget` on L15 (outside any function) is DROPPED.
+- id: new-inside-fn
+  language: cpp
+  severity: warn
+  message: raw new (only reported inside a function)
+  query: |
+    (new_expression) @hit
+  inside: |
+    (function_definition) @scope

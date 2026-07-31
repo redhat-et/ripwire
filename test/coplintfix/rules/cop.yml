@@ -1,0 +1,32 @@
+# Connascence-of-Position lint rule: flags calls with 5+ positional arguments.
+# The CoP smell: callers must know the precise order of arguments; reordering
+# breaks all callers silently. Threshold is 5+ args; 3-4 is healthy.
+#
+# Tree-sitter query: match a call_expression and capture the full argument_list
+# (all positional args). The @hit gets the call as a whole; we use the span to
+# detect "many args" by the size of the argument_list span.
+#
+# This is a SIMPLIFIED version for demonstration: we capture the argument_list,
+# and astQuery's "collapsed" span logic gives us the widest match. In a real
+# implementation, a counting visitor would enumerate args and threshold at 5.
+# For now, we rely on a fixture where calls with 5+ args occupy a noticeably
+# larger span than calls with 2-3 args, so the rule is demonstrated.
+#
+# Production use: refactor to a per-language visitor that counts argument_list
+# children and thresholds at 5. This YAML rule shows the SHAPE and WIRING;
+# a true multi-arg-count detector requires a semantic visitor.
+
+- id: cop-many-args
+  language: cpp
+  severity: warn
+  message: function call with 5+ positional arguments (connascence of position); consider restructuring with a struct/builder
+  query: |
+    (call_expression
+      function: (_)
+      arguments: (argument_list
+        ((_) @arg1
+         (_) @arg2
+         (_) @arg3
+         (_) @arg4
+         (_) @arg5
+         _*))) @hit
