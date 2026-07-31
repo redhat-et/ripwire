@@ -16,11 +16,10 @@ name: CI
 #     test/regression.sh already covers both, so a CI log reader sees the two headline product
 #     guarantees (determinism, well-formed XML / G4) called out as their own named steps.
 #
-# FetchContent sources (tree-sitter core + 12 grammar repos + swift/doctest, all SHA-pinned — see
-# CMakeLists.txt) are cached across runs via actions/cache keyed on CMakeLists.txt's own hash, so a pin
-# bump invalidates the cache automatically and a normal re-run reuses the shared clone
-# (ctxpack_use_shared_source / ctxpack_use_shared_source_commit in CMakeLists.txt already know how to
-# adopt exactly this directory layout without re-fetching).
+# There is no dependency-download step and no dependency cache: tree-sitter core, all 15 grammars and
+# doctest are VENDORED under third_party/deps (see CMakeLists.txt), so `actions/checkout` is the whole
+# provisioning story. That also means CI exercises the same hermetic build a stranger's clone gets —
+# a cache step would have hidden a re-introduced network fetch behind a warm runner.
 
 on:
   push:
@@ -34,11 +33,6 @@ concurrency:
 
 # Never CTXPACK_NATIVE in CI: -march=native would bake in whatever ISA the CI runner's host happens to
 # expose that week, defeating the entire point of testing the portable default.
-#
-# CMakeLists.txt hardcodes the SHARED FetchContent source cache to $HOME/.cache/ctxpack-deps (see its own
-# comment: "shared, relocatable dep SOURCE cache" — the same path every dev machine + this CI runner use).
-# Caching that literal path across runs is what lets ctxpack_use_shared_source[_commit] in CMakeLists.txt
-# adopt the previous run's clones instead of re-fetching all 15 pinned repos from scratch every time.
 
 jobs:
   release:
@@ -61,13 +55,6 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
-      - name: Cache FetchContent sources ($HOME/.cache/ctxpack-deps)
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ctxpack-deps
-          key: ctxpack-deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ctxpack-deps-${{ runner.os }}-
 
       - name: Configure (portable default — no CTXPACK_NATIVE)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -128,13 +115,6 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
-      - name: Cache FetchContent sources ($HOME/.cache/ctxpack-deps)
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ctxpack-deps
-          key: ctxpack-deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ctxpack-deps-${{ runner.os }}-
 
       - name: Configure (G1 sanitizer stack)
         run: cmake -S . -B asan -DCTXPACK_ASAN=ON

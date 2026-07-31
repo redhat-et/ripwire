@@ -59,13 +59,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxml2-utils
 
-      - name: Cache FetchContent sources
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ctxpack-deps
-          key: ctxpack-deps-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ctxpack-deps-${{ matrix.name }}-
 
       - name: Configure (portable — no CTXPACK_NATIVE, this binary ships to other machines)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

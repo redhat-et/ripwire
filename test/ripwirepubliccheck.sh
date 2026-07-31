@@ -192,7 +192,24 @@ import os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')
          for p in open(sys.argv[1], 'rb').read().split(b'\0') if p]
 tracked = set(paths)
-roots = ['src', 'src/infra', 'third_party', '']          # mirrors target_include_directories()
+# The include roots the compiler is actually handed — our own targets' first, then the ones CMake
+# passes the vendored dependency targets. A vendored header saying #include "tree_sitter/api.h" is
+# self-contained (that header IS in this repo); arm 7 just has to model the same roots the build
+# does, or it reports a closure break that no compiler would ever see.
+#
+# Note what this deliberately does NOT do: exempt third_party/deps/ from the arm. Vendored code is
+# where an escape would be easiest to miss, so it stays swept — only the root list grows. And the
+# roots are ENUMERATED, not globbed off disk, so pruning a dependency too far still fails the arm
+# instead of quietly shrinking the search.
+_deps = 'third_party/deps'
+_grammars = ('bash', 'c', 'cpp', 'csharp', 'go', 'java', 'javascript', 'json',
+             'objc', 'python', 'ruby', 'rust', 'swift')
+roots = (['src', 'src/infra', 'third_party', '']                        # our targets
+         + [f'{_deps}/tree_sitter/lib/include']                         # PUBLIC, given to every target
+         + [f'{_deps}/tree_sitter/lib/src', f'{_deps}/tree_sitter/lib/src/wasm']   # tree-sitter PRIVATE
+         + [f'{_deps}/{g}/src' for g in _grammars]                      # add_ts_grammar(): PRIVATE ${_src}
+         + [f'{_deps}/ts_typescript/typescript/src', f'{_deps}/ts_typescript/tsx/src']  # add_ts_object()
+         + [f'{_deps}/doctest', f'{_deps}/doctest/doctest/parts'])      # doctest INTERFACE + dev root
 inc = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
 # Generated headers: produced into the build dir by CMake, never committed. Named, not pattern-matched.
 generated = {'version.h', 'embedded_queries.h'}
