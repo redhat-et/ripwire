@@ -1,0 +1,144 @@
+# How this tool is built — a method, not a manifesto
+
+ripwire is a deterministic tool whose output an agent is expected to trust without reading the
+source. That is a strong claim, and the only thing that makes it survivable is the process below.
+None of it is specific to this codebase; it transfers to anything where the output *looks plausible
+whether or not it is correct*.
+
+Three ideas do most of the work: **gate before code**, **capture-audit**, and
+**sibling-completeness**.
+
+---
+
+## 1. Write the gate before the code it measures
+
+A ranking, a token estimate, a call graph, and a similarity score all look reasonable when they are
+wrong. There is no compiler error, no crash, no visibly bad output. Code-then-test in that setting
+does not produce a test — it produces a *transcript* of whatever the code happened to do.
+
+So the order is fixed: decide what the property is, write the check that would catch its absence,
+watch it fail, then write the code that makes it pass.
+
+The corollary is what makes it real: **a gate that cannot observe what it asserts is worse than no
+gate**, because it reports confidence. Two shapes of that failure have shipped here:
+
+- **Compiled-away observation.** A gate asserting a degrade path asserts on a diagnostic that the
+  release build compiles out. For three development cycles every degrade-path gate in CI was green
+  because it could not see the thing it checked. The fix was to run the whole suite in *both* build
+  flavours — not to write more gates.
+- **Vanished probe target.** A gate that anchors on "the most recent commit" goes inert the moment
+  the most recent commit is documentation-only: no diff, no rows, nothing to assert, green. The fix
+  is a **presence guard** — assert the thing you are about to search for actually exists, *then*
+  assert the property.
+
+Both are the same bug: the measurement's precondition was never itself measured. A useful habit is
+to periodically **force each gate to fail** and check that it does.
+
+---
+
+## 2. Capture-audit: read your own output as a stranger would
+
+Periodically, run **every** verb, on a real repository, and record the actual output into one
+document. Then read that document as an unfamiliar user, and write down every place where the output
+is misleading, ambiguous, over-confident, or silently incomplete.
+
+This finds a class of defect that no unit test looks for, because each individual output is *valid*:
+
+- a count that reads like a total but is a floor;
+- a `0` that means "not found" and will be read as "does not exist";
+- two verbs using the same word for different quantities (call *sites* versus caller/callee *pairs*);
+- a truncation with no disclosure;
+- a header that names a denominator it does not actually count;
+- an estimate presented with the confidence of a measurement.
+
+Every finding becomes a gate, so it cannot come back. The capture itself is then worth keeping and
+regenerating: it doubles as the source of the generated command reference and as a harvest of real
+command lines for the differential harness.
+
+Two practical rules learned the expensive way:
+
+- **The capture must not pollute retrieval.** A document that quotes every verb and every flag wins
+  every lexical query about the tool. Keep it in a directory the crawler skips, and demote
+  self-declared generated documents in the ranking.
+- **Regenerate against the final binary**, not the one you started the round with, or the capture
+  documents behavior that no longer exists.
+
+---
+
+## 3. Sibling-completeness: the dominant defect class
+
+When a fix lands on one member of a family, **it almost never lands on the siblings.**
+
+A count is marked as a floor on `--callers` but not on `--callees`, `--uses` and `--impact`. A
+refusal gets a did-you-mean on one selector and not the other five. One language's qualified calls
+are resolved precisely and six others keep guessing. A paging vocabulary reaches nineteen verbs and
+misses six. An MCP verb renders differently from its CLI sibling.
+
+None of these is a bug in the fix. Each is a bug in its *scope*.
+
+The practice that follows is mechanical, and it is the highest-yield habit in this whole document:
+
+> **After any fix, enumerate the family and check every member.** Not a sample — the enumeration.
+> Then write one gate over the *whole family*, not over the instance you fixed.
+
+A family-wide gate — "every verb that emits a count states its unit", "every selector that can miss
+refuses with a suggestion", "every language's call forms are exercised by name" — is worth more than
+a dozen instance gates, because it fails for the *next* sibling too, including one that does not
+exist yet.
+
+The corollary for review: when reviewing a fix, do not ask "is this correct?" Ask **"what are its
+siblings, and did they move?"**
+
+---
+
+## 4. Adversarial review, and letting the reviewer be wrong
+
+Work here is reviewed by a reviewer whose explicit job is to find the round *broken* — not to
+approve it. That framing matters: a reviewer asked to confirm will confirm.
+
+Two things keep it honest in both directions:
+
+- **The reviewer's findings are claims, not verdicts.** More than once, a reviewer's proposed fix
+  shape or factual claim was **refuted by measurement**, and the measurement won. A review that
+  cannot be wrong is not a review.
+- **The record gets corrected.** When the running ledger of a round turned out to be wrong, it was
+  corrected in place rather than quietly re-scoped.
+
+The measurable outcome: in every round where an adversarial review pass ran after a merge, it found
+something broken. The pattern is load-bearing, and "the merge looked clean" has never once been
+evidence.
+
+---
+
+## 5. Publish the negative results
+
+Two ranking experiments here produced no confirmed lift. They were not deleted and they were not
+quietly left on: they are dropped from the help text and refuse to run without an explicit
+development environment variable, with their own evaluation records attached.
+
+Likewise the counterexamples: the verb that makes output *larger* on short symbols, the anchor worth
+exactly +0.0pp on the wrong corpus, the search verb that costs more tokens than it saves, the ranker
+that is excellent at importance and terrible at relatedness. All of them are in `docs/EVALS.md`
+because a tool that only publishes its wins has not told you how to use it.
+
+A negative result recorded is worth more than a feature shipped on a hunch — and it is the only
+thing that stops the same idea being re-attempted every six months.
+
+---
+
+## 6. What the honesty vocabulary buys
+
+The output-level version of all of the above is a small fixed vocabulary that appears *in the
+output*, not in the documentation: floors are labelled `counts_floor="1"`; ambiguity is counted
+(`amb=`, `ambiguous=`); truncations disclose what was cut and why; a selector that matches nothing
+**refuses** rather than answering `0`; an estimate says it is calibrated rather than exact.
+
+The point is not modesty. It is that a consumer — increasingly, an automated one — can act
+differently on "none found" than on "none exists", and can only do that if the difference reaches it.
+Every one of those markers exists because a capture-audit read caught the output saying something it
+could not support.
+
+---
+
+*See `CONTRIBUTING.md` for how these rules land as concrete requirements on a change, and
+`docs/EVALS.md` for the instruments and the numbers.*
