@@ -29,5 +29,3 @@
 --raw	git's own flag ("git diff --raw") quoted describing --stray-content's per-ref cost model, not a ctxpack flag
 --read	aider's own flag ("aider --read FILE") quoted in the wrap-aider recipe, not a ctxpack flag
 --short	git's own flag ("git rev-parse --short HEAD") quoted where a skill tells you to record the commit you measured at, not a ctxpack flag
---output	git's own flag ("git diff --output=FILE") quoted in the P0.1 write-primitive finding — it is the git option that made an unvalidated ref a file-overwrite, not a ctxpack flag
---verify	git's own flag ("git rev-parse --verify") quoted as the fix for that finding, not a ctxpack flag
