@@ -155,10 +155,20 @@ case "$CH" in *'window="18mo"'*)   ok '§A9.6 --rank-by=churn <r> carries window
               *) no "§A9.6 --rank-by=churn <r> has no window=: $CH" ;; esac
 case "$CH" in *'at="'*)            ok '§A9.6 --rank-by=churn <r> carries the at= stamp (map-diff precedent)' ;;
               *) no "§A9.6 --rank-by=churn <r> has no at= stamp: $CH" ;; esac
-# --since must relabel the window rather than keep advertising the default (the §P9 N7 rule, one verb over)
-CS="$( perl -e 'alarm 180; exec @ARGV' "$BIN" "$ROOT" --rank-by=churn --since=HEAD~50 --top-k=5 2>/dev/null | grep -oE '<r [^>]*>' | head -1 )"
-case "$CS" in *'window="HEAD~50"'*) ok '§A9.6 an ACTIVE --since relabels window= (no stale 18mo claim)' ;;
-              *) no "§A9.6 --since did not relabel window=: $CS" ;; esac
+# --since must relabel the window rather than keep advertising the default.
+# The rev is the ROOT COMMIT, not a fixed HEAD~N. A depth-relative rev makes this arm assert a property of
+# the CHECKOUT (does it have N ancestors?) on top of the property it means to assert (does an ACTIVE
+# --since relabel window=?), and an unresolvable rev refuses before the header is ever emitted — so a young
+# or shallow clone reddens the gate while the disclosure it guards is perfectly correct. Every git
+# repository has a root commit, so this resolves everywhere and exercises the same code path.
+SINCEREV="$( git -C "$ROOT" rev-list --max-parents=0 HEAD 2>/dev/null | head -1 )"
+if [ -z "$SINCEREV" ]; then
+    no '§A9.6 could not resolve a root commit to exercise --since (git history unavailable)'
+else
+    CS="$( perl -e 'alarm 180; exec @ARGV' "$BIN" "$ROOT" --rank-by=churn --since="$SINCEREV" --top-k=5 2>/dev/null | grep -oE '<r [^>]*>' | head -1 )"
+    case "$CS" in *"window=\"$SINCEREV\""*) ok '§A9.6 an ACTIVE --since relabels window= (no stale 18mo claim)' ;;
+                  *) no "§A9.6 --since did not relabel window=: $CS" ;; esac
+fi
 # NEGATIVE: pagerank is byte-identical to the plain map — the disclosure must cost the default path nothing.
 perl -e 'alarm 180; exec @ARGV' "$BIN" "$ROOT" --rank-by=pagerank --top-k=5 >"$TMP/pr" 2>/dev/null
 perl -e 'alarm 180; exec @ARGV' "$BIN" "$ROOT" --top-k=5                    >"$TMP/plain" 2>/dev/null
