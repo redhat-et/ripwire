@@ -122,6 +122,14 @@ TABLE = {
     # ── src/cli.h ────────────────────────────────────────────────────────────────────────────────────────
     ( "src/cli.h", "example" ):        ( 1, "not-markup", "example[64]: ' %s=100' with the FLAG NAME from kIntFlags/the paging arms (longest ~20 B). A stderr refusal example, never a document." ),
     ( "src/cli.h", "flag" ):           ( 1, "not-markup", "flag[32] (`%.*s`, so INVISIBLE to the pre-wave-3 population): applyIntFlag's echoed flag name. `bare` is f.prefix minus its trailing '=', and f.prefix is a literal in the compile-time kIntFlags table — 13 rows, longest '--connect-radius=' ⇒ bare 16 B against 31 usable + NUL, 15 B of margin. The `.*` precision is int( bare.size() ) and bounds NOTHING; the bound is the table. Result goes to refuseFlagValue, which fprintf's it to STDERR — never a document." ),
+    # ── src/infra/profileScope.h — the opt-in self-profiler's REPORT formatter ───────────────────────────
+    # Not markup by construction, and doubly so: the report is human-readable text printed to stdout by
+    # prof::report(), never an element of the XML document; and the whole facility compiles to ((void)0)
+    # unless -DCTXPACK_PROFILE=ON, so none of these three buffers exists in a normal binary. A truncation
+    # here shortens one line of a developer's timing table. It cannot land inside a tag.
+    ( "src/infra/profileScope.h", "nameBuf" ):  ( 2, "not-markup", "nameBuf[160] x2 at :721/:723: '%s [%s]' over trim_pretty's fn[96] plus Site::description, a compile-time string literal from the PROFILE_SCOPE_DESCRIBE call site. Printed as a timing-table row, never emitted as a document." ),
+    ( "src/infra/profileScope.h", "locBuf" ):   ( 1, "not-markup", "locBuf[64] at :724: '%s:%d' over Site::file (__FILE__, a compile-time literal) and Site::line. Same timing table; a truncated path costs a developer legibility, nothing else." ),
+    ( "src/infra/profileScope.h", "indented" ): ( 1, "not-markup", "indented[208] at :759: '%*s%s%s' — a width-form pad (depth*2, and depth is capped at 64 by print_tree_node's own guard) over nameBuf[160] plus the literal ' *'. Same timing table." ),
     # ── src/lanes.h — THE REFERENCE SAFE SHAPE ───────────────────────────────────────────────────────────
     ( "src/lanes.h", "buf" ):          ( 3, "safe",       "buf[640] x3: snprintf-THEN-escape. :723 interpolates an UNBOUNDED file path and is still safe for exactly that reason — the warning text is escaped downstream, so a cut shortens prose and can never land inside markup. This is the shape §B14's six were not." ),
     # ── src/main.cpp ─────────────────────────────────────────────────────────────────────────────────────
@@ -246,7 +254,7 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 155, "calls": 137, "sites": 30, "rows": 20, "widthforms": 2 }
+EXPECTED = { "mentions": 164, "calls": 146, "sites": 34, "rows": 23, "widthforms": 3 }
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
 drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
 if drift:

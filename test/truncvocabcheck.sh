@@ -288,7 +288,20 @@ run "$TINY" --communities                    > "$TMP/tiny_communities.xml"
 run "$TINY" --graph-query='kind(all,fn)'     > "$TMP/tiny_query.xml"
 run "$TINY" --impact=leafOne                 > "$TMP/tiny_impact.xml"
 run "$TINY" --external-surface               > "$TMP/tiny_ext.xml"
-run "$ROOT" --seams                          > "$TMP/tiny_seams.xml"
+# The untruncated --seams case used to point at "$ROOT" on the assumption that this repo sits under the
+# 20-pair cap. That is a property of the tree, not of the tool, and it stopped holding the moment the
+# source layout grew another directory — the gate then reported a FALSE truncation alarm about itself.
+# Build the small corpus explicitly, exactly as the truncated case above builds the big one: 3 pairs,
+# same shape, far under the cap. Now both halves of the pair own their fixture.
+SEAMSMALL="$TMP/seamsmall"
+i=0
+while [ $i -lt 3 ]; do
+    mkdir -p "$SEAMSMALL/m$i" "$SEAMSMALL/n$i"
+    printf 'int callee%d( int x ) { return x + 1; }\n' "$i" > "$SEAMSMALL/n$i/b.c"
+    printf 'int callee%d( int x );\nint caller%d( int x ) { return callee%d( x ); }\n' "$i" "$i" "$i" > "$SEAMSMALL/m$i/a.c"
+    i=$(( i + 1 ))
+done
+run "$SEAMSMALL" --seams                     > "$TMP/tiny_seams.xml"
 
 untruncated "$TMP/tiny_communities.xml" communities      shown_modules modules_capped community "(C) --communities modules"
 untruncated "$TMP/tiny_query.xml"       query            shown         capped         s         "(C) --graph-query"

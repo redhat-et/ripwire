@@ -1,5 +1,5 @@
-# labels_recall.tsv — held-out labels for the RECALL lane (PLAN_outputAudit_2026-07-28.md §Sequencing:
-# the measuring instrument that must exist before §P2b — default de-prioritization of generated docs in
+# labels_recall.tsv — held-out labels for the RECALL lane (the retrieval-evaluation plan
+# the measuring instrument that must exist before the generated-doc demotion — default de-prioritization of generated docs in
 # the recall lens — may be evaluated). One row per query: query<TAB>primary<TAB>acceptable<TAB>class
 #   primary    = comma-separated repo-relative markdown path(s); a hit on ANY of them is primary credit.
 #   acceptable = comma-separated path(s) earning lenient (graded) credit, or `-` for none.
@@ -17,9 +17,13 @@
 # AFTER this file was complete, to produce baseline numbers. The eval is therefore allowed to say the
 # current ranker is wrong.
 #
-# Corpus note: the recall lens is docs-only (markdown). Labels reference docs in THIS working tree,
-# including PLAN_/DESIGN_/RESEARCH_ docs that are not on the public SHIP list; the harness counts a query
-# whose labelled paths are absent on disk as SKIPPED (reported), so a pruned checkout degrades honestly.
+# Corpus note: the recall lens is docs-only (markdown). These labels were authored against the private
+# development tree's document set, much of which this public export deliberately does not ship. The
+# harness counts a query whose labelled paths are absent on disk as SKIPPED (reported), so the checkout
+# degrades honestly rather than scoring a query it cannot answer -- but the RECALL LANE IS THEREFORE
+# UNDER-SAMPLED HERE AND MUST BE RE-AUTHORED against this repo's own docs/ set before its numbers mean
+# anything. Re-author by READING the shipped docs, never by transcribing --recall output (see the
+# labeling protocol above). The ranking lane, which targets code, is unaffected.
 SPEC definitive spec decided choices output schema	SPEC.md	README.md	name
 phase ledger which phase is DONE gate status	PLAN_phases.md	-	name
 PUBLIC_MANIFEST what ships to the public remote	PUBLIC_MANIFEST.md	-	name
@@ -52,7 +56,7 @@ adversarial review of the landed graph correctness levers	PLAN_hardeningFindings
 does the right feature fire at the right moment adoption audit	ADOPTION_AUDIT_fable2026.md	-	name
 C++ performance first priority plan	PLAN_cpp_perf2026.md	-	name
 make agents actually use the features skills plan	PLAN_skills2026.md	-	name
-output audit findings recall budget paging vocabulary	PLAN_outputAudit_2026-07-28.md	NEXT_SESSION_outputAudit.md	name
+output audit findings recall budget paging vocabulary	the retrieval-evaluation plan	NEXT_SESSION_outputAudit.md	name
 quality delta gating exit codes usage	README.md	SPEC.md,skills/ctxpack-quality-bar/SKILL.md	adversarial
 pack task one call orientation under a token budget usage	README.md	SPEC.md,skills/ctxpack-orient/SKILL.md	adversarial
 merge scout pairwise conflict sites landing order usage	README.md	SPEC.md,skills/ctxpack-change-check/SKILL.md	adversarial

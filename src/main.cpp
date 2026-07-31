@@ -6292,7 +6292,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        std::printf( "<!-- ctxpack seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages) -->" );
+        std::printf( "<!-- ctxpack seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages) -->" );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //

@@ -1,5 +1,5 @@
-# labels_ranking.tsv — held-out labels for the RANKING lane (PLAN_outputAudit_2026-07-28.md §Sequencing:
-# the measuring instrument that must exist before §P4's ranking half — fixture/present de-prioritization
+# labels_ranking.tsv — held-out labels for the RANKING lane (the retrieval-evaluation plan
+# the measuring instrument that must exist before the ranking half — fixture/present de-prioritization
 # in the ranking lenses — may be evaluated). One row per query: query<TAB>primary<TAB>acceptable<TAB>class
 #   primary    = comma-separated repo-relative CODE path(s), each optionally `path#SymbolName` — a
 #                candidate matches when its p= path equals/suffix-matches the path AND (when #Symbol is
@@ -10,7 +10,7 @@
 #                concept     — conceptual phrase describing what one symbol does
 #                task        — an agent's task wording, the on-task symbol is the labelled answer
 #                adversarial — vocabulary that today lets test/*fix fixtures or present/ deck scripts
-#                              outrank the real source (the §P4 pollution class: the plan's own example
+#                              outrank the real source (the pollution class: the plan's own example
 #                              is --for="pagerank power iteration" ranking a fixture Robot::speak above
 #                              pageRankDouble); the labelled answer is the real source symbol.
 #
@@ -20,7 +20,7 @@
 # The ranker was run on these queries only AFTER this file was complete, to produce baseline numbers.
 # The eval is therefore allowed to say the current ranker is wrong.
 #
-# RECALIBRATION 2026-07-29 (capture-audit-4 Phase 0, R21 owner ruling — per-label reasons, protocol
+# RECALIBRATION 2026-07-29 (per-label reasons, protocol
 # unchanged: every decision below was made by re-READING the source, never by running the ranker):
 #   * "redact secrets…" — primary widened to a MULTI-ANSWER (redactInPlace + redactSecrets). The redact
 #     family grew during the audit-3 fix round (sig-text redaction raised src/redact.h fan-in) and the
@@ -33,8 +33,8 @@
 #     length normalization sank it — not a wrong label; the re-frozen bars absorb it.
 #   * "map sanitizer stack trace frames to indexed symbols" — re-ANCHORED from path-only to symbols.
 #     The path-only label credited ANY new symbol in tracein.h (the recorded strict absent→4
-#     "improvement" was §B10's frames-seen tally landing in the file — a label artifact, refuted in
-#     audit-3's final verifier M11). By source reading the frame→indexed-symbol mapping is
+#     "improvement" was an unrelated frames-seen tally landing in the file — a label artifact, refuted in
+#     a later adversarial verifier pass). By source reading the frame→indexed-symbol mapping is
 #     tracelocus.h's corpus resolution: partitionTraceFrames orchestrates it (primary); extractFrames
 #     (pure extraction) and the per-frame resolvers traceResolveByName/traceEnclosingSymbol earn
 #     lenient credit.
