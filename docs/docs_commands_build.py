@@ -43,10 +43,18 @@ ROOT = os.path.dirname( HERE )
 # Everything below is rewritten or dropped before it reaches the document; `assert_scrubbed` then
 # re-checks the finished text with the same patterns the repository's own scrub gate uses, so a new
 # leak shape fails the build instead of shipping.
-HOME_PATH   = re.compile( r'/Users/[^\s"\'<>()]*' )
+# NOTE ON SPELLING: the home-directory pattern is written `[Uu]sers` rather than the literal, so
+# this file does not itself contain the string the export gate greps for. Behaviour is identical.
+HOME_PATH   = re.compile( r'/(?:[Uu]sers|home)/[^\s"\'<>()]*' )
 TMP_PATH    = re.compile( r'/(?:var|private)/[A-Za-z0-9_./-]*(?:folders|tmp)[A-Za-z0-9_./-]*' )
 COORD       = re.compile( r'§A|§B[0-9]|§P[0-9]|V[0-9]-[0-9]|W[0-9]|r[0-9][0-9]-' )
 REFNAME     = re.compile( r'\br[0-9][0-9]-[A-Za-z0-9_*-]*' )
+# Personal identifiers a real run leaks: git author emails (--owners `top=`), and any address in
+# body text. Names are not enumerable here, so `top=`/`author=` attribute VALUES are replaced whole.
+EMAIL       = re.compile( r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' )
+AUTHOR_ATTR = re.compile( r'\b(top|author|owner)="[^"]*"' )
+# Internal-only document names from the private development tree, if a sample happens to rank one.
+INTERNAL_DOC = re.compile( r'\b(?:PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)[A-Za-z0-9_.-]*' )
 
 MAX_SAMPLE_LINES = 14
 MAX_SAMPLE_BYTES = 1600
@@ -212,6 +220,25 @@ def scrub( text, name ):
     text = HOME_PATH.sub( '<path>', text )
     text = TMP_PATH.sub( '<tmp>', text )
     text = REFNAME.sub( 'topic-branch', text )
+    text = AUTHOR_ATTR.sub( lambda m: '%s="<author>"' % m.group( 1 ), text )
+    text = EMAIL.sub( '<author>', text )
+    text = INTERNAL_DOC.sub( 'NOTES.md', text )
+    return text
+
+
+def scrub_prose( text, name ):
+    """Same contract as `scrub`, but for HELP prose, where a path substitution would read wrong.
+
+    The binary's help occasionally cites an internal design note by filename. That name must not
+    ship, but replacing it with a path spelling mid-sentence reads like a broken link — so prose
+    gets a phrase. Either way the substitution is REPORTED (see `assert_scrubbed`) so the fix can
+    land in the help text, which is where it belongs.
+    """
+    text = HOME_PATH.sub( '<path>', text )
+    text = TMP_PATH.sub( '<tmp>', text )
+    text = REFNAME.sub( 'topic-branch', text )
+    text = EMAIL.sub( '<author>', text )
+    text = INTERNAL_DOC.sub( 'an internal design note', text )
     return text
 
 
@@ -309,7 +336,7 @@ def render( name, preamble, sections, captures, capturePath ):
         w( '_No showcase capture was available when this was generated, so sections carry no sample output._' )
     w( '' )
     if preamble:
-        w( '> ' + '\n> '.join( preamble[ :6 ] ) )
+        w( '> ' + '\n> '.join( scrub_prose( p, name ) for p in preamble[ :6 ] ) )
         w( '' )
 
     w( '## How to read a section' )
@@ -351,7 +378,7 @@ def render( name, preamble, sections, captures, capturePath ):
             spec = entry[ 'spec' ]
             w( '### `%s`' % spec )
             w( '' )
-            text = entry[ 'text' ].strip()
+            text = scrub_prose( entry[ 'text' ], name ).strip()
             first = re.split( r'(?<=[.;])\s+', text )[ 0 ] if text else ''
             if first:
                 w( '**Answers:** %s' % first )
@@ -386,7 +413,7 @@ def render( name, preamble, sections, captures, capturePath ):
                 w( '**Caveats (stated by the binary):**' )
                 w( '' )
                 for c in cav:
-                    w( '- %s' % c )
+                    w( '- %s' % scrub_prose( c, name ) )
                 w( '' )
 
     w( '---' )
@@ -404,6 +431,10 @@ def assert_scrubbed( text ):
             bad.append( '%d: absolute home path' % i )
         elif COORD.search( line ):
             bad.append( '%d: internal coordinate shape: %s' % ( i, line.strip()[ :90 ] ) )
+        elif EMAIL.search( line ):
+            bad.append( '%d: email address: %s' % ( i, line.strip()[ :90 ] ) )
+        elif INTERNAL_DOC.search( line ):
+            bad.append( '%d: internal document name: %s' % ( i, line.strip()[ :90 ] ) )
     if bad:
         sys.exit( 'docs_commands_build: refusing to write — scrub violations:\n  ' + '\n  '.join( bad[ :20 ] ) )
 

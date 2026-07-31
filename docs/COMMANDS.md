@@ -170,8 +170,8 @@ $ ./build/ctxpack . --for="rankGraphTeleport"
 <d l="1278" n="rankGraphTeleport" id="./src/graph.h::ctx::rankGraphTeleport" cx="5" ccx="8" in="6" churn="63" amp="216">
 <doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quali…</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )</d>
 </f>
-<f p="./DESIGN_specPrefetch.md">
-<d l="1" n="DESIGN_specPrefetch" cx="0" ccx="0" in="0" churn="3" amp="9"># DESIGN — Deterministic Speculative Context Prefetch (a MEASURE-FIRST study) **Status:** design study (read-only). No `src/` changed, no gate touched, nothin…</d>
+<f p="./NOTES.md">
+<d l="1" n="NOTES.md" cx="0" ccx="0" in="0" churn="3" amp="9"># DESIGN — Deterministic Speculative Context Prefetch (a MEASURE-FIRST study) **Status:** design study (read-only). No `src/` changed, no gate touched, nothin…</d>
 </f>
 <f p="./ADOPTION_AUDIT_fable2026.md">
 <d l="1" n="ADOPTION_AUDIT_fable2026" cx="0" ccx="0" in="0" churn="1" amp="2"># ADOPTION_AUDIT_fable2026 — does the right feature fire at the right moment? Auditor: senior DX audit, 2026-07-03. Method: read every routing surface (all 17…</d>
@@ -340,14 +340,14 @@ _Most relevant DOCS' full bodies (markdown only) — recall what is already writ
 $ ./build/ctxpack . --recall="quality delta gating exit codes"
 ctxpack recall — "quality delta gating exit codes" — 107 relevant of 160 document files, best-first — total=107 shown=8 capped=1 est_tokens=45391
 
-━━ ./NEXT_SESSION_2026-07-26.md  (relevance 6.490) ━━
+━━ ./NOTES.md  (relevance 6.490) ━━
 # Next session — plan and starting prompt
 
 State at handoff: **`test/regression.sh` ALL PASS, 224 gates, exit 0. Working tree clean through
 `dfe330a`** (the credibility round: `--abi` triage · n=43 judged eval · dated-record lane ·
 provenance notes · `--doctor` staleness; agent branches topic-branch preserved for audit). The qsnap
-NDEBUG fix is `e7405e7`. MCP 30 verbs. Full evidence: `REPORT_r25_abi.md`,
-`REPORT_r25_docdrift.md`, `REPORT_r25_notes.md`, `RESEARCH_skillEval2026.md` §8.
+NDEBUG fix is `e7405e7`. MCP 30 verbs. Full evidence: `NOTES.md`,
+`NOTES.md`, `NOTES.md`, `NOTES.md` §8.
 
 The theme continues: last round made three verbs' NUMBERS trustworthy; this round makes the
 tool's own **instruments** trustworthy — the quality gate, the eval methodology, the prose that
@@ -669,7 +669,7 @@ _Markdown docs that name SYM in a backtick (doc<->code edges)._
 $ ./build/ctxpack . --mentions=rankGraphTeleport
 <!-- ctxpack mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). docs= is the row count (distinct files); sections= counts the underlying markdown-section mentions before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->
 <mentions of="rankGraphTeleport" defs="1" docs="1" sections="1">
-<doc p="./DESIGN_specPrefetch.md" mentions="1"/>
+<doc p="./NOTES.md" mentions="1"/>
 </mentions>
 ```
 
@@ -1153,9 +1153,9 @@ $ ./build/ctxpack . --hotspots
 <!-- ctxpack hotspots: maintenance-pain = complexity × recent churn (window=12mo). churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. unranked_no_complexity= is a file with commits but no function or method to score (a pure declaration header, markdown, config). unranked_no_churn= is a file no in-window commit was attributed to — and it CONFLATES two cases this verb cannot tell apart: a genuinely quiet file, and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the join could not match), which scores zero for a reason that is not about the file. Treat it as an upper bound on quietness, not a measure of it. raise the default cap with limit=N (offset=M pages) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
 <hotspots window="12mo" files="918" ranked="218" unranked_no_churn="0" unranked_no_complexity="700" shown="40" capped="1" at="9d096a6b2">
-<f p="./src/main.cpp" churn="353" ccx="3311" score="1168783" top="main" top_ccx="376" top_l="8007"/>
-<f p="./src/ingest.cpp" churn="92" ccx="2713" score="249596" top="ingest" top_ccx="702" top_l="3856"/>
-<f p="./src/serialize.h" churn="124" ccx="1517" score="188108" top="packSignatures" top_ccx="197" top_l="2035"/>
+<f p="./src/main.cpp" churn="353" ccx="3311" score="1168783" top="<author>" top_ccx="376" top_l="8007"/>
+<f p="./src/ingest.cpp" churn="92" ccx="2713" score="249596" top="<author>" top_ccx="702" top_l="3856"/>
+<f p="./src/serialize.h" churn="124" ccx="1517" score="188108" top="<author>" top_ccx="197" top_l="2035"/>
 ... [25 more line(s); run it to see the whole thing]
 ```
 
@@ -1230,9 +1230,9 @@ $ ./build/ctxpack . --hotspots --since="2 weeks ago"
 <!-- ctxpack hotspots: maintenance-pain = complexity × recent churn (window=2 weeks ago). churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. unranked_no_complexity= is a file with commits but no function or method to score (a pure declaration header, markdown, config). unranked_no_churn= is a file no in-window commit was attributed to — and it CONFLATES two cases this verb cannot tell apart: a genuinely quiet file, and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the join could not match), which scores zero for a reason that is not about the file. Treat it as an upper bound on quietness, not a measure of it. raise the default cap with limit=N (offset=M pages) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
 <hotspots window="2 weeks ago" files="918" ranked="137" unranked_no_churn="418" unranked_no_complexity="363" shown="40" capped="1" at="9d096a6b2">
-<f p="./src/main.cpp" churn="216" ccx="3311" score="715176" top="main" top_ccx="376" top_l="8007"/>
-<f p="./src/serialize.h" churn="70" ccx="1517" score="106190" top="packSignatures" top_ccx="197" top_l="2035"/>
-<f p="./src/ingest.cpp" churn="26" ccx="2713" score="70538" top="ingest" top_ccx="702" top_l="3856"/>
+<f p="./src/main.cpp" churn="216" ccx="3311" score="715176" top="<author>" top_ccx="376" top_l="8007"/>
+<f p="./src/serialize.h" churn="70" ccx="1517" score="106190" top="<author>" top_ccx="197" top_l="2035"/>
+<f p="./src/ingest.cpp" churn="26" ccx="2713" score="70538" top="<author>" top_ccx="702" top_l="3856"/>
 ... [25 more line(s); run it to see the whole thing]
 ```
 
@@ -1245,7 +1245,7 @@ $ ./build/ctxpack . --hotspots --since="2 weeks ago"
 
 **Answers:** enforce layering rules (exit 2 on violation);
 
-the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates) — RESEARCH_agentQuality2026 §1a. propagation_cost's N is dependency-capable files only, same denominator as --deps <health>. Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the spelling you passed, so a rules file means the same thing in every checkout --arch=FILE --baseline     write .ctxpack_arch_baseline (accept current debt as baseline), exit 0 --arch=FILE --baseline-update  merge current violations into baseline (accept new debt), exit 0
+the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates) — an internal design note §1a. propagation_cost's N is dependency-capable files only, same denominator as --deps <health>. Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the spelling you passed, so a rules file means the same thing in every checkout --arch=FILE --baseline     write .ctxpack_arch_baseline (accept current debt as baseline), exit 0 --arch=FILE --baseline-update  merge current violations into baseline (accept new debt), exit 0
 
 **Try it**
 
@@ -1268,7 +1268,7 @@ $ ./build/ctxpack . --arch=test/archfix/rules.txt
 
 **Caveats (stated by the binary):**
 
-- the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates) — RESEARCH_agentQuality2026 §1a.
+- the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates) — an internal design note §1a.
 
 ### `--lint`
 
@@ -1429,8 +1429,8 @@ Call-graph isolate provenance: 718 declaration, 472 header, 1371 source, 1865 do
 - **./src::escapeXml@serialize.h:112:7124** — 305 symbols
 - **./src::jsonEscape@mcpjson.h:623:37438** — 239 symbols
 - **./src::readByteSafeLine@stdinline.h:44:2700** — 59 symbols
-- **./src::str@ingest.cpp:887:55948** — 52 symbols
-- **./src::communityPresentation@main.cpp:318:20421** — 33 symbols
+- **./src::<author>:887:55948** — 52 symbols
+- **./src::<author>:318:20421** — 33 symbols
 ... [17 more line(s); run it to see the whole thing]
 ```
 
@@ -1509,13 +1509,15 @@ $ ./build/ctxpack . --owners
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
 <owners files="918" at="9d096a6b2">
 <uniform authors="1" bf="1" share="1.00" files="881"/>
-<f p="./PLAN_audit5Public2026.md" authors="2" bf="1" top="quaterniongames@gmail.com" share="0.97"/>
-<f p="./src/cli.h" authors="2" bf="1" top="quaterniongames@gmail.com" share="0.99"/>
-<f p="./src/clones.h" authors="2" bf="1" top="quaterniongames@gmail.com" share="0.88"/>
-<f p="./src/eval.h" authors="2" bf="1" top="quaterniongames@gmail.com" share="0.92"/>
-<f p="./src/ingest.cpp" authors="2" bf="1" top="quaterniongames@gmail.com" share="0.95"/>
-<f p="./src/jsonesc.h" authors="2" bf="0" top="quaterniongames@gmail.com" share="0.59"/>
-... [21 more line(s); run it to see the whole thing]
+<f p="./NOTES.md" authors="2" bf="1" top="<author>" share="0.97"/>
+<f p="./src/cli.h" authors="2" bf="1" top="<author>" share="0.99"/>
+<f p="./src/clones.h" authors="2" bf="1" top="<author>" share="0.88"/>
+<f p="./src/eval.h" authors="2" bf="1" top="<author>" share="0.92"/>
+<f p="./src/ingest.cpp" authors="2" bf="1" top="<author>" share="0.95"/>
+<f p="./src/jsonesc.h" authors="2" bf="0" top="<author>" share="0.59"/>
+<f p="./src/main.cpp" authors="2" bf="1" top="<author>" share="0.98"/>
+<f p="./src/mcp.h" authors="2" bf="1" top="<author>" share="0.94"/>
+... [19 more line(s); run it to see the whole thing]
 ```
 
 **Shaped by:** `--json`
@@ -2470,13 +2472,13 @@ ctxpack --eval-retrieval  (known-item, 150 doc-commented symbols; gold is in-cor
 
 ### `--eval-mined=FILE`
 
-**Answers:** session-trace-mined retrieval eval: consumes a minedpair.jsonl artifact from bench/mine_traces.py (real (query, gold-files) pairs mined from local Claude Code session transcripts) and reports recall@5/10/20 + Acc@k + MRR per arm (for/query/anchor/random), assisted vs unassisted (DESIGN_traceEvals.md).
+**Answers:** session-trace-mined retrieval eval: consumes a minedpair.jsonl artifact from bench/mine_traces.py (real (query, gold-files) pairs mined from local Claude Code session transcripts) and reports recall@5/10/20 + Acc@k + MRR per arm (for/query/anchor/random), assisted vs unassisted (an internal design note).
 
 ### `--eval-skills=FILE`
 
 **Answers:** labelled skill-ROUTING eval: ROOT is a skills directory (one SKILL.md per subdir);
 
-FILE is TSV `prompt<TAB>skill[,skill]|none<TAB>provenance`. Scores deterministic selectors (keyword overlap = the trivial baseline, BM25 over descriptions/full text, name match, the routed --for ranker) on top-1-in- permitted-set plus positive/negative separation (AUC) — does the right skill fire, does every skill stay quiet on off-topic prompts. Ambiguous moments carry a permitted SET; `none` rows are first-class. RESEARCH_skillEval2026.md. -h, --help                 this catalog -v, --version              print the version + short build info, exit 0
+FILE is TSV `prompt<TAB>skill[,skill]|none<TAB>provenance`. Scores deterministic selectors (keyword overlap = the trivial baseline, BM25 over descriptions/full text, name match, the routed --for ranker) on top-1-in- permitted-set plus positive/negative separation (AUC) — does the right skill fire, does every skill stay quiet on off-topic prompts. Ambiguous moments carry a permitted SET; `none` rows are first-class. an internal design note -h, --help                 this catalog -v, --version              print the version + short build info, exit 0
 
 **Try it**
 

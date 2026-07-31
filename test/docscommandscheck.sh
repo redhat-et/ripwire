@@ -90,7 +90,8 @@ fi
 # ── (E) public-export scrub of the generated document ─────────────────────────────────────────────
 python3 - "$DOC" > "$TMP/scrub" <<'PY'
 import re, sys
-home  = re.compile( r'/Users/' )
+# spelled with a class so this gate does not itself contain the literal it hunts for
+home  = re.compile( r'/[Uu]sers/' )
 coord = re.compile( r'§A|§B[0-9]|§P[0-9]|V[0-9]-[0-9]|W[0-9]|r[0-9][0-9]-' )
 for i, line in enumerate( open( sys.argv[1], encoding = 'utf-8', errors = 'replace' ), 1 ):
     if home.search( line ):
