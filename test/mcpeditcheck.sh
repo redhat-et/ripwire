@@ -2,7 +2,7 @@
 # mcpeditcheck.sh — gate for the W4-#8 symbol-addressed EDIT verbs
 #   replace_symbol_body / insert_before_symbol / insert_after_symbol.
 #
-# These are ctxpack's FIRST write verbs, so the SAFETY CONTRACT is the feature. This gate exercises
+# These are ripwire's FIRST write verbs, so the SAFETY CONTRACT is the feature. This gate exercises
 # every branch of that contract, and asserts that every REFUSAL leaves the target file byte-identical:
 #
 #   1. replace_symbol_body: splice a function body → re-read shows the exact splice, and the bytes
@@ -26,14 +26,14 @@
 #
 # Usage:
 #   test/mcpeditcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/mcpeditcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/mcpeditcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -42,7 +42,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcpeditcheck: BIN=$BIN  FIX=$FIX"

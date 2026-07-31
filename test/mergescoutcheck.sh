@@ -19,14 +19,14 @@
 #   - determinism (byte-identical run-to-run) and xmllint-clean output
 #
 # Usage:
-#   test/mergescoutcheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/mergescoutcheck.sh
+#   test/mergescoutcheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/mergescoutcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -34,7 +34,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "mergescoutcheck: BIN=$BIN"
 
 # ── Build the fixture repo: init, then branches A / B / C off it ──────────────────────────────────────
@@ -293,7 +293,7 @@ median_ms()
     local times=()
     for (( n_local = 0; n_local < PERFRUNS; ++n_local )); do
         # AUDIT5 Y4: shard-aware lookup — a qms blob may be flat under $clearDir or under $clearDir/<xx>/ (2-hex shard).
-        [ -n "$clearDir" ] && { f="$( find "$clearDir" -maxdepth 2 -type f -name 'ctxpack-qms-*.bin' 2>/dev/null )"; [ -n "$f" ] && rm -f $f; }
+        [ -n "$clearDir" ] && { f="$( find "$clearDir" -maxdepth 2 -type f -name 'ripwire-qms-*.bin' 2>/dev/null )"; [ -n "$f" ] && rm -f $f; }
         local elapsed
         elapsed="$( run_once_ms "$@" )" || return 1
         [ -z "$elapsed" ] && return 1

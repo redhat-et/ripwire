@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-# run_locbench.py — measure ctxpack's code-LOCALIZATION accuracy on a public benchmark, honestly.
+# run_locbench.py — measure ripwire's code-LOCALIZATION accuracy on a public benchmark, honestly.
 #
 # WHAT THIS IS. LocAgent (arXiv 2503.09089, ACL'25) turned "given a GitHub issue, find the files/
 # functions to edit" into a scored subfield: file-level Acc@k + function-level Acc@k over a public
-# set of (issue text, repo@commit, gold edit locations). This harness runs ctxpack as the localizer
-# — one deterministic, $0, sub-second `ctxpack <repo> --for="<issue>"` per instance — parses the
+# set of (issue text, repo@commit, gold edit locations). This harness runs ripwire as the localizer
+# — one deterministic, $0, sub-second `ripwire <repo> --for="<issue>"` per instance — parses the
 # ranked symbols out of its XML, and scores them against the gold `edit_functions`. It is the
 # retrieval-proxy's (bench/ANSWERQUALITY.md §1) public-benchmark sibling: same LLM-free, deterministic,
 # leave-nothing-out posture, but on an EXTERNAL scoreboard with the field's own metric definitions.
 #
 # HONESTY CONTRACT (house rule — publish the losses with the wins):
-#   * ctxpack is a deterministic ranker; LocAgent/SweRank are LLM/rerank agents. This measures the
+#   * ripwire is a deterministic ranker; LocAgent/SweRank are LLM/rerank agents. This measures the
 #     $0 deterministic FLOOR, not parity — see README.md "honest comparison".
 #   * `added_functions` (patch ADDS them; they do not exist at base_commit) are structurally
 #     un-findable by ANY static localizer → reported apart, never silently folded into the wins.
-#   * PARSE COVERAGE is reported as its own number: a gold function ctxpack's parser never emitted is
+#   * PARSE COVERAGE is reported as its own number: a gold function ripwire's parser never emitted is
 #     an automatic miss, and we say how many there were rather than hiding them in the denominator.
-#   * Non-Python gold (ctxpack speaks Py/TS/Go/Rust/C++/Swift/ObjC) is skipped with a count.
+#   * Non-Python gold (ripwire speaks Py/TS/Go/Rust/C++/Swift/ObjC) is skipped with a count.
 #
 # ARMS (all deterministic; same parse, same scoring):
-#   for     — `ctxpack <repo> --for="<title+body>"`   the flagship task lens (routed by default)
-#   query   — `ctxpack <repo> --query="<title+body>"` pure lexical BM25 (no compose/quality framing)
-#   anchor  — `ctxpack <repo> --for=... --anchor`      EXPERIMENTAL lexically-anchored graph expansion
+#   for     — `ripwire <repo> --for="<title+body>"`   the flagship task lens (routed by default)
+#   query   — `ripwire <repo> --query="<title+body>"` pure lexical BM25 (no compose/quality framing)
+#   anchor  — `ripwire <repo> --for=... --anchor`      EXPERIMENTAL lexically-anchored graph expansion
 #
 # METRICS (match the LocAgent paper's, arXiv 2503.09089 §4.1):
 #   file-level     Acc@1 / Acc@5 / Acc@10   — a gold FILE within the top-k ranked files
 #   function-level Acc@5 / Acc@10 + MRR      — a gold FUNCTION within the top-k ranked functions
-#   parse-coverage — fraction of gold functions ctxpack's parser emitted at all (the localizer's ceiling)
+#   parse-coverage — fraction of gold functions ripwire's parser emitted at all (the localizer's ceiling)
 #
 # REPRODUCE (validation slice, no auth needed — public HF datasets-server JSON API):
 #   python3 bench/locbench/run_locbench.py --n 25 --work-dir /tmp/locbench
@@ -35,11 +35,11 @@
 # SWE-bench-Lite fallback (gold = files/functions touched by the fix patch):
 #   python3 bench/locbench/run_locbench.py --dataset swebench-lite --n 25 --work-dir /tmp/locbench
 #
-# Deterministic given (dataset, slice, ctxpack binary): no LLM, no RNG, stable instance order.
+# Deterministic given (dataset, slice, ripwire binary): no LLM, no RNG, stable instance order.
 import argparse, hashlib, json, math, os, re, statistics, subprocess, sys, time, urllib.request, urllib.error, urllib.parse, pathlib
 import xml.etree.ElementTree as ET
 
-CTX = os.environ.get("CTXPACK", "ctxpack")
+CTX = os.environ.get("RIPWIRE", "ripwire")
 ROWS_API = "https://datasets-server.huggingface.co/rows"
 DATASETS = {
     "locbench":     ("czlll/Loc-Bench_V1",        "default", "test"),
@@ -59,7 +59,7 @@ def fetch_rows( dataset, config, split, n, cache_dir ):
         page = None
         for attempt in range( 5 ):
             try:
-                req = urllib.request.Request( url, headers={ "User-Agent": "ctxpack-locbench/1.0" } )
+                req = urllib.request.Request( url, headers={ "User-Agent": "ripwire-locbench/1.0" } )
                 with urllib.request.urlopen( req, timeout=120 ) as r:
                     page = json.load( r )
                 break
@@ -132,8 +132,8 @@ def checkout( repo, base_commit, repos_dir, history_depth=1 ):
     # after a deepened run needs a fresh --work-dir. Ancestors of a fixed sha are immutable, so a given
     # (base_commit, history_depth) always yields the same history regardless of when it is fetched.
     dst = repos_dir / repo.replace( "/", "__" )
-    marker = dst / f".ctxpack_at_{base_commit}"
-    depth_marker = dst / f".ctxpack_deepened_{history_depth}_at_{base_commit}"
+    marker = dst / f".ripwire_at_{base_commit}"
+    depth_marker = dst / f".ripwire_deepened_{history_depth}_at_{base_commit}"
     if not marker.exists():
         if not ( dst / ".git" ).exists():
             dst.mkdir( parents=True, exist_ok=True )
@@ -149,8 +149,8 @@ def checkout( repo, base_commit, repos_dir, history_depth=1 ):
         sh( [ "git", "clean", "-qfdx" ], cwd=dst )
         if co.returncode != 0:
             return None
-        for old in dst.glob( ".ctxpack_at_*" ): old.unlink()
-        for old in dst.glob( ".ctxpack_deepened_*" ): old.unlink()   # depth markers are per-sha too
+        for old in dst.glob( ".ripwire_at_*" ): old.unlink()
+        for old in dst.glob( ".ripwire_deepened_*" ): old.unlink()   # depth markers are per-sha too
         marker.write_text( "" )
     if history_depth > 1 and not depth_marker.exists():
         if ( dst / ".git" / "shallow" ).exists():
@@ -162,7 +162,7 @@ def checkout( repo, base_commit, repos_dir, history_depth=1 ):
         depth_marker.write_text( "" )
     return dst
 
-# ── ctxpack run + parse ──────────────────────────────────────────────────────
+# ── ripwire run + parse ──────────────────────────────────────────────────────
 def run_ctx( repo_path, flags, timeout=600 ):
     t0 = time.perf_counter()
     r = sh( [ CTX, str( repo_path ) ] + flags, timeout=timeout )
@@ -172,7 +172,7 @@ def frozen_partition( repo ):
     # Stable 50/50 REPOSITORY-DISJOINT split independent of dataset order. Hashing the repository avoids
     # training on one issue from the same checkout family later used for held-out acceptance.
     # The salt is part of the benchmark contract: changing it creates a different train/held-out set.
-    digest = hashlib.sha256( ( "ctxpack-a7-v2\0" + repo.lower() ).encode( "utf-8" ) ).digest()
+    digest = hashlib.sha256( ( "ripwire-a7-v2\0" + repo.lower() ).encode( "utf-8" ) ).digest()
     return "train" if digest[0] < 128 else "heldout"
 
 def estimated_output_tokens( text ):
@@ -293,10 +293,10 @@ def covered( universe_candidates, gold_funcs, universe_files ):
 
 # ── main ─────────────────────────────────────────────────────────────────────
 def main():
-    ap = argparse.ArgumentParser( description="ctxpack localization accuracy on LocBench / SWE-bench-Lite" )
+    ap = argparse.ArgumentParser( description="ripwire localization accuracy on LocBench / SWE-bench-Lite" )
     ap.add_argument( "--dataset", default="locbench", choices=list( DATASETS ) )
     ap.add_argument( "--n", type=int, default=25, help="slice size (instances, stable order)" )
-    ap.add_argument( "--work-dir", required=True, help="scratch dir for dataset cache + cloned repos (NOT the ctxpack repo)" )
+    ap.add_argument( "--work-dir", required=True, help="scratch dir for dataset cache + cloned repos (NOT the ripwire repo)" )
     ap.add_argument( "--top-k", type=int, default=200, help="symbols per --for/--anchor arm run (they self-limit to a ~40-symbol focused bundle)" )
     ap.add_argument( "--query-chars", type=int, default=1200, help="chars of the issue problem_statement used as the query (deterministic prefix)" )
     ap.add_argument( "--arms", default="for,query,anchor" )
@@ -311,7 +311,7 @@ def main():
                           "artifacts). N>1 deepens each cached clone to N ancestors of base_commit (no future leakage; "
                           "fail-closed). Compared runs MUST use identical values; recorded in header + JSON meta." )
     ap.add_argument( "--ctx-extra-args", default="",
-                     help="extra whitespace-separated ctxpack flags appended to every ARM invocation (candidates + "
+                     help="extra whitespace-separated ripwire flags appended to every ARM invocation (candidates + "
                           "production + cold), e.g. --ctx-extra-args=--no-cochange-boost for a boost-off ablation arm. "
                           "NOT applied to the index build or the --query coverage-universe run, so both arms of an "
                           "ablation share an identical universe. Recorded in JSON meta." )
@@ -356,7 +356,7 @@ def main():
         query = " ".join( title_body.split() )[: a.query_chars]
         gold_files, gold_funcs, added = gold_for_instance( inst, a.dataset )
 
-        # skip instances whose gold files aren't a ctxpack language (LocBench is all-Python; guard anyway)
+        # skip instances whose gold files aren't a ripwire language (LocBench is all-Python; guard anyway)
         exts = { os.path.splitext( f )[1] for f in gold_files }
         ctx_exts = { ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".cpp", ".cc", ".h", ".hpp",
                      ".swift", ".m", ".mm", ".java", ".rb", ".sh", ".bash", ".json", ".md", ".markdown",
@@ -372,7 +372,7 @@ def main():
         # arm-order parse/cache bias from latency while retaining the exact shipping rankers.
         index_base = work / "indexes" / inst["instance_id"].replace( "/", "__" )
         index_base.parent.mkdir( parents=True, exist_ok=True )
-        rich_cache = pathlib.Path( str(index_base) + ".rich.ctxpackcache" )
+        rich_cache = pathlib.Path( str(index_base) + ".rich.ripwirecache" )
         if not rich_cache.exists():
             _, _, irc = run_ctx( repo_path, [ f"--index-out={index_base}", "--top-k=1", "--no-cache" ] )
             if irc != 0 or not rich_cache.exists():
@@ -381,11 +381,11 @@ def main():
         if a.measure_index:
             measure_base = work / "measure-index" / inst["instance_id"].replace( "/", "__" )
             measure_base.parent.mkdir( parents=True, exist_ok=True )
-            for suffix in ( ".lean.ctxpackcache", ".rich.ctxpackcache" ):
+            for suffix in ( ".lean.ripwirecache", ".rich.ripwirecache" ):
                 artifact = pathlib.Path( str(measure_base) + suffix )
                 if artifact.exists(): artifact.unlink()
             _, index_wall, irc = run_ctx( repo_path, [ f"--index-out={measure_base}", "--top-k=1", "--no-cache" ] )
-            if irc != 0 or not pathlib.Path( str(measure_base) + ".rich.ctxpackcache" ).exists():
+            if irc != 0 or not pathlib.Path( str(measure_base) + ".rich.ripwirecache" ).exists():
                 raise SystemExit( f"[{idx+1}/{len(rows)}] {inst['instance_id']}: MEASURED INDEX FAIL rc={irc}" )
 
         # Coverage universe: flat globally-ranked candidates, not grouped <f>/<sigs> output. The CLI
@@ -487,7 +487,7 @@ def main():
     print( f"LocBench validation slice — dataset={a.dataset}  split={a.split}  n_scored={scored}"
            f"  (excluded-with-reason: nonpy={skipped_nonpy} checkout={skipped_checkout} ctx={skipped_ctx} unindexable={skipped_unindexable})" )
     print( "=" * 78 )
-    print( f"parse coverage: {cov_total}/{gold_total} gold functions emitted by ctxpack's parser "
+    print( f"parse coverage: {cov_total}/{gold_total} gold functions emitted by ripwire's parser "
            f"= {pct(cov_total, gold_total)}   (added_functions excluded, structurally absent: {added_total})" )
     print()
     print( "Acc@k = STRICT (all gold locations within top-k), per LocAgent arXiv 2503.09089 §4.1." )
@@ -523,7 +523,7 @@ def main():
 
     if a.json_out:
         pathlib.Path( a.json_out ).write_text( json.dumps(
-            dict( dataset=a.dataset, split=a.split, split_contract="repo-disjoint sha256(ctxpack-a7-v2\\0 + lowercase(repo)), byte0<128=train",
+            dict( dataset=a.dataset, split=a.split, split_contract="repo-disjoint sha256(ripwire-a7-v2\\0 + lowercase(repo)), byte0<128=train",
                   history_depth=a.history_depth, ctx_extra_args=a.ctx_extra_args,
                   n_scored=scored,
                   skipped=dict( nonpy=skipped_nonpy, checkout=skipped_checkout, ctx=skipped_ctx, unindexable=skipped_unindexable ),

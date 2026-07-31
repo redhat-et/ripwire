@@ -67,13 +67,13 @@
 # and fails. (ii) the two predicates drifting apart so that `mentioned` stops being the weaker of the two,
 # which would make (A) fail on something (B) had just called closed: arm (D) asserts they still nest.
 #
-#   bash test/legendcoveragecheck.sh                       # build/ctxpack
-#   bash test/legendcoveragecheck.sh build_base/ctxpack    # or CTXPACK_BIN=... — both seams honored
+#   bash test/legendcoveragecheck.sh                       # build/ripwire
+#   bash test/legendcoveragecheck.sh build_base/ripwire    # or RIPWIRE_BIN=... — both seams honored
 #   LEGENDCOV_LIST=1 bash test/legendcoveragecheck.sh      # print the full per-verb table (the audit view)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 BASELINE="$ROOT/test/legendcoverage_baseline.txt"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -81,7 +81,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -f "$BASELINE" ] || { echo "missing $BASELINE — this gate is a ratchet and cannot run without its floor"; exit 2; }
 
 echo "legendcoveragecheck: BIN=$BIN"

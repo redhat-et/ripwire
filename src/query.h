@@ -5,7 +5,7 @@
 // recursion beyond a BOUNDED hop depth, no unification, no fixpoint. A `--query=EXPR` is a small functional
 // expression that evaluates to a deterministic, sorted, de-duplicated NodeId set; main.cpp serializes it
 // exactly like --callers. The point is to answer questions the fixed verbs did not pre-anticipate by
-// COMPOSING a handful of primitives, while staying as predictable + bounded as every other ctxpack verb.
+// COMPOSING a handful of primitives, while staying as predictable + bounded as every other ripwire verb.
 //
 // Grammar (recursive-descent; whitespace-insensitive):
 //   EXPR    := SOURCE | FILTER | CLOSURE | JOIN
@@ -60,7 +60,7 @@ inline bool kindOfWord( std::string_view w, SymKind& out ) noexcept
 }
 
 // One-pass recursive-descent parse-and-evaluate. The operator set is small and each node-set is
-// materialized eagerly — the graphs ctxpack handles fit comfortably in memory.
+// materialized eagerly — the graphs ripwire handles fit comfortably in memory.
 struct Eval
 {
     const IngestResult& ing;

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # bundleidcheck.sh — the P2.3/P2.4 "the flagship bundles carry a usable chain key, and never a false zero" gate.
 #
-#   test/bundleidcheck.sh                       # uses build/ctxpack on test/fixture
-#   CTXPACK_BIN=asan/ctxpack test/bundleidcheck.sh
+#   test/bundleidcheck.sh                       # uses build/ripwire on test/fixture
+#   RIPWIRE_BIN=asan/ripwire test/bundleidcheck.sh
 #
 # --for / --pack-task / --from-trace are the verbs an agent ORIENTS with, and the next move after reading one
 # is always to chain into --expand=SYM / --callers=SYM. Before P2.3 their <d> rows carried l=/cx=/ccx= and the
@@ -23,14 +23,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "bundleidcheck: BIN=$BIN"
 
@@ -173,7 +173,7 @@ for B in 600 1200 6000; do
     # only — the bundle emits source text, and this repo's own sources contain the string "over_ceiling"
     # (trap #15). Measured margin note: at B=600 on this fixture the pre-CA4 binary delivered 1618 B against a
     # 1628 B bar — a 10-byte accident, the same shape as the 28-byte one the fixup above records.
-    OVERLBL="$( sed -n 's/.*<!-- ctxpack task bundle\(.*\)-->.*/\1/p' "$TMP/b.$B" | grep -c 'over_ceiling' )"
+    OVERLBL="$( sed -n 's/.*<!-- ripwire task bundle\(.*\)-->.*/\1/p' "$TMP/b.$B" | grep -c 'over_ceiling' )"
     [ "${OVERLBL:-0}" -gt 0 ] && OVERLBL=1 || OVERLBL=0
     [ "$BYTES" -gt "$CEILTOL" ] && OVERREAL=1 || OVERREAL=0
     if [ -z "$BUDGET" ] || [ -z "$CEIL" ]; then

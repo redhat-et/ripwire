@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cppoperatorcheck.sh — C++ operator-method capture gate.
 #
-# WHY THIS EXISTS: ctxpack is run mostly on C++ codebases, yet before this gate every C++ OPERATOR
+# WHY THIS EXISTS: ripwire is run mostly on C++ codebases, yet before this gate every C++ OPERATOR
 # method was INVISIBLE — the upstream C++ tags.scm captures methods only via identifier /
 # field_identifier / qualified_identifier declarators, but an operator's declarator is a DIFFERENT
 # tree-sitter node kind (`operator_name` for symbolic/subscript/call/arrow ops, `operator_cast` for
@@ -18,7 +18,7 @@
 #      `operator`); and the operator_cast declarator's name is trimmed to `operator <type>` (its raw
 #      span is the whole `operator bool() const`).
 #
-# EMPIRICALLY-CONFIRMED node kinds (tree-sitter-cpp v0.23.4), verified with `ctxpack --match` before
+# EMPIRICALLY-CONFIRMED node kinds (tree-sitter-cpp v0.23.4), verified with `ripwire --match` before
 # any assertion below was written:
 #   bool operator==(...) / operator= / operator+ / operator[] / operator() / operator-> / operator</
 #   operator<< / operator<= / operator<=> / operator& / operator&& / operator>   → declarator kind
@@ -33,7 +33,7 @@
 # CLEAN. This is the #1 correctness risk and is asserted explicitly below.
 #
 # CALL-EDGE LIMITATION (documented, out of scope, NOT tested as a positive): `a == b` parses as a
-# binary_expression, not a call_expression, so ctxpack cannot resolve the implicit call to operator==
+# binary_expression, not a call_expression, so ripwire cannot resolve the implicit call to operator==
 # without semantic overload resolution (outside the tool's contract). Operators are captured as
 # DEFINITIONS only; their fan-in stays low. This gate does NOT assert an implicit-operator call edge.
 #
@@ -43,14 +43,14 @@
 #
 # Usage:
 #   test/cppoperatorcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/cppoperatorcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/cppoperatorcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Does NOT edit
 # regression.sh. Uses --no-cache throughout so a stale warm cache can never mask a real change.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/cppopfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -59,7 +59,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required for the escaping proof"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

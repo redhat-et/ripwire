@@ -12,12 +12,12 @@
 #   (f) xmllint on the whole batch payload (one well-formed XML document — CDATA-wrapped sub-answers);
 #   + hostile inputs: missing/empty/non-array `queries`, and the CLI `--batch=FILE` counterpart.
 #
-# Usage:  test/batchcheck.sh   |   CTXPACK_BIN=build_r2c1/ctxpack test/batchcheck.sh
+# Usage:  test/batchcheck.sh   |   RIPWIRE_BIN=build_r2c1/ripwire test/batchcheck.sh
 # Exits non-zero on any failure. Never mutates the checked-in fixture. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -25,7 +25,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "batchcheck: BIN=$BIN  FIX=$FIX"

@@ -553,7 +553,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     if( S == 0 )
     {
         // empty graph: still emit a valid document
-        std::fprintf( out, "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>ctxpack graph</title></head>"
+        std::fprintf( out, "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>ripwire graph</title></head>"
                            "<body><p>No symbols found.</p></body></html>\n" );
         return;
     }
@@ -682,7 +682,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "<title>ctxpack wiki</title>\n"
+        "<title>ripwire wiki</title>\n"
         "<style>\n"
         "* { margin:0; padding:0; box-sizing:border-box; }\n"
         "body { background:#111; color:#eee; font:13px/1.4 sans-serif; overflow:hidden; }\n"
@@ -718,7 +718,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "</head>\n"
         "<body>\n"
         "<div id=\"bar\">\n"
-        "  <h1>ctxpack wiki</h1>\n"
+        "  <h1>ripwire wiki</h1>\n"
         "  <a class=\"nav\" href=\"#overview\">Overview</a>\n"
         "  <input id=\"search\" type=\"text\" placeholder=\"search labels...\">\n"
         "  <span id=\"depth\">depth <input id=\"depthSlider\" type=\"range\" min=\"1\" max=\"3\" value=\"2\" style=\"width:60px\"><span id=\"depthVal\">2</span></span>\n"

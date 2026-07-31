@@ -27,13 +27,13 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="${2:-test/fixture}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"
 trap 'rm -rf "$TMP"' EXIT
 
-[ -x "$BIN" ] || { printf 'no ctxpack binary at %s\n' "$BIN"; exit 2; }
+[ -x "$BIN" ] || { printf 'no ripwire binary at %s\n' "$BIN"; exit 2; }
 cd "$ROOT"
 
 "$BIN" "$CORPUS" --no-cache >"$TMP/baseline" 2>"$TMP/baseline.err" || exit 1

@@ -12,7 +12,7 @@
 #
 # Usage:
 #   test/jsmetricscheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/jsmetricscheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/jsmetricscheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Does NOT edit
 # regression.sh. All --quality-baseline/--quality-delta work happens in a SCRATCH copy (mktemp), never on
@@ -20,7 +20,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/jsmetricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -28,7 +28,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/jsmetricsfix directory"; exit 2; }
 
 echo "jsmetricscheck: BIN=$BIN  FIX=$FIX"
@@ -118,7 +118,7 @@ function simple( x )
 }
 EOF
 ( cd "$QD" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-[ -f "$QD/.ctxpack_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a JS-only corpus" || no "--quality-baseline did not write a sidecar for JS"
+[ -f "$QD/.ripwire_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a JS-only corpus" || no "--quality-baseline did not write a sidecar for JS"
 
 cat > "$QD/a.js" <<'EOF'
 function simple( x )

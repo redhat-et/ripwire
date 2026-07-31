@@ -1,4 +1,4 @@
-// main.cpp — ctxpack entry point: parse args → ingest → graph → PageRank → minified XML,
+// main.cpp — ripwire entry point: parse args → ingest → graph → PageRank → minified XML,
 // plus --map-diff (teleport toward git-changed files) and --pack-top-n (append source).
 // ingest() comes from ingest.cpp (real, tree-sitter) or stub_ingest.cpp (test).
 
@@ -28,7 +28,7 @@
 #include "mcp.h"
 #include "mcpserver.h"      // DESIGN_teamIndex.md §2: the optional remote MCP transport (--listen), picked below
 #include "wrap.h"
-#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DCTXPACK_PROFILE=ON)
+#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
 #include "search.h"
 #include "query.h"
@@ -118,7 +118,7 @@ using ctx::quality::resolveCacheBlobPath;   // Y4 (AUDIT5): shard-aware blob pat
 // (MCP has its own separate file, mcpCachePath in mcp.h — unaffected.)
 //
 // Y4 (AUDIT5): resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
-// choke point every ctxpack-*.bin blob path now routes through. See its comment for the full rationale.
+// choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
 std::string defaultCachePath( const std::string& root, bool captureValueUses )
 {
     char        absbuf[ PATH_MAX ];
@@ -126,7 +126,7 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
     std::uint64_t h = 1469598103934665603ull;
     for( const char* c = abs; *c; ++c ) { h ^= static_cast<unsigned char>( *c ); h = ctx::hashutil::fnv1aMultiply( h ); }
     char tail[ 48 ];
-    std::snprintf( tail, sizeof( tail ), "ctxpack-%016llx-%s.bin",
+    std::snprintf( tail, sizeof( tail ), "ripwire-%016llx-%s.bin",
                    static_cast<unsigned long long>( h ), captureValueUses ? "rich" : "lean" );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
 }
@@ -219,7 +219,7 @@ bool gitChurnCounts( const std::string& root, const ctx::IngestResult& ing, std:
 // gitRepoHasHistory / gitHeadSha moved to quality.h (re-exported via the `using` aliases above) so the CLI
 // --quality-* paths and the MCP quality_delta/quality_baseline verbs share ONE copy of the HEAD probes.
 
-// Wave-4 remote ergonomics: `ctxpack <git-url>` — if the positional arg is a git URL (https:// or
+// Wave-4 remote ergonomics: `ripwire <git-url>` — if the positional arg is a git URL (https:// or
 // git@), shallow-clone it (git clone --depth=1, core.quotepath=false) into a stable per-URL cache dir
 // under $TMPDIR (reused if it already exists) and return the local path to map. On success, prints one
 // stderr line telling the user where it cloned. On failure, prints a clear error and returns "" (the
@@ -506,7 +506,7 @@ inline ExpandToken parseExpandToken( const std::string& token, const char* verb 
         // the reader to ignore a warning that fires on the happy path.
         if( token.find( "::" ) != std::string::npos ) { out.selector = token;  return out; }
 
-        std::fprintf( stderr, "ctxpack: %s=%s: malformed range '%.*s' (want START-END, e.g. 5-10) — emitting the whole body\n",
+        std::fprintf( stderr, "ripwire: %s=%s: malformed range '%.*s' (want START-END, e.g. 5-10) — emitting the whole body\n",
                       verb, token.c_str(), int( rangeStr.size() ), rangeStr.data() );
         return out;   // degrade: selector only, hasRange stays false
     }
@@ -536,13 +536,13 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     if( !isGitUrl( urlOrPath ) )
         return { urlOrPath, true };
 
-    // cache key = FNV-1a-64 of the URL → <hardened cache dir>/ctxpack-remote-<hex>. Reuse if the dir
+    // cache key = FNV-1a-64 of the URL → <hardened cache dir>/ripwire-remote-<hex>. Reuse if the dir
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
-    // $TMPDIR → $XDG_CACHE_HOME/ctxpack (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
+    // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
     std::uint64_t h = 1469598103934665603ull;
     for( unsigned char c : urlOrPath ) { h ^= c; h = ctx::hashutil::fnv1aMultiply( h ); }
     char tail[ 48 ];
-    std::snprintf( tail, sizeof( tail ), "/ctxpack-remote-%016llx", static_cast<unsigned long long>( h ) );
+    std::snprintf( tail, sizeof( tail ), "/ripwire-remote-%016llx", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
 
     namespace fs = std::filesystem;
@@ -550,7 +550,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     if( !refetch && fs::exists( fs::path( cacheDir ) / ".git", ec ) && !ec )
     {
         const long ageDays = cloneAgeDays( cacheDir );
-        std::fprintf( stderr, "ctxpack: reusing cached clone of %s (%ld day%s old); pass --refetch to update\n",
+        std::fprintf( stderr, "ripwire: reusing cached clone of %s (%ld day%s old); pass --refetch to update\n",
                       urlOrPath.c_str(), ageDays, ageDays == 1 ? "" : "s" );
         return { cacheDir, true };
     }
@@ -567,11 +567,11 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     const std::string cmd = "git -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
                              "clone --depth=1 -q -- " + ctx::shSingleQuote( urlOrPath )
                           + " " + ctx::shSingleQuote( cacheDir ) + " 2>&1";
-    std::fprintf( stderr, "ctxpack: cloning %s → %s\n", urlOrPath.c_str(), cacheDir.c_str() );
+    std::fprintf( stderr, "ripwire: cloning %s → %s\n", urlOrPath.c_str(), cacheDir.c_str() );
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        std::fprintf( stderr, "ctxpack: could not launch git clone (is git on PATH?)\n" );
+        std::fprintf( stderr, "ripwire: could not launch git clone (is git on PATH?)\n" );
         return { std::string(), false };
     }
     char line[ 4096 ];
@@ -579,7 +579,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     const int rc = pclose( pipe );
     if( rc != 0 || !( fs::exists( fs::path( cacheDir ) / ".git", ec ) && !ec ) )
     {
-        std::fprintf( stderr, "ctxpack: git clone failed for %s\n", urlOrPath.c_str() );
+        std::fprintf( stderr, "ripwire: git clone failed for %s\n", urlOrPath.c_str() );
         fs::remove_all( fs::path( cacheDir ), ec );
         return { std::string(), false };
     }
@@ -624,7 +624,7 @@ extern "C"
 }
 
 // This process's own executable path, realpath'd. macOS uses _NSGetExecutablePath and Linux uses
-// /proc/self/exe because argv[0] is often just "ctxpack" after shell PATH resolution. Other platforms
+// /proc/self/exe because argv[0] is often just "ripwire" after shell PATH resolution. Other platforms
 // fall back to realpath(argv0), then an explicit PATH search. Never crashes: failure degrades to "".
 inline std::string selfExecutablePath( const char* argv0 )
 {
@@ -792,10 +792,10 @@ int runDoctor( const ctx::Config& cfg, const char* argv0 )
 
     // ---- check 1: binary-vs-PATH staleness (no --version mechanism exists — checked; compare
     // realpath'd identity via (device,inode), then mtime/size, of argv[0]'s resolved binary vs
-    // `which ctxpack`'s) ----
+    // `which ripwire`'s) ----
     {
         const std::string selfPath  = selfExecutablePath( argv0 );
-        const std::string whichPath = doctorPopenTrim( "which ctxpack 2>/dev/null" );
+        const std::string whichPath = doctorPopenTrim( "which ripwire 2>/dev/null" );
         struct stat        selfSt {};
         struct stat         whichSt {};
         const bool haveSelf  = !selfPath.empty()  && ::stat( selfPath.c_str(),  &selfSt )  == 0;
@@ -807,7 +807,7 @@ int runDoctor( const ctx::Config& cfg, const char* argv0 )
 
         if( !haveWhich )
         {
-            attrs += " on_path=\"0\"";   // ctxpack not found on PATH at all — not itself a failure (may run via absolute path)
+            attrs += " on_path=\"0\"";   // ripwire not found on PATH at all — not itself a failure (may run via absolute path)
         }
         else if( haveSelf )
         {
@@ -849,10 +849,10 @@ int runDoctor( const ctx::Config& cfg, const char* argv0 )
     }
 
     // ---- check 3: cache-dir health — resolves, writable (create+delete a probe file), report
-    // existing ctxpack-* blob count + total bytes (eviction sanity: flag >50 blobs, informational) ----
+    // existing ripwire-* blob count + total bytes (eviction sanity: flag >50 blobs, informational) ----
     {
         const std::string dir   = cacheDirLadder();
-        const std::string probe = dir + "/.ctxpack-doctor-probe-" + std::to_string( ::getpid() );
+        const std::string probe = dir + "/.ripwire-doctor-probe-" + std::to_string( ::getpid() );
         bool writable = false;
         if( std::FILE* f = std::fopen( probe.c_str(), "wb" ) )
         {
@@ -870,7 +870,7 @@ int runDoctor( const ctx::Config& cfg, const char* argv0 )
             {
                 if( ec ) break;
                 const std::string fn = entry.path().filename().string();
-                if( fn.rfind( "ctxpack-", 0 ) != 0 ) continue;   // only our own blob family
+                if( fn.rfind( "ripwire-", 0 ) != 0 ) continue;   // only our own blob family
                 std::error_code sec;
                 const auto sz = entry.file_size( sec );
                 if( !sec ) totalBytes += static_cast<long long>( sz );
@@ -1297,7 +1297,7 @@ ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
 
     // B8 query-mention anchoring: lift a file / dotted module / Scope.symbol the task literally NAMES near the
     // top (inert — byte-identical — when the text names nothing indexed). Routed path only.
-    if( !cfg.noRoute && !cfg.noMentionBoost && !std::getenv( "CTXPACK_NO_MENTION" ) )
+    if( !cfg.noRoute && !cfg.noMentionBoost && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
         if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
@@ -1312,7 +1312,7 @@ ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
 
     // B3 co-change prior boost (OPT-IN, EXPERIMENTAL): files that historically change WITH the top seeds get a
     // bounded secondary boost. Inert (byte-identical) without usable git history. Routed path only.
-    if( !cfg.noRoute && ( cfg.cochangeBoost || std::getenv( "CTXPACK_COCHANGE" ) ) )
+    if( !cfg.noRoute && ( cfg.cochangeBoost || std::getenv( "RIPWIRE_COCHANGE" ) ) )
     {
         PROFILE_SCOPE_DESCRIBE( "main: co-change prior boost (mine + apply)" );
         std::vector<std::vector<std::uint32_t>> coSets;
@@ -1342,7 +1342,7 @@ ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
     // reuses g.mentions (the same doc<->code backtick edges `--mentions=SYM` already exposes) to lift docs
     // that discuss the query's top-resolved symbols, strictly below those symbols' own scores. Runs LAST
     // (after route/anchor/query-mention/co-change) so it reads the fully-resolved rank.
-    if( !cfg.noDocMention && !std::getenv( "CTXPACK_NO_DOC_MENTION" ) )
+    if( !cfg.noDocMention && !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
         if( applyDocMentionBoost( g, lensRank, &docMentionInfo ) )
@@ -1471,7 +1471,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h.reserve( 640 + p.rootOpenStr.size() + p.taskNote.size() + p.routeNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + extraNotes.size() );
     h += withRouteAttr ? std::string( p.rootOpenStr ) : ctx::ctxRootOpen( p.task, {} );
-    h += "<!-- ctxpack lens for ";
+    h += "<!-- ripwire lens for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else                 h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
     h.append( p.routeNote );
@@ -1510,7 +1510,7 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
 
 // §B1.3: the auto-surfaced field notes ride the rows inside the sigs array; this stanza is their DISCLOSURE
 // — `notes_total` counts what the tree matched, `notes_kept` what survived the byte ladder, the same pair
-// --pack-task --json reports. Empty unless a NoteIndex exists, so a tree with no .ctxpack_notes keeps its
+// --pack-task --json reports. Empty unless a NoteIndex exists, so a tree with no .ripwire_notes keeps its
 // pre-feature bytes exactly (the L3 inertness contract).
 inline std::string forLensNotesStanza( const ctx::JsonSigNoteCounts& counts, bool active )
 {
@@ -1539,7 +1539,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     constexpr std::size_t kJsonEnvelopeDigitsMax  = 10;
     constexpr std::size_t kJsonEnvelopeBytes      = kJsonEnvelopeFixedBytes + kJsonEnvelopeDigitsMax;   // 48, the RESERVATION
     // §B1.3: the notes stanza `,"notes_total":N,"notes_kept":M` is charged too — but ONLY when a NoteIndex
-    // exists, so a tree with no .ctxpack_notes keeps its budget arithmetic (and therefore its bytes) exactly
+    // exists, so a tree with no .ripwire_notes keeps its budget arithmetic (and therefore its bytes) exactly
     // as before. That is the L3 inertness contract, not a rounding convenience.
     constexpr std::size_t kJsonNotesStanzaBytes = 40;
     // §B1.4: `,"lego_total":N,"compose_total":N,"routes_total":N` — UNLIKE the notes stanza, these three keys
@@ -1669,7 +1669,7 @@ std::optional<int> runForLens( const MainDispatch& d )
     // to the task (with descriptive cx/in metrics), framed for reuse. The evidence-optimal bundle
     // (signatures > bodies, ranked best-first, "compose from these" — CrossCodeEval/eWASH/De-Hallucinator).
     // Emits multiple sibling blocks (sigs, lego, compose) — wrapped in <ctx> so the output is a single
-    // valid XML document (G4). The default map (plain ctxpack <dir>) never reaches this path.
+    // valid XML document (G4). The default map (plain ripwire <dir>) never reaches this path.
     if( !cfg.forTask.empty() )
     {
         // ROUTING (now the DEFAULT): a deterministic, confidence-gated query-shape classifier picks the BASE
@@ -1825,7 +1825,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // continue without it, the same warn-and-continue shape --partition's --with-graph note (below,
             // runPackTask) already uses, rather than silently dropping the flag's effect with no tell at all.
             if( cfg.withGraph )
-                std::fprintf( stderr, "ctxpack: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
+                std::fprintf( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
 
             std::size_t legoTotal = 0;
             for( const std::vector<NodeId>& impls : legoScoped ) if( !impls.empty() ) ++legoTotal;
@@ -2148,7 +2148,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         {
             // §B4.2: one shared refusal — a non-defining `file:name` says WHICH files define the type and
             // hands back a runnable retry; a genuinely unknown name still gets the near-miss it always had.
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --lego type not found: ",
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --lego type not found: ",
                                                                    cfg.legoType, "--lego=" ).c_str() );
             return 1;
         }
@@ -2176,9 +2176,9 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         if( pick.winner == kNoNode )
         {
             if( pick.targetKind == SymKind::Other )   // task string matched nothing lexical at all
-                std::fprintf( stderr, "ctxpack: --exemplar: no symbol matches '%.*s'\n", int( cfg.exemplar.size() ), cfg.exemplar.data() );
+                std::fprintf( stderr, "ripwire: --exemplar: no symbol matches '%.*s'\n", int( cfg.exemplar.size() ), cfg.exemplar.data() );
             else
-                std::fprintf( stderr, "ctxpack: --exemplar: no %s in the corpus to exemplify\n", symTag( pick.targetKind ) );
+                std::fprintf( stderr, "ripwire: --exemplar: no %s in the corpus to exemplify\n", symTag( pick.targetKind ) );
             return 1;   // no-candidate case degrades cleanly (clear message, nonzero exit, no crash)
         }
 
@@ -2205,7 +2205,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // the SELECTION EVIDENCE the sentence above claims to be showing ("tested before untested, higher
         // fan-in, lower complexity" is the rule; in=/ccx=/tested= are its inputs, unreadable without a gloss).
         // tested= is absence-meaningful and says so, per the house rule for an omitted-not-zero attribute.
-        std::printf( "<!-- ctxpack exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
+        std::printf( "<!-- ripwire exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
                      "On the root, the three attributes that ARE that ordering's evidence: in=reuse-count "
                      "(callers), ccx=cognitive complexity, tested=1 when a test reaches it (OMITTED, never 0, "
                      "when none does). Copy its shape, not its text. -->",
@@ -2266,10 +2266,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
     }
 
     // --arch=FILE: architectural fitness function. Enforce the user's declared layering rules against the
-    // #include graph; print every crossing edge; exit 2 if any (a CI gate). The rules are the user's — ctxpack
+    // #include graph; print every crossing edge; exit 2 if any (a CI gate). The rules are the user's — ripwire
     // imposes no architecture, only the one declared.
     //
-    // S5-B --baseline support: a `.ctxpack_arch_baseline` sidecar (one FNV-1a-64 hex hash per line) identifies
+    // S5-B --baseline support: a `.ripwire_arch_baseline` sidecar (one FNV-1a-64 hex hash per line) identifies
     // accepted violations (the current debt). Hash key = src_file + NUL + dst_file + NUL + FROM->TO label.
     // --baseline (first run): write the sidecar with all current violations, exit 0.
     // No flag + sidecar present: suppress baselined violations; exit 2 ONLY for new (un-baselined) ones.
@@ -2283,7 +2283,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
             // parseArchRules itself (mirrors --lint-rules) — printing the generic "cannot read" on top would
             // misdescribe a syntax error (file exists, parses to nothing) as a missing/unreadable file.
             if( !ar.parseError )
-                std::fprintf( stderr, "ctxpack: --arch cannot read rules file: %.*s\n", int( cfg.archRules.size() ), cfg.archRules.data() );
+                std::fprintf( stderr, "ripwire: --arch cannot read rules file: %.*s\n", int( cfg.archRules.size() ), cfg.archRules.data() );
             return 1;
         }
         const auto adj = resolveIncludeAdj( ing );
@@ -2339,7 +2339,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
                 {
                     const std::string label = ar.layerNames[ la ] + "->" + ar.layerNames[ lb ];
                     // S2: hash root-RELATIVE file paths so a committed baseline is portable across root
-                    // spellings (`ctxpack .` vs `ctxpack /abs/repo`). Display still shows ing.files[…] verbatim.
+                    // spellings (`ripwire .` vs `ripwire /abs/repo`). Display still shows ing.files[…] verbatim.
                     // The same relFiles[] the rule was MATCHED against — one normalization, one meaning.
                     const std::uint64_t h   = archViolHash( relFiles[f], relFiles[g], label );
                     viols.push_back( { std::uint32_t( f ), g, h, ar.layerNames[ la ], ar.layerNames[ lb ] } );
@@ -2442,13 +2442,13 @@ std::optional<int> runArchViews( const MainDispatch& d )
             for( const Viol& v : viols ) hashes.insert( v.hash );
             if( !archWriteBaseline( sidecarPath, hashes ) )
             {
-                std::fprintf( stderr, "ctxpack: --baseline cannot write sidecar: %s\n", sidecarPath.c_str() );
+                std::fprintf( stderr, "ripwire: --baseline cannot write sidecar: %s\n", sidecarPath.c_str() );
                 return 1;
             }
-            std::fprintf( stderr, "ctxpack arch: baseline written (%zu violation(s) accepted) → %s\n",
+            std::fprintf( stderr, "ripwire arch: baseline written (%zu violation(s) accepted) → %s\n",
                           viols.size(), sidecarPath.c_str() );
             // Still emit the arch XML for reference (shows what was baselined), then exit 0.
-            std::printf( "<!-- ctxpack arch: baseline mode — all %zu violation(s) accepted as baseline. exit=0.%s -->", viols.size(), kArchMatchDomain );
+            std::printf( "<!-- ripwire arch: baseline mode — all %zu violation(s) accepted as baseline. exit=0.%s -->", viols.size(), kArchMatchDomain );
             std::printf( "<arch layers=\"%zu\" rules=\"%zu\" pathRules=\"%zu\" violations=\"%zu\" baselined=\"%zu\" new_violations=\"0\">",
                          ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size() );
             for( const Viol& v : viols ) emitViol( v, true );
@@ -2464,12 +2464,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
             for( const Viol& v : viols ) hashes.insert( v.hash );
             if( !archWriteBaseline( sidecarPath, hashes ) )
             {
-                std::fprintf( stderr, "ctxpack: --baseline-update cannot write sidecar: %s\n", sidecarPath.c_str() );
+                std::fprintf( stderr, "ripwire: --baseline-update cannot write sidecar: %s\n", sidecarPath.c_str() );
                 return 1;
             }
-            std::fprintf( stderr, "ctxpack arch: baseline updated (%zu hash(es) total) → %s\n",
+            std::fprintf( stderr, "ripwire arch: baseline updated (%zu hash(es) total) → %s\n",
                           hashes.size(), sidecarPath.c_str() );
-            std::printf( "<!-- ctxpack arch: baseline-update mode — %zu violation(s) merged into baseline. exit=0.%s -->", viols.size(), kArchMatchDomain );
+            std::printf( "<!-- ripwire arch: baseline-update mode — %zu violation(s) merged into baseline. exit=0.%s -->", viols.size(), kArchMatchDomain );
             std::printf( "<arch layers=\"%zu\" rules=\"%zu\" pathRules=\"%zu\" violations=\"%zu\" baselined=\"%zu\" new_violations=\"0\">",
                          ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size() );
             for( const Viol& v : viols ) emitViol( v, true );
@@ -2496,10 +2496,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
 
         // Informational stderr line when baseline is active.
         if( hasBaseline )
-            std::fprintf( stderr, "ctxpack arch: %zu violation(s) total — %zu suppressed (baseline) — %zu new\n",
+            std::fprintf( stderr, "ripwire arch: %zu violation(s) total — %zu suppressed (baseline) — %zu new\n",
                           viols.size(), basedViols.size(), newViols.size() );
 
-        std::printf( "<!-- ctxpack arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.%s -->", kArchMatchDomain );
+        std::printf( "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.%s -->", kArchMatchDomain );
         std::printf( "<arch layers=\"%zu\" rules=\"%zu\" pathRules=\"%zu\" violations=\"%zu\" baselined=\"%zu\" new_violations=\"%zu\">",
                      ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(), newViols.size() );
         for( const Viol& v : viols ) emitViol( v, hasBaseline && baseline.count( v.hash ) );
@@ -2584,7 +2584,7 @@ int emitClonesReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
     // §A8.1: total= (new) is ALWAYS the true row total (groups+type3-group-count), unpaged included — see
     // cloneUnpagedTotalAttr() above for why it is skipped when paging is active (pageDisclosure already
     // owns total= there; two attributes of the same name would break XML well-formedness).
-    std::printf( "<!-- ctxpack clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. raise the default cap with limit=N (offset=M pages). -->" );
+    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. raise the default cap with limit=N (offset=M pages). -->" );
     std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\"%s>", cg.size(), cg3.size(),
                  cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
                  pageDisclosure( cpab, sizeof( cpab ), clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
@@ -2637,7 +2637,7 @@ inline HotspotWorstFn hotspotWorstFnOf( const ctx::IngestResult& ing, ctx::NodeI
 // numbers are ENTIRELY mined from that window, published nothing, so the 18-month default was readable only
 // by reading the source.
 inline constexpr const char* kCochangeRepoLegend =
-    "<!-- ctxpack cochange: file pairs that change together in git but share no transitive static dependency (surprising=1) = hidden coupling. "
+    "<!-- ripwire cochange: file pairs that change together in git but share no transitive static dependency (surprising=1) = hidden coupling. "
     "together= is the number of commits in window= that touched BOTH files (3 or more, or the pair is not reported); "
     "deg= is that count over the commit count of the LESS-CHANGED of the two files, so 1.00 means the quieter file never changed without the other. "
     "window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. "
@@ -2647,7 +2647,7 @@ inline constexpr const char* kCochangeRepoLegend =
     "dep_capable=0 instead, because for it \"shares no static dependency\" is vacuously true. raise the default cap with limit=N (offset=M pages) -->";
 
 inline constexpr const char* kCochangeFileLegend =
-    "<!-- ctxpack cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
+    "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
     "together= is the number of commits in window= that touched BOTH this file and the partner (3 or more, or the partner is not reported); "
     "deg= is that count over commits=, THIS file's own commit count — a different denominator from the repo-wide pair form, which divides by the less-changed side. "
     "window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. "
@@ -2679,9 +2679,9 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         // --hotspots is a measurement verb and its window is part of the measurement, so refuse instead.
         if( !cfg.since.empty() && !sinceScope.active )
         {
-            std::fprintf( stderr, "ctxpack: --hotspots --since='%.*s' is neither a git revision nor a recognizable date — refusing rather than "
+            std::fprintf( stderr, "ripwire: --hotspots --since='%.*s' is neither a git revision nor a recognizable date — refusing rather than "
                                   "reporting an all-history scan under a window label you did not ask for "
-                                  "(e.g. ctxpack <dir> --hotspots --since=\"2 weeks ago\", or --since=HEAD~20)\n",
+                                  "(e.g. ripwire <dir> --hotspots --since=\"2 weeks ago\", or --since=HEAD~20)\n",
                           int( cfg.since.size() ), cfg.since.data() );
             return 1;
         }
@@ -2715,14 +2715,14 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             {
                 std::vector<char>  sinceEsc;
                 const std::string  windowLabel = std::string( escapeXml( std::string_view( cfg.since ), sinceEsc ) );
-                std::printf( "<!-- ctxpack hotspots: the since-window matched no commits — empty result, not an error (git history exists) -->" );
+                std::printf( "<!-- ripwire hotspots: the since-window matched no commits — empty result, not an error (git history exists) -->" );
                 // the same partition the main path emits, so a reader parsing one shape parses both:
                 // an empty window means every file is unranked for want of churn.
                 std::printf( "<hotspots window=\"%s\" files=\"%zu\" ranked=\"0\" unranked_no_churn=\"%zu\" unranked_no_complexity=\"0\" commits=\"0\" shown=\"0\" capped=\"0\"%s></hotspots>",
                              windowLabel.c_str(), ing.files.size(), ing.files.size(), gitstamp::atAttr( root ).c_str() );
                 return 0;
             }
-            std::fprintf( stderr, "ctxpack --hotspots: git unavailable / no history (need a git repo)\n" );
+            std::fprintf( stderr, "ripwire --hotspots: git unavailable / no history (need a git repo)\n" );
             return 1;
         }
 
@@ -2774,7 +2774,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::string windowLabelInComment = windowLabel;   // "--" is illegal inside an XML comment (G4)
         for( std::size_t i = 1; i < windowLabelInComment.size(); ++i )
             if( windowLabelInComment[ i - 1 ] == '-' && windowLabelInComment[i] == '-' ) windowLabelInComment[i] = ' ';
-        std::printf( "<!-- ctxpack hotspots: maintenance-pain = complexity × recent churn (window=%s). "
+        std::printf( "<!-- ripwire hotspots: maintenance-pain = complexity × recent churn (window=%s). "
                      "churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. "
                      "files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so "
                      "ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. "
@@ -2850,7 +2850,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         if( !cfg.cochangeFile.empty() )                                    // partners of one file → shared core (gitmine.h)
         {
             const std::uint32_t fid = resolveFileSuffix( ing, cfg.cochangeFile );
-            if( fid == UINT32_MAX ) { std::fprintf( stderr, "ctxpack --cochange: file not found: %.*s\n", int( cfg.cochangeFile.size() ), cfg.cochangeFile.data() ); return 1; }
+            if( fid == UINT32_MAX ) { std::fprintf( stderr, "ripwire --cochange: file not found: %.*s\n", int( cfg.cochangeFile.size() ), cfg.cochangeFile.data() ); return 1; }
             // multi-root §5: the probed file belongs to exactly ONE root — mine that repo only (co-change is
             // per-repo by construction; partners in another root are undefined and never synthesized).
             const std::uint32_t fidRoot  = multiRoot ? ing.fileRoot[ fid ] : UINT32_MAX;
@@ -2903,13 +2903,13 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // HEAD probe distinguishes them → clean empty (pairs="0", commits="0", exit 0) vs error+exit 1.
             if( sinceScope.active && gitRepoHasHistory( root ) )
             {
-                std::printf( "<!-- ctxpack cochange: the since-window matched no commits — empty result, not an error (git history exists) -->" );
+                std::printf( "<!-- ripwire cochange: the since-window matched no commits — empty result, not an error (git history exists) -->" );
                 // The at= stamp belongs on the EMPTY result too — "no pairs at this HEAD" is itself a claim
                 // about a specific HEAD, and --hotspots' own zero-row path already stamps for that reason.
                 std::printf( "<cochange pairs=\"0\" commits=\"0\" window=\"%s\" shown=\"0\" capped=\"0\"%s></cochange>", coWindowLabel.c_str(), gitstamp::atAttr( root ).c_str() );
                 return 0;
             }
-            std::fprintf( stderr, "ctxpack --cochange: git unavailable / no history (need a git repo)\n" );
+            std::fprintf( stderr, "ripwire --cochange: git unavailable / no history (need a git repo)\n" );
             return 1;
         }
         std::vector<std::uint32_t>             freq( ing.files.size(), 0 );
@@ -2985,7 +2985,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.ownersSym );
             if( defs.empty() )
             {
-                std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --owners symbol not found: ",
+                std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --owners symbol not found: ",
                                                                        cfg.ownersSym, "--owners=" ).c_str() );
                 return 1;
             }
@@ -3014,7 +3014,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             ownerships = gitFileAuthors( root, ing, onlyFileId );
         if( ownerships.empty() )
         {
-            std::fprintf( stderr, "ctxpack --owners: git unavailable / no history (need a git repo with commits)\n" );
+            std::fprintf( stderr, "ripwire --owners: git unavailable / no history (need a git repo with commits)\n" );
             return 1;
         }
 
@@ -3028,7 +3028,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         const std::vector<std::size_t> printRows     = ownershipRowsToPrint( ownerships, cap, detail );
 
         // XML comments forbid a literal "--" (G4): the flag is spelled "detail=1" below, not "--detail=1".
-        std::printf( "<!-- ctxpack owners: recency-weighted author ownership (half-life=6mo). "
+        std::printf( "<!-- ripwire owners: recency-weighted author ownership (half-life=6mo). "
                      "bf=1 = one person holds >80%% of weighted commits (bus-factor risk); "
                      "authors=1 files fold into <uniform/> below; pass detail=1 for the full per-file listing. "
                      "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
@@ -3093,11 +3093,11 @@ std::string noBaselineFatalMessage( const std::string& baselineFile, const ctx::
     // could not tell the fallback had even been tried and would look for a bug in the sidecar. Same two
     // clauses, same order, same verb-name spelling convention as the stale arms below.
     if( !sel.isSidecarStale() )
-        return "ctxpack: no " + baselineFile + " and no git HEAD to auto-compare against — run `ctxpack <dir> --quality-baseline` BEFORE the change you want to measure\n";
+        return "ripwire: no " + baselineFile + " and no git HEAD to auto-compare against — run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n";
 
-    return "ctxpack: " + baselineFile + " was STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — "
-         + ( sel.isStaleFileOnDisk() ? "it is still on disk (could not be removed): delete it, or re-run `ctxpack <dir> --quality-baseline` to re-pin it\n"
-                                     : "it has been removed: re-run `ctxpack <dir> --quality-baseline` BEFORE the change you want to measure\n" );
+    return "ripwire: " + baselineFile + " was STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — "
+         + ( sel.isStaleFileOnDisk() ? "it is still on disk (could not be removed): delete it, or re-run `ripwire <dir> --quality-baseline` to re-pin it\n"
+                                     : "it has been removed: re-run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n" );
 }
 
 // PLAN_dispatchRefactor_2026-07-27.md §6.3: runQualityViews was NOT a dispatch chain — it held two
@@ -3113,7 +3113,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
     const std::string&                root         = d.root;
 
     // --quality-baseline / --quality-delta (the convergence-loop oracle): snapshot ccx + clone groups + dead
-    // candidates to .ctxpack_quality_baseline; then report ONLY what a change made WORSE vs it. The "delta not
+    // candidates to .ripwire_quality_baseline; then report ONLY what a change made WORSE vs it. The "delta not
     // absolute" discipline — a refine loop targets the regression it introduced, not absolute numbers (the
     // defense against metric-gaming). exit 2 if any new debt, like --arch.
     if( cfg.qualityBaseline || cfg.qualityDelta )
@@ -3128,12 +3128,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         if( cfg.qualityBaseline )
         {
             const bool wrote = quality::writeBaseline( quality::computeSnapshot( ing, g, cfg.rootPath ), baselineFile, gitHeadSha( root ) );
-            std::fprintf( stderr, wrote ? "ctxpack: wrote %s (snapshot of %zu symbols)\n" : "ctxpack: could not write %s\n",
+            std::fprintf( stderr, wrote ? "ripwire: wrote %s (snapshot of %zu symbols)\n" : "ripwire: could not write %s\n",
                           baselineFile.c_str(), ing.symbols.size() );
             return wrote ? 0 : 1;
         }
 
-        // Precedence for the baseline: (1) an explicit `.ctxpack_quality_baseline` sidecar (from
+        // Precedence for the baseline: (1) an explicit `.ripwire_quality_baseline` sidecar (from
         // --quality-baseline) wins whenever it is pinned at the CURRENT HEAD — the mid-task convergence loop
         // (baseline once, edit, re-check) is unchanged; (2) else — no sidecar, or a STALE one (see R3 below) —
         // if the root is a git repo with a HEAD tree, auto-baseline against HEAD so the "before I push" loop
@@ -3171,13 +3171,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             baseSel.snapshot = std::move( headSnap );
             if( !baseSel.isSidecarStale() )   // the stale/healed case is silent by design — only the true "never baselined" case is informative
-                std::fprintf( stderr, "ctxpack: no %s — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)\n",
+                std::fprintf( stderr, "ripwire: no %s — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)\n",
                               baselineFile.c_str() );
         }
         std::vector<quality::Regression> regs = quality::computeDelta( ing, g, baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
 
         // Signal-to-noise round — the per-finding ACK RATCHET. Suppress findings already accepted (with a
-        // reason) in .ctxpack_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
+        // reason) in .ripwire_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
         // magnitude survives the filter and reappears. --quality-ack merges the currently-VISIBLE findings
         // into that file instead of printing the report (accepting what previous acks already hid would be
         // a silent blanket ack — only what the agent can see right now is what it can accept).
@@ -3228,19 +3228,19 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             if( ackWritten == 0 && !cfg.qualityAckOnly.empty() )
             {
-                std::fprintf( stderr, "ctxpack: --ack-only=%.*s matched none of the %zu finding(s) — nothing written\n",
+                std::fprintf( stderr, "ripwire: --ack-only=%.*s matched none of the %zu finding(s) — nothing written\n",
                               int( cfg.qualityAckOnly.size() ), cfg.qualityAckOnly.data(), regs.size() );
                 return 1;
             }
             const bool wroteAcks = quality::writeAckRecords( acksFile, acks );
             if( wroteAcks && !cfg.qualityAckOnly.empty() )
-                std::fprintf( stderr, "ctxpack: acknowledged %zu of %zu finding(s) (%zu left UNACKED by --ack-only, %zu already acked) → %s\n",
+                std::fprintf( stderr, "ripwire: acknowledged %zu of %zu finding(s) (%zu left UNACKED by --ack-only, %zu already acked) → %s\n",
                               ackWritten, regs.size(), ackSkipped, ackedCount, acksFile.c_str() );
             else if( wroteAcks )
-                std::fprintf( stderr, "ctxpack: acknowledged %zu finding(s) (%zu already acked) → %s\n",
+                std::fprintf( stderr, "ripwire: acknowledged %zu finding(s) (%zu already acked) → %s\n",
                               regs.size(), ackedCount, acksFile.c_str() );
             else
-                std::fprintf( stderr, "ctxpack: could not write %s\n", acksFile.c_str() );
+                std::fprintf( stderr, "ripwire: could not write %s\n", acksFile.c_str() );
             return wroteAcks ? 0 : 1;
         }
 
@@ -3260,7 +3260,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         }
         const std::size_t preexistingCount = regs.size() - newSymbolCount;
 
-        // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ctxpack: --token-budget
+        // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
         // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
         // `$?` gets a number with no subject; this puts the WHICH on the channel a human reads, without
         // touching the XML contract. Names the first gating row in the already-sorted list (deterministic).
@@ -3277,7 +3277,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 const std::string at = first->path.empty() ? std::string{}
                                                            : " at " + first->path + ":" + std::to_string( first->line );
-                std::fprintf( stderr, "ctxpack: --quality-delta gating: %zu preexisting-worse major finding(s); first: %s %s%s (was=%u now=%u)\n",
+                std::fprintf( stderr, "ripwire: --quality-delta gating: %zu preexisting-worse major finding(s); first: %s %s%s (was=%u now=%u)\n",
                               gatingCount, first->kind.c_str(), first->sym.c_str(), at.c_str(), first->was, first->now );
             }
         }
@@ -3329,7 +3329,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         // §B7.1 (CA4) — the heading used to open "only what changed for the WORSE vs
-        // .ctxpack_quality_baseline", which is FALSE in every state but one: three of the four floors this
+        // .ripwire_quality_baseline", which is FALSE in every state but one: three of the four floors this
         // verb can use are not that file, and in one of them the file was judged stale and DELETED from the
         // user's tree during this very run. The floor actually used is named by baseline= on the element
         // below, so the heading now points at that attribute instead of asserting a floor, and the four
@@ -3337,9 +3337,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // them, and a marker string that is only legible to whoever wrote it is not a disclosure.
         // G4: no "--" anywhere inside an XML comment ⇒ flag names are written bare ("quality-baseline"),
         // the same convention kMaxTokensFitLegend follows. No "%" either: this is a one-argument printf.
-        std::printf( "<!-- ctxpack quality-delta: only what a change made WORSE against the floor named by "
+        std::printf( "<!-- ripwire quality-delta: only what a change made WORSE against the floor named by "
                      "baseline= below. FOUR floors, and they are not interchangeable: sidecar = the pinned "
-                     ".ctxpack_quality_baseline snapshot, honored only because it was pinned at the CURRENT "
+                     ".ripwire_quality_baseline snapshot, honored only because it was pinned at the CURRENT "
                      "git HEAD; git-HEAD = no sidecar existed, so the working tree was auto-compared against "
                      "the HEAD tree; git-HEAD (stale sidecar removed) = a sidecar existed, was pinned at a "
                      "DIFFERENT sha, and this run DELETED it from your working tree before falling back to "
@@ -3445,7 +3445,7 @@ inline std::string_view deadCodeStripDotSlash( std::string_view p ) noexcept
 // per indexed file and once per candidate symbol.
 //
 // W3FIX: position 0 is only the repo root when the indexed path is ROOT-RELATIVE, which it is for
-// `ctxpack .` (paths read "./src/x.h") and is NOT for `ctxpack /abs/repo` (paths read "/abs/repo/src/x.h").
+// `ripwire .` (paths read "./src/x.h") and is NOT for `ripwire /abs/repo` (paths read "/abs/repo/src/x.h").
 // So the anchored arm matched nothing at all under an absolute root spelling, and --dead-code=./src refused
 // with "matches no indexed path" on a tree that plainly has one — the same root-spelling class arch.h's
 // relForHash header comment describes for baseline hashes. The fix is that same normalization, reused rather
@@ -3537,7 +3537,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         //
         // W3FIX: `root` is handed to the anchored arm so "position 0" means the repo root under EVERY root
         // spelling. Without it the anchored match compared the filter against an ABSOLUTE indexed path and
-        // could never hit, so `ctxpack /abs/repo --dead-code=./src` refused where `ctxpack . --dead-code=./src`
+        // could never hit, so `ripwire /abs/repo --dead-code=./src` refused where `ripwire . --dead-code=./src`
         // answered. The unanchored (component-anywhere) arm never read the root and is untouched.
         const std::string_view dirFilterRaw = cfg.deadCodeDir;
         std::string_view       dirFilter = deadCodeStripDotSlash( dirFilterRaw );
@@ -3557,8 +3557,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                 if( filterMatchesPath( indexedPath ) ) { filterHitsIndex = true; break; }
             if( !filterHitsIndex )
             {
-                std::fprintf( stderr, "ctxpack: --dead-code=%.*s matches no indexed path — a zero here would be a failure, not a measurement "
-                                      "(pass a directory or file that exists in the tree, e.g. ctxpack <dir> --dead-code=src)\n",
+                std::fprintf( stderr, "ripwire: --dead-code=%.*s matches no indexed path — a zero here would be a failure, not a measurement "
+                                      "(pass a directory or file that exists in the tree, e.g. ripwire <dir> --dead-code=src)\n",
                               int( dirFilterRaw.size() ), dirFilterRaw.data() );
                 return 1;
             }
@@ -3593,7 +3593,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             return sa.name < sb.name;
         } );
 
-        std::printf( "<!-- ctxpack dead-code: high-confidence source functions with internal linkage and no caller in the indexed tree. "
+        std::printf( "<!-- ripwire dead-code: high-confidence source functions with internal linkage and no caller in the indexed tree. "
                      "A bare-name filter matches by path COMPONENT: filter=\"src\" keeps any path with a src segment at any depth "
                      "(test/x/src/y.cpp included); anchor with ./ (filter=\"./src\") to pin the root-level directory only. "
                      "Graph evidence is local to the indexed tree; verify before deleting -->" );
@@ -3703,7 +3703,7 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     {
         // §B4.2: the shared refusal — see selectorrefuse.h. A `file:name` whose FILE half is the fault used
         // to read as "that symbol does not exist", which sends an agent hunting for a rename that never was.
-        std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --edit-check symbol not found: ",
+        std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --edit-check symbol not found: ",
                                                                cfg.editCheckSym, "--edit-check=" ).c_str() );
         return 1;
     }
@@ -3711,7 +3711,7 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     const std::vector<EditCheckGroup> groups = editCheckGroups( ing, d.g, matches );
     if( groups.size() > 1 )
     {
-        std::fprintf( stderr, "ctxpack: --edit-check: %s\n",
+        std::fprintf( stderr, "ripwire: --edit-check: %s\n",
                       editCheckAmbiguousMessage( cfg.editCheckSym, groups, "--edit-check=", matches.size() ).c_str() );
         return 1;
     }
@@ -3785,7 +3785,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         if( matches.empty() )
         {
             const std::string verb = std::string( wantCallers ? "--callers" : "--callees" );   // one arm, two spellings
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: " + verb + " symbol not found: ",
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: " + verb + " symbol not found: ",
                                                                    sym, verb + "=" ).c_str() );   // §B4.2 shared refusal
             return 1;
         }
@@ -3901,7 +3901,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::vector<NodeId> result = ev.run();
         if( !ev.ok )
         {
-            std::fprintf( stderr, "ctxpack: --graph-query: %s\n", ev.err.c_str() );
+            std::fprintf( stderr, "ripwire: --graph-query: %s\n", ev.err.c_str() );
             return 1;
         }
         // §P0.5b: a name() literal matching NO indexed symbol is a typo — refuse it the way the eleven other
@@ -3911,7 +3911,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         {
             const std::string& missingName = ev.unresolvedNames.front();
             std::fprintf( stderr, "%s\n", withDidYouMean( ing, missingName,
-                          "ctxpack: --graph-query: name(\"" + missingName + "\") matches no symbol in the indexed tree" ).c_str() );
+                          "ripwire: --graph-query: name(\"" + missingName + "\") matches no symbol in the indexed tree" ).c_str() );
             return 1;
         }
         // Rank the matched set by importance (PageRank) so a BROAD query leads with what matters, and cap it
@@ -3939,7 +3939,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         // `callers(name("X"),1)` reports the identical number --callers does — and it shipped the marker on
         // neither. That is the §B4 echo-site shape src/graphlegend.h's own header indicts, so the shared
         // constants land here too rather than a sixth wording.
-        std::printf( "<!-- ctxpack graph-query: a fixed-operator node-set query over the call graph (sources "
+        std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
                      "name/all; filters kind/cx/fanin/file; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
                      "%s-->", ctx::graphCountDisclosure().c_str() );
@@ -4063,7 +4063,7 @@ collectUseSites( const ctx::IngestResult& ing, const UsesSelector& sel, std::spa
 // cap with an explicit remainder is the one addition, shared by all six arms).
 inline int refuseUsesFileQualifier( const ctx::IngestResult& ing, std::string_view sym, const UsesSelector& )
 {
-    std::fprintf( stderr, "%s\n", ctx::selectorNotFoundMessage( ing, "ctxpack: --uses symbol not found: ",
+    std::fprintf( stderr, "%s\n", ctx::selectorNotFoundMessage( ing, "ripwire: --uses symbol not found: ",
                                                                 sym, "--uses=" ).c_str() );
     return 1;
 }
@@ -4123,7 +4123,7 @@ std::optional<int> runUses( const MainDispatch& d )
         if( defs.empty() && sites.empty() )
         {
             std::fprintf( stderr, "%s\n", withDidYouMean( ing, sel.suggestName,
-                          "ctxpack: --uses selector matched no indexed definition: " + std::string( sym ) ).c_str() );
+                          "ripwire: --uses selector matched no indexed definition: " + std::string( sym ) ).c_str() );
             return 1;
         }
 
@@ -4274,7 +4274,7 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         const PageWindow  extPw   = pageWindow( names.size(), effectiveRowCap( cfg.pageLimit, histCap ), cfg.pageOffset );
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        std::printf( "<!-- ctxpack external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed "
+        std::printf( "<!-- ripwire external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed "
                      "tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls) -->" );
         // P2.1: --pack-top-n caps the listing; names= is the true total, shown=/capped= the printed slice.
         const std::size_t extShown = extPw.end - extPw.begin;
@@ -4325,7 +4325,7 @@ std::optional<int> runPath( const MainDispatch& d )
             // grammar, so the endpoint that missed gets the shared diagnosis (unindexed path vs wrong file half
             // vs unknown name) instead of a near-miss on the name half alone.
             const std::string_view missing = srcDefs.empty() ? srcN : dstN;
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --path endpoint not found: ",
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --path endpoint not found: ",
                                                                   missing, "--path=" ).c_str() );
             return 1;
         }
@@ -4390,7 +4390,7 @@ std::optional<int> runConnect( const MainDispatch& d )
         }
         if( specs.size() < 2 || specs.size() > ctx::connectcfg::kMaxTerminals )
         {
-            std::fprintf( stderr, "ctxpack: --connect needs 2..%zu comma-separated symbols (got %zu) — for a broader ranked set use --for\n",
+            std::fprintf( stderr, "ripwire: --connect needs 2..%zu comma-separated symbols (got %zu) — for a broader ranked set use --for\n",
                           ctx::connectcfg::kMaxTerminals, specs.size() );
             return 1;
         }
@@ -4402,7 +4402,7 @@ std::optional<int> runConnect( const MainDispatch& d )
             {
                 // §M7 (W3FIX): resolveFocus is the SAME file:name resolver --around/--lego use, so this arm
                 // gets the same shared diagnosis rather than a bare near-miss about the name half.
-                std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --connect symbol not found: ",
+                std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --connect symbol not found: ",
                                                                        spec, "--connect=" ).c_str() );
                 return 1;
             }
@@ -4441,7 +4441,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         const std::vector<NodeId> seeds = resolveAllByNameQualified( ing, cfg.impactSym );
         if( seeds.empty() )
         {
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --impact symbol not found: ",
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --impact symbol not found: ",
                                                                    cfg.impactSym, "--impact=" ).c_str() );   // §B4.2
             return 1;
         }
@@ -4536,7 +4536,7 @@ std::optional<int> runMentions( const MainDispatch& d )
         const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.mentionsSym );
         if( defs.empty() )
         {
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --mentions symbol not found: ",
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --mentions symbol not found: ",
                                                                    cfg.mentionsSym, "--mentions=" ).c_str() );
             return 1;
         }
@@ -4548,7 +4548,7 @@ std::optional<int> runMentions( const MainDispatch& d )
 
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        std::printf( "<!-- ctxpack mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
+        std::printf( "<!-- ripwire mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
                      "docs= is the row count (distinct files); sections= counts the underlying markdown-section mentions "
                      "before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. "
                      "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->" );
@@ -4633,13 +4633,13 @@ std::optional<int> runAffected( const MainDispatch& d )
             // §M7 (W3FIX): resolveAffectedSeeds accepts file:name and path::scope::name too, so a bad item gets
             // the shared file-half diagnosis appended to this arm's own two-reading sentence (which explains
             // WHY the item was tried twice, and therefore has to come first).
-            std::fprintf( stderr, "ctxpack: --affected: '%s' matches no indexed file path (as a path pattern) and no indexed "
+            std::fprintf( stderr, "ripwire: --affected: '%s' matches no indexed file path (as a path pattern) and no indexed "
                                   "symbol (as a symbol name; file:name and path::scope::name also accepted)%s\n",
                           sel.badItem.c_str(), ctx::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() );
             return 1;
         }
         const std::vector<NodeId>& seeds = sel.seeds;
-        if( seeds.empty() ) { std::fprintf( stderr, "ctxpack: --affected matched no symbols: %.*s\n", int( cfg.affectedFiles.size() ), cfg.affectedFiles.data() ); return 1; }
+        if( seeds.empty() ) { std::fprintf( stderr, "ripwire: --affected matched no symbols: %.*s\n", int( cfg.affectedFiles.size() ), cfg.affectedFiles.data() ); return 1; }
         const std::vector<NodeId>  reach = ctx::transitiveCallers( g, seeds );
         std::vector<char>          fseen( ing.files.size(), 0 );
         std::vector<std::uint32_t> testFiles;
@@ -4651,7 +4651,7 @@ std::optional<int> runAffected( const MainDispatch& d )
         // over the same argument string and return different counts, so which one fired is a fact about the
         // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
         // for a header), which is what makes the two readings comparable at a glance.
-        std::printf( "<!-- ctxpack affected: test files that transitively reach the changed files/symbols (run these); seeded_by= says which reading the argument took. "
+        std::printf( "<!-- ripwire affected: test files that transitively reach the changed files/symbols (run these); seeded_by= says which reading the argument took. "
                      "script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) — "
                      "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached= -->" );
         std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\">",
@@ -4685,7 +4685,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     if( !cfg.exercisesFlag ) return std::nullopt;
     if( cfg.exercisesFile.empty() )
     {
-        std::fprintf( stderr, "ctxpack: --exercises needs a test file — e.g. --exercises=test/foo_harness.cpp "
+        std::fprintf( stderr, "ripwire: --exercises needs a test file — e.g. --exercises=test/foo_harness.cpp "
                               "(the inverse of --affected: what that test transitively covers)\n" );
         return 1;
     }
@@ -4693,7 +4693,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     const ExerciseSeeds sel = resolveExerciseSeeds( ing, cfg.exercisesFile );
     if( !sel.anyFileMatched )
     {
-        std::fprintf( stderr, "ctxpack: --exercises: no indexed file path matches '%.*s' (the argument is a path pattern, "
+        std::fprintf( stderr, "ripwire: --exercises: no indexed file path matches '%.*s' (the argument is a path pattern, "
                               "like --affected's; use --tree or --grep to find its spelling)\n",
                       int( cfg.exercisesFile.size() ), cfg.exercisesFile.data() );
         return 1;
@@ -4701,7 +4701,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     if( sel.testFiles.empty() )
     {
         // The decided non-test behavior (--help states it): refuse, do not widen the verb. See testmap.h.
-        std::fprintf( stderr, "ctxpack: --exercises: '%.*s' matches %u indexed file(s), none of them a TEST path "
+        std::fprintf( stderr, "ripwire: --exercises: '%.*s' matches %u indexed file(s), none of them a TEST path "
                               "(a test/ or tests/ directory segment, or a test_*/ *_test.* / *_spec.* filename). This verb "
                               "subtracts test code from its answer, which is meaningless for a non-test file — for \"what does "
                               "this call\", use --callees=SYM (1 hop) or --graph-query with a callees(...) closure\n",
@@ -4729,7 +4729,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     // flag spelling). xmllint is the gate that catches a regression here.
     const std::string harnessAttr = exercisesHarnessAttr( ing, sel.testFiles );   // §A9.1, empty for a .cpp/.py harness
 
-    std::printf( "<!-- ctxpack exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
+    std::printf( "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
                  "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see -->" );
     std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s>",
@@ -4783,7 +4783,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 }
             }
             if( !anyGit )
-            { std::fprintf( stderr, "ctxpack --situ: no files given and no git diff in any root (use --situ=F1,F2)\n" ); return 1; }
+            { std::fprintf( stderr, "ripwire --situ: no files given and no git diff in any root (use --situ=F1,F2)\n" ); return 1; }
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
                 std::fprintf( stdout, "=== root %s (%s) ===\n", ws[r].label.c_str(), ws[r].arg.c_str() );
@@ -4802,7 +4802,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             changed.assign( ing.files.size(), 0 );
             if( !gitChangedFiles( root, ing, changed ) )
-            { std::fprintf( stderr, "ctxpack --situ: no files given and no git diff (use --situ=F1,F2)\n" ); return 1; }
+            { std::fprintf( stderr, "ripwire --situ: no files given and no git diff (use --situ=F1,F2)\n" ); return 1; }
         }
         ctx::writeSituation( stdout, root, ing, g, changed );
         return 0;
@@ -4821,7 +4821,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             changed.assign( ing.files.size(), 0 );
             if( !gitChangedFiles( root, ing, changed ) )
-            { std::fprintf( stderr, "ctxpack --test-gate: no files given and no git diff (use --test-gate=F1,F2)\n" ); return 1; }
+            { std::fprintf( stderr, "ripwire --test-gate: no files given and no git diff (use --test-gate=F1,F2)\n" ); return 1; }
         }
         // §A3a (PLAN_outputAudit2_2026-07-28.md): --test-gate joined the pageview.h paging vocabulary — the
         // <u> untested-row list honors --limit/--offset instead of a silent 25-row cap with no disclosure.
@@ -4868,7 +4868,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 // case (it still degrades to its own empty section); see prcontext.h §badRef.
                 if( masks[r].badRef )
                 {
-                    std::fprintf( stderr, "ctxpack: --pr-context: unknown base ref '%.*s' in root %s\n",
+                    std::fprintf( stderr, "ripwire: --pr-context: unknown base ref '%.*s' in root %s\n",
                                   int( cfg.prContextBase.size() ), cfg.prContextBase.data(), ws[r].arg.c_str() );
                     return 1;
                 }
@@ -4892,7 +4892,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
 
             std::vector<char> prEsc;
             const std::string baseLabelEsc = std::string( escapeXml( std::string_view( baseLabel ), prEsc ) );
-            std::printf( "<!-- ctxpack pr-context (multi-root workspace): ONE <pr-context> section per root over the "
+            std::printf( "<!-- ripwire pr-context (multi-root workspace): ONE <pr-context> section per root over the "
                          "MERGED graph — per-root changed files / owners / co-change from each repo's own history, "
                          "blast radius crossing roots via real evidence edges. base=%s. deterministic. -->", baseLabelEsc.c_str() );
             std::printf( "<pr-context-workspace base=\"%s\" roots=\"%zu\">", baseLabelEsc.c_str(), ws.size() );
@@ -4909,7 +4909,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // Kept ahead of the `!pcm.ok` degrade below, whose message would misname this failure.
         if( pcm.badRef )
         {
-            std::fprintf( stderr, "ctxpack: --pr-context: unknown base ref '%.*s'\n",
+            std::fprintf( stderr, "ripwire: --pr-context: unknown base ref '%.*s'\n",
                           int( cfg.prContextBase.size() ), cfg.prContextBase.data() );
             return 1;
         }
@@ -4921,7 +4921,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             // escapes via writePrContext's ex(); this degrade path had forgotten to).
             std::vector<char>  prEsc;
             const std::string  baseLabelEsc = std::string( escapeXml( std::string_view( baseLabel ), prEsc ) );
-            std::printf( "<!-- ctxpack pr-context: not a git repository (or git unavailable / bad base ref) — nothing to bundle -->" );
+            std::printf( "<!-- ripwire pr-context: not a git repository (or git unavailable / bad base ref) — nothing to bundle -->" );
             std::printf( "<pr-context base=\"%s\" files=\"0\"/>", baseLabelEsc.c_str() );
             return 0;
         }
@@ -4933,7 +4933,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                                     UINT32_MAX, std::string_view(), pcm );
     }
 
-    // --export=cc.json[:FILE]: Wave-4 CodeCharta interchange export. Per-file metrics ctxpack already
+    // --export=cc.json[:FILE]: Wave-4 CodeCharta interchange export. Per-file metrics ripwire already
     // computes → the cc.json folder-tree a CodeCharta 3D city consumes. FILE or stdout, mirroring --html.
     if( cfg.exportCcJson )
     {
@@ -4965,7 +4965,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             if( !ccOut )
             {
                 DEGRADED_PATH_ALERT( "writeCcJson: could not open output file" );
-                std::fprintf( stderr, "ctxpack: --export=cc.json:%s: cannot open file for writing\n", ccPath.c_str() );
+                std::fprintf( stderr, "ripwire: --export=cc.json:%s: cannot open file for writing\n", ccPath.c_str() );
                 return 1;
             }
         }
@@ -4996,7 +4996,7 @@ bool readTraceText( const std::string& src, std::string& text )
         return true;
     }
     std::FILE* f = std::fopen( src.c_str(), "rb" );
-    if( !f ) { std::fprintf( stderr, "ctxpack: --from-trace: cannot open '%s'\n", src.c_str() ); return false; }
+    if( !f ) { std::fprintf( stderr, "ripwire: --from-trace: cannot open '%s'\n", src.c_str() ); return false; }
     char buf[ 4096 ]; std::size_t n;
     while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 ) text.append( buf, n );
     std::fclose( f );
@@ -5040,7 +5040,7 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     const FromTraceResult res = fromTraceBundleText( ing, g, text, src == "-" ? "<stdin>" : src, in );
     if( !res.ok )
     {
-        std::fprintf( stderr, "ctxpack: --from-trace: no stack-trace / sanitizer / compiler frames found in '%s' — nothing to map\n",
+        std::fprintf( stderr, "ripwire: --from-trace: no stack-trace / sanitizer / compiler frames found in '%s' — nothing to map\n",
                       src == "-" ? "<stdin>" : src.c_str() );
         return 1;
     }
@@ -5051,7 +5051,7 @@ std::optional<int> runFromTrace( const MainDispatch& d )
 
 // L3 (PLAN_agentLeverage2026.md §L3) — repo field notes: the WRITE side (surfacing at retrieval is wired into
 // packSignatures/packBodies above). Two verbs share this handler:
-//   --note-add="TARGET: text" — append a note to the committed, sorted root/.ctxpack_notes and print the exact
+//   --note-add="TARGET: text" — append a note to the committed, sorted root/.ripwire_notes and print the exact
 //        written line. The date is git's committer clock (HEAD, %cs), NOT wall time, so the line is a pure
 //        function of (commit state, target, text) — deterministic and stable across machines; a non-git root
 //        degrades to the fixed epoch 1970-01-01 + a DEGRADED_PATH_ALERT (nothing to date against). MUTATES one
@@ -5073,12 +5073,12 @@ std::optional<int> runNotes( const MainDispatch& d )
         const std::size_t sep = spec.find( ": " );
         if( sep == std::string::npos )
         {
-            std::fprintf( stderr, "ctxpack: --note-add: want \"TARGET: text\" (a canonical id path::scope::name or a file path, then ': ', then the note) — got '%s'\n", spec.c_str() );
+            std::fprintf( stderr, "ripwire: --note-add: want \"TARGET: text\" (a canonical id path::scope::name or a file path, then ': ', then the note) — got '%s'\n", spec.c_str() );
             return 1;
         }
         // §S3 — sanitizeNoteField sanitizes AND decides (notes.h's header has the full finding): the old
         // `sanitizeField(...).empty()` pair refused an ASCII-blank note and accepted six other blank classes,
-        // committing an invisible line into `.ctxpack_notes`. `hasContent` is ctx::hasVisibleContent, the same
+        // committing an invisible line into `.ripwire_notes`. `hasContent` is ctx::hasVisibleContent, the same
         // derived predicate the MCP edit verbs' payload check reads.
         const notes::NoteField targetField = notes::sanitizeNoteField( std::string_view( spec ).substr( 0, sep ) );
         const notes::NoteField textField   = notes::sanitizeNoteField( std::string_view( spec ).substr( sep + 2 ) );
@@ -5105,7 +5105,7 @@ std::optional<int> runNotes( const MainDispatch& d )
                      + ( blankCodePointCount == 1 ? " invisible code point: " : " invisible code points: " )
                      + blankSpelling;
             };
-            std::fprintf( stderr, "ctxpack: --note-add: both a target and a note text are required (got target=%s text=%s)\n",
+            std::fprintf( stderr, "ripwire: --note-add: both a target and a note text are required (got target=%s text=%s)\n",
                           describeField( targetField ).c_str(), describeField( textField ).c_str() );
             return 1;
         }
@@ -5116,17 +5116,17 @@ std::optional<int> runNotes( const MainDispatch& d )
         // --for/--expand/default-map XML emission (notescheck.sh's det-gate covers this).
         if( !notes::isDecisionShaped( text ) )
         {
-            std::fprintf( stderr, "ctxpack: --note-add: tip: notes that say \"chose X over Y because Z\" surface better — consider adding the why\n" );
+            std::fprintf( stderr, "ripwire: --note-add: tip: notes that say \"chose X over Y because Z\" surface better — consider adding the why\n" );
         }
         // D5: canonicalize the target's path component to ROOT-RELATIVE before it ever touches disk — the
-        // portable-notes contract (.ctxpack_notes is committed and must resolve on any other checkout). An
+        // portable-notes contract (.ripwire_notes is committed and must resolve on any other checkout). An
         // absolute target outside this root can never be reached from another checkout's crawl, so refuse
         // loudly instead of silently writing a note that surfaces nowhere, ever.
         bool outsideRoot = false;
         const std::string target = notes::normalizeNoteTarget( rawTarget, d.root, outsideRoot );
         if( outsideRoot )
         {
-            std::fprintf( stderr, "ctxpack: --note-add: target '%s' resolves outside the root '%s' — refusing (notes must stay root-relative/portable)\n", rawTarget.c_str(), d.root.c_str() );
+            std::fprintf( stderr, "ripwire: --note-add: target '%s' resolves outside the root '%s' — refusing (notes must stay root-relative/portable)\n", rawTarget.c_str(), d.root.c_str() );
             return 1;
         }
         std::string date = ctx::quality::gitCommitterDateIso( d.root );
@@ -5147,7 +5147,7 @@ std::optional<int> runNotes( const MainDispatch& d )
         const std::string line = notes::addNote( path, target, date, text, sha, branch );
         if( line.empty() )
         {
-            std::fprintf( stderr, "ctxpack: --note-add: could not write %s\n", path.c_str() );
+            std::fprintf( stderr, "ripwire: --note-add: could not write %s\n", path.c_str() );
             return 1;
         }
         std::fwrite( line.data(), 1, line.size(), stdout );
@@ -5189,7 +5189,7 @@ std::optional<int> runNotes( const MainDispatch& d )
             std::vector<char> esc;
             char hdr[ 320 ];
             std::snprintf( hdr, sizeof( hdr ),
-                           "<ctx><!-- ctxpack field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere) -->",
+                           "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere) -->",
                            all.size(), targetCount, danglingCount );
             w.write( hdr );
             w.write( "<notes>" );
@@ -5241,7 +5241,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     if( !cfg.packTaskFlag ) return std::nullopt;
     if( cfg.packTask.empty() )   // refuse loudly without a task string (never fall through to the default map)
     {
-        std::fprintf( stderr, "ctxpack: --pack-task: a task string is required — e.g. --pack-task=\"add retry to the http client\"\n" );
+        std::fprintf( stderr, "ripwire: --pack-task: a task string is required — e.g. --pack-task=\"add retry to the http client\"\n" );
         return 1;
     }
     const std::string task( cfg.packTask );
@@ -5277,7 +5277,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
         // place it belongs. Say so on stderr rather than dropping it silently (it is not worth failing the
         // whole run over — the bundles themselves are unaffected).
         if( cfg.withGraph )
-            std::fprintf( stderr, "ctxpack: --with-graph is not applied in --partition mode (N+1 bundles, no single graph) — bundles emitted without it\n" );
+            std::fprintf( stderr, "ripwire: --with-graph is not applied in --partition mode (N+1 bundles, no single graph) — bundles emitted without it\n" );
         if( cfg.json )
         {
             std::string js;
@@ -5302,7 +5302,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
         // warn-and-continue shape the --partition branch above already uses, rather than silently dropping
         // the flag's effect with no tell at all.
         if( cfg.withGraph )
-            std::fprintf( stderr, "ctxpack: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
+            std::fprintf( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
         std::string js;
         packTaskBundleText( ing, g, task, lr, in, &js );
         std::fwrite( js.data(), 1, js.size(), stdout );
@@ -5358,7 +5358,7 @@ std::optional<int> runMergeScout( const MainDispatch& d )
     {
         if( cfg.mergeScout.empty() )
         {
-            std::fprintf( stderr, "ctxpack: --merge-scout needs REF[,REF...] (e.g. --merge-scout=branchA,branchB)\n" );
+            std::fprintf( stderr, "ripwire: --merge-scout needs REF[,REF...] (e.g. --merge-scout=branchA,branchB)\n" );
             return 1;
         }
         const mergescout::ScoutResult result = mergescout::computeMergeScout( root, cfg.mergeScout, ing, cfg.excludes, cfg.maxFileBytes );
@@ -5367,9 +5367,9 @@ std::optional<int> runMergeScout( const MainDispatch& d )
             // X9(a): a non-git root gets its OWN message — there is no offending ref to name, and "unknown
             // ref ''" would be a confusing refusal for a completely different reason (no git history at all).
             if( result.nonGitRoot )
-                std::fprintf( stderr, "ctxpack: --merge-scout: %s is not a git repository (or has no HEAD commit) — nothing to scout\n", root.c_str() );
+                std::fprintf( stderr, "ripwire: --merge-scout: %s is not a git repository (or has no HEAD commit) — nothing to scout\n", root.c_str() );
             else
-                std::fprintf( stderr, "ctxpack: --merge-scout: unknown ref '%s'\n", result.badRef.c_str() );
+                std::fprintf( stderr, "ripwire: --merge-scout: unknown ref '%s'\n", result.badRef.c_str() );
             return 1;
         }
         mergescout::writeMergeScout( stdout, result );
@@ -5448,12 +5448,12 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
         brief = readBriefFile( briefPath );
         if( !brief.ok )
         {
-            std::fprintf( stderr, "ctxpack: --plan-lanes: cannot read --brief=%s\n", briefPath.c_str() );
+            std::fprintf( stderr, "ripwire: --plan-lanes: cannot read --brief=%s\n", briefPath.c_str() );
             return 1;
         }
         if( brief.lines.size() < lanes::kMinLanes || brief.lines.size() > lanes::kMaxLanes )
         {
-            std::fprintf( stderr, "ctxpack: --plan-lanes --brief=%s has %zu non-blank line(s) — one line per lane, and the lane "
+            std::fprintf( stderr, "ripwire: --plan-lanes --brief=%s has %zu non-blank line(s) — one line per lane, and the lane "
                                   "count must be %u..%u (1 is not a fan-out)\n",
                           briefPath.c_str(), brief.lines.size(), lanes::kMinLanes, lanes::kMaxLanes );
             return 1;
@@ -5471,7 +5471,7 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
 
     if( ing.symbols.empty() )
     {
-        std::fprintf( stderr, "ctxpack: --plan-lanes: no indexed symbols under %s — there is nothing to split into lanes\n", root.c_str() );
+        std::fprintf( stderr, "ripwire: --plan-lanes: no indexed symbols under %s — there is nothing to split into lanes\n", root.c_str() );
         return 1;
     }
 
@@ -5515,7 +5515,7 @@ ctx::gitoracle::HistoryIndex buildHistoryIndex( const ctx::Config& cfg, const st
 
     ctx::gitoracle::HistoryIndex idx = ctx::gitoracle::probeNameHistory( root );
     if( idx.nonGitRoot )
-        std::fprintf( stderr, "ctxpack: --with-history: %s has no git history — %s\n", root.c_str(), verbNote );
+        std::fprintf( stderr, "ripwire: --with-history: %s has no git history — %s\n", root.c_str(), verbNote );
     return idx;
 }
 
@@ -5535,7 +5535,7 @@ int runFlip( const MainDispatch& d )
     // (a pre-existing gap in that verb); --flip must not turn the same gap into "no gate named X".
     if( d.multiRoot )
     {
-        std::fprintf( stderr, "ctxpack: --flip is single-root only (the gate harvest reads on-disk paths, which a merged "
+        std::fprintf( stderr, "ripwire: --flip is single-root only (the gate harvest reads on-disk paths, which a merged "
                               "workspace relabels) — run it once per root\n" );
         return 1;
     }
@@ -5543,7 +5543,7 @@ int runFlip( const MainDispatch& d )
     const flipimpact::FlipResult result = flipimpact::computeFlip( d.ing, d.g, root, d.cfg.excludes, d.cfg.flipGate );
     if( !result.ok )
     {
-        std::string msg = "ctxpack: --flip: no gate named '" + std::string( d.cfg.flipGate ) + "' in " + root;
+        std::string msg = "ripwire: --flip: no gate named '" + std::string( d.cfg.flipGate ) + "' in " + root;
         if( !result.nearMisses.empty() )
         {
             msg += " (did you mean";
@@ -5552,7 +5552,7 @@ int runFlip( const MainDispatch& d )
             msg += "?)";
         }
         std::fprintf( stderr, "%s\n", msg.c_str() );
-        std::fprintf( stderr, "ctxpack: run `ctxpack %s --flags` for the gate table\n", root.c_str() );
+        std::fprintf( stderr, "ripwire: run `ripwire %s --flags` for the gate table\n", root.c_str() );
         return 1;
     }
     flipimpact::writeFlip( stdout, result, d.ing, root, d.cfg.detail ? SIZE_MAX : flipimpact::kMaxFlipRows );
@@ -5573,9 +5573,9 @@ int runAbiCheck( const MainDispatch& d )
     if( !result.ok )
     {
         if( result.nonGitRoot )
-            std::fprintf( stderr, "ctxpack: --abi: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
+            std::fprintf( stderr, "ripwire: --abi: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
         else
-            std::fprintf( stderr, "ctxpack: --abi: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+            std::fprintf( stderr, "ripwire: --abi: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
         return 1;
     }
     // --detail=N is this verb's ONE "show me everything" lever: it lifts the per-ref display cap AND prints
@@ -5616,7 +5616,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
     {
         if( d.multiRoot )
         {
-            std::fprintf( stderr, "ctxpack: --plan is single-root only (one repo = one ref namespace) — run it per root\n" );
+            std::fprintf( stderr, "ripwire: --plan is single-root only (one repo = one ref namespace) — run it per root\n" );
             return 1;
         }
         const landingplan::PlanResult result = landingplan::computePlan( root, cfg.strayFilter, d.ing, cfg.excludes, cfg.maxFileBytes,
@@ -5624,9 +5624,9 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         if( !result.ok )
         {
             if( result.nonGitRoot )
-                std::fprintf( stderr, "ctxpack: --plan: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
+                std::fprintf( stderr, "ripwire: --plan: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
             else
-                std::fprintf( stderr, "ctxpack: --plan: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+                std::fprintf( stderr, "ripwire: --plan: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
             return 1;
         }
         landingplan::writePlan( stdout, result );
@@ -5637,7 +5637,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
     {
         if( d.multiRoot )
         {
-            std::fprintf( stderr, "ctxpack: --stray-content is single-root only (one repo = one ref namespace) — run it per root\n" );
+            std::fprintf( stderr, "ripwire: --stray-content is single-root only (one repo = one ref namespace) — run it per root\n" );
             return 1;
         }
         if( cfg.abiFlag ) return runAbiCheck( d );   // --stray-content --abi: the cross-branch ABI-break gate
@@ -5645,9 +5645,9 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         if( !result.ok )
         {
             if( result.nonGitRoot )
-                std::fprintf( stderr, "ctxpack: --stray-content: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
+                std::fprintf( stderr, "ripwire: --stray-content: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
             else
-                std::fprintf( stderr, "ctxpack: --stray-content: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+                std::fprintf( stderr, "ripwire: --stray-content: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
             return 1;
         }
         // §P15/§P16: real paging over the outer, deterministically-sorted refs listing (see crossref.h's
@@ -5662,7 +5662,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         const crossref::EvalReport rep = crossref::evalStray( root, std::string( cfg.evalStray ) );
         if( !rep.ok )
         {
-            std::fprintf( stderr, "ctxpack: --eval-stray: cannot read '%.*s', or %s is not a git repository\n",
+            std::fprintf( stderr, "ripwire: --eval-stray: cannot read '%.*s', or %s is not a git repository\n",
                           int( cfg.evalStray.size() ), cfg.evalStray.data(), root.c_str() );
             return 1;
         }
@@ -5682,12 +5682,12 @@ std::optional<int> runCrossRef( const MainDispatch& d )
     {
         if( cfg.whereis.empty() )
         {
-            std::fprintf( stderr, "ctxpack: --whereis needs a symbol (e.g. --whereis=adoptValidatedLowBandContours)\n" );
+            std::fprintf( stderr, "ripwire: --whereis needs a symbol (e.g. --whereis=adoptValidatedLowBandContours)\n" );
             return 1;
         }
         if( d.multiRoot )
         {
-            std::fprintf( stderr, "ctxpack: --whereis is single-root only (one repo = one ref namespace) — run it per root\n" );
+            std::fprintf( stderr, "ripwire: --whereis is single-root only (one repo = one ref namespace) — run it per root\n" );
             return 1;
         }
         // --with-history: ONE git-history walk (memoized per repo+HEAD sha), giving --whereis the lane a tree
@@ -5702,7 +5702,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                                                                        crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs } );
         if( !result.ok )
         {
-            std::fprintf( stderr, "ctxpack: --whereis: %s is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );
+            std::fprintf( stderr, "ripwire: --whereis: %s is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );
             return 1;
         }
         crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset );
@@ -5749,7 +5749,7 @@ std::optional<int> runLayout( const MainDispatch& d )
 
     if( cfg.layoutStruct.empty() )
     {
-        std::fprintf( stderr, "ctxpack: --layout needs a struct/class name (e.g. --layout=AudioUniforms, or --layout=file.h:Name)\n" );
+        std::fprintf( stderr, "ripwire: --layout needs a struct/class name (e.g. --layout=AudioUniforms, or --layout=file.h:Name)\n" );
         return 1;
     }
 
@@ -5763,13 +5763,13 @@ std::optional<int> runLayout( const MainDispatch& d )
         // findDefBody's generic aggregate scan (a scoped enum's head contains the word "class"/"struct" too)
         // and silently degrade to a confident modeled="1" zero-field struct instead of refusing.
         if( result.enumCandidates > 0 )
-            std::fprintf( stderr, "ctxpack: --layout: '%.*s' is an enum, --layout models structs (a scoped/unscoped enum's underlying type is not a byte layout)\n",
+            std::fprintf( stderr, "ripwire: --layout: '%.*s' is an enum, --layout models structs (a scoped/unscoped enum's underlying type is not a byte layout)\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
         else if( result.bodilessCandidates > 0 )
-            std::fprintf( stderr, "ctxpack: --layout: '%.*s' is indexed but has no C-family aggregate body — this verb models C/C++/ObjC byte layout only\n",
+            std::fprintf( stderr, "ripwire: --layout: '%.*s' is indexed but has no C-family aggregate body — this verb models C/C++/ObjC byte layout only\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
         else
-            std::fprintf( stderr, "ctxpack: --layout: no indexed struct/class named '%.*s' (try --grep=%.*s to find its spelling)\n",
+            std::fprintf( stderr, "ripwire: --layout: no indexed struct/class named '%.*s' (try --grep=%.*s to find its spelling)\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data(),
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
         return 1;
@@ -5853,7 +5853,7 @@ int emitCommunitiesReport( const ctx::Config& cfg, const ctx::IngestResult& ing,
     // SAME module id emits shown=/capped= for the identical listing, so the two views of one module
     // disagreed about whether a cut had happened. Per rule 2, size= IS this element's total, so the pair is
     // the bare shown=/capped= form the drill verb uses, not a noun-prefixed one.
-    std::printf( "<!-- ctxpack communities: cohesive call-graph modules (Louvain); bridge=cross-module edges; isolated=call-graph-edgeless symbols; "
+    std::printf( "<!-- ripwire communities: cohesive call-graph modules (Louvain); bridge=cross-module edges; isolated=call-graph-edgeless symbols; "
                  "drill= names the verb that takes an id= from a row below. On each module row size= is its TRUE member count while "
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
@@ -5933,8 +5933,8 @@ int emitCommunityDrill( const ctx::Config& cfg, const ctx::IngestResult& ing, co
     if( !numeric || parsed >= K )
     {
         if( K == 0 )
-        { std::fprintf( stderr, "ctxpack: --community: this corpus has no call-graph modules to drill into\n" );  return 1; }
-        std::fprintf( stderr, "ctxpack: --community: '%.*s' is not a module id — valid ids are 0..%u (the id= values --communities "
+        { std::fprintf( stderr, "ripwire: --community: this corpus has no call-graph modules to drill into\n" );  return 1; }
+        std::fprintf( stderr, "ripwire: --community: '%.*s' is not a module id — valid ids are 0..%u (the id= values --communities "
                               "and --zoom print); nearest valid id: %u\n",
                       int( cfg.communityId.size() ), cfg.communityId.data(), K - 1,
                       numeric ? K - 1 : 0u );
@@ -5983,7 +5983,7 @@ int emitCommunityDrill( const ctx::Config& cfg, const ctx::IngestResult& ing, co
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
-    std::printf( "<!-- ctxpack community: ONE module from the communities/zoom partition — its ranked members and its bridge edges to "
+    std::printf( "<!-- ripwire community: ONE module from the communities/zoom partition — its ranked members and its bridge edges to "
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
@@ -6008,7 +6008,7 @@ std::optional<int> runCommunityDrill( const MainDispatch& d )
     if( !d.cfg.communityFlag ) return std::nullopt;
     if( d.cfg.communityId.empty() )
     {
-        std::fprintf( stderr, "ctxpack: --community needs a module ID — take one from the id= values --communities "
+        std::fprintf( stderr, "ripwire: --community needs a module ID — take one from the id= values --communities "
                               "or --zoom print, e.g. --community=12\n" );
         return 1;
     }
@@ -6096,7 +6096,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         {
             // nested-subgraph diagram: one subgraph per top module; its child modules (next-finer level) are
             // nodes inside; bridge edges connect top modules. Deterministic node ids = "L<level>_<gid>".
-            std::printf( "%%%% ctxpack --zoom --mermaid: nested module hierarchy (multi-level Louvain). subgraph = top module, inner node = sub-module (dir, symbol count); edge = cross-module call count. Render at mermaid.live.\n" );
+            std::printf( "%%%% ripwire --zoom --mermaid: nested module hierarchy (multi-level Louvain). subgraph = top module, inner node = sub-module (dir, symbol count); edge = cross-module call count. Render at mermaid.live.\n" );
             std::printf( "flowchart TB\n" );
             std::vector<char> esc;
             const auto ex = [ & ]( std::string_view s ) -> std::string { std::string r( s ); for( char& ch : r ) if( ch == '"' ) ch = '\''; return r; };
@@ -6152,7 +6152,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         std::size_t inHierarchy = 0;
         for( std::uint32_t gid : topOrder ) inHierarchy += members[topL][gid].size();
         const std::uint32_t isolatedCount = N - std::uint32_t( inHierarchy );
-        std::printf( "<!-- ctxpack zoom: NESTED module hierarchy (multi-level Louvain); indent = one level deeper; module = dominant-dir(symbol-count); leaf lists top-ranked symbols; bridge = cross-top-module call traffic. "
+        std::printf( "<!-- ripwire zoom: NESTED module hierarchy (multi-level Louvain); indent = one level deeper; module = dominant-dir(symbol-count); leaf lists top-ranked symbols; bridge = cross-top-module call traffic. "
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
@@ -6215,7 +6215,7 @@ std::optional<int> runZoom( const MainDispatch& d )
 }
 
 // §P11.8 — --tree is the session-start ORIENTATION map, and it emitted files in path order: the one order an
-// orientation map must not use. On ctxpack's own tree a cold agent's first 40 lines were audit-document
+// orientation map must not use. On ripwire's own tree a cold agent's first 40 lines were audit-document
 // section titles (`ADOPTION_AUDIT_…`, `AGENTS.md`, `AUDIT2_…` — every one of them sorts above `src/`) and the
 // code it had landed to read was pages down.
 //
@@ -6292,7 +6292,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        std::printf( "<!-- ctxpack seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages) -->" );
+        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages) -->" );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //
@@ -6378,7 +6378,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         };
 
         constexpr std::uint32_t minW = 3;                              // hide trivial edges for readability
-        std::printf( "%%%% ctxpack --mermaid: module (directory) dependency graph — node = dir (symbol count), edge = inter-module calls (>= %u). Render at mermaid.live.\n", minW );
+        std::printf( "%%%% ripwire --mermaid: module (directory) dependency graph — node = dir (symbol count), edge = inter-module calls (>= %u). Render at mermaid.live.\n", minW );
         std::printf( "flowchart LR\n" );
         // group shown nodes by TOP-LEVEL directory component → mermaid subgraphs (visual subsystem clusters)
         HashMap<std::string, std::vector<std::uint32_t>> groups;
@@ -6444,8 +6444,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // 5-backtick fence always safely embeds it whole (test/mdembedcheck.sh pins this). Every element below
         // is SYNTHESIZED (counts, sorted names, fixed section labels) — no verbatim file content is embedded,
         // which is what makes this an enforceable guarantee rather than an incidental one (contrast --recall).
-        std::printf( "<!-- ctxpack markdown: no run of 4-or-more backticks in this output — safe to embed inside a wider fence -->\n\n" );
-        std::printf( "# ctxpack architecture report\n\n%u files · %u symbols · %u edges · %u modules (%u call-graph isolated)\n\n",
+        std::printf( "<!-- ripwire markdown: no run of 4-or-more backticks in this output — safe to embed inside a wider fence -->\n\n" );
+        std::printf( "# ripwire architecture report\n\n%u files · %u symbols · %u edges · %u modules (%u call-graph isolated)\n\n",
                      F, N, std::uint32_t( g.outTargets.size() ), modules, isolates.total );
         std::printf( "Call-graph isolate provenance: %u declaration, %u header, %u source, %u document; %u connected Louvain singletons\n\n",
                      isolates.declaration, isolates.header, isolates.source, isolates.document, isolates.connectedSingletons );
@@ -6514,7 +6514,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // symbol-less files files= includes but no <file> row can ever list (fine — a file with no symbols
         // has nothing to preview — but silent until now).
         const std::uint32_t filesUnlisted = F - std::uint32_t( ford.size() );
-        std::printf( "<!-- ctxpack tree: each file + its top symbols by rank, files ordered by their best "
+        std::printf( "<!-- ripwire tree: each file + its top symbols by rank, files ordered by their best "
                      "symbol's rank (path breaks ties) — a session-start orientation map. files= is the indexed "
                      "corpus; rows list files WITH symbols; files_unlisted= holds the symbol-less remainder "
                      // W3FIX NIT: "files equals the listed rows plus files_unlisted on every run" reads FALSE on
@@ -6586,8 +6586,8 @@ int emitGrepReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
     if( cfg.grepRegex )
         if( const std::optional<std::string> reErr = regexCompileError( pat ) )
         {
-            std::fprintf( stderr, "ctxpack: --regex='%s' is not a valid regular expression: %s "
-                                  "(a hits=\"0\" here would be a failure, not a measurement — fix the pattern, e.g. ctxpack <dir> --regex='fnv1a\\w+')\n",
+            std::fprintf( stderr, "ripwire: --regex='%s' is not a valid regular expression: %s "
+                                  "(a hits=\"0\" here would be a failure, not a measurement — fix the pattern, e.g. ripwire <dir> --regex='fnv1a\\w+')\n",
                           pat.c_str(), reErr->c_str() );
             return 1;
         }
@@ -6640,7 +6640,7 @@ int emitGrepReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
     // states its ordering in full and grep's said nothing.
     // §B12.4 in-band (W3FIX): same shared clause as --impact, so limit="0" is DEFINED on the first screen of
     // the two verbs an agent walks most, not only in --help and pageview.h.
-    std::printf( "<!-- ctxpack grep: parallel literal/regex scan; each hit carries its matched line (m) and enclosing symbol (in=, "
+    std::printf( "<!-- ripwire grep: parallel literal/regex scan; each hit carries its matched line (m) and enclosing symbol (in=, "
                  "a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
                  "ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
@@ -6747,8 +6747,8 @@ std::optional<int> runLint( const MainDispatch& d )
                         // patterns, zero patterns, and a mis-quoted query alike, and naming the wrong one
                         // would be its own small fabrication. Show the query as received and let the
                         // reader see the stray quote / second pattern for themselves.
-                        std::fprintf( stderr, "ctxpack: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
-                                              "ctxpack auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
+                        std::fprintf( stderr, "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
+                                              "ripwire auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
                                               "(query as received: %s)\n",
                                       matchQuery.c_str() );
                         return 1;
@@ -6764,7 +6764,7 @@ std::optional<int> runLint( const MainDispatch& d )
             // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
             if( !uncompiled.empty() )
             {
-                std::fprintf( stderr, "ctxpack: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
+                std::fprintf( stderr, "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
                                       "(query as received: %s)\n",
                               std::string( cfg.match ).c_str() );
                 return 1;
@@ -6777,9 +6777,9 @@ std::optional<int> runLint( const MainDispatch& d )
             const PageWindow  matchPage  = pageWindow( ms.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
             const std::size_t matchShown = matchPage.end - matchPage.begin;
             char              mpab[ kPageDisclosureCap ];
-            std::printf( "<!-- ctxpack match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
+            std::printf( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
                          "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached). "
-                         "auto_captured=\"1\" ⇒ the query bound no @capture and ctxpack appended `@m` to its single top-level pattern. "
+                         "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
                          "raise the default cap with limit=N (offset=M pages) -->" );
             std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s>",
                          ms.size(),
@@ -6800,7 +6800,7 @@ std::optional<int> runLint( const MainDispatch& d )
         }
 
         // --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
-        // never the [FLOW]/[TYPE] checks ctxpack can't see soundly (RESEARCH_codeIntelligence §0/§4).
+        // never the [FLOW]/[TYPE] checks ripwire can't see soundly (RESEARCH_codeIntelligence §0/§4).
         //
         // S6-A: added 4 new AST-query checks + 3 symbol-level checks (large-function, deep-nesting,
         // inconsistent-return) that require body-text analysis beyond what a single tree-sitter capture gives.
@@ -6994,7 +6994,7 @@ std::optional<int> runLint( const MainDispatch& d )
             userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
             if( userRules.empty() )
             {
-                std::fprintf( stderr, "ctxpack: --lint-rules=%.*s: no rules loaded\n", int( cfg.lintRulesDir.size() ), cfg.lintRulesDir.data() );
+                std::fprintf( stderr, "ripwire: --lint-rules=%.*s: no rules loaded\n", int( cfg.lintRulesDir.size() ), cfg.lintRulesDir.data() );
                 return 1;
             }
             const auto [ userFindings, saturatedUserRuleIds ] = runLintRules( ing, userRules );
@@ -7030,7 +7030,7 @@ std::optional<int> runLint( const MainDispatch& d )
         const bool anyRuleCapped = !saturatedRules.empty();
 
         // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
-        std::printf( "<!-- ctxpack lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
+        std::printf( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
                      "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
                      "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
                      "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
@@ -7110,7 +7110,7 @@ std::optional<int> runAround( const MainDispatch& d )
         const NodeId focus = resolveFocus( ing, cfg.around );
         if( focus == kNoNode )
         {
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ctxpack: --around symbol not found: ",
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --around symbol not found: ",
                                                                    cfg.around, "--around=" ).c_str() );   // §B4.2
             return 1;
         }
@@ -7136,7 +7136,7 @@ std::optional<int> runAround( const MainDispatch& d )
 
         // §B4b — G4: serialize() owns <r>…</r> and CLOSES it, so these two sibling blocks were a SECOND
         // top-level element (`--around=buildRecall` tailed `…</r><compose>…</compose>`, xmllint rejected it,
-        // ctxpack exited 0). See ctx::aroundNeedsCtxWrap above for the full finding and the wrapper rule.
+        // ripwire exited 0). See ctx::aroundNeedsCtxWrap above for the full finding and the wrapper rule.
         // Trap #8 ("a disclosure has BYTES"): the 11 wrapper bytes are charged at the markup rate, like the
         // sections they enclose.
         const ctx::CtxWrap wrap = ctx::ctxWrapFor( aroundCompose, !g.composeEdges.empty(),
@@ -7209,7 +7209,7 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
         // renamed the identical semantic for exactly that reason (recall.h's emitRecallBudgeted, N3) and this
         // sibling — inside the same round's own fix — kept the old spelling. Same vocabulary now, all three
         // channels (XML record, JSON record, stderr), so a script can key on one name.
-        std::fprintf( stderr, "ctxpack: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n", mapEstTokens, tokenBudget );
+        std::fprintf( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n", mapEstTokens, tokenBudget );
         if( tb.buf )
         {
             if( asJson ) std::fprintf( real, "{\"withheld_est_tokens\":%zu,\"budget\":%zu,\"withheld\":true}", mapEstTokens, tokenBudget );
@@ -7251,7 +7251,7 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
     const auto discloseEmptyChurn = [ & ]( const std::string& windowStamp )
     {
         if( hasChurnEvidence ) return;
-        std::fprintf( stderr, "ctxpack: --rank-by=churn found no commits in its window; using uniform (structural) ranking — this map is "
+        std::fprintf( stderr, "ripwire: --rank-by=churn found no commits in its window; using uniform (structural) ranking — this map is "
                               "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", windowStamp.c_str() );
     };
 
@@ -7318,7 +7318,7 @@ int runDefaultMap( const MainDispatch& d )
             // replaced, and scrubbed NEITHER control bytes nor invalid UTF-8 — while RouteChoice::reason
             // embeds `identifierHit`, the user's own query token (lexical.h). So `--query=$'parseArgs\001x'`
             // put a raw 0x01 inside an XML comment and `--query=$'parseArgs\377x'` an invalid UTF-8 byte:
-            // ctxpack exited 0 and xmllint rejected the whole document, which is a G4 breach at exit 0 —
+            // ripwire exited 0 and xmllint rejected the whole document, which is a G4 breach at exit 0 —
             // the ONE real breach a control byte swept through 19 value-taking verbs found.
             //
             // The dash collapse is byte-identical to what stood here (both reduce a run of '-' to one), so
@@ -7348,7 +7348,7 @@ int runDefaultMap( const MainDispatch& d )
             rank = rankGraphTeleport( g, diffTeleport( ing, changed ) );
         else
         {
-            std::fprintf( stderr, "ctxpack: --map-diff requires git in PATH; using uniform ranking\n" );
+            std::fprintf( stderr, "ripwire: --map-diff requires git in PATH; using uniform ranking\n" );
             rank = rankGraph( g );
         }
     }
@@ -7567,7 +7567,7 @@ int runDefaultMap( const MainDispatch& d )
             if( !htmlOut )
             {
                 DEGRADED_PATH_ALERT( "writeHtml: could not open output file" );
-                std::fprintf( stderr, "ctxpack: --html=%s: cannot open file for writing\n", htmlPath.c_str() );
+                std::fprintf( stderr, "ripwire: --html=%s: cannot open file for writing\n", htmlPath.c_str() );
                 return 1;
             }
         }
@@ -7612,11 +7612,11 @@ int runDefaultMap( const MainDispatch& d )
                 // the path half. selectorFaultClause does the split (and states when the path itself is
                 // unindexed); this arm keeps its own flag-first sentence byte-for-byte ahead of it.
                 expandMissed = true;
-                std::fprintf( stderr, "ctxpack: --expand=%s matched no symbol%s\n", et.selector.c_str(),
+                std::fprintf( stderr, "ripwire: --expand=%s matched no symbol%s\n", et.selector.c_str(),
                               ctx::selectorFaultClause( ing, et.selector, "--expand=" ).c_str() );
             }
             else if( matches.size() > 8 )   // final-segment names (reset/size/update) collide widely
-                std::fprintf( stderr, "ctxpack: --expand=%s matches %zu symbols; emitting all up to --pack-budget-bytes (qualify with file:name to narrow)\n",
+                std::fprintf( stderr, "ripwire: --expand=%s matches %zu symbols; emitting all up to --pack-budget-bytes (qualify with file:name to narrow)\n",
                               et.selector.c_str(), matches.size() );
             for( NodeId id : matches )
             {
@@ -7645,7 +7645,7 @@ int runDefaultMap( const MainDispatch& d )
             const ExpandToken ot = parseExpandToken( rawNm, "--outline" );
             const std::string nm = ot.range.hasRange ? ot.selector : rawNm;
             if( ot.range.hasRange )
-                std::fprintf( stderr, "ctxpack: --outline=%s: --outline has no line-range form — outlining the whole symbol "
+                std::fprintf( stderr, "ripwire: --outline=%s: --outline has no line-range form — outlining the whole symbol "
                                       "(use --expand=%s:%u-%u for a body slice)\n",
                               rawNm.c_str(), ot.selector.c_str(), ot.range.startLine, ot.range.endLine );
 
@@ -7654,7 +7654,7 @@ int runDefaultMap( const MainDispatch& d )
             {
                 // §M7 (W3FIX): same grammar, same shared refusal as --expand above.
                 outlineMissed = true;
-                std::fprintf( stderr, "ctxpack: --outline=%s matched no symbol%s\n", nm.c_str(),
+                std::fprintf( stderr, "ripwire: --outline=%s matched no symbol%s\n", nm.c_str(),
                               ctx::selectorFaultClause( ing, nm, "--outline=" ).c_str() );
             }
             for( NodeId id : matches ) outlineNodes.push_back( id );
@@ -7713,7 +7713,7 @@ int runDefaultMap( const MainDispatch& d )
     // default emits, so the map stays — but the caller is TOLD, once, on stderr (stdout stays byte-identical),
     // and --top-k=0 is the documented off switch. Fires only when the user did not choose a top-k themselves.
     if( !cfg.topKExplicit && ( !cfg.expand.empty() || !cfg.outline.empty() ) && !cfg.json )
-        std::fprintf( stderr, "ctxpack: note — the ranked top-%d map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
+        std::fprintf( stderr, "ripwire: note — the ranked top-%d map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
 
     // §F5 — THE CEILING VERDICT, taken here because this is the first point where every input to the map's own
     // byte count is settled: mapTopK (post --max-tokens, post --adaptive) and payloadTokens (the §H7 charge that
@@ -7808,7 +7808,7 @@ int runDefaultMap( const MainDispatch& d )
     // fail loudly instead of exiting 0 with a silently-truncated map (CI gates trust the exit code)
     if( std::fflush( stdout ) != 0 || std::ferror( stdout ) )
     {
-        std::fprintf( stderr, "ctxpack: write error — output truncated\n" );
+        std::fprintf( stderr, "ripwire: write error — output truncated\n" );
         return 1;
     }
 
@@ -7835,7 +7835,7 @@ int runDefaultMap( const MainDispatch& d )
 // SHAPE modifiers, and a refusal that enumerates them against "supported verbs" sends the reader hunting for
 // a verb to drop instead of an encoding to pick. The return value says which kind it found, so the caller can
 // word the two cases differently.
-// §B11.4 — THE REPORT-VERB PRECEDENCE TABLE, in ctxpack's real DISPATCH order (main()'s handler chain, then
+// §B11.4 — THE REPORT-VERB PRECEDENCE TABLE, in ripwire's real DISPATCH order (main()'s handler chain, then
 // each handler's own arm order). One row per verb-selecting flag, so adding a verb is adding a ROW rather
 // than editing a message — the house rule for exactly this shape.
 //
@@ -7892,8 +7892,8 @@ void warnReportVerbPrecedence( const ctx::Config& c )
     }
     if( ignored.empty() ) return;   // 0 or 1 verb — nothing was dropped, so nothing is said
 
-    std::fprintf( stderr, "ctxpack: %s takes precedence when several verbs are given — IGNORED this run: %s. "
-                          "The winner is fixed by ctxpack's dispatch order, NOT by the order you typed them; "
+    std::fprintf( stderr, "ripwire: %s takes precedence when several verbs are given — IGNORED this run: %s. "
+                          "The winner is fixed by ripwire's dispatch order, NOT by the order you typed them; "
                           "pass one verb per run.\n", winner, ignored.c_str() );
 }
 
@@ -8019,15 +8019,15 @@ int main( int argc, char** argv )
     // one silently wins and the rest are ignored outright, with no signal to the caller that anything was
     // dropped. Warn once, on stderr, one line per conflict; behavior is UNCHANGED (the same flag still wins).
     if( !cfg.forTask.empty() && ( !cfg.query.empty() || cfg.packTaskFlag ) )
-        std::fprintf( stderr, "ctxpack: --for takes precedence over --query/--pack-task when both are given (the others are ignored)\n" );
+        std::fprintf( stderr, "ripwire: --for takes precedence over --query/--pack-task when both are given (the others are ignored)\n" );
     else if( cfg.packTaskFlag && !cfg.query.empty() )
-        std::fprintf( stderr, "ctxpack: --pack-task takes precedence over --query when both are given (--query is ignored)\n" );
+        std::fprintf( stderr, "ripwire: --pack-task takes precedence over --query when both are given (--query is ignored)\n" );
     if( cfg.stable && cfg.mostImportantLast )
-        std::fprintf( stderr, "ctxpack: --stable takes precedence over --most-important-last when both are given (emit order stays path/id order)\n" );
+        std::fprintf( stderr, "ripwire: --stable takes precedence over --most-important-last when both are given (emit order stays path/id order)\n" );
 
     // §B11.4 (CA4) — the SAME hazard X9(c) discloses for three flags, on the ~50 report verbs it never
     // reached. `--hotspots --clones` emits hotspots only, exit 0, stderr EMPTY; `--owners --clones` emits
-    // CLONES — because the winner is fixed by ctxpack's internal DISPATCH ORDER, not by the order the flags
+    // CLONES — because the winner is fixed by ripwire's internal DISPATCH ORDER, not by the order the flags
     // were typed, which is the part no caller can guess. Behaviour is unchanged: the same verb still wins,
     // and this only says so. Warns ONCE per run, listing every verb that was dropped.
     warnReportVerbPrecedence( cfg );
@@ -8043,17 +8043,17 @@ int main( int argc, char** argv )
         if( const char* unsupported = jsonUnsupportedVerb( cfg ) )
         {
             if( isJsonShapeModifier( unsupported ) )
-                std::fprintf( stderr, "ctxpack: --json and %s are two output SHAPES for the same rows — pass one, not both "
-                              "(e.g. ctxpack <dir> --callers=SYM --json, or ctxpack <dir> --callers=SYM %s)\n", unsupported, unsupported );
+                std::fprintf( stderr, "ripwire: --json and %s are two output SHAPES for the same rows — pass one, not both "
+                              "(e.g. ripwire <dir> --callers=SYM --json, or ripwire <dir> --callers=SYM %s)\n", unsupported, unsupported );
             else
                 // §B1.2: the enumeration used to stop at --test-gate and never mention --metrics, which HAS
                 // had a full JSON twin (row keys amp/cbo/ccx/cx/in/loc/nest/out/params/role/tested) since it
                 // was never added to the deny-chain above — so a caller obeying THIS refusal never learned
                 // the one flag it was actually looking for existed. Corrected in the same commit as the
                 // eight new arms above, so the sentence changes exactly once.
-                std::fprintf( stderr, "ctxpack: --json is not yet supported for %s — supported: the default map, "
+                std::fprintf( stderr, "ripwire: --json is not yet supported for %s — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics (e.g. ctxpack <dir> --callers=SYM --json)\n", unsupported );
+                              "--metrics (e.g. ripwire <dir> --callers=SYM --json)\n", unsupported );
             return 1;
         }
 
@@ -8066,7 +8066,7 @@ int main( int argc, char** argv )
     // tell a no-op from a typo, and one line on stderr closes exactly that gap while changing no output byte.
     // Deliberately not a refusal, and deliberately not silence.
     if( cfg.json && cfg.planLanesFlag )
-        std::fprintf( stderr, "ctxpack: --plan-lanes always emits JSON — --json is redundant here and changes nothing\n" );
+        std::fprintf( stderr, "ripwire: --plan-lanes always emits JSON — --json is redundant here and changes nothing\n" );
 
     if( cfg.mcp )
     {
@@ -8078,7 +8078,7 @@ int main( int argc, char** argv )
             hc.listenSpec = std::string( cfg.listen );
             hc.token      = std::string( cfg.mcpToken );
             if( hc.token.empty() )
-                if( const char* envTok = std::getenv( "CTXPACK_MCP_TOKEN" ); envTok && *envTok ) hc.token = envTok;   // env fallback (avoids the secret in argv/ps)
+                if( const char* envTok = std::getenv( "RIPWIRE_MCP_TOKEN" ); envTok && *envTok ) hc.token = envTok;   // env fallback (avoids the secret in argv/ps)
             hc.root             = std::string( cfg.rootPath );
             for( std::string_view r : cfg.roots ) hc.roots.emplace_back( r );
             hc.topK             = cfg.topK;
@@ -8088,8 +8088,8 @@ int main( int argc, char** argv )
             return runMcpHttp( hc );
         }
         // X7 (D3/D4): thread the SAME positional-root plumbing the HTTP branch above uses into the stdio
-        // loop too — a bare `ctxpack --mcp` (no root) keeps the pre-X7 "every request names its own path"
-        // behavior (roots empty ⇒ runMcp's defaultRoot stays ""); `ctxpack <root> --mcp` now actually uses it.
+        // loop too — a bare `ripwire --mcp` (no root) keeps the pre-X7 "every request names its own path"
+        // behavior (roots empty ⇒ runMcp's defaultRoot stays ""); `ripwire <root> --mcp` now actually uses it.
         std::vector<std::string> mcpRoots;
         for( std::string_view r : cfg.roots ) mcpRoots.emplace_back( r );
         return runMcp( cfg.topK, cfg.stable, cfg.noRedact, std::string( cfg.rootPath ), mcpRoots );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
@@ -8102,7 +8102,7 @@ int main( int argc, char** argv )
     {
         const auto refuse = [ & ]( const char* what, const char* why ) -> int
         {
-            std::fprintf( stderr, "ctxpack: %s is single-root only in a multi-root workspace — %s\n", what, why );
+            std::fprintf( stderr, "ripwire: %s is single-root only in a multi-root workspace — %s\n", what, why );
             return 1;
         };
         if( cfg.qualityDelta || cfg.qualityBaseline )
@@ -8146,7 +8146,7 @@ int main( int argc, char** argv )
         if( cfg.planLanesFlag )
             return refuse( "--plan-lanes", "the carve, the at= stamp and the churn/hotspot lens are all per-repo; run it per root" );
         if( cfg.noteAddFlag || cfg.notesList )
-            return refuse( "--note-add/--notes", "the .ctxpack_notes file lives at ONE repo root (its targets are that root's canonical ids); run it per root" );
+            return refuse( "--note-add/--notes", "the .ripwire_notes file lives at ONE repo root (its targets are that root's canonical ids); run it per root" );
     }
 
     // ── --doctor: self-diagnosis, before the heavy ingest pipeline (like --scan-skill above) ─────
@@ -8173,14 +8173,14 @@ int main( int argc, char** argv )
         const SkillFileReadResult result = scanSkillFileChecked( path );
         if( !result.readable )
         {
-            std::fprintf( stderr, "ctxpack: --scan-skill: cannot read '%s' — no scan performed\n", path.c_str() );
+            std::fprintf( stderr, "ripwire: --scan-skill: cannot read '%s' — no scan performed\n", path.c_str() );
             return 3;
         }
         std::vector<SkillScanRow> rows;
         rows.reserve( result.findings.size() );
         for( const SkillFinding& f : result.findings ) rows.push_back( { path, f } );
         printSkillScanArtifact( stdout, rows, /*filesScanned=*/1 );
-        std::fprintf( stderr, "ctxpack scan: %d finding(s) in %s\n", int( result.findings.size() ), path.c_str() );
+        std::fprintf( stderr, "ripwire scan: %d finding(s) in %s\n", int( result.findings.size() ), path.c_str() );
         return skillScanExitCode( result.findings );
     }
 
@@ -8199,7 +8199,7 @@ int main( int argc, char** argv )
             const bool isDir = exists && fs::is_directory( cfg.scanSkillsDir, ec ) && !ec;
             if( !exists || !isDir )
             {
-                std::fprintf( stderr, "ctxpack: --scan-skills: cannot read '%.*s' — no scan performed\n",
+                std::fprintf( stderr, "ripwire: --scan-skills: cannot read '%.*s' — no scan performed\n",
                               int( cfg.scanSkillsDir.size() ), cfg.scanSkillsDir.data() );
                 return 3;
             }
@@ -8237,7 +8237,7 @@ int main( int argc, char** argv )
         // §B13.3 — WHAT COUNTS AS A SKILL FILE, and why this walk no longer says ".md".
         // It used to collect `.md` only. `files="22"` was honest about what it scanned and silent about what
         // it did not: this repo's skills/ holds 24 files, and the two it never opened are `skills/install.sh`
-        // and `skills/hooks/ctxpack-nudge.sh` — under `verdict="clean"`, with no counter and no legend clause.
+        // and `skills/hooks/ripwire-nudge.sh` — under `verdict="clean"`, with no counter and no legend clause.
         // An injection scanner's directory verdict silently excluded that directory's two EXECUTABLES, which
         // are the files most worth scanning. The single-file form has no such filter (`--scan-skill=<any
         // file>` scans it), so the two entry points disagreed about their own subject.
@@ -8334,7 +8334,7 @@ int main( int argc, char** argv )
         // 0 skill files" (an empty/unpopulated dir — a real measurement) legible on its own, distinct from
         // this same verb's exit-3 refusal above (which never gets here). §B13.3 adds the other half of the
         // population to the same line: what the walk saw and could not scan, and what it did not descend.
-        std::fprintf( stderr, "ctxpack scan: %d finding(s) total (%d skill file(s) scanned, %d unscannable file(s) skipped, %d denylisted subtree(s) not descended)\n",
+        std::fprintf( stderr, "ripwire scan: %d finding(s) total (%d skill file(s) scanned, %d unscannable file(s) skipped, %d denylisted subtree(s) not descended)\n",
                       totalFindings, filesScanned, filesSkipped, prunedDirs );
         return maxSev;
     }
@@ -8362,7 +8362,7 @@ int main( int argc, char** argv )
         {
             const std::string bf( cfg.batchFile );
             std::FILE* f = std::fopen( bf.c_str(), "rb" );
-            if( !f ) { std::fprintf( stderr, "ctxpack: --batch: cannot open '%s'\n", bf.c_str() ); return 1; }
+            if( !f ) { std::fprintf( stderr, "ripwire: --batch: cannot open '%s'\n", bf.c_str() ); return 1; }
             char buf[ 4096 ]; std::size_t n;
             while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 ) content.append( buf, n );
             std::fclose( f );
@@ -8450,7 +8450,7 @@ int main( int argc, char** argv )
             std::error_code rootEc;
             if( !fs::exists( fs::path( resolvedRoot ), rootEc ) || rootEc )
             {
-                std::fprintf( stderr, "ctxpack: root path does not exist: %s\n", resolvedRoot.c_str() );
+                std::fprintf( stderr, "ripwire: root path does not exist: %s\n", resolvedRoot.c_str() );
                 return 1;
             }
         }
@@ -8470,8 +8470,8 @@ int main( int argc, char** argv )
     const std::string root( multiRoot ? ws[0].arg : resolvedRoots[0] );   // single-root alias; multi-root sites branch on `ws`
 
     // --index-out=BASE (DESIGN_teamIndex §1.4, both-families amendment): the CI generate-and-exit path.
-    // Cold-parse the tree TWICE — once lean, once rich — writing BASE.lean.ctxpackcache and
-    // BASE.rich.ctxpackcache, then exit 0 WITHOUT emitting a map. Both families ship because the flagship
+    // Cold-parse the tree TWICE — once lean, once rich — writing BASE.lean.ripwirecache and
+    // BASE.rich.ripwirecache, then exit 0 WITHOUT emitting a map. Both families ship because the flagship
     // orientation verbs (--for/--exemplar/--metrics/--uses) ingest RICH and a lean-only artifact leaves
     // them cold (measured: lean 1.46 MB, rich 2.80 MB on this repo). This is sugar over --cache, not a
     // second write path — it reuses ingest()'s existing saveCache machinery, one ingest per explicit cache
@@ -8483,7 +8483,7 @@ int main( int argc, char** argv )
     {
         const std::string       base( cfg.indexOut );
         struct Family { const char* suffix; bool rich; };
-        const Family families[2] = { { ".lean.ctxpackcache", false }, { ".rich.ctxpackcache", true } };
+        const Family families[2] = { { ".lean.ripwirecache", false }, { ".rich.ripwirecache", true } };
 
         int rc = 0;
         for( const Family& fam : families )
@@ -8498,11 +8498,11 @@ int main( int argc, char** argv )
             const std::uintmax_t  sz = std::filesystem::file_size( std::filesystem::path( path ), ec );
             if( ec || sz == 0 )
             {
-                std::fprintf( stderr, "ctxpack: --index-out: failed to write %s\n", path.c_str() );
+                std::fprintf( stderr, "ripwire: --index-out: failed to write %s\n", path.c_str() );
                 rc = 1;
             }
             else
-                std::fprintf( stderr, "ctxpack: --index-out wrote %s (%llu bytes, %s family)\n",
+                std::fprintf( stderr, "ripwire: --index-out wrote %s (%llu bytes, %s family)\n",
                               path.c_str(), static_cast<unsigned long long>( sz ), fam.rich ? "rich" : "lean" );
         }
         return rc;
@@ -8520,7 +8520,7 @@ int main( int argc, char** argv )
         // Multi-root ingest (DESIGN_multiRoot.md §4): ONE existing per-root cache blob per root (the exact
         // defaultCachePath keying, label-free content), each root crawled + parsed independently in canonical
         // order, then merged by one id-offset pass. Incrementality is structural: an edit in root2 dirties
-        // ONLY root2's blob — root1's load is a pure warm hit (CTXPACK_CACHE_STATS proves it per root).
+        // ONLY root2's blob — root1's load is a pure warm hit (RIPWIRE_CACHE_STATS proves it per root).
         std::vector<IngestResult> parts;
         parts.reserve( ws.size() );
         for( const WorkspaceRoot& r : ws )
@@ -8546,7 +8546,7 @@ int main( int argc, char** argv )
     if( cfg.ignoreTests )
         applyIgnoreTests( ing );
 
-    if( std::getenv( "CTXPACK_STATS" ) )   // how many std::strings the stored model holds (+ their bytes)
+    if( std::getenv( "RIPWIRE_STATS" ) )   // how many std::strings the stored model holds (+ their bytes)
     {
         std::size_t pathB = 0, nameB = 0, calleeB = 0, incB = 0;
         for( const auto& f : ing.files )      pathB   += f.size();
@@ -8563,7 +8563,7 @@ int main( int argc, char** argv )
             "        includes/targets   = %zu (%zu B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
     }
-    // W4-#15 SCIP precision overlay: parse the index (if --scip given) → map to ctxpack ids → hand to
+    // W4-#15 SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
     // buildGraph as an optional parameter. A missing/corrupt/mismatched index yields an EMPTY overlay
     // (one DEGRADED_PATH_ALERT + stderr note) and the build proceeds name-based, byte-identical to no --scip.
     ScipOverlay scipOverlay;
@@ -8695,7 +8695,7 @@ int main( int argc, char** argv )
     RedactCounts        redactCounts;
     RedactCounts* const redactPtr = cfg.noRedact ? nullptr : &redactCounts;
 
-    // L3 field notes: load root/.ctxpack_notes ONCE (a small file) into the surfacing index. Single-root only
+    // L3 field notes: load root/.ripwire_notes ONCE (a small file) into the surfacing index. Single-root only
     // (a workspace has no single repo root — notes are a per-repo artifact), and nullptr when EMPTY so every
     // surfacing seam (--for/--expand/MCP) stays byte-identical when there is nothing to show — the inertness
     // contract. Retrieval handlers below read notesPtr; --note-add/--notes have their own handler.

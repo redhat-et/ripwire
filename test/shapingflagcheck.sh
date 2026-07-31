@@ -29,20 +29,20 @@
 # `! cmp -s` accepted. The byte delta is printed either way, and the disclosure-outweighs-the-saving case is
 # NAMED in the pass line rather than reported as a shrink that did not happen.
 #
-#   bash test/shapingflagcheck.sh                        # build/ctxpack
+#   bash test/shapingflagcheck.sh                        # build/ripwire
 #   bash test/shapingflagcheck.sh <scratch>/base_w3      # red-first: the notices are absent there
-#   CTXPACK_BIN=asan/ctxpack bash test/shapingflagcheck.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/shapingflagcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "shapingflagcheck: BIN=$BIN"
 git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.before"

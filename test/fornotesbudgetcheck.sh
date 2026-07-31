@@ -3,9 +3,9 @@
 # --token-budget, the way the JSON sibling already does.
 #
 # Usage:
-#   test/fornotesbudgetcheck.sh                      # uses build/ctxpack
-#   test/fornotesbudgetcheck.sh asan/ctxpack
-#   CTXPACK_BIN=build_base/ctxpack test/fornotesbudgetcheck.sh   # red-first: the XML arms MUST fail here
+#   test/fornotesbudgetcheck.sh                      # uses build/ripwire
+#   test/fornotesbudgetcheck.sh asan/ripwire
+#   RIPWIRE_BIN=build_base/ripwire test/fornotesbudgetcheck.sh   # red-first: the XML arms MUST fail here
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
@@ -27,11 +27,11 @@
 #     and well-formed.
 #
 # The corpus is built here, in a temp dir this script creates and removes: it needs its own git repo
-# (notes are provenance-stamped) and its own .ctxpack_notes, neither of which belongs in the tree.
+# (notes are provenance-stamped) and its own .ripwire_notes, neither of which belongs in the tree.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
@@ -40,7 +40,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "fornotesbudgetcheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "fornotesbudgetcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "fornotesbudgetcheck: python3 is required (JSON arms)"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "fornotesbudgetcheck: git is required (notes carry a sha/branch stamp)"; exit 2; }
 
@@ -67,7 +67,7 @@ for i in 0 1 2 3 4 5 6 7 8 9 10 11; do
     "$BIN" "$CORPUS" --note-add="widgetRoutine${i}_${j}: $NOTE" >/dev/null 2>&1
   done
 done
-[ -s "$CORPUS/.ctxpack_notes" ] || { echo "fornotesbudgetcheck: --note-add wrote no notes — the corpus cannot exercise the contract"; exit 2; }
+[ -s "$CORPUS/.ripwire_notes" ] || { echo "fornotesbudgetcheck: --note-add wrote no notes — the corpus cannot exercise the contract"; exit 2; }
 
 TASK="widget dispatcher pipeline stage"
 
@@ -112,9 +112,9 @@ if [ "$fullText" -ge 1 ]; then ok "a surviving note carries its FULL text (no no
 else no "a surviving note lost its tail — notes must be charged, never trimmed"; fi
 
 # ── arm 4: L3 inertness — a tree with no notes is unaffected by any of this ────────────────────────
-rm -f "$CORPUS/.ctxpack_notes"
+rm -f "$CORPUS/.ripwire_notes"
 bare="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=800 2>/dev/null )"
-case "$bare" in *"<note "*) no "a tree with no .ctxpack_notes still emitted a <note> element";; *) ok "a tree with no notes emits none (L3 inertness)";; esac
+case "$bare" in *"<note "*) no "a tree with no .ripwire_notes still emitted a <note> element";; *) ok "a tree with no notes emits none (L3 inertness)";; esac
 bareEst="$( printf '%s' "$bare" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
 if [ -n "$bareEst" ] && [ "$bareEst" -le 800 ]; then ok "no-notes tree also fits the ceiling (est_tokens=$bareEst)"
 else no "no-notes tree reports est_tokens='$bareEst' against a budget of 800"; fi

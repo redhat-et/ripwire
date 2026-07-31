@@ -19,13 +19,13 @@
 # nested list found in the output it asserts: shown= equals the actual printed row count, the listing's own
 # total attribute >= shown, capped= is "1" iff total>shown else "0", and the legend names the fixed caps.
 #
-# Usage:  bash test/prnestedcapcheck.sh [path/to/ctxpack]
-#         CTXPACK_BIN=build_base/ctxpack bash test/prnestedcapcheck.sh   # red-first: must FAIL (no disclosure)
+# Usage:  bash test/prnestedcapcheck.sh [path/to/ripwire]
+#         RIPWIRE_BIN=build_base/ripwire bash test/prnestedcapcheck.sh   # red-first: must FAIL (no disclosure)
 # Exits non-zero on any failure. Does NOT edit regression.sh (test/pargates.py auto-discovers *check.sh).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # house convention: the suite passes the binary via CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # house convention: the suite passes the binary via RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }

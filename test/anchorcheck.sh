@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # anchorcheck.sh — the AUDIT3 steal-#1 gate: LARGER-style lexically-anchored graph expansion (--for --anchor).
 #
-#   test/anchorcheck.sh                       # uses build/ctxpack on test/anchorfix
-#   CTXPACK_BIN=asan/ctxpack test/anchorcheck.sh
+#   test/anchorcheck.sh                       # uses build/ripwire on test/anchorfix
+#   RIPWIRE_BIN=asan/ripwire test/anchorcheck.sh
 #
 # --anchor seeds the PPR personalization from the top lexical hits of --for=TASK and blends the walk back
 # into the lens rank (graph.h anchoredLexicalRank) — surfacing structurally-adjacent symbols the task's
@@ -21,19 +21,19 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-# L5 (AUDIT5): --anchor is dropped from --help and gated behind CTXPACK_DEV=1 (negative-result
+# L5 (AUDIT5): --anchor is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
 # experiment, kept reachable for continued eval work). This gate exercises the flag directly, so it
 # needs the gate itself set.
-export CTXPACK_DEV=1
+export RIPWIRE_DEV=1
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "anchorcheck: BIN=$BIN"
 
 # fixture copy: sources only (never the golden itself), relative path, outside any git repo
@@ -96,10 +96,10 @@ grep -q 'anchored, EXPERIMENTAL' "$TMP/a1" && ok "anchored output self-declares 
 [ $? -ne 0 ] && grep -qi 'anchor' "$TMP/err" && ok "--anchor without --for exits non-zero with a clear message" \
                                              || no "--anchor without --for did not refuse loudly"
 
-# ── 4b) --anchor WITHOUT CTXPACK_DEV=1 refuses loudly (the L5 experimental gate) ──────────────────────
-env -u CTXPACK_DEV "$BIN" anchorfix --no-cache --for="$QUERY" --anchor >/dev/null 2>"$TMP/deverr"
-[ $? -ne 0 ] && grep -q 'CTXPACK_DEV' "$TMP/deverr" && ok "--anchor without CTXPACK_DEV=1 refuses loudly (exit nonzero, names CTXPACK_DEV)" \
-                                                     || no "--anchor without CTXPACK_DEV=1 did not refuse loudly"
+# ── 4b) --anchor WITHOUT RIPWIRE_DEV=1 refuses loudly (the L5 experimental gate) ──────────────────────
+env -u RIPWIRE_DEV "$BIN" anchorfix --no-cache --for="$QUERY" --anchor >/dev/null 2>"$TMP/deverr"
+[ $? -ne 0 ] && grep -q 'RIPWIRE_DEV' "$TMP/deverr" && ok "--anchor without RIPWIRE_DEV=1 refuses loudly (exit nonzero, names RIPWIRE_DEV)" \
+                                                     || no "--anchor without RIPWIRE_DEV=1 did not refuse loudly"
 
 # ── 5) MUTATION self-test — the expansion assertion must FAIL against the un-anchored output ──────────
 MUT="$( printf '%s' "$PLAIN" | grep -q 'flushEvictionQueue' && echo BAD || echo TRIPPED )"

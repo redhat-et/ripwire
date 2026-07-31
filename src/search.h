@@ -788,7 +788,7 @@ inline std::optional<std::string> regexCompileError( const std::string& pat )
 // so which hits survive a truncation is a pure function of the corpus, never of thread scheduling.
 //
 // §P11.1 — the returned ORDER is TIER-then-path, not path alone. Plain path-alphabetical order plus the
-// caller's fixed row cap is a systematic bias against code on any doc-bearing repo: on ctxpack's own tree
+// caller's fixed row cap is a systematic bias against code on any doc-bearing repo: on ripwire's own tree
 // `--grep=DEGRADED_PATH_ALERT` filled 66 of its 100 shown rows with markdown and left no `test/` row at all,
 // because `AGENTS.md` and `AUDIT*.md` sort above `src/` and the cap always cuts the tail. Ordering HERE
 // rather than in the emitter keeps the CLI verb and the MCP `grep` verb on ONE order — they already share

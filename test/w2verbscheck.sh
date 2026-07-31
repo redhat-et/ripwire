@@ -6,7 +6,7 @@
 #
 # Fixture (test/w2verbsfix/): Shapes.java + shapes.rb, each with a 1-param/0-nest leaf, a 3-param/
 # 3-deep-nested method (if>for>if resp. if>while>if), and a 1-param method calling both (cbo=2). Every
-# loc/params/nest/ccx/cbo value below was measured by running `ctxpack test/w2verbsfix --metrics` and
+# loc/params/nest/ccx/cbo value below was measured by running `ripwire test/w2verbsfix --metrics` and
 # reading the raw output BEFORE being pinned as an assertion (see the fixture file headers).
 #
 # REAL BUGS FOUND while building this gate — NOW FIXED in 04113a2 (see src/ingest.cpp). This gate
@@ -30,7 +30,7 @@
 #
 # Usage:
 #   test/w2verbscheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/w2verbscheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/w2verbscheck.sh
 #
 # Exits non-zero on any FAIL (an assertion that doesn't match observed behavior). The mutation
 # self-tests at the end prove every pinned value is live, not a tautology.
@@ -38,7 +38,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="test/w2verbsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -46,7 +46,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 [ -d "$FIX" ] || { echo "no test/w2verbsfix directory"; exit 2; }
 
@@ -233,7 +233,7 @@ class A
 }
 EOF
 ( cd "$QDJ" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-[ -f "$QDJ/.ctxpack_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a Java-only corpus" || no "--quality-baseline did not write a sidecar for Java"
+[ -f "$QDJ/.ripwire_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a Java-only corpus" || no "--quality-baseline did not write a sidecar for Java"
 cat > "$QDJ/A.java" <<'EOF'
 class A
 {
@@ -272,7 +272,7 @@ def simple(x)
 end
 EOF
 ( cd "$QDR" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-[ -f "$QDR/.ctxpack_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a Ruby-only corpus" || no "--quality-baseline did not write a sidecar for Ruby"
+[ -f "$QDR/.ripwire_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a Ruby-only corpus" || no "--quality-baseline did not write a sidecar for Ruby"
 cat > "$QDR/a.rb" <<'EOF'
 def simple(x)
   if x > 0

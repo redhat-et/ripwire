@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-# swebench_eval.py — generate SWE-bench predictions for TWO arms (baseline vs +ctxpack context) so the
-# OFFICIAL swebench harness can score them, and you read off ctxpack's task-success contribution as the
-# delta. This file owns ONLY the ctxpack-specific part (prompt construction); scoring is delegated to
+# swebench_eval.py — generate SWE-bench predictions for TWO arms (baseline vs +ripwire context) so the
+# OFFICIAL swebench harness can score them, and you read off ripwire's task-success contribution as the
+# delta. This file owns ONLY the ripwire-specific part (prompt construction); scoring is delegated to
 # `python -m swebench.harness.run_evaluation` (the standard sandboxed, non-gameable scorer). The bench/
 # ANSWERQUALITY.md retrieval proxy is the leading indicator; THIS is the end-to-end number.
 #
 # Not run in CI — needs an API key + the dataset + Docker (for the scorer):
 #   pip install datasets anthropic
-#   export ANTHROPIC_API_KEY=...                         # ctxpack must be on PATH (or set CTXPACK=)
+#   export ANTHROPIC_API_KEY=...                         # ripwire must be on PATH (or set RIPWIRE=)
 #   python bench/swebench_eval.py --n 50
-#   python -m swebench.harness.run_evaluation --predictions_path preds_ctxpack.jsonl  --run_id ctx  --dataset_name princeton-nlp/SWE-bench_Lite
+#   python -m swebench.harness.run_evaluation --predictions_path preds_ripwire.jsonl  --run_id ctx  --dataset_name princeton-nlp/SWE-bench_Lite
 #   python -m swebench.harness.run_evaluation --predictions_path preds_baseline.jsonl --run_id base --dataset_name princeton-nlp/SWE-bench_Lite
-#   # compare the two "resolved" counts — the delta IS ctxpack's contribution.
+#   # compare the two "resolved" counts — the delta IS ripwire's contribution.
 import argparse, json, os, re, subprocess, sys, pathlib
 
-CTX        = os.environ.get("CTXPACK", "ctxpack")
-MODEL      = os.environ.get("CTXPACK_EVAL_MODEL", "claude-opus-4-8")
-REPO_CACHE = pathlib.Path(os.environ.get("CTXPACK_REPO_CACHE", "/tmp/ctxpack_swebench_repos"))
+CTX        = os.environ.get("RIPWIRE", "ripwire")
+MODEL      = os.environ.get("RIPWIRE_EVAL_MODEL", "claude-opus-4-8")
+REPO_CACHE = pathlib.Path(os.environ.get("RIPWIRE_REPO_CACHE", "/tmp/ripwire_swebench_repos"))
 SYS = ("You are an expert software engineer. Given a bug report and repository context, reply with a "
        "single unified diff (git patch) that fixes the issue. Output ONLY the diff, no prose.")
 
@@ -33,8 +33,8 @@ def checkout(repo, base_commit):
     sh(["git", "-C", str(dst), "clean", "-fdx"])
     return dst
 
-def ctxpack_context(repo_path, problem, budget=2000):
-    # the ctxpack arm's extra context: a ranked, task-lensed signatures inventory for the bug report.
+def ripwire_context(repo_path, problem, budget=2000):
+    # the ripwire arm's extra context: a ranked, task-lensed signatures inventory for the bug report.
     q = " ".join(problem.split())[:300]
     r = sh([CTX, str(repo_path), "--for", q, "--max-tokens", str(budget)])
     return r.stdout if r.returncode == 0 else ""
@@ -58,20 +58,20 @@ def main():
     a = ap.parse_args()
     from datasets import load_dataset
     ds = load_dataset(a.dataset, split=a.split)
-    with open("preds_baseline.jsonl", "w") as bf, open("preds_ctxpack.jsonl", "w") as cf:
+    with open("preds_baseline.jsonl", "w") as bf, open("preds_ripwire.jsonl", "w") as cf:
         for i, inst in enumerate(ds):
             if i >= a.n: break
             iid, repo, bc, prob = inst["instance_id"], inst["repo"], inst["base_commit"], inst["problem_statement"]
             print(f"[{i+1}/{a.n}] {iid}", file=sys.stderr)
             try:
-                ctx = ctxpack_context(checkout(repo, bc), prob)
+                ctx = ripwire_context(checkout(repo, bc), prob)
             except Exception as e:
                 print(f"  skip ({e})", file=sys.stderr); continue
             base = extract_patch(ask(SYS, f"# Bug report\n{prob}\n\nReply with the fixing diff."))
-            ctxd = extract_patch(ask(SYS, f"# Repository map (ctxpack)\n{ctx}\n\n# Bug report\n{prob}\n\nReply with the fixing diff."))
+            ctxd = extract_patch(ask(SYS, f"# Repository map (ripwire)\n{ctx}\n\n# Bug report\n{prob}\n\nReply with the fixing diff."))
             for f, patch in ((bf, base), (cf, ctxd)):
                 f.write(json.dumps({"instance_id": iid, "model_name_or_path": MODEL, "model_patch": patch}) + "\n"); f.flush()
-    print("wrote preds_baseline.jsonl + preds_ctxpack.jsonl — score BOTH with the official swebench harness (see header).", file=sys.stderr)
+    print("wrote preds_baseline.jsonl + preds_ripwire.jsonl — score BOTH with the official swebench harness (see header).", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

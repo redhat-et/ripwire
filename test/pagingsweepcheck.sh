@@ -86,24 +86,24 @@
 #   --stray-content     (none — no display cap on the outer refs listing, so discloseCap=false keeps the tag
 #                        byte-identical; its per-ref <file> children keep their own separate maxFiles cap)
 #
-# Everything outside that table must be byte-equal. Check (I) proves it literally when CTXPACK_PREBIN points
+# Everything outside that table must be byte-equal. Check (I) proves it literally when RIPWIRE_PREBIN points
 # at a pre-change binary; it is SKIPPED otherwise, so the gate stays runnable in CI, where none exists.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/pagingsweepcheck.sh
-#         CTXPACK_BIN=build/ctxpack CTXPACK_PREBIN=/tmp/ctxpack.pre bash test/pagingsweepcheck.sh
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/pagingsweepcheck.sh
+#         RIPWIRE_BIN=build/ripwire RIPWIRE_PREBIN=/tmp/ripwire.pre bash test/pagingsweepcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-PREBIN="${CTXPACK_PREBIN:-}"
+PREBIN="${RIPWIRE_PREBIN:-}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 
 echo "pagingsweepcheck: BIN=$BIN  PREBIN=${PREBIN:-<none>}"
@@ -435,7 +435,7 @@ if [ -n "$PREBIN" ] && [ -x "$PREBIN" ]; then
         && ok "--graph-query: un-paginated output byte-identical to the pre-change binary" \
         || no "--graph-query: un-paginated output CHANGED vs the pre-change binary"
 else
-    echo "  SKIP  (I) — set CTXPACK_PREBIN=/path/to/pre-change/ctxpack to run the literal identity diff"
+    echo "  SKIP  (I) — set RIPWIRE_PREBIN=/path/to/pre-change/ripwire to run the literal identity diff"
 fi
 
 # ── (J) §A10.1: the verbs with a genuine BARE-RUN default cap (hotspots=40, cochange=30, whereis=60,

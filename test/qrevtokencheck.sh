@@ -6,7 +6,7 @@
 # reads a leading `-` as an OPTION. That is precisely how the P0.1 `--pr-context=--output=FILE` defect
 # TRUNCATED a file outside the repo and exited 0. Two instances in the quality path:
 #   1. LIVE (low severity only because merge-base cannot write files): `readBaselineHeadSha` returned
-#      `line.substr(5)` verbatim out of `.ctxpack_quality_baseline` — a COMMITTED file, therefore
+#      `line.substr(5)` verbatim out of `.ripwire_quality_baseline` — a COMMITTED file, therefore
 #      attacker-influenceable on a cloned repo — straight into `git merge-base --is-ancestor '<sha>' …`.
 #   2. LATENT: `git archive --format=tar '<committish>'` was built with no separator and no resolution, and
 #      `git archive --output=` demonstrably does write a file. Every caller passes "HEAD" or a rev-list sha
@@ -25,17 +25,17 @@
 #       passes a TRAILING `--`, never a leading one.
 #
 # Own temp repo. Needs git.
-# Usage:  test/qrevtokencheck.sh   |   CTXPACK_BIN=build/ctxpack test/qrevtokencheck.sh
+# Usage:  test/qrevtokencheck.sh   |   RIPWIRE_BIN=build/ripwire test/qrevtokencheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 QSRC="$ROOT/src/quality.h"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qrevtokencheck (git not available)"; exit 0; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
@@ -62,9 +62,9 @@ NOSIDECAR="$( run )"; NOSIDECAR_RC="$( rc_of )"
 [ -n "$NOSIDECAR" ] && ok "baseline phase: the no-sidecar (git-HEAD) report is non-empty" || no "no-sidecar report empty — checks are vacuous"
 
 # ── (a)(b) hostile `head` stamps ───────────────────────────────────────────────────────────────────────────
-BASEF="$REPO/.ctxpack_quality_baseline"
+BASEF="$REPO/.ripwire_quality_baseline"
 for payload in "--output=$VICTIM" "-e" "--upload-pack=touch $WORK/pwned" "$WORK/../victim.txt" "HEAD; touch $WORK/pwned2"; do
-    printf '# ctxpack quality baseline v2\nhead %s\nloc deadbeef 10\n' "$payload" > "$BASEF"
+    printf '# ripwire quality baseline v2\nhead %s\nloc deadbeef 10\n' "$payload" > "$BASEF"
     OUT="$( run )"; RC="$( rc_of )"
     [ "$( cat "$VICTIM" )" = "$VICTIM_BEFORE" ] \
         && ok "hostile head stamp '$payload': the file outside the repo is untouched" \
@@ -80,7 +80,7 @@ done
 # The tampered sidecar must be DISTRUSTED: it routes into the existing unreachable-pin self-heal, so the
 # FINDINGS equal the no-sidecar git-HEAD answer, and the header says out loud that the sidecar was removed
 # (never a silent substitution — the baseline= marker is the audit trail).
-printf '# ctxpack quality baseline v2\nhead --output=%s\nloc deadbeef 10\n' "$VICTIM" > "$BASEF"
+printf '# ripwire quality baseline v2\nhead --output=%s\nloc deadbeef 10\n' "$VICTIM" > "$BASEF"
 TAMPERED="$( run )"
 rows_of(){ printf '%s' "$1" | tr '<' '\n' | grep '^r kind='; }
 [ "$( rows_of "$TAMPERED" )" = "$( rows_of "$NOSIDECAR" )" ] \

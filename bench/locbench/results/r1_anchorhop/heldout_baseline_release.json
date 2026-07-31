@@ -1,7 +1,7 @@
 {
   "dataset": "locbench",
   "split": "heldout",
-  "split_contract": "repo-disjoint sha256(ctxpack-a7-v2\\0 + lowercase(repo)), byte0<128=train",
+  "split_contract": "repo-disjoint sha256(ripwire-a7-v2\\0 + lowercase(repo)), byte0<128=train",
   "history_depth": 1,
   "ctx_extra_args": "",
   "n_scored": 243,

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # The version string lives in exactly ONE place — this project() call. --version (main.cpp)
 # reads it via the generated version.h below; test/versioncheck.sh asserts the two never drift.
-project(ctxpack VERSION 0.1.0 LANGUAGES C CXX)
+project(ripwire VERSION 0.1.0 LANGUAGES C CXX)
 
 # ---- language standards (SPEC §7: C++23 / C11) ----
 set(CMAKE_CXX_STANDARD 23)
@@ -11,39 +11,39 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # ---- verification build modes (SPEC §6/§8) ----
 # Each sanitizer family owns a separate build tree; combining runtimes is unsupported and obscures failures.
-option(CTXPACK_ASAN "build with the complete fail-fast G1 sanitizer stack" OFF)
-option(CTXPACK_TSAN "build separately with ThreadSanitizer" OFF)
-option(CTXPACK_FUZZ "build the opt-in per-grammar libFuzzer suite" OFF)
-set(_ctxpack_verification_mode_count 0)
-foreach(_ctxpack_mode CTXPACK_ASAN CTXPACK_TSAN CTXPACK_FUZZ)
-  if(${_ctxpack_mode})
-    math(EXPR _ctxpack_verification_mode_count "${_ctxpack_verification_mode_count} + 1")
+option(RIPWIRE_ASAN "build with the complete fail-fast G1 sanitizer stack" OFF)
+option(RIPWIRE_TSAN "build separately with ThreadSanitizer" OFF)
+option(RIPWIRE_FUZZ "build the opt-in per-grammar libFuzzer suite" OFF)
+set(_ripwire_verification_mode_count 0)
+foreach(_ripwire_mode RIPWIRE_ASAN RIPWIRE_TSAN RIPWIRE_FUZZ)
+  if(${_ripwire_mode})
+    math(EXPR _ripwire_verification_mode_count "${_ripwire_verification_mode_count} + 1")
   endif()
 endforeach()
-if(_ctxpack_verification_mode_count GREATER 1)
-  message(FATAL_ERROR "CTXPACK_ASAN, CTXPACK_TSAN, and CTXPACK_FUZZ are mutually exclusive; use separate build trees")
+if(_ripwire_verification_mode_count GREATER 1)
+  message(FATAL_ERROR "RIPWIRE_ASAN, RIPWIRE_TSAN, and RIPWIRE_FUZZ are mutually exclusive; use separate build trees")
 endif()
 
 # A flag probe is insufficient: Apple Clang accepts -fsanitize=fuzzer but some Xcode distributions omit
 # libclang_rt.fuzzer_osx.a. Compile AND link a complete harness before creating fuzz targets, and never
 # download a replacement toolchain from the build.
-if(CTXPACK_FUZZ)
+if(RIPWIRE_FUZZ)
   if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang" OR NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "CTXPACK_FUZZ requires Clang for both C and CXX")
+    message(FATAL_ERROR "RIPWIRE_FUZZ requires Clang for both C and CXX")
   endif()
   include(CheckCXXSourceCompiles)
-  set(_ctxpack_required_flags_save "${CMAKE_REQUIRED_FLAGS}")
-  set(_ctxpack_required_link_options_save "${CMAKE_REQUIRED_LINK_OPTIONS}")
+  set(_ripwire_required_flags_save "${CMAKE_REQUIRED_FLAGS}")
+  set(_ripwire_required_link_options_save "${CMAKE_REQUIRED_LINK_OPTIONS}")
   set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer-no-link,address")
   set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=fuzzer,address")
   check_cxx_source_compiles(
     "#include <cstddef>\n#include <cstdint>\nextern \"C\" int LLVMFuzzerTestOneInput( const std::uint8_t*, std::size_t ) { return 0; }"
-    CTXPACK_HAS_LIBFUZZER_RUNTIME)
-  set(CMAKE_REQUIRED_FLAGS "${_ctxpack_required_flags_save}")
-  set(CMAKE_REQUIRED_LINK_OPTIONS "${_ctxpack_required_link_options_save}")
-  if(NOT CTXPACK_HAS_LIBFUZZER_RUNTIME)
+    RIPWIRE_HAS_LIBFUZZER_RUNTIME)
+  set(CMAKE_REQUIRED_FLAGS "${_ripwire_required_flags_save}")
+  set(CMAKE_REQUIRED_LINK_OPTIONS "${_ripwire_required_link_options_save}")
+  if(NOT RIPWIRE_HAS_LIBFUZZER_RUNTIME)
     message(FATAL_ERROR
-      "CTXPACK_FUZZ requires a Clang toolchain containing the libFuzzer runtime. "
+      "RIPWIRE_FUZZ requires a Clang toolchain containing the libFuzzer runtime. "
       "Configure both CMAKE_C_COMPILER and CMAKE_CXX_COMPILER from the same upstream LLVM installation; "
       "the build will not install a compiler automatically.")
   endif()
@@ -51,11 +51,11 @@ endif()
 
 # ---- optimization profile (portable by default) ----
 # default: arch-neutral on anything that isn't Apple Silicon; auto-detected apple-m1 tuning (safe generic
-# tuning, not a native-host bake-in) on real Apple Silicon. -DCTXPACK_NATIVE=ON: dev-machine-only opt-in
+# tuning, not a native-host bake-in) on real Apple Silicon. -DRIPWIRE_NATIVE=ON: dev-machine-only opt-in
 # (-march=native bakes in host CPU extensions — never for a binary that ships or runs elsewhere).
-# See cmake/PortableFlags.cmake for the full rationale and the CTXPACK_PRETEND_LINUX test-only hook.
+# See cmake/PortableFlags.cmake for the full rationale and the RIPWIRE_PRETEND_LINUX test-only hook.
 include(cmake/PortableFlags.cmake)
-add_compile_options(${CTXPACK_ARCH_FLAGS})
+add_compile_options(${RIPWIRE_ARCH_FLAGS})
 
 # ---- FetchContent: VENDORED sources, PER-BUILD-TREE build output ----
 # Every dependency lives IN THIS REPO under third_party/deps/<name>: a cold clone builds with the
@@ -76,7 +76,7 @@ add_compile_options(${CTXPACK_ARCH_FLAGS})
 # `cmake --build`, so a shared build dir lets the LAST tree to configure win — and deleting that tree
 # then breaks every other one. Local also gives sanitizer builds their isolation for free (asan/_deps
 # and build/_deps hold separately-compiled libtree-sitter.a).
-set(_ctxpack_vendored_deps "${CMAKE_CURRENT_SOURCE_DIR}/third_party/deps" CACHE PATH "in-repo dependency SOURCE trees")
+set(_ripwire_vendored_deps "${CMAKE_CURRENT_SOURCE_DIR}/third_party/deps" CACHE PATH "in-repo dependency SOURCE trees")
 set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")   # local build/subbuild (never the source tree)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 include(FetchContent)
@@ -86,20 +86,20 @@ include(FetchContent)
 # was pruned wrong or the checkout is incomplete, and that has to be a loud configure-time error, NEVER
 # a silent fall back to a network clone. A public build that quietly reaches for github is precisely the
 # failure this vendoring exists to remove, so the degrade direction here is "stop", not "download".
-macro(ctxpack_use_vendored_source NAME SENTINEL)
-  string(TOUPPER "${NAME}" _ctxpack_up)
-  if(NOT EXISTS "${_ctxpack_vendored_deps}/${NAME}/${SENTINEL}")
+macro(ripwire_use_vendored_source NAME SENTINEL)
+  string(TOUPPER "${NAME}" _ripwire_up)
+  if(NOT EXISTS "${_ripwire_vendored_deps}/${NAME}/${SENTINEL}")
     message(FATAL_ERROR
-      "vendored dependency '${NAME}' is missing ${SENTINEL} under ${_ctxpack_vendored_deps}/${NAME} — "
+      "vendored dependency '${NAME}' is missing ${SENTINEL} under ${_ripwire_vendored_deps}/${NAME} — "
       "the checkout is incomplete; this build will not fetch a replacement from the network")
   endif()
-  set(FETCHCONTENT_SOURCE_DIR_${_ctxpack_up} "${_ctxpack_vendored_deps}/${NAME}")
+  set(FETCHCONTENT_SOURCE_DIR_${_ripwire_up} "${_ripwire_vendored_deps}/${NAME}")
 endmacro()
 
 # ---- configure-time query embedding (SPEC §1: one self-contained binary) ----
 # queries/<language>/tags.scm remains the editable source of truth. CMake regenerates this constexpr
 # table whenever any query changes; ingest reads only the binary's read-only data at runtime.
-set(_ctxpack_query_names
+set(_ripwire_query_names
   bash
   c
   cpp
@@ -114,43 +114,43 @@ set(_ctxpack_query_names
   rust
   swift
   typescript)
-set(_ctxpack_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(_ctxpack_embedded_queries "${_ctxpack_generated_dir}/embedded_queries.h")
-file(MAKE_DIRECTORY "${_ctxpack_generated_dir}")
-list(LENGTH _ctxpack_query_names _ctxpack_query_count)
-file(WRITE "${_ctxpack_embedded_queries}" "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <string_view>\n\nnamespace ctx::embedded_queries\n{\n\nstruct EmbeddedQuery\n{\n    std::string_view sub;\n    std::string_view source;\n};\n\ninline constexpr std::size_t kEmbeddedQueryCount = ${_ctxpack_query_count};\ninline constexpr std::array<EmbeddedQuery, kEmbeddedQueryCount> kEmbeddedQueries = {{\n")
-foreach(_ctxpack_query_name IN LISTS _ctxpack_query_names)
-  set(_ctxpack_query_path "${CMAKE_CURRENT_SOURCE_DIR}/queries/${_ctxpack_query_name}/tags.scm")
-  file(READ "${_ctxpack_query_path}" _ctxpack_query_source)
-  string(TOUPPER "${_ctxpack_query_name}" _ctxpack_query_upper)
-  set(_ctxpack_query_delimiter "CTXQ_${_ctxpack_query_upper}")
-  string(FIND "${_ctxpack_query_source}" ")${_ctxpack_query_delimiter}\"" _ctxpack_query_collision)
-  if(NOT _ctxpack_query_collision EQUAL -1)
-    message(FATAL_ERROR "tags query ${_ctxpack_query_name} collides with its generated raw-string delimiter")
+set(_ripwire_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(_ripwire_embedded_queries "${_ripwire_generated_dir}/embedded_queries.h")
+file(MAKE_DIRECTORY "${_ripwire_generated_dir}")
+list(LENGTH _ripwire_query_names _ripwire_query_count)
+file(WRITE "${_ripwire_embedded_queries}" "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <string_view>\n\nnamespace ctx::embedded_queries\n{\n\nstruct EmbeddedQuery\n{\n    std::string_view sub;\n    std::string_view source;\n};\n\ninline constexpr std::size_t kEmbeddedQueryCount = ${_ripwire_query_count};\ninline constexpr std::array<EmbeddedQuery, kEmbeddedQueryCount> kEmbeddedQueries = {{\n")
+foreach(_ripwire_query_name IN LISTS _ripwire_query_names)
+  set(_ripwire_query_path "${CMAKE_CURRENT_SOURCE_DIR}/queries/${_ripwire_query_name}/tags.scm")
+  file(READ "${_ripwire_query_path}" _ripwire_query_source)
+  string(TOUPPER "${_ripwire_query_name}" _ripwire_query_upper)
+  set(_ripwire_query_delimiter "CTXQ_${_ripwire_query_upper}")
+  string(FIND "${_ripwire_query_source}" ")${_ripwire_query_delimiter}\"" _ripwire_query_collision)
+  if(NOT _ripwire_query_collision EQUAL -1)
+    message(FATAL_ERROR "tags query ${_ripwire_query_name} collides with its generated raw-string delimiter")
   endif()
-  file(APPEND "${_ctxpack_embedded_queries}"
-    "    { \"${_ctxpack_query_name}\", R\"${_ctxpack_query_delimiter}(${_ctxpack_query_source})${_ctxpack_query_delimiter}\" },\n")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ctxpack_query_path}")
+  file(APPEND "${_ripwire_embedded_queries}"
+    "    { \"${_ripwire_query_name}\", R\"${_ripwire_query_delimiter}(${_ripwire_query_source})${_ripwire_query_delimiter}\" },\n")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ripwire_query_path}")
 endforeach()
-file(APPEND "${_ctxpack_embedded_queries}" "}};\n\ninline constexpr std::string_view queryFor( std::string_view sub ) noexcept\n{\n    for( const EmbeddedQuery& query : kEmbeddedQueries )\n    {\n        if( query.sub == sub )\n            return query.source;\n    }\n    return {};\n}\n\n} // namespace ctx::embedded_queries\n")
+file(APPEND "${_ripwire_embedded_queries}" "}};\n\ninline constexpr std::string_view queryFor( std::string_view sub ) noexcept\n{\n    for( const EmbeddedQuery& query : kEmbeddedQueries )\n    {\n        if( query.sub == sub )\n            return query.source;\n    }\n    return {};\n}\n\n} // namespace ctx::embedded_queries\n")
 
 # ---- generated version.h ----
-# The version string lives in ONE place: the project(ctxpack VERSION ...) call above. --version reads
+# The version string lives in ONE place: the project(ripwire VERSION ...) call above. --version reads
 # this generated header; test/versioncheck.sh diffs its output against CMakeLists.txt's own VERSION so
 # the two can never silently drift. Short build info (compiler id/version, build type) rides along so a
-# bug report's "ctxpack --version" line is enough to reproduce the toolchain, no separate --doctor call.
+# bug report's "ripwire --version" line is enough to reproduce the toolchain, no separate --doctor call.
 # CMAKE_BUILD_TYPE is empty for the plain dev configure the house style mandates (CLAUDE.md: "never
 # -DCMAKE_BUILD_TYPE=Release" locally — Release defines NDEBUG, which compiles DEGRADED_PATH_ALERT out).
 # "unspecified" told a bug reporter nothing about what they actually ran; "dev" is the honest, specific
 # label for that configure (§P6.10, 2026-07-28 output audit) — it is the first thing a bug report pastes.
 if(NOT CMAKE_BUILD_TYPE)
-  set(_ctxpack_build_type_str "dev")
+  set(_ripwire_build_type_str "dev")
 else()
-  set(_ctxpack_build_type_str "${CMAKE_BUILD_TYPE}")
+  set(_ripwire_build_type_str "${CMAKE_BUILD_TYPE}")
 endif()
-set(_ctxpack_version_header "${_ctxpack_generated_dir}/version.h")
-file(WRITE "${_ctxpack_version_header}"
-"#pragma once\n\n// Generated by CMakeLists.txt from project(ctxpack VERSION ...) — do not edit by hand.\nnamespace ctx\n{\ninline constexpr const char* kCtxpackVersion     = \"${PROJECT_VERSION}\";\ninline constexpr const char* kCtxpackBuildType   = \"${_ctxpack_build_type_str}\";\ninline constexpr const char* kCtxpackCompilerId  = \"${CMAKE_CXX_COMPILER_ID}\";\ninline constexpr const char* kCtxpackCompilerVer = \"${CMAKE_CXX_COMPILER_VERSION}\";\n} // namespace ctx\n")
+set(_ripwire_version_header "${_ripwire_generated_dir}/version.h")
+file(WRITE "${_ripwire_version_header}"
+"#pragma once\n\n// Generated by CMakeLists.txt from project(ripwire VERSION ...) — do not edit by hand.\nnamespace ctx\n{\ninline constexpr const char* kRipwireVersion     = \"${PROJECT_VERSION}\";\ninline constexpr const char* kRipwireBuildType   = \"${_ripwire_build_type_str}\";\ninline constexpr const char* kRipwireCompilerId  = \"${CMAKE_CXX_COMPILER_ID}\";\ninline constexpr const char* kRipwireCompilerVer = \"${CMAKE_CXX_COMPILER_VERSION}\";\n} // namespace ctx\n")
 
 # ---- tree-sitter CORE (static) ----
 # MUST precede MakeAvailable: tree-sitter defaults BUILD_SHARED_LIBS ON -> you'd get a dylib.
@@ -158,7 +158,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 # Dependency independence (SHA-pin): GIT_TAG is the commit the tag pointed to when resolved via
 # `git ls-remote --tags <repo> "refs/tags/<tag>^{}"` (2026-07-22) — an immutable, un-force-pushable ref.
 # The tag stays as a trailing comment so `git log`/README readers still see the human-legible version.
-ctxpack_use_vendored_source(tree_sitter lib/src/lib.c)
+ripwire_use_vendored_source(tree_sitter lib/src/lib.c)
 FetchContent_Declare(tree_sitter
   GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
   GIT_TAG 7f534862c3ec939c3a6ee147f7600ef5c1bf900f  # v0.26.9
@@ -170,7 +170,7 @@ FetchContent_MakeAvailable(tree_sitter)
 # add a regenerate-parser.c custom command, and a SOVERSION/ABI trap. SOURCE_SUBDIR _none_
 # makes FetchContent skip the grammar's own CMakeLists; we compile only parser.c (+scanner.c).
 macro(add_ts_grammar NAME REPO TAG)
-  ctxpack_use_vendored_source(${NAME} src/parser.c)
+  ripwire_use_vendored_source(${NAME} src/parser.c)
   FetchContent_Declare(${NAME}
     GIT_REPOSITORY ${REPO}
     GIT_TAG ${TAG}
@@ -187,7 +187,7 @@ macro(add_ts_grammar NAME REPO TAG)
   add_library(ts_${NAME} OBJECT ${_srcs})
   target_include_directories(ts_${NAME} PRIVATE ${tree_sitter_SOURCE_DIR}/lib/include ${_src})
   set_target_properties(ts_${NAME} PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
-  set(CTXPACK_TS_${NAME}_SOURCES ${_srcs})
+  set(RIPWIRE_TS_${NAME}_SOURCES ${_srcs})
 endmacro()
 
 # Build one OBJECT lib from an already-fetched grammar's SUBDIR/src (parser.c [+scanner.c]).
@@ -200,7 +200,7 @@ function(add_ts_object NAME SRCDIR)
   add_library(ts_${NAME} OBJECT ${_srcs})
   target_include_directories(ts_${NAME} PRIVATE ${tree_sitter_SOURCE_DIR}/lib/include ${SRCDIR})
   set_target_properties(ts_${NAME} PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
-  set(CTXPACK_TS_${NAME}_SOURCES ${_srcs} PARENT_SCOPE)
+  set(RIPWIRE_TS_${NAME}_SOURCES ${_srcs} PARENT_SCOPE)
 endfunction()
 
 # ---- pinned grammars (SHA-pinned: each GIT_TAG below is the commit its comment's tag
@@ -213,11 +213,11 @@ add_ts_grammar(rust   https://github.com/tree-sitter/tree-sitter-rust.git       
 # Swift: upstream main has no generated parser.c — only the audited generated-files commit below does,
 # which is why the pin is a bare SHA rather than a tag. Vendoring settles it permanently: the tree under
 # third_party/deps/swift IS that commit's generated output, so nothing has to resolve a branch to find it.
-set(_ctxpack_swift_commit 31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5)
-ctxpack_use_vendored_source(swift src/parser.c)
+set(_ripwire_swift_commit 31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5)
+ripwire_use_vendored_source(swift src/parser.c)
 FetchContent_Declare(swift
   GIT_REPOSITORY https://github.com/alex-pinkus/tree-sitter-swift.git
-  GIT_TAG ${_ctxpack_swift_commit}
+  GIT_TAG ${_ripwire_swift_commit}
   GIT_SHALLOW FALSE
   SOURCE_SUBDIR _none_)
 FetchContent_MakeAvailable(swift)
@@ -255,7 +255,7 @@ add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git          
 # TypeScript: ONE repo cloned once (SOURCE_SUBDIR _none_ skips its CMakeLists), then TWO
 # OBJECT libs (ts_tsts from typescript/src, ts_tstsx from tsx/src). Both share common/scanner.c
 # which each parser dir's own scanner.c #includes, so per-dir (parser.c + scanner.c) is correct.
-ctxpack_use_vendored_source(ts_typescript typescript/src/parser.c)
+ripwire_use_vendored_source(ts_typescript typescript/src/parser.c)
 FetchContent_Declare(ts_typescript
   GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-typescript.git
   GIT_TAG f975a621f4e7f532fe322e13c4f79495e0a7b2e7  # v0.23.2
@@ -268,7 +268,7 @@ add_ts_object(tstsx ${ts_typescript_SOURCE_DIR}/tsx/src)
 # ---- explicit, easy-to-extend executable source list ----
 # Later stages (graph/rank/serialize/main) get appended here. ingest.cpp + the vendored
 # fastmath.cpp (VERIFY/DEGRADED handlers link partner, SPEC §9) are the foundation.
-set(CTXPACK_SRCS
+set(RIPWIRE_SRCS
   src/ingest.cpp
   src/pagerank.cpp
   src/infra/fastmath.cpp
@@ -278,7 +278,7 @@ set(CTXPACK_SRCS
 set_source_files_properties(src/pagerank.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
 
 # All grammar OBJECT files, gathered once so every target links the same set.
-set(CTXPACK_TS_OBJECTS
+set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_cpp>
   $<TARGET_OBJECTS:ts_python>
   $<TARGET_OBJECTS:ts_go>
@@ -297,152 +297,152 @@ set(CTXPACK_TS_OBJECTS
 )
 
 # ---- probe target: the Phase-1/2 proof binary ----
-add_executable(ctxpack_probe
+add_executable(ripwire_probe
   src/tsprobe.cpp
-  ${CTXPACK_SRCS}
-  ${CTXPACK_TS_OBJECTS})
-target_link_libraries(ctxpack_probe PRIVATE tree-sitter)
-target_include_directories(ctxpack_probe PRIVATE
+  ${RIPWIRE_SRCS}
+  ${RIPWIRE_TS_OBJECTS})
+target_link_libraries(ripwire_probe PRIVATE tree-sitter)
+target_include_directories(ripwire_probe PRIVATE
   ${tree_sitter_SOURCE_DIR}/lib/include
-  ${_ctxpack_generated_dir}
+  ${_ripwire_generated_dir}
   src/infra
   third_party
   src)
 
-# ---- the real ctxpack binary: full pipeline (ingest → graph → PageRank → minified XML) ----
+# ---- the real ripwire binary: full pipeline (ingest → graph → PageRank → minified XML) ----
 # main.cpp forward-declares ctx::ingest(); linking ingest.cpp supplies the real tree-sitter one.
-add_executable(ctxpack
+add_executable(ripwire
   src/main.cpp
-  ${CTXPACK_SRCS}
-  ${CTXPACK_TS_OBJECTS})
-target_link_libraries(ctxpack PRIVATE tree-sitter)
-target_include_directories(ctxpack PRIVATE
+  ${RIPWIRE_SRCS}
+  ${RIPWIRE_TS_OBJECTS})
+target_link_libraries(ripwire PRIVATE tree-sitter)
+target_include_directories(ripwire PRIVATE
   ${tree_sitter_SOURCE_DIR}/lib/include
-  ${_ctxpack_generated_dir}
+  ${_ripwire_generated_dir}
   src/infra
   third_party
   src)
 
-# ---- global install: `cmake --install build --prefix /opt/homebrew --component ctxpack` (see install.sh) ----
-# COMPONENT ctxpack + --component on install scopes this to just the binary: without it, `cmake --install`
+# ---- global install: `cmake --install build --prefix /opt/homebrew --component ripwire` (see install.sh) ----
+# COMPONENT ripwire + --component on install scopes this to just the binary: without it, `cmake --install`
 # also runs the vendored tree-sitter subproject's own install() rules (headers/pkgconfig/static lib into
-# the same --prefix) even though ctxpack links it in statically and needs none of that at runtime.
-install(TARGETS ctxpack RUNTIME DESTINATION bin COMPONENT ctxpack)
+# the same --prefix) even though ripwire links it in statically and needs none of that at runtime.
+install(TARGETS ripwire RUNTIME DESTINATION bin COMPONENT ripwire)
 
 # ---- direct structural/numeric gates (SPEC §8) ----
-option(CTXPACK_TESTS "build direct CSR and PageRank verification gates" OFF)
-if(CTXPACK_TESTS)
+option(RIPWIRE_TESTS "build direct CSR and PageRank verification gates" OFF)
+if(RIPWIRE_TESTS)
   enable_testing()
 
   # SPEC §8: unit/property gates use a SHA-locked Doctest checkout — the exact v2.4.12 release commit,
   # vendored under third_party/deps/doctest (header + parts + the cmake scripts its CMakeLists reads).
-  set(_ctxpack_doctest_commit 1da23a3e8119ec5cce4f9388e91b065e20bf06f5)
+  set(_ripwire_doctest_commit 1da23a3e8119ec5cce4f9388e91b065e20bf06f5)
   # doctest is a test-only dependency: it must contribute no install() rules to this project, and the
   # vendored copy is pruned to what the build compiles (the single header + parts/ + its cmake
   # scripts). Its upstream install() block would otherwise try to install a doctest/extensions
   # directory that pruning removed — turned off at the source rather than left to `--component` luck.
   set(DOCTEST_NO_INSTALL ON)
-  ctxpack_use_vendored_source(doctest doctest/doctest.h)
+  ripwire_use_vendored_source(doctest doctest/doctest.h)
   FetchContent_Declare(doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
-    GIT_TAG ${_ctxpack_doctest_commit}
+    GIT_TAG ${_ripwire_doctest_commit}
     GIT_SHALLOW FALSE)
   FetchContent_MakeAvailable(doctest)
 
-  add_executable(ctxpack_test_csr
+  add_executable(ripwire_test_csr
     test/verify_csr.cpp
     src/infra/fastmath.cpp)
-  target_include_directories(ctxpack_test_csr PRIVATE src/infra third_party src)
-  target_link_libraries(ctxpack_test_csr PRIVATE doctest::doctest)
-  add_test(NAME ctxpack.csr COMMAND ctxpack_test_csr)
+  target_include_directories(ripwire_test_csr PRIVATE src/infra third_party src)
+  target_link_libraries(ripwire_test_csr PRIVATE doctest::doctest)
+  add_test(NAME ripwire.csr COMMAND ripwire_test_csr)
 
-  add_executable(ctxpack_test_pagerank
+  add_executable(ripwire_test_pagerank
     test/verify_pagerank.cpp
     src/pagerank.cpp
     src/infra/fastmath.cpp)
-  target_include_directories(ctxpack_test_pagerank PRIVATE src/infra third_party src)
-  target_link_libraries(ctxpack_test_pagerank PRIVATE doctest::doctest)
-  add_test(NAME ctxpack.pagerank COMMAND ctxpack_test_pagerank)
+  target_include_directories(ripwire_test_pagerank PRIVATE src/infra third_party src)
+  target_link_libraries(ripwire_test_pagerank PRIVATE doctest::doctest)
+  add_test(NAME ripwire.pagerank COMMAND ripwire_test_pagerank)
 
-  add_executable(ctxpack_test_radix
+  add_executable(ripwire_test_radix
     test/verify_radix.cpp
     src/infra/fastmath.cpp)
-  target_include_directories(ctxpack_test_radix PRIVATE src/infra third_party src)
-  add_test(NAME ctxpack.radix COMMAND ctxpack_test_radix)
+  target_include_directories(ripwire_test_radix PRIVATE src/infra third_party src)
+  add_test(NAME ripwire.radix COMMAND ripwire_test_radix)
 endif()
 
-# ---- self-profiling build (src/infra/profileScope.h): -DCTXPACK_PROFILE=ON ----
+# ---- self-profiling build (src/infra/profileScope.h): -DRIPWIRE_PROFILE=ON ----
 # OFF by default → every PROFILE_SCOPE compiles to ((void)0): byte-identical, zero-cost normal binary.
 # ON → per-phase CNTVCT timing (+ Apple PMC cycles/instructions/cache-misses when run under sudo).
-# Build in a SEPARATE dir so build/ctxpack (the bench binary) stays untouched:
-#   cmake -S . -B build_prof -DCTXPACK_NATIVE=ON -DCTXPACK_PROFILE=ON && cmake --build build_prof -j
-option(CTXPACK_PROFILE "instrument the pipeline with PROFILE_SCOPE self-profiling" OFF)
-foreach(_pt ctxpack ctxpack_probe)
-  target_compile_definitions(${_pt} PRIVATE PROFILE_ENABLED=$<BOOL:${CTXPACK_PROFILE}>)
+# Build in a SEPARATE dir so build/ripwire (the bench binary) stays untouched:
+#   cmake -S . -B build_prof -DRIPWIRE_NATIVE=ON -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
+option(RIPWIRE_PROFILE "instrument the pipeline with PROFILE_SCOPE self-profiling" OFF)
+foreach(_pt ripwire ripwire_probe)
+  target_compile_definitions(${_pt} PRIVATE PROFILE_ENABLED=$<BOOL:${RIPWIRE_PROFILE}>)
 endforeach()
 
 # ---- G1 sanitizer build (SPEC §6/§8): owned code + tree-sitter core + every grammar ----
-set(CTXPACK_GRAMMAR_TARGETS
+set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c)
-set(CTXPACK_RUNTIME_COMPILE_TARGETS ctxpack_probe ctxpack tree-sitter ${CTXPACK_GRAMMAR_TARGETS})
-set(CTXPACK_RUNTIME_LINK_TARGETS ctxpack_probe ctxpack)
-if(CTXPACK_TESTS)
-  list(APPEND CTXPACK_RUNTIME_COMPILE_TARGETS ctxpack_test_csr ctxpack_test_pagerank ctxpack_test_radix)
-  list(APPEND CTXPACK_RUNTIME_LINK_TARGETS ctxpack_test_csr ctxpack_test_pagerank ctxpack_test_radix)
+set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
+set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
+if(RIPWIRE_TESTS)
+  list(APPEND RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
+  list(APPEND RIPWIRE_RUNTIME_LINK_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
 endif()
-set(CTXPACK_G1_SANITIZERS "-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast-overflow")
-set(_ctxpack_tree_sitter_ignorelist "${_ctxpack_generated_dir}/tree_sitter_sanitizer_ignorelist.txt")
-set(_ctxpack_swift_ignorelist "${_ctxpack_generated_dir}/swift_sanitizer_ignorelist.txt")
-set(_ctxpack_bash_ignorelist "${_ctxpack_generated_dir}/bash_sanitizer_ignorelist.txt")
-# Full G1 remains enabled on ctxpack and every grammar. Pinned tree-sitter v0.26.9 intentionally uses
+set(RIPWIRE_G1_SANITIZERS "-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast-overflow")
+set(_ripwire_tree_sitter_ignorelist "${_ripwire_generated_dir}/tree_sitter_sanitizer_ignorelist.txt")
+set(_ripwire_swift_ignorelist "${_ripwire_generated_dir}/swift_sanitizer_ignorelist.txt")
+set(_ripwire_bash_ignorelist "${_ripwire_generated_dir}/bash_sanitizer_ignorelist.txt")
+# Full G1 remains enabled on ripwire and every grammar. Pinned tree-sitter v0.26.9 intentionally uses
 # defined C unsigned wrap throughout reverse loops and erase-at-zero iteration, so only that non-UB check
 # is disabled target-wide for the pinned core. All other integer/undefined/conversion checks remain on.
 # Pinned core uses defined unsigned wrap plus signed narrowing in its UINT16_MAX sentinel and inlined ICU
 # UTF-8 macros, so those two checks are disabled only for the core target. Subtree progress quantization and
 # generated external-scanner C function pointers remain exact-function exceptions. The lookahead sentinel
 # remains on upstream master as of 2026-07-12.
-file(WRITE "${_ctxpack_tree_sitter_ignorelist}"
+file(WRITE "${_ripwire_tree_sitter_ignorelist}"
   "[implicit-unsigned-integer-truncation]\nfun:ts_parser__balance_subtree\n"
   "[function]\nfun:ts_parser__external_scanner_create\n")
 # Swift's scanner stores lexer->lookahead (-1 at EOF) in uint32 inside this exact whitespace helper.
-file(WRITE "${_ctxpack_swift_ignorelist}"
+file(WRITE "${_ripwire_swift_ignorelist}"
   "[implicit-integer-sign-change]\nfun:eat_whitespace\n")
 # Bash's scanner decrements zero-valued nesting depths after marking the scan complete; uint32 wrap is intentional.
-file(WRITE "${_ctxpack_bash_ignorelist}"
+file(WRITE "${_ripwire_bash_ignorelist}"
   "[unsigned-integer-overflow]\nfun:scan\n")
 
-if(CTXPACK_ASAN)
-  foreach(_t IN LISTS CTXPACK_RUNTIME_COMPILE_TARGETS)
-    target_compile_options(${_t} PRIVATE ${CTXPACK_G1_SANITIZERS}
+if(RIPWIRE_ASAN)
+  foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
+    target_compile_options(${_t} PRIVATE ${RIPWIRE_G1_SANITIZERS}
       -fno-sanitize-recover=all -fno-omit-frame-pointer -O2 -g)
   endforeach()
-  foreach(_t IN LISTS CTXPACK_RUNTIME_LINK_TARGETS)
-    target_link_options(${_t} PRIVATE ${CTXPACK_G1_SANITIZERS})
+  foreach(_t IN LISTS RIPWIRE_RUNTIME_LINK_TARGETS)
+    target_link_options(${_t} PRIVATE ${RIPWIRE_G1_SANITIZERS})
   endforeach()
   target_compile_options(tree-sitter PRIVATE
     -fno-sanitize=unsigned-integer-overflow
     -fno-sanitize=implicit-signed-integer-truncation
     -fno-sanitize=implicit-integer-sign-change
-    "-fsanitize-ignorelist=${_ctxpack_tree_sitter_ignorelist}")
-  target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ctxpack_swift_ignorelist}")
-  target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ctxpack_bash_ignorelist}")
+    "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
+  target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
+  target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
 
   # Xcode's arm64 Darwin runtime rejects both the standalone leak sanitizer and detect_leaks=1 at startup.
   # Keep the local ASan/UBSan gate executable and explicit; LeakSanitizer remains a Linux/upstream-runtime
   # CI gate using the committed tree-sitter suppressions rather than being falsely claimed on Apple Clang.
   if(APPLE)
-    set(_ctxpack_asan_options "detect_leaks=0:halt_on_error=1:abort_on_error=1")
+    set(_ripwire_asan_options "detect_leaks=0:halt_on_error=1:abort_on_error=1")
   else()
-    set(_ctxpack_asan_options "detect_leaks=1:halt_on_error=1:abort_on_error=1")
+    set(_ripwire_asan_options "detect_leaks=1:halt_on_error=1:abort_on_error=1")
   endif()
-  add_custom_target(ctxpack_asan_fixture
+  add_custom_target(ripwire_asan_fixture
     COMMAND ${CMAKE_COMMAND} -E env
-      "ASAN_OPTIONS=${_ctxpack_asan_options}"
+      "ASAN_OPTIONS=${_ripwire_asan_options}"
       "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
       "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan_suppressions.txt"
-      $<TARGET_FILE:ctxpack> ${CMAKE_CURRENT_SOURCE_DIR}/test/fixture --no-cache
-    DEPENDS ctxpack
+      $<TARGET_FILE:ripwire> ${CMAKE_CURRENT_SOURCE_DIR}/test/fixture --no-cache
+    DEPENDS ripwire
     COMMENT "Run the G1 fixture with the platform leak-detection policy")
 endif()
 
@@ -450,81 +450,81 @@ endif()
 # A SEPARATE target/dir from ASan (TSan and ASan are mutually exclusive). Vets the one concurrent path in the
 # server: the detached HEAD-snapshot prefetch thread against a request-thread ingest, serialized by
 # quality::headSnapshotIngestMutex + the single-flight atomic. Build + run the (b) non-vacuity scenario:
-#   cmake -S . -B tsan -DCTXPACK_TSAN=ON && cmake --build tsan -j
-if(CTXPACK_TSAN)
-  foreach(_t IN LISTS CTXPACK_RUNTIME_COMPILE_TARGETS)
+#   cmake -S . -B tsan -DRIPWIRE_TSAN=ON && cmake --build tsan -j
+if(RIPWIRE_TSAN)
+  foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
     target_compile_options(${_t} PRIVATE -fsanitize=thread -fno-omit-frame-pointer -O2 -g)
   endforeach()
-  foreach(_t IN LISTS CTXPACK_RUNTIME_LINK_TARGETS)
+  foreach(_t IN LISTS RIPWIRE_RUNTIME_LINK_TARGETS)
     target_link_options(${_t} PRIVATE -fsanitize=thread)
   endforeach()
 endif()
 
 # ---- opt-in ingestion fuzzing (SPEC §8): isolated coverage-instrumented parser objects ----
 # Keep these copies separate from production objects: fuzzer-no-link coverage callbacks must never leak
-# into a normal executable. CTXPACK_FUZZ is OFF by default and every target is EXCLUDE_FROM_ALL.
-if(CTXPACK_FUZZ)
-  set(CTXPACK_FUZZ_COMPILE_OPTIONS
+# into a normal executable. RIPWIRE_FUZZ is OFF by default and every target is EXCLUDE_FROM_ALL.
+if(RIPWIRE_FUZZ)
+  set(RIPWIRE_FUZZ_COMPILE_OPTIONS
     -fsanitize=fuzzer-no-link,address,undefined,integer,float-divide-by-zero,float-cast-overflow
     -fno-sanitize-recover=all -fno-omit-frame-pointer -O2 -g)
-  set(CTXPACK_FUZZ_LINK_OPTIONS
+  set(RIPWIRE_FUZZ_LINK_OPTIONS
     -fsanitize=fuzzer,address,undefined,integer,float-divide-by-zero,float-cast-overflow)
 
-  add_library(ctxpack_tree_sitter_fuzz STATIC EXCLUDE_FROM_ALL ${tree_sitter_SOURCE_DIR}/lib/src/lib.c)
-  target_include_directories(ctxpack_tree_sitter_fuzz PRIVATE
+  add_library(ripwire_tree_sitter_fuzz STATIC EXCLUDE_FROM_ALL ${tree_sitter_SOURCE_DIR}/lib/src/lib.c)
+  target_include_directories(ripwire_tree_sitter_fuzz PRIVATE
     ${tree_sitter_SOURCE_DIR}/lib/src ${tree_sitter_SOURCE_DIR}/lib/src/wasm
     PUBLIC ${tree_sitter_SOURCE_DIR}/lib/include)
-  target_compile_definitions(ctxpack_tree_sitter_fuzz PRIVATE
+  target_compile_definitions(ripwire_tree_sitter_fuzz PRIVATE
     _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE _BSD_SOURCE _DARWIN_C_SOURCE)
-  target_compile_options(ctxpack_tree_sitter_fuzz PRIVATE ${CTXPACK_FUZZ_COMPILE_OPTIONS}
+  target_compile_options(ripwire_tree_sitter_fuzz PRIVATE ${RIPWIRE_FUZZ_COMPILE_OPTIONS}
     -fno-sanitize=unsigned-integer-overflow
     -fno-sanitize=implicit-signed-integer-truncation
     -fno-sanitize=implicit-integer-sign-change
-    "-fsanitize-ignorelist=${_ctxpack_tree_sitter_ignorelist}")
-  set_target_properties(ctxpack_tree_sitter_fuzz PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
+    "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
+  set_target_properties(ripwire_tree_sitter_fuzz PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
 
-  set(CTXPACK_FUZZ_TARGETS)
-  function(add_ctxpack_fuzzer NAME LANGUAGE GRAMMAR_SOURCE_KEY)
-    set(_ctxpack_grammar_source_var "CTXPACK_TS_${GRAMMAR_SOURCE_KEY}_SOURCES")
-    set(_ctxpack_fuzz_grammar_target "ctxpack_fuzz_grammar_${NAME}")
-    add_library(${_ctxpack_fuzz_grammar_target} OBJECT EXCLUDE_FROM_ALL ${${_ctxpack_grammar_source_var}})
-    list(GET ${_ctxpack_grammar_source_var} 0 _ctxpack_fuzz_parser_source)
-    get_filename_component(_ctxpack_fuzz_grammar_dir "${_ctxpack_fuzz_parser_source}" DIRECTORY)
-    target_include_directories(${_ctxpack_fuzz_grammar_target} PRIVATE
-      ${tree_sitter_SOURCE_DIR}/lib/include ${_ctxpack_fuzz_grammar_dir})
-    target_compile_options(${_ctxpack_fuzz_grammar_target} PRIVATE ${CTXPACK_FUZZ_COMPILE_OPTIONS})
+  set(RIPWIRE_FUZZ_TARGETS)
+  function(add_ripwire_fuzzer NAME LANGUAGE GRAMMAR_SOURCE_KEY)
+    set(_ripwire_grammar_source_var "RIPWIRE_TS_${GRAMMAR_SOURCE_KEY}_SOURCES")
+    set(_ripwire_fuzz_grammar_target "ripwire_fuzz_grammar_${NAME}")
+    add_library(${_ripwire_fuzz_grammar_target} OBJECT EXCLUDE_FROM_ALL ${${_ripwire_grammar_source_var}})
+    list(GET ${_ripwire_grammar_source_var} 0 _ripwire_fuzz_parser_source)
+    get_filename_component(_ripwire_fuzz_grammar_dir "${_ripwire_fuzz_parser_source}" DIRECTORY)
+    target_include_directories(${_ripwire_fuzz_grammar_target} PRIVATE
+      ${tree_sitter_SOURCE_DIR}/lib/include ${_ripwire_fuzz_grammar_dir})
+    target_compile_options(${_ripwire_fuzz_grammar_target} PRIVATE ${RIPWIRE_FUZZ_COMPILE_OPTIONS})
     if(NAME STREQUAL "swift")
-      target_compile_options(${_ctxpack_fuzz_grammar_target} PRIVATE "-fsanitize-ignorelist=${_ctxpack_swift_ignorelist}")
+      target_compile_options(${_ripwire_fuzz_grammar_target} PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
     elseif(NAME STREQUAL "bash")
-      target_compile_options(${_ctxpack_fuzz_grammar_target} PRIVATE "-fsanitize-ignorelist=${_ctxpack_bash_ignorelist}")
+      target_compile_options(${_ripwire_fuzz_grammar_target} PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
     endif()
-    set_target_properties(${_ctxpack_fuzz_grammar_target} PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(${_ripwire_fuzz_grammar_target} PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
 
-    set(_ctxpack_fuzz_target "ctxpack_fuzz_${NAME}")
-    add_executable(${_ctxpack_fuzz_target} EXCLUDE_FROM_ALL
-      test/fuzz/fuzz_ingest.cpp $<TARGET_OBJECTS:${_ctxpack_fuzz_grammar_target}>)
-    target_compile_definitions(${_ctxpack_fuzz_target} PRIVATE CTXPACK_FUZZ_LANGUAGE=${LANGUAGE})
-    target_compile_options(${_ctxpack_fuzz_target} PRIVATE ${CTXPACK_FUZZ_COMPILE_OPTIONS})
-    target_link_options(${_ctxpack_fuzz_target} PRIVATE ${CTXPACK_FUZZ_LINK_OPTIONS})
-    target_link_libraries(${_ctxpack_fuzz_target} PRIVATE ctxpack_tree_sitter_fuzz)
-    target_include_directories(${_ctxpack_fuzz_target} PRIVATE ${tree_sitter_SOURCE_DIR}/lib/include)
-    set(CTXPACK_FUZZ_TARGETS ${CTXPACK_FUZZ_TARGETS} ${_ctxpack_fuzz_target} PARENT_SCOPE)
+    set(_ripwire_fuzz_target "ripwire_fuzz_${NAME}")
+    add_executable(${_ripwire_fuzz_target} EXCLUDE_FROM_ALL
+      test/fuzz/fuzz_ingest.cpp $<TARGET_OBJECTS:${_ripwire_fuzz_grammar_target}>)
+    target_compile_definitions(${_ripwire_fuzz_target} PRIVATE RIPWIRE_FUZZ_LANGUAGE=${LANGUAGE})
+    target_compile_options(${_ripwire_fuzz_target} PRIVATE ${RIPWIRE_FUZZ_COMPILE_OPTIONS})
+    target_link_options(${_ripwire_fuzz_target} PRIVATE ${RIPWIRE_FUZZ_LINK_OPTIONS})
+    target_link_libraries(${_ripwire_fuzz_target} PRIVATE ripwire_tree_sitter_fuzz)
+    target_include_directories(${_ripwire_fuzz_target} PRIVATE ${tree_sitter_SOURCE_DIR}/lib/include)
+    set(RIPWIRE_FUZZ_TARGETS ${RIPWIRE_FUZZ_TARGETS} ${_ripwire_fuzz_target} PARENT_SCOPE)
   endfunction()
 
-  add_ctxpack_fuzzer(cpp        tree_sitter_cpp        cpp)
-  add_ctxpack_fuzzer(python     tree_sitter_python     python)
-  add_ctxpack_fuzzer(go         tree_sitter_go         go)
-  add_ctxpack_fuzzer(rust       tree_sitter_rust       rust)
-  add_ctxpack_fuzzer(typescript tree_sitter_typescript tsts)
-  add_ctxpack_fuzzer(tsx        tree_sitter_tsx        tstsx)
-  add_ctxpack_fuzzer(swift      tree_sitter_swift      swift)
-  add_ctxpack_fuzzer(objc       tree_sitter_objc       objc)
-  add_ctxpack_fuzzer(javascript tree_sitter_javascript javascript)
-  add_ctxpack_fuzzer(bash       tree_sitter_bash       bash)
-  add_ctxpack_fuzzer(java       tree_sitter_java       java)
-  add_ctxpack_fuzzer(ruby       tree_sitter_ruby       ruby)
-  add_ctxpack_fuzzer(json       tree_sitter_json       json)
-  add_ctxpack_fuzzer(csharp     tree_sitter_c_sharp    csharp)
-  add_ctxpack_fuzzer(c          tree_sitter_c          c)
-  add_custom_target(ctxpack_fuzzers DEPENDS ${CTXPACK_FUZZ_TARGETS})
+  add_ripwire_fuzzer(cpp        tree_sitter_cpp        cpp)
+  add_ripwire_fuzzer(python     tree_sitter_python     python)
+  add_ripwire_fuzzer(go         tree_sitter_go         go)
+  add_ripwire_fuzzer(rust       tree_sitter_rust       rust)
+  add_ripwire_fuzzer(typescript tree_sitter_typescript tsts)
+  add_ripwire_fuzzer(tsx        tree_sitter_tsx        tstsx)
+  add_ripwire_fuzzer(swift      tree_sitter_swift      swift)
+  add_ripwire_fuzzer(objc       tree_sitter_objc       objc)
+  add_ripwire_fuzzer(javascript tree_sitter_javascript javascript)
+  add_ripwire_fuzzer(bash       tree_sitter_bash       bash)
+  add_ripwire_fuzzer(java       tree_sitter_java       java)
+  add_ripwire_fuzzer(ruby       tree_sitter_ruby       ruby)
+  add_ripwire_fuzzer(json       tree_sitter_json       json)
+  add_ripwire_fuzzer(csharp     tree_sitter_c_sharp    csharp)
+  add_ripwire_fuzzer(c          tree_sitter_c          c)
+  add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 endif()

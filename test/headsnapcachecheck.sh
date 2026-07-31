@@ -25,26 +25,26 @@
 #
 # Uses its OWN temp repo + a private XDG_CACHE_HOME (TMPDIR unset) so the HEAD-snapshot caches land in a dir we
 # own and can inspect. Does NOT edit regression.sh. Needs git.
-# Usage:  test/headsnapcachecheck.sh   |   CTXPACK_BIN=build_w2e/ctxpack test/headsnapcachecheck.sh
+# Usage:  test/headsnapcachecheck.sh   |   RIPWIRE_BIN=build_w2e/ripwire test/headsnapcachecheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
 XDG="$TMP/xdg"; mkdir -p "$XDG"
-CACHEDIR="$XDG/ctxpack"
+CACHEDIR="$XDG/ripwire"
 
 # portable inode reader (BSD stat -f %i / GNU stat -c %i)
 inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
 # AUDIT5 Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
-snapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ctxpack-qheadsnap-*.bin' 2>/dev/null; }
+snapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qheadsnap-*.bin' 2>/dev/null; }
 nsnap(){ snapfiles | wc -l | tr -d ' '; }
 # run against $REPO with the private cache dir and a HEAD-snapshot cache enabled (auto path is internal to
 # computeHeadSnapshot; --no-cache only disables the WORKING-tree auto-cache, not the HEAD-snapshot cache — so
@@ -68,7 +68,7 @@ echo "headsnapcachecheck: BIN=$BIN"
 # ── (a) equivalence + reuse (unchanged HEAD == working tree, 0 regressions) ───────────────────────────────
 run --no-cache >"$TMP/a1" 2>/dev/null; rc1=$?
 SF="$( snapfiles | head -1 )"
-[ -n "$SF" ] && ok "run 1 creates a HEAD-snapshot cache file" || no "no ctxpack-qheadsnap-*.bin after run 1"
+[ -n "$SF" ] && ok "run 1 creates a HEAD-snapshot cache file" || no "no ripwire-qheadsnap-*.bin after run 1"
 I1="$( [ -n "$SF" ] && inode_of "$SF" )"
 
 run --no-cache >"$TMP/a2" 2>/dev/null; rc2=$?
@@ -139,7 +139,7 @@ for i in 1 2 3 4 5; do
 done
 # no-exclude runs share one key group; count only those (exclude=tests group adds its own capped set).
 # AUDIT5 Y4: shard-aware lookup
-NOEXC="$( find "$CACHEDIR" -maxdepth 2 -type f -name 'ctxpack-qheadsnap-*.bin' 2>/dev/null | wc -l | tr -d ' ' )"
+NOEXC="$( find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qheadsnap-*.bin' 2>/dev/null | wc -l | tr -d ' ' )"
 [ "$NOEXC" -le 4 ] && ok "cache dir bounded after HEAD churn ($NOEXC files, per-repo cap 2 per key group)" \
     || no "cache dir grew unbounded after churn ($NOEXC files) — eviction not working"
 

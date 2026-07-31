@@ -1,8 +1,8 @@
-# Head-to-head: ctxpack vs Aider repo-map vs codebase-memory-mcp vs graphify (LocBench held-out slice)
+# Head-to-head: ripwire vs Aider repo-map vs codebase-memory-mcp vs graphify (LocBench held-out slice)
 
 **Phase B5.3 of PLAN_researchImprove2026.md — 2026-07-13.**
 Primary deliverable: the per-instance win/loss matrix and the **loss-bucket analysis** (what can we
-learn to make ctxpack better). The scoreboard is the by-product.
+learn to make ripwire better). The scoreboard is the by-product.
 
 ## (i) Methodology + exact versions
 
@@ -12,7 +12,7 @@ SHA-256 `5bbcea4bff11396f38f8aca3e64d697a8ea1da2bc54d705da7f6e34886804c97` (matc
 session's scratchpad was used — hash-verified against the harness's pinned value before use).
 
 **Slice.** The **first 60 scored held-out instances in stable dataset order** — the harness's own frozen
-repo-disjoint salted-SHA-256 split (`ctxpack-a7-v2`, byte0<128=train), via
+repo-disjoint salted-SHA-256 split (`ripwire-a7-v2`, byte0<128=train), via
 `--split=heldout --max-scored 60 --n 560`. Zero exclusions in any arm; N(paired)=60.
 Mix: 20 single-file gold, 40 multi-file — a **hard slice** (cf. the README footnote: strict
 ALL-gold-in-top-k is much harder on multi-file gold; heldout-243 full-run strict file@10 is 60.9%
@@ -20,21 +20,21 @@ while this slice gives 36.7%).
 
 **Checkouts.** Depth-1 shallow fetch of `base_commit` (`run_locbench.checkout()`, `history_depth=1`),
 imported and reused unmodified by all arms. Competitor arms shared one checkout tree
-(`headtohead/repos/`); the ctxpack arm used the harness's own workdir. Same commits, byte-identical
+(`headtohead/repos/`); the ripwire arm used the harness's own workdir. Same commits, byte-identical
 content.
 
 **Gold + metric.** Gold = the harness's `primary_files` (patch-touched files present in the indexed
 universe — identical gold for all arms). Metric = the harness's own strict file@k (`file_ranks` +
 `acc_all_at`, **imported unmodified** from `run_locbench.py`): exact repo-relative path identity;
 basename fallback only when the basename is unique in the universe (universe = `git ls-files` of the
-checkout for competitor arms; ctxpack's stored worst/first ranks used directly). Strict@k = ALL gold
+checkout for competitor arms; ripwire's stored worst/first ranks used directly). Strict@k = ALL gold
 files within top-k; any@10 = lenient first-hit recall.
 
 **Arms.**
 
 | arm | version / hash | invocation |
 |---|---|---|
-| ctxpack `--for` (routed, default flags) | binary sha256 `eb1c39fa8054c2e33c5be22cbfbf17d91dcd0f1e90f1c53f593b3e50a9ee0faa`; repo @ `aab8674` with uncommitted work-tree changes (harness `run_locbench.py` sha256 `22bf603a5b3443f31ef81f9baccc6a230f524efce7708e63c32f795ce9e7c5e9`) | `CTXPACK=<build> run_locbench.py --split=heldout --max-scored 60 --arms for --n 560` → per instance `--for=<issue 1200ch> --top-k=200 --format=candidates --cache=<rich>` |
+| ripwire `--for` (routed, default flags) | binary sha256 `eb1c39fa8054c2e33c5be22cbfbf17d91dcd0f1e90f1c53f593b3e50a9ee0faa`; repo @ `aab8674` with uncommitted work-tree changes (harness `run_locbench.py` sha256 `22bf603a5b3443f31ef81f9baccc6a230f524efce7708e63c32f795ce9e7c5e9`) | `RIPWIRE=<build> run_locbench.py --split=heldout --max-scored 60 --arms for --n 560` → per instance `--for=<issue 1200ch> --top-k=200 --format=candidates --cache=<rich>` |
 | Aider repo-map | aider-chat **0.86.2**, Python 3.12.13 (venv) | `RepoMap(map_tokens=1e6, refresh="always").get_ranked_tags([], all_files, set(), idents)`; `idents` = aider's own `get_ident_mentions(issue[:1200])` (its real chat-personalization mechanism). Also a no-personalization control. File order = first appearance in ranked tags. |
 | codebase-memory-mcp | **0.9.0** (npm, DeusData), node v26.4.0 | `cli index_repository --repo-path=<repo>` then `cli search_graph --project=<p> --query=<issue 1200ch> --limit=300` (BM25 over graph nodes, structural boosting). File order = first appearance in ranked symbol results. |
 | graphify | **graphifyy 0.9.15** (PyPI, Graphify-Labs), Python 3.12.13 (venv), `PYTHONHASHSEED=0` | `graphify extract <repo> --code-only --no-cluster --out <per-instance dir>` (local tree-sitter AST, no LLM/API key) then `graphify query "<issue 1200ch>" --graph graph.json --budget 20000` (local BFS traversal from question-matched seed nodes). File order = first appearance of a node's `src=` file in BFS output (imposed convention — see note). |
@@ -75,7 +75,7 @@ vs `graphify/determinism_run_{c,d}_seed0.json` (identical). So: **deterministic 
 pins the hash seed — by default it is not.**
 
 **Timeouts / skips.** 600 s per tool invocation (`gtimeout`); zero timeouts, zero errors, zero
-exclusions. Wall per instance (median/max): ctxpack **0.074 s / 1.55 s** (warm, pre-built index);
+exclusions. Wall per instance (median/max): ripwire **0.074 s / 1.55 s** (warm, pre-built index);
 aider **2.5 s / 87.6 s** (tags scan; two rankings per instance); cbm **1.14 s / 17.7 s** (index+query);
 graphify **5.8 s / 96.4 s** (extract median 4.9 s / max 86.5 s + query).
 
@@ -83,13 +83,13 @@ graphify **5.8 s / 96.4 s** (extract median 4.9 s / max 86.5 s + query).
 
 | arm | file@1 | file@3 | file@5 | file@10 | any@10 (lenient) |
 |---|---|---|---|---|---|
-| **ctxpack `--for`** | 5.0% | **18.3%** | **26.7%** | **36.7%** | **75.0%** |
+| **ripwire `--for`** | 5.0% | **18.3%** | **26.7%** | **36.7%** | **75.0%** |
 | aider repo-map (personalized) | 0.0% | 1.7% | 6.7% | 13.3% | 33.3% |
 | aider repo-map (no persona) | 0.0% | 1.7% | 3.3% | 10.0% | 26.7% |
 | codebase-memory-mcp | **6.7%** | 10.0% | 16.7% | 26.7% | 66.7% |
 | graphify (BFS traversal order) | 0.0% | 3.3% | 5.0% | 21.7% | 41.7% |
 
-ctxpack leads strict@3/@5/@10 and lenient@10; codebase-memory-mcp edges strict@1 (BM25 name-exact hits
+ripwire leads strict@3/@5/@10 and lenient@10; codebase-memory-mcp edges strict@1 (BM25 name-exact hits
 land #1 when the issue names the module — see buckets) and is the only competitor within reach.
 Aider's map barely responds to the query (personalization only nudges file PageRank).
 
@@ -101,9 +101,9 @@ Aider's map barely responds to the query (personalization only nudges file PageR
 | vs codebase-memory-mcp | **10** | 4 | 12 | 34 |
 | vs graphify | **12** | 3 | 10 | 35 |
 
-Lenient any@10: vs aider 28–3 ctxpack; vs cbm 14–9 ctxpack; vs graphify 22–2 ctxpack.
+Lenient any@10: vs aider 28–3 ripwire; vs cbm 14–9 ripwire; vs graphify 22–2 ripwire.
 
-Competitor strict wins (= ctxpack strict losses, all analyzed below):
+Competitor strict wins (= ripwire strict losses, all analyzed below):
 `scikit-learn-25186`, `micropython-lib-947`, `scikit-learn-29130`, `transformers-35453` (cbm);
 `scikit-learn-29130`, `repo_standards_validator-137` (aider).
 graphify strict wins add: `GitPython-1636`, `imod-python-1159` (+ `repo_standards_validator-137`,
@@ -111,7 +111,7 @@ shared with aider). Lenient-only losses vs cbm add: `modin-6836`, `MSS-1967`, `s
 `TagStudio-735`, `zulip-31168`; vs aider add: `real-intent-102`, `scikit-learn-8478`; vs graphify
 adds nothing new (`GitPython-1636` also lenient, `scikit-learn-8478` shared).
 
-ctxpack strict wins for the record — vs aider (16): scikit-learn-24145, quiz-backend-84, sopel-2285,
+ripwire strict wins for the record — vs aider (16): scikit-learn-24145, quiz-backend-84, sopel-2285,
 pip-13085, aiortc-795, pandas-21401, scikit-learn-14012, pulp_rpm-3224, scikit-learn-6116, rucio-4930,
 zulip-14091, modin-3404, pandas-35029, jwcrypto-195, aiohttp-7829, PlasmaPy-2542; vs cbm (10):
 sopel-2285, pip-13085, pandas-21401, pulp_rpm-3224, pandas-35029, jwcrypto-195, aiohttp-7829,
@@ -123,11 +123,11 @@ Full 60-row paired table: `paired_table.md`; machine-readable: `headtohead_resul
 
 Every loss was re-executed (`--for` with the instance's re-checked-out base_commit + its cached index;
 reruns reproduced the stored ranks exactly) and the actual top-10 vs gold inspected.
-Assignments + full notes: `loss_buckets.json`; rerun evidence: `loss_ctxpack_output.json`.
+Assignments + full notes: `loss_buckets.json`; rerun evidence: `loss_ripwire_output.json`.
 
 ### B1 — path/module-mention unexploited — 3 instances (all strict losses; the biggest lever)
 The issue **literally names the gold file** — as a GitHub URL path, a dotted module, or a package
-name — and ctxpack's ranker doesn't exploit it, while cbm's plain BM25 over names does.
+name — and ripwire's ranker doesn't exploit it, while cbm's plain BM25 over names does.
 - `scikit-learn-25186`: issue contains `sklearn/ensemble/_iforest.py` twice in URLs plus
   `IsolationForest`/`_compute_score_samples`. ctx 60, cbm **8**.
 - `transformers-35453`: issue says "In `transformers.optimization` support…". Gold
@@ -160,13 +160,13 @@ First gold found early; a **sibling gold file at rank 11–65** kills strict@10.
   code-symbol-centric; maintenance-script gold starves it.
 
 ### B5 — indirect gold (named file != fixed file) — 1
-- `MSS-1967`: issue names `conftest.py` L227; ctxpack ranked conftest.py **#1** — lexically perfect,
+- `MSS-1967`: issue names `conftest.py` L227; ripwire ranked conftest.py **#1** — lexically perfect,
   but the accepted fix edited the three files whose popups *triggered* the warning. Wants a 1-hop
   "what reaches this" graph expansion from the named anchor (exactly `--anchor`'s design intent), not
   better lexical match. cbm lenient-hit at 1.
 
 ### B6 — test/doc-file crowding — 1 primary (+3 as secondary)
-- `simtools-1183`: gold = the db layer (13/30/52); ctxpack's top-10 = io_handler, `docs/source/conf.py`
+- `simtools-1183`: gold = the db layer (13/30/52); ripwire's top-10 = io_handler, `docs/source/conf.py`
   and **5 test files**. Tests that mention the profiled symbols outrank implementation. Also visible in
   the top-10s of 25186, 29130, 8478 (sklearn test files flood the top).
 
@@ -214,14 +214,14 @@ strict-wins that plain name/seed matching solved.
 ## Artifacts
 
 All under `scratchpad/headtohead/`:
-- `ctxpack60.json` — harness output, ctxpack arm (per-instance ranks, walls, coverage)
+- `ripwire60.json` — harness output, ripwire arm (per-instance ranks, walls, coverage)
 - `aider60.jsonl` (raw) / `aider60.clean.jsonl` (filtered: aider prints progress lines to stdout) — ranked files per instance, personalized + plain
 - `cbm60.jsonl` — codebase-memory-mcp ranked files per instance
 - `graphify60.jsonl` — graphify ranked files per instance (+ per-instance extract/query walls);
   `graphify/determinism_run_*.json` — the determinism evidence pairs
 - `headtohead_results.json` — paired per-instance table + summaries (scoreboard source of truth)
 - `paired_table.md` — human-readable 60-row paired table
-- `loss_buckets.json` / `loss_ctxpack_output.json` — bucket assignments + rerun evidence
+- `loss_buckets.json` / `loss_ripwire_output.json` — bucket assignments + rerun evidence
 - `run_aider_arm.{py,sh}`, `aider_worker.py`, `cbm_worker.py`, `run_cbm_arm.sh`, `graphify_worker.py`, `run_graphify_arm.sh`, `score.py`, `score4.py` — arm scripts
 - `logs/` — full stdout/stderr of every arm
 

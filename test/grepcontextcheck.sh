@@ -20,12 +20,12 @@
 #   - --regex=PAT --grep-context=2 also works (context is not literal-only)
 #
 # Usage:
-#   test/grepcontextcheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/grepcontextcheck.sh
+#   test/grepcontextcheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/grepcontextcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/grepcontextfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -34,7 +34,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/grepcontextfix dir — fixture missing"; exit 2; }
 
 echo "grepcontextcheck: BIN=$BIN  CORPUS=$CORPUS"

@@ -12,39 +12,39 @@ repo. Absorbed skill directories were deleted — their content lives on in the 
 
 | Old skill            | New home                     | Notes |
 |----------------------|------------------------------|-------|
-| ctxpack-orient       | **ctxpack-orient**           | kept; now the escalation-ladder base |
-| ctxpack-tour         | **ctxpack-orient**           | folded in as the report→deps→communities→hotspots ladder |
-| ctxpack-zoom         | **ctxpack-orient**           | folded in as the nested-hierarchy + --mermaid/--html rungs |
-| ctxpack-navigate     | **ctxpack-navigate**         | kept; --query-vs---for + graph-query pointer retained |
-| ctxpack-explain      | **ctxpack-navigate**         | folded in as the one-symbol deep-dive section |
-| ctxpack-triage       | **ctxpack-find-bug**         | → Branch A ("symptom, no idea where") |
-| ctxpack-bisect       | **ctxpack-find-bug**         | → Branch B ("suspect a subsystem, narrow it") |
-| ctxpack-diagnose     | **ctxpack-find-bug**         | → Branch C ("I changed X and it broke" — --situ) |
-| ctxpack-design       | **ctxpack-before-you-build** | → feasibility spike / reusable blocks |
-| ctxpack-plan         | **ctxpack-before-you-build** | → plan section |
-| ctxpack-spike        | **ctxpack-before-you-build** | → feasibility-spike section |
-| ctxpack-scope        | **ctxpack-before-you-build** | → sizing-rubric section |
-| ctxpack-interface    | **ctxpack-before-you-build** | → interface section (design-time boundary work) |
-| ctxpack-pr-impact    | **ctxpack-change-check**     | keeps --map-diff + --rank-by=churn |
-| ctxpack-pre-pr       | **ctxpack-change-check**     | keeps --map-diff + --rank-by=churn |
-| ctxpack-fresh-eyes   | **ctxpack-fresh-eyes**       | kept; now the repo-wide once-over base |
-| ctxpack-clone-hunt   | **ctxpack-fresh-eyes**       | folded into duplicate-bodies pass |
-| ctxpack-owners       | **ctxpack-fresh-eyes**       | folded into ownership / bus-factor pass |
-| ctxpack-dead-code    | **ctxpack-fresh-eyes**       | folded in; dead-code's honest caveats preserved verbatim |
-| ctxpack-coupling     | **ctxpack-fresh-eyes**       | folded into the hidden-coupling (co-change) pass |
-| ctxpack-audit-skill  | **ctxpack-security-scan**    | → skill-file scanner section |
-| ctxpack-mcp-audit    | **ctxpack-security-scan**    | → .mcp.json manual-checklist section |
-| ctxpack-efficient    | **ctxpack-efficient**        | kept standalone |
-| ctxpack-quality-bar  | **ctxpack-quality-bar**      | kept; cross-ref updated pre-pr → change-check |
-| ctxpack-reuse-first  | **ctxpack-reuse-first**      | kept standalone |
-| ctxpack-review       | **ctxpack-change-check** + **ctxpack-fresh-eyes** | **DELETED** — split by moment (see 2026-07 MOMENT pass below) |
-| ctxpack-compress     | **ctxpack-compress**         | kept standalone (the detail-ladder rewrite) |
-| ctxpack-handoff      | **ctxpack-handoff**          | kept standalone |
-| ctxpack-layers       | **ctxpack-layers**           | kept standalone (--arch gate + baseline workflow) |
-| ctxpack-mcp          | **ctxpack-mcp**              | kept; cross-ref updated mcp-audit → security-scan |
-| ctxpack-graph-query  | **ctxpack-graph-query**      | kept standalone |
-| ctxpack-perf-target  | **ctxpack-perf-target**      | kept standalone; description sharpened + routing header added |
-| —                    | **ctxpack-write-tests**      | NEW (AUDIT4 S4, 2026-07-10) — no predecessor; untested-code coverage moment had no home until then |
+| ripwire-orient       | **ripwire-orient**           | kept; now the escalation-ladder base |
+| ripwire-tour         | **ripwire-orient**           | folded in as the report→deps→communities→hotspots ladder |
+| ripwire-zoom         | **ripwire-orient**           | folded in as the nested-hierarchy + --mermaid/--html rungs |
+| ripwire-navigate     | **ripwire-navigate**         | kept; --query-vs---for + graph-query pointer retained |
+| ripwire-explain      | **ripwire-navigate**         | folded in as the one-symbol deep-dive section |
+| ripwire-triage       | **ripwire-find-bug**         | → Branch A ("symptom, no idea where") |
+| ripwire-bisect       | **ripwire-find-bug**         | → Branch B ("suspect a subsystem, narrow it") |
+| ripwire-diagnose     | **ripwire-find-bug**         | → Branch C ("I changed X and it broke" — --situ) |
+| ripwire-design       | **ripwire-before-you-build** | → feasibility spike / reusable blocks |
+| ripwire-plan         | **ripwire-before-you-build** | → plan section |
+| ripwire-spike        | **ripwire-before-you-build** | → feasibility-spike section |
+| ripwire-scope        | **ripwire-before-you-build** | → sizing-rubric section |
+| ripwire-interface    | **ripwire-before-you-build** | → interface section (design-time boundary work) |
+| ripwire-pr-impact    | **ripwire-change-check**     | keeps --map-diff + --rank-by=churn |
+| ripwire-pre-pr       | **ripwire-change-check**     | keeps --map-diff + --rank-by=churn |
+| ripwire-fresh-eyes   | **ripwire-fresh-eyes**       | kept; now the repo-wide once-over base |
+| ripwire-clone-hunt   | **ripwire-fresh-eyes**       | folded into duplicate-bodies pass |
+| ripwire-owners       | **ripwire-fresh-eyes**       | folded into ownership / bus-factor pass |
+| ripwire-dead-code    | **ripwire-fresh-eyes**       | folded in; dead-code's honest caveats preserved verbatim |
+| ripwire-coupling     | **ripwire-fresh-eyes**       | folded into the hidden-coupling (co-change) pass |
+| ripwire-audit-skill  | **ripwire-security-scan**    | → skill-file scanner section |
+| ripwire-mcp-audit    | **ripwire-security-scan**    | → .mcp.json manual-checklist section |
+| ripwire-efficient    | **ripwire-efficient**        | kept standalone |
+| ripwire-quality-bar  | **ripwire-quality-bar**      | kept; cross-ref updated pre-pr → change-check |
+| ripwire-reuse-first  | **ripwire-reuse-first**      | kept standalone |
+| ripwire-review       | **ripwire-change-check** + **ripwire-fresh-eyes** | **DELETED** — split by moment (see 2026-07 MOMENT pass below) |
+| ripwire-compress     | **ripwire-compress**         | kept standalone (the detail-ladder rewrite) |
+| ripwire-handoff      | **ripwire-handoff**          | kept standalone |
+| ripwire-layers       | **ripwire-layers**           | kept standalone (--arch gate + baseline workflow) |
+| ripwire-mcp          | **ripwire-mcp**              | kept; cross-ref updated mcp-audit → security-scan |
+| ripwire-graph-query  | **ripwire-graph-query**      | kept standalone |
+| ripwire-perf-target  | **ripwire-perf-target**      | kept standalone; description sharpened + routing header added |
+| —                    | **ripwire-write-tests**      | NEW (AUDIT4 S4, 2026-07-10) — no predecessor; untested-code coverage moment had no home until then |
 
 ## Judgment calls beyond the target taxonomy
 
@@ -65,47 +65,47 @@ its nearest neighbours.
 
 The 17 were well-written individually but agents **route by MOMENT**, and three moments were co-claimed by
 near-synonym descriptions (router stalls → agent falls back to grep). This pass rewrote DESCRIPTIONS to be
-pickable from the description alone, split `ctxpack-review` by moment, and added an entry-point router.
+pickable from the description alone, split `ripwire-review` by moment, and added an entry-point router.
 
-- **WRITE moment de-collided.** `ctxpack-reuse-first` = "about to write ONE symbol (fn/class/helper)";
-  `ctxpack-before-you-build` = "about to start a FEATURE (multi-symbol, needs a plan/interface/sizing)";
-  `ctxpack-efficient` reframed as a pure cross-cutting DISCIPLINE ("token+accuracy discipline for any read"),
+- **WRITE moment de-collided.** `ripwire-reuse-first` = "about to write ONE symbol (fn/class/helper)";
+  `ripwire-before-you-build` = "about to start a FEATURE (multi-symbol, needs a plan/interface/sizing)";
+  `ripwire-efficient` reframed as a pure cross-cutting DISCIPLINE ("token+accuracy discipline for any read"),
   dropping "about to author" so it stops competing at the write moment. `--exemplar` now surfaced in
   before-you-build too (was reachable only from reuse-first).
-- **`ctxpack-review` DELETED, split by moment:** its diff-review material (blast radius, tests, hotspots,
-  `--metrics` interpretation) → **ctxpack-change-check**; its unfamiliar-subsystem-risk + refactor-planning
-  material → **ctxpack-fresh-eyes** (now scope-to-a-subsystem, not repo-only). change-check + quality-bar are
+- **`ripwire-review` DELETED, split by moment:** its diff-review material (blast radius, tests, hotspots,
+  `--metrics` interpretation) → **ripwire-change-check**; its unfamiliar-subsystem-risk + refactor-planning
+  material → **ripwire-fresh-eyes** (now scope-to-a-subsystem, not repo-only). change-check + quality-bar are
   now an explicit CHAIN ("did the code get worse" → "is it safe to merge").
-- **UNDERSTAND de-duped:** the verbatim "how does X work / where is Y" now lives only on `ctxpack-orient`;
-  `ctxpack-efficient` dropped it.
+- **UNDERSTAND de-duped:** the verbatim "how does X work / where is Y" now lives only on `ripwire-orient`;
+  `ripwire-efficient` dropped it.
 - **Stranded features got interpretation homes:** `--metrics` attrs (`cbo`/`lcom4`/`nest`/`loc`/`params`/
   `tested`) interpreted with thresholds+actions in change-check; refactor/god-object trigger + `--communities`/
   `--cochange` in fresh-eyes; portable `--cache=FILE` one-liner in efficient.
-- **Router added:** `ctxpack-router` = the moment→skill map (10+ moments → one skill each) + the two-reflex
+- **Router added:** `ripwire-router` = the moment→skill map (10+ moments → one skill each) + the two-reflex
   primer (before you write → `--exemplar`; before done → `--quality-delta`). Every skill also gained a
   one-line routing header so a wrong route self-corrects in one hop.
 
 Net: 17 skills (review deleted, router added). The count is a rounding error; the win is every recognized
 moment has exactly one clear entry.
 
-## 2026-07-05 — ctxpack-compress merged into ctxpack-efficient (17 → 16)
+## 2026-07-05 — ripwire-compress merged into ripwire-efficient (17 → 16)
 
-`ctxpack-compress`'s detail ladder (map → `--pack-signatures` → `--outline` → `--expand` → `--pack-top-n`)
+`ripwire-compress`'s detail ladder (map → `--pack-signatures` → `--outline` → `--expand` → `--pack-top-n`)
 and its `--compress` scope/when-NOT-to-compress guidance never had its own MOMENT — agents already land in
-`ctxpack-efficient` first (the map-before-you-read discipline), and `--compress` is the next question once
+`ripwire-efficient` first (the map-before-you-read discipline), and `--compress` is the next question once
 you're already reading a body `--expand`/`--outline` surfaced. Moved verbatim (plus the redaction/
-`--no-redact` note, A3-S5) into `skills/ctxpack-efficient/compress-ladder.md`, a companion file loaded on
-demand — same pattern as `ctxpack-quality-bar/quality-metrics.md`. `ctxpack-efficient/SKILL.md` gained one
-pointer line; every `ctxpack-compress` reference elsewhere (router's reference-skills list) was repointed.
-Directory `skills/ctxpack-compress/` deleted.
+`--no-redact` note, A3-S5) into `skills/ripwire-efficient/compress-ladder.md`, a companion file loaded on
+demand — same pattern as `ripwire-quality-bar/quality-metrics.md`. `ripwire-efficient/SKILL.md` gained one
+pointer line; every `ripwire-compress` reference elsewhere (router's reference-skills list) was repointed.
+Directory `skills/ripwire-compress/` deleted.
 
 Net: 16 skills (compress folded into efficient as a companion file, no moment lost).
 
-## 2026-07-10 — ctxpack-write-tests added (AUDIT4 S4) (16 → 17)
+## 2026-07-10 — ripwire-write-tests added (AUDIT4 S4) (16 → 17)
 
 The untested-code-coverage moment ("this is untested, add coverage") had no home — it's distinct from
-judging your own diff (`ctxpack-change-check`) or your own code's quality (`ctxpack-quality-bar`). New
-standalone skill `ctxpack-write-tests`: ranks candidates by `--seams` (untested cross-module edges) and the
+judging your own diff (`ripwire-change-check`) or your own code's quality (`ripwire-quality-bar`). New
+standalone skill `ripwire-write-tests`: ranks candidates by `--seams` (untested cross-module edges) and the
 `tested=0` lens, pulls the symbol's outside contract via `--callers`, verifies the new test registers with
 `--affected`. No skill was merged or deleted for this one — it's a genuinely new moment.
 

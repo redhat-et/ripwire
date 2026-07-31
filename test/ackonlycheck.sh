@@ -8,16 +8,16 @@
 # round it would have swept in 59 findings to accept 8. Matching the FACET (contract-change) is what makes
 # a narrow, honest ack expressible.
 #
-# The gate runs on a synthetic repo so it never depends on ctxpack's own current debt.
+# The gate runs on a synthetic repo so it never depends on ripwire's own current debt.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
 echo "ackonlycheck: BIN=$BIN"
 
@@ -38,7 +38,7 @@ inline int gamma_fn( int a )
 EOF
 git add lib.h; git commit -qm base
 "$BIN" . --quality-baseline >/dev/null 2>&1
-[ -f .ctxpack_quality_baseline ] && ok "baseline snapshot written" || { no "no baseline written"; echo "ALL FAIL"; exit 1; }
+[ -f .ripwire_quality_baseline ] && ok "baseline snapshot written" || { no "no baseline written"; echo "ALL FAIL"; exit 1; }
 
 # the change: alpha and beta each gain a parameter (api-surface contract-change on a PREEXISTING symbol),
 # and gamma_fn gets markedly more complex (a complexity regression, a DIFFERENT kind).
@@ -76,13 +76,13 @@ grep -q -- '--quality-ack' "$TMP/noack.err" && grep -q -- '--ack-only' "$TMP/noa
     && ok "…and the message names both flags" || no "…without naming both flags: $( cat "$TMP/noack.err" )"
 
 # 1) a pattern matching NOTHING must refuse loudly and write nothing, never silently ack everything.
-cp .ctxpack_quality_acks "$TMP/acks.pre" 2>/dev/null || : > "$TMP/acks.pre"
+cp .ripwire_quality_acks "$TMP/acks.pre" 2>/dev/null || : > "$TMP/acks.pre"
 "$BIN" . --quality-delta --ack-only=zzz-no-such-finding --quality-ack="probe" >/dev/null 2>"$TMP/none.err"
 rc=$?
 [ $rc -eq 1 ] && ok "--ack-only matching nothing exits 1" || no "--ack-only matching nothing exited $rc (expected 1)"
 grep -q 'matched none' "$TMP/none.err" && ok "…and says so on stderr" || no "…with no explanatory stderr"
-if [ -f .ctxpack_quality_acks ]; then
-    cmp -s .ctxpack_quality_acks "$TMP/acks.pre" && ok "…and wrote nothing" || no "…but MODIFIED the ack file"
+if [ -f .ripwire_quality_acks ]; then
+    cmp -s .ripwire_quality_acks "$TMP/acks.pre" && ok "…and wrote nothing" || no "…but MODIFIED the ack file"
 else ok "…and wrote nothing (no ack file)"; fi
 
 # 2) the narrow ack: only the api-surface contract-changes, leaving the complexity finding gating.

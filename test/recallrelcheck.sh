@@ -19,18 +19,18 @@
 # The #1-doc assertion parses the FIRST "━━ <path> (relevance X) ━━" header line — best-first ordering is
 # part of the emitted contract ("best-first" appears in the summary line).
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/recallrelcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/recallrelcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "recallrelcheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

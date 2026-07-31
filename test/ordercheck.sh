@@ -15,19 +15,19 @@
 #       stays); a stale binary without the L5 change would fail this.
 #   (e) determinism + xmllint-clean on the --order= path.
 #
-# Usage:  test/ordercheck.sh   |   CTXPACK_BIN=asan/ctxpack test/ordercheck.sh
+# Usage:  test/ordercheck.sh   |   RIPWIRE_BIN=asan/ripwire test/ordercheck.sh
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "ordercheck: BIN=$BIN"
 

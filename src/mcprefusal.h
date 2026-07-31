@@ -534,7 +534,7 @@ inline std::string singleRootRefusal( std::string_view verb, std::string_view be
 // that is FALSE on two real git repos:
 //
 //   whereis / stray_content -> "not a git repository (or no HEAD commit) — no refs to search"   (both are)
-//   quality_delta           -> "no .ctxpack_quality_baseline and no git HEAD to auto-compare against"
+//   quality_delta           -> "no .ripwire_quality_baseline and no git HEAD to auto-compare against"
 //   edit_check              -> "symbol not found: 'X'"   for a symbol find_symbol RETURNS on the same paths
 //   owners                  -> "no git history for this tree (not a repo, or no commits)"        (it has)
 //   situational_awareness   -> "no changed files given and no git diff"
@@ -561,7 +561,7 @@ struct McpSingleRootVerb
 };
 
 inline constexpr McpSingleRootVerb kMcpSingleRootVerbs[] = {
-    { "quality_baseline",      "it pins ONE tree's floor into ONE .ctxpack_quality_baseline sidecar, and a "
+    { "quality_baseline",      "it pins ONE tree's floor into ONE .ripwire_quality_baseline sidecar, and a "
                                "workspace of N roots has no single place to put it" },
     { "quality_delta",         "its baseline is keyed to ONE repo's git HEAD (or that repo's sidecar), and N "
                                "roots have N HEADs; run it per root" },
@@ -831,9 +831,9 @@ static_assert( mcpSingleRootVerbsAreKnown(),
 //   M2 — `paths` is accepted and consumed on all 30 verbs (kMcpUniversalFields says so, and the comment
 //        above it has said so in prose) and was DECLARED on 18. The 12 undeclared verbs answer a multi-root
 //        request correctly, so a schema-driven client was the only party that could not discover the form.
-//   M4 — every `required` omitted `path`, which under the DEFAULT shipped install (`ctxpack wrap claude`
+//   M4 — every `required` omitted `path`, which under the DEFAULT shipped install (`ripwire wrap claude`
 //        passes no startup root) is required on all 30. Not a constant: a server started as
-//        `ctxpack <root> --mcp`, or the remote transport with a pinned workspace, supplies the root itself
+//        `ripwire <root> --mcp`, or the remote transport with a pinned workspace, supplies the root itself
 //        and `path` is genuinely optional there. So it is rendered per-server from the policy, and the
 //        answer is true for the server that gave it rather than true on average.
 //   M12 — 0 of 84 declared properties carried a `description`, on a surface where `kind` is an enum on one

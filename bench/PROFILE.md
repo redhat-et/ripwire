@@ -1,18 +1,18 @@
-# ctxpack — self-profile (where the time goes)
+# ripwire — self-profile (where the time goes)
 
-ctxpack instruments its own pipeline with the vendored `PROFILE_SCOPE`
+ripwire instruments its own pipeline with the vendored `PROFILE_SCOPE`
 (`src/infra/profileScope.h` + `profilePmc.h`). Gated behind a CMake option so the normal
 binary stays **byte-identical + zero-cost** (every marker → `((void)0)`; verified: no report,
 deterministic, map unchanged).
 
 ## Reproduce
 ```sh
-cmake -S . -B build_prof -DCTXPACK_NATIVE=ON -DCTXPACK_PROFILE=ON && cmake --build build_prof -j
+cmake -S . -B build_prof -DRIPWIRE_NATIVE=ON -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
 # timing only (per-phase CNTVCT wall):
-build_prof/ctxpack <repo> --no-cache            # cold (full tree-sitter parse)
-build_prof/ctxpack <repo>                        # warm (cache hit) — run twice, 2nd is warm
+build_prof/ripwire <repo> --no-cache            # cold (full tree-sitter parse)
+build_prof/ripwire <repo>                        # warm (cache hit) — run twice, 2nd is warm
 # + Apple PMC cycles/instructions/cache-misses per phase (needs root to arm the counters):
-sudo build_prof/ctxpack <repo> --no-cache > /tmp/p.txt 2>&1
+sudo build_prof/ripwire <repo> --no-cache > /tmp/p.txt 2>&1
 ```
 The report auto-prints at exit (a `#PROF_TSV_BEGIN…END` block carries the raw integers for tooling).
 
@@ -108,7 +108,7 @@ uses for co-change/churn).
 
 ### The drift alarm — `bench/perfgate.sh`
 New script: builds nothing, times a fixed corpus (this repo's own root — `src/` + `third_party/` +
-whatever the denylist keeps; ctxpack takes one positional `<dir>` so `$ROOT` stands in for "src +
+whatever the denylist keeps; ripwire takes one positional `<dir>` so `$ROOT` stands in for "src +
 third_party") cold (`--no-cache`) and warm (`--cache=`, primed), median of 5 via `/usr/bin/time`,
 compares against `bench/perf_budgets.txt`. Exits 1 with a loud message on any median over budget.
 **Not** wired into `test/regression.sh` — perf gates flake in CI (thermal throttling, shared runners,
@@ -128,11 +128,11 @@ machine variance without masking a real regression — see the file's own header
 
 ### Fresh measurement table (current binary, HEAD `f76fa6d`)
 
-Rebuilt from a clean tree in an isolated build dir (`-DCTXPACK_NATIVE=ON`); medians of 3+.
+Rebuilt from a clean tree in an isolated build dir (`-DRIPWIRE_NATIVE=ON`); medians of 3+.
 
 | repo | cold | warm | --for | --hotspots |
 |---|---|---|---|---|
-| this repo (ctxpack, ~150 files) | 0.16 s | 0.02 s | — | — |
+| this repo (ripwire, ~150 files) | 0.16 s | 0.02 s | — | — |
 | private C++ corpus (1849 files / 33k syms) | 1.50–1.63 s (med ~1.54 s) | 0.28–0.29 s | 0.32–0.34 s | 0.38–0.61 s (med ~0.41 s) |
 
 Tracks the `reviews/AUDIT_2026-07.md` perf-audit baseline (repo cold 0.16 s/warm 0.02 s; private corpus
@@ -142,7 +142,7 @@ run-to-run variance in the other direction, but `--for` 0.33 s vs 0.79 s is a re
 perf work landed in the batches since the audit was written — not independently re-attributed here,
 flagged for a future profiling pass to confirm which fix gets the credit).
 
-### Fresh private-corpus phase table (profile build, `-DCTXPACK_PROFILE=ON`)
+### Fresh private-corpus phase table (profile build, `-DRIPWIRE_PROFILE=ON`)
 
 **Cold** (`--no-cache`, 1849 files):
 
@@ -180,9 +180,9 @@ re-serialize entirely. **Doc post-pass is now the single largest warm-run item (
 matches the audit's P3 finding ("cache doc post-pass", ~53–63 ms warm) and remains unfixed; still the
 next-best warm-run lever after `gitFileAuthors` above.
 
-*Reproduce:* `cmake -S . -B build_prof -DCTXPACK_NATIVE=ON -DCTXPACK_PROFILE=ON && cmake --build build_prof -j`,
-then `build_prof/ctxpack <repo> --no-cache` (cold) / `build_prof/ctxpack <repo> --cache=/tmp/c.bin` run
-twice (warm). Perf-gate check: `bench/perfgate.sh` (needs `build/ctxpack`; see its header for
+*Reproduce:* `cmake -S . -B build_prof -DRIPWIRE_NATIVE=ON -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j`,
+then `build_prof/ripwire <repo> --no-cache` (cold) / `build_prof/ripwire <repo> --cache=/tmp/c.bin` run
+twice (warm). Perf-gate check: `bench/perfgate.sh` (needs `build/ripwire`; see its header for
 `--write-budgets`).
 
 ## 2026-07-11 — MEASURE-FIRST: speculative-prefetch experiment (DESIGN_specPrefetch.md, Phase E)
@@ -192,21 +192,21 @@ NUMBERS decide whether the speculative-prefetch mechanism is worth building. **O
 instrumentation + harness, build NOTHING else this round** — the honest, design-anticipated result.
 
 ### Instrumentation (env-gated, zero-cost-off)
-`CTXPACK_MCP_TIMINGS=1` makes `runMcp` (`src/mcp.h`) emit ONE stderr line per request —
-`ctxpack-timing verb=<v> wall_ms=<f> rebuilt=<0|1>` — where `rebuilt=1` means a full `getIndex()` rebuild
+`RIPWIRE_MCP_TIMINGS=1` makes `runMcp` (`src/mcp.h`) emit ONE stderr line per request —
+`ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1>` — where `rebuilt=1` means a full `getIndex()` rebuild
 (the staleness / post-edit cache-miss path) fired during that request. Off by default → the server is
 byte-identical + silent on stdout (gated by `test/spectimingcheck.sh`, and the A/B in `bench/spec_trace.py
---determinism`). Same precedent as `ingest.cpp`'s `CTXPACK_CACHE_STATS`.
+--determinism`). Same precedent as `ingest.cpp`'s `RIPWIRE_CACHE_STATS`.
 
 > **Deviation from the design (noted for the coordinator):** the design named a `--mcp-timings` CLI flag.
 > `src/cli.h`/`main.cpp` were owned by a concurrent agent this round, so the switch is the env var
-> `CTXPACK_MCP_TIMINGS` instead — same zero-cost-off contract, no CLI surface touched. If the mechanism ever
+> `RIPWIRE_MCP_TIMINGS` instead — same zero-cost-off contract, no CLI surface touched. If the mechanism ever
 > ships, the flag can be added then; the observable's behavior is identical either way.
 
 ### Decision table — per-request wall (ms), medians over 5 reps, Apple Silicon
-Reproduce: `python3 bench/spec_trace.py --bin build/ctxpack --reps 5`.
+Reproduce: `python3 bench/spec_trace.py --bin build/ripwire --reps 5`.
 
-| phase | verb / step | ctxpack p50 | ctxpack p95 | reb | canyon p50 | canyon p95 | reb |
+| phase | verb / step | ripwire p50 | ripwire p95 | reb | canyon p50 | canyon p95 | reb |
 |---|---|---:|---:|:-:|---:|---:|:-:|
 | orient | for (first verb) | 64.8 | 68.7 | 1 | 362.1 | 416.3 | 1 |
 | read | find_symbol | 0.7 | 0.8 | 0 | 4.7 | 6.3 | 0 |
@@ -235,7 +235,7 @@ NOT the absolute wall:
 
 | corpus | prefetchable qsnap delta p50 | p95 | total cold quality_delta | un-prefetchable working-tree residual |
 |---|---:|---:|---:|---:|
-| ctxpack (~150 files) | 357.7 ms | 392.1 ms | 734 ms | ~378 ms |
+| ripwire (~150 files) | 357.7 ms | 392.1 ms | 734 ms | ~378 ms |
 | private C++ corpus (1849 files) | 6213.5 ms | 6586.1 ms | 14493 ms | ~8154 ms |
 
 Even where (d) is GO, the prefetch hides only **~43 % of `quality_delta`** (6.2 s of 14.5 s) — the working-tree
@@ -243,7 +243,7 @@ clone pass (~8.2 s) is the larger elephant and no prefetch touches it. (The desi
 and the reviewer's "~3 s" both **understated** the true cost; the whole point of measure-first.)
 
 ### GO / NO-GO verdict (thresholds from DESIGN_specPrefetch.md §4)
-| candidate | ctxpack (~150 files) | private C++ corpus (1849 files) |
+| candidate | ripwire (~150 files) | private C++ corpus (1849 files) |
 |---|---|---|
 | **(a) edit-rebuild** — DEAD if <500 ms total OR p95<200 ms | **DEAD** (52 ms) | *edit skipped (read-only).* Warm rebuild proxy = for(first) **362/416 ms p95**: a **single** edit is <500 ms total → DEAD; **≥2** edits crosses both thresholds → would SURVIVE. **Marginal, edit-frequency-dependent.** |
 | **(b) predicted-verb cache-warm** | **DEAD** (read verbs ~0.7 ms warm — nothing to hide) | **DEAD** (~5–11 ms warm) |
@@ -251,7 +251,7 @@ and the reviewer's "~3 s" both **understated** the true cost; the whole point of
 | **(d) qsnap prefetch on HEAD-move** — GO if prefetchable p95 > 1 s | **NO-GO** (392 ms) | **GO** (6586 ms p95) |
 
 ### What was built — and what was NOT
-- **Built:** the `CTXPACK_MCP_TIMINGS` observable (`src/mcp.h`), the `bench/spec_trace.py` harness, this
+- **Built:** the `RIPWIRE_MCP_TIMINGS` observable (`src/mcp.h`), the `bench/spec_trace.py` harness, this
   section, and `test/spectimingcheck.sh` (the zero-cost-off + protocol-byte-identity gate).
 - **NOT built — Phase M deferred (STOP):** (d) fires GO only at large-repo scale, and its mechanism is **not
   "genuinely small."** The thing it prefetches is the single heaviest op in the tool (a full HEAD Snapshot:

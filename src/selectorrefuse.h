@@ -62,7 +62,7 @@ inline bool indexHasFileMatching( const IngestResult& ing, std::string_view file
 
 // THE DIAGNOSIS — the parenthetical alone, "" when there is nothing honest to add. Separated from the
 // sentence below (W3FIX) because the five arms this round routed here spell their verdict AFTER the echoed
-// selector ("ctxpack: --expand=SEL matched no symbol"), so they need the clause without the sentence. A
+// selector ("ripwire: --expand=SEL matched no symbol"), so they need the clause without the sentence. A
 // defaulted `specTail` parameter on selectorNotFoundMessage would have done the same job while CHANGING that
 // function's arity, i.e. its contract, for every existing caller — a clause of its own costs nothing and
 // leaves the shared sentence untouched.
@@ -106,7 +106,7 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
 
 // The complete stderr line (no trailing newline) for a selector that resolved to nothing.
 //
-//   `prefix`    the verb's own opening clause, INCLUDING its noun and the trailing ": " — "ctxpack: --lego
+//   `prefix`    the verb's own opening clause, INCLUDING its noun and the trailing ": " — "ripwire: --lego
 //               type not found: " reads differently from "--callers symbol not found: " and both are what
 //               agents grep for, so the noun stays the caller's.
 //   `spec`      the selector exactly as typed (echoed, always — a refusal that does not repeat the input
@@ -114,7 +114,7 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
 //   `retryForm` the surface's retry syntax for the runnable example ("--callers=", "--uses=", …).
 //
 // A verb whose verdict follows the selector instead of preceding it composes the two pieces itself:
-//   "ctxpack: --expand=" + sel + " matched no symbol" + selectorFaultClause( ing, sel, "--expand=" )
+//   "ripwire: --expand=" + sel + " matched no symbol" + selectorFaultClause( ing, sel, "--expand=" )
 inline std::string selectorNotFoundMessage( const IngestResult& ing, std::string prefix, std::string_view spec,
                                             std::string_view retryForm )
 {

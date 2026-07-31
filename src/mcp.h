@@ -1,6 +1,6 @@
 #pragma once
 
-// mcp.h — --mcp (SPEC §5): expose ctxpack as an MCP tool over stdio. Newline-delimited
+// mcp.h — --mcp (SPEC §5): expose ripwire as an MCP tool over stdio. Newline-delimited
 // JSON-RPC 2.0; three methods (initialize / tools/list / tools/call). Hand-rolled minimal
 // JSON (sufficient for these well-formed shapes) — no JSON library dependency.
 //
@@ -39,7 +39,7 @@ namespace ctx
 // *** KEEP IN SYNC WITH tools/list BELOW ***  Adding/removing/renaming a `{"name":"..."}` stanza
 // in the tools/list JSON must add/remove/rename the matching row here, in the same relative
 // order, and update kMcpVerbCount. test/wrapverbscheck.sh enforces this at test time by diffing
-// a live tools/list call against `ctxpack wrap claude`'s output — it fails loudly on drift even
+// a live tools/list call against `ripwire wrap claude`'s output — it fails loudly on drift even
 // if this comment is ignored.
 enum class McpVerbGroup { Read, FlagshipReflex, Edit };
 
@@ -68,7 +68,7 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     // ── flagship-reflex verbs (write-moment / before-you-call-it-done / is-it-safe-to-change) ──
     { "exemplar",                "repo's best-in-class instance of a kind, to imitate before you write",   McpVerbGroup::FlagshipReflex },
     { "quality_delta",           "only what your working tree made WORSE vs baseline, before you call it done", McpVerbGroup::FlagshipReflex },
-    { "quality_baseline",        "pin the quality floor (writes .ctxpack_quality_baseline sidecar)",       McpVerbGroup::FlagshipReflex },
+    { "quality_baseline",        "pin the quality floor (writes .ripwire_quality_baseline sidecar)",       McpVerbGroup::FlagshipReflex },
     { "impact",                  "transitive blast radius of a symbol (is it safe to change?)",            McpVerbGroup::FlagshipReflex },
     { "uses",                    "the resolvable use-sites of a symbol (call/read/write/import/extends)",  McpVerbGroup::FlagshipReflex },
     { "path_between",            "shortest directed call path from A to B (does A reach B, and how?)",     McpVerbGroup::FlagshipReflex },
@@ -145,7 +145,7 @@ inline bool isMcpProtocolVersionSupported( std::string_view version ) noexcept
 //     ONE workspace"). A tools/call whose `path`/`paths` names a DIFFERENT tree is refused with a clean
 //     error and NO index rebuild; an OMITTED path defaults to the pinned workspace.
 //   • defaultRoot (AUDIT5 D3/D4, X7) — stdio's own, SOFTER counterpart of pinnedRoot: non-empty only when
-//     `ctxpack <root> --mcp` was given a startup root (mutually exclusive with pinnedRoot — stdio never
+//     `ripwire <root> --mcp` was given a startup root (mutually exclusive with pinnedRoot — stdio never
 //     sets pinnedRoot). An OMITTED path defaults to it for every verb, mirroring the HTTP default-to-pinned
 //     step above; but unlike pinnedRoot, an EXPLICIT path naming a different tree is only refused for the 3
 //     EDIT verbs (a read verb reaching across a sibling checkout is a feature stdio has always offered).
@@ -157,7 +157,7 @@ struct McpDispatchPolicy
 {
     std::string pinnedRoot;         // "" = stdio (no pinning); non-empty = the remote transport's fixed workspace key/root
     bool        editsAllowed = true;   // false = refuse the 3 edit verbs (remote default)
-    std::string defaultRoot;        // "" = no stdio startup root given; else the canonicalized `ctxpack <root> --mcp` root
+    std::string defaultRoot;        // "" = no stdio startup root given; else the canonicalized `ripwire <root> --mcp` root
 };
 
 // canonicalize a root path for the workspace-pin comparison: realpath when it resolves, else the string
@@ -314,7 +314,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
         // tail at EOF was refused with a cause about a field whose value was sitting in the bytes. See
         // mcpjson.h's checkFrame for the scan and for why it is a completeness gate, not a second parser.
         //
-        // Placed in the SHARED handler, so stdio (where the edit verbs live and where `ctxpack wrap claude`
+        // Placed in the SHARED handler, so stdio (where the edit verbs live and where `ripwire wrap claude`
         // runs) gets the check the HTTP transport got for free from Content-Length. Answered with id:null on
         // purpose: JSON-RPC 2.0 requires a null id whenever the id could not be reliably detected, and in a
         // frame we have just judged un-whole no field is reliable — including that one.
@@ -405,13 +405,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                                          : kMcpLatestProtocolVersion;
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
                        ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
-                       "\",\"serverInfo\":{\"name\":\"ctxpack\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{}}}}";
+                       "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{}}}}";
             }
         }
         else if( method == "tools/list" )
             // §B6 M4: is `path` actually REQUIRED of this caller? Only when this server cannot supply a root
-            // itself — no `ctxpack <root> --mcp` startup root and no pinned remote workspace. That is the
-            // DEFAULT shipped install (`ctxpack wrap claude` passes no startup root), which is why every
+            // itself — no `ripwire <root> --mcp` startup root and no pinned remote workspace. That is the
+            // DEFAULT shipped install (`ripwire wrap claude` passes no startup root), which is why every
             // `required` omitting `path` was wrong for almost every real deployment; but it is not a constant,
             // and a schema that declared it unconditionally would be newly wrong for the rooted server. Each
             // server answers for itself.
@@ -470,7 +470,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"owners\",\"description\":\"Bus-factor: recency-weighted (6-month half-life) author ownership per file. bf=1 means one person holds >80% of weighted commits. symbol optional — restricts to the file that defines it.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "owners", pathIsRequired ) + "},"
                    // W4-#8 EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
-                   "{\"name\":\"replace_symbol_body\",\"description\":\"Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition. Refuses (file unchanged) if not found (lists nearest names), ambiguous (lists file:line candidates — retry with 'file'; in a multi-root workspace pass the root-labeled path form, e.g. file:'svc/'), the index is stale (call any read verb first), or the file is a SYMLINK (resolve to the real file first — editing through a link would replace the link entry, not the target). Concurrent ctxpack edits serialize; a concurrent external write is detected and refused, never silently overwritten. path = repo dir, or paths = multiple workspace roots (writes land in the correct root's real file); symbol = def name; file = optional disambiguating path substring; new_body = replacement text.\","
+                   "{\"name\":\"replace_symbol_body\",\"description\":\"Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition. Refuses (file unchanged) if not found (lists nearest names), ambiguous (lists file:line candidates — retry with 'file'; in a multi-root workspace pass the root-labeled path form, e.g. file:'svc/'), the index is stale (call any read verb first), or the file is a SYMLINK (resolve to the real file first — editing through a link would replace the link entry, not the target). Concurrent ripwire edits serialize; a concurrent external write is detected and refused, never silently overwritten. path = repo dir, or paths = multiple workspace roots (writes land in the correct root's real file); symbol = def name; file = optional disambiguating path substring; new_body = replacement text.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "replace_symbol_body", pathIsRequired ) + "},"
                    "{\"name\":\"insert_before_symbol\",\"description\":\"Insert text immediately BEFORE a symbol's definition (its first byte); a trailing newline is added only if missing. Same refusal contract as replace_symbol_body (not found / ambiguous / stale index → file unchanged). path/paths as replace_symbol_body (multi-root writes land in the real file); text = the text to insert.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "insert_before_symbol", pathIsRequired ) + "},"
@@ -484,9 +484,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // paraphrased — this stanza used to describe an ordering the selector does not use.
                    "{\"name\":\"exemplar\",\"description\":\"BEFORE writing a function / method / class / struct / interface / variable, get the repo's single best-in-class instance of that kind to imitate — signature AND full body. " + std::string( kExemplarSelectionRule ) + ". Beats grep/find_symbol: those find A definition, this ranks every definition and returns the one worth copying. kind = fn|method|class|struct|iface|var, OR a task string (its top match's kind is used).\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "exemplar", pathIsRequired ) + "},"
-                   "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your working tree made WORSE vs baseline — across 10 measured failure modes (complexity, verbosity, nesting, params, new duplication, new dead code, new public API surface, error-masking, short-horizon churn, new clone of a reused helper). Read-only; auto-compares vs git HEAD with no setup, or a pinned .ctxpack_quality_baseline sidecar (quality_baseline) if present and not stale — baseline field reports which was used. A small numeric delta carries sev=minor (informational, does not gate); findings accepted in .ctxpack_quality_acks are suppressed (acked counts them) until one worsens past its acked size. Non-minor regressions = new debt: fix and re-run to converge.\","
+                   "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your working tree made WORSE vs baseline — across 10 measured failure modes (complexity, verbosity, nesting, params, new duplication, new dead code, new public API surface, error-masking, short-horizon churn, new clone of a reused helper). Read-only; auto-compares vs git HEAD with no setup, or a pinned .ripwire_quality_baseline sidecar (quality_baseline) if present and not stale — baseline field reports which was used. A small numeric delta carries sev=minor (informational, does not gate); findings accepted in .ripwire_quality_acks are suppressed (acked counts them) until one worsens past its acked size. Non-minor regressions = new debt: fix and re-run to converge.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "quality_delta", pathIsRequired ) + "},"
-                   "{\"name\":\"quality_baseline\",\"description\":\"PIN the quality floor: writes .ctxpack_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface. Call once at the start of non-trivial work, then quality_delta after each edit compares against this pinned floor instead of HEAD. Side-effecting (writes a file) — skip it for a simple 'before I push' check, quality_delta already compares vs HEAD with zero setup.\","
+                   "{\"name\":\"quality_baseline\",\"description\":\"PIN the quality floor: writes .ripwire_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface. Call once at the start of non-trivial work, then quality_delta after each edit compares against this pinned floor instead of HEAD. Side-effecting (writes a file) — skip it for a simple 'before I push' check, quality_delta already compares vs HEAD with zero setup.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "quality_baseline", pathIsRequired ) + "},"
                    // §B6 M4: limit/offset are DECLARED here because they are HONORED (mcpPageArgs → pageWindow),
                    // which is what the legend has always instructed. Before this they were undeclared and
@@ -754,7 +754,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             }
 
             // ── stdio startup-root default + edit-verb workspace pin (AUDIT5 D3/D4, X7) ────────────────────
-            // Fires only when `ctxpack <root> --mcp` was actually given a startup root (policy.defaultRoot
+            // Fires only when `ripwire <root> --mcp` was actually given a startup root (policy.defaultRoot
             // non-empty) and only over stdio (policy.pinnedRoot empty — the remote gates above already
             // handled the HTTP case and always set pathsUsageError before falling through if they refused).
             // An omitted `path` defaults to that root for EVERY verb (the D3 half of the fix — before this,
@@ -1129,7 +1129,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "quality_baseline" && !path.empty() )
                 {
                     // §B6 M9: over a multi-root `paths` workspace this verb used to render the raw \x1f-separated
-                    // workspace REGISTRY KEY into a client-facing message — "could not write <key>/.ctxpack_
+                    // workspace REGISTRY KEY into a client-facing message — "could not write <key>/.ripwire_
                     // quality_baseline (unwritable directory?)" under -32603. Three lies in one sentence: an
                     // internal key shown as a path, an INTERNAL-ERROR code for a caller usage error, and a
                     // filesystem cause for a request-shape problem (the directory was perfectly writable; there
@@ -1285,20 +1285,20 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
 }
 
 // stdio MCP loop: one JSON object per line. Returns the process exit code. `root`/`roots` are the
-// positional args `ctxpack <root> --mcp` was started with (roots.size()>=2 = a multi-root workspace);
+// positional args `ripwire <root> --mcp` was started with (roots.size()>=2 = a multi-root workspace);
 // both default empty for the pre-X7 "no startup root" mode, in which every request must still name its
 // own `path` exactly as before. `root` mirrors `McpHttpConfig::root`; `roots` mirrors `::roots` — same
 // plumbing as runMcpHttp(), just building McpDispatchPolicy::defaultRoot instead of ::pinnedRoot (D3/D4).
 inline int runMcp( int topK, bool stable = false, bool noRedact = false,
                    const std::string& root = std::string(), const std::vector<std::string>& roots = {} )
 {
-    // MEASURE-FIRST instrumentation (CTXPACK_MCP_TIMINGS, off by default → byte-identical + silent server, same
-    // discipline as ingest.cpp's CTXPACK_CACHE_STATS). When set, emit ONE stderr TSV line per handled request:
-    //   ctxpack-timing verb=<v> wall_ms=<f> rebuilt=<0|1>
+    // MEASURE-FIRST instrumentation (RIPWIRE_MCP_TIMINGS, off by default → byte-identical + silent server, same
+    // discipline as ingest.cpp's RIPWIRE_CACHE_STATS). When set, emit ONE stderr TSV line per handled request:
+    //   ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1>
     // stderr only, so the JSON-RPC stdout stream is untouched and every determinism/protocol gate is unaffected.
     // NOTE: the design specified a `--mcp-timings` CLI flag; cli.h/main.cpp are owned by a concurrent agent this
     // round, so we use the env var instead (recorded in bench/PROFILE.md's appendix) — same zero-cost-off contract.
-    const bool timingsOn = std::getenv( "CTXPACK_MCP_TIMINGS" ) != nullptr;
+    const bool timingsOn = std::getenv( "RIPWIRE_MCP_TIMINGS" ) != nullptr;
 
     // X7 (D3/D4): resolve the SOFT stdio default root, same shape as runMcpHttp()'s pinnedRoot resolution
     // (mcpWorkspaceKey for 2+ roots, else a plain mcpCanonRoot) but never refuses to start — a malformed
@@ -1347,7 +1347,7 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
             const double wallMs = std::chrono::duration< double, std::milli >(
                                       std::chrono::steady_clock::now() - t0 ).count();
             const unsigned rebuilt = ( mcpRebuildCounter().load( std::memory_order_relaxed ) != rebuildAtStart ) ? 1u : 0u;
-            std::fprintf( stderr, "ctxpack-timing verb=%s wall_ms=%.3f rebuilt=%u\n",
+            std::fprintf( stderr, "ripwire-timing verb=%s wall_ms=%.3f rebuilt=%u\n",
                           r.timingVerb.c_str(), wallMs, rebuilt );
             std::fflush( stderr );
         }

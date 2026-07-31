@@ -6,9 +6,9 @@
 # <head>/<script>) while reporting success. The fix guards resolveOneForEdit on SymKind::Section. This gate
 # proves: doc sections are refused + the file is byte-unchanged, AND a real code edit still applies (no
 # over-block). Verified to FAIL against the pre-fix binary (which reported "applied" + corrupted the file).
-# Usage:  test/mcpeditkindcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/mcpeditkindcheck.sh
+# Usage:  test/mcpeditkindcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/mcpeditkindcheck.sh
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

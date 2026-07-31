@@ -2,7 +2,7 @@
 # A7 retrieval gate: adversarial relevance fixtures plus corrected evaluator identity semantics.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/retrievalfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

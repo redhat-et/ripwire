@@ -1,8 +1,8 @@
 // bench_convergence.cpp — the library-scale convergence showpiece. After a parallel parse, the symbols
 // must converge into ONE structure (the byName multimap) and references resolve against it — the classic
-// "many writers / one structure" problem (semiconductor DV elaboration; ctxpack's serial merge).
+// "many writers / one structure" problem (semiconductor DV elaboration; ripwire's serial merge).
 //
-//   A serial            : one byName map + resolve, single-threaded — ctxpack today.
+//   A serial            : one byName map + resolve, single-threaded — ripwire today.
 //   B partition-by-hash : shard the keyspace by hash(name); each shard built + read independently →
 //                         DISJOINT writes → lock-free, parallel. The DV lesson: beat many-writers by NOT
 //                         sharing — partition until writes don't collide, then it scales with cores.

@@ -3,7 +3,7 @@
 # (GATE_DECISION_r1cpp.md "Timing protocol"). Standalone on purpose: run_multiswe.py is the QUALITY
 # harness and is not modified for the perf tier.
 #
-# Per held-out instance, per arm (baseline = CTXPACK_NO_ANCHORHOP=1, candidate = default env):
+# Per held-out instance, per arm (baseline = RIPWIRE_NO_ANCHORHOP=1, candidate = default env):
 #   * 5 warm production-bundle runs (`--for=<query>` + the instance's rich cache) → wall samples
 #   * 1 cold run (`--no-cache`) → cold wall
 #   * token ceiling = run_locbench.estimated_output_tokens( warm payload ) (+ raw bytes beside it)
@@ -12,7 +12,7 @@
 # are the ones timed. Warm payload determinism is asserted across the 5 samples (zero-silent-skip).
 #
 # USAGE:
-#   CTXPACK=./build/ctxpack python3 timing_multiswe.py --work-dir <same as quality run> \
+#   RIPWIRE=./build/ripwire python3 timing_multiswe.py --work-dir <same as quality run> \
 #       --json-out timing_heldout.json [--lang cpp] [--dataset-lock ../../..../multiswe/dataset.lock]
 import argparse, json, pathlib, statistics, subprocess, sys, time
 
@@ -46,7 +46,7 @@ def main():
     instances = lock["instances_by_lang"][a.lang]
     work      = pathlib.Path( a.work_dir )
     repos_dir = work / "repos"; index_dir = work / "indexes"
-    arms      = [ ( "baseline", { "CTXPACK_NO_ANCHORHOP": "1" } ), ( "candidate", {} ) ]
+    arms      = [ ( "baseline", { "RIPWIRE_NO_ANCHORHOP": "1" } ), ( "candidate", {} ) ]
 
     rows = []
     for idx, inst in enumerate( instances ):
@@ -54,7 +54,7 @@ def main():
         repo_path = ms.checkout( inst["org"], inst["repo"], inst["base_sha"], repos_dir, {}, False )
         if repo_path is None: raise SystemExit( f"{iid}: CHECKOUT FAIL (zero-silent-skip contract)" )
         cache_key  = f"{inst['org']}__{inst['repo']}__{inst['base_sha']}"
-        rich_cache = index_dir / f"{cache_key}.rich.ctxpackcache"
+        rich_cache = index_dir / f"{cache_key}.rich.ripwirecache"
         if not rich_cache.exists():
             base = index_dir / cache_key
             _, _, irc = lb.run_ctx( repo_path, [ f"--index-out={base}", "--top-k=1", "--no-cache" ] )
@@ -84,7 +84,7 @@ def main():
                            for k, v in row["arms"].items() ), file=sys.stderr )
 
     pathlib.Path( a.json_out ).write_text( json.dumps( dict(
-        protocol=f"{a.warm_samples} warm (rich cache) + 1 cold (--no-cache) production --for per arm per instance; arms baseline(CTXPACK_NO_ANCHORHOP=1)/candidate back-to-back per instance; run alone",
+        protocol=f"{a.warm_samples} warm (rich cache) + 1 cold (--no-cache) production --for per arm per instance; arms baseline(RIPWIRE_NO_ANCHORHOP=1)/candidate back-to-back per instance; run alone",
         dataset_lock_sha256=lock.get( "content_sha256", "" ), lang=a.lang, n=len( rows ), instances=rows ), indent=1 ) )
     print( f"wrote {a.json_out} ({len(rows)} instances)" )
 

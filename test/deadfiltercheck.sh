@@ -12,19 +12,19 @@
 # Invariants frozen here: a directory filter SELECTS (its counts sum back to the unfiltered total), a
 # filename filter still works, and a filter naming nothing in the tree REFUSES instead of measuring zero.
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/deadfiltercheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/deadfiltercheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/deadfiltercheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/deadfiltercheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "deadfiltercheck: BIN=$BIN  ROOT=$ROOT"
 
 deadCount(){ "$BIN" "$ROOT" "$@" 2>/dev/null | grep -oE '<dead-code count="[0-9]+"' | grep -oE '[0-9]+'; }

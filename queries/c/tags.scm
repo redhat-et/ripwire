@@ -1,4 +1,4 @@
-; ctxpack C tags — written for ctxpack (.c). Derived from the upstream tree-sitter/tree-sitter-c
+; ripwire C tags — written for ripwire (.c). Derived from the upstream tree-sitter/tree-sitter-c
 ; v0.24.1 queries/tags.scm (definitions only: struct/union/enum/typedef/function) plus the SAME
 ; @reference.call augmentation the C++ tags.scm already carries (upstream C tags ship definitions
 ; ONLY, matching upstream C++). tree-sitter-c is the grammar tree-sitter-cpp itself EXTENDS, so the

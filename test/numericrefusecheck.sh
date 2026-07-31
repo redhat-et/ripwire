@@ -6,9 +6,9 @@
 # fixed sentence — no echo of what was actually passed, no example — while refusePageValue (one function
 # away) and the 24 compliant kViewFlags rows do both:
 #
-#     ctxpack … --zoom=          →  "ctxpack: --zoom needs a positive integer depth"     (before)
-#     ctxpack … --zoom=zzq       →  "ctxpack: --zoom needs a positive integer depth"     (byte-identical)
-#     ctxpack … --limit=zzq      →  "ctxpack: --limit needs a positive integer — got 'zzq', e.g. --limit=100"
+#     ripwire … --zoom=          →  "ripwire: --zoom needs a positive integer depth"     (before)
+#     ripwire … --zoom=zzq       →  "ripwire: --zoom needs a positive integer depth"     (byte-identical)
+#     ripwire … --limit=zzq      →  "ripwire: --limit needs a positive integer — got 'zzq', e.g. --limit=100"
 #
 # Two dialects for one error class: the caller of the first cannot tell an unset shell variable from a typo
 # without re-reading its own command line. §B8.1: `--connect-radius=0` refused loudly while `=13/999999`
@@ -28,20 +28,20 @@
 # ends of --connect-radius' range refuse, the in-range ends still work, and the two byte-size arms still
 # accept their K/M/G suffix forms untouched.
 #
-#   bash test/numericrefusecheck.sh                                     # build/ctxpack
-#   bash test/numericrefusecheck.sh build_base/ctxpack                  # must FAIL (pre-fix binary)
-#   CTXPACK_BIN=asan/ctxpack bash test/numericrefusecheck.sh
+#   bash test/numericrefusecheck.sh                                     # build/ripwire
+#   bash test/numericrefusecheck.sh build_base/ripwire                  # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=asan/ripwire bash test/numericrefusecheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 [ -d test/fixture ] || { echo "no test/fixture corpus — this gate cannot run"; exit 2; }
 echo "numericrefusecheck: BIN=$BIN"

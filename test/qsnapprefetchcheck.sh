@@ -6,7 +6,7 @@
 # observes git HEAD has MOVED since the last observation (a commit just landed), a DETACHED background thread
 # runs the SAME quality::computeHeadSnapshot a lazy quality_delta would, writing the sha-keyed qsnap cache FILE
 # so the NEXT quality_delta finds it warm. It is gated on a cheap file-count heuristic (default 500, §8 GO-at-
-# scale) so small repos never pay a useless background burn; CTXPACK_QSNAP_PREFETCH_MIN_FILES lowers it so this
+# scale) so small repos never pay a useless background burn; RIPWIRE_QSNAP_PREFETCH_MIN_FILES lowers it so this
 # tiny fixture can exercise the mechanism (documented test surface).
 #
 # THE GATES (all must be green):
@@ -19,12 +19,12 @@
 #       un-rewritten: same inode/mtime — a cold miss would rename a fresh blob into place).
 #   (c) DETERMINISM — quality_delta's response body is BYTE-IDENTICAL prefetch-fired vs prefetch-suppressed.
 #   (d) SINGLE-FLIGHT — two rapid HEAD moves: no crash, and at most ONE concurrent worker (observed via the
-#       CTXPACK_MCP_TIMINGS "prefetch spawn"/"prefetch done" stderr lines — the live count never exceeds 1).
+#       RIPWIRE_MCP_TIMINGS "prefetch spawn"/"prefetch done" stderr lines — the live count never exceeds 1).
 #   (e) TSan — run this whole script with a ThreadSanitizer binary (see below); every scenario asserts the
 #       server stderr carries NO "ThreadSanitizer" warning (trivially true on a normal build; a real check on a
 #       TSan build). Build + run:
-#         cmake -S . -B tsan -DCTXPACK_TSAN=ON && cmake --build tsan -j
-#         CTXPACK_BIN=tsan/ctxpack test/qsnapprefetchcheck.sh
+#         cmake -S . -B tsan -DRIPWIRE_TSAN=ON && cmake --build tsan -j
+#         RIPWIRE_BIN=tsan/ripwire test/qsnapprefetchcheck.sh
 #
 # MONOTONE FRESHNESS is by construction (stated, not timing-tested): computeHeadSnapshot re-reads gitHeadSha at
 # run time and keys the qsnap by THAT sha, so a prefetched blob is byte-identical to what lazy would compute for
@@ -32,15 +32,15 @@
 #
 # Usage:
 #   test/qsnapprefetchcheck.sh
-#   CTXPACK_BIN=build_p5w9/ctxpack test/qsnapprefetchcheck.sh
-#   CTXPACK_BIN=tsan/ctxpack       test/qsnapprefetchcheck.sh   # the (e) TSan half
+#   RIPWIRE_BIN=build_p5w9/ripwire test/qsnapprefetchcheck.sh
+#   RIPWIRE_BIN=tsan/ripwire       test/qsnapprefetchcheck.sh   # the (e) TSan half
 #
 # Exits non-zero on any failure. NEVER edits test/fixture — every mutation is on a scratch mktemp COPY.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -49,7 +49,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
@@ -103,7 +103,7 @@ wait_for_id() { local i; for i in $( seq 1 200 ); do grep -q "\"id\":$2" "$1" 2>
 # AUDIT5 Y4: shard-aware lookup — a blob may be flat under a cache dir or under <dir>/<xx>/ (2-hex shard).
 blob_paths() { find "$1" -maxdepth 2 -type f -name "$2" 2>/dev/null; }
 blob_first() { blob_paths "$1" "$2" | head -1; }
-qsnap_count() { blob_paths "$1" 'ctxpack-qsnap-*.bin' | grep -c . ; }
+qsnap_count() { blob_paths "$1" 'ripwire-qsnap-*.bin' | grep -c . ; }
 inode_mtime() { stat -f '%i %m' "$1" 2>/dev/null || echo "MISSING"; }
 assert_no_tsan() { grep -q "ThreadSanitizer" "$1" 2>/dev/null && no "TSan WARNING in server stderr ($2)" || ok "no ThreadSanitizer warning in server stderr ($2)"; }
 
@@ -116,18 +116,18 @@ read A_W A_C <<<"$( new_repo )"
 # checksum-VALID — never a non-empty partial one (the torn-read the direct-ofstream write allowed).
 SAMPLE_BAD=0
 ( for i in $( seq 1 400 ); do
-    f="$( blob_first "$A_C" 'ctxpack-qsnap-*.bin' )"
+    f="$( blob_first "$A_C" 'ripwire-qsnap-*.bin' )"
     [ -n "$f" ] && { v="$( validate_qsnap "$f" )"; [ "$v" = "INVALID" ] && echo bad >>"$A_W/sampler.flag"; }
   done ) &
 SAMPLER=$!
 for i in $( seq 1 12 ); do
-    rm -f $( blob_paths "$A_C" 'ctxpack-qsnap-*.bin' )
+    rm -f $( blob_paths "$A_C" 'ripwire-qsnap-*.bin' )
     TMPDIR="$A_C/" "$BIN" "$A_W" --quality-delta >/dev/null 2>>"$A_W/err.txt"
 done
 wait $SAMPLER 2>/dev/null
 [ -s "$A_W/sampler.flag" ] && no "(a) sampler caught a non-empty INVALID qsnap (torn read)" \
                            || ok "(a) qsnap never observed half-written across 12 rewrites (atomic rename)"
-FINAL="$( blob_first "$A_C" 'ctxpack-qsnap-*.bin' )"
+FINAL="$( blob_first "$A_C" 'ripwire-qsnap-*.bin' )"
 [ -n "$FINAL" ] && [ "$( validate_qsnap "$FINAL" )" = "VALID" ] && ok "(a) final qsnap blob is checksum-valid" \
                                                                || no "(a) final qsnap blob missing/invalid"
 # AUDIT5 Y4: shard-aware lookup — the atomic-rename tmp file can land in either layout too.
@@ -142,7 +142,7 @@ echo "=== (b) NON-VACUITY: commit → prefetch fires (qsnap appears with NO qual
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 read B_W B_C <<<"$( new_repo )"
 FIFO="$B_W/in.fifo"; mkfifo "$FIFO"
-TMPDIR="$B_C/" CTXPACK_QSNAP_PREFETCH_MIN_FILES=1 CTXPACK_MCP_TIMINGS=1 \
+TMPDIR="$B_C/" RIPWIRE_QSNAP_PREFETCH_MIN_FILES=1 RIPWIRE_MCP_TIMINGS=1 \
     "$BIN" --mcp <"$FIFO" >"$B_W/out.txt" 2>"$B_W/err.txt" &
 SRV=$!; exec 9>"$FIFO"
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' >&9
@@ -162,11 +162,11 @@ APPEARED=0
 for i in $( seq 1 120 ); do [ "$( qsnap_count "$B_C" )" -ge 1 ] && { APPEARED=1; break; }; sleep 0.05; done
 [ "$APPEARED" -eq 1 ] && ok "(b) qsnap for the NEW sha appeared WITHOUT any quality_delta (prefetch fired — non-vacuous)" \
                       || no "(b) qsnap never appeared after the commit — prefetch did NOT fire"
-grep -q "ctxpack-prefetch spawn" "$B_W/err.txt" && ok "(b) server logged a prefetch spawn" \
+grep -q "ripwire-prefetch spawn" "$B_W/err.txt" && ok "(b) server logged a prefetch spawn" \
                                                 || no "(b) no prefetch spawn logged"
 # wait for the worker to finish writing, then snapshot the file identity.
-for i in $( seq 1 60 ); do grep -q "ctxpack-prefetch done" "$B_W/err.txt" && break; sleep 0.05; done
-PF="$( blob_first "$B_C" 'ctxpack-qsnap-*.bin' )"
+for i in $( seq 1 60 ); do grep -q "ripwire-prefetch done" "$B_W/err.txt" && break; sleep 0.05; done
+PF="$( blob_first "$B_C" 'ripwire-qsnap-*.bin' )"
 ID_BEFORE="$( inode_mtime "$PF" )"
 
 # now quality_delta over MCP — it must take the WARM path (qsnap HIT → file served un-rewritten, same inode).
@@ -184,7 +184,7 @@ esac
 
 # measured warm-vs-cold delta on THIS corpus (report-only; the win is corpus-dependent, §8).
 WARM_MS="$( grep 'verb=quality_delta' "$B_W/err.txt" | tail -1 | sed -E 's/.*wall_ms=([0-9.]+).*/\1/' )"
-rm -f $( blob_paths "$B_C" 'ctxpack-qsnap-*.bin' )        # force a COLD control (AUDIT5 Y4: shard-aware)
+rm -f $( blob_paths "$B_C" 'ripwire-qsnap-*.bin' )        # force a COLD control (AUDIT5 Y4: shard-aware)
 printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$B_W\"}}}" >&9
 wait_for_id "$B_W/out.txt" 5
 COLD_MS="$( grep 'verb=quality_delta' "$B_W/err.txt" | tail -1 | sed -E 's/.*wall_ms=([0-9.]+).*/\1/' )"
@@ -200,7 +200,7 @@ run_qd_scenario() {   # $1 = min-files threshold (1 => fires, huge => suppressed
     local w c thr="$1"
     read w c <<<"$( new_repo )"
     local fifo="$w/in.fifo"; mkfifo "$fifo"
-    TMPDIR="$c/" CTXPACK_QSNAP_PREFETCH_MIN_FILES="$thr" CTXPACK_MCP_TIMINGS=1 \
+    TMPDIR="$c/" RIPWIRE_QSNAP_PREFETCH_MIN_FILES="$thr" RIPWIRE_MCP_TIMINGS=1 \
         "$BIN" --mcp <"$fifo" >"$w/out.txt" 2>"$w/err.txt" &
     local srv=$!; exec 8>"$fifo"
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' >&8
@@ -241,7 +241,7 @@ echo "=== (d) SINGLE-FLIGHT: two rapid HEAD moves → no crash, at most one conc
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 read D_W D_C <<<"$( new_repo )"
 FIFO="$D_W/in.fifo"; mkfifo "$FIFO"
-TMPDIR="$D_C/" CTXPACK_QSNAP_PREFETCH_MIN_FILES=1 CTXPACK_MCP_TIMINGS=1 \
+TMPDIR="$D_C/" RIPWIRE_QSNAP_PREFETCH_MIN_FILES=1 RIPWIRE_MCP_TIMINGS=1 \
     "$BIN" --mcp <"$FIFO" >"$D_W/out.txt" 2>"$D_W/err.txt" &
 SRV=$!; exec 9>"$FIFO"
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' >&9
@@ -261,7 +261,7 @@ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"tools/call\",\"params
 wait_for_id "$D_W/out.txt" 99 && ok "(d) server still responsive after two rapid HEAD moves (no crash)" \
                               || no "(d) server unresponsive after rapid HEAD moves (crash?)"
 # scan the ordered spawn/done lines; the live worker count must NEVER exceed 1.
-MAXLIVE="$( grep -E "ctxpack-prefetch (spawn|done)" "$D_W/err.txt" | python3 -c '
+MAXLIVE="$( grep -E "ripwire-prefetch (spawn|done)" "$D_W/err.txt" | python3 -c '
 import sys
 live=0; mx=0
 for ln in sys.stdin:

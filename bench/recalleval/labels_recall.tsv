@@ -43,7 +43,7 @@ deterministic speculative context prefetch measure first study	DESIGN_specPrefet
 committable team index artifact remote MCP transport design	DESIGN_teamIndex.md	-	concept
 labelled eval for skill routing corpus design	RESEARCH_skillEval2026.md	PLAN_skills2026.md	concept
 shrinking what the tool returns to the caller output economy	RESEARCH_outputEconomy.md	-	concept
-2026 code intelligence competitive landscape where ctxpack fits	RESEARCH_competitiveLandscape2026.md	RESEARCH_codeIntelligence.md	concept
+2026 code intelligence competitive landscape where ripwire fits	RESEARCH_competitiveLandscape2026.md	RESEARCH_codeIntelligence.md	concept
 multi resolution retrieval research decisions	RESEARCH_multiResolution.md	-	concept
 code quality signals to steer better agent code	RESEARCH_codeQualitySteering.md	RESEARCH_agentQuality2026.md	concept
 evidence study better code fewer tokens never stale	RESEARCH_agentQuality2026.md	-	name
@@ -57,9 +57,9 @@ does the right feature fire at the right moment adoption audit	ADOPTION_AUDIT_fa
 C++ performance first priority plan	PLAN_cpp_perf2026.md	-	name
 make agents actually use the features skills plan	PLAN_skills2026.md	-	name
 output audit findings recall budget paging vocabulary	the retrieval-evaluation plan	NEXT_SESSION_outputAudit.md	name
-quality delta gating exit codes usage	README.md	SPEC.md,skills/ctxpack-quality-bar/SKILL.md	adversarial
-pack task one call orientation under a token budget usage	README.md	SPEC.md,skills/ctxpack-orient/SKILL.md	adversarial
-merge scout pairwise conflict sites landing order usage	README.md	SPEC.md,skills/ctxpack-change-check/SKILL.md	adversarial
+quality delta gating exit codes usage	README.md	SPEC.md,skills/ripwire-quality-bar/SKILL.md	adversarial
+pack task one call orientation under a token budget usage	README.md	SPEC.md,skills/ripwire-orient/SKILL.md	adversarial
+merge scout pairwise conflict sites landing order usage	README.md	SPEC.md,skills/ripwire-change-check/SKILL.md	adversarial
 recall memory notes token budget flags usage	README.md	SPEC.md	adversarial
-from trace stack frames mapped to symbols usage	README.md	SPEC.md,skills/ctxpack-find-bug/SKILL.md	adversarial
-edit check did the contract change callers usage	README.md	SPEC.md,skills/ctxpack-change-check/SKILL.md	adversarial
+from trace stack frames mapped to symbols usage	README.md	SPEC.md,skills/ripwire-find-bug/SKILL.md	adversarial
+edit check did the contract change callers usage	README.md	SPEC.md,skills/ripwire-change-check/SKILL.md	adversarial

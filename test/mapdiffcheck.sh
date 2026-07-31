@@ -17,18 +17,18 @@
 #
 # Also gated: --map-diff on a clean tree (no diff) still emits a valid map; determinism.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/mapdiffcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/mapdiffcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh. Needs git.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required for --map-diff gate"; exit 2; }
 echo "mapdiffcheck: BIN=$BIN"
 

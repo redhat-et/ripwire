@@ -2,7 +2,7 @@
 
 // tracein.h — B11/L2 trace-to-locus (--from-trace=FILE, '-' = stdin, PLAN_agentLeverage2026.md).
 //
-// Agents hand-translate stack traces / sanitizer reports / compiler errors into ctxpack queries many times
+// Agents hand-translate stack traces / sanitizer reports / compiler errors into ripwire queries many times
 // per session (this round: a UBSan `mention.h:95:48` turned into a manual file read). This module is the
 // deterministic, zero-dependency FRAME EXTRACTOR: it turns the raw text of such an artifact into an ordered
 // list of {path, line, func, format} frames. The corpus resolution (frame → indexed file → enclosing symbol)

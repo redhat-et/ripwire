@@ -7,8 +7,8 @@
 #   1. fetches SWE-bench-Lite instance METADATA ONLY (repo, instance_id, base_commit) from the public
 #      HuggingFace datasets-server JSON API — the same stdlib-only urllib pattern as
 #      bench/locbench/run_locbench.py's fetch_rows. It does NOT clone any task repo.
-#   2. applies ctxpack's EXACT LocBench train/held-out split rule (bench/locbench/run_locbench.py
-#      frozen_partition: sha256("ctxpack-a7-v2\0" + lowercase(repo)), byte0<128 => train) directly to
+#   2. applies ripwire's EXACT LocBench train/held-out split rule (bench/locbench/run_locbench.py
+#      frozen_partition: sha256("ripwire-a7-v2\0" + lowercase(repo)), byte0<128 => train) directly to
 #      each SWE-bench-Lite instance's repo. This is a pure function of the repo string, so it does not
 #      require re-fetching LocBench: any repo that WOULD land in LocBench's train partition is excluded.
 #   3. deterministically samples up to 40 instances, seeded, stratified round-robin by repo so no single
@@ -22,7 +22,7 @@
 #   * No fabricated instance ids, ever. If the network fetch is unavailable, this script FAILS with a
 #     clear message and points at --from-file (a local JSON dump of the same HF row shape) as the only
 #     sanctioned fallback — it does not invent or hardcode a task list.
-#   * The split salt ("ctxpack-a7-v2\0") and rule (byte0<128) are copied verbatim from
+#   * The split salt ("ripwire-a7-v2\0") and rule (byte0<128) are copied verbatim from
 #     bench/locbench/run_locbench.py's frozen_partition(); if that salt ever changes, this file's
 #     SPLIT_SALT constant must change with it (checked at review time, not automatically — see the
 #     assertion in --verify-split-const below).
@@ -43,7 +43,7 @@ SPLIT    = "test"
 # ── the split rule, copied verbatim from bench/locbench/run_locbench.py frozen_partition() ──────────
 # DO NOT diverge from that function's salt/algorithm; this is what "repo-disjoint from LocBench train"
 # means for the whole B4 harness. If run_locbench.py's salt ever changes, update SPLIT_SALT here too.
-SPLIT_SALT = "ctxpack-a7-v2\0"
+SPLIT_SALT = "ripwire-a7-v2\0"
 
 def frozen_partition( repo ):
     digest = hashlib.sha256( ( SPLIT_SALT + repo.lower() ).encode( "utf-8" ) ).digest()
@@ -61,7 +61,7 @@ def fetch_rows( n_max, cache_dir ):
         page = None
         for attempt in range( 5 ):
             try:
-                req = urllib.request.Request( url, headers={ "User-Agent": "ctxpack-agentloop/1.0" } )
+                req = urllib.request.Request( url, headers={ "User-Agent": "ripwire-agentloop/1.0" } )
                 with urllib.request.urlopen( req, timeout=120 ) as r:
                     page = json.load( r )
                 break
@@ -128,13 +128,13 @@ def content_hash( instances ):
 
 def main():
     ap = argparse.ArgumentParser( description=__doc__.split( "\n\n" )[0] if __doc__ else "" )
-    ap.add_argument( "--work-dir", default=".", help="scratch dir for the HF row cache (NOT the ctxpack repo)" )
+    ap.add_argument( "--work-dir", default=".", help="scratch dir for the HF row cache (NOT the ripwire repo)" )
     ap.add_argument( "--from-file", default="", help="offline fallback: local JSON dump of HF rows "
                      "(list of {repo, instance_id, base_commit, ...}) instead of a network fetch" )
     ap.add_argument( "--n-fetch", type=int, default=0, help="cap rows fetched from the API (0 = all test rows)" )
     ap.add_argument( "--target", type=int, default=40, help="instances to select" )
     ap.add_argument( "--cap-per-repo", type=int, default=4 )
-    ap.add_argument( "--seed", default="ctxpack-b4-agentloop-v1", help="seed string for the stratified sample" )
+    ap.add_argument( "--seed", default="ripwire-b4-agentloop-v1", help="seed string for the stratified sample" )
     ap.add_argument( "--out", default=str( pathlib.Path( __file__ ).parent / "tasks.lock" ) )
     ap.add_argument( "--verify-split-const", action="store_true",
                      help="print the split salt/rule and exit 0, no network/file I/O (review aid)" )
@@ -176,7 +176,7 @@ def main():
                   for r in selected ]
     chash = content_hash( instances )
     lock = dict(
-        schema="ctxpack-agentloop-tasks-lock-v1",
+        schema="ripwire-agentloop-tasks-lock-v1",
         dataset=DATASET, config=CONFIG, split=SPLIT,
         split_contract=f"repo-disjoint from LocBench train: sha256({SPLIT_SALT!r} + lowercase(repo)), byte0<128=train (excluded)",
         seed=a.seed, cap_per_repo=a.cap_per_repo, target=a.target,

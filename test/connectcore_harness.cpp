@@ -2,7 +2,7 @@
 // --connect (DESIGN_connectSubgraph.md §2/§3: metric-closure 2-approx Steiner over the UNDIRECTED view,
 // true call direction reported). graph.h is header-only, so this builds tiny synthetic Graphs by hand
 // (out-CSR + in-CSR, exactly buildGraph's layout) and asserts the RESULT STRUCTURE — independent of the
-// ctxpack binary, main.cpp, and any corpus.
+// ripwire binary, main.cpp, and any corpus.
 //
 // Cases proved (each maps to a design clause):
 //   A   the motivating shape (§1): two siblings under a shared dispatch caller connect THROUGH that caller —

@@ -2,7 +2,7 @@
 # layoutcheck.sh — the field-notes §5 gate for --layout=STRUCT, the CPU/GPU contract verb (src/layout.h).
 #
 #   test/layoutcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/layoutcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/layoutcheck.sh
 #
 # The fixture test/layoutfix/ carries one instance of every rule the model has to get right, and every
 # case it has to REFUSE. Each expected number below was worked out by hand from the C alignment rules and
@@ -25,7 +25,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/layoutfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -33,7 +33,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "layoutcheck: BIN=$BIN  CORPUS=$CORPUS"
 

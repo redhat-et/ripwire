@@ -28,23 +28,23 @@
 #       parseExpandToken).
 #
 # Byte-identity: every PLAIN form (bare name, NAME:START-END, path, ./path, the default map) must be
-# byte-identical to the PRE-CHANGE binary. Set CTXPACK_BASE_BIN=<path to the pre-change ctxpack> to run
+# byte-identical to the PRE-CHANGE binary. Set RIPWIRE_BASE_BIN=<path to the pre-change ripwire> to run
 # that arm; it SKIPs (loudly) when unset, so the gate is still useful in CI.
 #
-# Usage:  test/selectorchaincheck.sh   |   CTXPACK_BIN=asan/ctxpack test/selectorchaincheck.sh
-#         CTXPACK_BASE_BIN=/tmp/ctxpack.pre test/selectorchaincheck.sh
+# Usage:  test/selectorchaincheck.sh   |   RIPWIRE_BIN=asan/ripwire test/selectorchaincheck.sh
+#         RIPWIRE_BASE_BIN=/tmp/ripwire.pre test/selectorchaincheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-BASE="${CTXPACK_BASE_BIN:-}"
+BASE="${RIPWIRE_BASE_BIN:-}"
 fail=0
 ok(){   printf '  PASS  %s\n' "$*"; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "selectorchaincheck: BIN=$BIN  BASE=${BASE:-<unset>}"
 
 # Warm one shared cache in our own scratch TMPDIR so the ~40 invocations below stay fast and hermetic.
@@ -172,12 +172,12 @@ if [ -n "$BASE" ] && [ -x "$BASE" ]; then
         # shellcheck disable=SC2086
         runbase $args >"$TMP/old.out" 2>"$TMP/old.err"; orc=$?
         if ! cmp -s "$TMP/new.out" "$TMP/old.out" || [ "$nrc" != "$orc" ]; then
-            no "(f) NOT byte-identical to the pre-change binary: ctxpack . $args (exit $nrc vs $orc)"; bid=1
+            no "(f) NOT byte-identical to the pre-change binary: ripwire . $args (exit $nrc vs $orc)"; bid=1
         fi
     done
     [ "$bid" = 0 ] && ok "(f) all 8 plain forms byte-identical to the pre-change binary"
 else
-    skip "(f) byte-identity vs pre-change binary (set CTXPACK_BASE_BIN=<path>)"
+    skip "(f) byte-identity vs pre-change binary (set RIPWIRE_BASE_BIN=<path>)"
 fi
 
 # ── (g) determinism + G4 on the new forms ────────────────────────────────────────────────────────────

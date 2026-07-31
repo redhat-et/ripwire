@@ -1,6 +1,6 @@
 #pragma once
 
-// model.h — the shared data model for ctxpack: the contract between INGEST (tree-sitter)
+// model.h — the shared data model for ripwire: the contract between INGEST (tree-sitter)
 // and the GRAPH / RANK / SERIALIZE stages. POD/DOD, ids not pointers, dense indices.
 //
 // Flow:  ingest() → IngestResult { files, symbols(defs), references(unresolved calls) }

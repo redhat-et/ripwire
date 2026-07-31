@@ -3,9 +3,9 @@
 # differently.
 #
 # Usage:
-#   test/taskechocheck.sh                       # uses build/ctxpack
-#   test/taskechocheck.sh asan/ctxpack
-#   CTXPACK_BIN=build_base/ctxpack test/taskechocheck.sh   # red-first: both families MUST fail here
+#   test/taskechocheck.sh                       # uses build/ripwire
+#   test/taskechocheck.sh asan/ripwire
+#   RIPWIRE_BIN=build_base/ripwire test/taskechocheck.sh   # red-first: both families MUST fail here
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
@@ -25,7 +25,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
@@ -34,7 +34,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "taskechocheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "taskechocheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "taskechocheck: python3 is required (JSON + XML-attribute arms)"; exit 2; }
 
 echo "taskechocheck: BIN=$BIN"
@@ -108,7 +108,7 @@ esac
 
 # ── §B1.7 arm 4: the SCRUB itself is untouched — the comment echo is still collapsed and G4-legal ──
 case "$XMLFOR" in
-    *'<!-- ctxpack lens for "audit the -token-budget ceiling arithmetic"'*)
+    *'<!-- ripwire lens for "audit the -token-budget ceiling arithmetic"'*)
         ok "the comment echo is still dash-collapsed (the G4 scrub was not weakened)";;
     *)  no "the comment echo no longer carries the collapsed form — the scrub was changed instead of bypassed";;
 esac
@@ -163,7 +163,7 @@ fi
 # xmlCommentText's header claimed it was "a drop-in at all six echo sites"; main.cpp's queryRouteNote was a
 # seventh that hand-rolled the std::unique dash collapse and scrubbed neither control bytes nor invalid
 # UTF-8 — while RouteChoice::reason embeds the user's own query token. So a 0x01 or a 0xFF in --query put
-# that byte inside an XML comment, ctxpack exited 0, and xmllint rejected the whole document: a G4 breach at
+# that byte inside an XML comment, ripwire exited 0, and xmllint rejected the whole document: a G4 breach at
 # exit 0. This lives HERE rather than in xmlwellformed.sh because it is the same task-ECHO family the arms
 # above pin, and it asserts BOTH halves — the document parses AND the scrub did not eat the echo.
 if command -v xmllint >/dev/null 2>&1; then

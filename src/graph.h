@@ -15,7 +15,7 @@
 #include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before §2a fallback
 #include "scipoverlay.h"        // W4-#15 SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "sortutil.h"           // radix edge sorting for large integer-key graph edge lists
-#include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DCTXPACK_PROFILE=ON)
+#include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <algorithm>
 #include <cmath>
@@ -1708,7 +1708,7 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
 //
 //   cbo[i]    — Q5a per-symbol Coupling-Between-Objects: count of DISTINCT in-repo dependency targets =
 //               distinct resolved callees (out-edge CSR is already deduped per source) + distinct composed
-//               member TYPES (composeEdges, deduped by typeSym). The best-validated coupling form ctxpack
+//               member TYPES (composeEdges, deduped by typeSym). The best-validated coupling form ripwire
 //               lacked (§1a: CBO is the #1 OO defect predictor, size-controlled). External/unresolved calls
 //               are absent from the graph, so cbo counts only in-repo coupling — the honest, computable set.
 //   tested[i] — Q2: 1 iff symbol i is referenced from ANY test-path file (filter.h isTestPath), across ALL

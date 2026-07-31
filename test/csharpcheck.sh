@@ -12,7 +12,7 @@
 #   Program.cs  (ns CsharpFix)           using System; using CsharpFix.Services;
 #                                          class Program { Main() -> new Greeter(); g.SayHello() }
 #
-# FINDINGS from running `ctxpack test/csharpfix` and inspecting the raw output:
+# FINDINGS from running `ripwire test/csharpfix` and inspecting the raw output:
 #   - 7 symbols / 3 files / edges=3 / ambiguous=0 / unresolved=0, clean stderr (no ABI/degrade).
 #   - IGreeter.cs: IGreeter (t="iface"), Greet (t="method" — a body-less interface member; still
 #     emitted as a symbol, just decl/def-collapsed OUT of the byName candidate set once Greeter's
@@ -36,15 +36,15 @@
 #
 # Usage:
 #   bash test/csharpcheck.sh
-#   CTXPACK_BIN=build/ctxpack bash test/csharpcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/csharpcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/csharpcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/csharpcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIX="$ROOT/test/csharpfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -52,7 +52,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for XML assertions"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

@@ -807,7 +807,7 @@ inline void writeCappedList( std::FILE* out, const char* tag, const Seq& seq, st
 // (already-lit / also / parent / capped) plus the family roll-up.
 inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<!-- ctxpack flip: the blast radius of turning ONE gate ON. lights = the code that becomes live: r rows "
+    std::fprintf( out, "<!-- ripwire flip: the blast radius of turning ONE gate ON. lights = the code that becomes live: r rows "
                        "are #if regions, b rows are C++ branch sites (a gate read as a VALUE through a constexpr bool, via= names "
                        "the binding). hosts = the indexed defs that code sits inside; downstream = what those defs transitively "
                        "CALL (what starts executing); dependents = what transitively calls THEM. tests = test files reaching the "

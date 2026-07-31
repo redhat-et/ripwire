@@ -8,18 +8,18 @@
 # NESTED data, so it is applied ONLY to the tabular list verbs, NEVER the nested map. Default --format=xml is
 # byte-identical (G4 + every existing consumer intact).
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/columnarcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/columnarcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 echo "columnarcheck: BIN=$BIN"
 

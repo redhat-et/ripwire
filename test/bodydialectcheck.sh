@@ -32,21 +32,21 @@
 #
 # Usage:
 #   bash test/bodydialectcheck.sh
-#   bash test/bodydialectcheck.sh asan/ctxpack
-#   CTXPACK_BIN=asan/ctxpack bash test/bodydialectcheck.sh
+#   bash test/bodydialectcheck.sh asan/ripwire
+#   RIPWIRE_BIN=asan/ripwire bash test/bodydialectcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "bodydialectcheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "bodydialectcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "bodydialectcheck: python3 is required"; exit 2; }
 
 echo "bodydialectcheck: BIN=$BIN"
@@ -148,7 +148,7 @@ python3 - "$TMP/sec.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 # <sigs> is rule 5 (a bare capped="1" on a byte-trimmed payload, no row total) and is deliberately excluded.
-ROSTER = ["bodies", "callers", "far"]     # notes/tests are absent on a corpus with no .ctxpack_notes / no tests
+ROSTER = ["bodies", "callers", "far"]     # notes/tests are absent on a corpus with no .ripwire_notes / no tests
 ROWTAG = {"bodies": "b", "callers": "s", "far": "s", "notes": "target", "tests": "test"}
 bad = []
 seen = 0

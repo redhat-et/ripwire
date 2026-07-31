@@ -27,14 +27,14 @@
 #   - determinism (byte-identical run-to-run) and xmllint-clean output
 #
 # Usage:
-#   test/pranchorcheck.sh                            # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/pranchorcheck.sh
+#   test/pranchorcheck.sh                            # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/pranchorcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -42,7 +42,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "pranchorcheck: BIN=$BIN"
 
 # ── the fixture: a base ref that has MOVED since this work forked ─────────────────────────────────────

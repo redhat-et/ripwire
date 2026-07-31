@@ -11,19 +11,19 @@
 #
 # House rule: float scores are NEVER asserted bit-exact — order + coarse ratios via k= parsing only.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/rankbycheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/rankbycheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/rankbyfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/rankbyfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 

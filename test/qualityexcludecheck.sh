@@ -15,15 +15,15 @@
 # REQUIRES the CLI to pass cfg.excludes to computeHeadSnapshot (main.cpp one-liner); against a binary that
 # lacks it this gate FAILS with the exact phantom dead-code regression it guards against — that is the point.
 # Uses its OWN temp repo. Does NOT edit regression.sh. Needs git.
-# Usage:  test/qualityexcludecheck.sh   |   CTXPACK_BIN=build/ctxpack test/qualityexcludecheck.sh
+# Usage:  test/qualityexcludecheck.sh   |   RIPWIRE_BIN=build/ripwire test/qualityexcludecheck.sh
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 REPO="$(mktemp -d)"; trap 'rm -rf "$REPO"' EXIT

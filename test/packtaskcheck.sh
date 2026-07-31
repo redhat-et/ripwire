@@ -19,18 +19,18 @@
 #   • HOSTILE note text (XML metachars + a "]]>" CDATA-close) stays xmllint-clean in the bundle
 #
 # Operates on a private temp git repo + the repo's own src/ (read-only). Needs git + xmllint.
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/packtaskcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/packtaskcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "git required"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required"; exit 2; }
 

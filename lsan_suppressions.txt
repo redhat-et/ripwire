@@ -1,4 +1,4 @@
-# ctxpack LeakSanitizer suppressions (SPEC §6 / §8).
+# ripwire LeakSanitizer suppressions (SPEC §6 / §8).
 # Tree-sitter grammars allocate static parse tables (and the core allocates internal state
 # for incremental reuse) that are intentionally never freed — these read as leaks under LSan
 # but are not. Suppress by the tree-sitter allocation entry points, not broadly.

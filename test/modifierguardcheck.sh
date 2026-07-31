@@ -16,23 +16,23 @@
 #       trick guardmsgcheck.sh uses): each broken combo exits 1 with a message naming both flags.
 #   (B) GREEN — the VALID combo for each fixed modifier still WORKS (exit 0, observable effect). Byte-
 #       identity of these valid combos against the pre-change binary was verified out-of-band this session
-#       (test/argvdiffcheck.sh CTXPACK_BASE=<pre-change build> over the 292-vector harvest: exactly 10
+#       (test/argvdiffcheck.sh RIPWIRE_BASE=<pre-change build> over the 292-vector harvest: exactly 10
 #       diffs, one per broken combo below, zero unexpected); this gate pins the BEHAVIOR going forward so a
 #       later regression is caught without needing a stashed binary in the tree.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/modifierguardcheck.sh
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/modifierguardcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "modifierguardcheck: BIN=$BIN"
 
@@ -69,7 +69,7 @@ guard "--no-prefilter alone"          '--no-prefilter modifies --grep=STR or --r
 guard "--detail beyond the head"      'exceeds the ranked head'                                       "$NOROOT" --for=x --detail=999
 guard "--since alone"                 '--since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn' "$NOROOT" --since="1 week ago"
 guard "--with-graph alone"            '--with-graph modifies --for=TASK or --pack-task=TASK'          "$NOROOT" --with-graph
-guard "--force outside wrap"          '--force only applies to `ctxpack wrap <agent>`'                "$NOROOT" --force
+guard "--force outside wrap"          '--force only applies to `ripwire wrap <agent>`'                "$NOROOT" --force
 guard "--baseline without --arch"     '--baseline/--baseline-update writes the --arch=FILE debt sidecar' "$NOROOT" --baseline
 guard "--baseline-update without --arch" '--baseline/--baseline-update writes the --arch=FILE debt sidecar' "$NOROOT" --baseline-update
 guard "--mcp-token without --listen"  '--mcp-token is read by the --listen HTTP transport only'        "$NOROOT" --mcp-token=x
@@ -178,8 +178,8 @@ printf '%s' "$graph_out" | grep -q 'mermaid' \
 # --wrap --force: the OTHER meaning of --force (src/wrap.h's own raw-argv scan) is untouched by the guard —
 # it returns before Config/parseArgs ever runs, so it must still accept --force cleanly.
 "$BIN" wrap claude --force >/dev/null 2>"$TMP/wrapforce.err"
-[ "$?" = 0 ] && ok "ctxpack wrap claude --force: still exits 0 (unaffected by the flag-surface guard)" \
-             || no "ctxpack wrap claude --force: broke ($(cat "$TMP/wrapforce.err"))"
+[ "$?" = 0 ] && ok "ripwire wrap claude --force: still exits 0 (unaffected by the flag-surface guard)" \
+             || no "ripwire wrap claude --force: broke ($(cat "$TMP/wrapforce.err"))"
 
 # ── §P12.2 — --adaptive now WORKS under --format=candidates instead of refusing ────────────────────────────
 dcount(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -o '<cand ' | wc -l | tr -d ' '; }

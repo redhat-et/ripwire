@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # langcheck.sh — TypeScript / Rust / ObjC ingest coverage gate.
 #
-# ctxpack --help advertises TypeScript, Rust, and ObjC/ObjC++ as supported languages, but
+# ripwire --help advertises TypeScript, Rust, and ObjC/ObjC++ as supported languages, but
 # (before this gate) no fixture anywhere in test/ actually exercised them. This gate has a
 # fixture with one small file per language, each with two functions/methods where one calls
 # the other, and pins assertions to what the binary ACTUALLY does — verified by running it
@@ -16,7 +16,7 @@
 #   d.h  — standalone ObjC header with @interface HeaderOnly; there is no .m/.mm companion,
 #          so this pins the .h content-sniff reroute and query prewarm path.
 #
-# FINDINGS from running `ctxpack test/langfix` and inspecting the raw output:
+# FINDINGS from running `ripwire test/langfix` and inspecting the raw output:
 #   - a.ts:  2 symbols extracted (addOne, addTwo), t="fn" both; call edge addTwo -> addOne present.
 #   - b.rs:  2 symbols extracted (square, sum_of_squares), t="fn" both; call edge
 #            sum_of_squares -> square present.
@@ -46,14 +46,14 @@
 #
 # Usage:
 #   test/langcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/langcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/langcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/langfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -62,7 +62,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for XML/JSON assertions"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

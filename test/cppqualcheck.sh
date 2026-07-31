@@ -7,7 +7,7 @@
 # when it was spelled with two or more `::` segments, or with explicit template arguments. The drop happened
 # at EXTRACTION, before resolution, so `ambiguous=`/`unresolved=` — the tool's own published call-graph
 # completeness gauges — could not move: the reader had no signal whatsoever. --uses/--callers/--edit-check
-# silently under-reported on ctxpack's own CLI<->MCP seam.
+# silently under-reported on ripwire's own CLI<->MCP seam.
 #
 # TWO CORPORA. test/cppqualfix/ proves each SPELLING extracts and resolves; every name in it has exactly one
 # definition, so those arms cannot prove the re-split chose the RIGHT def. test/cppqualdecoyfix/ (§8) gives
@@ -18,33 +18,33 @@
 # each spelling to the mechanism it proves.
 #
 # RED-FIRST (recorded 2026-07-31; three reference binaries, each pinned to what it proves):
-#   vs build/ctxpack_base (pre-§H4): 28 of the 49 checks fail —
+#   vs build/ripwire_base (pre-§H4): 28 of the 49 checks fail —
 #     fixture header edges=3 ambiguous=0   (now 11 / 1)
 #     --uses: targetFn 0, make 0, get 0, pick 0, freeTmpl 0, scopedTmpl 0, Widget 0   (now 1/1/2/1/1/1/1)
 #     repo root: --uses=selectBaseline 1, --callers=writeTally 0, --uses=writeTally 0, --uses=readWholeFile 1
 #     --edit-check arity change on a 3-segment cross-file caller: callers="1"  (now "2", both incompatible)
-#   vs build/ctxpack_prefixup (§H4 as first shipped): the three §8 `>`-family arms fail — qualified
+#   vs build/ripwire_prefixup (§H4 as first shipped): the three §8 `>`-family arms fail — qualified
 #     operator> / operator>> / operator>= bound the OUTER decoys at :65/:66/:67 instead of :76/:77/:78.
-#   vs asan/ctxpack_prefixup: §9's --from-trace arm exits 134 (sanitizer abort). The PLAIN build is silent
-#     on that wrap, so §9 only carries evidence when CTXPACK_BIN points at a G1 binary.
+#   vs asan/ripwire_prefixup: §9's --from-trace arm exits 134 (sanitizer abort). The PLAIN build is silent
+#     on that wrap, so §9 only carries evidence when RIPWIRE_BIN points at a G1 binary.
 #   All 49 PASS against the fixed binary, plain AND asan.
 #   (The four cast arms and the two most-vexing-parse arms pass on every binary by construction — they are
 #   regression guards for a future round, not evidence of this one.)
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/cppqualcheck.sh   |   bash test/cppqualcheck.sh asan/ctxpack
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/cppqualcheck.sh   |   bash test/cppqualcheck.sh asan/ripwire
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"      # BOTH seams: positional arg and CTXPACK_BIN=
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional arg and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolute BEFORE we cd away
-PROBE="$( dirname "$BIN" )/ctxpack_probe"
+PROBE="$( dirname "$BIN" )/ripwire_probe"
 FIX="$ROOT/test/cppqualfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/cppqualfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 
@@ -140,7 +140,7 @@ if [ -x "$PROBE" ]; then
         no "probe output for callerCasts is EMPTY or unrecognised — the cast arm would pass vacuously. Got: '$CASTREFS'"
     fi
 else
-    echo "  SKIP  ctxpack_probe not built at $PROBE — cast arm is --uses-only"
+    echo "  SKIP  ripwire_probe not built at $PROBE — cast arm is --uses-only"
 fi
 for kw in static_cast reinterpret_cast const_cast dynamic_cast; do
     RC="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --uses="$kw" --no-cache >/dev/null 2>&1; echo $? )"

@@ -175,7 +175,7 @@ struct UncheckedSpec { const char* tag; const char* note; };
 inline constexpr UncheckedSpec kUncheckedTable[] = {
     { "weak-file-line",  "no symbol named on the anchor's line: file existence and the EOF bound were checked, symbol identity was not" },
     { "named-elsewhere", "the symbol named beside this anchor is not defined in the anchored file, so the doc is pointing at a call site or a neighbouring fact rather than that definition: existence and the EOF bound were checked, symbol identity was not" },
-    { "not-indexed",     "the anchored file exists in the tree but is not in the index (an excluded directory, or a language ctxpack does not parse), so neither the line bound nor symbol identity could be checked" },
+    { "not-indexed",     "the anchored file exists in the tree but is not in the index (an excluded directory, or a language ripwire does not parse), so neither the line bound nor symbol identity could be checked" },
     { "not-a-definition","the name occurs in the code as an identifier token but is not an indexed definition (library API, macro, build variable, or a declaration kind the grammar does not tag): presence checked, definition not" },
     { "foreign-scope",   "the mention is qualified by a scope this repo does not define, so it names another project's API rather than this code" },
     { "uncorroborated",  "no name this repo DOES define appears on the mention's own line, so it reads as an illustrative or external identifier rather than a claim about this code" },
@@ -1266,7 +1266,7 @@ struct RepoPaths
 
 // The AUXILIARY presence corpus: text files the INDEX does not parse but a doc legitimately names symbols
 // from. Two measured false-positive classes came from exactly this gap — CMake build switches
-// (`CTXPACK_TSAN`, `option()`), and, on a GPU repo, every shader function, because `.metal` is not an
+// (`RIPWIRE_TSAN`, `option()`), and, on a GPU repo, every shader function, because `.metal` is not an
 // indexed grammar (field notes §4). A name that lives only in one of these is present in the repo, so it
 // must not read as a stale doc claim. Extensions only — no content sniffing, no full-tree read.
 inline constexpr std::string_view kAuxTextExt[] = {
@@ -1528,7 +1528,7 @@ inline void forEachIndexParallel( std::size_t count, const char* what, Work&& wo
         }
         catch( ... )
         {
-            std::fprintf( stderr, "ctxpack: doc-drift %s worker degraded (exception swallowed)\n", what );
+            std::fprintf( stderr, "ripwire: doc-drift %s worker degraded (exception swallowed)\n", what );
         }
     };
 
@@ -1713,7 +1713,7 @@ inline HashMap<std::string, std::uint32_t> buildPathMemo( const IngestResult& in
 }
 
 // §P11.10 — the report opened with two screens of drift="0" rows before the first actionable doc: rows were
-// in path order, and ctxpack's own alphabetically-early docs (AUDIT2_…, AUDIT3_…, AUDIT5_…) happen to be
+// in path order, and ripwire's own alphabetically-early docs (AUDIT2_…, AUDIT3_…, AUDIT5_…) happen to be
 // audit ledgers whose every failed anchor is a DATED record, so they carry drift="0" and led anyway, while
 // the worst live rot (DESIGN_pathPreciseInclude.md, drift="14") sat far below the fold.
 //
@@ -1910,7 +1910,7 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
         DEGRADED_PATH_ALERT( "doc-drift gateability: live total disagrees with drift= — projected_drift clamped to a floor of 0" );
     const std::uint32_t projectedDrift = res.drift > liveTotal ? res.drift - liveTotal : 0u;
 
-    std::fprintf( out, "<!-- ctxpack doc-drift gateability: every doc below still has >=1 LIVE (undated) "
+    std::fprintf( out, "<!-- ripwire doc-drift gateability: every doc below still has >=1 LIVE (undated) "
                        "failing anchor (live=). The ONE fix that reclassifies ALL of a doc's live rows at "
                        "once: an ISO date (YYYY-MM-DD) in its H1 heading or filename, OR a front-matter "
                        "line naming date/dated/written/generated/captured/recorded/reviewed/audited/"
@@ -1931,7 +1931,7 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
 // it is a paragraph, not control flow, and inlining ~57 lines of prose into writeDocDriftPage made the
 // function read as long when nothing about its LOGIC grew. One string, one place to correct it.
 inline constexpr const char* kDocDriftLegend =
-    "<!-- ctxpack doc drift: the CHECKABLE anchors in this repo's markdown, verified against the live "
+    "<!-- ripwire doc drift: the CHECKABLE anchors in this repo's markdown, verified against the live "
     "index, reporting only the ones that no longer hold. Four kinds: file:line refs (missing-file / "
     "past-eof / line-moved, the last only when the doc names a symbol on that line), backticked symbol "
     "mentions (undefined), `= N` constants and `[N]` array extents (value/extent vs the declaration). "

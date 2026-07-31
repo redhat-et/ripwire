@@ -1,5 +1,5 @@
 {
-  "schema": "ctxpack-cppbench-dataset-lock-v1",
+  "schema": "ripwire-cppbench-dataset-lock-v1",
   "source_repo": "https://github.com/SFML/SFML",
   "branch_scope": "all",
   "gold_extensions": [

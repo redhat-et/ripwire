@@ -24,12 +24,12 @@
 # statement, and fails with "syntax error near unexpected token '('" only when wrapped in `x="$( ... <<'PY' )"`
 # — bash 3.2 is still `/bin/bash` on an unmodified Mac, so this is a real portability hazard, not a style nit).
 #
-# Usage:  test/showcasecapturecheck.sh   |   test/showcasecapturecheck.sh asan/ctxpack   |   CTXPACK_BIN=asan/ctxpack test/showcasecapturecheck.sh
+# Usage:  test/showcasecapturecheck.sh   |   test/showcasecapturecheck.sh asan/ripwire   |   RIPWIRE_BIN=asan/ripwire test/showcasecapturecheck.sh
 # Exits non-zero on any failure. Needs python3. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 SCRIPT="$ROOT/test/showcase_capture.py"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -38,7 +38,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "showcasecapturecheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "showcasecapturecheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -f "$SCRIPT" ] || { echo "showcasecapturecheck: missing $SCRIPT"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "showcasecapturecheck: python3 is required"; exit 2; }
 
@@ -152,7 +152,7 @@ else
     # above `PASS … recounted top-50 reduction is 59.3% — within the 30-90% sanity band`, guarding a caption
     # that said 63%. A 60-point-wide band cannot see a 3.7-point contradiction, so the gate and the text it
     # protects disagreed in adjacent lines and the suite stayed green. Worse, the two numbers were not even
-    # the same QUANTITY: the caption was measured from `ctxpack .` and the gate passes $ROOT, an absolute
+    # the same QUANTITY: the caption was measured from `ripwire .` and the gate passes $ROOT, an absolute
     # path, and the corpus root repeats inside every element (`id=` on <d>, `p=` on <b>). On this worktree —
     # a 130-byte absolute root — the old arm printed 53.8% for a caption that says 63.1%.
     #

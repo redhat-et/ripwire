@@ -32,6 +32,6 @@ reach, so the gate proves TRUE POSITIVES and TRUE NEGATIVES from the same run.
 ## a fenced example — nothing in here is a claim about this repo
 
 ```
-$ ctxpack . --doc-drift
+$ ripwire . --doc-drift
   → pointing at code.h:999 (`ghostSymbol`) — an illustration, not an anchor
 ```

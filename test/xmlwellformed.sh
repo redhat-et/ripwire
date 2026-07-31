@@ -2,7 +2,7 @@
 # xmlwellformed.sh — G4 gate: every XML-emitting verb must pass `xmllint --noout`.
 #
 # Verbs exercised:
-#   default map          plain `ctxpack <dir>`
+#   default map          plain `ripwire <dir>`
 #   --for=task           task lens (sigs + lego + compose)
 #   --expand=SYM         full def bodies
 #   --pack-signatures    signatures-only bundle
@@ -24,47 +24,47 @@
 #
 # §B4b — WHY THIS GATE WALKS A SYMBOL SAMPLE. `--around` emitted its <compose>/<routes> siblings AFTER
 # serialize() had already closed the root <r>, so the document had TWO top-level elements: xmllint rejected
-# it and ctxpack exited 0. Only 5 of 135 sampled symbols reproduce it — the breach needs a focus symbol whose
+# it and ripwire exited 0. Only 5 of 135 sampled symbols reproduce it — the breach needs a focus symbol whose
 # ego-graph actually carries compose or route edges, not a hostile byte, which is precisely why the audit's
 # 19-verb control-byte G4 sweep structurally could not find it. A fixed hand-picked symbol would rot the
 # moment ranking moved, so the sample is DERIVED: the repo's own top-K map, walked. Keep it derived.
 #
 # Usage:
-#   bash test/xmlwellformed.sh                    # uses build/ctxpack on . and test/fixture
-#   bash test/xmlwellformed.sh asan/ctxpack       # positional BIN
-#   CTXPACK_BIN=asan/ctxpack bash test/xmlwellformed.sh
+#   bash test/xmlwellformed.sh                    # uses build/ripwire on . and test/fixture
+#   bash test/xmlwellformed.sh asan/ripwire       # positional BIN
+#   RIPWIRE_BIN=asan/ripwire bash test/xmlwellformed.sh
 #   XMLWF_AROUND_SAMPLE=40 bash test/xmlwellformed.sh   # narrow the --around walk (default 150)
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative BIN / CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative BIN / RIPWIRE_BIN
 AROUND_SAMPLE="${XMLWF_AROUND_SAMPLE:-150}"
 
 CORPUS_SMALL="$ROOT/test/fixture"     # tiny fixture for fast deterministic checks
-CORPUS_FULL="$ROOT"                   # the ctxpack repo itself (has owners, tree, arch data)
+CORPUS_FULL="$ROOT"                   # the ripwire repo itself (has owners, tree, arch data)
 
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint not found — install libxml2-utils"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 echo "xmlwellformed: BIN=$BIN"
 
-# Helper: run ctxpack with given args, pipe stdout through xmllint, report PASS/FAIL.
+# Helper: run ripwire with given args, pipe stdout through xmllint, report PASS/FAIL.
 check_xml() {
     local label="$1"; shift
     local out
     out=$( "$BIN" "$@" --no-cache 2>/dev/null )
-    local rc_ctxpack=$?
+    local rc_ripwire=$?
     if [ -z "$out" ]; then
-        no "$label — ctxpack produced no output (rc=$rc_ctxpack)"
+        no "$label — ripwire produced no output (rc=$rc_ripwire)"
         return
     fi
     if printf '%s' "$out" | xmllint --noout - 2>/dev/null; then
@@ -101,7 +101,7 @@ check_xml "--outline (fixture)" "$CORPUS_SMALL" --outline=distance
 check_xml "--outline (repo)"    "$CORPUS_FULL"  --outline=escapeXml
 
 # ── --owners (paths + git emails must be escaped) ────────────────────────────────────────
-# ctxpack repo is a git repo with commits; --owners on it exercises the email escape path.
+# ripwire repo is a git repo with commits; --owners on it exercises the email escape path.
 # Skip gracefully if git is unavailable (CI without git history).
 owners_out=$( "$BIN" "$CORPUS_FULL" --owners --no-cache 2>&1 )
 if echo "$owners_out" | grep -q 'git unavailable\|no history'; then
@@ -123,7 +123,7 @@ check_xml "--tree (repo)"    "$CORPUS_FULL"  --tree
 
 # ── --arch --baseline (comment must not contain --) ─────────────────────────────────────
 # Use a TEMP COPY of baselinefix so the sidecar never lands in the repo.
-# cd into the work dir so ctxpack finds rules.txt relative to the indexed directory
+# cd into the work dir so ripwire finds rules.txt relative to the indexed directory
 # (matching how baselinecheck.sh works — archRules is resolved relative to the cwd).
 BLFIX="$ROOT/test/baselinefix"
 if [ -d "$BLFIX" ]; then
@@ -131,7 +131,7 @@ if [ -d "$BLFIX" ]; then
     cp -R "$BLFIX" "$BLWORK"
     bl_out=$( cd "$BLWORK" && "$BIN" . --arch=rules.txt --baseline --no-cache 2>/dev/null )
     if [ -z "$bl_out" ]; then
-        no "--arch --baseline — ctxpack produced no output"
+        no "--arch --baseline — ripwire produced no output"
     elif printf '%s' "$bl_out" | xmllint --noout - 2>/dev/null; then
         ok "--arch --baseline (no double-hyphen in comment)"
     else
@@ -142,7 +142,7 @@ if [ -d "$BLFIX" ]; then
     # Also exercise --baseline-update (has a distinct comment string)
     bl_upd=$( cd "$BLWORK" && "$BIN" . --arch=rules.txt --baseline-update --no-cache 2>/dev/null )
     if [ -z "$bl_upd" ]; then
-        no "--arch --baseline-update — ctxpack produced no output"
+        no "--arch --baseline-update — ripwire produced no output"
     elif printf '%s' "$bl_upd" | xmllint --noout - 2>/dev/null; then
         ok "--arch --baseline-update (no double-hyphen in comment)"
     else

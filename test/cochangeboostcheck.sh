@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # cochangeboostcheck.sh — B3 (PLAN_researchImprove2026): the co-change prior boost on the --for lens.
 #
-# The boost is OPT-IN (--cochange-boost / CTXPACK_COCHANGE=1) and EXPERIMENTAL — the held-out LocBench
+# The boost is OPT-IN (--cochange-boost / RIPWIRE_COCHANGE=1) and EXPERIMENTAL — the held-out LocBench
 # record (train multi-file +6.4pp, held-out +0.0pp, warm p50 +19%) kept it off by default pending a
 # C++-corpus eval. This gate pins the opt-in contract on a SCRIPTED fixture repo (so it never depends
-# on ctxpack's own history and cannot rot when this repo's commits age):
+# on ripwire's own history and cannot rot when this repo's commits age):
 #   (0)   DEFAULT OFF — without the flag, output is BYTE-IDENTICAL on a history-rich repo whether or
 #         not the boost code exists (i.e. default == pre-B3 behavior; no header note, no rank change).
 #   (i)   SIGNAL — opted in, with real co-change history, a lexically-invisible partner file's symbol
@@ -14,24 +14,24 @@
 #   (iii) SCOPE — --query and --for --no-route are untouched by the env even when set.
 #   (iv)  DETERMINISM — three opted-in runs are byte-identical; output is xmllint-clean.
 #   (v)   SEEDS UNCHANGEABLE — the top-3 candidates are identical opted-in vs default, and the env
-#         enable (CTXPACK_COCHANGE=1) matches the flag enable byte-for-byte.
+#         enable (RIPWIRE_COCHANGE=1) matches the flag enable byte-for-byte.
 #
-# Usage:  bash test/cochangeboostcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/cochangeboostcheck.sh
+# Usage:  bash test/cochangeboostcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/cochangeboostcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-# L5 (AUDIT5): --cochange-boost is dropped from --help and gated behind CTXPACK_DEV=1 (negative-result
+# L5 (AUDIT5): --cochange-boost is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
 # experiment, kept reachable for continued eval work). This gate exercises the flag directly.
-export CTXPACK_DEV=1
+export RIPWIRE_DEV=1
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null || { echo "cochangeboostcheck: git not on PATH"; exit 2; }
 echo "cochangeboostcheck: BIN=$BIN"
 
@@ -114,8 +114,8 @@ top3off="$( printf '%s' "$OFF" | grep -o '<cand r="[123]" [^>]*id="[^"]*"' )"
 
 # env enable == flag enable, byte-for-byte (the one-variable ablation control has two equivalent forms)
 "$BIN" "$HIST" --for="$Q" --no-cache --cochange-boost >"$TMP/flagon.xml" 2>/dev/null
-CTXPACK_COCHANGE=1 "$BIN" "$HIST" --for="$Q" --no-cache >"$TMP/envon.xml" 2>/dev/null
-cmp -s "$TMP/flagon.xml" "$TMP/envon.xml" && ok "CTXPACK_COCHANGE=1 == --cochange-boost (byte-identical)" \
+RIPWIRE_COCHANGE=1 "$BIN" "$HIST" --for="$Q" --no-cache >"$TMP/envon.xml" 2>/dev/null
+cmp -s "$TMP/flagon.xml" "$TMP/envon.xml" && ok "RIPWIRE_COCHANGE=1 == --cochange-boost (byte-identical)" \
     || no "env enable and flag enable diverge"
 
 # ── (ii) inert without history: depth-1 shallow clone / single-commit repo / non-git copy ───────────
@@ -141,10 +141,10 @@ inertPair "$NOGIT" "non-git tree"
 
 # ── (iii) scope: --query and --for --no-route are byte-identical even with the env set ──────────────
 "$BIN" "$HIST" --query="$Q" --no-cache >"$TMP/q1.xml" 2>/dev/null
-CTXPACK_COCHANGE=1 "$BIN" "$HIST" --query="$Q" --no-cache >"$TMP/q2.xml" 2>/dev/null
+RIPWIRE_COCHANGE=1 "$BIN" "$HIST" --query="$Q" --no-cache >"$TMP/q2.xml" 2>/dev/null
 cmp -s "$TMP/q1.xml" "$TMP/q2.xml" && ok "--query path untouched by the boost env" || no "--query path affected"
 "$BIN" "$HIST" --for="$Q" --no-route --no-cache >"$TMP/nr1.xml" 2>/dev/null
-CTXPACK_COCHANGE=1 "$BIN" "$HIST" --for="$Q" --no-route --no-cache >"$TMP/nr2.xml" 2>/dev/null
+RIPWIRE_COCHANGE=1 "$BIN" "$HIST" --for="$Q" --no-route --no-cache >"$TMP/nr2.xml" 2>/dev/null
 cmp -s "$TMP/nr1.xml" "$TMP/nr2.xml" && ok "--no-route path keeps its pre-routing bytes (boost does not apply)" \
     || no "--no-route path affected by the boost"
 
@@ -162,10 +162,10 @@ else ok "xmllint not present — skipped (G4 covered by xmlwellformed.sh)"; fi
 "$BIN" "$HIST" --cochange-boost >/dev/null 2>"$TMP/refuse.err"
 [ $? -ne 0 ] && grep -q 'cochange-boost' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"
 
-# --cochange-boost WITHOUT CTXPACK_DEV=1 refuses loudly (the L5 experimental gate)
-env -u CTXPACK_DEV "$BIN" "$HIST" --for="$Q" --cochange-boost --no-cache >/dev/null 2>"$TMP/deverr"
-[ $? -ne 0 ] && grep -q 'CTXPACK_DEV' "$TMP/deverr" && ok "--cochange-boost without CTXPACK_DEV=1 refuses loudly" \
-                                                     || no "--cochange-boost without CTXPACK_DEV=1 did not refuse loudly"
+# --cochange-boost WITHOUT RIPWIRE_DEV=1 refuses loudly (the L5 experimental gate)
+env -u RIPWIRE_DEV "$BIN" "$HIST" --for="$Q" --cochange-boost --no-cache >/dev/null 2>"$TMP/deverr"
+[ $? -ne 0 ] && grep -q 'RIPWIRE_DEV' "$TMP/deverr" && ok "--cochange-boost without RIPWIRE_DEV=1 refuses loudly" \
+                                                     || no "--cochange-boost without RIPWIRE_DEV=1 did not refuse loudly"
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

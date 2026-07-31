@@ -3,7 +3,7 @@
 #
 # The bug: canonicalId( path, scope, name ) returns the BARE NAME when a symbol has no scope
 # (resolve.h). That is right for display, and catastrophic as a cross-branch comparison key — every
-# scope-less `ok()` in a tree folds to ONE identity. Measured on the ctxpack repo itself, 29% of map
+# scope-less `ok()` in a tree folds to ONE identity. Measured on the ripwire repo itself, 29% of map
 # rows carried a non-unique id, 238 shell `ok()` helpers among them.
 #
 # The consequence was a FABRICATED conflict: two branches touching completely disjoint files were
@@ -14,13 +14,13 @@
 # positive must be gone AND the true positives must survive.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 echo "scoutkeycheck: BIN=$BIN"
 
 pairline(){ "$BIN" "$1" --merge-scout=laneA,laneB 2>/dev/null | grep -oE '<pair [^>]*>' | head -1; }

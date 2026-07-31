@@ -3,20 +3,20 @@
 #
 # Usage:
 #   bash test/skillscan.sh
-#   CTXPACK_BIN=asan/ctxpack bash test/skillscan.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/skillscan.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
 
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
@@ -47,7 +47,7 @@ fi
 
 # ── check 5: docs.md — a SAFE skill that DOCUMENTS attack phrases as quoted/backticked/fenced examples
 #    must NOT be flagged CRITICAL (precision: documentation-of-attacks ≠ attack). Guards the false-positive
-#    that flagged ctxpack's own audit skills. ──────────────────────────────────────────────────────────
+#    that flagged ripwire's own audit skills. ──────────────────────────────────────────────────────────
 rc="$( scan_exit "--scan-skill=$ROOT/test/skillfix/docs.md" )"
 if [ "$rc" != "2" ]; then ok "docs.md not CRITICAL (rc=$rc — documentation, not attack)"; else no "docs.md false-positive CRITICAL (precision regression)"; cat "$TMP/scan_out.txt"; fi
 
@@ -66,7 +66,7 @@ if [ "$rc" = "2" ]; then ok "evade_quote.md exits 2 (stray-quote evasion caught)
 rc="$( scan_exit "--scan-skill=$ROOT/test/skillfix/evade_fenced.md" )"
 if [ "$rc" = "2" ]; then ok "evade_fenced.md exits 2 (bare-fence evasion caught)"; else no "evade_fenced.md expected exit 2, got $rc (bare-fence evasion NOT caught)"; cat "$TMP/scan_out.txt"; fi
 
-# ── check 9: ctxpack's own shipped skills must remain CLEAN (precision must hold) ────────────────────
+# ── check 9: ripwire's own shipped skills must remain CLEAN (precision must hold) ────────────────────
 #    These skills legitimately document attack phrases in inline-backtick / balanced-quote spans and
 #    inside ```text fences. They must NOT false-positive. This used to pin two skill paths BY NAME with
 #    a loose `rc != 2`; both paths went stale and — because the pre-§P0.5a binary treated an unreadable

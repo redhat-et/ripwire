@@ -3,7 +3,7 @@
   "date": "2026-07-22",
   "dataset": "czlll/Loc-Bench_V1 test split, n=560, train slice n=317 (87 repos)",
   "harness": "bench/locbench/run_locbench.py --n 560 --split train --arms for (top-k 200, query-chars 1200, history-depth 1)",
-  "baseline": "same binary with CTXPACK_NO_ANCHORHOP=1 (gate-proven byte-identical to the pre-R1 binary on --for/--no-route/name-exact/plain map: test/anchorhopcheck.sh + nr/ne/map diffs vs a main-built binary)",
+  "baseline": "same binary with RIPWIRE_NO_ANCHORHOP=1 (gate-proven byte-identical to the pre-R1 binary on --for/--no-route/name-exact/plain map: test/anchorhopcheck.sh + nr/ne/map diffs vs a main-built binary)",
   "combination_rule_finding": "hop mass to a candidate = MAX over supporting edges, not SUM. Summing lets a hub shared by many anchors (utility helper, __init__ import target) accumulate several anchors' worth of mass and outrank the true top lexical hits — measured train strict@1 27.1% -> 8.2% with sum at α=0.2. Max bounds any candidate at α·topAnchorScore (α<1 means a hop-only candidate can never displace the #1 hit) and is order-independent.",
   "metric_note": "deltas are paired per-instance vs baseline (summarize: strict file@k = all primary gold files within top-k; lenient = any gold in top-10; fn-MRR = first-hit reciprocal rank). Wall deltas from these sweep runs are cache-state artifacts (shared index/OS caches across serial+parallel lanes) and were NOT used for any decision; latency evidence comes from the held-out release runs only.",
   "sweep": [
@@ -21,7 +21,7 @@
   "rationale": "strict@10 (the gate metric) plateaus at +0.95pp across α∈[0.05,0.15] and declines above; @1/MRR damage grows monotonically with α (−5.36pp @1 by α=0.4). α=0.10 is the mid-plateau point: @10 at the plateau max, @1 exactly flat, MRR −0.04pp (noise), plus small @3/@5 gains. θ is not binding under the max-combination rule (identical metrics at θ=0.25/0.50/0.75, α=0.2); 0.50 kept as the decided default.",
   "heldout_acceptance": {
     "date": "2026-07-22",
-    "protocol": "one shot after constants chosen on train — bench/locbench/run_locbench.py --n 560 --split heldout --arms for --latency-samples 5 --measure-cold --measure-index; baseline = same binary CTXPACK_NO_ANCHORHOP=1; candidate = α=0.10/θ=0.50 baked; runs sequential and alone (no concurrent load)",
+    "protocol": "one shot after constants chosen on train — bench/locbench/run_locbench.py --n 560 --split heldout --arms for --latency-samples 5 --measure-cold --measure-index; baseline = same binary RIPWIRE_NO_ANCHORHOP=1; candidate = α=0.10/θ=0.50 baked; runs sequential and alone (no concurrent load)",
     "baseline_absolute": { "strict1": 19.3, "strict3": 44.4, "strict5": 54.3, "strict10": 66.7, "func5": 17.7, "func10": 23.5, "fn_mrr": 0.2328, "lenient10": 79.0, "allpatch10": 58.0, "warm_p50_ms": 145.6, "warm_p95_ms": 772.0, "cold_p50_ms": 341.7, "cold_p95_ms": 1641.7, "token_p50": 3141 },
     "candidate_absolute": { "strict1": 19.3, "strict3": 44.0, "strict5": 53.9, "strict10": 67.1, "func5": 16.9, "func10": 23.5, "fn_mrr": 0.2316, "lenient10": 79.8, "allpatch10": 58.4, "warm_p50_ms": 145.9, "warm_p95_ms": 761.5, "cold_p50_ms": 339.2, "cold_p95_ms": 1623.8, "token_p50": 3140 },
     "paired_deltas": "strict file@10 +0.41pp with clustered-bootstrap 95% LOWER BOUND +0.00pp; lenient +0.82pp; MRR −0.0012; multi-file +0.00pp; warm p50 +2.8% p95 +10.2%; token p50 +0.2% p95 +2.7%; cold +1.6%/+11.1%; index +1.8%/+12.7%",

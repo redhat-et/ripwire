@@ -36,7 +36,7 @@
 // model over the INDEXED C-family files and does not grow a preprocessor. Three consequences worth
 // stating rather than discovering: (a) only C/C++/ObjC files are considered — a TypeScript or Swift
 // `class Cat {` opens a brace after the word `class` and would otherwise be modelled as a C++ struct and
-// then compared as a "mirror" of an unrelated same-named one; (b) mirrors are found among files ctxpack
+// then compared as a "mirror" of an unrelated same-named one; (b) mirrors are found among files ripwire
 // INDEXES, so a `.metal` copy is invisible until the shader-graph coverage of field-notes §4 lands, at
 // which point it joins automatically with no change here; (c) macro type names and array extents resolve
 // against the DEFINING FILE's own `#define`s and `constexpr`/`using`/`enum` declarations only. The
@@ -1887,7 +1887,7 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
 
     // G4: an XML comment may not contain a double hyphen, so this text names flags WITHOUT their leading
     // dashes. Keep it that way when editing.
-    std::fprintf( out, "<!-- ctxpack layout: field offsets COMPUTED from the source text under standard-layout "
+    std::fprintf( out, "<!-- ripwire layout: field offsets COMPUTED from the source text under standard-layout "
                        "assumptions on a 64-bit Apple/LP64 target (natural alignment, interior padding, trailing pad to "
                        "the aggregate's own alignment). NOT the ABI: pragma pack, bitfields, virtuals, base classes, "
                        "nested aggregates, preprocessor-conditional members and unsized field types are DETECTED and set "

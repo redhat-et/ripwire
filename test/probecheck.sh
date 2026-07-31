@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# probecheck.sh — ctxpack_probe (the Phase-1/2 PROOF binary) enum-table gate.
+# probecheck.sh — ripwire_probe (the Phase-1/2 PROOF binary) enum-table gate.
 #
 # WHY THIS EXISTS: src/tsprobe.cpp counted symbols into a hardcoded `std::array<int, 6>` indexed by
 # `Lang` and a `std::array<int, 7>` indexed by `SymKind`, next to a 5-arm langName() switch. Both were
 # written when Lang had five values. Lang has since grown to sixteen (…Markdown=7 … CSharp=14, C=15)
 # and SymKind to eight, so:
 #   - a corpus with ONE plain .c file wrote langCount[15] off the end of a 6-slot array — the probe
-#     died (exit 139/138) on a corpus `./build/ctxpack` itself handles fine (H4 grammar survey);
+#     died (exit 139/138) on a corpus `./build/ripwire` itself handles fine (H4 grammar survey);
 #   - every language after the original five printed lang "?";
 #   - markdown headings (SymKind::Section) printed under the "other" label, and SymKind::Other was
 #     off the end of the printf entirely.
@@ -24,15 +24,15 @@
 #
 # Usage:
 #   bash test/probecheck.sh
-#   CTXPACK_BIN=build/ctxpack bash test/probecheck.sh     # probe is taken as ${CTXPACK_BIN}_probe
-#   CTXPACK_BIN=asan/ctxpack  bash test/probecheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/probecheck.sh     # probe is taken as ${RIPWIRE_BIN}_probe
+#   RIPWIRE_BIN=asan/ripwire  bash test/probecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 PROBE="${BIN}_probe"                                  # same build dir as the binary under test
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -40,7 +40,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$PROBE" ] || { echo "no ctxpack_probe at $PROBE — build first (cmake --build build -j)"; exit 2; }
+[ -x "$PROBE" ] || { echo "no ripwire_probe at $PROBE — build first (cmake --build build -j)"; exit 2; }
 [ -d "$ROOT/test/cfix" ] || { echo "no fixture at $ROOT/test/cfix"; exit 2; }
 
 cd "$ROOT"

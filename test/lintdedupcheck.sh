@@ -11,12 +11,12 @@
 # file:line, enclosing symbol, text) to ONE, keeping findings=/rule count= truthful (they count
 # distinct VISIBLE findings, not raw AST captures) — see src/main.cpp's §P6.1 comment.
 #
-#   CTXPACK_BIN=build/ctxpack bash test/lintdedupcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/lintdedupcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/lintdedupcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/lintdedupcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIXTURE="$ROOT/test/lintdedupfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -24,7 +24,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]     || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ]     || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIXTURE" ] || { echo "no test/lintdedupfix dir — fixture missing"; exit 2; }
 
 echo "lintdedupcheck: BIN=$BIN  FIXTURE=$FIXTURE"

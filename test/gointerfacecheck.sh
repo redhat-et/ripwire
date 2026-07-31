@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gointerfacecheck.sh — AUDIT2 F3 gate: Go interface method requirements are captured.
 #
-# For a Go `interface`, ctxpack emitted the interface TYPE but NONE of its method requirements — the
+# For a Go `interface`, ripwire emitted the interface TYPE but NONE of its method requirements — the
 # interface's entire contract was invisible with no honesty signal (ambiguous=0 unresolved=0),
 # inconsistent with Swift (protocol func requirements ARE captured) and with Go impl methods. The fix
 # adds (method_elem name: (field_identifier) @name) @definition.method to queries/go/tags.scm —
@@ -9,17 +9,17 @@
 # from `method_declaration`, which has a receiver + body). This gate asserts the >=2 requirements appear
 # as method symbols. It FAILS on HEAD (Get/Put/Delete absent).
 #
-# Self-contained mktemp fixture; honors CTXPACK_BIN.
+# Self-contained mktemp fixture; honors RIPWIRE_BIN.
 #
 # Usage:
 #   test/gointerfacecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/gointerfacecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/gointerfacecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -27,7 +27,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 
 mkdir -p "$TMP/g"

@@ -29,12 +29,12 @@
 #                     pairs[0], and v==1. A schema that drifts silently is worse than no schema.
 #
 # Usage:
-#   test/planlanescheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/planlanescheck.sh
+#   test/planlanescheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/planlanescheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -42,7 +42,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found — required to validate the plan JSON"; exit 2; }
 echo "planlanescheck: BIN=$BIN"
 
@@ -72,7 +72,7 @@ struct FoldHost
 EOF
 # a committed field note on a symbol a lane will claim — the plan must carry it into that lane's notes[]
 # (free: the index is already built for every run, and it is exactly the gotcha you would rediscover).
-printf 'contendedSymbolAaa\t2026-07-27\tboth lanes want this one\n' >"$COLL/.ctxpack_notes"
+printf 'contendedSymbolAaa\t2026-07-27\tboth lanes want this one\n' >"$COLL/.ripwire_notes"
 cat >"$COLL/brief.txt" <<'EOF'
 contendedSymbolAaa
 rework contendedSymbolAaa now
@@ -233,7 +233,7 @@ if hit:
     check( p["conflict_count"] >= 1, "G-C positive: conflict_count >= 1 on that pair" )
 
 noted = [ L for L in d["lanes"] if any( "both lanes want this one" in n for n in L["notes"] ) ]
-check( len( noted ) >= 1, "G-C notes: a committed .ctxpack_notes entry on a claimed symbol reaches that lane's notes[]" )
+check( len( noted ) >= 1, "G-C notes: a committed .ripwire_notes entry on a claimed symbol reaches that lane's notes[]" )
 
 order = d["landing_order"]
 check( sorted( order ) == sorted( lanes.keys() ) and len( set( order ) ) == len( order ),

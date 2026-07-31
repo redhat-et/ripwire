@@ -1,7 +1,7 @@
 #pragma once
 
 // redact.h — Wave 4 #7: deterministic secret redaction of EMITTED context (Repomix / octocode table
-// stakes). ctxpack maps get pasted into cloud LLMs, so any credential that lives in a source body / doc
+// stakes). ripwire maps get pasted into cloud LLMs, so any credential that lives in a source body / doc
 // must not leave the machine verbatim. Applied ONLY at the BODY-EMISSION seams (CDATA source in
 // packSource/packBodies/packOutline, doc bodies in recall.h, extracted docText) — NEVER to symbol
 // names / signatures in the default map (identifiers are not secrets, and the default map must stay
@@ -401,7 +401,7 @@ inline void reportRedactions( std::FILE* err, const RedactCounts& counts )
         "openai/anthropic-key", "private-key", "keyword-gated-secret", "jwt"
     };
 
-    std::fprintf( err, "ctxpack: redacted %u secret%s from emitted context (",
+    std::fprintf( err, "ripwire: redacted %u secret%s from emitted context (",
                   total, total == 1 ? "" : "s" );
     bool first = true;
     for( std::size_t k = 0; k < std::size_t( SecretKind::kCount ); ++k )

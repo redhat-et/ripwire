@@ -47,22 +47,22 @@
 #
 # NEVER edits test/fixture: every mutation happens on a scratch corpus written under mktemp.
 #
-#   bash test/mcpeditpresencecheck.sh                                   # build/ctxpack
-#   bash test/mcpeditpresencecheck.sh /path/to/base/ctxpack             # must FAIL (pre-fix binary)
-#   CTXPACK_BIN=asan/ctxpack bash test/mcpeditpresencecheck.sh          # both seams bind the same way
+#   bash test/mcpeditpresencecheck.sh                                   # build/ripwire
+#   bash test/mcpeditpresencecheck.sh /path/to/base/ripwire             # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=asan/ripwire bash test/mcpeditpresencecheck.sh          # both seams bind the same way
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 echo "mcpeditpresencecheck: BIN=$BIN"
 

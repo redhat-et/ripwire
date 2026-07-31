@@ -2,8 +2,8 @@
 # legobundlecheck.sh — §P3: the bundle's <lego> block must carry the SAME identity as the standalone
 # --lego verb, and must be SCOPED to the task it was asked about.
 #
-#   test/legobundlecheck.sh                         # uses build/ctxpack on this repo + test/legofix
-#   CTXPACK_BIN=asan/ctxpack test/legobundlecheck.sh
+#   test/legobundlecheck.sh                         # uses build/ripwire on this repo + test/legofix
+#   RIPWIRE_BIN=asan/ripwire test/legobundlecheck.sh
 #
 # Two defects, one block (PLAN_outputAudit_2026-07-28.md §P3):
 #
@@ -40,14 +40,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "legobundlecheck: BIN=$BIN"
 

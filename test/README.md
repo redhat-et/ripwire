@@ -2,12 +2,12 @@
 
 Every `test/*check.sh` is a self-contained gate: it builds its own fixture (usually a sandbox
 tree, and its own throwaway git repo when it needs history), runs the binary named by
-`$CTXPACK_BIN`, and exits non-zero with a `FAIL` line naming what broke.
+`$RIPWIRE_BIN`, and exits non-zero with a `FAIL` line naming what broke.
 
 Run them all in parallel:
 
 ```bash
-python3 test/pargates.py . ./build/ctxpack -j 6
+python3 test/pargates.py . ./build/ripwire -j 6
 ```
 
 `test/regression.sh` is the sequential driver and holds the canonical gate list;

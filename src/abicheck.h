@@ -735,7 +735,7 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
 
     // G4: an XML comment may not contain a double hyphen, so this text names flags and git subcommands
     // WITHOUT their leading dashes (the same rule layout.h's and crossref.h's own comments follow).
-    std::fprintf( out, "<!-- ctxpack abi: the cross-branch ABI-BREAK gate — layout(STRUCT) crossed with "
+    std::fprintf( out, "<!-- ripwire abi: the cross-branch ABI-BREAK gate — layout(STRUCT) crossed with "
                        "stray-content(BRANCH). Scope is what each ref AUTHORED: the paths `diff base..tip` "
                        "reports against its own merge base, never `diff HEAD..tip` (a file the branch never "
                        "opened cannot be a break the branch introduced, and on a long-lived tree that one "

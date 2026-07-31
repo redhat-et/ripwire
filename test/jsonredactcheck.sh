@@ -3,9 +3,9 @@
 # credential shapes the XML siblings redact.
 #
 # Usage:
-#   test/jsonredactcheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/jsonredactcheck.sh
-#   CTXPACK_BIN=build_base/ctxpack test/jsonredactcheck.sh   # red-first: the JSON arms MUST fail here
+#   test/jsonredactcheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/jsonredactcheck.sh
+#   RIPWIRE_BIN=build_base/ripwire test/jsonredactcheck.sh   # red-first: the JSON arms MUST fail here
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
@@ -29,7 +29,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
@@ -39,7 +39,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # hard input requirements — a missing input is a FAILURE of the gate, never a silent skip
-[ -x "$BIN" ] || { echo "jsonredactcheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "jsonredactcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "jsonredactcheck: python3 is required (JSON well-formedness arm)"; exit 2; }
 
 echo "jsonredactcheck: BIN=$BIN"
@@ -104,9 +104,9 @@ grep -qF 'REDACTED:github-token' "$TMP/pt.json" && ok "JSON --pack-task: github-
 grep -qF 'REDACTED:aws-key' "$TMP/pt.json" && ok "JSON --pack-task: aws-key marker present" || no "JSON --pack-task: no aws-key redaction marker"
 
 # ── 3) the tally is really threaded — the JSON runs report on stderr, same as the XML runs ─────────
-grep -q 'ctxpack: redacted .* from emitted context (' "$TMP/for.json.err" \
+grep -q 'ripwire: redacted .* from emitted context (' "$TMP/for.json.err" \
   && ok "JSON --for: stderr redaction summary emitted" || no "JSON --for: no stderr redaction summary (counts pointer not threaded)"
-grep -q 'ctxpack: redacted .* from emitted context (' "$TMP/pt.json.err" \
+grep -q 'ripwire: redacted .* from emitted context (' "$TMP/pt.json.err" \
   && ok "JSON --pack-task: stderr redaction summary emitted" || no "JSON --pack-task: no stderr redaction summary"
 
 # ── 4) --no-redact remains the opt-out on the JSON surfaces too ────────────────────────────────────
@@ -114,7 +114,7 @@ run "$TMP/for.nr.json" "$TMP/for.nr.json.err" --for=probeSecretLoader --token-bu
 grep -qF "$AWS_RAW" "$TMP/for.nr.json" && ok "JSON --for --no-redact: raw value passes through (opt-out intact)" || no "JSON --for --no-redact: raw value missing — redaction is unconditional, not gated"
 run "$TMP/pt.nr.json" "$TMP/pt.nr.json.err" --pack-task="$TASK" --json --no-redact
 grep -qF "$GH_RAW" "$TMP/pt.nr.json" && ok "JSON --pack-task --no-redact: raw value passes through (opt-out intact)" || no "JSON --pack-task --no-redact: raw value missing — redaction is unconditional, not gated"
-grep -q 'ctxpack: redacted' "$TMP/for.nr.json.err" && no "JSON --no-redact: stderr summary printed although nothing was redacted" || ok "JSON --no-redact: no stderr summary"
+grep -q 'ripwire: redacted' "$TMP/for.nr.json.err" && no "JSON --no-redact: stderr summary printed although nothing was redacted" || ok "JSON --no-redact: no stderr summary"
 
 # ── 5) precision — a decoy (40-hex git SHA in prose, no credential keyword) survives in JSON too ───
 grep -qF "$SHA_DECOY" "$TMP/for.json" && ok "JSON --for: git-SHA decoy intact (no false redaction)" || no "JSON --for: FALSE REDACTION of the git-SHA decoy"

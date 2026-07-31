@@ -185,7 +185,7 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
 
     // G4: an XML comment may not contain a double hyphen, so this text (like writeStrayContent's and
     // writeWhereis's) uses an em dash for punctuation and names flags WITHOUT their leading dashes.
-    std::fprintf( out, "<!-- ctxpack landing-plan: stray-content's cheap per-blob sweep composed with merge-scout's "
+    std::fprintf( out, "<!-- ripwire landing-plan: stray-content's cheap per-blob sweep composed with merge-scout's "
                        "per-arm overlap oracle — of every local branch, which still hold REAL work (v=\"unmerged\"), "
                        "which were already re-implemented on the live line (v=\"superseded\", EXCLUDED below — landing "
                        "them re-does work that is already done) or are already merged (omitted entirely, counted in "

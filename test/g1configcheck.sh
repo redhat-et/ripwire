@@ -13,7 +13,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 for mode in ASAN TSAN FUZZ; do
-    grep -q "option(CTXPACK_$mode" "$CMAKE" && ok "CTXPACK_$mode is explicitly declared" || no "CTXPACK_$mode option missing"
+    grep -q "option(RIPWIRE_$mode" "$CMAKE" && ok "RIPWIRE_$mode is explicitly declared" || no "RIPWIRE_$mode option missing"
 done
 grep -q 'are mutually exclusive' "$CMAKE" && ok "sanitizer modes are mutually exclusive" || no "mutual-exclusion gate missing"
 
@@ -21,7 +21,7 @@ grep -q -- '-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast
     && ok "complete G1 sanitizer set declared" || no "complete G1 sanitizer set missing"
 grep -q -- '-fno-sanitize-recover=all -fno-omit-frame-pointer -O2 -g' "$CMAKE" \
     && ok "G1 is fail-fast, framed, and O2" || no "G1 fail-fast/O2 contract missing"
-grep -q 'tree-sitter.*${CTXPACK_GRAMMAR_TARGETS}' "$CMAKE" \
+grep -q 'tree-sitter.*${RIPWIRE_GRAMMAR_TARGETS}' "$CMAKE" \
     && ok "tree-sitter core and grammar target list are instrumented" || no "dependency instrumentation list missing"
 unsignedTruncationSectionCount="$( grep -c '\[implicit-unsigned-integer-truncation\]' "$CMAKE" )"
 balanceCount="$( grep -c 'fun:ts_parser__balance_subtree' "$CMAKE" )"
@@ -46,8 +46,8 @@ else
     no "tree-sitter sanitizer policy differs from the audited core-only rules"
 fi
 
-grep -q 'set(_ctxpack_asan_options "detect_leaks=0' "$CMAKE" \
-    && grep -q 'set(_ctxpack_asan_options "detect_leaks=1' "$CMAKE" \
+grep -q 'set(_ripwire_asan_options "detect_leaks=0' "$CMAKE" \
+    && grep -q 'set(_ripwire_asan_options "detect_leaks=1' "$CMAKE" \
     && grep -q 'LSAN_OPTIONS=suppressions=' "$CMAKE" \
     && ok "Darwin limitation and non-Darwin leak gate are explicit" || no "platform leak runtime policy missing"
 if grep -q -- '-fsanitize=leak' "$CMAKE"; then no "unsupported standalone Darwin leak sanitizer declared"; else ok "no unsupported standalone leak flag"; fi
@@ -56,14 +56,14 @@ grep -q 'check_cxx_source_compiles' "$CMAKE" && grep -q 'LLVMFuzzerTestOneInput'
     && grep -q 'same upstream LLVM installation' "$CMAKE" \
     && ok "libFuzzer availability uses a real link probe with remediation" || no "libFuzzer link probe/remediation missing"
 
-fuzzTargetCount="$( grep -c '^  add_ctxpack_fuzzer(' "$CMAKE" )"
+fuzzTargetCount="$( grep -c '^  add_ripwire_fuzzer(' "$CMAKE" )"
 [ "$fuzzTargetCount" = 15 ] && ok "15 grammar fuzz targets declared" || no "expected 15 grammar fuzz targets, found $fuzzTargetCount"
 grep -q 'EXCLUDE_FROM_ALL' "$CMAKE" && ok "fuzz targets excluded from normal builds" || no "fuzz targets can enter normal builds"
 
 grep -q 'LLVMFuzzerTestOneInput' "$HARNESS" && grep -q 'ts_parser_parse_string' "$HARNESS" \
     && grep -q 'ts_node_child(' "$HARNESS" && grep -q 'ts_node_named_child(' "$HARNESS" \
     && ok "shared harness parses arbitrary bytes and iteratively walks ASTs" || no "shared AST fuzz harness incomplete"
-grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep -q 'CTXPACK_FUZZ_JOBS:-4' "$RUNNER" \
+grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep -q 'RIPWIRE_FUZZ_JOBS:-4' "$RUNNER" \
     && grep -q 'DETECT_LEAKS=0' "$RUNNER" && grep -q 'DETECT_LEAKS=1' "$RUNNER" \
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 

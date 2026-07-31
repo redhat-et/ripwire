@@ -7,7 +7,7 @@
 //
 // Companion to matrixDyn<T> (dense). This is the SPARSE substrate that graph ranking runs
 // on: a CSR matrix, a matrix-free SpMV (apply), and a generic power-iteration
-// dominantEigenvector(). ctxpack's mixed-precision PageRank kernel lives in src/pagerank.cpp.
+// dominantEigenvector(). ripwire's mixed-precision PageRank kernel lives in src/pagerank.cpp.
 //
 // Discipline (same as matrixDyn, see SPEC §2b/§3):
 //   * DOD storage: three owning, contiguous, 128-B-aligned SoA arrays — rowOffsets[rows+1],
@@ -23,7 +23,7 @@
 // (infra depends on math → a cycle). Parallelism is therefore INJECTED by the caller: the
 // SpMV is embarrassingly parallel by row and the reductions are block-structured for a
 // deterministic parallel reduce (compute partials[block] in parallel, sum them in block
-// order → identical result). math/ stays dependency-free + single-threaded here; ctxpack
+// order → identical result). math/ stays dependency-free + single-threaded here; ripwire
 // drops DispatchSystem::parallelFor over the row/block ranges.
 
 #include "fastmath.h"   // VERIFY / fastmath::hardware_constructive_interference_size

@@ -1,4 +1,4 @@
-; ctxpack TypeScript tags — written for ctxpack.
+; ripwire TypeScript tags — written for ripwire.
 ; The upstream tree-sitter-typescript tags.scm targets .d.ts declaration files
 ; (function_signature / method_signature) and ships no @reference.call, so it extracts
 ; almost nothing from ordinary .ts/.tsx source. This set covers real source: concrete

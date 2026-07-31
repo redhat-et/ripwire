@@ -26,15 +26,15 @@
 #   - determinism + xmllint-clean
 #
 # Usage:
-#   test/prmaskanchorcheck.sh                            # uses build/ctxpack
-#   test/prmaskanchorcheck.sh /path/to/other/ctxpack     # positional binary (the RED run)
-#   CTXPACK_BIN=asan/ctxpack test/prmaskanchorcheck.sh
+#   test/prmaskanchorcheck.sh                            # uses build/ripwire
+#   test/prmaskanchorcheck.sh /path/to/other/ripwire     # positional binary (the RED run)
+#   RIPWIRE_BIN=asan/ripwire test/prmaskanchorcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -46,7 +46,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # document-wide grep for a count reads the tool's own prose back. Anchor every count read to the ROOT ELEMENT.
 hdrfiles(){ grep -o '<pr-context[^>]*>' "$1" | head -1 | grep -o 'files="[0-9]*"' | head -1 | grep -o '[0-9]*'; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "prmaskanchorcheck: BIN=$BIN"
 
 # ── fixture: a tree that vendors a copy of its own layout ─────────────────────────────────────────────

@@ -8,19 +8,19 @@
 # behave exactly as before (union across both files); "alpha.cpp:dup" / "beta.cpp:dup" must narrow to the
 # ONE matching file.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/qualifiedresolvecheck.sh
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/qualifiedresolvecheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/qualifiedfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/qualifiedfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 

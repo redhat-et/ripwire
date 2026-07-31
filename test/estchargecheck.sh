@@ -23,18 +23,18 @@
 # gate — that band is the recurrence guard, and it is the reason this file asserts a band and never a
 # bit-exact token count (house rule: float/estimate assertions get a tolerance, never bit-equality).
 #
-# Usage:  bash test/estchargecheck.sh [BIN]   |   CTXPACK_BIN=asan/ctxpack bash test/estchargecheck.sh
+# Usage:  bash test/estchargecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/estchargecheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 echo "estchargecheck: BIN=$BIN"
 
@@ -538,7 +538,7 @@ rc_k0=$?
 
 # ── #13 (Owner ruling 3): the CALL GRAPH must not move. est_tokens is a reporting concern; if any of these
 #    five counts changed, this lane touched something it had no business touching. Pinned as a SELF-COMPARISON
-#    against $CTXPACK_BASE when one is supplied (that is the only honest form — the numbers are corpus-
+#    against $RIPWIRE_BASE when one is supplied (that is the only honest form — the numbers are corpus-
 #    dependent), and otherwise as an internal-consistency check that they are present and non-degenerate. ────
 GRAPH_KEYS='files=[0-9]+ symbols=[0-9]+ edges=[0-9]+'
 counts_of(){ grep -aoE 'files=[0-9]+|symbols=[0-9]+|edges=[0-9]+|ambiguous=[0-9]+|unresolved=[0-9]+' "$1" | tr '\n' ' '; }
@@ -547,28 +547,28 @@ counts_of(){ grep -aoE 'files=[0-9]+|symbols=[0-9]+|edges=[0-9]+|ambiguous=[0-9]
 # which is what makes "the graph did not move" a statement about the CHANGE rather than about the diff size.
 "$BIN" test/fixture --no-cache >"$TMP/g_new.out" 2>/dev/null
 NEWC="$( counts_of "$TMP/g_new.out" )"
-if [ -n "${CTXPACK_BASE:-}" ] && [ -x "${CTXPACK_BASE:-}" ]; then
-    "$CTXPACK_BASE" test/fixture --no-cache >"$TMP/g_base.out" 2>/dev/null
+if [ -n "${RIPWIRE_BASE:-}" ] && [ -x "${RIPWIRE_BASE:-}" ]; then
+    "$RIPWIRE_BASE" test/fixture --no-cache >"$TMP/g_base.out" 2>/dev/null
     BASEC="$( counts_of "$TMP/g_base.out" )"
     [ "$NEWC" = "$BASEC" ] \
-        && ok "#13 ruling 3: files=/symbols=/edges=/ambiguous=/unresolved= unmoved vs CTXPACK_BASE — [$NEWC]" \
+        && ok "#13 ruling 3: files=/symbols=/edges=/ambiguous=/unresolved= unmoved vs RIPWIRE_BASE — [$NEWC]" \
         || no "#13 ruling 3 VIOLATED: [$NEWC] vs base [$BASEC] — this change moved the call graph"
 else
     echo "$NEWC" | grep -qE "$GRAPH_KEYS" \
-        && ok "#13 ruling 3: the five graph counts are present [$NEWC] (set CTXPACK_BASE to diff them against the pre-change binary)" \
+        && ok "#13 ruling 3: the five graph counts are present [$NEWC] (set RIPWIRE_BASE to diff them against the pre-change binary)" \
         || no "#13 ruling 3: the graph counts are missing or malformed [$NEWC]"
 fi
 
 # ── #14 (the CA4 coverage debt, trap #3): THE open_memstream DEGRADE PATH. The wave-1 verifier declared these
 #    paths never exercised: `open_memstream` fails on ALLOCATION, so no `ulimit -n` harness reaches them. The
-#    fault switch CTXPACK_FAULT_CHARGE_BUFFER=1 exists ONLY on the non-NDEBUG flavour — the same flavour
+#    fault switch RIPWIRE_FAULT_CHARGE_BUFFER=1 exists ONLY on the non-NDEBUG flavour — the same flavour
 #    DEGRADED_PATH_ALERT exists on — so this arm must FAIL, NOT SKIP, on a build that cannot observe alerts,
 #    and it establishes that flavour with its OWN observability probe rather than assuming it.
 #
 #    (a) OBSERVABILITY PROBE. If the switch has no effect, this build is either Release (alerts compiled out,
 #        so a degrade assertion here would pass for the wrong reason — the exact 2026-07-27 CI trap) or the
 #        seam regressed. Either way it is a FAILURE of this gate, never a skip. ────────────────────────────────
-CTXPACK_FAULT_CHARGE_BUFFER=1 "$BIN" src --top-k=10 --pack-signatures --no-cache >"$TMP/dg.out" 2>"$TMP/dg.err"
+RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" src --top-k=10 --pack-signatures --no-cache >"$TMP/dg.out" 2>"$TMP/dg.err"
 rc_dg=$?
 if grep -aq 'chargeSection: open_memstream failed' "$TMP/dg.err"; then
     ok "#14a observability probe: this flavour CAN observe DEGRADED_PATH_ALERT (the fault switch is live)"
@@ -619,7 +619,7 @@ PY
     #    un-swept when it was introduced (trap #6: a fix that produces a helper sweeps the helper's callers,
     #    not the surface). A --detail bundle embeds src/'s own comments as body text, and this round's §H7
     #    work put the literals `est_tokens=1216` and `est_tokens=619` into those comments, so the arm went red
-    #    on 2026-07-31 reading ctxpack's source back at itself while the header was correctly bare. Diagnosis
+    #    on 2026-07-31 reading ripwire's source back at itself while the header was correctly bare. Diagnosis
     #    (a): no code defect — the header attribute has never been emitted on this path — and CORPUS DRIFT,
     #    since what changed was src/, not serialize.h.
     #
@@ -631,7 +631,7 @@ PY
     { [ -n "$FCTL" ] && [ "$FCTL" -gt 0 ]; } 2>/dev/null \
         && ok "#14d anchor control: the UNDEGRADED --for --detail=5 header does carry est_tokens=\"$FCTL\" (the probe is live)" \
         || no "#14d anchor control: the undegraded --for --detail=5 header has no est_tokens (got '$FCTL') — the omission probe below is vacuous"
-    CTXPACK_FAULT_CHARGE_BUFFER=1 "$BIN" src --for="$FOR_TASK" --detail=5 --no-cache >"$TMP/dgf.out" 2>"$TMP/dgf.err"
+    RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" src --for="$FOR_TASK" --detail=5 --no-cache >"$TMP/dgf.out" 2>"$TMP/dgf.err"
     FDG="$( forest_of "$TMP/dgf.out" )"
     [ -z "$FDG" ] \
         && ok "#14d degraded --for OMITS est_tokens entirely (never a fabricated number)" \
@@ -646,18 +646,18 @@ PY
     #        control (`$TMP/dg_ctl.out`, no switch in the environment) is the reference.
     g4fail=0
     for badval in 10 1x 1000000 11 '1 ' 0 true ''; do
-        CTXPACK_FAULT_CHARGE_BUFFER="$badval" "$BIN" src --top-k=10 --pack-signatures --no-cache >"$TMP/dg_g4.out" 2>"$TMP/dg_g4.err"
+        RIPWIRE_FAULT_CHARGE_BUFFER="$badval" "$BIN" src --top-k=10 --pack-signatures --no-cache >"$TMP/dg_g4.out" 2>"$TMP/dg_g4.err"
         if grep -aq 'chargeSection: open_memstream failed' "$TMP/dg_g4.err"; then
-            no "#14e CTXPACK_FAULT_CHARGE_BUFFER='$badval' INJECTED the fault — only the exact value \"1\" may (prefix test, verifier G4)"
+            no "#14e RIPWIRE_FAULT_CHARGE_BUFFER='$badval' INJECTED the fault — only the exact value \"1\" may (prefix test, verifier G4)"
             g4fail=1
         elif ! cmp -s "$TMP/dg_g4.out" "$TMP/dg_ctl.out"; then
-            no "#14e CTXPACK_FAULT_CHARGE_BUFFER='$badval' changed the document vs the unset control"
+            no "#14e RIPWIRE_FAULT_CHARGE_BUFFER='$badval' changed the document vs the unset control"
             g4fail=1
         fi
     done
     [ "$g4fail" = 0 ] && ok "#14e the fault switch is exact-match: 8 non-\"1\" values (incl. 10 / 1x / 1000000) are byte-identical to unset"
 else
-    no "#14a observability probe FAILED: CTXPACK_FAULT_CHARGE_BUFFER=1 produced no DEGRADED_PATH_ALERT. Either this is an NDEBUG/Release build (alerts compiled out — every degrade arm below would pass for the wrong reason: see CLAUDE.md, the 2026-07-27 CI trap) or the openChargeBuffer seam regressed. This is a FAILURE, not a skip."
+    no "#14a observability probe FAILED: RIPWIRE_FAULT_CHARGE_BUFFER=1 produced no DEGRADED_PATH_ALERT. Either this is an NDEBUG/Release build (alerts compiled out — every degrade arm below would pass for the wrong reason: see CLAUDE.md, the 2026-07-27 CI trap) or the openChargeBuffer seam regressed. This is a FAILURE, not a skip."
 fi
 
 # ── §C1 + §C2 (capture-audit-4, wave 3): --for --json's ENVELOPE is charged, and so is over_ceiling ─────

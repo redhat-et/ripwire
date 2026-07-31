@@ -1,10 +1,10 @@
 {
-  "schema": "ctxpack-agentloop-tasks-lock-v1",
+  "schema": "ripwire-agentloop-tasks-lock-v1",
   "dataset": "princeton-nlp/SWE-bench_Lite",
   "config": "default",
   "split": "test",
-  "split_contract": "repo-disjoint from LocBench train: sha256('ctxpack-a7-v2\\x00' + lowercase(repo)), byte0<128=train (excluded)",
-  "seed": "ctxpack-b4-agentloop-v1",
+  "split_contract": "repo-disjoint from LocBench train: sha256('ripwire-a7-v2\\x00' + lowercase(repo)), byte0<128=train (excluded)",
+  "seed": "ripwire-b4-agentloop-v1",
   "cap_per_repo": 4,
   "target": 40,
   "raw_rows_fetched": 300,

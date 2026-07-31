@@ -20,16 +20,16 @@
 #   F. JSON parity — --json carries the same three counters and the same per-row origin.
 #
 # Everything runs in git-backed temp repos (the auto-baseline-vs-HEAD path), never the real repo.
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/qualityorigincheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/qualityorigincheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qualityorigincheck (git required for the HEAD-baseline fixtures)"; exit 0; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT

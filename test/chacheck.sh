@@ -13,20 +13,20 @@
 #               the arity-1 overload (fixed arity 1 != 3), keeps the arity-3 overload, and KEEPS the variadic
 #               overload (variadic is never a fixed arity → never provably wrong).
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/chacheck.sh   (or asan/ctxpack)
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/chacheck.sh   (or asan/ripwire)
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIX="$ROOT/test/chafix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/chafix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 

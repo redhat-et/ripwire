@@ -18,17 +18,17 @@
 #   (a `statements` ancestor marks a local). This gate asserts (a) the local bindings are NOT symbols,
 #   (b) the call edges attribute to the enclosing FUNCTION, not the last local binding.
 #
-# Fixtures are created under a self-contained mktemp dir (no shared fixture touched). Honors CTXPACK_BIN.
+# Fixtures are created under a self-contained mktemp dir (no shared fixture touched). Honors RIPWIRE_BIN.
 #
 # Usage:
 #   test/swiftmemberscheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/swiftmemberscheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/swiftmemberscheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -36,7 +36,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 
 # ── F2 fixture: init / subscript / deinit as concrete members AND protocol requirements ──────────────

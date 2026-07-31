@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# evictioncheck.sh — gate for A5 (cache-dir hygiene): the cache-ladder dir accumulates ctxpack-* blobs
+# evictioncheck.sh — gate for A5 (cache-dir hygiene): the cache-ladder dir accumulates ripwire-* blobs
 # (the main lean/rich parse-cache PLUS qsnap/qheadsnap) but only the qsnap/qheadsnap families ever
 # evicted — the main family had NO evictor at all. --doctor measured ~11,914 blobs / 2.4 GB on a machine
 # that runs ~20 parallel agent sessions across many repos.
 #
 # Policy under test (quality.h: evictOldCacheFamily generalized + sweepStaleCacheBlobsOnce; hooked from
 # src/ingest.cpp's saveCache, right after the tmp->rename publish): at saveCache time, at most once per
-# process, best-effort and silent — first delete any ctxpack-* blob older than 30 days, THEN (only if the
+# process, best-effort and silent — first delete any ripwire-* blob older than 30 days, THEN (only if the
 # dir is still over budget) delete oldest-first until the dir total is under 2 GB. The blob this run just
 # wrote/used is NEVER deleted by either pass.
 #
@@ -27,7 +27,7 @@
 #   (d) the blob THIS run itself just wrote (the real auto-cache for the seeded fixture repo) survives, AND
 #       lands inside a shard subdir (not flat) — the Y4 write path is really exercised.
 #   (e) the dir is back under budget after the sweep.
-#   (f) concurrency smoke: two ctxpack processes racing saveCache/eviction against the SAME seeded dir
+#   (f) concurrency smoke: two ripwire processes racing saveCache/eviction against the SAME seeded dir
 #       (same fixture repo → same cache-file key) — neither crashes, both exit 0, both still emit
 #       well-formed output. Matches the quality.h comment: loadCache self-heals a missing/torn file,
 #       saveCache publishes via tmp-then-rename, and a double fs::remove of an already-gone file is a
@@ -35,16 +35,16 @@
 #
 # Sparse filler (truncate -s) keeps the ">2 GB" file logically oversized (what fs::file_size measures)
 # without touching real disk, so the gate stays fast. Does NOT edit regression.sh.
-# Usage:  test/evictioncheck.sh   |   CTXPACK_BIN=build_r2a1/ctxpack test/evictioncheck.sh
+# Usage:  test/evictioncheck.sh   |   RIPWIRE_BIN=build_r2a1/ripwire test/evictioncheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v truncate >/dev/null 2>&1 || { echo "truncate required (sparse-file filler)"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -57,7 +57,7 @@ apparentsize(){ stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || ec
 # Y4: shard-aware — every blob glob below now looks at both the flat top-level AND any 2-hex-char shard
 # subdir (mindepth/maxdepth bound it to exactly the layouts the sweep itself understands; never an
 # open-ended walk of a shared $TMPDIR).
-allblobs(){ find "$CACHEDIR" -mindepth 1 -maxdepth 2 -name 'ctxpack-*.bin' 2>/dev/null; }
+allblobs(){ find "$CACHEDIR" -mindepth 1 -maxdepth 2 -name 'ripwire-*.bin' 2>/dev/null; }
 dirapparentbytes(){
     local total=0 f sz
     while IFS= read -r f; do
@@ -73,14 +73,14 @@ echo "evictioncheck: BIN=$BIN  CACHEDIR=$CACHEDIR"
 # a tiny fixture so each run itself is fast; content only needs to parse cleanly.
 printf 'int tiny( void )\n{\n    return 1;\n}\n' > "$REPO/f.cpp"
 
-OLD="$CACHEDIR/ctxpack-deadbeef0000aaaa-lean.bin"
-FILLER="$CACHEDIR/ctxpack-deadbeef0000bbbb-lean.bin"
-FRESH="$CACHEDIR/ctxpack-deadbeef0000cccc-lean.bin"
+OLD="$CACHEDIR/ripwire-deadbeef0000aaaa-lean.bin"
+FILLER="$CACHEDIR/ripwire-deadbeef0000bbbb-lean.bin"
+FRESH="$CACHEDIR/ripwire-deadbeef0000cccc-lean.bin"
 # Y4: a fixed shard dir seeded with its own old/fresh pair — proves the sweep reaches INTO the new layout,
 # not just the flat legacy one, in the SAME run as the flat trio above (a realistic mixed-layout cache dir).
 SHARDDIR="$CACHEDIR/7f"; mkdir -p "$SHARDDIR"
-OLD_SH="$SHARDDIR/ctxpack-deadbeef0000a1a1-lean.bin"
-FRESH_SH="$SHARDDIR/ctxpack-deadbeef0000c1c1-lean.bin"
+OLD_SH="$SHARDDIR/ripwire-deadbeef0000a1a1-lean.bin"
+FRESH_SH="$SHARDDIR/ripwire-deadbeef0000c1c1-lean.bin"
 
 # (a) an OLD blob — a fixed date far in the past, so it is always >30 days old regardless of when this
 #     gate runs (no live date-arithmetic needed). Seeded in BOTH layouts.
@@ -106,7 +106,7 @@ beforebytes="$( dirapparentbytes )"
     || no "seed: dir does not exceed budget yet (~$beforebytes bytes) — filler too small"
 
 # Run pointed at the seeded dir via TMPDIR (the first rung of cacheDirLadder()) — no --cache/--no-cache,
-# so ctxpack takes its normal auto-cache path (defaultCachePath) and saveCache's hygiene hook fires for real.
+# so ripwire takes its normal auto-cache path (defaultCachePath) and saveCache's hygiene hook fires for real.
 env -u XDG_CACHE_HOME TMPDIR="$CACHEDIR" "$BIN" "$REPO" >"$TMP/run1.xml" 2>"$TMP/run1.err"
 rc1=$?
 
@@ -126,7 +126,7 @@ aftercount="$( allblobs | wc -l | tr -d ' ' )"
 
 ownblob="$( allblobs | grep -v -e "$FRESH" -e "$FRESH_SH" )"
 [ -n "$ownblob" ] && ok "this run's own cache blob found: $( basename "$ownblob" )" || no "could not locate this run's own cache blob at all"
-printf '%s' "$ownblob" | grep -qE '/[0-9a-f]{2}/ctxpack-' \
+printf '%s' "$ownblob" | grep -qE '/[0-9a-f]{2}/ripwire-' \
     && ok "this run's own cache blob landed in a SHARD subdir (Y4 write path exercised, not just flat)" \
     || no "this run's own cache blob is still FLAT — resolveCacheBlobPath did not shard a fresh write ($ownblob)"
 
@@ -134,13 +134,13 @@ afterbytes="$( dirapparentbytes )"
 [ "$afterbytes" -lt 2147483648 ] && ok "cache dir back under the 2 GB budget after the sweep (~$afterbytes bytes)" \
     || no "cache dir still over budget after the sweep (~$afterbytes bytes)"
 
-# ── (f) concurrency smoke: reseed a stale + oversized blob, fire two ctxpack processes at the SAME dir ────
+# ── (f) concurrency smoke: reseed a stale + oversized blob, fire two ripwire processes at the SAME dir ────
 # Win 2 (ingest.cpp) skips saveCache entirely on a no-change warm run — and the eviction sweep lives
 # INSIDE saveCache — so the fixture must actually change here, or neither concurrent run would touch
 # saveCache at all and this check would pass vacuously.
 printf 'int tiny2( void )\n{\n    return 2;\n}\n' >> "$REPO/f.cpp"
-OLD2="$CACHEDIR/ctxpack-deadbeef0000dddd-lean.bin"
-FILLER2="$CACHEDIR/ctxpack-deadbeef0000eeee-lean.bin"
+OLD2="$CACHEDIR/ripwire-deadbeef0000dddd-lean.bin"
+FILLER2="$CACHEDIR/ripwire-deadbeef0000eeee-lean.bin"
 printf 'stale-old-cache-blob-2' > "$OLD2"; touch -t 202001010000 "$OLD2"
 truncate -s 2600M "$FILLER2"
 

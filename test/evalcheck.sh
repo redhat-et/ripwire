@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # evalcheck.sh — gate for --eval itself (NOTHING gated --eval before this: fillordercheck only mentions it).
-# --eval is ctxpack's self-benchmark: for each of the last N commits it hides that commit's touched files,
-# ranks the rest by co-change proximity to them under several rankers (ctxpack PageRank, BM25 variants,
+# --eval is ripwire's self-benchmark: for each of the last N commits it hides that commit's touched files,
+# ranks the rest by co-change proximity to them under several rankers (ripwire PageRank, BM25 variants,
 # fused, same-dir, random floor), and reports recall@{5,10,20}. It's the oracle the aider-multiplier tuning
 # in AUDIT §"Batch B" leaned on — so an --eval that silently mis-computes recall would quietly corrupt every
 # ranking-quality decision. This gate asserts the STRUCTURE and the MATH INVARIANTS of the table, on a
 # synthetic git repo with a KNOWN co-change signal (files change in fixed pairs).
 #
 # Invariants asserted (true for any correct recall@k table, not observed-and-frozen):
-#   (1) the table lists all the expected rankers incl. ctxpack, BM25, fused, random
+#   (1) the table lists all the expected rankers incl. ripwire, BM25, fused, random
 #   (2) every real-ranker cell is a percentage in [0,100]  (recall is a fraction; >100 only for the
 #       explicitly-labelled `random` FLOOR row, which normalises differently — excluded)
 #   (3) recall is MONOTONE NON-DECREASING across @5 → @10 → @20 for every real ranker (a larger cut-off
@@ -16,18 +16,18 @@
 #   (4) the header reports averaging over ≥1 historical commit (it actually ran the held-out eval)
 #   (5) determinism
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/evalcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/evalcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh. Needs git.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required for --eval gate"; exit 2; }
 echo "evalcheck: BIN=$BIN"
 
@@ -57,8 +57,8 @@ run >/dev/null 2>&1; EC=$?
 
 # ── 1) expected rankers present ──────────────────────────────────────────────────────────────────────
 missing=""
-for rk in ctxpack BM25 fused same-dir random; do printf '%s' "$EV" | grep -q "$rk" || missing="$missing $rk"; done
-[ -z "$missing" ] && ok "--eval lists all expected rankers (ctxpack, BM25, fused, same-dir, random)" || no "--eval missing rankers:$missing"
+for rk in ripwire BM25 fused same-dir random; do printf '%s' "$EV" | grep -q "$rk" || missing="$missing $rk"; done
+[ -z "$missing" ] && ok "--eval lists all expected rankers (ripwire, BM25, fused, same-dir, random)" || no "--eval missing rankers:$missing"
 
 # ── 2) averaged over ≥1 historical commit (the held-out eval actually happened) ──────────────────────
 NC="$( printf '%s' "$EV" | grep -oE 'over [0-9]+ historical commit' | grep -oE '[0-9]+' | head -1 )"
@@ -73,11 +73,11 @@ NC="$( printf '%s' "$EV" | grep -oE 'over [0-9]+ historical commit' | grep -oE '
 #    (a parse that silently matched ZERO rows would otherwise "pass" both checks vacuously).
 PARSE="$( printf '%s\n' "$EV" | awk '
     { name=$1 }
-    name!="ctxpack" && name!="BM25" && name!="BM25sub" && name!="BM25body" && name!="fused" && name!="same-dir" { next }
+    name!="ripwire" && name!="BM25" && name!="BM25sub" && name!="BM25body" && name!="fused" && name!="same-dir" { next }
     {
         n=0
         for( i=1; i<=NF; i++ ) if( $i ~ /^[0-9]+\.[0-9]+%$/ ) { v=$i; sub(/%/,"",v); c[++n]=v+0 }
-        if( n!=3 ) next            # header "ctxpack --eval …" row has 0 cells → skipped here
+        if( n!=3 ) next            # header "ripwire --eval …" row has 0 cells → skipped here
         rows++
         for( i=1; i<=3; i++ ) if( c[i]<0 || c[i]>100 ) badrange=badrange " " name "(" c[i] ")"
         if( !(c[1]<=c[2] && c[2]<=c[3]) ) badmono=badmono " " name "(" c[1] "/" c[2] "/" c[3] ")"
@@ -101,7 +101,7 @@ BAD_MONO="$( printf '%s' "$PARSE" | sed -n 's/^MONO=//p' )"
 # here so the note can't silently regress back to a bare, uninterpreted table).
 printf '%s' "$EV" | grep -q 'note:' && ok "--eval: table carries an interpretive note (was bare pre-§P11.12)" || no "--eval: no interpretive note found"
 printf '%s' "$EV" | grep -q 'SHIPPED default' && ok "--eval: note names which ranker is the SHIPPED default" || no "--eval: note does not name the shipped default"
-printf '%s' "$EV" | grep -q 'structural-only PageRank' && ok "--eval: note explains ctxpack= is structural PageRank, not a retrieval ranker" || no "--eval: note does not explain the ctxpack row"
+printf '%s' "$EV" | grep -q 'structural-only PageRank' && ok "--eval: note explains ripwire= is structural PageRank, not a retrieval ranker" || no "--eval: note does not explain the ripwire row"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

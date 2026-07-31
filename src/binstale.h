@@ -17,7 +17,7 @@
 // the last commit that touched each candidate dependent source, compared via `git merge-base
 // --is-ancestor` (quality::gitIsAncestor) — a pure function of the commit graph, unaffected by clone time.
 //
-// HONEST LIMITS (ctxpack sees no build system — no Makefile/CMakeLists/link graph parsing, ever):
+// HONEST LIMITS (ripwire sees no build system — no Makefile/CMakeLists/link graph parsing, ever):
 //   - "binary" is a CONTENT heuristic: a NUL byte in the first 8000 bytes of the WORKING-TREE file (git's
 //     own `buffer_is_binary` heuristic, the same one `git diff` uses to print "Binary files differ"). Read
 //     from disk, not from a git blob — this check asks "is what's checked out right now stale", and doctor

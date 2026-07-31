@@ -2,7 +2,7 @@
 # analyze.py — paired per-task/seed analysis for Phase B4 agent-in-the-loop eval results.
 #
 # WHAT THIS DOES. Consumes the record schema written by run_agentloop.py (SCHEMA
-# "ctxpack-agentloop-results-v1") and computes paired arm deltas (baseline vs ctxpack_mcp) per
+# "ripwire-agentloop-results-v1") and computes paired arm deltas (baseline vs ripwire_mcp) per
 # (instance_id, seed), then a REPOSITORY-CLUSTERED bootstrap 95% lower bound on the resolved-rate
 # delta — because multiple SWE-bench instances from one repo are not independent trials any more than
 # multiple LocBench issues from one repo are.
@@ -15,7 +15,7 @@
 # independent re-implementation of the same statistical method for the agentloop record schema.
 #
 # SELF-TEST (`--self-test`): builds a tiny synthetic in-memory fixture (a handful of fake repos/
-# instances/seeds with a manufactured resolved-rate lift for ctxpack_mcp) and asserts the pipeline
+# instances/seeds with a manufactured resolved-rate lift for ripwire_mcp) and asserts the pipeline
 # produces the expected sign and a positive bootstrap lower bound — proves the math runs correctly
 # without needing any real (paid) run data.
 #
@@ -24,8 +24,8 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
-SCHEMA = "ctxpack-agentloop-results-v1"
-ARM_BASELINE, ARM_CTXPACK = "baseline", "ctxpack_mcp"
+SCHEMA = "ripwire-agentloop-results-v1"
+ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_mcp"
 
 def mean( xs ): return sum( xs ) / len( xs ) if xs else 0.0
 
@@ -46,7 +46,7 @@ def pair_by_task_seed( records ):
         by_key.setdefault( ( r["instance_id"], r["seed"] ), {} )[ r["arm"] ] = r
     paired, incomplete = [], []
     for ( instance_id, seed ), arms in sorted( by_key.items() ):
-        base, ctx = arms.get( ARM_BASELINE ), arms.get( ARM_CTXPACK )
+        base, ctx = arms.get( ARM_BASELINE ), arms.get( ARM_RIPWIRE )
         if base and ctx and base["status"] == "ok" and ctx["status"] == "ok" \
            and base["resolved"] is not None and ctx["resolved"] is not None:
             paired.append( ( instance_id, base["repo"], seed, base, ctx ) )
@@ -93,12 +93,12 @@ def paired_ratio( pairs, field ):
     p95 = ratios[ max( 0, math.ceil( 0.95 * len( ratios ) ) - 1 ) ]
     return p50, p95
 
-def analyze( records, n_boot=10000, bootstrap_seed="ctxpack-b4-agentloop-bootstrap-v1" ):
+def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstrap-v1" ):
     paired, incomplete = pair_by_task_seed( records )
     repos = sorted( { repo for _, repo, *_ in paired } )
     out = dict( n_pairs=len( paired ), n_repos=len( repos ), n_incomplete=len( incomplete ) )
     if not paired:
-        out["note"] = "zero complete paired (baseline,ctxpack_mcp) runs — nothing to analyze yet"
+        out["note"] = "zero complete paired (baseline,ripwire_mcp) runs — nothing to analyze yet"
         return out
     rdeltas = [ resolved_delta( b, c ) for *_ , b, c in paired ]
     ldeltas = [ loc_hit_delta( b, c ) for *_ , b, c in paired ]
@@ -132,10 +132,10 @@ def print_report( out ):
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
 def synthetic_fixture():
-    # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ctxpack_mcp resolves ~2/3 of the time,
+    # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ripwire_mcp resolves ~2/3 of the time,
     # baseline ~1/3 — a manufactured, unambiguous positive lift, so the bootstrap lower bound MUST be
     # positive (that's the assertion --self-test checks) and tokens/wall/cost are set to a mild,
-    # deterministic ctxpack_mcp overhead (+8%) so the ratio math has something non-trivial to compute.
+    # deterministic ripwire_mcp overhead (+8%) so the ratio math has something non-trivial to compute.
     rng = random.Random( "agentloop-selftest-fixture-v1" )
     repos = [ "fake/repoA", "fake/repoB", "fake/repoC" ]
     records = []
@@ -150,7 +150,7 @@ def synthetic_fixture():
                 base_cost, ctx_cost = 0.50, 0.54
                 for arm, resolved, tokens, wall, cost in (
                     ( ARM_BASELINE, base_resolved, base_tokens, base_wall, base_cost ),
-                    ( ARM_CTXPACK,  ctx_resolved,  ctx_tokens,  ctx_wall,  ctx_cost ),
+                    ( ARM_RIPWIRE,  ctx_resolved,  ctx_tokens,  ctx_wall,  ctx_cost ),
                 ):
                     records.append( dict(
                         instance_id=instance_id, repo=repo, base_commit="deadbeef",
@@ -160,7 +160,7 @@ def synthetic_fixture():
                         error=None, started_unix=0, finished_unix=0 ) )
     # one deliberately incomplete pair (baseline never finished) — must land in n_incomplete, not paired.
     records.append( dict( instance_id="repoA-orphan", repo="fake/repoA", base_commit="deadbeef",
-                          arm=ARM_CTXPACK, seed=1, harness="fixture", model="fixture", status="ok",
+                          arm=ARM_RIPWIRE, seed=1, harness="fixture", model="fixture", status="ok",
                           resolved=True, localization_hit=True, tokens_in=1000, tokens_out=9000,
                           wall_seconds=100.0, cost_usd=0.4, error=None, started_unix=0, finished_unix=0 ) )
     return records

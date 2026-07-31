@@ -27,7 +27,7 @@
 # kIngest*Mirror constants in the SAME diff, then re-pin". `test/qextractionkeycheck.sh` asserts the resulting
 # equality; this gate is what makes you look.
 #
-# This is a pure source-text check — it does not build or run the ctxpack binary.
+# This is a pure source-text check — it does not build or run the ripwire binary.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 SRC="$ROOT/src/quality.h"

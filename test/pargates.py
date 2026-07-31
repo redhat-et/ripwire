@@ -5,7 +5,7 @@ The repo's own test/regression.sh runs ~210 gates in ONE sequential for-loop, wh
 exceeds the agent harness time ceiling. This runs the same scripts concurrently so a
 full verification fits in one window. It does NOT modify regression.sh.
 
-usage: pargates.py <repo-root> <ctxpack-bin> [-j N] [--only substr] [--json out.json]
+usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.json]
 """
 import concurrent.futures as cf
 import json
@@ -41,7 +41,7 @@ if only:
 
 
 def run(g):
-    env = dict(os.environ, CTXPACK_BIN=binp)
+    env = dict(os.environ, RIPWIRE_BIN=binp)
     t0 = time.time()
     try:
         p = subprocess.run(
@@ -51,7 +51,7 @@ def run(g):
         rc, out = p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
         rc, out = 124, "TIMEOUT after 300s"
-    # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a CTXPACK_BASE
+    # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
     skipped = rc == 0 and "SKIP" in out[:400]

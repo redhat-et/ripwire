@@ -40,7 +40,7 @@
 #       well-formedness before this one, so that shipped.
 #   (7) MUTATION — each of the three assertion SHAPES is shown to be able to fail.
 #
-# RED-FIRST, AND WHAT IT CANNOT COVER. Against build/ctxpack_base (main before this lane) the gate reports
+# RED-FIRST, AND WHAT IT CANNOT COVER. Against build/ripwire_base (main before this lane) the gate reports
 # 50 FAIL / 18 PASS: every arm of (1)(2)(3), six of (4), three of (5), and (6)'s MCP-payload row. The 18
 # passes are (7)'s mutants, (2)'s two refusal pins, and the well-formedness of documents that were already
 # well-formed. The ONE arm that is structurally NOT binary-sensitive is (5)'s source grep: it reads the
@@ -49,22 +49,22 @@
 # (5)'s three OTHER arms — the shipped --help, the live documents — are binary-sensitive and did go red.
 #
 # Usage:
-#   bash test/floormarkcheck.sh                              # build/ctxpack
-#   bash test/floormarkcheck.sh build/ctxpack_base           # the RED run (base binary lacks the marker)
-#   CTXPACK_BIN=asan/ctxpack bash test/floormarkcheck.sh
+#   bash test/floormarkcheck.sh                              # build/ripwire
+#   bash test/floormarkcheck.sh build/ripwire_base           # the RED run (base binary lacks the marker)
+#   RIPWIRE_BIN=asan/ripwire bash test/floormarkcheck.sh
 #
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or any golden file.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "floormarkcheck: python3 required"; exit 2; }
 cd "$ROOT"
 echo "floormarkcheck: BIN=$BIN"
@@ -532,7 +532,7 @@ printf '<callers of="x" count="3">' >"$TMP/mut_root.xml"
 grep -q "$MARK_XML" "$TMP/mut_root.xml" \
     && no "(7) the presence assertion cannot see a root WITHOUT the marker" \
     || ok "(7) presence: a marker-less root IS detected"
-printf '<!-- ctxpack callers: nothing disclosed --><callers/>' >"$TMP/mut_leg.xml"
+printf '<!-- ripwire callers: nothing disclosed --><callers/>' >"$TMP/mut_leg.xml"
 case "$( leadComment "$TMP/mut_leg.xml" )" in
     *"$FLOOR_ANCHOR"*) no "(7) the legend assertion matches a legend that lacks the sentence" ;;
     *)                 ok "(7) legend: a legend without the floor sentence IS detected" ;;

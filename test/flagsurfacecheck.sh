@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# flagsurfacecheck.sh — every flag ctxpack ADVERTISES in --help must actually PARSE.
+# flagsurfacecheck.sh — every flag ripwire ADVERTISES in --help must actually PARSE.
 #
 # The gap this closes: deckcheck.sh proves every flag named in PROSE exists in --help (prose -> help).
 # Nothing proved the other direction (help -> parser). --help is a hand-maintained string literal in
@@ -10,18 +10,18 @@
 #
 # The assertion is deliberately narrow: a flag must not produce the specific "unknown flag" error.
 # Any OTHER refusal is fine and expected — --gateability refuses without --doc-drift, --anchor is
-# CTXPACK_DEV-gated, --arch wants a file. Those are deliberate messages; "unknown flag" means the
+# RIPWIRE_DEV-gated, --arch wants a file. Those are deliberate messages; "unknown flag" means the
 # parser has never heard of it.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
 echo "flagsurfacecheck: BIN=$BIN"
 
@@ -82,7 +82,7 @@ done
 # omission from an accidental one. Anything NOT in this list is a flag a user can only find by reading
 # source, which is a documentation bug. Keep the reasons; a bare list rots into a dumping ground.
 #   --stable, --most-important-last, --no-auto-order  deprecated/hidden aliases of --order= (warn + redirect)
-#   --anchor                                          CTXPACK_DEV-gated, a recorded negative-result experiment
+#   --anchor                                          RIPWIRE_DEV-gated, a recorded negative-result experiment
 #   --cochange-boost                                  EXPERIMENTAL opt-in; held-out was +0.0pp, default OFF
 #   --no-prefilter                                    debug: the full-scan soundness oracle for --regex
 #   --route                                           back-compat no-op (routing is the default now)

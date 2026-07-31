@@ -382,7 +382,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
-    std::string out = "<!-- ctxpack edit-check: SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/"
+    std::string out = "<!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/"
                        "contract-change — plus its 1-hop callers. A caller is flagged incompatible=\"1\" when its argument count "
                        "was reliably counted and NO definition in the folded set could accept it: every one has a FIXED arity that "
                        "disagrees. A variadic, defaulted or implicit-receiver definition (a Python/Ruby method, whose params counts "

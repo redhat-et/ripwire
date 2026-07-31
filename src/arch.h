@@ -1,7 +1,7 @@
 #pragma once
 
 // arch.h — architectural fitness functions (layering rules) for --arch (RESEARCH_codeIntelligence §2).
-// The rules are the USER's, declared in a small text file; ctxpack imposes no architecture of its own —
+// The rules are the USER's, declared in a small text file; ripwire imposes no architecture of its own —
 // it just enforces the one you declare against the #include graph and reports the crossing edges, with a
 // non-zero exit code for CI. Instrument, not judge.
 //
@@ -21,7 +21,7 @@
 //                                       only its allowed targets are permitted, everything else is a violation
 //
 // --baseline support (S5-B):
-//   A sidecar file `.ctxpack_arch_baseline` in the CWD holds one FNV-1a-64 hex hash per line, each
+//   A sidecar file `.ripwire_arch_baseline` in the CWD holds one FNV-1a-64 hex hash per line, each
 //   identifying an accepted violation by stable key = src_file + NUL + dst_file + NUL + rule_label.
 //   First run with --baseline writes the sidecar and exits 0 (accept the current debt).
 //   Subsequent runs suppress baselined violations; exit 2 only on NEW (un-baselined) ones.
@@ -282,7 +282,7 @@ inline ArchRules parseArchRules( const std::string& path )
     // mirroring parseLintRuleFile's badLine/"file skipped" contract exactly.
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
     {
-        std::fprintf( stderr, "ctxpack: --arch: %s:%zu: %s — rules file rejected\n", path.c_str(), lineNo, why );
+        std::fprintf( stderr, "ripwire: --arch: %s:%zu: %s — rules file rejected\n", path.c_str(), lineNo, why );
         DEGRADED_PATH_ALERT( "arch: malformed rules line — rules file rejected" );
         return false;
     };
@@ -412,9 +412,9 @@ inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 
 // ── S2: root-relative path for BASELINE HASHING (committed-sidecar portability) ───────────────────────
 //
-// Both baseline sidecars (.ctxpack_arch_baseline, .ctxpack_quality_baseline) are meant to be COMMITTED and
+// Both baseline sidecars (.ripwire_arch_baseline, .ripwire_quality_baseline) are meant to be COMMITTED and
 // portable. But every path in ing.files is spelled `<ingest-root>/<relative>` verbatim — the crawl just
-// prepends the root argument. So `ctxpack .` embeds `./game/x.cpp` while `ctxpack /abs/repo` embeds
+// prepends the root argument. So `ripwire .` embeds `./game/x.cpp` while `ripwire /abs/repo` embeds
 // `/abs/repo/game/x.cpp`, giving DIFFERENT hashes for the same file → a baseline written under one root
 // spelling falsely fails enforcement under another (exit 0 vs 2 for a teammate/CI with a different root).
 //
@@ -474,7 +474,7 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
 // Using a fixed name in CWD keeps it repo-committable and rules-file-independent; the user adds it to .gitignore or commits it.
 inline std::string archBaselinePath( const std::string& /*rulesPath*/ ) noexcept
 {
-    return ".ctxpack_arch_baseline";
+    return ".ripwire_arch_baseline";
 }
 
 // Read the baseline sidecar.  Returns the set of violation hashes committed as accepted debt.
@@ -506,7 +506,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 
     std::FILE* f = std::fopen( sidecarPath.c_str(), "w" );
     if( !f ) return false;
-    std::fprintf( f, "# ctxpack arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n" );
+    std::fprintf( f, "# ripwire arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n" );
     for( std::uint64_t h : sorted )
         std::fprintf( f, "%016llx\n", static_cast<unsigned long long>( h ) );
     std::fclose( f );
@@ -536,7 +536,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 //         "useless" = abstract + unstable (A large, I large) and D high — abstractions nothing uses
 //         "ok"      = otherwise
 //
-// Abstractness proxy (from the tags ctxpack already has — NO new parser pass):
+// Abstractness proxy (from the tags ripwire already has — NO new parser pass):
 //   a TYPE = a Class/Struct/Interface symbol. It is ABSTRACT when it is SymKind::Interface (a TS/Go
 //   interface, Swift/ObjC protocol → abstract by definition) OR it is a Class/Struct that DECLARES at
 //   least one method with NO BODY (endByte <= sigEndByte) — a pure-virtual / abstract-method declaration,
@@ -556,7 +556,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 //   A + I >= kZoneBalancePoint (1.0)  → "useless" (high-I high-A corner: abstract AND nothing depends on it)
 // Tie-break: D exactly == kZoneDistanceThreshold is NOT "past" it (strict '>') → falls to "ok", deterministic.
 // FOLKLORE (not independently validated — RESEARCH_agentQuality2026 §1a): these corners are Martin's design
-// heuristic, descriptive only; ctxpack does not claim they predict defects or maintenance cost.
+// heuristic, descriptive only; ripwire does not claim they predict defects or maintenance cost.
 inline constexpr double kZoneDistanceThreshold = 0.5;   // |A+I-1| past this → classify into pain/useless
 inline constexpr double kZoneBalancePoint      = 1.0;   // the A+I split line between the pain and useless corners
 

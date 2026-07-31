@@ -23,18 +23,18 @@
 #   81.2→78.1 step is the from-trace label re-anchor pricing out a path-only artifact, not a ranker
 #   regression; floors below unchanged — still comfortably floor-style under the recalibrated numbers.)
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/recallevalcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/recallevalcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null || { echo "recallevalcheck: python3 required"; exit 2; }
 echo "recallevalcheck: BIN=$BIN"
 
@@ -42,7 +42,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 OUT="$TMP/run1.txt"; OUT2="$TMP/run2.txt"
 
 # ── #1: the harness runs end-to-end, labels load clean ─────────────────────────────────────────────────
-CTXPACK_BIN="$BIN" python3 "$ROOT/bench/recalleval/run_recalleval.py" >"$OUT" 2>"$TMP/err1.txt"
+RIPWIRE_BIN="$BIN" python3 "$ROOT/bench/recalleval/run_recalleval.py" >"$OUT" 2>"$TMP/err1.txt"
 rc=$?
 { [ "$rc" = 0 ] && grep -q '^labels OK: recall=' "$OUT"; } \
     && ok "harness exit 0, labels load clean ($( grep '^labels OK' "$OUT" ))" \
@@ -74,7 +74,7 @@ done
     || no "a metric is out of range or non-monotone"
 
 # ── #4: DETERMINISM — two runs byte-identical ──────────────────────────────────────────────────────────
-CTXPACK_BIN="$BIN" python3 "$ROOT/bench/recalleval/run_recalleval.py" >"$OUT2" 2>/dev/null
+RIPWIRE_BIN="$BIN" python3 "$ROOT/bench/recalleval/run_recalleval.py" >"$OUT2" 2>/dev/null
 diff -q "$OUT" "$OUT2" >/dev/null \
     && ok "deterministic: two full runs byte-identical" \
     || no "NON-deterministic: two runs differ"

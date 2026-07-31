@@ -62,7 +62,7 @@ def main():
     # Repository-clustered paired bootstrap. Multiple issues from one project are not independent trials.
     repos = sorted( { b[i]["repo"] for i in ids } )
     by_repo = { r:[ i for i in ids if b[i]["repo"] == r ] for r in repos }
-    rng = random.Random( "ctxpack-a7-bootstrap-v1" )
+    rng = random.Random( "ripwire-a7-bootstrap-v1" )
     boots = []
     for _ in range( a.bootstrap ):
         sampled = [ rng.choice( repos ) for _ in repos ]

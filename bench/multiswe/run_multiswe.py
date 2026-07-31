@@ -11,14 +11,14 @@
 # `fix_patch` touches. The harness, per instance:
 #   1. shallow-checkout the SOURCE repo at `base.sha` (never the fix commit — the issue query must
 #      not have the fix already visible);
-#   2. run ctxpack as the localizer in three arms — `--for` (shipping default, incl. the B8 mention
+#   2. run ripwire as the localizer in three arms — `--for` (shipping default, incl. the B8 mention
 #      anchor), `--for --no-mention-boost` (ablation), `--query` (pure lexical BM25);
 #   3. parse the flat `--format=candidates` export;
 #   4. score strict file@1/3/5/10 (LocAgent's ALL-gold-in-top-k, arXiv 2503.09089 §4.1), lenient
 #      any-gold@10, and first-hit MRR — same metric shapes as bench/cppbench and bench/locbench.
 #
 # REUSE (not reinvention): the candidate parser, file-rank scorer, subprocess wrapper, and timed
-# ctxpack runner are bench/locbench's (imported, not re-derived, so scoring stays byte-for-byte
+# ripwire runner are bench/locbench's (imported, not re-derived, so scoring stays byte-for-byte
 # comparable across all three benches); the git-hunk-header function-name extractor is bench/cppbench's
 # (same reasoning — no LLM, no heuristic beyond git's own xfuncname patterns).
 #
@@ -36,7 +36,7 @@
 #   * Issue-report queries are the SAME shape LocBench uses (written by someone who does NOT yet know
 #     the fix) — these numbers ARE comparable in spirit to LocBench, though repo population, gold
 #     granularity, and curation process (human-verified PRs vs mined commits) still differ; say so.
-#   * Zero silent skips at RUN time: a checkout/index/ctxpack failure aborts loudly. Mining-stage
+#   * Zero silent skips at RUN time: a checkout/index/ripwire failure aborts loudly. Mining-stage
 #     exclusions (no linked issue, no indexable gold file, local-path hygiene) are dataset-construction
 #     choices, counted in dataset.lock's mining_stats, not runtime skips.
 #   * `--offline` mode (used by test/multiswecheck.sh) never touches the network; it requires the
@@ -45,7 +45,7 @@
 #
 # USAGE:
 #   # one-command reproduction: mine + score the shipped dataset.lock (network: HF + GitHub)
-#   CTXPACK=./build/ctxpack python3 bench/multiswe/run_multiswe.py --work-dir /tmp/multiswe \
+#   RIPWIRE=./build/ripwire python3 bench/multiswe/run_multiswe.py --work-dir /tmp/multiswe \
 #       --lang cpp --json-out bench/multiswe/results/cpp.json \
 #       --scoreboard-out bench/multiswe/results/cpp_scoreboard.md
 #   # re-mine from scratch (both languages, capped)
@@ -53,7 +53,7 @@
 #       --work-dir /tmp/multiswe --raw-dir /tmp/multiswe-raw
 #   # offline smoke gate — see test/multiswecheck.sh
 #
-# Deterministic given (dataset.lock, ctxpack binary): no LLM, no RNG, frozen instance order.
+# Deterministic given (dataset.lock, ripwire binary): no LLM, no RNG, frozen instance order.
 import argparse, hashlib, json, os, pathlib, re, statistics, sys, time, urllib.request, urllib.error
 
 HERE = pathlib.Path( __file__ ).resolve().parent
@@ -81,7 +81,7 @@ LANGS = ( "c", "cpp" )
 
 # ── mining: discover + download the per-repo JSONL files (network; skipped under --offline) ────────
 def discover_repos( lang, timeout=60 ):
-    req = urllib.request.Request( HF_API, headers={ "User-Agent": "ctxpack-multiswe/1.0" } )
+    req = urllib.request.Request( HF_API, headers={ "User-Agent": "ripwire-multiswe/1.0" } )
     with urllib.request.urlopen( req, timeout=timeout ) as r:
         meta = json.load( r )
     sibs = [ s["rfilename"] for s in meta.get( "siblings", [] ) ]
@@ -111,7 +111,7 @@ def download_raw( lang, raw_dir, offline, verbose ):
         if not dst.exists():
             url = f"{HF_RESOLVE}/{lang}/{org}__{repo}_dataset.jsonl"
             if verbose: print( f"# downloading {url}", file=sys.stderr )
-            req = urllib.request.Request( url, headers={ "User-Agent": "ctxpack-multiswe/1.0" } )
+            req = urllib.request.Request( url, headers={ "User-Agent": "ripwire-multiswe/1.0" } )
             with urllib.request.urlopen( req, timeout=300 ) as r:
                 dst.write_bytes( r.read() )
         paths.append( dst )
@@ -236,7 +236,7 @@ def load_or_mine_lock( a ):
         raise SystemExit( "zero eligible instances mined across requested languages — refusing to write "
                           "an empty dataset.lock (zero-fabrication contract)" )
     chash = content_hash( all_inst )
-    lock = dict( schema="ctxpack-multiswe-dataset-lock-v1", source_dataset=DATASET_ID,
+    lock = dict( schema="ripwire-multiswe-dataset-lock-v1", source_dataset=DATASET_ID,
                 source_dataset_url=f"https://huggingface.co/datasets/{DATASET_ID}",
                 source_dataset_revision=revision, license=LICENSE_NOTE, languages=langs,
                 gold_extensions={ l: list( GOLD_EXTS[l] ) for l in langs }, cap_per_lang=a.cap_per_lang,
@@ -264,7 +264,7 @@ def parse_repo_map( spec ):
 def checkout( org, repo, sha, repos_dir, repo_map, offline ):
     key = f"{org}/{repo}"
     dst = repos_dir / f"{org}__{repo}"
-    marker = dst / f".ctxpack_at_{sha}"
+    marker = dst / f".ripwire_at_{sha}"
     if marker.exists(): return dst
     origin = repo_map.get( key )
     if origin is None and offline:
@@ -285,11 +285,11 @@ def checkout( org, repo, sha, repos_dir, repo_map, offline ):
         co = lb.sh( [ "git", "checkout", "-q", "-f", "FETCH_HEAD" ], cwd=dst )
     lb.sh( [ "git", "clean", "-qfdx" ], cwd=dst )
     if co.returncode != 0: return None
-    for old in dst.glob( ".ctxpack_at_*" ): old.unlink()
+    for old in dst.glob( ".ripwire_at_*" ): old.unlink()
     marker.write_text( "" )
     return dst
 
-# ── ctxpack arms (reuse lb.run_ctx / lb.parse_candidates / lb.file_ranks / lb.acc_all_at / lb.first_hit) ─
+# ── ripwire arms (reuse lb.run_ctx / lb.parse_candidates / lb.file_ranks / lb.acc_all_at / lb.first_hit) ─
 ARMS = ( "for", "for-no-mention", "query" )
 def arm_flags( arm, query, top_k ):
     if arm == "for":           return [ f"--for={query}", f"--top-k={top_k}" ]
@@ -308,7 +308,7 @@ def main():
     ap.add_argument( "--cap-per-lang", type=int, default=0, help="0 = no cap (take all eligible instances)" )
     ap.add_argument( "--offline", action="store_true", help="never touch the network; requires --raw-dir pre-populated and --repo-map covering every referenced org/repo" )
     ap.add_argument( "--repo-map", default="", help="ORG/REPO=local_path[,ORG2/REPO2=path2,...] — offline checkout override" )
-    ap.add_argument( "--work-dir", required=True, help="scratch dir for repo checkouts + indexes (NOT the ctxpack repo)" )
+    ap.add_argument( "--work-dir", required=True, help="scratch dir for repo checkouts + indexes (NOT the ripwire repo)" )
     ap.add_argument( "--top-k", type=int, default=200 )
     ap.add_argument( "--query-chars", type=int, default=1200, help="deterministic prefix of the issue query used for --for/--query" )
     ap.add_argument( "--arms", default=",".join( ARMS ) )
@@ -352,7 +352,7 @@ def main():
             raise SystemExit( f"[{idx+1}/{len(instances)}] {iid}: CHECKOUT FAIL (zero-silent-skip contract)" )
 
         cache_key = f"{inst['org']}__{inst['repo']}__{inst['base_sha']}"
-        rich_cache = index_dir / f"{cache_key}.rich.ctxpackcache"
+        rich_cache = index_dir / f"{cache_key}.rich.ripwirecache"
         if not rich_cache.exists():
             base = index_dir / cache_key
             _, _, irc = lb.run_ctx( repo_path, [ f"--index-out={base}", "--top-k=1", "--no-cache" ] )

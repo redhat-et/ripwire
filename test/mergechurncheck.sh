@@ -7,14 +7,14 @@
 # with no --diff-merges mode git prints NO paths at all for a merge commit. So a file whose only history is a
 # merge commit — an "evil merge": a conflict resolved by writing content neither parent had, or a file added
 # while resolving — has zero history lines anywhere in the stream. It read churn=0, it was missing from
-# --owners entirely, and nothing disclosed it: a measured-looking zero. Measured on the ctxpack repo itself
+# --owners entirely, and nothing disclosed it: a measured-looking zero. Measured on the ripwire repo itself
 # before the fix: 2 of 1028 tracked paths (IDEAS_fieldNotes_2026-07-25.md, NEXT_SESSION_2026-07-26.md) had
 # no --owners row at all while being ordinary, present, tracked files.
 #
 # THE FIX, and why THIS shape (measured, not chosen by taste — the numbers are this fixture's, re-derivable
 # by running the variants against it):
 #
-#   variant                      branchfile.cpp   mergeonly.cpp   shared.cpp   ctxpack-repo path-lines
+#   variant                      branchfile.cpp   mergeonly.cpp   shared.cpp   ripwire-repo path-lines
 #                                (truth: 3)       (truth: 1)      (truth: 4)   (baseline 3618)
 #   ------------------------------------------------------------------------------------------------
 #   today (no flag)              3  ok            0  MISSING      3  MISSING   3618
@@ -40,18 +40,18 @@
 # EXPIRY NOTE: like test/churnjoincheck.sh, this fixture hardcodes 2026-06 commit dates and --hotspots mines a
 # wall-clock "12 months ago" window, so both gates go quiet together after 2027-06. Fix them as a pair.
 #
-# Usage:  test/mergechurncheck.sh              # build/ctxpack
-#         test/mergechurncheck.sh asan/ctxpack # positional seam
-#         CTXPACK_BIN=asan/ctxpack test/mergechurncheck.sh   # env seam
+# Usage:  test/mergechurncheck.sh              # build/ripwire
+#         test/mergechurncheck.sh asan/ripwire # positional seam
+#         RIPWIRE_BIN=asan/ripwire test/mergechurncheck.sh   # env seam
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"       # BOTH seams — positional and env
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"       # BOTH seams — positional and env
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 echo "mergechurncheck: BIN=$BIN  ROOT=$ROOT"
 

@@ -9,15 +9,15 @@
 # quality-delta exit-2 contract. Uses git-init fixtures + the auto-vs-HEAD baseline path (same idiom as
 # qualitycheck.sh §7). Operates entirely in temp dirs; the repo is never touched.
 #
-# Usage:  CTXPACK_BIN=build_w3/ctxpack bash test/qualitykindscheck.sh
+# Usage:  RIPWIRE_BIN=build_w3/ripwire bash test/qualitykindscheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolutize BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qualitykindscheck (git not available)"; exit 0; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT

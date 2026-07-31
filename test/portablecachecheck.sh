@@ -3,7 +3,7 @@
 #
 # The bug (same class as S2's baseline-portability fix, RESEARCH_agentQuality2026 §2f DeusData): the
 # incremental cache's file-list keys used to be spelled `<ingest-root-ARG>/<relative>` VERBATIM — a cache
-# built via `ctxpack /home/a/repo --cache=repo.ctxpackcache` embedded `/home/a/repo/src/x.cpp`, so consuming
+# built via `ripwire /home/a/repo --cache=repo.ripwirecache` embedded `/home/a/repo/src/x.cpp`, so consuming
 # that SAME cache file at `/home/b/repo` (a different checkout/CI path) missed on every lookup (path strings
 # never match) and silently fell back to a full reparse every time — defeating the entire point of a
 # COMMITTED cache artifact (team/CI skip the cold parse).
@@ -19,7 +19,7 @@
 #   (a) PORTABILITY: build a --cache=FILE under path A (a copy of the fixture), copy that SAME cache file
 #       (byte-for-byte, `cp`) to be consumed under path B (a SEPARATE copy of the fixture) → output from
 #       the B-consumed-A's-cache run is BYTE-IDENTICAL to a cold (--no-cache) run at B. This is the
-#       headline claim: "a team can commit repo.ctxpackcache and everyone (and CI) skips the cold parse."
+#       headline claim: "a team can commit repo.ripwirecache and everyone (and CI) skips the cold parse."
 #   (b) warm==cold STILL HOLDS at the SAME path (the existing determinism contract untouched by T5).
 #   (c) an OLD-FORMAT (pre-T5, absolute-path-keyed) cache self-invalidates cleanly: doctoring a fresh
 #       cache's version field down to 2 must not crash and must still produce byte-identical output to a
@@ -30,22 +30,22 @@
 #
 # Usage:
 #   bash test/portablecachecheck.sh
-#   CTXPACK_BIN=asan/ctxpack bash test/portablecachecheck.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/portablecachecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "portablecachecheck: BIN=$BIN  TMP=$TMP"
 
@@ -61,9 +61,9 @@ mkdir -p "$( dirname "$PATH_A" )" "$( dirname "$PATH_B" )"
 cp -R "$FIXTURE" "$PATH_A"
 cp -R "$FIXTURE" "$PATH_B"
 
-CACHE_FILE="$TMP/repo.ctxpackcache"
+CACHE_FILE="$TMP/repo.ripwirecache"
 
-# build the cache under path A (this IS the "commit repo.ctxpackcache from CI/teammate A" step)
+# build the cache under path A (this IS the "commit repo.ripwirecache from CI/teammate A" step)
 "$BIN" "$PATH_A" --cache="$CACHE_FILE" --no-stable >"$TMP/a_build.xml" 2>"$TMP/a_build.err"
 rc_a=$?
 if [ "$rc_a" -eq 0 ] && [ -s "$CACHE_FILE" ]; then
@@ -73,11 +73,11 @@ else
 fi
 
 # snapshot the cache bytes exactly as "committed" — consume that SAME file (no rebuild) under path B
-cp "$CACHE_FILE" "$TMP/repo.ctxpackcache.committed"
+cp "$CACHE_FILE" "$TMP/repo.ripwirecache.committed"
 
-BEFORE_SUM="$( md5 -q "$TMP/repo.ctxpackcache.committed" 2>/dev/null || md5sum "$TMP/repo.ctxpackcache.committed" | cut -d' ' -f1 )"
+BEFORE_SUM="$( md5 -q "$TMP/repo.ripwirecache.committed" 2>/dev/null || md5sum "$TMP/repo.ripwirecache.committed" | cut -d' ' -f1 )"
 
-"$BIN" "$PATH_B" --cache="$TMP/repo.ctxpackcache.committed" --no-stable >"$TMP/b_warm.xml" 2>"$TMP/b_warm.err"
+"$BIN" "$PATH_B" --cache="$TMP/repo.ripwirecache.committed" --no-stable >"$TMP/b_warm.xml" 2>"$TMP/b_warm.err"
 rc_b=$?
 if [ "$rc_b" -eq 0 ]; then
     ok "(a) consuming A's committed cache under path B exits 0"
@@ -90,7 +90,7 @@ fi
 # "skip the cold parse" point while masquerading as success)? Win-2's dirty-flag means saveCache is
 # skipped entirely when nothing changed — so an unchanged cache file (same bytes before/after) is
 # PROOF every file hash-matched via the re-absolutized key, i.e. a genuine warm hit, not a disguised miss.
-AFTER_SUM="$( md5 -q "$TMP/repo.ctxpackcache.committed" 2>/dev/null || md5sum "$TMP/repo.ctxpackcache.committed" | cut -d' ' -f1 )"
+AFTER_SUM="$( md5 -q "$TMP/repo.ripwirecache.committed" 2>/dev/null || md5sum "$TMP/repo.ripwirecache.committed" | cut -d' ' -f1 )"
 if [ "$BEFORE_SUM" = "$AFTER_SUM" ]; then
     ok "(a) GENUINE WARM HIT: consuming A's cache at path B left the cache bytes UNCHANGED (every file hash-matched — not a disguised full reparse)"
 else
@@ -111,7 +111,7 @@ fi
 
 # the committed cache file itself must have been left untouched by B's read (portable caches are
 # read-shared by many checkouts; a consuming run must not mutate the artifact another checkout owns)
-if diff -q "$CACHE_FILE" "$TMP/repo.ctxpackcache.committed" >/dev/null 2>&1; then
+if diff -q "$CACHE_FILE" "$TMP/repo.ripwirecache.committed" >/dev/null 2>&1; then
     ok "(a) reading the committed cache under path B did not mutate the original bytes"
 else
     no "(a) reading the committed cache under path B mutated it in place"

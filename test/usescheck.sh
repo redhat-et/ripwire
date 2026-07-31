@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # usescheck.sh — the ABS-3 reference / use-site index gate (--uses=SYM + --external-surface).
 #
-#   test/usescheck.sh                        # uses build/ctxpack on test/usesfix
-#   CTXPACK_BIN=asan/ctxpack test/usescheck.sh
+#   test/usescheck.sh                        # uses build/ripwire on test/usesfix
+#   RIPWIRE_BIN=asan/ripwire test/usescheck.sh
 #
 # The fixture test/usesfix (store.h + store.cpp) exercises EVERY use-site role:
 #   import   #include "store.h"  (store.cpp:9)
@@ -17,15 +17,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/usesfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]   || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ]   || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ]|| { echo "no test/usesfix dir — fixture missing"; exit 2; }
 
 echo "usescheck: BIN=$BIN  CORPUS=$CORPUS"

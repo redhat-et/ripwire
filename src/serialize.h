@@ -319,7 +319,7 @@ public:
         if( m_used )
         {
             // A4-F18: a short fwrite (disk full, broken pipe, quota) previously went UNNOTICED — the map was
-            // silently truncated and ctxpack still exited 0. Latch the failure so the caller can turn it into a
+            // silently truncated and ripwire still exited 0. Latch the failure so the caller can turn it into a
             // nonzero exit + one stderr line (the failed fwrite also sets ferror(m_out), the seam main reads).
             const std::size_t wrote = std::fwrite( m_buf, 1, m_used, m_out );
             if( wrote != m_used ) m_writeError = true;
@@ -353,7 +353,7 @@ private:
 // drift apart. `d=` is always present; `sha=`/`branch=` are OMITTED entirely on a legacy (unstamped) note
 // rather than emitted empty — an absent attribute is unambiguously "no provenance recorded", never confused
 // with a resolvable-but-empty one. The sha is shown ABBREVIATED (notes::shortSha, 7 hex — terse, matching
-// git's own --abbrev default); the full sha lives only in .ctxpack_notes on disk.
+// git's own --abbrev default); the full sha lives only in .ripwire_notes on disk.
 inline void appendOneNote( std::string& out, const notes::Note& n, std::vector<char>& esc )
 {
     out += "<note d=\"";  out += escapeXml( n.date, esc );  out += "\"";
@@ -417,7 +417,7 @@ inline std::string symbolNoteTarget( const notes::NoteIndex* ni, const IngestRes
 // still moves the content bytes. We DELIBERATELY do NOT vendor a BPE table — Claude's tokenizer is
 // not public (§2f: a vendored blob buys exactness for the WRONG tokenizer). Instead a declarative
 // constexpr table of MEASURED bytes/token, calibrated against tiktoken o200k_base over per-language
-// ctxpack map outputs (test/tokenbudgetcheck.sh records the corpus + MAPE). o200k↔cl100k spread on
+// ripwire map outputs (test/tokenbudgetcheck.sh records the corpus + MAPE). o200k↔cl100k spread on
 // our minified output is ≤4% (measured), well inside the headroom margin, so one family suffices.
 //
 // The estimate = (accurate envelope + content byte model) / (symbol-language-weighted bytes/token).
@@ -426,7 +426,7 @@ inline std::string symbolNoteTarget( const notes::NoteIndex* ni, const IngestRes
 struct TokenCalib
 {
     Lang        lang;
-    double      bytesPerToken;   // measured B/tok of ctxpack map output in this language (o200k_base)
+    double      bytesPerToken;   // measured B/tok of ripwire map output in this language (o200k_base)
 };
 
 // MEASURED B/tok of the whole minified map per dominant language (o200k_base; see the check's corpus).
@@ -666,7 +666,7 @@ inline bool isChargeBufferFaultInjected() noexcept
         // CA4 w1fix2-verifier G4: this read `value[0] == '1'`, so `=10`, `=1x` and `=1000000` all injected the
         // fault — a prefix test where the contract is a switch. EXACT "1" is the only ON value; anything else,
         // including "0", "true" and the empty string, is OFF.
-        const char* value = std::getenv( "CTXPACK_FAULT_CHARGE_BUFFER" );
+        const char* value = std::getenv( "RIPWIRE_FAULT_CHARGE_BUFFER" );
         return value != nullptr && std::strcmp( value, "1" ) == 0;
     }();
     return isOn;
@@ -687,7 +687,7 @@ inline std::FILE* openChargeBuffer( char** bufOut, std::size_t* sizeOut ) noexce
 // serialize() OWNS a root element — it writes `<r …>` and it writes `</r>` — so anything a caller emits after
 // it is a SECOND top-level element and the document is not XML. G4 ("output | xmllint --noout clean") is one
 // of the four hard guardrails, and `--around` breached it at exit 0: `--around=buildRecall` tailed
-// `…</f></r><compose>…</compose>`, xmllint said "Extra content at the end of the document", ctxpack said 0.
+// `…</f></r><compose>…</compose>`, xmllint said "Extra content at the end of the document", ripwire said 0.
 // MEASURED 5 of 135 sampled symbols on this repo — every focus symbol whose ego-graph carries compose or
 // route edges — and the pre-wave binary breaches byte-identically, so it was pre-existing, not wave damage.
 //
@@ -799,7 +799,7 @@ inline constexpr std::size_t kEdgeMarkupBytes   = 9;
 //
 // NOT SHIPPED (T7 §2g, measured-and-declined): bimodal emission (rank #1 top + #2 bottom) is a free
 // reorder but --eval structurally cannot score it (ranking-recovery is order-invariant) — it needs an
-// LLM-in-the-loop harness ctxpack deliberately avoids, so it stays a documented open question, not a
+// LLM-in-the-loop harness ripwire deliberately avoids, so it stays a documented open question, not a
 // T3 dependency. Markdown-KV/table sub-encoding was also measured (T7): a per-symbol Markdown-KV
 // block is +17% tokens (never amortizes); a Markdown TABLE only wins at >=4 rows on a tabular slice
 // (~7% on a whole --metrics map) — marginal with format-contract risk, evaluated and DEFERRED, not
@@ -1176,8 +1176,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // written once the document it describes has been measured (PHASE 2 below) and the legend's own bytes
     // are part of what it describes.
     std::string legend = outProv
-        ? "<!-- ctxpack v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->"
-        : "<!-- ctxpack v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->";
+        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->"
+        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->";
     if( churnWindow != nullptr )      legend += kChurnRankLegend;      // §A9.6, churn-only (see the constant)
     // §B2.1: the same treatment for authority/hub/rrf. Mutually exclusive with the churn arm by construction
     // (main.cpp fills exactly one of the two fields), and null on the default pagerank map ⇒ zero bytes there.
@@ -2366,7 +2366,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
 // R6 (A4-R6) — --format=candidates: a FLAT, machine-readable top-K export for an EXTERNAL reranker. One
 // <cand> row per candidate carrying exactly (rank, score, name, canonical id, kind, file, line, one-line
 // signature) — NO lens/quality attrs, NO doc bodies, NO nesting. The research doc's division-of-labor thesis:
-// ctxpack stays deterministic and offline and hands a reranker precisely the identity + score + signature it
+// ripwire stays deterministic and offline and hands a reranker precisely the identity + score + signature it
 // needs, nothing to strip. Still XML so the G4 xmllint gate holds; the flatness is what makes it cheap.
 // Deterministic: (score desc, id asc) — the SAME total order packSignatures/serialize select with. `cap`
 // bounds the row count (wired to --top-k); cap<=0 = every symbol. Emits exactly `keep` rows (a symbol whose
@@ -2437,7 +2437,7 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
     // §P8 collision, documented not renamed: on a <cand> row s= is the SCORE and k= the KIND tag — the exact
     // inverse of the ranked map. Neither can move (golden.xml + SPEC.md pin one, postingscheck.sh's positional
     // regex pins the other), so the legend states it. G4: no double hyphen inside an XML comment.
-    w.write( "<!-- ctxpack candidates: flat top K export for an external reranker. r=rank(1 based) s=SCORE "
+    w.write( "<!-- ripwire candidates: flat top K export for an external reranker. r=rank(1 based) s=SCORE "
              "n=name id=canonical k=KIND-tag p=path l=line. Note k= is the kind here and the PageRank score in "
              "the ranked map; on this row the score is s=. Root: count= rows exported of total= RANKED CORPUS "
              "symbols (total is the corpus size, never a match count), capped=\"1\" means the top-k cut dropped "
@@ -3486,7 +3486,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     std::vector<char> esc;
     // §A10.11: three files=-family counts, one legend (the DEPTH-collision --owners already discloses for
     // its own files=, same idea here across an element and its child instead of a fold).
-    w.write( "<!-- ctxpack deps: file-to-file #include/import view, heaviest transitive cone first. files= (root) = files with "
+    w.write( "<!-- ripwire deps: file-to-file #include/import view, heaviest transitive cone first. files= (root) = files with "
              "at least one dependency edge (this listing's own denominator); health files= = the whole indexed corpus; "
              "health dep_files= = the dependency-CAPABLE subset of it (the ccd/acd/nccd denominator). "
              "raise the default cap with limit=N (offset=M pages). -->" );

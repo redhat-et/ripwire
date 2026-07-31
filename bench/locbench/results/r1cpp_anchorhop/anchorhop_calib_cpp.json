@@ -3,7 +3,7 @@
   "date": "2026-07-23",
   "dataset": "bench/cppbench dataset.lock — SFML @ a91a7f6a, n=120 mined / 115 scored, single repo, commit-message queries",
   "harness": "bench/cppbench/run_cppbench.py --arms for (top-k 200); binary = audit5r2-r1cpp build (R1 patch + MaxScore-pruning restoration, ea03181)",
-  "baseline": "same binary with CTXPACK_NO_ANCHORHOP=1 (gate-proven byte-identical to a main-built binary on the conceptual route)",
+  "baseline": "same binary with RIPWIRE_NO_ANCHORHOP=1 (gate-proven byte-identical to a main-built binary on the conceptual route)",
   "determinism_note": "every arm run is verified byte-identical twice by the harness; single-run sweep points are exact, not sampled",
   "train_baseline_absolute": { "strict1": 6.96, "strict3": 14.78, "strict5": 20.00, "strict10": 31.30, "any10": 45.22, "mrr": 0.2195 },
   "sweep": [

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # routecheck.sh — the routing gate: a deterministic, confidence-gated query-shape ranker selector for --for.
 #
-#   test/routecheck.sh                        # uses build/ctxpack on test/routefix
-#   CTXPACK_BIN=asan/ctxpack test/routecheck.sh
+#   test/routecheck.sh                        # uses build/ripwire on test/routefix
+#   RIPWIRE_BIN=asan/ripwire test/routecheck.sh
 #
 # Routing is now the DEFAULT: --for (and --query) classify the query shape and pick the lens ranker
 # (name-exact vs subtoken+body BM25) via a CONFIDENCE gate (lexical.h chooseForRanker) — name-exact only when
@@ -21,14 +21,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "routecheck: BIN=$BIN"
 
 # fixture copy: sources only (never the golden itself), relative path, outside any git repo

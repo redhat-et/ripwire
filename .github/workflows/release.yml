@@ -1,12 +1,12 @@
 name: Release
 
-# Builds ctxpack for macOS arm64/x64 + Linux x64/arm64 on every `vX.Y.Z` tag push and attaches the four
+# Builds ripwire for macOS arm64/x64 + Linux x64/arm64 on every `vX.Y.Z` tag push and attaches the four
 # binaries to a GitHub Release. UNTESTED UNTIL THE FIRST REAL TAG PUSH:
 # this file is statically valid (see test/portablebuildcheck.sh's sibling validation note and the workflow
 # README pointer below) but has never actually run — GitHub Actions itself cannot be executed from this
 # dev environment. Review the FIRST run's logs closely before trusting `scripts/install.sh` against it.
 #
-# Every leg configures WITHOUT -DCTXPACK_NATIVE=ON on purpose: a release binary must run on any machine of
+# Every leg configures WITHOUT -DRIPWIRE_NATIVE=ON on purpose: a release binary must run on any machine of
 # its target arch, not just the exact CPU that happened to build it (see cmake/PortableFlags.cmake — the
 # portable default auto-applies safe generic Apple Silicon tuning on the two macOS-arm64 builders and
 # emits zero host-specific flags everywhere else).
@@ -60,24 +60,24 @@ jobs:
           sudo apt-get install -y --no-install-recommends libxml2-utils
 
 
-      - name: Configure (portable — no CTXPACK_NATIVE, this binary ships to other machines)
+      - name: Configure (portable — no RIPWIRE_NATIVE, this binary ships to other machines)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build -j --target ctxpack
+        run: cmake --build build -j --target ripwire
 
       - name: Smoke-test the freshly built binary
         run: |
-          ./build/ctxpack --version
-          ./build/ctxpack test/fixture --no-cache | xmllint --noout -
+          ./build/ripwire --version
+          ./build/ripwire test/fixture --no-cache | xmllint --noout -
 
       - name: Package
         id: package
         run: |
-          version="$( ./build/ctxpack --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 )"
-          asset="ctxpack-${version}-${{ matrix.asset_os }}-${{ matrix.asset_arch }}"
+          version="$( ./build/ripwire --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 )"
+          asset="ripwire-${version}-${{ matrix.asset_os }}-${{ matrix.asset_arch }}"
           mkdir -p "dist/${asset}"
-          cp build/ctxpack "dist/${asset}/ctxpack"
+          cp build/ripwire "dist/${asset}/ripwire"
           cp README.md LICENSE "dist/${asset}/" 2>/dev/null || cp README.md "dist/${asset}/"
           tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
           shasum -a 256 "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"

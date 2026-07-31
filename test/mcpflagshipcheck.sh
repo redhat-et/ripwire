@@ -2,7 +2,7 @@
 # mcpflagshipcheck.sh — gate for the FLAGSHIP-REFLEX MCP verbs an MCP-only agent otherwise cannot reach:
 #   exemplar          — the write-moment reflex (--exemplar): best-in-class instance to imitate, WITH its body.
 #   quality_delta     — the before-you-call-it-done reflex (--quality-delta): only what got WORSE vs baseline.
-#   quality_baseline  — pins the floor (--quality-baseline): WRITES .ctxpack_quality_baseline stamped w/ HEAD.
+#   quality_baseline  — pins the floor (--quality-baseline): WRITES .ripwire_quality_baseline stamped w/ HEAD.
 #   impact            — is-it-safe-to-change (--impact): transitive blast radius of a symbol.
 #   uses              — every read/write/import site (--uses), not just calls.
 #   path_between      — does A reach B / the flow (--path=A,B). (Named path_between: 'path' is the repo-root arg.)
@@ -19,14 +19,14 @@
 #
 # Usage:
 #   test/mcpflagshipcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/mcpflagshipcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/mcpflagshipcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh or golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -34,7 +34,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "git required for the quality fixture"; exit 2; }
 
@@ -208,9 +208,9 @@ print("REGRESSION_OK")
 
 # ─── 4. quality_baseline — WRITES the sidecar with a head-sha stamp ──────────
 echo
-echo "=== 4. quality_baseline — writes .ctxpack_quality_baseline stamped with HEAD ==="
+echo "=== 4. quality_baseline — writes .ripwire_quality_baseline stamped with HEAD ==="
 
-rm -f "$REPO/.ctxpack_quality_baseline"
+rm -f "$REPO/.ripwire_quality_baseline"
 QB="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"quality_baseline","arguments":{"path":"'"$REPO"'"}}}' \
@@ -220,10 +220,10 @@ case "$QB_INNER" in
     __ERROR__) no "quality_baseline returned an error";;
     *)         ok "quality_baseline: returned a result";;
 esac
-[ -f "$REPO/.ctxpack_quality_baseline" ] && ok "quality_baseline: wrote the .ctxpack_quality_baseline sidecar" || no "quality_baseline: sidecar NOT written"
+[ -f "$REPO/.ripwire_quality_baseline" ] && ok "quality_baseline: wrote the .ripwire_quality_baseline sidecar" || no "quality_baseline: sidecar NOT written"
 # the sidecar carries a 'head <sha>' record; the HEAD of the fixture is a real 40-hex sha.
 HEAD_SHA="$( git -C "$REPO" rev-parse HEAD )"
-grep -q "head $HEAD_SHA" "$REPO/.ctxpack_quality_baseline" && ok "quality_baseline: sidecar stamped with the current HEAD sha" || no "quality_baseline: sidecar not stamped with HEAD ($HEAD_SHA)"
+grep -q "head $HEAD_SHA" "$REPO/.ripwire_quality_baseline" && ok "quality_baseline: sidecar stamped with the current HEAD sha" || no "quality_baseline: sidecar not stamped with HEAD ($HEAD_SHA)"
 echo "$QB_INNER" | grep -q "$HEAD_SHA" && ok "quality_baseline: result JSON reports the head_sha" || no "quality_baseline: result JSON missing head_sha"
 
 # after pinning, quality_delta must prefer the sidecar (baseline=sidecar). The gnarly fn is now BASELINED
@@ -235,7 +235,7 @@ QD3="$( mcp_call \
 echo "$QD3" | python3 -c 'import sys,json;r=json.load(sys.stdin);print("SIDECAR_OK" if r["baseline"]=="sidecar" else "GOT:"+r["baseline"])' | grep -q SIDECAR_OK \
     && ok "quality_delta: honors the pinned sidecar (baseline=sidecar) after quality_baseline" \
     || no "quality_delta did not switch to the sidecar baseline"
-rm -f "$REPO/.ctxpack_quality_baseline"
+rm -f "$REPO/.ripwire_quality_baseline"
 
 # ─── 5. impact / uses / path_between — expected symbols on the call chain ────
 echo

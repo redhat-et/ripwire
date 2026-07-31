@@ -45,7 +45,7 @@ namespace ctx
 struct McpHttpConfig
 {
     std::string              listenSpec;             // the raw --listen value: "HOST:PORT" or bare "PORT" (loopback)
-    std::string              token;                  // shared bearer (--mcp-token or CTXPACK_MCP_TOKEN); "" = none
+    std::string              token;                  // shared bearer (--mcp-token or RIPWIRE_MCP_TOKEN); "" = none
     std::string              root;                   // roots[0] — the single-root workspace to pin
     std::vector<std::string> roots;                  // ALL positional roots (multi-root workspace when size() >= 2)
     int                      topK             = 200;
@@ -351,7 +351,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     }
     if( port <= 0 || port > 65535 )
     {
-        std::fprintf( stderr, "ctxpack: --listen: could not parse a port from '%s' (want HOST:PORT or PORT, 1..65535)\n", cfg.listenSpec.c_str() );
+        std::fprintf( stderr, "ripwire: --listen: could not parse a port from '%s' (want HOST:PORT or PORT, 1..65535)\n", cfg.listenSpec.c_str() );
         return 1;
     }
 
@@ -362,8 +362,8 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     if( !loopback && cfg.token.empty() )
     {
         std::fprintf( stderr,
-            "ctxpack: REFUSING to bind %s:%d — a non-loopback MCP listener requires a shared bearer token.\n"
-            "         Set one with --mcp-token=SECRET or the CTXPACK_MCP_TOKEN env var, and put ctxpack behind\n"
+            "ripwire: REFUSING to bind %s:%d — a non-loopback MCP listener requires a shared bearer token.\n"
+            "         Set one with --mcp-token=SECRET or the RIPWIRE_MCP_TOKEN env var, and put ripwire behind\n"
             "         your own reverse proxy for TLS + real auth (the token is a tripwire, not a security boundary).\n",
             host.c_str(), port );
         return 1;
@@ -373,8 +373,8 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     if( cfg.allowRemoteEdits && cfg.token.empty() )
     {
         std::fprintf( stderr,
-            "ctxpack: REFUSING to start — --allow-remote-edits enables remote file WRITES and therefore requires\n"
-            "         a shared bearer token (--mcp-token=SECRET or CTXPACK_MCP_TOKEN), even on loopback.\n" );
+            "ripwire: REFUSING to start — --allow-remote-edits enables remote file WRITES and therefore requires\n"
+            "         a shared bearer token (--mcp-token=SECRET or RIPWIRE_MCP_TOKEN), even on loopback.\n" );
         return 1;
     }
 
@@ -384,7 +384,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     {
         std::string wsErr;
         const std::string key = mcpWorkspaceKey( cfg.roots, wsErr );
-        if( key.empty() ) { std::fprintf( stderr, "ctxpack: --listen: %s\n", wsErr.c_str() ); return 1; }
+        if( key.empty() ) { std::fprintf( stderr, "ripwire: --listen: %s\n", wsErr.c_str() ); return 1; }
         pinnedRoot = mcpCanonRoot( key );   // a real path if the dedupe collapsed to one root; else the opaque key (realpath fails → returned as-is)
     }
     else
@@ -396,7 +396,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
 
     // ── 4) open the listening socket ───────────────────────────────────────────────────────────────────
     const int listenFd = ::socket( AF_INET, SOCK_STREAM, 0 );
-    if( listenFd < 0 ) { std::fprintf( stderr, "ctxpack: --listen: socket() failed: %s\n", std::strerror( errno ) ); return 1; }
+    if( listenFd < 0 ) { std::fprintf( stderr, "ripwire: --listen: socket() failed: %s\n", std::strerror( errno ) ); return 1; }
     int one = 1;
     ::setsockopt( listenFd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof( one ) );
 
@@ -406,36 +406,36 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     const std::string bindHost = ( host == "localhost" ) ? std::string( "127.0.0.1" ) : host;
     if( ::inet_pton( AF_INET, bindHost.c_str(), &addr.sin_addr ) != 1 )
     {
-        std::fprintf( stderr, "ctxpack: --listen: '%s' is not a valid IPv4 bind address (IPv6 is not supported; reverse-proxy for that)\n", host.c_str() );
+        std::fprintf( stderr, "ripwire: --listen: '%s' is not a valid IPv4 bind address (IPv6 is not supported; reverse-proxy for that)\n", host.c_str() );
         ::close( listenFd );
         return 1;
     }
     if( ::bind( listenFd, reinterpret_cast<sockaddr*>( &addr ), sizeof( addr ) ) != 0 )
     {
-        std::fprintf( stderr, "ctxpack: --listen: bind %s:%d failed: %s\n", host.c_str(), port, std::strerror( errno ) );
+        std::fprintf( stderr, "ripwire: --listen: bind %s:%d failed: %s\n", host.c_str(), port, std::strerror( errno ) );
         ::close( listenFd );
         return 1;
     }
     if( ::listen( listenFd, 16 ) != 0 )
     {
-        std::fprintf( stderr, "ctxpack: --listen: listen() failed: %s\n", std::strerror( errno ) );
+        std::fprintf( stderr, "ripwire: --listen: listen() failed: %s\n", std::strerror( errno ) );
         ::close( listenFd );
         return 1;
     }
 
     // ── 5) startup banner. LOUD + explicit on any non-loopback bind (§2.3.4: an accidental 0.0.0.0 is never silent) ──
     if( loopback )
-        std::fprintf( stderr, "ctxpack: MCP HTTP listener on http://%s:%d/mcp (loopback only)%s%s\n",
+        std::fprintf( stderr, "ripwire: MCP HTTP listener on http://%s:%d/mcp (loopback only)%s%s\n",
                       host.c_str(), port,
                       cfg.token.empty() ? "" : " [token required]",
                       cfg.allowRemoteEdits ? " [remote edits ENABLED]" : "" );
     else
         std::fprintf( stderr,
-            "ctxpack: ****************************************************************************\n"
-            "ctxpack: *  MCP HTTP listener bound to %s:%d — REACHABLE OFF-HOST.\n"
-            "ctxpack: *  Bearer token REQUIRED. No TLS — put this behind a reverse proxy for TLS\n"
-            "ctxpack: *  and real auth. The token is a tripwire, not a security boundary.%s\n"
-            "ctxpack: ****************************************************************************\n",
+            "ripwire: ****************************************************************************\n"
+            "ripwire: *  MCP HTTP listener bound to %s:%d — REACHABLE OFF-HOST.\n"
+            "ripwire: *  Bearer token REQUIRED. No TLS — put this behind a reverse proxy for TLS\n"
+            "ripwire: *  and real auth. The token is a tripwire, not a security boundary.%s\n"
+            "ripwire: ****************************************************************************\n",
             host.c_str(), port, cfg.allowRemoteEdits ? "  [remote edits ENABLED]" : "" );
 
     // warm the pinned index once so the first client request is fast (and any parse issue surfaces now, on
@@ -444,10 +444,10 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
 
     const bool authRequired = !cfg.token.empty();
 
-    // MEASURE-FIRST parity with the stdio loop: CTXPACK_MCP_TIMINGS emits ONE stderr line per handled
+    // MEASURE-FIRST parity with the stdio loop: RIPWIRE_MCP_TIMINGS emits ONE stderr line per handled
     // request (verb, wall-ms, rebuilt=0|1) — off by default (byte-identical, silent). The rebuilt bit is
     // what the workspace-pinning gate reads to assert an off-workspace refusal did NOT rebuild the index.
-    const bool timingsOn = std::getenv( "CTXPACK_MCP_TIMINGS" ) != nullptr;
+    const bool timingsOn = std::getenv( "RIPWIRE_MCP_TIMINGS" ) != nullptr;
 
     // ── 6) accept loop: single-threaded, one request per connection (Connection: close) — §2b serialize ─
     for( ;; )
@@ -518,7 +518,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
                 const double wallMs = std::chrono::duration< double, std::milli >(
                                           std::chrono::steady_clock::now() - t0 ).count();
                 const unsigned rebuilt = ( mcpRebuildCounter().load( std::memory_order_relaxed ) != rebuildAtStart ) ? 1u : 0u;
-                std::fprintf( stderr, "ctxpack-timing verb=%s wall_ms=%.3f rebuilt=%u\n", r.timingVerb.c_str(), wallMs, rebuilt );
+                std::fprintf( stderr, "ripwire-timing verb=%s wall_ms=%.3f rebuilt=%u\n", r.timingVerb.c_str(), wallMs, rebuilt );
                 std::fflush( stderr );
             }
         }

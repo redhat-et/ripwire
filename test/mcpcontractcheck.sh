@@ -20,16 +20,16 @@
 # fix being un-done (the §B6 M14 lesson, and the shape arm (K) of mcpframehonestycheck already uses).
 #
 # Usage:  test/mcpcontractcheck.sh [BIN]
-#         CTXPACK_BIN=asan/ctxpack test/mcpcontractcheck.sh
+#         RIPWIRE_BIN=asan/ripwire test/mcpcontractcheck.sh
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "mcpcontractcheck: BIN=$BIN"
 
 python3 - "$BIN" "$ROOT" "$TMP" <<'PY'
@@ -144,7 +144,7 @@ srv.close()
 rooted = Stdio( rA )
 rtools = rooted.call( "tools/list" )[ "result" ][ "tools" ]
 stillReq = [ t[ "name" ] for t in rtools if "path" in t[ "inputSchema" ].get( "required", [] ) ]
-check( not stillReq, "(B/M4) rooted server (`ctxpack <root> --mcp`): `path` NOT required (%d wrongly required)" % len( stillReq ) )
+check( not stillReq, "(B/M4) rooted server (`ripwire <root> --mcp`): `path` NOT required (%d wrongly required)" % len( stillReq ) )
 rooted.close()
 
 # ═══ (C) M1 — the multi-root single-root refusals, MCP vs CLI, verb for verb ═══════════════════════════════
@@ -162,7 +162,7 @@ BASE = {
 # The false causes M1 found. None may appear on a multi-root answer ever again — this is the finding
 # expressed as a test, not the fix expressed as a test.
 FALSE_CAUSES = ( "not a git repository", "no git history for this tree", "symbol not found",
-                 "no .ctxpack_quality_baseline and no git HEAD" )
+                 "no .ripwire_quality_baseline and no git HEAD" )
 
 srv = Stdio()
 wrongCause, notRefused, refusedButShouldNot = [], [], []

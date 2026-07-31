@@ -22,18 +22,18 @@
 #                                 because its 356-vector matrix contains no empty-value vector — which is
 #                                 how the class shipped in the first place.)
 #
-# Usage:  bash test/a9disclosurecheck.sh   |   CTXPACK_BIN=build_base/ctxpack bash test/a9disclosurecheck.sh (must FAIL)
+# Usage:  bash test/a9disclosurecheck.sh   |   RIPWIRE_BIN=build_base/ripwire bash test/a9disclosurecheck.sh (must FAIL)
 # Exits non-zero on any failure. Does NOT edit test/regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "a9disclosurecheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 

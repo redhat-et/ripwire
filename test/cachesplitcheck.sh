@@ -23,20 +23,20 @@
 #
 # Usage:
 #   bash test/cachesplitcheck.sh
-#   CTXPACK_BIN=build_w2a/ctxpack bash test/cachesplitcheck.sh
+#   RIPWIRE_BIN=build_w2a/ripwire bash test/cachesplitcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "cachesplitcheck: BIN=$BIN  TMP=$TMP"
 
@@ -44,14 +44,14 @@ CORPUS="$ROOT/test/fixture"
 [ -d "$CORPUS" ] || { echo "no test/fixture corpus"; exit 2; }
 
 XDG="$TMP/xdg"; mkdir -p "$XDG"
-CACHEDIR="$XDG/ctxpack"
+CACHEDIR="$XDG/ripwire"
 
 # portable inode reader (BSD stat -f %i / GNU stat -c %i)
 inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
 # glob helper: echo the single matching class file (or empty). AUDIT5 Y4: shard-aware lookup — a blob may
 # live flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex-char shard), so search both via find -maxdepth 2.
-richfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ctxpack-*-rich.bin' 2>/dev/null | head -1; }
-leanfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ctxpack-*-lean.bin' 2>/dev/null | head -1; }
+richfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-rich.bin' 2>/dev/null | head -1; }
+leanfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-lean.bin' 2>/dev/null | head -1; }
 
 run(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$CORPUS" "$@"; }
 
@@ -67,10 +67,10 @@ LF="$( leanfile )"
 
 # both class files coexist → proves the split (old single-file scheme could only ever have ONE file)
 # AUDIT5 Y4: shard-aware lookup — count matching blobs in either layout. Narrowed to the -rich.bin/-lean.bin
-# CLASS files specifically (not the bare 'ctxpack-*.bin' wildcard): Y2's qchurn family now also writes a
-# ctxpack-qchurn-*.bin blob during the --for pass, which the old broad wildcard would incorrectly count
+# CLASS files specifically (not the bare 'ripwire-*.bin' wildcard): Y2's qchurn family now also writes a
+# ripwire-qchurn-*.bin blob during the --for pass, which the old broad wildcard would incorrectly count
 # toward "class cache files" — the gate's stated intent here is exactly 2 class files (rich + lean).
-NFILES="$( find "$CACHEDIR" -maxdepth 2 -type f \( -name 'ctxpack-*-rich.bin' -o -name 'ctxpack-*-lean.bin' \) 2>/dev/null | wc -l | tr -d ' ' )"
+NFILES="$( find "$CACHEDIR" -maxdepth 2 -type f \( -name 'ripwire-*-rich.bin' -o -name 'ripwire-*-lean.bin' \) 2>/dev/null | wc -l | tr -d ' ' )"
 [ "$NFILES" = "2" ] && ok "rich + lean caches coexist (exactly 2 class files — split confirmed)" \
     || no "expected exactly 2 class cache files after rich→lean, found $NFILES"
 

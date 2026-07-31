@@ -3,7 +3,7 @@
 # src/landingplan.h) can report a CONFIDENT answer they did not earn.
 #
 #   test/crossrefdegradecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/crossrefdegradecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/crossrefdegradecheck.sh
 #
 # Five independent claims, each of which was FALSE before this gate existed:
 #
@@ -37,18 +37,18 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "crossrefdegradecheck: git unavailable — skipping"; exit 0; }
 
-export GIT_AUTHOR_NAME=ctxpack GIT_AUTHOR_EMAIL=ctxpack@example.invalid
-export GIT_COMMITTER_NAME=ctxpack GIT_COMMITTER_EMAIL=ctxpack@example.invalid
+export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid
+export GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
 export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
 
 # attr NAME < file  — the value of XML attribute NAME on the first ELEMENT that carries it. The comment

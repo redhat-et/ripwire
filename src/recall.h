@@ -333,7 +333,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
     line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size() );
-    line += "ctxpack recall — \"";
+    line += "ripwire recall — \"";
     line += task;
     line += "\" — ";
     line += std::to_string( shape.matchedCount );
@@ -621,7 +621,7 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
             std::fwrite( honest.data(), 1, honest.size(), out );
         }
         std::fwrite( note.data(), 1, noteBytes, out );
-        std::fprintf( stderr, "ctxpack: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n",
+        std::fprintf( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n",
                       bundle.shape.estTokens, budgetTokens );
         return 3;
     }

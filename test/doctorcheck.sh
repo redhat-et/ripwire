@@ -15,20 +15,20 @@
 #
 # Usage:
 #   test/doctorcheck.sh
-#   CTXPACK_BIN=build_p5w4/ctxpack test/doctorcheck.sh
+#   RIPWIRE_BIN=build_p5w4/ripwire test/doctorcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "doctorcheck: BIN=$BIN"
 
 # A small ad-hoc target dir (git repo, one file) — --doctor needs a root positional.
@@ -43,15 +43,15 @@ git -C "$REPO" commit -qm init >/dev/null
 
 # ── (A) happy path ──────────────────────────────────────────────────────────────────────────────
 # binary-path is the one check whose "ok" genuinely depends on this MACHINE's state (is the PATH
-# copy of ctxpack the same file as the one under test?) — on a dev box with a stale `which ctxpack`
+# copy of ripwire the same file as the one under test?) — on a dev box with a stale `which ripwire`
 # that's a REAL finding, not a gate bug. So the happy path pins PATH to a dir containing exactly this
 # $BIN (same file, same inode either way it's resolved) to make check 1 deterministically ok="1", and
 # gives it its own scratch TMPDIR so the cache-dir row isn't at the mercy of whatever blobs already
 # live in the real one.
-BINDIR="$TMP/bin"; mkdir -p "$BINDIR"; cp "$BIN" "$BINDIR/ctxpack"; chmod +x "$BINDIR/ctxpack"
+BINDIR="$TMP/bin"; mkdir -p "$BINDIR"; cp "$BIN" "$BINDIR/ripwire"; chmod +x "$BINDIR/ripwire"
 HAPPYCACHE="$TMP/happycache"; mkdir -p "$HAPPYCACHE"
 
-OUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ctxpack" "$REPO" --doctor --no-cache 2>/dev/null )"
+OUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ripwire" "$REPO" --doctor --no-cache 2>/dev/null )"
 RC=$?
 echo "happy-path output:"; echo "$OUT"; echo "(exit=$RC)"; echo
 
@@ -130,7 +130,7 @@ echo "$NOUT" | xmllint --noout - 2>/dev/null && ok "xmllint clean (non-repo)" ||
 #     from a same-content build — same_file="0" alone false-positives every working install. The
 #     content-equality fallback (equal mtime AND equal size) must flag ok="1" copied="1" instead. ──
 COPYDIR="$TMP/copydir"; mkdir -p "$COPYDIR"
-cp -p "$BIN" "$COPYDIR/ctxpack"; chmod +x "$COPYDIR/ctxpack"   # -p preserves mtime -> identical mtime+size, different inode
+cp -p "$BIN" "$COPYDIR/ripwire"; chmod +x "$COPYDIR/ripwire"   # -p preserves mtime -> identical mtime+size, different inode
 COPYCACHE="$TMP/copycache"; mkdir -p "$COPYCACHE"
 COUT="$( PATH="$COPYDIR:$PATH" TMPDIR="$COPYCACHE" "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
 
@@ -146,8 +146,8 @@ echo "$COUT" | grep -q 'copied="1"' \
 # ── (F) genuine-stale binary: mtime forced apart (size still equal) -> still a real mismatch, must
 #     stay ok="0" with no copied="1" (the fallback must not paper over an actually-stale shadow). ──
 STALEDIR="$TMP/staledir"; mkdir -p "$STALEDIR"
-cp -p "$BIN" "$STALEDIR/ctxpack"; chmod +x "$STALEDIR/ctxpack"
-touch -t 202001010000 "$STALEDIR/ctxpack"   # force a different mtime; size stays identical
+cp -p "$BIN" "$STALEDIR/ripwire"; chmod +x "$STALEDIR/ripwire"
+touch -t 202001010000 "$STALEDIR/ripwire"   # force a different mtime; size stays identical
 STALECACHE="$TMP/stalecache"; mkdir -p "$STALECACHE"
 SOUT="$( PATH="$STALEDIR:$PATH" TMPDIR="$STALECACHE" "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
 
@@ -165,7 +165,7 @@ echo "$SOUT" | grep -oE '<c n="binary-path" ok="0"[^<]*/>' | grep -q 'hint="STAL
     && ok "genuine-stale binary -> binary-path row carries hint=\"STALE: ...\"" \
     || no "genuine-stale binary: binary-path row has no hint="
 STALEHINT="$( echo "$SOUT" | grep -oE 'hint="STALE:[^"]*"' )"
-echo "$STALEHINT" | grep -qF "$STALEDIR/ctxpack" \
+echo "$STALEHINT" | grep -qF "$STALEDIR/ripwire" \
     && ok "hint= correctly names the OLDER (staledir) binary as stale, not the newer one" \
     || no "hint= did not name the older binary: $STALEHINT"
 
@@ -187,7 +187,7 @@ git -C "$STALEREPO" add -A && git -C "$STALEREPO" commit -qm "add tool + tool.cp
 printf 'int f(){return 2;}\n' >"$STALEREPO/bin/tool.cpp"      # source edited AFTER — binary never recommitted
 git -C "$STALEREPO" add -A && git -C "$STALEREPO" commit -qm "edit tool.cpp only" >/dev/null
 
-GOUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ctxpack" "$STALEREPO" --doctor --no-cache 2>/dev/null )"
+GOUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ripwire" "$STALEREPO" --doctor --no-cache 2>/dev/null )"
 GRC=$?
 echo "tracked-binary-staleness (stale case) output:"; echo "$GOUT"; echo "(exit=$GRC)"; echo
 
@@ -213,7 +213,7 @@ printf 'int g(){return 1;}\n' >"$FRESHREPO/bin/tool.cpp"
 printf 'MZ\x00\x00binarystub'  >"$FRESHREPO/bin/tool"
 git -C "$FRESHREPO" add -A && git -C "$FRESHREPO" commit -qm "add tool + tool.cpp together, never touched again" >/dev/null
 
-FOUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ctxpack" "$FRESHREPO" --doctor --no-cache 2>/dev/null )"
+FOUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ripwire" "$FRESHREPO" --doctor --no-cache 2>/dev/null )"
 FRC=$?
 echo "tracked-binary-staleness (fresh case) output:"; echo "$FOUT"; echo "(exit=$FRC)"; echo
 

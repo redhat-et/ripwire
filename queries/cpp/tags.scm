@@ -1,4 +1,4 @@
-; ctxpack C++ tags — vendored from tree-sitter-cpp v0.23.4 queries/tags.scm,
+; ripwire C++ tags — vendored from tree-sitter-cpp v0.23.4 queries/tags.scm,
 ; AUGMENTED with @reference.call (the upstream C++ tags ship definitions ONLY).
 
 ; ---- definitions (upstream) ----
@@ -13,7 +13,7 @@
 
 (function_declarator declarator: (qualified_identifier name: (identifier) @name)) @definition.method
 
-; ---- operator methods (ctxpack addition) ----
+; ---- operator methods (ripwire addition) ----
 ; The upstream C++ tags capture methods only via identifier/field_identifier/qualified_identifier
 ; declarators; an OPERATOR's declarator is a distinct node kind (operator_name for symbolic/subscript/
 ; call/arrow ops, operator_cast for conversion ops), so operators were invisible. These three patterns
@@ -42,7 +42,7 @@
 
 (class_specifier name: (type_identifier) @name) @definition.class
 
-; ---- references (ctxpack addition — calls drive the PageRank edges) ----
+; ---- references (ripwire addition — calls drive the PageRank edges) ----
 
 (call_expression
   function: (identifier) @name) @reference.call
@@ -81,7 +81,7 @@
 ;
 ; WHY THE CAST KEYWORDS ARE NOT EXCLUDED HERE. tree-sitter-cpp parses `static_cast<T>(x)` as this exact
 ; shape, so this pattern also matches all four C++ cast keywords (171 sites in src/ alone). The natural fix
-; — a `(#not-eq? @name "static_cast")` predicate — does NOT work: ctxpack's passesPredicates is wired into
+; — a `(#not-eq? @name "static_cast")` predicate — does NOT work: ripwire's passesPredicates is wired into
 ; --match/--lint only, never into the tags pass (measured: the predicate left --uses=static_cast at 165).
 ; The exclusion therefore lives at capture time in ingest.cpp (isCppCastKeyword), where it is enforceable.
 (call_expression

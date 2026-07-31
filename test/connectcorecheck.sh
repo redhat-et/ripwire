@@ -14,7 +14,7 @@
 #   G  MUTATION: flipping an edge direction in the fixture flips the reported direction (C is non-vacuous)
 #   H  honest degrades: empty terminals -> empty result; out-of-range dropped; >16 clamped; dups deduped
 #
-# Independent of the ctxpack binary and of main.cpp. Uses its OWN temp dir. Does NOT edit regression.sh.
+# Independent of the ripwire binary and of main.cpp. Uses its OWN temp dir. Does NOT edit regression.sh.
 # Usage:  bash test/connectcorecheck.sh            (compiles with c++/clang++)
 #         CXX=clang++ bash test/connectcorecheck.sh
 
@@ -29,7 +29,7 @@ echo "connectcorecheck: CXX=$CXX"
 
 # ── compile the harness against graph.h (header-only): infra + src on the include path ────────────────────────
 # fastmath.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) — link it exactly
-# as the real ctxpack target does, so any degrade path resolves at link time.
+# as the real ripwire target does, so any degrade path resolves at link time.
 if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$BIN" 2> "$WORK/cc.log"; then

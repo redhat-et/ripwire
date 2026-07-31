@@ -12,13 +12,13 @@
 #   consumer -> producer : the bare name and file:name forms still resolve (purely additive)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
 echo "chainidcheck: BIN=$BIN"
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # localitycheck.sh — the S6-C locality tie-break gate (adversarial HIGH-1 regression).
 #
-#   test/localitycheck.sh                       # uses build/ctxpack on test/localityfix
-#   CTXPACK_BIN=asan/ctxpack test/localitycheck.sh
+#   test/localitycheck.sh                       # uses build/ripwire on test/localityfix
+#   RIPWIRE_BIN=asan/ripwire test/localitycheck.sh
 #
 # The fixture test/localityfix/loc.cpp has two UNRELATED classes Xtra and Bravo that BOTH define go().
 # Class Xenon::call() does `Bravo b; b.go();`. The caller scope "Xenon" shares only a leading LETTER with
@@ -18,15 +18,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/localityfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "localitycheck: BIN=$BIN  CORPUS=$CORPUS"
 

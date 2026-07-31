@@ -10,14 +10,14 @@
 #   (f) --help with a directory → treats it as positional, outputs help, exit 0
 #
 # Usage:
-#   test/clicheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/clicheck.sh
+#   test/clicheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/clicheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # BOTH seams: `bash test/clicheck.sh asan/ctxpack` and CTXPACK_BIN=
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: `bash test/clicheck.sh asan/ripwire` and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -26,7 +26,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "clicheck: BIN=$BIN  CORPUS=$CORPUS"
 
@@ -135,7 +135,7 @@ grep -q "usage:" "$TMP/e_stdout" \
 # --for beats --query/--pack-task: one warning line, and the --for answer still comes out (behavior unchanged).
 g1_out="$( "$BIN" "$CORPUS" --for="widget" --query="widget" --pack-task="add a widget" --no-cache 2>"$TMP/g1_err" )"
 g1_forOnly_out="$( "$BIN" "$CORPUS" --for="widget" --no-cache 2>/dev/null )"
-[ "$( grep -c '^ctxpack: --for takes precedence' "$TMP/g1_err" )" = 1 ] \
+[ "$( grep -c '^ripwire: --for takes precedence' "$TMP/g1_err" )" = 1 ] \
     && ok "X9(c): --for+--query+--pack-task: exactly one precedence warning on stderr" \
     || no "X9(c): expected exactly one --for precedence warning, got: $( cat "$TMP/g1_err" )"
 [ "$g1_out" = "$g1_forOnly_out" ] \
@@ -144,13 +144,13 @@ g1_forOnly_out="$( "$BIN" "$CORPUS" --for="widget" --no-cache 2>/dev/null )"
 
 # --pack-task beats --query when --for is absent: one warning line.
 g2_err="$( "$BIN" "$CORPUS" --query="widget" --pack-task="add a widget" --no-cache 2>&1 1>/dev/null )"
-printf '%s' "$g2_err" | grep -q '^ctxpack: --pack-task takes precedence over --query' \
+printf '%s' "$g2_err" | grep -q '^ripwire: --pack-task takes precedence over --query' \
     && ok "X9(c): --pack-task+--query (no --for): precedence warning on stderr" \
     || no "X9(c): expected a --pack-task-over-query warning, got: $g2_err"
 
 # --stable + --most-important-last: one warning line; a bare --for (no conflict) stays silent (control).
 g3_err="$( "$BIN" "$CORPUS" --stable --most-important-last --no-cache 2>&1 1>/dev/null )"
-printf '%s' "$g3_err" | grep -q '^ctxpack: --stable takes precedence over --most-important-last' \
+printf '%s' "$g3_err" | grep -q '^ripwire: --stable takes precedence over --most-important-last' \
     && ok "X9(c): --stable+--most-important-last: precedence warning on stderr" \
     || no "X9(c): expected a --stable-over-most-important-last warning, got: $g3_err"
 g4_err="$( "$BIN" "$CORPUS" --for="widget" --no-cache 2>&1 1>/dev/null )"

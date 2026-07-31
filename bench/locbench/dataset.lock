@@ -3,4 +3,4 @@ config=default
 split=test
 rows=560
 rows_json_sha256=5bbcea4bff11396f38f8aca3e64d697a8ea1da2bc54d705da7f6e34886804c97
-split_contract=repo-disjoint sha256(ctxpack-a7-v2\0 + lowercase(repo)); byte0<128=train
+split_contract=repo-disjoint sha256(ripwire-a7-v2\0 + lowercase(repo)); byte0<128=train

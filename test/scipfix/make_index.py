@@ -2,7 +2,7 @@
 # make_index.py — generate a minimal, VALID SCIP index (index.scip) for the scipfix fixture, by
 # hand-rolling protobuf wire encoding (stdlib only — no scip-clang, no protobuf library). This is the
 # ground-truth the --scip overlay consumes: it pins the ambiguous `handler()` call in caller.cpp to
-# alpha.cpp's `handler`, so ctxpack collapses the name-based split edge to one precise edge.
+# alpha.cpp's `handler`, so ripwire collapses the name-based split edge to one precise edge.
 #
 # SCIP proto field numbers (verified against sourcegraph/scip scip.proto):
 #   Index.documents = 2
@@ -10,7 +10,7 @@
 #   Occurrence.range = 1 (packed repeated int32 [startLine,startChar,endChar]), symbol = 2, symbol_roles = 3
 #   SymbolInformation.symbol = 1, display_name = 6
 #   SymbolRole.Definition = 0x1 (bit 0)
-# Ranges are 0-BASED. ctxpack Symbol.line is 1-based, so line N (1-based def) is encoded as N-1 here.
+# Ranges are 0-BASED. ripwire Symbol.line is 1-based, so line N (1-based def) is encoded as N-1 here.
 #
 # Usage: python3 test/scipfix/make_index.py            # writes test/scipfix/index.scip next to this file
 #        python3 test/scipfix/make_index.py OUT.scip   # writes to OUT.scip
@@ -87,7 +87,7 @@ def index(documents) -> bytes:
     return m
 
 # ---- the fixture index -----------------------------------------------------------------------------
-# The SCIP symbol string that identifies alpha.cpp's `handler`. The exact string is opaque to ctxpack —
+# The SCIP symbol string that identifies alpha.cpp's `handler`. The exact string is opaque to ripwire —
 # it only needs the SAME string to appear on the definition (in alpha.cpp) and the reference (in
 # caller.cpp) so they link. We use a SCIP-shaped string; any stable string works.
 SYM_HANDLER_ALPHA = "scip-clang cxx . `alpha.cpp`/handler()."
@@ -101,10 +101,10 @@ def build(stale: bool = False, external: bool = False) -> bytes:
     #   * alpha's `handler` DEFINITION stays at 0-based line 10 (== 1-based line 11) → it maps fine.
     #   * caller's reference to `handler` is recorded at 0-based line 7 (== 1-based line 8) — one line OFF
     #     the real `handler();` call (line 9, 0-based 8), as if a line were inserted since the index was cut.
-    #     ctxpack parsed NO `handler` call at caller.cpp line 8. Under the OLD "greatest def line ≤ occ line"
+    #     ripwire parsed NO `handler` call at caller.cpp line 8. Under the OLD "greatest def line ≤ occ line"
     #     line-scan the stale line still resolves to run() (run def at line 7) and pins run→handler with
     #     prov="scip" — it TRUSTS the stale line with no cross-check (the silent partial-staleness hazard).
-    #     The S5 gate finds no ctxpack reference at (caller.cpp, line 8) → it DROPS the occurrence: run
+    #     The S5 gate finds no ripwire reference at (caller.cpp, line 8) → it DROPS the occurrence: run
     #     reverts to the honest name-based ambiguous split. Fewer-but-correct, never a wrong precise edge.
     # Result: a stale index yields ZERO precise edges, and the match-ratio note fires showing 0/1
     # occurrences pinned — the honest older-commit signal.
@@ -141,7 +141,7 @@ def build(stale: bool = False, external: bool = False) -> bytes:
     if external:
         # A4-F21 gate fixture: one EXTERNAL reference occurrence — a symbol string that never appears in
         # any document's `symbols` (never a def anywhere in this index), the way a real SCIP indexer
-        # records every `std::`/library reference it sees even though ctxpack (and the index itself) never
+        # records every `std::`/library reference it sees even though ripwire (and the index itself) never
         # defines those symbols in-tree. `dit == scipDef.end()` for this one regardless of which line it
         # sits on, so its exact position is irrelevant — it exists purely to inflate ov.refOccurrences
         # (the OLD, wrong S5 denominator) without being matchable, which is exactly the deflation this

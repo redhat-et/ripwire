@@ -8,17 +8,17 @@
 #   mcpeditracecheck.sh / mcpeditkindcheck.sh), and asserts the mode is STILL 0755 after the edit applied.
 #   Verified to FAIL against the pre-fix binary (mode drops to 0644) and PASS on the fix.
 #
-# A3-F8: the per-file advisory edit lock used to be a "<path>.ctxpack-lock" sidecar created next to the target
+# A3-F8: the per-file advisory edit lock used to be a "<path>.ripwire-lock" sidecar created next to the target
 #   and never unlinked — permanent litter in the user's repo, visible in git status. The fix moves the lock to
 #   the per-user cache dir keyed by a hash of the target path (flock cross-process safety preserved). This gate
-#   runs an edit verb inside a real git repo fixture and asserts NO .ctxpack-lock shows up in `git status`.
+#   runs an edit verb inside a real git repo fixture and asserts NO .ripwire-lock shows up in `git status`.
 #
-# Usage:  test/mcpeditmodecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/mcpeditmodecheck.sh
+# Usage:  test/mcpeditmodecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/mcpeditmodecheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -26,7 +26,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "mcpeditmodecheck: BIN=$BIN"
 
@@ -73,7 +73,7 @@ esac
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
-echo "=== 2. A3-F8 — an edit verb leaves NO .ctxpack-lock in the repo (git status clean of it) ==="
+echo "=== 2. A3-F8 — an edit verb leaves NO .ripwire-lock in the repo (git status clean of it) ==="
 # ═══════════════════════════════════════════════════════════════════════════
 W2="$TMP/f8"; mkdir -p "$W2"
 (
@@ -96,13 +96,13 @@ case "$R2" in
 esac
 
 # no lockfile as a plain file anywhere in the tree
-LOCK_FILES="$( find "$W2" -name '*.ctxpack-lock' 2>/dev/null )"
-# nothing named .ctxpack-lock in git's view of the working tree
-GIT_LOCK="$( cd "$W2" && git status --porcelain 2>/dev/null | grep -i 'ctxpack-lock' )"
+LOCK_FILES="$( find "$W2" -name '*.ripwire-lock' 2>/dev/null )"
+# nothing named .ripwire-lock in git's view of the working tree
+GIT_LOCK="$( cd "$W2" && git status --porcelain 2>/dev/null | grep -i 'ripwire-lock' )"
 
 { [ -z "$LOCK_FILES" ] && [ -z "$GIT_LOCK" ]; } \
-    && ok "F8: no .ctxpack-lock sidecar in the repo tree after an edit (lock lives in the per-user cache dir)" \
-    || no "F8: a .ctxpack-lock leaked into the repo (files=[$LOCK_FILES] git=[$GIT_LOCK])"
+    && ok "F8: no .ripwire-lock sidecar in the repo tree after an edit (lock lives in the per-user cache dir)" \
+    || no "F8: a .ripwire-lock leaked into the repo (files=[$LOCK_FILES] git=[$GIT_LOCK])"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

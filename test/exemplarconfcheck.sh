@@ -2,8 +2,8 @@
 # exemplarconfcheck.sh — §P5 gate: --exemplar's low_confidence signal must actually FIRE and must fire
 # ONLY when the task→kind donation is untrustworthy (src/exemplar.h: resolveExemplarKind, INVARIANT 3).
 #
-#   test/exemplarconfcheck.sh                       # uses build/ctxpack on the ctxpack repo itself
-#   CTXPACK_BIN=asan/ctxpack test/exemplarconfcheck.sh
+#   test/exemplarconfcheck.sh                       # uses build/ripwire on the ripwire repo itself
+#   RIPWIRE_BIN=asan/ripwire test/exemplarconfcheck.sh
 #
 # Regression for the reported defect: --exemplar="format byte sizes for humans" returned fnv1a64 (a hash
 # fn, unrelated to the task) with NO low_confidence flag — a no-topical-match answer indistinguishable from
@@ -18,14 +18,14 @@
 # is unchanged and out of scope per §P5) — only the confidence SIGNAL attached to the kind-donation step.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "exemplarconfcheck: BIN=$BIN  CORPUS=$ROOT"
 
 exemhdr(){ printf '%s' "$1" | grep -o '<exemplar[^>]*>' | head -1; }

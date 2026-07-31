@@ -1,4 +1,4 @@
-; ctxpack JSON tags — written for ctxpack (.json). Derived from the upstream
+; ripwire JSON tags — written for ripwire (.json). Derived from the upstream
 ; tree-sitter-json v0.24.8 grammar node-types, verified against an AST dump (see the
 ; jsonlangcheck fixture).
 ;

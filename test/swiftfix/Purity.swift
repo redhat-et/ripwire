@@ -1,4 +1,4 @@
-// ctxpack S6-B fixture — Swift mutating purity
+// ripwire S6-B fixture — Swift mutating purity
 // Used by test/swiftcheck.sh to verify pure="1" on non-mutating funcs.
 
 struct Counter {

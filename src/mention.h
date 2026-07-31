@@ -96,7 +96,7 @@ inline bool pathSuffixMatches( std::string_view path, const std::vector<std::str
 
     // earlier segments must match the preceding whole components right-to-left
     // (decrement INSIDE the body — the `i-- > 0` idiom wraps the unsigned at loop exit, which G1's
-    // integer sanitizer deliberately traps on ctxpack-owned code)
+    // integer sanitizer deliberately traps on ripwire-owned code)
     for( std::size_t i = segments.size() - 1; i > 0; )
     {
         --i;

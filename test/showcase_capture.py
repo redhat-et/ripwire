@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Regenerate the ctxpack command showcase against the CURRENT binary. Successor to runner.py."""
+"""Regenerate the ripwire command showcase against the CURRENT binary. Successor to runner.py."""
 import subprocess, time, os, re, sys, json, tempfile, shutil
 
 # No absolute machine paths here: test/ is a SHIP path and ripwirepubliccheck greps it for home-dir
 # prefixes. REPO is derived from this script's own location; SCRATCH is a per-run temp dir (override
-# via CTXPACK_SHOWCASE_SCRATCH to keep the sandbox around for inspection).
+# via RIPWIRE_SHOWCASE_SCRATCH to keep the sandbox around for inspection).
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRATCH = os.environ.get("CTXPACK_SHOWCASE_SCRATCH") or tempfile.mkdtemp(prefix="ctxpack_showcase_")
-BIN = "./build/ctxpack"
-ABIN = os.path.join(REPO, "build", "ctxpack")
+SCRATCH = os.environ.get("RIPWIRE_SHOWCASE_SCRATCH") or tempfile.mkdtemp(prefix="ripwire_showcase_")
+BIN = "./build/ripwire"
+ABIN = os.path.join(REPO, "build", "ripwire")
 DIRTY = os.path.join(SCRATCH, "dirty")          # throwaway --local clone with ONE deliberate regression
 AUX = os.path.join(SCRATCH, "aux")
 os.makedirs(AUX, exist_ok=True)
@@ -50,9 +50,9 @@ STRAY_TSV = "# ref<TAB>verdict labels for --eval-stray\nr25-notes\tmerged\nr25-a
 stray_tsv_path = os.path.join(AUX, "stray_labels2.tsv")
 open(stray_tsv_path, "w").write(STRAY_TSV)
 
-SKILLS_TSV = ("orient in an unfamiliar codebase fast\tctxpack-orient\tjudged\n"
-              "who calls this function and what is the blast radius\tctxpack-navigate\tjudged\n"
-              "plan parallel worktrees so the lanes do not collide\tctxpack-change-check\tjudged\n"
+SKILLS_TSV = ("orient in an unfamiliar codebase fast\tripwire-orient\tjudged\n"
+              "who calls this function and what is the blast radius\tripwire-navigate\tjudged\n"
+              "plan parallel worktrees so the lanes do not collide\tripwire-change-check\tjudged\n"
               "what is the weather in Paris\tnone\tneg\n")
 skills_tsv_path = os.path.join(AUX, "skills_labels2.tsv")
 open(skills_tsv_path, "w").write(SKILLS_TSV)
@@ -64,8 +64,8 @@ brief_path = os.path.join(AUX, "lanes_brief.txt")
 open(brief_path, "w").write(BRIEF)
 
 html_out = os.path.join(AUX, "map2.html")
-cc_out = os.path.join(AUX, "ctxpack2.cc.json")
-cache_out = os.path.join(AUX, "warm2.ctxpackcache")
+cc_out = os.path.join(AUX, "ripwire2.cc.json")
+cache_out = os.path.join(AUX, "warm2.ripwirecache")
 
 # --- command table ------------------------------------------------------
 C = []
@@ -156,7 +156,7 @@ add(S4, f"{BIN} . --stray-content=r25 --abi", "Cross-branch ABI-break gate: stru
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
-add(S4, f"{BIN} . --flags --flip=CTXPACK_ASAN", "Blast radius of turning ONE gate on: live code, symbols, transitive reach, covering tests.")
+add(S4, f"{BIN} . --flags --flip=RIPWIRE_ASAN", "Blast radius of turning ONE gate on: live code, symbols, transitive reach, covering tests.")
 add(S4, f"{BIN} . --flags --flip=NoSuchGate", "Unknown-gate refusal (exit 1) naming the near-misses.")
 add(S4, f'{BIN} . --plan-lanes=3 --task="add a --since filter to the doc-drift verb and cover it with tests"', "NEW VERB: pre-hoc lane plan — which of 3 parallel worktrees would COLLIDE, before a line is written. JSON on stdout.")
 add(S4, f"{BIN} . --plan-lanes --brief={brief_path}", "NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode).", pre=f"cat {brief_path}")
@@ -169,7 +169,7 @@ add(S4, f"{BIN} . --doc-drift --gateability", "The finishable to-do list: docs w
     post_label="Tail of the same output — the `<gateability>` section:")
 add(S4, f"{BIN} . --doc-drift --with-history", "Same report, with git history splitting stale mentions into deleted-by-commit vs never-existed.", timeout=600)
 add(S4, f"{BIN} . --from-trace=-", "Map a pasted stack trace onto indexed symbols. CHANGED: in_corpus= now reports the real count (was 0).", stdin=trace_path, pre=f"cat {trace_path}")
-add(S4, f"{BIN} . --notes", "List all field notes (write-side memory). This repo still has no .ctxpack_notes.")
+add(S4, f"{BIN} . --notes", "List all field notes (write-side memory). This repo still has no .ripwire_notes.")
 add(S4, f'{BIN} . --pack-task="add a new output format flag to the CLI"', "ONE budget-shared bundle: ranking + top bodies + caller sigs + notes + tests_to_run. CHANGED: <d> rows now carry n=/id=.")
 add(S4, f'{BIN} . --pack-task="add a new output format flag to the CLI" --partition=3', "Fan-out form: one shared core + 3 per-agent slices carved along call-graph communities.")
 add(S4, f'{BIN} . --for="pagerank power iteration" --with-graph', "Task lens + a compact Mermaid flowchart of the top anchors' 1-hop edges.")
@@ -180,7 +180,7 @@ S5 = "self-diagnosis"
 add(S5, f"{BIN} . --doctor", "Environment self-check: binary staleness, grammars, cache dir, git, tracked-binary staleness.")
 
 S6 = "security"
-add(S6, f"{BIN} --scan-skill=skills/ctxpack-orient/SKILL.md", "Scan a single skill file for injection/exfiltration patterns before installing.")
+add(S6, f"{BIN} --scan-skill=skills/ripwire-orient/SKILL.md", "Scan a single skill file for injection/exfiltration patterns before installing.")
 add(S6, f"{BIN} --scan-skills=skills", "Scan a whole skills directory (exit 2 = CRITICAL, 1 = WARN). Explicit-DIR form only.")
 
 S7 = "knobs / modes"
@@ -204,7 +204,7 @@ add(S7, f"{BIN} . --eval", "Self-eval: co-change recall vs BM25.", timeout=900)
 add(S7, f"{BIN} . --eval-retrieval", "Known-item retrieval eval: MRR + recall@k per ranker per query mode.", timeout=900)
 add(S7, f"{BIN} . --eval-stray={stray_tsv_path}", "Labelled verdict-accuracy eval for --stray-content (3 hand-labelled refs).", timeout=900, pre=f"cat {stray_tsv_path}")
 add(S7, f"{BIN} skills --eval-skills={skills_tsv_path}", "Labelled skill-ROUTING eval over the repo's own skills/ directory (4 hand-labelled prompts).", timeout=600, pre=f"cat {skills_tsv_path}")
-add(S7, f"{BIN} wrap claude", "Print the recipe to wire ctxpack into Claude Code as an MCP server.")
+add(S7, f"{BIN} wrap claude", "Print the recipe to wire ripwire into Claude Code as an MCP server.")
 add(S7, f"{BIN} --version", "Version + short build info.")
 
 # --- the sandbox clone: verbs that need a DIRTY tree -------------------
@@ -433,17 +433,17 @@ sandbox_diffstat = subprocess.run("git diff --stat", shell=True, cwd=DIRTY, capt
 doc = []
 FENCE = "`````"  # 5 backticks: some outputs (--recall, --report) contain 3-backtick fences of their own
 date = time.strftime("%Y-%m-%d")
-doc.append("# ctxpack — every verb, run for real\n")
+doc.append("# ripwire — every verb, run for real\n")
 doc.append(f"- **Date:** {date} (regenerated capture; supersedes any older `docs/captures/COMMANDS_showcase_*.md`)")
 doc.append(f"- **Lives in `docs/captures/`** — a directory the crawl/retrieval lenses SKIP (`kCrawlSkipDirs`, src/ingest.h): a generated doc that quotes every verb's output out-scores the source for any query about the tool and was 77% of `--recall` on this repo when it sat at the root (PLAN_outputAudit_2026-07-28.md §P2). `test/argvdiffcheck.sh` harvests its `## `-heading command lines as differential vectors — keep that format.")
 doc.append(f"- **Version:** `{ver}`")
-doc.append(f"- **Repo:** the ctxpack repo @ `{sha}` — **{dirty_note}**. That is the one structural difference from the previous capture, which ran against a deliberately dirty tree. A clean tree is the honest default for a showcase, so the diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`) appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.")
-doc.append(f"- **Corpus:** the ctxpack repo itself (dogfood), via `./build/ctxpack`")
+doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. That is the one structural difference from the previous capture, which ran against a deliberately dirty tree. A clean tree is the honest default for a showcase, so the diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`) appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.")
+doc.append(f"- **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`")
 doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` — one preexisting function made deeply nested, one function's arity changed 1 -> 2, one copy-paste duplicate helper, one new 8-parameter public function.")
 doc.append("")
-doc.append("**How to read the blocks:** ctxpack's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size. Exit codes are recorded when non-zero; wall time when >1s.")
+doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
-doc.append(f"**Not run (and why):** `ctxpack <git-url>` (network clone), `--mcp` / `--listen` / `--mcp-token` / `--allow-remote-edits` (persistent servers — `wrap claude` below shows the wiring), `--note-add` / `--quality-baseline` / `--arch --baseline[-update]` / `--index-out` (state writers; the repo is read-only for this capture — `--quality-ack` IS shown, but only inside the throwaway sandbox clone), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--force` (wrap-only modifier), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
+doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--mcp` / `--listen` / `--mcp-token` / `--allow-remote-edits` (persistent servers — `wrap claude` below shows the wiring), `--note-add` / `--quality-baseline` / `--arch --baseline[-update]` / `--index-out` (state writers; the repo is read-only for this capture — `--quality-ack` IS shown, but only inside the throwaway sandbox clone), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--force` (wrap-only modifier), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
 
 cur_section = None
@@ -453,7 +453,7 @@ for r in results:
         cur_section = c["section"]
         doc.append(f"\n---\n\n# {cur_section}\n")
         if cur_section == S8:
-            doc.append(f"Everything below runs with `cwd` = the throwaway clone at `{DIRTY}` (`git clone --local` of this repo, then one deliberate regression in `src/sortutil.h`). The read-only repo is never touched. The binary is the same `build/ctxpack`, addressed absolutely.\n")
+            doc.append(f"Everything below runs with `cwd` = the throwaway clone at `{DIRTY}` (`git clone --local` of this repo, then one deliberate regression in `src/sortutil.h`). The read-only repo is never touched. The binary is the same `build/ripwire`, addressed absolutely.\n")
     doc.append(f"## `{c['cmd']}`\n")
     doc.append(f"*{c['what']}*\n")
     meta = []

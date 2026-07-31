@@ -2,14 +2,14 @@
 # htmlexport.sh — gate for P2-A: --html self-contained graph export.
 #
 # Usage:
-#   test/htmlexport.sh                          # uses build/ctxpack on test/fixture
-#   CTXPACK_BIN=asan/ctxpack test/htmlexport.sh
+#   test/htmlexport.sh                          # uses build/ripwire on test/fixture
+#   RIPWIRE_BIN=asan/ripwire test/htmlexport.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -18,7 +18,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
 echo "htmlexport: BIN=$BIN  CORPUS=$CORPUS"
 

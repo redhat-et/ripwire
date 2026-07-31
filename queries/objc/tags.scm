@@ -1,4 +1,4 @@
-; ctxpack Objective-C / Objective-C++ tags — for amaanq/tree-sitter-objc (inherits tree-sitter-C).
+; ripwire Objective-C / Objective-C++ tags — for amaanq/tree-sitter-objc (inherits tree-sitter-C).
 ; Captures the ObjC layer (classes / methods / protocols / [message sends]) + C-style funcs/calls.
 ; Patterns derived from the grammar's highlights.scm + a verified parse dump. This grammar does NOT
 ; understand C++ (templates / namespaces / ::), so C++-heavy regions of a .mm error-recover & are partial.

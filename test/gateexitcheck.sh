@@ -32,7 +32,7 @@
 #   (D) SKIP IS NOT PASS — a skip and a pass-with-failures both exit 0, and §B15 forbids conflating
 #       them. The distinguisher is the printed vocabulary: a skip prints a skip marker and a reason and
 #       NO failure marker. Asserted live on the tree's sanctioned skip (argvdiffcheck with no
-#       CTXPACK_BASE, 17 ms) and on the skip_honest fixture — and, statically, no gate may print
+#       RIPWIRE_BASE, 17 ms) and on the skip_honest fixture — and, statically, no gate may print
 #       "ALL PASS" on a path that skipped, which is what g1freshcheck did before this round.
 #   (E) GATEEXIT_FULL=1 — the ground truth, off by default. Copies every gate in place, injects a forced
 #       failure before its terminal, RUNS IT, and reads the exit status. ~4 minutes; that is the sweep
@@ -281,19 +281,19 @@ else:
 
 AV = os.path.join( T, "argvdiffcheck.sh" )
 if os.path.exists( AV ):
-    env = { k: v for k, v in os.environ.items() if k != "CTXPACK_BASE" }
+    env = { k: v for k, v in os.environ.items() if k != "RIPWIRE_BASE" }
     r = subprocess.run( [ "bash", AV ], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120 )
     txt = r.stdout + r.stderr
     if r.returncode != 0:
-        no( "(D) argvdiffcheck without CTXPACK_BASE exited %s; the sanctioned skip must be exit 0" % r.returncode )
+        no( "(D) argvdiffcheck without RIPWIRE_BASE exited %s; the sanctioned skip must be exit 0" % r.returncode )
     elif not SKIPWORD.search( txt ):
         no( "(D) argvdiffcheck's skip exits 0 without printing a skip marker — indistinguishable from a pass" )
     elif re.search( r'\bFAIL\b', txt ):
         no( "(D) argvdiffcheck's skip printed a FAIL marker and still exited 0" )
-    elif "CTXPACK_BASE" not in txt:
+    elif "RIPWIRE_BASE" not in txt:
         no( "(D) argvdiffcheck's skip does not say what would activate it" )
     else:
-        ok( "(D) the tree's sanctioned skip (argvdiffcheck, no CTXPACK_BASE) exits 0, prints SKIP + the reason, prints no FAIL" )
+        ok( "(D) the tree's sanctioned skip (argvdiffcheck, no RIPWIRE_BASE) exits 0, prints SKIP + the reason, prints no FAIL" )
 
 # ── (E) ground truth, opt-in ──────────────────────────────────────────────────────────────────────────
 if FULL:

@@ -8,7 +8,7 @@
 # REAL BUG FOUND — NOW FIXED in d98ffed. WAS: when --since scopes to a window with ZERO matching
 # commits (a valid, deterministic outcome — not "git is broken"), repo-wide --cochange (src/main.cpp:
 # 1124) and --hotspots (src/main.cpp:~1017) both checked `if (sets.empty())` and printed the SAME
-# message as an actual missing-git-repo error — "ctxpack --VERB: git unavailable / no history (need a
+# message as an actual missing-git-repo error — "ripwire --VERB: git unavailable / no history (need a
 # git repo)" — and exit 1, conflating "there is no git repository at all" with "there IS a git repo,
 # --since is valid, it just matched nothing." The single-file form (`--cochange=FILE`) never had this
 # bug (it degraded to `commits="0" partners="0"` exit 0). FIX (d98ffed): the empty-window case now
@@ -27,25 +27,25 @@
 #
 # DATE-form gotcha discovered while building this gate: `git log --since=2999-01-01` (Apple Git 2.39.5)
 # does NOT correctly exclude all commits — it appears to mis-parse far-future 4-digit years starting
-# around 2100 and returns ALL commits (a git/approxidate quirk, not a ctxpack bug). This gate therefore
+# around 2100 and returns ALL commits (a git/approxidate quirk, not a ripwire bug). This gate therefore
 # uses 2030-01-01 (safely future relative to any real commit date, safely below the ~2100 wrap) as its
 # "zero commits in window" date — a value that will need bumping well before 2030 arrives.
 #
 # Fixture: a throwaway git repo (mktemp, never committed) with two co-changing pairs in DISJOINT commit
 # windows — A+B in the first 3 commits, C+D in the last 3 — built fresh here per run.
 #
-# Usage:  test/sincecochangecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/sincecochangecheck.sh
+# Usage:  test/sincecochangecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/sincecochangecheck.sh
 # Exits non-zero on any FAIL. Does NOT edit regression.sh, sincecheck.sh, or any existing test file.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "sincecochangecheck: BIN=$BIN"
 

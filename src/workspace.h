@@ -6,8 +6,8 @@
 //   * root set hygiene   — realpath dedupe (stderr note), NESTED roots = hard error (§2.1);
 //   * root identity      — label = shortest unique whole-segment suffix of the root's REAL path
 //                          (basename when unique; leftward whole-segment extension on collision) (§2);
-//   * canonical order    — roots sorted by LABEL (byte order), NEVER argv order: `ctxpack a b` and
-//                          `ctxpack b a` are byte-identical (§2.1);
+//   * canonical order    — roots sorted by LABEL (byte order), NEVER argv order: `ripwire a b` and
+//                          `ripwire b a` are byte-identical (§2.1);
 //   * merge              — per-root IngestResults concatenated with fileId/NodeId offsets into one
 //                          IngestResult whose ing.files carry the LABELED spelling `<label>/<rel>`;
 //                          the on-disk path per file survives in ing.realPaths (§4).
@@ -99,7 +99,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
             if( r.real == real ) { dup = true; break; }
         if( dup )
         {
-            std::fprintf( stderr, "ctxpack: duplicate root '%s' ignored (same directory already listed)\n", a.c_str() );
+            std::fprintf( stderr, "ripwire: duplicate root '%s' ignored (same directory already listed)\n", a.c_str() );
             continue;
         }
         out.push_back( { a, real, std::string() } );
@@ -115,7 +115,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
             if( inner.size() > outer.size() && inner.compare( 0, outer.size(), outer ) == 0
                 && inner[ outer.size() ] == '/' )
             {
-                std::fprintf( stderr, "ctxpack: nested roots are not allowed: '%s' is inside '%s' — pass disjoint roots "
+                std::fprintf( stderr, "ripwire: nested roots are not allowed: '%s' is inside '%s' — pass disjoint roots "
                                       "(to focus on a subtree, use --for / DIR-scoped verbs instead)\n",
                               out[j].arg.c_str(), out[i].arg.c_str() );
                 return false;

@@ -7,10 +7,10 @@
 #      and NOT the "git unavailable" stderr error.
 #   2  a genuine NON-repo dir     → STILL errors (exit non-zero) — the real git-unavailable case is unchanged.
 #   3  the empty-window output is deterministic run-to-run and well-formed XML.
-# Usage:  test/sincewindowcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/sincewindowcheck.sh
+# Usage:  test/sincewindowcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/sincewindowcheck.sh
 # Exits non-zero on any failure. Self-contained (own temp dirs). Does NOT edit test/regression.sh. Needs git.
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

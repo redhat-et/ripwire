@@ -11,19 +11,19 @@
 # user error. A name() that DOES resolve, inside a composed query that legitimately selects nothing, is a
 # measurement and must still exit 0 with count="0".
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/graphqueryrefusecheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/graphqueryrefusecheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/graphqueryrefusecheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/graphqueryrefusecheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "graphqueryrefusecheck: BIN=$BIN  ROOT=$ROOT"
 
 # ── 1. a bare unknown name refuses, names the literal, and prints no <query> element

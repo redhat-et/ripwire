@@ -2,7 +2,7 @@
 
 // quality.h — --quality-baseline / --quality-delta: the deterministic oracle for a code-quality CONVERGENCE
 // LOOP. Snapshot the current per-symbol cognitive complexity, the duplicate-clone groups, and the dead-symbol
-// set to a `.ctxpack_quality_baseline` sidecar; then `--quality-delta` reports ONLY what got WORSE vs that
+// set to a `.ripwire_quality_baseline` sidecar; then `--quality-delta` reports ONLY what got WORSE vs that
 // baseline — the "delta, not absolute" discipline that lets a refine loop target *the regression it
 // introduced* instead of chasing absolute numbers (the defense against Goodhart / metric-gaming). Exits 2 if
 // any NEW regression (worse complexity over the bar, new duplication, newly-dead), like --arch.
@@ -53,7 +53,7 @@ namespace ctx
 namespace quality
 {
 
-inline const char*        kBaselineFile  = ".ctxpack_quality_baseline";
+inline const char*        kBaselineFile  = ".ripwire_quality_baseline";
 constexpr std::uint32_t   kMinCloneTokens = 18;     // matches the --clones default (so both verbs see the same clones)
 constexpr std::uint32_t   kCcxBar         = 15;     // SonarSource cognitive-complexity bar — a regression must end up OVER this
 
@@ -85,14 +85,14 @@ constexpr std::uint32_t   kMinorParamDelta = 2;    // params:     +1 param → m
 // Signal-to-noise round — the per-finding ACK RATCHET sidecar (`--quality-ack[=REASON]`): each line records one
 // deliberately-accepted finding; --quality-delta suppresses it (honestly, via acked="N") until the finding
 // WORSENS past the acked magnitude, at which point it reappears. Committable, like the baseline sidecar.
-inline const char*        kAcksFile = ".ctxpack_quality_acks";
+inline const char*        kAcksFile = ".ripwire_quality_acks";
 
 // D1 fix (AUDIT5, HIGH): both sidecars above are FILE NAME constants, not paths — every read/write/remove
 // site must resolve them against the ANALYZED ROOT, never the process CWD. The CLI is invoked
-// `ctxpack <dir> --quality-ack` and may run from ANY cwd (a wrapper script, an orchestrator batching
+// `ripwire <dir> --quality-ack` and may run from ANY cwd (a wrapper script, an orchestrator batching
 // several roots from one launch dir, a Makefile target) — a bare relative filename then reads/writes/
 // deletes CWD's sidecar instead of `<dir>`'s. Observed live: --quality-ack on root B run from cwd A
-// rewrote A's committed `.ctxpack_quality_acks`; the stale-baseline self-heal (main.cpp) could have
+// rewrote A's committed `.ripwire_quality_acks`; the stale-baseline self-heal (main.cpp) could have
 // DELETED A's baseline the same way. The MCP server already root-qualified for exactly this reason
 // (mcpverbs.h's SIDECAR LOCATION note); this is the one shared home so the CLI and MCP paths can never
 // re-diverge again. Mirrors notes::notesPath's root + "/" + name discipline (notes.h).
@@ -121,8 +121,8 @@ inline bool insertScratchSeen( ScratchMap<std::uint8_t>& seen, std::uint64_t key
 }
 
 // S2: the BASELINE-ONLY canonical id — `relForHash(path,root)::scope::name`. Byte-identical to the graph's
-// g.canonId EXCEPT the path segment is made root-relative, so a COMMITTED .ctxpack_quality_baseline is
-// portable across root spellings (`ctxpack .` vs `ctxpack /abs/repo` produce the SAME baseline key + hash).
+// g.canonId EXCEPT the path segment is made root-relative, so a COMMITTED .ripwire_quality_baseline is
+// portable across root spellings (`ripwire .` vs `ripwire /abs/repo` produce the SAME baseline key + hash).
 // The graph's g.canonId — and thus the emitted `id=` attribute and resolution — is left completely UNCHANGED;
 // this key exists only where a baseline hash is taken (computeSnapshot / computeDelta). `root` is the ingest
 // root as invoked (cfg.rootPath). Deterministic: a pure string function of (path, root, scope, name).
@@ -352,7 +352,7 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
 // re-exports them with `using` aliases so its existing call sites are byte-unchanged.
 
 // S4: shared per-user cache-directory ladder (mirrors mcpCachePath): $TMPDIR (per-user on macOS) → $XDG_CACHE_HOME/
-// ctxpack (0700) → bare /tmp. A fixed world-writable /tmp path is a symlink/poisoning target on multi-user
+// ripwire (0700) → bare /tmp. A fixed world-writable /tmp path is a symlink/poisoning target on multi-user
 // machines. Returns the dir with NO trailing slash. Deterministic per (user, env).
 inline std::string cacheDirLadder()
 {
@@ -367,7 +367,7 @@ inline std::string cacheDirLadder()
     const char* xdgCache = std::getenv( "XDG_CACHE_HOME" );
     if( xdgCache && *xdgCache )
     {
-        std::string d = std::string( xdgCache ) + "/ctxpack";
+        std::string d = std::string( xdgCache ) + "/ripwire";
         ::mkdir( d.c_str(), 0700 );   // EEXIST is fine; other failures degrade at cache-write time
         return d;
     }
@@ -426,7 +426,7 @@ inline std::string gitCommitterDateIso( const std::string& root )
 // Empty inputs degrade to false. Deterministic for fixed repo state.
 //
 // R3 (owner ruling, 2026-07-29): this used to ALSO back the stale-baseline carve-out — a
-// `.ctxpack_quality_baseline` pinned at a REACHABLE ancestor of HEAD was honored as a deliberate floor (B10.1b).
+// `.ripwire_quality_baseline` pinned at a REACHABLE ancestor of HEAD was honored as a deliberate floor (B10.1b).
 // That carve-out is REVOKED (a parallel session's ancestor-pinned sidecar produced 31 phantom regressions on
 // the CLI while the MCP arm honestly reported zero); `selectBaseline` now decides staleness by STRICT sha
 // equality and never calls this. The remaining caller is `binstale.h`'s "is the built binary older than the
@@ -541,7 +541,7 @@ inline bool gitRepoHasHistory( const std::string& root )
 // PORTABLE across the per-run tmp root: the HEAD tree is materialized under a pid-suffixed tmpRoot that differs
 // every run, but saveCache stores each key ROOT-RELATIVE (relForHash) and loadCache re-absolutizes it against
 // the CURRENT tmpRoot (ingest.cpp T5), and the freshness gate is a CONTENT hash — so run 1's cache built under
-// /…/ctxpack-qhead-<pid1> warm-hits run 2 under /…/ctxpack-qhead-<pid2> for the same HEAD. The cache file lives
+// /…/ripwire-qhead-<pid1> warm-hits run 2 under /…/ripwire-qhead-<pid2> for the same HEAD. The cache file lives
 // under cacheDirLadder() directly (NOT inside tmpRoot), so it survives the tmpRoot RAII teardown.
 //
 // Bump when the HEAD-snapshot cache SCHEME changes (independent of ingest's own kParserVer, which the blob
@@ -643,7 +643,7 @@ inline std::string headSnapExclHex( const std::vector<std::string>& excludes, st
 }
 
 // Y4 (AUDIT5) — BLOB-COUNT SHARDING. The 2 GiB low-water sweep (kMaxCacheDirBytes below) bounds cache-dir
-// BYTES but not blob COUNT: production shows 23,502 ctxpack-*.bin blobs (mostly qheadsnap/qsnap/qbody churn —
+// BYTES but not blob COUNT: production shows 23,502 ripwire-*.bin blobs (mostly qheadsnap/qsnap/qbody churn —
 // a new blob per commit per repo, across the ~20 parallel agent sessions this machine runs) sitting FLAT in
 // one cache dir, so every sweep's directory listing is O(N) over a single huge readdir(). Shard by a
 // 2-hex-char subdir keyed on the BLOB'S OWN FILENAME hash — the same technique git's object store uses for
@@ -678,7 +678,7 @@ inline std::string resolveCacheBlobPath( const std::string& dir, const std::stri
     return shardDir + "/" + filename;
 }
 
-// Deterministic per-(repo, excludes, sha) cache filename: ctxpack-<family>-<repoHex>-<exclHex>-<shaHex>.bin,
+// Deterministic per-(repo, excludes, sha) cache filename: ripwire-<family>-<repoHex>-<exclHex>-<shaHex>.bin,
 // resolved through the shard-aware `resolveCacheBlobPath` above. The (family, repo, excl) prefix is the
 // eviction group; the sha suffix distinguishes commits within it. Every field is a fixed-width hex hash of
 // git-controlled / realpath'd input → no path-injection into the filename. One shared body for the
@@ -687,7 +687,7 @@ inline std::string shaKeyedCachePath( const char* family, const std::string& rep
 {
     const std::uint64_t shaKey = fnv1a64( sha );
     char tail[ 96 ];
-    std::snprintf( tail, sizeof( tail ), "ctxpack-%s-%s-%s-%016llx.bin",
+    std::snprintf( tail, sizeof( tail ), "ripwire-%s-%s-%s-%016llx.bin",
                    family, repoHex.c_str(), exclHex.c_str(), static_cast<unsigned long long>( shaKey ) );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
 }
@@ -708,7 +708,7 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
 // (rule-of-three: two families that evict identically → one evictor, not two copies that must stay in sync).
 //
 // A5 (cache-dir hygiene) generalization: a THIRD shape of sweep showed up (see sweepStaleCacheBlobsOnce below) —
-// age-then-size across the WHOLE "ctxpack-*" family rather than a keep-N-newest cap on one sub-family — so this
+// age-then-size across the WHOLE "ripwire-*" family rather than a keep-N-newest cap on one sub-family — so this
 // is the rule-of-three consolidation the paragraph above already anticipated, not a second copy-pasted sweeper.
 // Two independent, optional passes run BEFORE the original count cap (each a no-op at its zero default, so the
 // qheadsnap/qsnap call sites below are byte-for-byte unaffected):
@@ -842,14 +842,14 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     }
 }
 
-// A5 (cache-dir hygiene) — --doctor measured ~11,914 ctxpack-* blobs / 2.4 GB in the cache-ladder dir on a
+// A5 (cache-dir hygiene) — --doctor measured ~11,914 ripwire-* blobs / 2.4 GB in the cache-ladder dir on a
 // machine that runs ~20 parallel agent sessions across many repos. Only the qsnap/qheadsnap families above were
-// ever capped (keep-2-newest); the MAIN parse cache (ctxpack-<hash>-lean/rich.bin, defaultCachePath in main.cpp)
-// shares the SAME "ctxpack-" prefix and dir but had no evictor at all — every distinct (repo, verb-class) pair
+// ever capped (keep-2-newest); the MAIN parse cache (ripwire-<hash>-lean/rich.bin, defaultCachePath in main.cpp)
+// shares the SAME "ripwire-" prefix and dir but had no evictor at all — every distinct (repo, verb-class) pair
 // this machine has ever touched leaves a blob forever.
 //
 // Policy (decided): at saveCache time, at most once per process, best-effort and silent — first delete any
-// ctxpack-* blob older than kMaxCacheBlobAgeDays, THEN (only if the dir is still over budget) delete oldest-
+// ripwire-* blob older than kMaxCacheBlobAgeDays, THEN (only if the dir is still over budget) delete oldest-
 // first until the dir total is under kMaxCacheDirBytes. `keepPath` (the blob this call is about to use/rewrite)
 // is NEVER deleted by either pass, so a run can never evict the cache entry it is itself relying on.
 //
@@ -857,7 +857,7 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
 // reparse, and saveCache publishes via tmp-then-rename, so a blob another process deletes out from under a
 // concurrent reader just looks like a cold miss — never a corrupt read. Two sweepers racing on the same file
 // both call fs::remove, and a double-remove is a benign no-op (the second just gets ENOENT via the error_code
-// overload). This sweep matches "ctxpack-" (not a narrower family prefix), so it also backstops qsnap/qheadsnap
+// overload). This sweep matches "ripwire-" (not a narrower family prefix), so it also backstops qsnap/qheadsnap
 // blobs that outlive their own keep-2 cap between runs — one dir-wide safety net under the per-family caps.
 constexpr double         kMaxCacheBlobAgeDays = 30.0;
 constexpr std::uintmax_t kMaxCacheDirBytes    = 2ull * 1024 * 1024 * 1024;   // 2 GB
@@ -868,14 +868,14 @@ inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string&
     bool expected = false;
     if( !swept.compare_exchange_strong( expected, true ) ) return;   // only the first saveCache in this process sweeps
 
-    evictOldCacheFamily( dir, "ctxpack-", keepPath, std::numeric_limits<std::size_t>::max(), kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
+    evictOldCacheFamily( dir, "ripwire-", keepPath, std::numeric_limits<std::size_t>::max(), kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
 }
 
-// The HEAD-snapshot INGEST cache family (ctxpack-qheadsnap-<repoHex>-<exclHex>-<sha>.bin), capped per (repo,excl).
+// The HEAD-snapshot INGEST cache family (ripwire-qheadsnap-<repoHex>-<exclHex>-<sha>.bin), capped per (repo,excl).
 inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& repoHex, const std::string& exclHex,
                                     const std::string& keepPath, std::size_t keep = 2 )
 {
-    evictOldCacheFamily( dir, "ctxpack-qheadsnap-" + repoHex + "-" + exclHex + "-", keepPath, keep );
+    evictOldCacheFamily( dir, "ripwire-qheadsnap-" + repoHex + "-" + exclHex + "-", keepPath, keep );
 }
 
 // A4-P1 (round 2) — the HEAD-snapshot *Snapshot* cache. The qheadsnap INGEST cache above only skips the parse;
@@ -956,10 +956,10 @@ inline std::string qsnapCachePath( const std::string& repoHex, const std::string
 inline void evictOldQSnapCaches( const std::string& dir, const std::string& repoHex, const std::string& exclHex,
                                  const std::string& keepPath, std::size_t keep = 2 )
 {
-    evictOldCacheFamily( dir, "ctxpack-qsnap-" + repoHex + "-" + exclHex + "-", keepPath, keep );
+    evictOldCacheFamily( dir, "ripwire-qsnap-" + repoHex + "-" + exclHex + "-", keepPath, keep );
 }
 
-// Signal-to-noise round — the WINDOW-REF body-hash cache family ("ctxpack-qbody-"): the per-canonId raw-body
+// Signal-to-noise round — the WINDOW-REF body-hash cache family ("ripwire-qbody-"): the per-canonId raw-body
 // hashes of the tree at gitWindowRefSha, the committed-thrash evidence side of short-horizon-churn. Immutable
 // for a given (repo, excludes, ref sha) exactly like the HEAD snapshot, cached with the SAME two never-stale
 // guards (sha-keyed filename + the self-validating qsnap blob format — we reuse serializeSnapshot with only
@@ -1137,7 +1137,7 @@ inline std::mutex& headSnapshotIngestMutex()
 // Atomic qsnap publish (§2b atomic-publish gate: no partial blob is ever visible at qsnapCachePath). Write the
 // blob to a UNIQUE tmp file (pid + a monotone counter → distinct even between the request thread's lazy write
 // and the prefetch worker's write of the SAME sha), flush, then rename() — POSIX rename is atomic within a
-// directory, so a concurrent reader (readQSnapBlob here, or a separate ctxpack process) sees either the OLD
+// directory, so a concurrent reader (readQSnapBlob here, or a separate ripwire process) sees either the OLD
 // complete file or the NEW complete file, never a torn half-written one. This REPLACES the direct
 // `ofstream(..., trunc)` that was torn-read-prone (a reader could observe a zero-length / partially-written
 // blob mid-write and reject a perfectly good sha), hardening the lazy path too. Degrade-only: any IO failure
@@ -1196,7 +1196,7 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     { DEGRADED_PATH_ALERT( "quality: commit-tree revision does not resolve to a commit — refusing to archive" ); return {}; }
 
     std::error_code ec;
-    const std::string tmpRoot = cacheDirLadder() + "/ctxpack-" + tag + "-" + std::to_string( ::getpid() );
+    const std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( ::getpid() );
     fs::remove_all( fs::path( tmpRoot ), ec );                 // stale leftover from a crashed prior run
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     { DEGRADED_PATH_ALERT( "quality: cannot create commit-tree temp dir" ); return {}; }
@@ -1215,7 +1215,7 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
 
 // T0.1 — build a quality Snapshot from the HEAD version of the tree, so `--quality-delta` (and the MCP
 // quality_delta verb) works at "before I push" with ZERO start-of-task ritual when no explicit
-// `.ctxpack_quality_baseline` sidecar exists. Mechanism: `git archive HEAD` streams a tar of the committed
+// `.ripwire_quality_baseline` sidecar exists. Mechanism: `git archive HEAD` streams a tar of the committed
 // tree, extracted into a fresh temp dir under the hardened cacheDirLadder(); we ingest + buildGraph +
 // computeSnapshot on that temp root and clean it up. The temp root is passed as the snapshot's own `root`, so
 // every baseline key is the SAME root-RELATIVE baselineCanonId (relForHash) the working-tree side produces —
@@ -1266,7 +1266,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
         {
             // the fprintf is the visible line in ALL build types (test/qsnapcachecheck.sh (e) gates on it);
             // DEGRADED_PATH_ALERT compiles out under NDEBUG.
-            std::fprintf( stderr, "ctxpack: quality: HEAD Snapshot cache corrupt — recomputing\n" );
+            std::fprintf( stderr, "ripwire: quality: HEAD Snapshot cache corrupt — recomputing\n" );
             DEGRADED_PATH_ALERT( "quality: HEAD Snapshot cache corrupt — recomputing" );
         }
     }
@@ -1354,7 +1354,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
         if( hit == 1 )  return { std::move( cached.bodyHashBySym ), true };
         if( hit == -1 )
         {
-            std::fprintf( stderr, "ctxpack: quality: window-ref body cache corrupt — recomputing\n" );
+            std::fprintf( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
             DEGRADED_PATH_ALERT( "quality: window-ref body cache corrupt — recomputing" );
         }
     }
@@ -1385,7 +1385,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     bodyOnly.bodyHashBySym = bodyHashesBySym( refIng, tmpRoot );   // canonId keys — this is quality-delta's OWN churn lane, whose other side (snap.bodyHashBySym) is keyed the same way; path-qualifying ONE side made every symbol read as rewritten   // root = tmpRoot → root-relative keys (S2)
 
     atomicWriteQSnap( qbodyPath, serializeSnapshot( bodyOnly, refSha ) );
-    evictOldCacheFamily( cacheDirLadder(), "ctxpack-qbody-" + repoHex + "-" + qbExclHex + "-", qbodyPath, 2 );
+    evictOldCacheFamily( cacheDirLadder(), "ripwire-qbody-" + repoHex + "-" + qbExclHex + "-", qbodyPath, 2 );
     return { std::move( bodyOnly.bodyHashBySym ), true };
 }
 
@@ -1581,7 +1581,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     // empty; a v2 baseline read by an OLD binary likewise skips lines it doesn't know. Re-baseline after an
     // upgrade (a v1 baseline lacking the new lines makes every current public/large symbol a fresh "was 0"
     // regression by design — that is the intended re-baseline prompt, not a bug).
-    f << "# ctxpack quality baseline v2 — regenerate with --quality-baseline; do not hand-edit\n";
+    f << "# ripwire quality baseline v2 — regenerate with --quality-baseline; do not hand-edit\n";
     // STALENESS STAMP: the HEAD commit the baseline was pinned at. --quality-delta compares this to the
     // current HEAD and, if they differ (a baseline left by an abandoned/parallel session, or from before a
     // commit), IGNORES the sidecar and falls back to the git-HEAD auto-baseline instead of reporting a wall
@@ -1605,7 +1605,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
 
 // Returns true only when `path` is a file that actually LOOKS like a baseline. r27 SUSPICION-A, second half:
 // this used to return true for a 0-byte (or wholly unrecognizable) file purely because the ifstream opened —
-// so a truncated sidecar, a failed write, or an `: > .ctxpack_quality_baseline` left behind by a script became
+// so a truncated sidecar, a failed write, or an `: > .ripwire_quality_baseline` left behind by a script became
 // "a valid baseline in which nothing existed". Combined with the empty-baseline oracle fix in computeDelta,
 // that would classify EVERY finding new-symbol and gate nothing, silently. A file that yields no comment
 // header, no `head` stamp and no record line is not an empty baseline — it is a broken one; report it absent
@@ -1668,7 +1668,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
 // The HEAD sha a baseline was pinned at (the "head <sha>" record written by writeBaseline), or "" if the
 // file is absent, predates the staleness stamp, or does not carry a bare object name.
 //
-// r27 TRUST BOUNDARY (Lane C routing). This value came out of `.ctxpack_quality_baseline`, which is a
+// r27 TRUST BOUNDARY (Lane C routing). This value came out of `.ripwire_quality_baseline`, which is a
 // COMMITTED file — so on a cloned repo its contents are attacker-influenceable — and it used to flow VERBATIM
 // into `gitIsAncestor`'s `git merge-base --is-ancestor '<sha>' …` argv (the old stale-sidecar self-heal; the
 // R3 ruling below removed that reachability hop, so today the value only ever reaches a STRING COMPARE against
@@ -1698,7 +1698,7 @@ inline std::string readBaselineHeadSha( const std::string& path )
 // ─── R3 (owner ruling, 2026-07-29) — the ONE baseline-selection seam, shared by BOTH arms ───────────────
 //
 // `--quality-delta` (main.cpp) and the `quality_delta` MCP verb (mcpverbs.h) each used to decide for
-// themselves whether a `.ctxpack_quality_baseline` sidecar still describes this tree, and they DISAGREED:
+// themselves whether a `.ripwire_quality_baseline` sidecar still describes this tree, and they DISAGREED:
 //   • MCP: any pinned sha != current HEAD sha ⇒ STALE (drop it, auto-baseline vs git HEAD).
 //   • CLI: stale ONLY when the pinned sha was also UNREACHABLE from HEAD (`gitIsAncestor` false) — the
 //     B10.1b "reachable ancestor = a deliberately-pinned floor" carve-out.
@@ -1804,12 +1804,12 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
         // a sidecar can be Stale (pinned at a real, non-empty sha) on a tree where `headSha` is now "" (no
         // git HEAD: not a repo, or git unavailable), and the unqualified claim is then false in the exact
         // state it fires in. The caller's own fatal already gets this right (mcpverbs.h's "no
-        // .ctxpack_quality_baseline and no git HEAD to auto-compare against"), so no consumer is misled
+        // .ripwire_quality_baseline and no git HEAD to auto-compare against"), so no consumer is misled
         // today — but the alert itself should not assert a fallback that does not exist.
         else if( headSha.empty() )
-            DEGRADED_PATH_ALERT( "quality: could not unlink the stale .ctxpack_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; this tree has no git HEAD to fall back to either, so this run has no baseline floor at all" );
+            DEGRADED_PATH_ALERT( "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; this tree has no git HEAD to fall back to either, so this run has no baseline floor at all" );
         else
-            DEGRADED_PATH_ALERT( "quality: could not unlink the stale .ctxpack_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; the baseline still falls back to git HEAD" );
+            DEGRADED_PATH_ALERT( "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; the baseline still falls back to git HEAD" );
     }
     return sel;
 }
@@ -1827,7 +1827,7 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
 // ("@@ -oldStart[,oldCount] +newStart[,newCount] @@"; git omits a count of 1). A hunk with oldCount==0 is a
 // PURE INSERTION — no old line touched, can never itself prove SELF ("the diff only ADDS lines", verbatim).
 // For an oldCount>0 hunk whose NEW-side range overlaps the symbol's CURRENT [line, line+loc-1] span (from the
-// working-tree ingest — the only line numbers ctxpack has), `git blame --porcelain HEAD -L
+// working-tree ingest — the only line numbers ripwire has), `git blame --porcelain HEAD -L
 // oldStart,+oldCount -- path` reports each touched OLD line's real last-commit committer-time; ANY such time
 // inside the window ⇒ SELF. No external diff/blame library — parsed by hand (sscanf against the two
 // count-optional header forms), consistent with the rest of this file's popen-based git mining.
@@ -2028,7 +2028,7 @@ inline std::string displaySym( const std::string& sym, std::string_view root )
 
 // ─── Signal-to-noise round: the per-finding ACK RATCHET ────────────────────────────────────────────────
 //
-// `.ctxpack_quality_acks` — one line per deliberately-accepted finding:
+// `.ripwire_quality_acks` — one line per deliberately-accepted finding:
 //     ack <kind> <16-hex identity key> <acked magnitude> <reason to end of line>
 // --quality-ack[=REASON] merges every finding the CURRENT delta reports into this file; --quality-delta then
 // suppresses a finding whose (kind, key) is acked at a magnitude ≥ its current `now` — and RE-REPORTS it the
@@ -2079,7 +2079,7 @@ inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
 //     re-surfaced and GATE again. That is the FAIL-CLOSED direction: a re-surfaced finding costs one honest
 //     re-ack with a reason; a silently-kept one is the bug being fixed. Never resolve an ambiguity in favour
 //     of "green".
-// The rewrite is visible in `git diff .ctxpack_quality_acks` — the ack file is committed precisely so a
+// The rewrite is visible in `git diff .ripwire_quality_acks` — the ack file is committed precisely so a
 // change in what is suppressed is reviewable.
 inline std::string ackKindToken( const std::string& kind, bool isZeroMagnitude, bool isNewSymbol )
 {
@@ -2155,7 +2155,7 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
 {
     std::ofstream f( path, std::ios::trunc );
     if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write acks file" ); return false; }
-    f << "# ctxpack quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude\n";
+    f << "# ripwire quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude\n";
     f << "# format: ack <kind> <16-hex-key> <ackNow> <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
     for( const auto& [ mapKey, r ] : acks )                       // btree order → byte-stable, always-sorted file (the merge-friendly guarantee)
     {

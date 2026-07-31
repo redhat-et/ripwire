@@ -32,7 +32,7 @@
 # derived by running the query the extractor runs. Each fixture gives every callee a UNIQUE name, so
 # `--uses=<name>` is a per-spelling assertion whose expected value is just "how many times did I
 # write that call". Where a spelling extracts but cannot resolve (function-pointer variables, ObjC
-# struct fn-pointer fields, casts), the assertion is made PRE-resolution through ctxpack_probe,
+# struct fn-pointer fields, casts), the assertion is made PRE-resolution through ripwire_probe,
 # because a reference that resolves to nothing vanishes from every graph verb while still being
 # extracted — and "extracted but unresolved" is a different verdict from "never extracted".
 #
@@ -60,12 +60,12 @@
 # and every documented-absent row. Those arms are regression fences for a future round, not evidence
 # of this one.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/callformcheck.sh  |  bash test/callformcheck.sh asan/ctxpack
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/callformcheck.sh  |  bash test/callformcheck.sh asan/ripwire
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"      # BOTH seams: positional arg and CTXPACK_BIN=
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional arg and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolute BEFORE we cd away
 PROBE="${BIN}_probe"                                 # probecheck.sh's house pattern: the probe must
                                                      # follow the BINARY UNDER TEST, never a hardcoded
@@ -76,7 +76,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/callformfix dir — fixtures missing"; exit 2; }
 cd "$ROOT"
 
@@ -189,7 +189,7 @@ probeBlind(){   # $1 lang  $2 symbol  $3 name  $4 prose
 }
 
 [ -x "$PROBE" ] \
-    || { no "ctxpack_probe missing at $PROBE — the pre-resolution arms cannot run, and a gate that cannot run must say so rather than skip quietly (probecheck.sh's law)"; }
+    || { no "ripwire_probe missing at $PROBE — the pre-resolution arms cannot run, and a gate that cannot run must say so rather than skip quietly (probecheck.sh's law)"; }
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 echo

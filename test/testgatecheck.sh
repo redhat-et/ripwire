@@ -22,18 +22,18 @@
 #   --test-gate=src/uncovered.cpp → tests={}, untested={user} → exit 4 (a non-test impacted symbol no test covers)
 #   --test-gate=<no such file>    → changed=0, exit 0 (no change = no obligations)
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/testgatecheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/testgatecheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # BOTH seams: positional and CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional and RIPWIRE_BIN
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "testgatecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -106,7 +106,7 @@ fi
 UNIT_FAM="$( grep -rlF 'untested=\"' "$ROOT/src" 2>/dev/null | sed 's|.*/||' | sort | tr '\n' ' ' )"
 probe_unit(){ "$BIN" "$ROOT" $1 2>/dev/null | grep -oE '<!--.*?-->' | head -1; }
 u_ok=1
-for spec in "--seams:EDGES" "--test-gate=src/editcheck.h:SYMBOLS" "--flags --flip=CTXPACK_ASAN:HOSTS"; do
+for spec in "--seams:EDGES" "--test-gate=src/editcheck.h:SYMBOLS" "--flags --flip=RIPWIRE_ASAN:HOSTS"; do
     _v="${spec%:*}"; _unit="${spec##*:}"
     _leg="$( probe_unit "$_v" )"
     if [ -z "$_leg" ]; then

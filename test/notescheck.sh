@@ -14,19 +14,19 @@
 #   • MCP parity for BOTH the `for` verb (<note> children) and the `fetch_body` body verb (JSON notes array)
 #
 # Operates on a private temp git repo (never touches the real repo). Needs git.
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/notescheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/notescheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# Both seams: a positional argument wins, then CTXPACK_BIN, then the dev build. The positional form is what
+# Both seams: a positional argument wins, then RIPWIRE_BIN, then the dev build. The positional form is what
 # a red-first run uses (`bash test/notescheck.sh <scratch>/base_w3`) and this gate only had the env one.
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
@@ -63,14 +63,14 @@ EXP_ABSENT="$( run --expand=helper )"
 MAP_ABSENT="$( run )"
 
 # an EMPTY notes file must be byte-identical to an absent one
-: > "$WORK/.ctxpack_notes"
+: > "$WORK/.ripwire_notes"
 [ "$FOR_ABSENT" = "$( run --for="widget compute helper lonely" )" ] && ok "inert: empty notes file → --for byte-identical" || no "empty notes file changed --for output"
 [ "$EXP_ABSENT" = "$( run --expand=helper )" ]                       && ok "inert: empty notes file → --expand byte-identical" || no "empty notes file changed --expand output"
 [ "$MAP_ABSENT" = "$( run )" ]                                       && ok "inert: empty notes file → default map byte-identical" || no "empty notes file changed the default map"
 # a header-comment-only file is still empty of notes → still inert
-printf '# ctxpack field notes v1 — just the header\n' > "$WORK/.ctxpack_notes"
+printf '# ripwire field notes v1 — just the header\n' > "$WORK/.ripwire_notes"
 [ "$FOR_ABSENT" = "$( run --for="widget compute helper lonely" )" ] && ok "inert: comment-only notes file → --for byte-identical" || no "comment-only notes file changed --for output"
-rm -f "$WORK/.ctxpack_notes"
+rm -f "$WORK/.ripwire_notes"
 
 # ── --note-add: prints the written line, writes a sorted file, date from git committer clock ───────────────
 GIT_DATE="$( cd "$WORK" && git log -1 --format=%cs HEAD )"
@@ -82,26 +82,26 @@ printf '%s' "$LINE_F" | grep -qF "$NORM_FILE_TARGET" && printf '%s' "$LINE_F" | 
     && ok "--note-add prints the exact written line (D5-normalized root-relative target + text)" || { no "--note-add did not print the written line"; printf '%s\n' "$LINE_F"; }
 printf '%s' "$LINE_F" | grep -qF "$GIT_DATE" \
     && ok "--note-add dates the note with git's committer clock ($GIT_DATE), not wall time" || { no "--note-add date != git committer date"; printf '%s\n' "$LINE_F"; }
-[ -f "$WORK/.ctxpack_notes" ] && ok "--note-add created $WORK/.ctxpack_notes" || no "--note-add did not create the notes file"
+[ -f "$WORK/.ripwire_notes" ] && ok "--note-add created $WORK/.ripwire_notes" || no "--note-add did not create the notes file"
 
-# ── provenance stamp: --note-add prints (and .ctxpack_notes stores) the writing repo's FULL HEAD sha +
+# ── provenance stamp: --note-add prints (and .ripwire_notes stores) the writing repo's FULL HEAD sha +
 #    branch, tab-appended after the 3 legacy fields — the printed line is the exact 5-field data line. ──────
 printf '%s' "$LINE_F" | grep -qF "$( printf '%s\t%s\t%s\t%s\t%s' "$NORM_FILE_TARGET" "$GIT_DATE" "watch the arena lifetime here" "$GIT_SHA_FULL" "$GIT_BRANCH" )" \
     && ok "--note-add's printed line carries the FULL HEAD sha + branch (5-field provenance shape)" \
     || { no "--note-add's printed line is missing/wrong provenance fields"; printf '%s\n' "$LINE_F"; }
-grep -qF "$( printf '%s\t%s\t%s\t%s\t%s' "$NORM_FILE_TARGET" "$GIT_DATE" "watch the arena lifetime here" "$GIT_SHA_FULL" "$GIT_BRANCH" )" "$WORK/.ctxpack_notes" \
-    && ok ".ctxpack_notes stores the FULL sha on disk (abbreviation happens only at surfacing)" \
-    || no ".ctxpack_notes does not store the full sha for a freshly-stamped note"
+grep -qF "$( printf '%s\t%s\t%s\t%s\t%s' "$NORM_FILE_TARGET" "$GIT_DATE" "watch the arena lifetime here" "$GIT_SHA_FULL" "$GIT_BRANCH" )" "$WORK/.ripwire_notes" \
+    && ok ".ripwire_notes stores the FULL sha on disk (abbreviation happens only at surfacing)" \
+    || no ".ripwire_notes does not store the full sha for a freshly-stamped note"
 
 # add two MORE (a symbol note and a scoped-id note) that sort in a different order than added → self-heals sorted
 run --note-add="helper: off-by-one lives here" >/dev/null
 run --note-add="$COMPUTE_ID: scoped method note" >/dev/null
 # the DATA lines (strip the '#' header) must be in sorted order
-DATA="$( grep -v '^#' "$WORK/.ctxpack_notes" )"
+DATA="$( grep -v '^#' "$WORK/.ripwire_notes" )"
 [ "$DATA" = "$( printf '%s\n' "$DATA" | LC_ALL=C sort )" ] && ok "notes file stays SORTED across appends (merge-friendly round-trip)" || { no "notes file is not sorted"; printf '%s\n' "$DATA"; }
 # idempotence: re-adding an identical triple does not duplicate
 run --note-add="helper: off-by-one lives here" >/dev/null
-[ "$( grep -c 'off-by-one lives here' "$WORK/.ctxpack_notes" )" = 1 ] && ok "--note-add is idempotent (no duplicate line for an identical triple)" || no "--note-add duplicated an identical note"
+[ "$( grep -c 'off-by-one lives here' "$WORK/.ripwire_notes" )" = 1 ] && ok "--note-add is idempotent (no duplicate line for an identical triple)" || no "--note-add duplicated an identical note"
 
 # ── surfacing in --for: file note on <f>, symbol note on <d> — both stamped, so both carry sha=/branch= ────
 NOTE_OPEN='<note d="'"$GIT_DATE"'" sha="'"$GIT_SHA"'" branch="'"$GIT_BRANCH"'">'   # abbreviated (7-hex) sha at surfacing, full sha only on disk
@@ -197,11 +197,11 @@ else
 fi
 
 # ── D5 (AUDIT5 / plan X8): root-relative field-notes portability ───────────────────────────────────────────
-# The committed .ctxpack_notes design is only merge-friendly/portable if targets are ROOT-RELATIVE — an
+# The committed .ripwire_notes design is only merge-friendly/portable if targets are ROOT-RELATIVE — an
 # absolute target dies on any other checkout's crawl root. normalizeNoteTarget() is the write+read seam:
 # canonicalize an absolute in-root target to root-relative on write, refuse an outside-root target loudly,
 # and re-normalize on read so a LEGACY absolute-target file (pre-fix) keeps surfacing without a rewrite.
-rm -f "$WORK/.ctxpack_notes"
+rm -f "$WORK/.ripwire_notes"
 runAbs(){ ( cd "$WORK" && "$BIN" "$WORK" --no-cache "$@" 2>/dev/null ); }
 
 # (1) a root-relative file target (no leading "./") is accepted as-is, surfaces on --for, and is NOT dangling.
@@ -229,13 +229,13 @@ OUTSIDE_ERR="$( cd "$WORK" && "$BIN" "$WORK" --no-cache --note-add="/etc/passwd:
 OUTSIDE_RC="$(  cd "$WORK" && "$BIN" "$WORK" --no-cache --note-add="/etc/passwd: should never be written" >/dev/null 2>&1; echo $? )"
 { [ "$OUTSIDE_RC" -ne 0 ] && printf '%s' "$OUTSIDE_ERR" | grep -qi 'outside'; } \
     && ok "D5(3): an outside-root absolute target refuses loudly (exit $OUTSIDE_RC)" || { no "D5(3): outside-root target was not refused"; printf 'rc=%s err=%s\n' "$OUTSIDE_RC" "$OUTSIDE_ERR"; }
-grep -qF '/etc/passwd' "$WORK/.ctxpack_notes" \
-    && no "D5(3): the refused outside-root target was written to .ctxpack_notes anyway" \
-    || ok "D5(3): the refused outside-root target left .ctxpack_notes untouched"
+grep -qF '/etc/passwd' "$WORK/.ripwire_notes" \
+    && no "D5(3): the refused outside-root target was written to .ripwire_notes anyway" \
+    || ok "D5(3): the refused outside-root target left .ripwire_notes untouched"
 
-# (4) a LEGACY absolute-target entry (as a pre-D5 ctxpack would have written it — never normalized) still
+# (4) a LEGACY absolute-target entry (as a pre-D5 ripwire would have written it — never normalized) still
 #     surfaces: readNotesRelative re-relativizes it against THIS run's root on load, no rewrite needed.
-printf '%s\t2020-01-01\tD5 legacy absolute note\n' "$WORK/src/a.cpp" >> "$WORK/.ctxpack_notes"
+printf '%s\t2020-01-01\tD5 legacy absolute note\n' "$WORK/src/a.cpp" >> "$WORK/.ripwire_notes"
 D5_LEGACY="$( runAbs --for="widget compute helper lonely" )"
 printf '%s' "$D5_LEGACY" | grep -qF '<![CDATA[D5 legacy absolute note]]>' \
     && ok "D5(4): a legacy (pre-fix) absolute-target entry still surfaces (read-side normalization)" || { no "D5(4): legacy absolute-target entry did not surface"; printf '%s\n' "$D5_LEGACY" | head -c 400; echo; }
@@ -244,7 +244,7 @@ printf '%s' "$D5_LEGACY_NOTES" | grep -qF '<target id="src/a.cpp" dangling="0">'
     && ok "D5(4): the re-normalized legacy target is NOT dangling" || { no "D5(4): re-normalized legacy target flagged dangling"; printf '%s\n' "$D5_LEGACY_NOTES"; }
 
 # ── provenance backward-compat: a genuinely LEGACY 3-field line (no sha/branch — exactly what a pre-this-
-#    round .ctxpack_notes contains) reads correctly and surfaces with NO sha=/branch= attribute at all (never
+#    round .ripwire_notes contains) reads correctly and surfaces with NO sha=/branch= attribute at all (never
 #    a hollow sha="" — an absent attribute, per the "no sha shown rather than a wrong one" contract), sitting
 #    in the SAME file as provenance-stamped entries added earlier in this run. ─────────────────────────────
 printf '%s' "$D5_LEGACY" | grep -qE '<note d="2020-01-01"[^>]*sha=' \
@@ -256,11 +256,11 @@ printf '%s' "$D5_LEGACY" | grep -qF '<note d="2020-01-01"><![CDATA[D5 legacy abs
 # the mixed file (legacy 3-field lines alongside 5-field stamped ones) round-trips through a re-sort/write
 # (any further --note-add rewrites the whole file): legacy lines stay 3-field, stamped ones stay 5-field.
 runAbs --note-add="$WORK/src/a.cpp: D5 trigger a rewrite" >/dev/null
-LEGACY_LINE="$( grep -F 'D5 legacy absolute note' "$WORK/.ctxpack_notes" )"
+LEGACY_LINE="$( grep -F 'D5 legacy absolute note' "$WORK/.ripwire_notes" )"
 [ "$( awk -F'\t' '{print NF}' <<< "$LEGACY_LINE" )" = 3 ] \
     && ok "D5(4c): round-trip keeps the legacy line 3-field (no padded-empty sha/branch tabs)" \
     || { no "D5(4c): legacy line gained extra fields on rewrite"; printf '%s\n' "$LEGACY_LINE"; }
-STAMPED_LINE="$( grep -F 'D5 root-relative file note' "$WORK/.ctxpack_notes" )"
+STAMPED_LINE="$( grep -F 'D5 root-relative file note' "$WORK/.ripwire_notes" )"
 [ "$( awk -F'\t' '{print NF}' <<< "$STAMPED_LINE" )" = 5 ] \
     && ok "D5(4c): round-trip keeps a stamped line 5-field" \
     || { no "D5(4c): stamped line lost its provenance fields on rewrite"; printf '%s\n' "$STAMPED_LINE"; }
@@ -279,7 +279,7 @@ printf '%s' "$D5_SYM" | grep -qF "$NOTE_OPEN"'<![CDATA[D5 sym-target regression 
     && ok "D5(6): a bare-name SYM target is unaffected by root-relative normalization" || { no "D5(6): bare-name SYM target regressed"; printf '%s\n' "$D5_SYM" | head -c 400; echo; }
 
 # ── R6: decision-shaped note nudge — gentle stderr tip, never a refusal, never touches stdout/XML ──────────
-rm -f "$WORK/.ctxpack_notes"
+rm -f "$WORK/.ripwire_notes"
 runSplit(){ ( cd "$WORK" && "$BIN" . --no-cache "$@" ) >"$OUT_F" 2>"$ERR_F"; }   # splits stdout/stderr into $OUT_F/$ERR_F
 OUT_F="$( mktemp )"; ERR_F="$( mktemp )"
 
@@ -314,7 +314,7 @@ printf '%s' "$XML_A" | xmllint --noout - 2>/dev/null && ok "R6: --for XML after 
 #
 # --note-add decided "present but carries nothing" with notes::sanitizeField (\t \n \r -> space, ASCII-space
 # trim) plus .empty(). That refused an ASCII-blank note and ACCEPTED six other blank classes, committing an
-# invisible row into .ctxpack_notes — a file the tool tells users to commit and merge. The verdict now comes
+# invisible row into .ripwire_notes — a file the tool tells users to commit and merge. The verdict now comes
 # from ctx::hasVisibleContent (src/blanktext.h), the SAME derived table the MCP edit verbs read, so this gate
 # and mcpframehonestycheck's (K) arms are two callers of one rule rather than two rules.
 #
@@ -322,10 +322,10 @@ printf '%s' "$XML_A" | xmllint --noout - 2>/dev/null && ok "R6: --for XML after 
 # BRAILLE PATTERN BLANK (the glyph no property calls blank), a bidi RLO (Trojan-Source Cf) and a raw VT
 # (a C0 control sanitizeField does not map). Each is asserted THREE ways — exit 1, nothing appended to the
 # file, and the refusal SPELLS the code point rather than echoing the invisible bytes.
-rm -f "$WORK/.ctxpack_notes"
+rm -f "$WORK/.ripwire_notes"
 noteAddBlank(){ ( cd "$WORK" && "$BIN" . --no-cache --note-add="alpha: $1" ) >"$OUT_F" 2>"$ERR_F"; }
 
-blankRows(){ [ -f "$WORK/.ctxpack_notes" ] && grep -c . "$WORK/.ctxpack_notes" || echo 0; }
+blankRows(){ [ -f "$WORK/.ripwire_notes" ] && grep -c . "$WORK/.ripwire_notes" || echo 0; }
 ROWS_BEFORE="$( blankRows )"
 
 # NB the payloads are built with printf so the bytes are exact — a literal in this file would be at the mercy
@@ -335,15 +335,15 @@ for probe in "NBSP:\302\240:U+00A0" "ZWSP:\342\200\213:U+200B" "BOM:\357\273\277
     label="${probe%%:*}"; rest="${probe#*:}"; bytes="${rest%%:*}"; want="${rest##*:}"
     noteAddBlank "$( printf "$bytes" )"; rc=$?
     [ "$rc" -eq 1 ] && ok "§S3 --note-add refuses a $label-only note (exit 1)" \
-                    || no "§S3 --note-add accepted a $label-only note (exit $rc) — it would be committed to .ctxpack_notes"
+                    || no "§S3 --note-add accepted a $label-only note (exit $rc) — it would be committed to .ripwire_notes"
     [ ! -s "$OUT_F" ] && ok "§S3 the $label refusal wrote no line to stdout" \
                       || no "§S3 the $label refusal still printed a written line: [$( head -c 120 "$OUT_F" )]"
     grep -qF "$want" "$ERR_F" && ok "§S3 the $label refusal SPELLS the code point ($want), it does not echo the bytes" \
                               || no "§S3 the $label refusal does not name $want: [$( grep -v 'tip:' "$ERR_F" | head -c 160 )]"
 done
 ROWS_AFTER="$( blankRows )"
-[ "$ROWS_BEFORE" = "$ROWS_AFTER" ] && ok "§S3 six blank classes appended ZERO rows to .ctxpack_notes ($ROWS_AFTER)" \
-                                   || no "§S3 .ctxpack_notes grew from $ROWS_BEFORE to $ROWS_AFTER rows across the blank probes"
+[ "$ROWS_BEFORE" = "$ROWS_AFTER" ] && ok "§S3 six blank classes appended ZERO rows to .ripwire_notes ($ROWS_AFTER)" \
+                                   || no "§S3 .ripwire_notes grew from $ROWS_BEFORE to $ROWS_AFTER rows across the blank probes"
 
 # the TARGET half — the sibling-completeness lens. Both fields go through the same predicate, so a blank
 # target must refuse for the same reason a blank text does; nothing in the audit had probed it.

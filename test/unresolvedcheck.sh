@@ -18,7 +18,7 @@
 #               helper()                 // same-language Python call → resolves cleanly
 #             def helper(): 1
 #
-# FINDINGS from running `ctxpack test/unresolvedfix` and reading the raw header BEFORE asserting:
+# FINDINGS from running `ripwire test/unresolvedfix` and reading the raw header BEFORE asserting:
 #   - header shows `unresolved=1` — exactly the one cross-language `render()` call from Python.
 #     `totally_external_fn` (genuine external) and both same-language calls are NOT counted.
 #   - edges=2: cppMain -> render (C++) and run -> helper (Python) both resolve — the lever does
@@ -33,13 +33,13 @@
 #
 # Usage:
 #   test/unresolvedcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/unresolvedcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/unresolvedcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/unresolvedfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -53,7 +53,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # (which has no digit) is NOT matched — only the header stats token `unresolved=<N>`.
 gauge_of(){ grep -oE "$2=[0-9]+" "$1" | head -1 | cut -d= -f2; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 
 echo "unresolvedcheck: BIN=$BIN  FIX=$FIX"

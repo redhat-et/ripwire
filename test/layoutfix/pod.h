@@ -1,7 +1,7 @@
 #pragma once
 
 // pod.h — layout fixture: structs whose byte offsets are known BY HAND, one per modelled rule.
-// Never compiled; ctxpack indexes it as C++ and test/layoutcheck.sh asserts the computed table.
+// Never compiled; ripwire indexes it as C++ and test/layoutcheck.sh asserts the computed table.
 
 #define SLOT_COUNT 4
 

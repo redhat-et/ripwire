@@ -1,12 +1,12 @@
 name: CI
 
 # Guardrails as automated gates (CLAUDE.md "The guardrails as automated gates", SPEC §6/§8):
-#   - release job:  configure (portable default, no CTXPACK_NATIVE — CI hardware is not "this dev machine")
+#   - release job:  configure (portable default, no RIPWIRE_NATIVE — CI hardware is not "this dev machine")
 #                    + build + full test/regression.sh (170+ gates incl. determinism/G4/quality) per OS.
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
-#                    Linux hardware, not the local CTXPACK_PRETEND_LINUX proxy test/portablebuildcheck.sh
+#                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
 #                    uses on the (Apple Silicon) dev machines this repo is normally built on.
-#   - asan job:      configure -DCTXPACK_ASAN=ON (G1: address,undefined,integer,float-divide-by-zero,
+#   - asan job:      configure -DRIPWIRE_ASAN=ON (G1: address,undefined,integer,float-divide-by-zero,
 #                    float-cast-overflow, fail-fast) + build + the fixture self-run + the 5 heaviest verbs
 #                    (--pack-task/--from-trace/--quality-delta/--merge-scout/--edit-check)
 #                    via their own gate scripts pointed at the ASan binary. NOT the full regression.sh under
@@ -31,7 +31,7 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Never CTXPACK_NATIVE in CI: -march=native would bake in whatever ISA the CI runner's host happens to
+# Never RIPWIRE_NATIVE in CI: -march=native would bake in whatever ISA the CI runner's host happens to
 # expose that week, defeating the entire point of testing the portable default.
 
 jobs:
@@ -56,14 +56,14 @@ jobs:
         run: brew install ripgrep
 
 
-      - name: Configure (portable default — no CTXPACK_NATIVE)
+      - name: Configure (portable default — no RIPWIRE_NATIVE)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j
 
       - name: "test/regression.sh (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
-        run: CTXPACK_BIN=build/ctxpack bash test/regression.sh
+        run: RIPWIRE_BIN=build/ripwire bash test/regression.sh
 
       # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so every
       # degrade-path gate above passed for the WRONG REASON: it could not observe the alert it asserts.
@@ -78,16 +78,16 @@ jobs:
         run: cmake --build build-debugalerts -j
 
       - name: "test/regression.sh against the non-Release build (degrade paths visible)"
-        run: CTXPACK_BIN=build-debugalerts/ctxpack bash test/regression.sh
+        run: RIPWIRE_BIN=build-debugalerts/ripwire bash test/regression.sh
 
       - name: det-gate — 2-run byte-identical diff
         run: |
-          ./build/ctxpack test/fixture --no-cache >/tmp/run_a.xml
-          ./build/ctxpack test/fixture --no-cache >/tmp/run_b.xml
+          ./build/ripwire test/fixture --no-cache >/tmp/run_a.xml
+          ./build/ripwire test/fixture --no-cache >/tmp/run_b.xml
           diff -q /tmp/run_a.xml /tmp/run_b.xml
 
       - name: G4 — xmllint --noout
-        run: ./build/ctxpack test/fixture --no-cache | xmllint --noout -
+        run: ./build/ripwire test/fixture --no-cache | xmllint --noout -
 
   asan:
     name: asan (${{ matrix.os }})
@@ -98,7 +98,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # Darwin's arm64 runtime rejects the standalone leak sanitizer at startup (CMakeLists.txt's own
-      # comment on this, `ctxpack_asan_fixture`); Linux gets full leak detection.
+      # comment on this, `ripwire_asan_fixture`); Linux gets full leak detection.
       ASAN_OPTIONS: ${{ runner.os == 'macOS' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1' }}
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       LSAN_OPTIONS: suppressions=${{ github.workspace }}/lsan_suppressions.txt
@@ -117,28 +117,28 @@ jobs:
 
 
       - name: Configure (G1 sanitizer stack)
-        run: cmake -S . -B asan -DCTXPACK_ASAN=ON
+        run: cmake -S . -B asan -DRIPWIRE_ASAN=ON
 
       - name: Build
         run: cmake --build asan -j
 
-      - name: G1 fixture self-run (ctxpack_asan_fixture)
-        run: cmake --build asan --target ctxpack_asan_fixture
+      - name: G1 fixture self-run (ripwire_asan_fixture)
+        run: cmake --build asan --target ripwire_asan_fixture
 
       - name: Heavy verb — --pack-task (test/packtaskcheck.sh)
-        run: CTXPACK_BIN=asan/ctxpack bash test/packtaskcheck.sh
+        run: RIPWIRE_BIN=asan/ripwire bash test/packtaskcheck.sh
 
       - name: Heavy verb — --from-trace (test/tracecheck.sh)
-        run: CTXPACK_BIN=asan/ctxpack bash test/tracecheck.sh
+        run: RIPWIRE_BIN=asan/ripwire bash test/tracecheck.sh
 
       - name: Heavy verb — --quality-delta (test/qualitycheck.sh)
-        run: CTXPACK_BIN=asan/ctxpack bash test/qualitycheck.sh
+        run: RIPWIRE_BIN=asan/ripwire bash test/qualitycheck.sh
 
       - name: Heavy verb — --merge-scout (test/mergescoutcheck.sh)
-        run: CTXPACK_BIN=asan/ctxpack bash test/mergescoutcheck.sh
+        run: RIPWIRE_BIN=asan/ripwire bash test/mergescoutcheck.sh
 
       - name: Heavy verb — --edit-check (test/editcheckcheck.sh)
-        run: CTXPACK_BIN=asan/ctxpack bash test/editcheckcheck.sh
+        run: RIPWIRE_BIN=asan/ripwire bash test/editcheckcheck.sh
 
       # NOT a heavy verb — here because it is the ONLY gate whose subject is an integer-overflow class that
       # a plain binary cannot observe. cppqualcheck §9 drives an unbalanced `operator>` frame through
@@ -146,16 +146,16 @@ jobs:
       # it in silence. The suite job above runs the whole suite TWICE and both times PLAIN, so this gate was
       # green-by-construction in CI until it appeared here (V3-H-2).
       - name: Sanitizer-only class — cppqualcheck §9 operator-frame scan (test/cppqualcheck.sh)
-        run: CTXPACK_BIN=asan/ctxpack bash test/cppqualcheck.sh
+        run: RIPWIRE_BIN=asan/ripwire bash test/cppqualcheck.sh
 
       - name: det-gate — 2-run byte-identical diff (ASan binary)
         run: |
-          ./asan/ctxpack test/fixture --no-cache >/tmp/run_a.xml
-          ./asan/ctxpack test/fixture --no-cache >/tmp/run_b.xml
+          ./asan/ripwire test/fixture --no-cache >/tmp/run_a.xml
+          ./asan/ripwire test/fixture --no-cache >/tmp/run_b.xml
           diff -q /tmp/run_a.xml /tmp/run_b.xml
 
       - name: G4 — xmllint --noout (ASan binary)
-        run: ./asan/ctxpack test/fixture --no-cache | xmllint --noout -
+        run: ./asan/ripwire test/fixture --no-cache | xmllint --noout -
 
       # Self-dogfood, STILL NON-GATING — but for a smaller and better-measured reason than before.
       #
@@ -179,4 +179,4 @@ jobs:
       # fixture, including the negative controls. Re-open this decision when the DESIGN docs' anchors are
       # fixed and the review notes carry a self-date: at that point drift= can be gated at 0.
       - name: Self-report (non-gating) — --doc-drift on our own docs
-        run: ./asan/ctxpack . --doc-drift --with-history || true
+        run: ./asan/ripwire . --doc-drift --with-history || true

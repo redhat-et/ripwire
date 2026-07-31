@@ -2,7 +2,7 @@
 # metalcheck.sh — the field-notes §4 gate: Metal Shading Language (.metal) + dual-compile-header coverage.
 #
 #   test/metalcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/metalcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/metalcheck.sh
 #
 # THE FAILURE THIS PINS: `--callers=ml_styleFor` returned 0 on a real Metal repo — every .metal shader
 # was outside the crawl, so the GPU half of a dual-compile codebase was invisible to the call graph and
@@ -24,7 +24,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/metalfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -32,7 +32,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 
 echo "metalcheck: BIN=$BIN  FIX=$FIX"

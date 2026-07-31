@@ -22,28 +22,28 @@
 #       different truncation set / a different sort tie-break, which only reproduces under contention)
 #   (6) PARALLEL == SERIAL: a one-file corpus takes the workerCount<=1 branch; its hits (line + enclosing +
 #       matched text) must equal the same file's hits from the parallel multi-file scan
-#   (7) EXTERNAL ORACLE: the (file,line) set ctxpack reports equals what `grep -n -F` reports for the same
-#       literal on the same fixture — an oracle that cannot be biased by ctxpack's own verifier
+#   (7) EXTERNAL ORACLE: the (file,line) set ripwire reports equals what `grep -n -F` reports for the same
+#       literal on the same fixture — an oracle that cannot be biased by ripwire's own verifier
 #   (8) a >512 B minified line is CAPPED (kGrepMatchedLineMaxBytes) and never splits a UTF-8 codepoint;
 #       output stays well-formed XML and valid UTF-8
 #   (9) the regex path also emits <m>, and --regex == --regex --no-prefilter (the per-file trigram reject
 #       that replaced the posting lists is still SOUND)
 #
 # Usage:
-#   bash test/grepscancheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack bash test/grepscancheck.sh
+#   bash test/grepscancheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire bash test/grepscancheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "grepscancheck: BIN=$BIN"
 
@@ -132,15 +132,15 @@ rows     "$TMP/lit"      | grep 'geometry.cpp' >"$TMP/par.rows"
     && ok "(6) single-worker (1-file corpus) hits identical to the parallel multi-file scan" \
     || { no "(6) serial and parallel scans disagree"; diff "$TMP/solo.rows" "$TMP/par.rows" | head -6; }
 
-# ── (7) EXTERNAL ORACLE: ctxpack's (file,line) set == `grep -n -F`'s, on the same literal ─────────────
+# ── (7) EXTERNAL ORACLE: ripwire's (file,line) set == `grep -n -F`'s, on the same literal ─────────────
 PAT='perimeter'
 "$BIN" "$FIX" --no-cache --grep="$PAT" 2>/dev/null | sed 's/></>\n</g' \
     | grep -oE 'p="[^"]*"' | sed 's/p="//;s/"$//' | sed "s|^$ROOT/||" | sort >"$TMP/cx.loc"
 ( cd "$FIX" && grep -rn -F "$PAT" . 2>/dev/null | sed 's|^\./||' | awk -F: '{print "test/fixture/"$1":"$2}' ) | sort -u >"$TMP/gr.loc"
 if diff -q "$TMP/cx.loc" "$TMP/gr.loc" >/dev/null; then
-    ok "(7) external oracle: ctxpack's hit locations == grep -n -F's ($( wc -l <"$TMP/cx.loc" | tr -d ' ' ) lines)"
+    ok "(7) external oracle: ripwire's hit locations == grep -n -F's ($( wc -l <"$TMP/cx.loc" | tr -d ' ' ) lines)"
 else
-    no "(7) ctxpack's hit locations differ from grep -n -F's"; diff "$TMP/cx.loc" "$TMP/gr.loc" | head -6
+    no "(7) ripwire's hit locations differ from grep -n -F's"; diff "$TMP/cx.loc" "$TMP/gr.loc" | head -6
 fi
 
 # ── (8) long-line cap + UTF-8 safety on a generated hostile corpus ────────────────────────────────────

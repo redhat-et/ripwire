@@ -10,18 +10,18 @@
 #   3) NO lens extras (churn=/amp=/clone=/tested=/<doc>) leak into a row.
 #   4) works on BOTH --for and --query; composes with --top-k; byte-deterministic; xmllint-clean.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/candidatescheck.sh
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/candidatescheck.sh
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 echo "candidatescheck: BIN=$BIN"
 

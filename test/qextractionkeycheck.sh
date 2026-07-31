@@ -31,10 +31,10 @@
 #       the default run's (quality.h threaded the ceiling into the HEAD ingest but keyed only on excludes).
 #
 # Uses its own temp repo + a private XDG_CACHE_HOME (TMPDIR unset), like qsnapcachecheck.sh. Needs git.
-# Usage:  test/qextractionkeycheck.sh   |   CTXPACK_BIN=build/ctxpack test/qextractionkeycheck.sh
+# Usage:  test/qextractionkeycheck.sh   |   RIPWIRE_BIN=build/ripwire test/qextractionkeycheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 QSRC="$ROOT/src/quality.h"
 ISRC="$ROOT/src/ingest.cpp"
@@ -42,7 +42,7 @@ fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ]  || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ]  || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -f "$QSRC" ] || { echo "no $QSRC — run from the repo"; exit 2; }
 [ -f "$ISRC" ] || { echo "no $ISRC — run from the repo"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
@@ -97,8 +97,8 @@ printf '%s' "$de" | grep -q 'blobCacheVer  != kIngestCacheVersionMirror' \
 # ── behavioral half: a temp repo with a real, non-vacuous regression ───────────────────────────────────────
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
 XDG="$TMP/xdg"; mkdir -p "$XDG"
-CACHEDIR="$XDG/ctxpack"
-qsnapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ctxpack-qsnap-*.bin' 2>/dev/null; }
+CACHEDIR="$XDG/ripwire"
+qsnapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qsnap-*.bin' 2>/dev/null; }
 nqsnap(){ qsnapfiles | wc -l | tr -d ' '; }
 run(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$REPO" --quality-delta "$@"; }
 
@@ -127,7 +127,7 @@ EOF
 run >"$TMP/warm1" 2>/dev/null
 QF="$( qsnapfiles | head -1 )"
 if [ -z "$QF" ]; then
-    no "no ctxpack-qsnap-*.bin blob written — cannot inspect the header"
+    no "no ripwire-qsnap-*.bin blob written — cannot inspect the header"
 else
     # od the first 16 bytes; fields are native-endian u32 (documented: same-machine blob, checksum otherwise).
     hdr="$( od -An -tu4 -j4 -N12 "$QF" | tr -s ' ' )"

@@ -14,25 +14,25 @@
 #   cyc1.cpp / cyc2.cpp : f1()->f2() and f2()->f1() at file scope via headers → a file->file 2-cycle
 #
 # Hand-computed report claims asserted:
-#   - the "# ctxpack architecture report" title line exists
+#   - the "# ripwire architecture report" title line exists
 #   - the counts line reports the right FILE count (matches the XML map's files= attribute — cross-checked
 #     against the map itself so the number is derived, not hard-coded)
 #   - the report and the XML map AGREE on symbol count (self-consistency: the same graph, two renderings)
 #   - a "God files" section names hub.h (the most-included header)
 #   - determinism
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/reportcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/reportcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "reportcheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -49,8 +49,8 @@ MAP="$( run )"
 map_attr(){ printf '%s' "$MAP" | grep -oE "$1=[0-9]+" | head -1 | grep -oE '[0-9]+'; }
 
 # ── 1) it IS a markdown architecture report (not the XML map) ─────────────────────────────────────────
-printf '%s' "$REP" | grep -q '^# ctxpack architecture report' \
-    && ok "--report emits the markdown '# ctxpack architecture report' title" \
+printf '%s' "$REP" | grep -q '^# ripwire architecture report' \
+    && ok "--report emits the markdown '# ripwire architecture report' title" \
     || no "--report missing markdown title (got: $( printf '%s' "$REP" | head -1 ))"
 printf '%s' "$REP" | grep -q '<r>' \
     && no "--report leaked XML map markup (<r>) — should be pure markdown" \

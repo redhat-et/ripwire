@@ -11,7 +11,7 @@
 #
 # test/regexbombfix/ has:
 #   bomb.md     — a long line of 4000 'a's, no 'b' — the catastrophic-backtracking bait for `(a+)+b`.
-#                 (.md, not .txt — ctxpack only ingests files with a recognized extension into ing.files,
+#                 (.md, not .txt — ripwire only ingests files with a recognized extension into ing.files,
 #                 and grep only scans ingested files; .md has no tree-sitter grammar but its raw bytes are
 #                 still stored for grep, which is all this fixture needs.)
 #   normal.cpp  — two ordinary EASY (a+)+b matches ("aab", "aaab"), to prove the bomb file's degrade does
@@ -20,12 +20,12 @@
 # Checks: (1) exit 0 (not a crash/signal death), (2) well-formed XML output, (3) the normal file's matches
 # still come through (the bomb file's failure is isolated), (4) deterministic (two runs byte-identical).
 #
-# Usage: CTXPACK_BIN=build/ctxpack bash test/regexbombcheck.sh
+# Usage: RIPWIRE_BIN=build/ripwire bash test/regexbombcheck.sh
 # Exits non-zero on any failure. Does NOT touch regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/regexbombfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -33,7 +33,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/regexbombfix dir — fixture missing"; exit 2; }
 
 echo "regexbombcheck: BIN=$BIN  CORPUS=test/regexbombfix"

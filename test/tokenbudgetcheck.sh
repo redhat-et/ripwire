@@ -23,15 +23,15 @@
 # class (measure into a buffer, decide, THEN write — never write-then-decide). See src/main.cpp's
 # runDefaultMap (the out/memBuf/memSz block right before the token-budget check) and its §P6.8 comment.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/tokenbudgetcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/tokenbudgetcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# W3FIX: $1 was ignored here — the file bound BIN from CTXPACK_BIN alone, so `test/tokenbudgetcheck.sh
-# asan/ctxpack` (the form every sibling gate accepts, and the form the suite's asan pass uses) silently tested
-# build/ctxpack instead. Same seam the wave-1 orchestrator fixed in B1's four gates, one file over.
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+# W3FIX: $1 was ignored here — the file bound BIN from RIPWIRE_BIN alone, so `test/tokenbudgetcheck.sh
+# asan/ripwire` (the form every sibling gate accepts, and the form the suite's asan pass uses) silently tested
+# build/ripwire instead. Same seam the wave-1 orchestrator fixed in B1's four gates, one file over.
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -46,7 +46,7 @@ TMP_TB_B_ERR="$TMP_TB_DIR/tiny.err"
 TMP_TB_B2_ERR="$TMP_TB_DIR/tiny2.err"
 TMP_TB_COMPOSE_ERR="$TMP_TB_DIR/compose.err"
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 
 echo "tokenbudgetcheck: BIN=$BIN"

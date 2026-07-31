@@ -1,4 +1,4 @@
-; ctxpack Bash tags — written for ctxpack (.sh/.bash/.zsh). tree-sitter-bash ships no
+; ripwire Bash tags — written for ripwire (.sh/.bash/.zsh). tree-sitter-bash ships no
 ; upstream tags.scm, so this is derived from the v0.23.3 grammar's node-types, verified
 ; against an AST dump (see the langcheck fixture).
 ;

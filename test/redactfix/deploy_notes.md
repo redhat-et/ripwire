@@ -1,7 +1,7 @@
 # Deployment credentials playbook
 
 These notes describe the credential rotation runbook so `--recall` can surface them. Every value here
-is a fake EXAMPLE. When ctxpack recalls this doc body it must redact the live-looking credentials below.
+is a fake EXAMPLE. When ripwire recalls this doc body it must redact the live-looking credentials below.
 
 ## AWS
 

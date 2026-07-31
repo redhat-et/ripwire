@@ -8,7 +8,7 @@
 # resolveIncludeAdj / fileIncludes in src/graph.h).
 #
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-# REAL BUG FOUND (2026-07-03, ctxpack HEAD 79d5918): Rule 3 silently NEVER fires on Python (or Go/Rust/
+# REAL BUG FOUND (2026-07-03, ripwire HEAD 79d5918): Rule 3 silently NEVER fires on Python (or Go/Rust/
 # JS/TS — see the probes below), even though --deps CORRECTLY prints the raw include target text and a
 # human reading `--deps` output would reasonably assume the file graph resolved. Root cause, read directly
 # from src/graph.h (resolveIncludeAdj, ~line 1022, and the near-identical fileIncludes builder ~line 236):
@@ -50,13 +50,13 @@
 #
 # Usage:
 #   test/narrowlangcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/narrowlangcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/narrowlangcheck.sh
 #
 # Exits non-zero on any failure. Does NOT edit regression.sh or any existing test file.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CPPFIX="test/importnarrowfix"          # relative — so emitted p="..." paths match the C++ control's own gate style
 PYFIX="test/narrowlangfix/py"
@@ -67,7 +67,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 bug(){ printf '  REAL BUG (pinned, not asserted-correct)  %s\n' "$*"; bugs=$((bugs+1)); }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 [ -d "$CPPFIX" ] || { echo "no test/importnarrowfix directory"; exit 2; }
 [ -d "$PYFIX" ]  || { echo "no test/narrowlangfix/py directory"; exit 2; }

@@ -13,7 +13,7 @@
 #   P3    cloneIsKeyword membership correctness.
 #   MUT   a mutation self-test (lifetime stream must differ from char-literal stream).
 #
-# Independent of the ctxpack binary and of main.cpp. Uses its OWN temp dir. Does NOT edit regression.sh.
+# Independent of the ripwire binary and of main.cpp. Uses its OWN temp dir. Does NOT edit regression.sh.
 # Usage:  bash test/clonelexcheck.sh            (compiles with c++/clang++)
 #         CXX=clang++ bash test/clonelexcheck.sh
 
@@ -28,7 +28,7 @@ echo "clonelexcheck: CXX=$CXX"
 
 # ── compile the harness against clones.h (header-only): infra + src on the include path ───────────────────────
 # fastmath.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) — link it exactly
-# as the real ctxpack target does, so any degrade path resolves at link time.
+# as the real ripwire target does, so any degrade path resolves at link time.
 if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$BIN" 2> "$WORK/cc.log"; then

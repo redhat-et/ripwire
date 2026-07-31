@@ -6,8 +6,8 @@
 # WHAT THIS IS. Claude Code already writes every user prompt and every Edit/Write/Read tool call (with
 # file paths) to ~/.claude/projects/<repo-slug>/*.jsonl for its own resume feature. This is free,
 # already-on-disk ore for a retrieval eval: segment a session into tasks (§2.1), gold = the files that
-# task's Edit/Write calls actually touched (§2.2), tag sessions that used ctxpack itself so the consumer
-# never grades ctxpack's own homework as independent evidence (§3.2). See DESIGN_traceEvals.md in full —
+# task's Edit/Write calls actually touched (§2.2), tag sessions that used ripwire itself so the consumer
+# never grades ripwire's own homework as independent evidence (§3.2). See DESIGN_traceEvals.md in full —
 # this file implements it verbatim.
 #
 # PRIVACY (§4, hard rule): local-only, opt-in, explicit invocation only. Reads only
@@ -18,7 +18,7 @@
 # §5.1 — it would break the Gate #1 byte-identical determinism contract).
 #
 # USAGE:
-#   python3 bench/mine_traces.py --repo /path/to/repo                  # writes ~/.ctxpack/traceevals/<hash>.jsonl
+#   python3 bench/mine_traces.py --repo /path/to/repo                  # writes ~/.ripwire/traceevals/<hash>.jsonl
 #   python3 bench/mine_traces.py --repo . --dry-run                    # segment/gold histogram, no write
 #   python3 bench/mine_traces.py --repo . --only-committed             # opt-in strict filter, §3.1
 #   python3 bench/mine_traces.py --repo . --export-sanitized out.jsonl # query redacted to a skeleton,
@@ -44,7 +44,7 @@ MIN_QUERY_CHARS = 24     # §2.1 — below this, a "user" turn is noise, not a t
 QUERY_TRUNC     = 2000   # §2.1 — mirrors bench/locbench's --query-chars posture
 JACCARD_NEAR_DUP = 0.90  # §2.3 — near-dup gold-set collapse threshold
 
-CTXPACK_BASH_RE = re.compile(r'(?:^|[\s;|&])ctxpack(?:\s|$)')   # §3.2 — Bash-invoked ctxpack
+RIPWIRE_BASH_RE = re.compile(r'(?:^|[\s;|&])ripwire(?:\s|$)')   # §3.2 — Bash-invoked ripwire
 
 # a small, deliberately short stopword list for the --export-sanitized skeleton's "top subtokens" —
 # NOT used anywhere in the real (unsanitized) artifact, which keeps the verbatim query.
@@ -181,7 +181,7 @@ def mine_session_file(path: str, repo_root: str, min_gold: int):
             "session_id": session_id,
             "segment_start_line": s.start_line,
             "segment_end_line": s.end_line,
-            "ctxpack_assisted": s.assisted,
+            "ripwire_assisted": s.assisted,
         })
 
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -221,9 +221,9 @@ def mine_session_file(path: str, repo_root: str, min_gold: int):
                     tin = tb.get("input") or {}
                     if name in ("Edit", "Write"):
                         record_edit(seg, repo_root, name, tin)
-                    elif name == "Bash" and CTXPACK_BASH_RE.search(tin.get("command", "") or ""):
+                    elif name == "Bash" and RIPWIRE_BASH_RE.search(tin.get("command", "") or ""):
                         seg.assisted = True
-                    elif name.startswith("mcp__") and "ctxpack" in name.lower():
+                    elif name.startswith("mcp__") and "ripwire" in name.lower():
                         seg.assisted = True
                 seg.end_line = lineno
             # system / queue-operation / attachment / frame-link / custom-title / ai-title: ignored (§1)
@@ -311,7 +311,7 @@ def build_record(p) -> dict:
         "session_id": p["session_id"],
         "segment_start_line": p["segment_start_line"],
         "segment_end_line": p["segment_end_line"],
-        "ctxpack_assisted": p["ctxpack_assisted"],
+        "ripwire_assisted": p["ripwire_assisted"],
         "dedup_count": p.get("dedup_count", 1),
         "miner_version": MINER_VERSION,
     }
@@ -335,7 +335,7 @@ def sanitize_record(rec: dict) -> dict:
 
 def default_out_path(repo_root: str) -> str:
     h = hashlib.sha1(repo_root.encode("utf-8")).hexdigest()[:16]
-    return str(pathlib.Path.home() / ".ctxpack" / "traceevals" / (h + ".jsonl"))
+    return str(pathlib.Path.home() / ".ripwire" / "traceevals" / (h + ".jsonl"))
 
 
 def _percentile(sorted_vals, p):
@@ -351,7 +351,7 @@ def main(argv=None) -> int:
                     "transcripts (DESIGN_traceEvals.md). Local-only, opt-in, LLM-free."
     )
     ap.add_argument("--repo", default=os.getcwd(), help="repo root whose sessions to mine (default: cwd)")
-    ap.add_argument("--out", default=None, help="output minedpair.jsonl path (default: ~/.ctxpack/traceevals/<hash>.jsonl)")
+    ap.add_argument("--out", default=None, help="output minedpair.jsonl path (default: ~/.ripwire/traceevals/<hash>.jsonl)")
     ap.add_argument("--export-sanitized", dest="export_sanitized", default=None,
                     help="write a SANITIZED artifact to PATH (query redacted to a skeleton, session_id "
                         "dropped) — the only way mined data may land inside the repo tree")
@@ -380,12 +380,12 @@ def main(argv=None) -> int:
     records = [build_record(p) for p in deduped]
 
     if args.dry_run:
-        n_assisted = sum(1 for r in records if r["ctxpack_assisted"])
+        n_assisted = sum(1 for r in records if r["ripwire_assisted"])
         gold_sizes = sorted(len(r["gold_files"]) for r in records)
         qlens = sorted(len(r["query"]) for r in records)
         print(f"mine_traces: {len(session_files)} session file(s), {len(raw_pairs)} raw segment pair(s) "
              f"(>= {args.min_gold} gold files), {len(records)} after dedup")
-        print(f"  ctxpack_assisted={n_assisted} unassisted={len(records) - n_assisted}")
+        print(f"  ripwire_assisted={n_assisted} unassisted={len(records) - n_assisted}")
         if gold_sizes:
             print(f"  gold-set size: min={gold_sizes[0]} median={_percentile(gold_sizes, 0.5)} max={gold_sizes[-1]}")
         if qlens:

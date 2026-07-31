@@ -12,10 +12,10 @@
 #                                  degrade; see test/sincecochangecheck.sh.
 #   - determinism:                 --since=HEAD~3 (REV form) is byte-identical run-to-run
 #   - shell safety:                a --since value with shell metacharacters executes nothing
-# Usage:  test/sincecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/sincecheck.sh
+# Usage:  test/sincecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/sincecheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh. Needs git.
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

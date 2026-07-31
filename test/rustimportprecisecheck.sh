@@ -17,12 +17,12 @@
 #
 # Also: B0 clean specifier capture, MONOTONICITY, determinism, warm==cold, well-formed XML.
 #
-# Usage:  test/rustimportprecisecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/rustimportprecisecheck.sh
+# Usage:  test/rustimportprecisecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/rustimportprecisecheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/rustimportprecisefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -31,7 +31,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "rustimportprecisecheck: BIN=$BIN  FIX=$FIX  TMP=$TMP"
 
 callee_binds(){  # $1 caller  $2 expected-path-substr  $3 must-NOT-contain-substr (decoy)
@@ -84,8 +84,8 @@ command -v xmllint >/dev/null 2>&1 \
 # Compile test/rustimport_unit.cpp against the SAME CMake flags/objects that built $BIN (mirrors
 # includeprecisecheck.sh's recipe), supplying its own main(); run it on the fixture.
 BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
-FLAGS_MK="$BUILD_DIR/CMakeFiles/ctxpack.dir/flags.make"
-LINK_TXT="$BUILD_DIR/CMakeFiles/ctxpack.dir/link.txt"
+FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"
+LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
 DRIVER="$ROOT/test/rustimport_unit.cpp"
 if [ -f "$FLAGS_MK" ] && [ -f "$LINK_TXT" ] && [ -f "$DRIVER" ]; then
   CXX="$( command -v c++ || command -v clang++ )"
@@ -93,8 +93,8 @@ if [ -f "$FLAGS_MK" ] && [ -f "$LINK_TXT" ] && [ -f "$DRIVER" ]; then
   eval "CXX_DEFINES=(  $( grep -m1 '^CXX_DEFINES ='  "$FLAGS_MK" | sed 's/^CXX_DEFINES =//' ) )"
   eval "CXX_INCLUDES=( $( grep -m1 '^CXX_INCLUDES =' "$FLAGS_MK" | sed 's/^CXX_INCLUDES =//' ) )"
   LINK_BODY="$( sed -E 's#^[^ ]+ ##' "$LINK_TXT" )"
-  LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#-o +ctxpack##' )"
-  LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#[^ "]*ctxpack.dir/src/main.cpp.o##' )"
+  LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#-o +ripwire##' )"
+  LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#[^ "]*ripwire.dir/src/main.cpp.o##' )"
   LINK_BODY="$( printf '%s' "$LINK_BODY" | tr -d '"' )"
   OBJ="$TMP/unit.o"; UNIT="$TMP/unit"
   if ( cd "$BUILD_DIR" && "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -c "$DRIVER" -o "$OBJ" ) 2>"$TMP/cc.err"; then
@@ -123,10 +123,10 @@ monotonic_check()
     trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
 
     local OLDB="$TMP/oldbuild"
-    if ! ( cmake -S "$WT" -B "$OLDB" -DCTXPACK_NATIVE=ON >/dev/null 2>&1 && cmake --build "$OLDB" -j >/dev/null 2>&1 ); then
+    if ! ( cmake -S "$WT" -B "$OLDB" -DRIPWIRE_NATIVE=ON >/dev/null 2>&1 && cmake --build "$OLDB" -j >/dev/null 2>&1 ); then
         skip "monotonicity: pre-change build failed"; return
     fi
-    local OLDBIN="$OLDB/ctxpack"
+    local OLDBIN="$OLDB/ripwire"
     [ -x "$OLDBIN" ] || { skip "monotonicity: pre-change binary missing"; return; }
 
     local ao an

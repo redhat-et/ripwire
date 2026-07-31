@@ -3,7 +3,7 @@
 #
 # Builds NOTHING. Times a selected corpus (default: this repo's own root — src/ + third_party/ +
 # everything else the denylist keeps, checked into git — stable unless someone adds/removes a lot
-# of files) cold (--no-cache) and warm (--cache) with CTXPACK_BIN,
+# of files) cold (--no-cache) and warm (--cache) with RIPWIRE_BIN,
 # takes the MEDIAN of 5 runs each via /usr/bin/time, and compares against budgets recorded in
 # bench/perf_budgets.txt. Exits 1 with a loud message the moment a median exceeds its budget — that's
 # the whole point: a silent regression (someone adds an O(n^2) loop, a rehash cascade, an accidental
@@ -15,10 +15,10 @@
 # reason (see bench/perf_budgets.txt header for the rationale).
 #
 # Usage:
-#   bench/perfgate.sh                          # uses ./build/ctxpack
-#   CTXPACK_BIN=build_prof/ctxpack bench/perfgate.sh
-#   CTXPACK_PERF_CORPUS=../your-large-cpp-corpus CTXPACK_PERF_LABEL=cpp bench/perfgate.sh
-#   CTXPACK_PERF_NAV_ARG=--deps CTXPACK_PERF_NAV_KEY=deps_cpp CTXPACK_PERF_LABEL=cpp bench/perfgate.sh
+#   bench/perfgate.sh                          # uses ./build/ripwire
+#   RIPWIRE_BIN=build_prof/ripwire bench/perfgate.sh
+#   RIPWIRE_PERF_CORPUS=../your-large-cpp-corpus RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh
+#   RIPWIRE_PERF_NAV_ARG=--deps RIPWIRE_PERF_NAV_KEY=deps_cpp RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh
 #   bench/perfgate.sh --write-budgets           # (re)generate perf_budgets.txt from THIS machine's
 #                                                # measured medians x 1.5 — use when you've made a
 #                                                # deliberate, verified perf change and want a new floor.
@@ -28,14 +28,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"     # allow a repo-relative CTXPACK_BIN
-CORPUS="${CTXPACK_PERF_CORPUS:-$ROOT}"
-[ "${CORPUS#/}" = "$CORPUS" ] && CORPUS="$ROOT/$CORPUS"     # allow a repo-relative CTXPACK_PERF_CORPUS
-LABEL="${CTXPACK_PERF_LABEL:-}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"     # allow a repo-relative RIPWIRE_BIN
+CORPUS="${RIPWIRE_PERF_CORPUS:-$ROOT}"
+[ "${CORPUS#/}" = "$CORPUS" ] && CORPUS="$ROOT/$CORPUS"     # allow a repo-relative RIPWIRE_PERF_CORPUS
+LABEL="${RIPWIRE_PERF_LABEL:-}"
 case "$LABEL" in
     *[!A-Za-z0-9_]*)
-        echo "perfgate: CTXPACK_PERF_LABEL may contain only A-Z, a-z, 0-9, and _"
+        echo "perfgate: RIPWIRE_PERF_LABEL may contain only A-Z, a-z, 0-9, and _"
         exit 2
         ;;
 esac
@@ -45,8 +45,8 @@ if [ -n "$LABEL" ]; then
     KEY_COLD="cold_$LABEL"
     KEY_WARM="warm_$LABEL"
 fi
-NAV_ARG="${CTXPACK_PERF_NAV_ARG:-}"
-NAV_KEY="${CTXPACK_PERF_NAV_KEY:-}"
+NAV_ARG="${RIPWIRE_PERF_NAV_ARG:-}"
+NAV_KEY="${RIPWIRE_PERF_NAV_KEY:-}"
 if [ "$LABEL" = "cpp" ] && [ -z "$NAV_ARG" ] && [ -z "$NAV_KEY" ]; then
     NAV_ARG="--deps"
     NAV_KEY="deps_cpp"
@@ -56,7 +56,7 @@ if [ -n "$NAV_ARG" ] && [ -z "$NAV_KEY" ]; then
 fi
 case "$NAV_KEY" in
     *[!A-Za-z0-9_]*)
-        echo "perfgate: CTXPACK_PERF_NAV_KEY may contain only A-Z, a-z, 0-9, and _"
+        echo "perfgate: RIPWIRE_PERF_NAV_KEY may contain only A-Z, a-z, 0-9, and _"
         exit 2
         ;;
 esac
@@ -65,12 +65,12 @@ RUNS=5
 WRITE_BUDGETS=0
 [ "${1:-}" = "--write-budgets" ] && WRITE_BUDGETS=1
 
-[ -x "$BIN" ] || { echo "perfgate: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "perfgate: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 # ---- selected corpus.
-# ctxpack takes exactly ONE positional <dir>, so the default points at $ROOT itself rather than passing
+# ripwire takes exactly ONE positional <dir>, so the default points at $ROOT itself rather than passing
 # src/ and third_party/ as two args (not supported) — same effective corpus (stable-ish size, checked
-# into git), single invocation. CTXPACK_PERF_CORPUS can override this for C++-heavy trees. ----
+# into git), single invocation. RIPWIRE_PERF_CORPUS can override this for C++-heavy trees. ----
 [ -d "$CORPUS" ] || { echo "perfgate: corpus dir missing: $CORPUS"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -200,13 +200,13 @@ done < "$BUDGETS"
 echo ""
 if [ "$matchCount" -eq 0 ]; then
     echo "perfgate: no matching budgets for label '${LABEL:-default}' in $BUDGETS"
-    echo "perfgate: run with --write-budgets for this label, or choose an existing CTXPACK_PERF_LABEL."
+    echo "perfgate: run with --write-budgets for this label, or choose an existing RIPWIRE_PERF_LABEL."
     exit 2
 fi
 if [ "$fail" -eq 1 ]; then
     echo "*** PERFGATE FAILED — a median exceeded its budget. This is the drift alarm firing: a hot"
     echo "*** path likely regressed (rehash cascade, dropped cache hit, new O(n^2) pass, ...). Profile"
-    echo "*** with -DCTXPACK_PROFILE=ON (see bench/PROFILE.md) before assuming it's just machine noise."
+    echo "*** with -DRIPWIRE_PROFILE=ON (see bench/PROFILE.md) before assuming it's just machine noise."
     exit 1
 fi
 echo "perfgate: all medians within budget."

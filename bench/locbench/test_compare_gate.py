@@ -65,7 +65,7 @@ def build_pair( seed, n_repos, n_per_repo, quality_gain, cost_mult_warm, cost_mu
         return { "n": n, "allf10": allf10 }
 
     def wrap( rows ):
-        return dict( dataset="czlll/Loc-Bench_V1", split="test", split_contract="ctxpack-a7-v2",
+        return dict( dataset="czlll/Loc-Bench_V1", split="test", split_contract="ripwire-a7-v2",
                      skipped={ "unindexable": 0 }, instances=rows, arms={ arm: summarize( rows ) } )
 
     return wrap( before_rows ), wrap( after_rows )

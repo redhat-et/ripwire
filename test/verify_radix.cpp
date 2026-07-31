@@ -218,7 +218,7 @@ struct EdgeRecord
 };
 static_assert( sizeof( EdgeRecord ) == 12 );
 
-void verifyCtxpackWrappers()
+void verifyRipwireWrappers()
 {
     for( const std::size_t count : { std::size_t( 2047 ), std::size_t( 2048 ), std::size_t( 2049 ), std::size_t( 65537 ) } )
     {
@@ -278,7 +278,7 @@ int main()
 {
     verifyLargePaths();
     verifySmallAndIndexedPaths();
-    verifyCtxpackWrappers();
+    verifyRipwireWrappers();
     verifyQuantization();
     std::puts( "radix gate: PASS" );
     return 0;

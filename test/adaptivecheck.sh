@@ -6,22 +6,22 @@
 # broad ones (BM25 saturates, no knee). --adaptive cuts at the largest RELATIVE score gap (Adaptive-k), floor
 # 5, ceiling = the existing top-k, and prints the cut in the header. Without it, output is byte-identical.
 #
-# Usage:  bash test/adaptivecheck.sh [BIN]   |   CTXPACK_BIN=asan/ctxpack bash test/adaptivecheck.sh
+# Usage:  bash test/adaptivecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/adaptivecheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# trap #20, BOTH seams. regression.sh drives gates through CTXPACK_BIN (`test/regression.sh:183`), which this
+# trap #20, BOTH seams. regression.sh drives gates through RIPWIRE_BIN (`test/regression.sh:183`), which this
 # file already honoured, so the SUITE was never running the wrong binary — the missing seam is the positional
 # one, which is how a lane or a verifier points a gate at asan/ or at a base binary BY HAND. Without it
-# `bash test/adaptivecheck.sh asan/ctxpack` silently re-ran build/ and reported PASS for the wrong binary.
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+# `bash test/adaptivecheck.sh asan/ripwire` silently re-ran build/ and reported PASS for the wrong binary.
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 echo "adaptivecheck: BIN=$BIN"
 

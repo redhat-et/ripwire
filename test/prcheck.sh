@@ -12,26 +12,26 @@
 # printed values identical by construction (the tie) — never against an absolute expected value. The
 # hub-vs-caller comparison is a coarse ratio via k= parsing (awk), never string equality.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/prcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/prcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/prfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/prfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 
 echo "prcheck: BIN=$BIN  CORPUS=test/prfix"
 
 OUT="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$FIX" --rank-by=pagerank --no-cache 2>/dev/null )"
-[ -n "$OUT" ] || { echo "empty output from ctxpack — cannot proceed"; exit 1; }
+[ -n "$OUT" ] || { echo "empty output from ripwire — cannot proceed"; exit 1; }
 
 # names in EMISSION order (rank desc, id asc — see src/serialize.h) — this IS the rank order.
 names_in_order(){ printf '%s' "$1" | grep -oE '<s [^>]*n="[^"]*"' | grep -oE 'n="[^"]*"' | sed 's/n="//;s/"//'; }

@@ -14,18 +14,18 @@
 #         byte-for-byte identical scoring (modulo wall-clock fields).
 #   (v)   tamper rejection — a hand-edited dataset.lock is refused on the next run (fail-closed).
 #
-# Usage:  bash test/multiswecheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/multiswecheck.sh
+# Usage:  bash test/multiswecheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/multiswecheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null || { echo "python3 required"; exit 2; }
 echo "multiswecheck: BIN=$BIN"
 
@@ -116,7 +116,7 @@ REPOMAP="fixtureorg/fixturerepo=$FIXREPO"
 
 # ── (i) mining: offline, from the fixture raw dir ────────────────────────────────────────────────
 LOG1="$TMP/run1.log"
-CTXPACK="$BIN" python3 "$HARNESS" \
+RIPWIRE="$BIN" python3 "$HARNESS" \
     --languages cpp --lang cpp --offline --raw-dir "$TMP/raw" --repo-map "$REPOMAP" \
     --work-dir "$WORK1" --dataset-lock "$LOCK" --json-out "$OUT1" \
     >"$LOG1" 2>&1
@@ -152,7 +152,7 @@ lock = json.load(open(sys.argv[1]))
 lock["instances_by_lang"]["cpp"][0]["gold_files"] = ["tampered.cpp"]
 json.dump(lock, open(sys.argv[1], "w"))
 PY
-    CTXPACK="$BIN" python3 "$HARNESS" \
+    RIPWIRE="$BIN" python3 "$HARNESS" \
         --languages cpp --lang cpp --offline --raw-dir "$TMP/raw" --repo-map "$REPOMAP" \
         --work-dir "$WORK1" --dataset-lock "$LOCK" >"$TMP/tamper.log" 2>&1
     trc=$?
@@ -182,11 +182,11 @@ else
 fi
 
 # ── (iv) determinism x2 — rerun against the SAME frozen lock, compare modulo wall-clock ─────────────
-CTXPACK="$BIN" python3 "$HARNESS" \
+RIPWIRE="$BIN" python3 "$HARNESS" \
     --languages cpp --lang cpp --offline --raw-dir "$TMP/raw" --repo-map "$REPOMAP" --refresh-dataset \
     --work-dir "$WORK1" --dataset-lock "$LOCK" --json-out "$OUT1" >"$TMP/run_a.log" 2>&1
 WORK2="$TMP/work2"; OUT2="$TMP/out2.json"
-CTXPACK="$BIN" python3 "$HARNESS" \
+RIPWIRE="$BIN" python3 "$HARNESS" \
     --languages cpp --lang cpp --offline --raw-dir "$TMP/raw" --repo-map "$REPOMAP" \
     --work-dir "$WORK2" --dataset-lock "$LOCK" --json-out "$OUT2" >"$TMP/run_b.log" 2>&1
 rc2=$?
@@ -210,7 +210,7 @@ fi
 
 # ── offline contract: refuse to mine without a pre-populated raw dir ────────────────────────────────
 EMPTYRAW="$TMP/empty-raw"; mkdir -p "$EMPTYRAW"
-CTXPACK="$BIN" python3 "$HARNESS" \
+RIPWIRE="$BIN" python3 "$HARNESS" \
     --languages cpp --lang cpp --offline --raw-dir "$EMPTYRAW" --repo-map "$REPOMAP" \
     --work-dir "$TMP/work3" --dataset-lock "$TMP/nolock.lock" --refresh-dataset \
     >"$TMP/offlinefail.log" 2>&1

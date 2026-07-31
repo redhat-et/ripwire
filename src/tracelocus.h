@@ -381,7 +381,7 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         // the user's query in — so it is machine-readable and VERBATIM (escapeXml + M2 character references),
         // beside the lossy readable echo in the comment. This lens emitted a bare `<ctx>` and had neither.
         std::string h = ctxRootOpen( srcNoteIn, {} );
-        h += "<!-- ctxpack trace-to-locus for ";
+        h += "<!-- ripwire trace-to-locus for ";
         if( withSrcEcho ) { h += "\"";  h += srcNote;  h += "\""; }
         else                h += "[src_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
         h += ": frames of a ";

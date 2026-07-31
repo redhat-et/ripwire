@@ -5,27 +5,27 @@
 #
 # Two categories legitimately land here (deckcheck.sh's own job is to tell these apart from a
 # fabricated flag, never to hide one):
-#   (a) a REAL ctxpack flag that `--help` deliberately does NOT print — a CTXPACK_DEV/env-gated
+#   (a) a REAL ripwire flag that `--help` deliberately does NOT print — a RIPWIRE_DEV/env-gated
 #       experiment kept out of the public catalog on purpose, a deprecated alias kept working for
 #       back-compat, or a flag that belongs to a subcommand (`wrap`) whose own flags aren't
 #       enumerated in the top-level --help text.
 #   (b) a flag that belongs to a DIFFERENT tool, quoted verbatim inside a worked example
-#       (xmllint / git / cmake / aider / this repo's own install.sh) — never a ctxpack flag at all.
+#       (xmllint / git / cmake / aider / this repo's own install.sh) — never a ripwire flag at all.
 #
 # deckcheck.sh also fails if an entry here is no longer used anywhere in the scanned sources
 # (stale-allowlist rot) — delete a row the day its last reference disappears.
 
---anchor	real flag (src/cli.h:980, src/main.cpp) — CTXPACK_DEV-gated EXPERIMENTAL flag, deliberately dropped from --help (cli.h:1112 comment: "a negative-result experiment"); only active with CTXPACK_DEV=1
---cochange-boost	real flag (src/cli.h:106) — CTXPACK_DEV-gated EXPERIMENTAL flag (the --anchor precedent), deliberately dropped from --help; CTXPACK_COCHANGE=1 env is the MCP-facing equivalent
+--anchor	real flag (src/cli.h:980, src/main.cpp) — RIPWIRE_DEV-gated EXPERIMENTAL flag, deliberately dropped from --help (cli.h:1112 comment: "a negative-result experiment"); only active with RIPWIRE_DEV=1
+--cochange-boost	real flag (src/cli.h:106) — RIPWIRE_DEV-gated EXPERIMENTAL flag (the --anchor precedent), deliberately dropped from --help; RIPWIRE_COCHANGE=1 env is the MCP-facing equivalent
 --stable	real flag (src/cli.h:896, deprecatedOrderFlag) — deprecated alias for --order=stable, still functional; --help documents --order=/--no-stable instead and the alias is intentionally left out of the catalog
 --most-important-last	real flag (src/cli.h:895, deprecatedOrderFlag) — deprecated alias for --order=important-last, still functional; superseded by --order= in --help's own text
 --no-auto-order	real flag (src/cli.h:898, deprecatedOrderFlag) — deprecated alias for --order=important-first, still functional; superseded by --order= in --help's own text
---all	real flag of the `wrap` subcommand (src/wrap.h:254, "ctxpack wrap --all" auto-detects every installed agent) — wrap's own flags are not enumerated in the top-level --help catalog
---build	cmake's own flag ("cmake --build build -j") quoted in build-command examples, not a ctxpack flag
---claude	skills/install.sh's own flag (installs into ~/.claude/skills) quoted in the wrap/install recipes, not a ctxpack flag
---codex	skills/install.sh's own flag (installs into ${CODEX_HOME:-~/.codex}/skills) quoted in the wrap/install recipes, not a ctxpack flag
---hook	skills/install.sh's own flag (registers the PreToolUse ctxpack-nudge hook) quoted in the install recipe, not a ctxpack flag
---noout	xmllint's own flag ("xmllint --noout -") quoted in the G4 well-formedness example, not a ctxpack flag
---raw	git's own flag ("git diff --raw") quoted describing --stray-content's per-ref cost model, not a ctxpack flag
---read	aider's own flag ("aider --read FILE") quoted in the wrap-aider recipe, not a ctxpack flag
---short	git's own flag ("git rev-parse --short HEAD") quoted where a skill tells you to record the commit you measured at, not a ctxpack flag
+--all	real flag of the `wrap` subcommand (src/wrap.h:254, "ripwire wrap --all" auto-detects every installed agent) — wrap's own flags are not enumerated in the top-level --help catalog
+--build	cmake's own flag ("cmake --build build -j") quoted in build-command examples, not a ripwire flag
+--claude	skills/install.sh's own flag (installs into ~/.claude/skills) quoted in the wrap/install recipes, not a ripwire flag
+--codex	skills/install.sh's own flag (installs into ${CODEX_HOME:-~/.codex}/skills) quoted in the wrap/install recipes, not a ripwire flag
+--hook	skills/install.sh's own flag (registers the PreToolUse ripwire-nudge hook) quoted in the install recipe, not a ripwire flag
+--noout	xmllint's own flag ("xmllint --noout -") quoted in the G4 well-formedness example, not a ripwire flag
+--raw	git's own flag ("git diff --raw") quoted describing --stray-content's per-ref cost model, not a ripwire flag
+--read	aider's own flag ("aider --read FILE") quoted in the wrap-aider recipe, not a ripwire flag
+--short	git's own flag ("git rev-parse --short HEAD") quoted where a skill tells you to record the commit you measured at, not a ripwire flag

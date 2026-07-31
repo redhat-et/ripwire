@@ -19,16 +19,16 @@
 #   (g) --json carries "p" and "gating":true with the same gating count, and the XML stays xmllint-clean.
 #
 # Own temp repo. Needs git; xmllint optional (that sub-check is skipped when absent).
-# Usage:  test/qrowlocatorcheck.sh   |   CTXPACK_BIN=build/ctxpack test/qrowlocatorcheck.sh
+# Usage:  test/qrowlocatorcheck.sh   |   RIPWIRE_BIN=build/ripwire test/qrowlocatorcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qrowlocatorcheck (git not available)"; exit 0; }
 
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
@@ -107,8 +107,8 @@ contra="$( printf '%s\n' "$ROWS" | grep ' gating="1"' | grep -cE 'sev="minor"|or
 
 # ── (e) one stderr line naming the gating finding at exit 2 ────────────────────────────────────────────────
 [ "$rc" -eq 2 ] && ok "gating findings exit 2" || no "expected exit 2, got $rc"
-if grep -q 'ctxpack: --quality-delta gating: ' "$TMP/xerr"; then
-    LINE="$( grep 'ctxpack: --quality-delta gating: ' "$TMP/xerr" )"
+if grep -q 'ripwire: --quality-delta gating: ' "$TMP/xerr"; then
+    LINE="$( grep 'ripwire: --quality-delta gating: ' "$TMP/xerr" )"
     ok "exit 2 prints a gating line on stderr"
     printf '%s' "$LINE" | grep -q "gating: $HDR_GATING preexisting-worse major finding" \
         && ok "the stderr line reports the same gating count as the header" \
@@ -116,7 +116,7 @@ if grep -q 'ctxpack: --quality-delta gating: ' "$TMP/xerr"; then
     printf '%s' "$LINE" | grep -q ' at [^ ]*:[0-9]' \
         && ok "the stderr line names WHERE the first gating finding is" \
         || no "stderr gating line carries no file:line: $LINE"
-    [ "$( grep -c 'ctxpack: --quality-delta gating: ' "$TMP/xerr" )" -eq 1 ] \
+    [ "$( grep -c 'ripwire: --quality-delta gating: ' "$TMP/xerr" )" -eq 1 ] \
         && ok "exactly one gating line on stderr (one line, like --token-budget)" \
         || no "more than one gating line printed"
 else

@@ -1,23 +1,23 @@
 {
  "scikit-learn__scikit-learn-25186": {
   "bucket": "path/module-mention unexploited",
-  "note": "Issue text contains the literal gold path sklearn/ensemble/_iforest.py (in GitHub URLs) and the class name IsolationForest; ctxpack ranked it 60 while BM25-over-symbols (cbm) hit 8. Secondary: top-10 crowded by test files."
+  "note": "Issue text contains the literal gold path sklearn/ensemble/_iforest.py (in GitHub URLs) and the class name IsolationForest; ripwire ranked it 60 while BM25-over-symbols (cbm) hit 8. Secondary: top-10 crowded by test files."
  },
  "micropython__micropython-lib-947": {
   "bucket": "path/module-mention unexploited",
-  "note": "Issue names 'the requests module'; gold is python-ecosys/requests/requests/__init__.py whose path components literally spell 'requests'. cbm BM25 rank 1; ctxpack 34 (top-10 was unix-ffi email/http files matching 'header/auth' vocabulary)."
+  "note": "Issue names 'the requests module'; gold is python-ecosys/requests/requests/__init__.py whose path components literally spell 'requests'. cbm BM25 rank 1; ripwire 34 (top-10 was unix-ffi email/http files matching 'header/auth' vocabulary)."
  },
  "huggingface__transformers-35453": {
   "bucket": "path/module-mention unexploited",
-  "note": "Issue names the dotted module 'transformers.optimization'; gold src/transformers/optimization.py. cbm rank 0; ctxpack 19 (near-miss). Dotted-module-to-file mapping not exploited."
+  "note": "Issue names the dotted module 'transformers.optimization'; gold src/transformers/optimization.py. cbm rank 0; ripwire 19 (near-miss). Dotted-module-to-file mapping not exploited."
  },
  "scikit-learn__scikit-learn-29130": {
   "bucket": "non-code/infra gold",
-  "note": "Gold is build_tools/update_environments_and_lock_files.py \u2014 a CI/lockfile maintenance script with weak call-graph presence. ctxpack 113; aider 4 (its PageRank+ident personalization favored build_tools); cbm 9."
+  "note": "Gold is build_tools/update_environments_and_lock_files.py \u2014 a CI/lockfile maintenance script with weak call-graph presence. ripwire 113; aider 4 (its PageRank+ident personalization favored build_tools); cbm 9."
  },
  "JackPlowman__repo_standards_validator-137": {
   "bucket": "multi-file strict near-miss",
-  "note": "ctxpack put gold repository_checks.py at 0 but the sibling gold validator/__main__.py (thin entrypoint wiring) at 19 \u2014 strict@10 fails on the entrypoint. aider got both within 8. Ultra-short issue (7 words) secondary."
+  "note": "ripwire put gold repository_checks.py at 0 but the sibling gold validator/__main__.py (thin entrypoint wiring) at 19 \u2014 strict@10 fails on the entrypoint. aider got both within 8. Ultra-short issue (7 words) secondary."
  },
  "zulip__zulip-31168": {
   "bucket": "multi-file strict near-miss",
@@ -25,7 +25,7 @@
  },
  "modin-project__modin-6836": {
   "bucket": "multi-file strict near-miss",
-  "note": "4-file gold. ctxpack first-hit 12; 3 of 4 gold within 52 but dataframe.py fell outside the 200-symbol candidate export (truncation). cbm first-hit 4, also strict-miss. Nobody solves 4-file strict."
+  "note": "4-file gold. ripwire first-hit 12; 3 of 4 gold within 52 but dataframe.py fell outside the 200-symbol candidate export (truncation). cbm first-hit 4, also strict-miss. Nobody solves 4-file strict."
  },
  "TagStudioDev__TagStudio-735": {
   "bucket": "multi-file strict near-miss",
@@ -33,15 +33,15 @@
  },
  "Standard-Labs__real-intent-102": {
   "bucket": "ultra-short/vague query",
-  "note": "Entire issue: 'Improve integration efficiency Multithreading'. ctxpack 13/14; aider hit both within 11 (5 first) \u2014 its structure-only PageRank is immune to query poverty; cbm returned 0 results."
+  "note": "Entire issue: 'Improve integration efficiency Multithreading'. ripwire 13/14; aider hit both within 11 (5 first) \u2014 its structure-only PageRank is immune to query poverty; cbm returned 0 results."
  },
  "Open-MSS__MSS-1967": {
   "bucket": "indirect gold (named file != fixed file)",
-  "note": "Issue names conftest.py L227 explicitly; ctxpack correctly ranked conftest.py #1 \u2014 but the accepted fix edited mscolab.py/socket_control.py/airdata.py (the files whose popups triggered the warning). Needs a 1-hop 'who triggers this' expansion, not better lexical match. cbm lenient-hit at 1."
+  "note": "Issue names conftest.py L227 explicitly; ripwire correctly ranked conftest.py #1 \u2014 but the accepted fix edited mscolab.py/socket_control.py/airdata.py (the files whose popups triggered the warning). Needs a 1-hop 'who triggers this' expansion, not better lexical match. cbm lenient-hit at 1."
  },
  "gammasim__simtools-1183": {
   "bucket": "test/doc-file crowding",
-  "note": "Profiling-output issue names array_model; gold is the db layer (db_handler.py 13, db_array_elements.py 30, application 52). ctxpack top-10 = io_handler, docs/conf.py and 5 test files. Tests mentioning the profiled symbols outrank the implementation."
+  "note": "Profiling-output issue names array_model; gold is the db layer (db_handler.py 13, db_array_elements.py 30, application 52). ripwire top-10 = io_handler, docs/conf.py and 5 test files. Tests mentioning the profiled symbols outrank the implementation."
  },
  "scikit-learn__scikit-learn-8478": {
   "bucket": "vocabulary gap (feature-request)",

@@ -7,14 +7,14 @@
 #   - Determinism: two runs produce byte-identical output
 #
 # Usage:
-#   test/ownerscheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/ownerscheck.sh
+#   test/ownerscheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/ownerscheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # BOTH seams: positional and CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional and RIPWIRE_BIN
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -22,7 +22,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "ownerscheck: BIN=$BIN"
 
@@ -33,7 +33,7 @@ git -C "$REPO" init -q
 git -C "$REPO" config user.email "setup@x.com"
 git -C "$REPO" config user.name  "Setup"
 
-# Create the source files (ctxpack needs parseable source; use simple C)
+# Create the source files (ripwire needs parseable source; use simple C)
 cat >"$REPO/file1.cpp" <<'EOF'
 // file1.cpp — owned mostly by alice (bf=1 expected)
 void func1() {}

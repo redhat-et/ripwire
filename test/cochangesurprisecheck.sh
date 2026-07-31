@@ -30,19 +30,19 @@
 # architectural debt). So the shell-script pair is now the NEGATIVE control for dep_capable="0", and the
 # "signal survives" duty moved to a real src<->src surprising row, which is what the flag is FOR.
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/cochangesurprisecheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/cochangesurprisecheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/cochangesurprisecheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/cochangesurprisecheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null || { echo "cochangesurprisecheck: git not on PATH"; exit 2; }
 echo "cochangesurprisecheck: BIN=$BIN  ROOT=$ROOT"
 

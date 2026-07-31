@@ -11,21 +11,21 @@
 # A false NON-zero: the churn numbers are real, the window they are labelled with is not, and the only
 # honest signal was a DEGRADED_PATH_ALERT on stderr — invisible to every MCP client.
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/hotspotsincecheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/hotspotsincecheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/hotspotsincecheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/hotspotsincecheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# BOTH seams — `bash test/<gate>.sh asan/ctxpack` is how a differential run passes a binary, and this gate
-# accepted the positional argument and silently ignored it, so a red-first run measured build/ctxpack.
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+# BOTH seams — `bash test/<gate>.sh asan/ripwire` is how a differential run passes a binary, and this gate
+# accepted the positional argument and silently ignored it, so a red-first run measured build/ripwire.
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || { echo "SKIP: not a git repo"; exit 0; }
 echo "hotspotsincecheck: BIN=$BIN  ROOT=$ROOT"
 

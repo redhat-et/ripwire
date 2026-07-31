@@ -12,26 +12,26 @@
 # exit code but not by message. A silent parse regression is therefore the single most likely way to break
 # this repo without any gate going red.
 #
-# USAGE — set CTXPACK_BASE to the reference binary:
-#     CTXPACK_BASE=build_base/ctxpack CTXPACK_BIN=build/ctxpack bash test/argvdiffcheck.sh
-# With no CTXPACK_BASE this SKIPS and exits 0: in normal CI there is no "previous" binary to compare
+# USAGE — set RIPWIRE_BASE to the reference binary:
+#     RIPWIRE_BASE=build_base/ripwire RIPWIRE_BIN=build/ripwire bash test/argvdiffcheck.sh
+# With no RIPWIRE_BASE this SKIPS and exits 0: in normal CI there is no "previous" binary to compare
 # against, and a gate that cannot run must say so rather than pretend to pass.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-BASE="${CTXPACK_BASE:-}"
+BASE="${RIPWIRE_BASE:-}"
 [ -n "$BASE" ] && [ "${BASE#/}" = "$BASE" ] && BASE="$ROOT/$BASE"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
 if [ -z "$BASE" ] || [ ! -x "$BASE" ]; then
-    echo "argvdiffcheck: SKIP — no CTXPACK_BASE reference binary"
-    echo "  (set CTXPACK_BASE=build_base/ctxpack after building the pre-change source to activate)"
+    echo "argvdiffcheck: SKIP — no RIPWIRE_BASE reference binary"
+    echo "  (set RIPWIRE_BASE=build_base/ripwire after building the pre-change source to activate)"
     exit 0
 fi
 echo "argvdiffcheck: BASE=$BASE"
@@ -75,7 +75,7 @@ comm -13 "$TMP/flags.new.txt" "$TMP/flags.base.txt" > "$TMP/flags.removed.txt"
 # STATE-WRITING flags are excluded too, and this is not optional: a gate that mutates the tree is a
 # liability, and --quality-ack/--quality-baseline/--note-add against $CORPUS write sidecars INTO the
 # fixture the golden snapshot is computed from. (Caught the hard way: an early run of this harness left
-# test/fixture/.ctxpack_quality_acks behind.) The verbs are covered by their own dedicated gates.
+# test/fixture/.ripwire_quality_acks behind.) The verbs are covered by their own dedicated gates.
 SKIP=" --mcp --listen --mcp-token --allow-remote-edits --refetch --doctor \
        --index-out --html --export --note-add --quality-ack --quality-baseline --baseline --baseline-update --scan-skills --cache "
 while read -r f; do
@@ -179,14 +179,14 @@ EOF
 #     actually types, not the ones a gate author imagines.
 # The source is the NEWEST capture under docs/captures/. Its absence is a FAILURE, not a skip — and so is a
 # zero-vector harvest: this block once pointed at a stale filename behind a silent `if [ -f ]` AND carried a
-# regex the capture format had outgrown (commands are `## \`./build/ctxpack …\`` headings, not line-start),
+# regex the capture format had outgrown (commands are `## \`./build/ripwire …\`` headings, not line-start),
 # so it contributed nothing for a round while every count still looked green (trap ledger #7, twice over).
 SHOWCASE="$( ls docs/captures/COMMANDS_showcase_*.md 2>/dev/null | sort | tail -1 )"
 if [ -z "$SHOWCASE" ]; then
     no "harvest source missing: no docs/captures/COMMANDS_showcase_*.md — the real-shape vectors are gone"
 else
-    harvested="$( grep -oE '^## `\./build/ctxpack [^`]*' "$SHOWCASE" 2>/dev/null \
-        | sed 's|^## `\./build/ctxpack ||' \
+    harvested="$( grep -oE '^## `\./build/ripwire [^`]*' "$SHOWCASE" 2>/dev/null \
+        | sed 's|^## `\./build/ripwire ||' \
         | grep -vE '\-\-mcp|\-\-listen|\-\-note-add|\-\-quality-ack|\-\-quality-baseline|\-\-baseline|\-\-index-out|\-\-html|\-\-export|\-\-cache=|\-\-eval-skills=|\-\-eval-stray=|\-\-from-trace=|\-\-batch=|\-\-scan-skill|\-\-arch=|\-\-lint-rules=|\-\-scip=|wrap ' \
         | head -60 )"
     hcount="$( printf '%s\n' "$harvested" | grep -c . )"
@@ -269,7 +269,7 @@ while IFS= read -r v; do
         # at 5 previously forced an agent to make a throwaway copy of this gate in test/ just to read its own
         # output — friction that argues for the knob, not the copy. ARGVDIFF_SHOW=999 prints all of them.
         if [ "$diffs" -le "${ARGVDIFF_SHOW:-5}" ]; then
-            printf '        DIFF  ctxpack %s\n' "$v"
+            printf '        DIFF  ripwire %s\n' "$v"
             [ "$rcb" != "$rcn" ] && printf '              exit %s -> %s\n' "$rcb" "$rcn"
             cmp -s "$TMP/o.base" "$TMP/o.new" || printf '              stdout differs (%s -> %s bytes)\n' "$(wc -c <"$TMP/o.base"|tr -d ' ')" "$(wc -c <"$TMP/o.new"|tr -d ' ')"
             cmp -s "$TMP/e.base.n" "$TMP/e.new.n" || { printf '              stderr differs:\n'; diff "$TMP/e.base.n" "$TMP/e.new.n" | head -4 | sed 's/^/                /'; }

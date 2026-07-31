@@ -8,7 +8,7 @@
 #
 # Route: this drives the PUBLIC ingest() entry point via the CLI (--cache=FILE with a doctored file on
 # disk) rather than calling loadCache directly from a standalone driver — the more honest end-to-end
-# fuzz (the real attack surface is "an agent/CI hands ctxpack a cache file it doesn't fully trust"),
+# fuzz (the real attack surface is "an agent/CI hands ripwire a cache file it doesn't fully trust"),
 # and it means this harness needed NO changes to src/ingest.h / src/ingest.cpp / src/quality.h.
 #
 # ── Part 1: v8 ingest-cache blob (loadCache) — DETERMINISTIC structured mutation table ─────────────
@@ -37,16 +37,16 @@
 #
 # Usage:
 #   bash test/cachefuzzcheck.sh
-#   CTXPACK_BIN=build/ctxpack CTXPACK_ASAN_BIN=asan/ctxpack bash test/cachefuzzcheck.sh
+#   RIPWIRE_BIN=build/ripwire RIPWIRE_ASAN_BIN=asan/ripwire bash test/cachefuzzcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; ALL PASS on success. Does not edit
 # regression.sh (regression.sh wires this in itself, once, if git status was clean when this was built).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-ASAN_BIN="${CTXPACK_ASAN_BIN:-$ROOT/asan/ctxpack}"
+ASAN_BIN="${RIPWIRE_ASAN_BIN:-$ROOT/asan/ripwire}"
 [ "${ASAN_BIN#/}" = "$ASAN_BIN" ] && ASAN_BIN="$ROOT/$ASAN_BIN"
 FIXTURE="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
@@ -56,7 +56,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 note(){ printf '  NOTE  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIXTURE" ] || { echo "no fixture at $FIXTURE"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 
@@ -352,7 +352,7 @@ if [ -x "$ASAN_BIN" ]; then
     [ "$asan_fail" -eq 0 ] && ok "ASan sweep: no sanitizer report across the whole mutation table" \
                            || no "ASan sweep: at least one sanitizer report fired (see above)"
 else
-    echo "no ASan binary at $ASAN_BIN — build with: cmake -S . -B asan -DCTXPACK_ASAN=ON && cmake --build asan -j"
+    echo "no ASan binary at $ASAN_BIN — build with: cmake -S . -B asan -DRIPWIRE_ASAN=ON && cmake --build asan -j"
     no "ASan sweep skipped — no ASan binary available"
 fi
 
@@ -374,10 +374,10 @@ git -C "$QREPO" init -q; git -C "$QREPO" config user.email x@y; git -C "$QREPO" 
 git -C "$QREPO" add -A; git -C "$QREPO" commit -qm init >/dev/null
 
 QXDG="$TMP/qxdg"; mkdir -p "$QXDG"
-QCACHEDIR="$QXDG/ctxpack"
+QCACHEDIR="$QXDG/ripwire"
 qrun(){ env -u TMPDIR XDG_CACHE_HOME="$QXDG" "$BIN" "$QREPO" --quality-delta "$@"; }
 # AUDIT5 Y4: shard-aware lookup — a blob may be flat under $QCACHEDIR or under $QCACHEDIR/<xx>/ (2-hex shard).
-qsnapfiles(){ find "$QCACHEDIR" -maxdepth 2 -type f -name 'ctxpack-qsnap-*.bin' 2>/dev/null; }
+qsnapfiles(){ find "$QCACHEDIR" -maxdepth 2 -type f -name 'ripwire-qsnap-*.bin' 2>/dev/null; }
 
 qrun --no-cache >"$TMP/q_truth" 2>/dev/null
 QBLOB="$( qsnapfiles | head -1 )"

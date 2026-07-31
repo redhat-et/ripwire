@@ -1,4 +1,4 @@
-; ctxpack Python tags — vendored verbatim from tree-sitter-python v0.23.6 queries/tags.scm.
+; ripwire Python tags — vendored verbatim from tree-sitter-python v0.23.6 queries/tags.scm.
 
 (module (expression_statement (assignment left: (identifier) @name) @definition.constant))
 

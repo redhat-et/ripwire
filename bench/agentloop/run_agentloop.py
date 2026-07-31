@@ -3,15 +3,15 @@
 #
 # WHAT THIS IS. PLAN_researchImprove2026.md Phase B4 / research/2026-07/R4-eval-methodology.md: the
 # stack currently measures retrieval quality (LocBench) but never the thing that actually matters —
-# does giving an agent ctxpack change whether it SOLVES the task. This script is the run matrix +
+# does giving an agent ripwire change whether it SOLVES the task. This script is the run matrix +
 # record schema + orchestration skeleton for that experiment. It does NOT execute any agent or spend
 # any money by itself: the actual exec step is a clearly marked NOT-IMPLEMENTED stub (see
 # `run_one()` below) until a harness (Claude Code `-p` / SWE-agent / mini-swe-agent) is wired in and a
 # human has explicitly approved a paid run.
 #
 # DESIGN (from R4-eval-methodology.md "Minimal agent-in-the-loop eval design"):
-#   Arms:   baseline    = agent with grep/read/glob only (no ctxpack)
-#           ctxpack_mcp = same agent + ctxpack wired in as an MCP server
+#   Arms:   baseline    = agent with grep/read/glob only (no ripwire)
+#           ripwire_mcp = same agent + ripwire wired in as an MCP server
 #   Seeds:  K=3 per (task, arm) — single-seed SWE-bench numbers are an unreliable "lucky pass"
 #           (https://arxiv.org/pdf/2605.12925); vary only the RNG/sampling seed, hold model+prompt fixed
 #           (Terminal-Bench "vary only the harness" template, https://arxiv.org/html/2601.11868v1).
@@ -33,14 +33,14 @@
 #
 # EXEC STUB — candidate (A) is now WIRED (see run_one()); (B) documented but not implemented:
 #   (A) `claude -p` (Claude Code print/non-interactive mode) with a tool allowlist — IMPLEMENTED below.
-#       The exact invocation per arm (see ALLOWED_TOOLS_BASELINE/ALLOWED_TOOLS_CTXPACK and run_one()):
+#       The exact invocation per arm (see ALLOWED_TOOLS_BASELINE/ALLOWED_TOOLS_RIPWIRE and run_one()):
 #         claude -p "<task prompt built from problem_statement + seed suffix>" \
 #           --permission-mode acceptEdits --output-format json --strict-mcp-config \
 #           --allowedTools "Bash,Read,Glob,Grep,Edit,Write"                              # baseline arm
-#           --allowedTools "Bash,Read,Glob,Grep,Edit,Write,mcp__ctxpack__*" \
-#           --mcp-config <generated ctxpack-mcp.json>                                    # ctxpack_mcp arm
-#       The MCP config registers `ctxpack --mcp` (verified against skills/ctxpack-mcp/SKILL.md +
-#       src/cli.h — NOT `ctxpack --mcp <workspace>`; the server is stdio with no positional root, each
+#           --allowedTools "Bash,Read,Glob,Grep,Edit,Write,mcp__ripwire__*" \
+#           --mcp-config <generated ripwire-mcp.json>                                    # ripwire_mcp arm
+#       The MCP config registers `ripwire --mcp` (verified against skills/ripwire-mcp/SKILL.md +
+#       src/cli.h — NOT `ripwire --mcp <workspace>`; the server is stdio with no positional root, each
 #       MCP verb call carries its own path/paths per request — see write_mcp_config()).
 #       No Docker sandbox here: each run gets a plain git checkout (see checkout_repo(), adapted from
 #       bench/locbench/run_locbench.py's checkout()) — the SWE-bench conda/dep environment is NOT
@@ -62,20 +62,20 @@ import argparse, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, time
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
 import select_tasks   # reuse fetch_rows()'s HF datasets-server fetch + cache — see load_gold_rows()
 
-SCHEMA = "ctxpack-agentloop-results-v1"
-ARMS   = ( "baseline", "ctxpack_mcp" )
+SCHEMA = "ripwire-agentloop-results-v1"
+ARMS   = ( "baseline", "ripwire_mcp" )
 DEFAULT_SEEDS = ( 1, 2, 3 )
 COST_LOW_PER_INSTANCE, COST_HIGH_PER_INSTANCE = 0.30, 1.50   # arXiv 2412.21139, per R4
 DEFAULT_TIMEOUT_SECONDS = 900
 
-# tool allowlists per arm (module docstring EXEC STUB) — ctxpack_mcp adds the MCP server's tools only;
+# tool allowlists per arm (module docstring EXEC STUB) — ripwire_mcp adds the MCP server's tools only;
 # everything else about the two arms is identical (Terminal-Bench "vary only the harness" template).
 ALLOWED_TOOLS_BASELINE = "Bash,Read,Glob,Grep,Edit,Write"
-ALLOWED_TOOLS_CTXPACK  = ALLOWED_TOOLS_BASELINE + ",mcp__ctxpack__*"
+ALLOWED_TOOLS_RIPWIRE  = ALLOWED_TOOLS_BASELINE + ",mcp__ripwire__*"
 
-# ctxpack binary path: same env-var convention bench/locbench/run_locbench.py uses (CTX), so a single
-# CTXPACK env var configures both harnesses; --ctxpack-bin overrides it per-invocation.
-CTXPACK_BIN_DEFAULT = os.environ.get( "CTXPACK", "ctxpack" )
+# ripwire binary path: same env-var convention bench/locbench/run_locbench.py uses (CTX), so a single
+# RIPWIRE env var configures both harnesses; --ripwire-bin overrides it per-invocation.
+RIPWIRE_BIN_DEFAULT = os.environ.get( "RIPWIRE", "ripwire" )
 
 RECORD_FIELDS = (
     "instance_id", "repo", "base_commit", "arm", "seed", "harness", "model",
@@ -85,7 +85,7 @@ RECORD_FIELDS = (
 
 def load_tasks_lock( path ):
     lock = json.loads( pathlib.Path( path ).read_text() )
-    if lock.get( "schema" ) != "ctxpack-agentloop-tasks-lock-v1":
+    if lock.get( "schema" ) != "ripwire-agentloop-tasks-lock-v1":
         raise SystemExit( f"{path}: unexpected schema {lock.get('schema')!r}; refusing (fail-closed)" )
     canon = [ dict( instance_id=i["instance_id"], repo=i["repo"], base_commit=i["base_commit"] )
               for i in sorted( lock["instances"], key=lambda x: x["instance_id"] ) ]
@@ -128,7 +128,7 @@ def checkout_repo( repo, base_commit, repos_dir ):
     would leak a previous run's agent edits into the next run). Returns the workspace dir, or None on a
     checkout failure (fail-closed — caller must not silently score/execute against a stale tree)."""
     dst = repos_dir / repo.replace( "/", "__" )
-    fetched_marker = dst / f".ctxpack_fetched_{base_commit}"
+    fetched_marker = dst / f".ripwire_fetched_{base_commit}"
     if not fetched_marker.exists():
         if not ( dst / ".git" ).exists():
             dst.mkdir( parents=True, exist_ok=True )
@@ -162,18 +162,18 @@ def patch_files( patch ):
     return sorted( set( re.findall( r'^\+\+\+ b/(.+)$', patch, re.M ) )
                  | set( re.findall( r'^--- a/(.+)$', patch, re.M ) ) )
 
-# ── MCP wiring for the ctxpack_mcp arm ────────────────────────────────────────────────────────────────
-def write_mcp_config( ctxpack_bin, out_path ):
-    """Write a --mcp-config JSON file registering ctxpack as an MCP server for `claude -p`.
+# ── MCP wiring for the ripwire_mcp arm ────────────────────────────────────────────────────────────────
+def write_mcp_config( ripwire_bin, out_path ):
+    """Write a --mcp-config JSON file registering ripwire as an MCP server for `claude -p`.
 
-    Verified (not guessed) against this repo: `ctxpack wrap claude` (skills/ctxpack-mcp/SKILL.md) prints
-    exactly `claude mcp add ctxpack -- ctxpack --mcp` — the server is `ctxpack --mcp` over STDIO with NO
+    Verified (not guessed) against this repo: `ripwire wrap claude` (skills/ripwire-mcp/SKILL.md) prints
+    exactly `claude mcp add ripwire -- ripwire --mcp` — the server is `ripwire --mcp` over STDIO with NO
     positional workspace/root argument. src/cli.h confirms: "--mcp may run without a path ... stdio
     --mcp does not [need a root] — its clients name a path per request" (each MCP verb call carries its
-    own `path`/`paths`). This corrects the task brief's assumed `ctxpack --mcp <workspace>` form, which
+    own `path`/`paths`). This corrects the task brief's assumed `ripwire --mcp <workspace>` form, which
     is not what the binary implements."""
     out_path.parent.mkdir( parents=True, exist_ok=True )
-    out_path.write_text( json.dumps( { "mcpServers": { "ctxpack": { "command": ctxpack_bin, "args": [ "--mcp" ] } } } ) )
+    out_path.write_text( json.dumps( { "mcpServers": { "ripwire": { "command": ripwire_bin, "args": [ "--mcp" ] } } } ) )
     return out_path
 
 def build_prompt( gold_row, seed ):
@@ -190,7 +190,7 @@ def build_prompt( gold_row, seed ):
     )
 
 # ── evaluation (--evaluator swebench|none) ─────────────────────────────────────────────────────────────
-def run_swebench_harness( task, patch, run_id_prefix="ctxpack-agentloop" ):
+def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
     """Score ONE candidate patch with the official SWE-bench evaluation harness (`swebench` PyPI
     package). Import-guarded: raises a clear, actionable SystemExit (not an ImportError traceback) if
     the package isn't installed, per --evaluator=swebench's contract. Requires Docker (the harness
@@ -220,7 +220,7 @@ def run_swebench_harness( task, patch, run_id_prefix="ctxpack-agentloop" ):
             "builds a per-instance image and runs FAIL_TO_PASS/PASS_TO_PASS inside it). Neither is "
             "assumed to be present in this environment; pass --evaluator=none to proceed without it." )
 
-    work = pathlib.Path( tempfile.mkdtemp( prefix="ctxpack-agentloop-eval-" ) )
+    work = pathlib.Path( tempfile.mkdtemp( prefix="ripwire-agentloop-eval-" ) )
     run_id = f"{run_id_prefix}-{task['instance_id']}-{int(time.time())}"
     predictions_path = work / "predictions.json"
     predictions_path.write_text( json.dumps( [ dict(
@@ -272,15 +272,15 @@ def evaluate_patch( task, gold_row, patch, evaluator ):
     raise SystemExit( f"unknown --evaluator {evaluator!r}; expected 'swebench' or 'none'" )
 
 # ── the one seam a real harness fills in ──────────────────────────────────────────────────────────
-def run_one( task, arm, seed, harness, model, *, work_dir=".", ctxpack_bin=CTXPACK_BIN_DEFAULT,
+def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
              timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None ):
     """Execute ONE (task, arm, seed) run through candidate harness (A) — `claude -p` — and return a
     filled record (RECORD_FIELDS schema). See the module docstring's EXEC STUB section for the exact
-    invocation per arm and write_mcp_config()'s docstring for the verified ctxpack MCP wiring.
+    invocation per arm and write_mcp_config()'s docstring for the verified ripwire MCP wiring.
 
     Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
     for this run (checkout_repo()); (b) invoke `claude -p` in that workspace with a tool allowlist per
-    arm, plus a generated --mcp-config for the ctxpack_mcp arm only; (c) capture wall-clock, the
+    arm, plus a generated --mcp-config for the ripwire_mcp arm only; (c) capture wall-clock, the
     --output-format json trailer's token/cost accounting (best-effort — see TODO-verify below), and the
     workspace's final `git diff` as the candidate patch; (d) score it via evaluate_patch()."""
     started = time.time()
@@ -309,10 +309,10 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ctxpack_bin=CTXPA
             "--output-format", "json",
             "--strict-mcp-config" ]   # baseline arm: no --mcp-config passed => zero MCP servers, even if
                                       # the target repo/user config would otherwise register one ambiently
-    if arm == "ctxpack_mcp":
-        allowed_tools = ALLOWED_TOOLS_CTXPACK
+    if arm == "ripwire_mcp":
+        allowed_tools = ALLOWED_TOOLS_RIPWIRE
         cfg_dir = pathlib.Path( work_dir ) / "mcp-config"
-        mcp_config_path = write_mcp_config( ctxpack_bin, cfg_dir / f"{task['instance_id']}-{seed}.json" )
+        mcp_config_path = write_mcp_config( ripwire_bin, cfg_dir / f"{task['instance_id']}-{seed}.json" )
         cmd += [ "--mcp-config", str( mcp_config_path ) ]
     cmd += [ "--allowedTools", allowed_tools ]
     if model:
@@ -367,9 +367,9 @@ def main():
     ap.add_argument( "--work-dir", default="/tmp/agentloop",
                      help="scratch dir for repo checkouts, the SWE-bench gold-row cache (shared with "
                           "select_tasks.py's --work-dir), and generated --mcp-config files" )
-    ap.add_argument( "--ctxpack-bin", default=CTXPACK_BIN_DEFAULT,
-                     help="ctxpack binary path the ctxpack_mcp arm's --mcp-config points at "
-                          "(default: $CTXPACK env var, else 'ctxpack' on PATH)" )
+    ap.add_argument( "--ripwire-bin", default=RIPWIRE_BIN_DEFAULT,
+                     help="ripwire binary path the ripwire_mcp arm's --mcp-config points at "
+                          "(default: $RIPWIRE env var, else 'ripwire' on PATH)" )
     ap.add_argument( "--evaluator", default="none", choices=( "swebench", "none" ),
                      help="'swebench' scores resolved= via the official swebench PyPI harness (Docker "
                           "required); 'none' (default) records resolved=None so the harness can run "
@@ -434,7 +434,7 @@ def main():
                f"seed={seed} harness={a.harness} model={a.model} evaluator={a.evaluator} "
                f"work_dir={a.work_dir}", file=sys.stderr )
         gold_rows = load_gold_rows( a.work_dir )
-        rec = run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ctxpack_bin=a.ctxpack_bin,
+        rec = run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ripwire_bin=a.ripwire_bin,
                         timeout_s=a.timeout_seconds, evaluator=a.evaluator, gold_rows=gold_rows )
         print( json.dumps( rec, indent=2 ) )
         return 0 if rec["status"] == "ok" else 1
@@ -444,7 +444,7 @@ def main():
     print( "Read bench/agentloop/README.md's safety note; a live run requires explicit human approval "
            "per task run, not just this flag.", file=sys.stderr )
     gold_rows = load_gold_rows( a.work_dir )
-    records = [ run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ctxpack_bin=a.ctxpack_bin,
+    records = [ run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ripwire_bin=a.ripwire_bin,
                           timeout_s=a.timeout_seconds, evaluator=a.evaluator, gold_rows=gold_rows )
                 for t, arm, seed in matrix ]
     out = dict( schema=SCHEMA, tasks_lock_content_sha256=lock["content_sha256"],

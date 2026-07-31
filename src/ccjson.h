@@ -1,8 +1,8 @@
 #pragma once
 
-// ccjson.h — Wave-4 feature: --export=cc.json[:FILE]. Map the per-file metrics ctxpack already
+// ccjson.h — Wave-4 feature: --export=cc.json[:FILE]. Map the per-file metrics ripwire already
 // computes (LOC, symbol count, cyclomatic cx, cognitive cx, file-level fan-in/fan-out, git churn)
-// into the CodeCharta interchange format (cc.json), so ctxpack becomes the metrics producer a
+// into the CodeCharta interchange format (cc.json), so ripwire becomes the metrics producer a
 // CodeCharta 3D-city visualization consumes for free.
 //
 // Format (documented CodeCharta v1.x "flat" shape, apiVersion "1.3"): a single JSON object with

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # weaksignalcheck.sh — R4 gate: the --for lens's weak-result HONESTY signal.
 #
-#   test/weaksignalcheck.sh                       # uses build/ctxpack on test/fixture + the routecheck/
+#   test/weaksignalcheck.sh                       # uses build/ripwire on test/fixture + the routecheck/
 #                                                  # anchorcheck golden fixtures
-#   CTXPACK_BIN=asan/ctxpack test/weaksignalcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/weaksignalcheck.sh
 #
 # When the --for lens's TOP-ranked match's raw lexical (BM25) score falls below
 # lexical.h's kWeakLexicalScoreThreshold, the query has too little real textual evidence behind it to
@@ -23,14 +23,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "weaksignalcheck: BIN=$BIN"
 

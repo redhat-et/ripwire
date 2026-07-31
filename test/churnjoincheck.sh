@@ -6,7 +6,7 @@
 # HashMap bucket wins, no tie-break", and the join predicate accepts a BARE BASENAME as a boundary suffix
 # of any indexed path ending in /<basename>. So a root-level file's commit count silently overwrote a
 # subdirectory file's, and a same-basename file that is NOT in the tree at all (deleted, excluded) donated
-# its whole history to an arbitrary same-name survivor. Measured on the ctxpack repo before the fix:
+# its whole history to an arbitrary same-name survivor. Measured on the ripwire repo before the fix:
 #   ./skills/install.sh  churn="2"   while `git log --since="12 months ago" -- skills/install.sh` = 6
 #   (the ROOT ./install.sh's 2 commits, proven causal: bumping the root file to 5 moved the SKILLS row to 5)
 # and in a sandbox: BOTH a/src/x.cpp and b/src/x.cpp reported churn="6" — the count of a DELETED src/x.cpp —
@@ -40,18 +40,18 @@
 #   5. A churn prior with zero in-window evidence discloses that in the window stamp AND on stderr, so
 #      "churn-ranked" and "churn found nothing" are distinguishable.
 #
-# Usage:  test/churnjoincheck.sh              # build/ctxpack
-#         test/churnjoincheck.sh asan/ctxpack # positional seam
-#         CTXPACK_BIN=asan/ctxpack test/churnjoincheck.sh   # env seam
+# Usage:  test/churnjoincheck.sh              # build/ripwire
+#         test/churnjoincheck.sh asan/ripwire # positional seam
+#         RIPWIRE_BIN=asan/ripwire test/churnjoincheck.sh   # env seam
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"       # BOTH seams — positional and env
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"       # BOTH seams — positional and env
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 echo "churnjoincheck: BIN=$BIN  ROOT=$ROOT"
 
@@ -290,7 +290,7 @@ fi
 #   base:  ranked="1"  ./a/zeta.cpp churn="6"   (its own in-window count is 0)
 #   fixed: ranked="0"  a/zeta.cpp unranked
 # Run for FOUR reasons the better candidate can be absent from the index — deleted, --exclude'd, an extension
-# ctxpack does not parse, and pruned by the crawl's own denylist — because the join must not care WHY.
+# ripwire does not parse, and pruned by the crawl's own denylist — because the join must not care WHY.
 zetaFixture(){   # zetaFixture DIR SURVIVOR_SUBDIR EXTRA_ROOT_FILE   (EXTRA_ROOT_FILE "" ⇒ the root file is deleted)
     local d="$1" sub="$2" extra="$3"
     mkdir -p "$d/$sub"
@@ -318,7 +318,7 @@ zetaFixture "$R4" a ""
 "$BIN" "$R4" --hotspots --limit=50 > "$TMP/h4.out" 2>"$TMP/h4.err"
 RANKED4="$( grep -oE 'ranked="[0-9]+"' "$TMP/h4.out" | head -1 | tr -cd '0-9' )"
 C4="$( churn_of "$TMP/h4.out" /a/zeta.cpp )"
-# git's own answer, from the SAME command ctxpack runs (never `git log -- <path>`: history simplification
+# git's own answer, from the SAME command ripwire runs (never `git log -- <path>`: history simplification
 # manufactures mismatches — 19 of them on a first verifier pass; that is trap #12 in this round's ledger)
 WANT4="$( git -C "$R4" log -c --since="12 months ago" --name-only --format= | grep -cx 'a/zeta.cpp' )"
 [ "${RANKED4:-x}" = 0 ] && ok "F4/deleted: ranked=\"0\" — a deleted file's 6 commits are NOBODY's, not the one survivor's" \
@@ -401,7 +401,7 @@ git -C "$R6" init -q; git -C "$R6" config user.email s@x.com; git -C "$R6" confi
 D 2019-01-01T12:00:00; git -C "$R6" add -A >/dev/null; git -C "$R6" commit -qm old
 mkdir -p "$R6/build"
 for i in 1 2 3 4 5; do
-    printf 'zeta payload %s\n' "$i" > "$R6/zeta.unparsed"   # an extension ctxpack has no grammar for
+    printf 'zeta payload %s\n' "$i" > "$R6/zeta.unparsed"   # an extension ripwire has no grammar for
     mkfn zetaBuild"$i"          > "$R6/build/zeta.cpp"       # build/ is on the crawl's own denylist
     D "2026-06-0${i}T12:00:00"; git -C "$R6" add -A >/dev/null; git -C "$R6" commit -qm "u$i"
 done
@@ -476,12 +476,12 @@ done
 mv "$R8/Case.cpp" "$R8/casetmp" && mv "$R8/casetmp" "$R8/case.cpp"
 unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
 "$BIN" "$R8" --hotspots --limit=50 > "$TMP/h8.out" 2>"$TMP/h8.err"
-# `want` must come from the SAME git command ctxpack runs, C-unquoted the same way. Two traps live here and both
+# `want` must come from the SAME git command ripwire runs, C-unquoted the same way. Two traps live here and both
 # bit this gate while it was being written: without `-c core.quotepath=false` git octal-escapes the UTF-8 bytes,
 # and WITH it git still C-quotes a path containing a control byte — so a raw `grep -cxF` against a shell literal
 # counts 0 for two of these three files and would have "proved" the join broken when it is the expectation that
 # is wrong. Unquote git's side in python, exactly as gitUnquotePath does, then compare.
-gitPathCount(){   # gitPathCount REPO RELPATH — in-window commits naming exactly RELPATH, per ctxpack's own command
+gitPathCount(){   # gitPathCount REPO RELPATH — in-window commits naming exactly RELPATH, per ripwire's own command
     git -C "$1" -c core.quotepath=false log -c --since="12 months ago" --name-only --format= \
         | python3 -c '
 import sys, re
@@ -716,7 +716,7 @@ fi
 # ── 10. THE DERIVED OFFSET: three spellings of one tree must agree, including a SUBDIRECTORY root ────
 # The offset exists because git anchors at the repo TOPLEVEL and the index anchors at the crawl root. Where the
 # crawl root is a SUBDIRECTORY, git's paths carry leading segments the indexed paths do not — and with a
-# basename/suffix join that direction cannot match at all, so churn silently vanished: `cd src && ctxpack .`
+# basename/suffix join that direction cannot match at all, so churn silently vanished: `cd src && ripwire .`
 # reported ranked="0" on the base binary and 73 correct rows on this one. Same tree, three spellings, one truth.
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 && [ -d "$ROOT/src" ]; then
     "$BIN" "$ROOT/src" --hotspots --limit=1000 > "$TMP/o_abs.out" 2>/dev/null
@@ -725,7 +725,7 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 && [ -d "$ROOT/src" ]; the
     RD="$( grep -oE 'ranked="[0-9]+"' "$TMP/o_dot.out" | head -1 | tr -cd '0-9' )"
     [ -n "$RD" ] && [ "${RD:-0}" -gt 0 ] \
         && ok "offset: a crawl root spelled '.' from INSIDE the repo ranks $RD rows (the derived gitPrefix is doing real work)" \
-        || no "offset: 'cd src && ctxpack .' ranked=\"$RD\" — the derived git prefix is not being applied, so churn vanished"
+        || no "offset: 'cd src && ripwire .' ranked=\"$RD\" — the derived git prefix is not being applied, so churn vanished"
     [ "${RA:-0}" = "${RD:-1}" ] && ok "offset: the absolute-subdir and dot-from-inside spellings agree (ranked=$RA)" \
         || no "offset: ranked=\"$RA\" for '$ROOT/src' vs \"$RD\" for '.' inside it — one spelling of the same tree is wrong"
     # and every row of the dot spelling re-derives against git's own walk, prefixed by the offset

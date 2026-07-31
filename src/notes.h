@@ -5,7 +5,7 @@
 // path keyed to a symbol. The most expensive thing an agent rebuilds across sessions is gotchas (this
 // round pinned four), not structure — a note pins one to the symbol it belongs to.
 //
-// STORE: `.ctxpack_notes` at the repo root — a committed, sorted, merge-friendly text file (the B10 sorted-
+// STORE: `.ripwire_notes` at the repo root — a committed, sorted, merge-friendly text file (the B10 sorted-
 // acks precedent: two sessions each appending a DIFFERENT note produce two pure, non-overlapping insertions
 // a 3-way text merge resolves cleanly). One line per note, in ONE of two shapes:
 //     <canonical-id or path>\t<ISO-date>\t<text, no tabs/newlines>                              (legacy, 3 fields)
@@ -15,7 +15,7 @@
 // PROVENANCE STAMP (the day's costliest lesson: a "done" claim with nothing anchoring it to a commit is
 // worthless the moment the tree moves on). --note-add now stamps the writing repo's HEAD sha + branch onto
 // every NEW note (main.cpp's --note-add handler resolves them via quality::gitHeadSha / `rev-parse
-// --abbrev-ref HEAD` and hands them to addNote). BACKWARD COMPATIBILITY is load-bearing — `.ctxpack_notes`
+// --abbrev-ref HEAD` and hands them to addNote). BACKWARD COMPATIBILITY is load-bearing — `.ripwire_notes`
 // is a COMMITTED file in real repos, so the format must extend, never break:
 //   - `text` itself can never contain a tab (sanitizeField strips them on write), so any tab appearing AFTER
 //     the third field is unambiguously the start of the sha/branch suffix — a 3-field legacy line (no such
@@ -30,7 +30,7 @@
 // disk. normalizeNoteTarget() is the ONE seam that enforces this: it canonicalizes an absolute in-root target
 // to root-relative on WRITE (see runNotes' --note-add handler in main.cpp) and refuses an outside-root target
 // loudly rather than silently writing an entry that can never match anywhere. readNotesRelative() is the READ
-// half — it re-normalizes on load so a LEGACY .ctxpack_notes written before this fix (absolute targets) keeps
+// half — it re-normalizes on load so a LEGACY .ripwire_notes written before this fix (absolute targets) keeps
 // surfacing correctly without a rewrite. A bare-name SYM target (no scope, e.g. a free function — canonicalId
 // degrades to just `name`) has no path component at all and passes through both untouched.
 //
@@ -61,7 +61,7 @@ namespace ctx::notes
 {
 
 // the committed store, at the repo root — mirrors quality.h's kAcksFile convention.
-inline const char* kNotesFile = ".ctxpack_notes";
+inline const char* kNotesFile = ".ripwire_notes";
 
 // one field note. POD-ish; owns its strings (a note file is small, so simplicity beats SoA here).
 struct Note
@@ -124,7 +124,7 @@ inline std::string sanitizeField( std::string_view s )
 // `--note-add` used to sanitize a field and then ask `.empty()` about the result. That pair is a THIRD
 // spelling of "present but carries nothing", and it is the weakest of the three: sanitizeField maps only
 // \t \n \r to a space and trims ASCII spaces, so an ASCII-blank note was refused while **6 of 6** other
-// blank classes were accepted and COMMITTED into `.ctxpack_notes` — NBSP, ZWSP, BOM, U+2800 BRAILLE PATTERN
+// blank classes were accepted and COMMITTED into `.ripwire_notes` — NBSP, ZWSP, BOM, U+2800 BRAILLE PATTERN
 // BLANK, a bidi RLO, and a raw VT (0x0B) written verbatim into a text file this tool tells users to commit
 // and merge. Same equivalence class the MCP edit verbs' §H2/ITEM A ruling already closed, one file over.
 //
@@ -266,7 +266,7 @@ inline std::vector<Note> readNotes( const std::string& path )
 }
 
 // D5 read-side normalization: re-relativize every target against `root` on load. This is what keeps a
-// LEGACY .ctxpack_notes (absolute targets, written before this fix or hand-edited) surfacing correctly on
+// LEGACY .ripwire_notes (absolute targets, written before this fix or hand-edited) surfacing correctly on
 // the current checkout without a rewrite. Best-effort like the rest of this file: an out-of-root absolute
 // target degrades to itself unchanged (normalizeNoteTarget's outsideRoot signal is ignored here — a read
 // never fails; the entry simply stays dangling, which --notes already reports).
@@ -300,7 +300,7 @@ inline bool writeNotes( const std::string& path, std::vector<Note> notes )
     sortNotes( notes );
     std::ofstream f( path, std::ios::trunc );
     if( !f ) { DEGRADED_PATH_ALERT( "notes: cannot write notes file" ); return false; }
-    f << "# ctxpack field notes v1 — one per line: <canonical-id or path> <TAB> <ISO-date> <TAB> <text> [<TAB> <HEAD sha> <TAB> <branch>]. Kept SORTED (merge-friendly union); dates are git committer-clock, not wall time; the trailing sha/branch pair is present only on provenance-stamped notes.\n";
+    f << "# ripwire field notes v1 — one per line: <canonical-id or path> <TAB> <ISO-date> <TAB> <text> [<TAB> <HEAD sha> <TAB> <branch>]. Kept SORTED (merge-friendly union); dates are git committer-clock, not wall time; the trailing sha/branch pair is present only on provenance-stamped notes.\n";
     for( const Note& n : notes ) f << noteLine( n ) << '\n';
     return bool( f );
 }

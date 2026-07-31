@@ -103,7 +103,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     std::vector<NodeId> changedSyms;
     for( NodeId i = 0; i < N; ++i ) if( changedFile[ ing.symbols[i].fileId ] ) changedSyms.push_back( i );
 
-    std::fprintf( out, "ctxpack situational-awareness — %u changed file(s), %zu symbols in them\n", nChanged, changedSyms.size() );
+    std::fprintf( out, "ripwire situational-awareness — %u changed file(s), %zu symbols in them\n", nChanged, changedSyms.size() );
     if( changedSyms.empty() )
     { std::fprintf( out, "  (no indexed symbols in the changed files — nothing to analyze)\n" ); return; }
 
@@ -437,7 +437,7 @@ inline void walkUntestedRows( const IngestResult& ing, const TestGateResult& r, 
 // script_gates_unmodelled= says what the walk is blind to — verbatim the sentence --affected already prints,
 // because the number and the blindness are the same on both verbs.
 inline constexpr const char* kTestGateLegend =
-    "ctxpack test-gate (TDAD-parity, arXiv 2603.17973): the tests to run for this change + the "
+    "ripwire test-gate (TDAD-parity, arXiv 2603.17973): the tests to run for this change + the "
     "UNTESTED blast radius. A queryable call-graph+test map cut agent-caused regressions -70% "
     "(6.08%->1.82%); this gate names the obligations, the agent runs the tests then relies on green. "
     "exit 4 if tests OR untested is non-empty. TWO INDEPENDENT LISTINGS, each with its own row count: "
