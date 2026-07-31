@@ -478,6 +478,8 @@ def main():
     ap.add_argument( '--out', default = os.path.join( ROOT, 'docs', 'COMMANDS.md' ) )
     ap.add_argument( '--check', action = 'store_true',
                      help = 'compare the documented flag set against the binary; write nothing' )
+    ap.add_argument( '--no-capture', action = 'store_true',
+                     help = 'write a sample-free document on purpose (required when no capture is found)' )
     args = ap.parse_args()
 
     binPath = args.bin
@@ -513,6 +515,15 @@ def main():
 
     capturePath = args.capture or newest_capture()
     captures    = parse_capture( capturePath )
+    # Regenerating without a capture silently deletes every sample block from a document that had
+    # them — a large, invisible loss that would look like a successful rebuild. Refuse instead, and
+    # make the sample-free document an explicit request.
+    if not captures and not args.no_capture:
+        sys.exit( 'docs_commands_build: no showcase capture found%s.\n'
+                  '  Samples would be DROPPED from the generated document.\n'
+                  '  Pass --capture PATH, put one under docs/captures/COMMANDS_showcase_*.md,\n'
+                  '  or pass --no-capture to write a sample-free document deliberately.'
+                  % ( ' at ' + args.capture if args.capture else '' ) )
     text        = render( name, preamble, sections, captures, capturePath if captures else None )
     assert_scrubbed( text )
     os.makedirs( os.path.dirname( args.out ), exist_ok = True )
