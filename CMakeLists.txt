@@ -57,69 +57,43 @@ endif()
 include(cmake/PortableFlags.cmake)
 add_compile_options(${CTXPACK_ARCH_FLAGS})
 
-# ---- FetchContent: SHARED sources, PER-BUILD-TREE build output ----
-# "no network" is a RUNTIME rule only; configure-time fetches are fine and cached.
+# ---- FetchContent: VENDORED sources, PER-BUILD-TREE build output ----
+# Every dependency lives IN THIS REPO under third_party/deps/<name>: a cold clone builds with the
+# network unplugged — no git fetch, no ~/.cache priming, no CI cache step, no upstream that can
+# disappear or force-push under us. The proof is a gate, not a claim — test/dependencypincheck.sh
+# runs a real disconnected CONFIGURE (the step at which FetchContent would fetch):
+#   cmake -S . -B scratch -DFETCHCONTENT_FULLY_DISCONNECTED=ON && cmake --build scratch -j
 #
-# Split by relocatability, because these two things have opposite sharing rules:
-#   * SOURCES (the git clones) are relocatable and compiler-flag-independent -> SHARE them across the
-#     fleet (~20 sessions) in ~/.cache so tree-sitter + 11 grammars clone exactly once. Each dep adopts
-#     the shared clone via FETCHCONTENT_SOURCE_DIR_<NAME> (ctxpack_use_shared_source, below).
-#   * BUILD + SUBBUILD dirs are NOT relocatable: their generated Makefiles bake in the consuming build
-#     tree's absolute CMAKE_BINARY_DIR and run `cd $CMAKE_BINARY_DIR && cmake --check-build-system` on
-#     every `cmake --build`. Sharing tree_sitter-build meant the LAST tree to configure won; when that
-#     was a scratch/worktree/oldbuild dir that later got deleted, every other tree inherited a `cd` into
-#     a now-missing path -> `tree_sitter-build/.../depend Error 1`. Keep them LOCAL (FETCHCONTENT_BASE_DIR
-#     -> this tree's ${CMAKE_BINARY_DIR}/_deps), so a build tree is fully self-contained and disposable
-#     with its own `build/`, and removing any OTHER build tree can never corrupt this one.
-# Bonus: this also gives sanitizer builds their isolation for free (asan/_deps vs build/_deps hold
-# separately-compiled libtree-sitter.a), so no more sanitizer-suffixed cache key is needed.
-set(_ctxpack_src_cache "$ENV{HOME}/.cache/ctxpack-deps" CACHE PATH "shared, relocatable dep SOURCE cache")
-set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")   # local build/subbuild (NOT the shared cache)
+# The FetchContent_Declare blocks below are kept for PROVENANCE only. Their GIT_REPOSITORY/GIT_TAG
+# record exactly which upstream commit each vendored tree was cut from (mirrored in THIRD_PARTY.md);
+# FETCHCONTENT_SOURCE_DIR_<NAME> makes FetchContent treat the vendored dir as already-provisioned —
+# no download step, no update step, no subbuild git step, and it never writes into the dir — so those
+# URLs are documentation of origin, not a code path anything can take.
+#
+# BUILD + SUBBUILD dirs stay LOCAL to the consuming build tree (FETCHCONTENT_BASE_DIR ->
+# ${CMAKE_BINARY_DIR}/_deps). They are not relocatable: their generated Makefiles bake in that tree's
+# absolute CMAKE_BINARY_DIR and run `cd $CMAKE_BINARY_DIR && cmake --check-build-system` on every
+# `cmake --build`, so a shared build dir lets the LAST tree to configure win — and deleting that tree
+# then breaks every other one. Local also gives sanitizer builds their isolation for free (asan/_deps
+# and build/_deps hold separately-compiled libtree-sitter.a).
+set(_ctxpack_vendored_deps "${CMAKE_CURRENT_SOURCE_DIR}/third_party/deps" CACHE PATH "in-repo dependency SOURCE trees")
+set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")   # local build/subbuild (never the source tree)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 include(FetchContent)
 
-# Reuse the fleet's shared clone WITHOUT letting FetchContent own it. Passing FETCHCONTENT_SOURCE_DIR_<NAME>
-# makes FetchContent treat that dir as already-provisioned: no download, no subbuild git step, and crucially
-# it never touches the dir (unlike a plain SOURCE_DIR override, whose clone stamp lives in the local subbuild
-# so ExternalProject would rm -rf + re-clone the shared source on every fresh build tree, racing the fleet).
-#
-# The SENTINEL is the exact file this dep's targets will compile (parser.c for a grammar, lib/src/lib.c for
-# the core). Adopting the shared clone only when its sentinel exists makes a partial/corrupt shared source
-# (e.g. an interrupted checkout, or Swift's parser.c which lives only on the with-generated-files branch)
-# SELF-HEAL: we simply don't adopt it, and FetchContent clones a fresh, correctly-checked-out copy into this
-# tree's local ${CMAKE_BINARY_DIR}/_deps/<name>-src. Same fallback covers a cold / air-gapped machine. Either
-# way the build output stays local, so the tree is self-contained and disposable with its own build/ dir.
-macro(ctxpack_use_shared_source NAME SENTINEL)
+# Point one dep at its vendored tree. SENTINEL is the exact file this dep's targets will compile
+# (src/parser.c for a grammar, lib/src/lib.c for the core) — a missing sentinel means the vendored tree
+# was pruned wrong or the checkout is incomplete, and that has to be a loud configure-time error, NEVER
+# a silent fall back to a network clone. A public build that quietly reaches for github is precisely the
+# failure this vendoring exists to remove, so the degrade direction here is "stop", not "download".
+macro(ctxpack_use_vendored_source NAME SENTINEL)
   string(TOUPPER "${NAME}" _ctxpack_up)
-  if(EXISTS "${_ctxpack_src_cache}/${NAME}-src/${SENTINEL}")
-    set(FETCHCONTENT_SOURCE_DIR_${_ctxpack_up} "${_ctxpack_src_cache}/${NAME}-src")
-  else()
-    unset(FETCHCONTENT_SOURCE_DIR_${_ctxpack_up})
+  if(NOT EXISTS "${_ctxpack_vendored_deps}/${NAME}/${SENTINEL}")
+    message(FATAL_ERROR
+      "vendored dependency '${NAME}' is missing ${SENTINEL} under ${_ctxpack_vendored_deps}/${NAME} — "
+      "the checkout is incomplete; this build will not fetch a replacement from the network")
   endif()
-endmacro()
-
-# Adopt a shared source clone for an arbitrary commit only when its checked-out HEAD is the declared
-# immutable revision. FETCHCONTENT_SOURCE_DIR bypasses FetchContent's checkout machinery entirely, so
-# the sentinel-only helper above is insufficient for commit pins: a shared branch checkout could otherwise
-# silently override GIT_TAG. A mismatch falls back to the build-local FetchContent clone.
-macro(ctxpack_use_shared_source_commit NAME SENTINEL COMMIT)
-  string(TOUPPER "${NAME}" _ctxpack_up)
-  set(_ctxpack_shared_source "${_ctxpack_src_cache}/${NAME}-src")
-  set(_ctxpack_shared_head "")
-  set(_ctxpack_git_result 1)
-  if(EXISTS "${_ctxpack_shared_source}/${SENTINEL}")
-    execute_process(
-      COMMAND git -C "${_ctxpack_shared_source}" rev-parse HEAD
-      RESULT_VARIABLE _ctxpack_git_result
-      OUTPUT_VARIABLE _ctxpack_shared_head
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
-  endif()
-  if(_ctxpack_git_result EQUAL 0 AND _ctxpack_shared_head STREQUAL "${COMMIT}")
-    set(FETCHCONTENT_SOURCE_DIR_${_ctxpack_up} "${_ctxpack_shared_source}")
-  else()
-    unset(FETCHCONTENT_SOURCE_DIR_${_ctxpack_up})
-  endif()
+  set(FETCHCONTENT_SOURCE_DIR_${_ctxpack_up} "${_ctxpack_vendored_deps}/${NAME}")
 endmacro()
 
 # ---- configure-time query embedding (SPEC §1: one self-contained binary) ----
@@ -184,7 +158,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 # Dependency independence (SHA-pin): GIT_TAG is the commit the tag pointed to when resolved via
 # `git ls-remote --tags <repo> "refs/tags/<tag>^{}"` (2026-07-22) — an immutable, un-force-pushable ref.
 # The tag stays as a trailing comment so `git log`/README readers still see the human-legible version.
-ctxpack_use_shared_source(tree_sitter lib/src/lib.c)
+ctxpack_use_vendored_source(tree_sitter lib/src/lib.c)
 FetchContent_Declare(tree_sitter
   GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
   GIT_TAG 7f534862c3ec939c3a6ee147f7600ef5c1bf900f  # v0.26.9
@@ -196,7 +170,7 @@ FetchContent_MakeAvailable(tree_sitter)
 # add a regenerate-parser.c custom command, and a SOVERSION/ABI trap. SOURCE_SUBDIR _none_
 # makes FetchContent skip the grammar's own CMakeLists; we compile only parser.c (+scanner.c).
 macro(add_ts_grammar NAME REPO TAG)
-  ctxpack_use_shared_source(${NAME} src/parser.c)
+  ctxpack_use_vendored_source(${NAME} src/parser.c)
   FetchContent_Declare(${NAME}
     GIT_REPOSITORY ${REPO}
     GIT_TAG ${TAG}
@@ -236,10 +210,11 @@ add_ts_grammar(cpp    https://github.com/tree-sitter/tree-sitter-cpp.git        
 add_ts_grammar(python https://github.com/tree-sitter/tree-sitter-python.git     bffb65a8cfe4e46290331dfef0dbf0ef3679de11)  # v0.23.6
 add_ts_grammar(go     https://github.com/tree-sitter/tree-sitter-go.git         3c3775faa968158a8b4ac190a7fda867fd5fb748)  # v0.23.4
 add_ts_grammar(rust   https://github.com/tree-sitter/tree-sitter-rust.git       cad8a206f2e4194676b9699f26f6560d07130d3f)  # v0.23.2
-# Swift: main has no generated parser.c. Pin the audited generated-files commit exactly; an arbitrary
-# SHA requires a full fetch (SPEC §7), and shared-source adoption must validate HEAD before bypassing it.
+# Swift: upstream main has no generated parser.c — only the audited generated-files commit below does,
+# which is why the pin is a bare SHA rather than a tag. Vendoring settles it permanently: the tree under
+# third_party/deps/swift IS that commit's generated output, so nothing has to resolve a branch to find it.
 set(_ctxpack_swift_commit 31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5)
-ctxpack_use_shared_source_commit(swift src/parser.c ${_ctxpack_swift_commit})
+ctxpack_use_vendored_source(swift src/parser.c)
 FetchContent_Declare(swift
   GIT_REPOSITORY https://github.com/alex-pinkus/tree-sitter-swift.git
   GIT_TAG ${_ctxpack_swift_commit}
@@ -280,7 +255,7 @@ add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git          
 # TypeScript: ONE repo cloned once (SOURCE_SUBDIR _none_ skips its CMakeLists), then TWO
 # OBJECT libs (ts_tsts from typescript/src, ts_tstsx from tsx/src). Both share common/scanner.c
 # which each parser dir's own scanner.c #includes, so per-dir (parser.c + scanner.c) is correct.
-ctxpack_use_shared_source(ts_typescript typescript/src/parser.c)
+ctxpack_use_vendored_source(ts_typescript typescript/src/parser.c)
 FetchContent_Declare(ts_typescript
   GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-typescript.git
   GIT_TAG f975a621f4e7f532fe322e13c4f79495e0a7b2e7  # v0.23.2
@@ -359,10 +334,15 @@ option(CTXPACK_TESTS "build direct CSR and PageRank verification gates" OFF)
 if(CTXPACK_TESTS)
   enable_testing()
 
-  # SPEC §8: unit/property gates use a SHA-locked Doctest checkout. This is the exact v2.4.12
-  # release commit; arbitrary commits require a full fetch, and shared adoption validates HEAD.
+  # SPEC §8: unit/property gates use a SHA-locked Doctest checkout — the exact v2.4.12 release commit,
+  # vendored under third_party/deps/doctest (header + parts + the cmake scripts its CMakeLists reads).
   set(_ctxpack_doctest_commit 1da23a3e8119ec5cce4f9388e91b065e20bf06f5)
-  ctxpack_use_shared_source_commit(doctest doctest/doctest.h ${_ctxpack_doctest_commit})
+  # doctest is a test-only dependency: it must contribute no install() rules to this project, and the
+  # vendored copy is pruned to what the build compiles (the single header + parts/ + its cmake
+  # scripts). Its upstream install() block would otherwise try to install a doctest/extensions
+  # directory that pruning removed — turned off at the source rather than left to `--component` luck.
+  set(DOCTEST_NO_INSTALL ON)
+  ctxpack_use_vendored_source(doctest doctest/doctest.h)
   FetchContent_Declare(doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
     GIT_TAG ${_ctxpack_doctest_commit}
