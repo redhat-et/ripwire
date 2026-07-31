@@ -56,12 +56,23 @@ printf '%s' "$SHDR2" | grep -q 'low_confidence' \
     && no "strong query (compute pagerank) wrongly fired low_confidence: $SHDR2" \
     || ok "strong query (compute pagerank) does not fire low_confidence: $SHDR2"
 
-# ── 3) selection itself is untouched — both strong queries and the weak query still land on the SAME ────
-# ROLE-based repo-wide kind=fn winner (fnv1a64), proving this fix changed only the confidence signal.
-printf '%s' "$WHDR"  | grep -q 'n="fnv1a64"' && printf '%s' "$SHDR1" | grep -q 'n="fnv1a64"' \
-    && printf '%s' "$SHDR2" | grep -q 'n="fnv1a64"' \
-    && ok "selection (ROLE-based winner) is unchanged by the confidence-signal fix" \
-    || no "selection changed — this fix must touch ONLY the confidence signal"
+# ── 3) selection itself is untouched — all three queries land on the SAME ROLE-based repo-wide kind=fn ──
+# winner, proving this fix changed only the confidence signal.
+#
+# The claim is DIFFERENTIAL — "the same winner regardless of query" — so it is asserted differentially.
+# It used to name the winner literally (`fnv1a64`), which made a claim about the corpus rather than about
+# the fix: any change to what the tree contains re-scored the role and reddened a gate that was measuring
+# something else entirely. Whichever symbol wins, all three queries must agree on it, because --exemplar
+# chooses by ROLE and the role does not read the query. Extract it from the weak query and require the
+# two strong ones to match.
+WINNER="$( printf '%s' "$WHDR" | sed -n 's/.* n="\([^"]*\)".*/\1/p' )"
+if [ -z "$WINNER" ]; then
+    no "selection: could not read n= from the weak-query header: $WHDR"
+elif printf '%s' "$SHDR1" | grep -q "n=\"$WINNER\"" && printf '%s' "$SHDR2" | grep -q "n=\"$WINNER\""; then
+    ok "selection (ROLE-based winner n=\"$WINNER\") is query-independent, as the confidence-signal fix requires"
+else
+    no "selection changed between queries (weak picked \"$WINNER\") — this fix must touch ONLY the confidence signal"
+fi
 
 # ── 4) determinism (byte-identical run-to-run) + well-formed XML, on the query that now flags degraded ──
 "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" >"$TMP/w1" 2>/dev/null
