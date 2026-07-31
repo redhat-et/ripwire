@@ -48,9 +48,15 @@ tracked=$( tr -dc '\0' < "$TMP/tracked.z" | wc -c | tr -d ' ' )
 
 # Text-only sweep over the committed set. `grep -I` skips binaries; -z keeps pathnames with spaces
 # intact. Every arm below funnels through this so the scope statement above is true by construction.
+#
+# SELF-EXCLUSION: this file states the forbidden patterns literally, so it matches its own arms. It
+# is excluded from every sweep — the same idiom the gate it replaces used. The cost is real and
+# named here: a genuine leak written INTO this script is the one thing the script cannot see, so
+# treat edits to it as edits to a trusted file and review them by eye.
+SELF="test/$( basename "$0" )"
 sweep(){  # sweep <extended-regex> [extra grep flags...]
     local re="$1"; shift
-    xargs -0 grep -InE "$@" -- "$re" < "$TMP/tracked.z" 2>/dev/null
+    xargs -0 grep -InE "$@" -- "$re" < "$TMP/tracked.z" 2>/dev/null | grep -vF "$SELF:"
 }
 
 # ── arm 1: the private working-copy name, anywhere, any case ──────────────────────────────────────

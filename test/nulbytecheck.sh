@@ -31,7 +31,7 @@
 #       allowlist is ENUMERATED from the tree, and this arm fails when a row stops being backed by a real file.
 #
 # THE ALLOWLIST is deliberately short and evidence-based: at the time of writing, `git ls-files` turns up
-# exactly three extensions carrying NUL bytes — .pptx (6 decks), .pdf (1), .tgz (2 locbench fixtures) — and no
+# exactly one extension carrying NUL bytes — .tgz (2 locbench fixtures) — and no
 # .png/.jpg/.ico exists in this repo at all, so none is pre-allowlisted. If a future round adds a genuinely
 # binary file type, this gate FAILS naming the file, and the fix is one row plus the reason. That failure is
 # the feature: an allowlist that grows by guess is how the next `.md` full of control bytes gets waved through.
@@ -72,8 +72,6 @@ import sys
 # Extensions whose files are legitimately binary — ENUMERATED from `git ls-files`, never guessed. See the
 # gate header: a new binary type is meant to fail here once and gain a row with a reason.
 BINARY_EXTENSIONS = {
-    ".pptx",   # present/*.pptx — the OOXML decks (zip containers)
-    ".pdf",    # present/ctxpack-showcase.pdf
     ".tgz",    # bench/locbench/results/*/*.tgz — gzipped gate+fixture bundles
 }
 
