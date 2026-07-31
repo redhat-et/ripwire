@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # routeedgecheck.sh — the B6.3 HTTP-route / cross-service edge-kind gate.
 #
-#   test/routeedgecheck.sh                       # uses build/ctxpack on test/routeedgefix
-#   CTXPACK_BIN=asan/ctxpack test/routeedgecheck.sh
+#   test/routeedgecheck.sh                       # uses build/ripwire on test/routeedgefix
+#   RIPWIRE_BIN=asan/ripwire test/routeedgecheck.sh
 #
 # Fixture test/routeedgefix/:
 #   server/app.py      FastAPI: GET /users/{user_id} (get_user), POST /users (create_user),
@@ -24,14 +24,14 @@
 #   (c) the deliberately ambiguous case produces NO edge (never a guess)
 #   (d) an unresolved USE (no matching DEF) produces NO edge
 #   (e) determinism x3 (byte-identical) + xmllint-clean output
-#   (f) a route-free corpus (ctxpack's OWN src/) is BYTE-IDENTICAL to a route-free baseline run — the
+#   (f) a route-free corpus (ripwire's OWN src/) is BYTE-IDENTICAL to a route-free baseline run — the
 #       additive-only / G5 contract (no route detector ever perturbs a corpus with none).
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIXTURE="$ROOT/test/routeedgefix"
 SERVER="$FIXTURE/server"
 CLIENT="$FIXTURE/client"
@@ -40,7 +40,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "routeedgecheck: BIN=$BIN  FIXTURE=$FIXTURE"
 
 forDump(){ "$BIN" "$@" --for="test" --no-cache 2>/dev/null; }
@@ -140,7 +140,7 @@ MEDGECOUNT="$( printf '%s' "$MULTI" | grep -o '<route ' | wc -l | tr -d ' ' )"
 
 # ---------------------------------------------------------------------------------------------------
 # (f) additive-only / G5: a route-free corpus is BYTE-IDENTICAL whether or not the B6.3 detectors ran.
-#     ctxpack's own src/ (pure C++/headers) has zero routes — its default map is not the --for/--around
+#     ripwire's own src/ (pure C++/headers) has zero routes — its default map is not the --for/--around
 #     path this feature touches, so this checks the cheapest reliable proxy: two back-to-back --no-cache
 #     runs agree, AND neither run's default map contains a <routes> tag (the block is additive-only,
 #     gated on g.routeEdges non-empty — G5 never fires on a route-free tree).
@@ -148,7 +148,7 @@ MEDGECOUNT="$( printf '%s' "$MULTI" | grep -o '<route ' | wc -l | tr -d ' ' )"
 echo "-- additive-only (route-free corpus) --"
 "$BIN" "$ROOT/src" --no-cache >"$TMP/src1" 2>/dev/null
 "$BIN" "$ROOT/src" --no-cache >"$TMP/src2" 2>/dev/null
-diff -q "$TMP/src1" "$TMP/src2" >/dev/null && ok "additive-only: ctxpack's own src/ default map is deterministic" \
+diff -q "$TMP/src1" "$TMP/src2" >/dev/null && ok "additive-only: ripwire's own src/ default map is deterministic" \
   || no "additive-only: src/ default map is non-deterministic"
 grep -q '<routes>' "$TMP/src1" && no "additive-only: <routes> leaked into a route-free corpus's default map" \
   || ok "additive-only: no <routes> tag on a route-free corpus"

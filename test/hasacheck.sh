@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # hasacheck.sh — S5-E HAS-A composition edges gate.
 #
-#   test/hasacheck.sh                       # uses build/ctxpack on test/hasafix
-#   CTXPACK_BIN=asan/ctxpack test/hasacheck.sh
+#   test/hasacheck.sh                       # uses build/ripwire on test/hasafix
+#   RIPWIRE_BIN=asan/ripwire test/hasacheck.sh
 #
 # The fixture test/hasafix/hasa.h has class CanyonScreen holding:
 #   m_pool  — a SpherePool by value (creates)
@@ -19,15 +19,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/hasafix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "hasacheck: BIN=$BIN  CORPUS=$CORPUS"
 

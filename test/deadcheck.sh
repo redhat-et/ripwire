@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # deadcheck.sh — the S5-A --dead-code detection gate.
 #
-#   test/deadcheck.sh                       # uses build/ctxpack on test/deadfix
-#   CTXPACK_BIN=asan/ctxpack test/deadcheck.sh
+#   test/deadcheck.sh                       # uses build/ripwire on test/deadfix
+#   RIPWIRE_BIN=asan/ripwire test/deadcheck.sh
 #
 # The fixture test/deadfix/ contains:
 #   (a) orphan()      — internal static definition, NEVER called in the tree → MUST appear in --dead-code
@@ -16,15 +16,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/deadfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "deadcheck: BIN=$BIN  CORPUS=$CORPUS"
 

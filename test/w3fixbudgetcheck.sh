@@ -3,9 +3,9 @@
 # about what a task-shaped verb does with the user's OWN TEXT, in the header and in the budget.
 #
 # Usage:
-#   test/w3fixbudgetcheck.sh                                  # uses build/ctxpack
-#   test/w3fixbudgetcheck.sh asan/ctxpack
-#   CTXPACK_BIN=build_base/ctxpack test/w3fixbudgetcheck.sh    # red-first: every family below MUST fail here
+#   test/w3fixbudgetcheck.sh                                  # uses build/ripwire
+#   test/w3fixbudgetcheck.sh asan/ripwire
+#   RIPWIRE_BIN=build_base/ripwire test/w3fixbudgetcheck.sh    # red-first: every family below MUST fail here
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
@@ -42,7 +42,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -50,7 +50,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "w3fixbudgetcheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "w3fixbudgetcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3  >/dev/null 2>&1 || { echo "w3fixbudgetcheck: python3 is required (XML parse-back + JSON arms)"; exit 2; }
 command -v xmllint  >/dev/null 2>&1 || { echo "w3fixbudgetcheck: xmllint is required (G4 arm)"; exit 2; }
 

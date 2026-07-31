@@ -5,7 +5,7 @@ is Python-only public data (LocBench / SWE-bench-Lite). Neither is a public, hum
 report-shaped** C++ localization benchmark. `run_multiswe.py` closes that gap by mining
 [**Multi-SWE-bench**](https://arxiv.org/abs/2504.02605) (ByteDance-Seed, NeurIPS 2025) — a multilingual
 issue-resolving benchmark curated by 68 expert annotators from real, merged, test-verified GitHub pull
-requests across 8 languages — down to its **C** and **C++** splits, and scores ctxpack against them the
+requests across 8 languages — down to its **C** and **C++** splits, and scores ripwire against them the
 same way `bench/locbench/` scores LocBench: same metric shapes, same zero-silent-skip discipline, same
 determinism contract.
 
@@ -22,15 +22,15 @@ PR's `fix_patch` touches, filtered to the language's own extensions and excludin
 
 1. **shallow-checkout the repo AT `base.sha`** (never the fix commit — the linked issue must not
    already show the fix);
-2. run ctxpack as the localizer in three arms — `--for` (shipping default, incl. the B8 query-mention
+2. run ripwire as the localizer in three arms — `--for` (shipping default, incl. the B8 query-mention
    anchor), `--for --no-mention-boost` (the anchor switched off), `--query` (pure lexical BM25);
 3. **parse** the flat `--format=candidates` export;
 4. **score** strict file@1/3/5/10 (ALL gold files within the top-k of one flat rank — LocAgent's
    definition, arXiv 2503.09089 §4.1), lenient any-gold-within-top-10, and first-hit MRR.
 
-Deterministic given `(dataset.lock, ctxpack binary)`: no LLM, no RNG, frozen instance order, and every
+Deterministic given `(dataset.lock, ripwire binary)`: no LLM, no RNG, frozen instance order, and every
 arm run is verified byte-identical twice before it is scored (zero-silent-skip contract — a checkout,
-index, or ctxpack failure aborts loudly rather than dropping an instance).
+index, or ripwire failure aborts loudly rather than dropping an instance).
 
 ## Dataset + license
 
@@ -108,15 +108,15 @@ future re-run against a private mirror or an air-gapped CI runner would use.
 
 | arm | invocation | what it is |
 |---|---|---|
-| `for` | `ctxpack <repo> --for="<issue title+body>"` | shipping default task lens, incl. the B8 mention anchor |
-| `for-no-mention` | `ctxpack <repo> --for="<issue title+body>" --no-mention-boost` | ablation: anchor OFF |
-| `query` | `ctxpack <repo> --query="<issue title+body>"` | pure lexical BM25, no lens framing |
+| `for` | `ripwire <repo> --for="<issue title+body>"` | shipping default task lens, incl. the B8 mention anchor |
+| `for-no-mention` | `ripwire <repo> --for="<issue title+body>" --no-mention-boost` | ablation: anchor OFF |
+| `query` | `ripwire <repo> --query="<issue title+body>"` | pure lexical BM25, no lens framing |
 
 ## How to run
 
 ```sh
 # one-command reproduction: mine (network: HF + GitHub) + score the full C++ split with the shipped lock
-CTXPACK=./build/ctxpack python3 bench/multiswe/run_multiswe.py \
+RIPWIRE=./build/ripwire python3 bench/multiswe/run_multiswe.py \
     --lang cpp --work-dir /tmp/multiswe \
     --json-out bench/multiswe/results/cpp.json \
     --scoreboard-out bench/multiswe/results/cpp_scoreboard.md
@@ -129,7 +129,7 @@ python3 bench/multiswe/run_multiswe.py --languages=c,cpp --refresh-dataset --cap
     --raw-dir /tmp/multiswe-raw --work-dir /tmp/multiswe --dataset-lock /tmp/other.lock
 
 # score the C split once it's been mined into a lock alongside cpp
-CTXPACK=./build/ctxpack python3 bench/multiswe/run_multiswe.py --lang c \
+RIPWIRE=./build/ripwire python3 bench/multiswe/run_multiswe.py --lang c \
     --work-dir /tmp/multiswe --dataset-lock /tmp/other.lock --json-out /tmp/c.json
 ```
 
@@ -156,7 +156,7 @@ and Multi-SWE C++ patches average 200+ lines across many files). Mention-anchor 
   one file; read @1 with the single-file stratum, not the pooled row.
 - All three arms tie on the multi-file stratum: terse issue reports on these libraries rarely name enough
   files for any query-side lever to separate arms there.
-- Scoring this benchmark flushed out two real ctxpack bugs (JSON data-file symbol explosion + tree-sitter
+- Scoring this benchmark flushed out two real ripwire bugs (JSON data-file symbol explosion + tree-sitter
   error-recovery blowup on nlohmann/json's parser-torture suite, 43s for one 100KB file) — fixed at
   `kMaxJsonConfigBytes`/`kMaxJsonNestDepth` (parserVer 28) before these numbers were produced.
 

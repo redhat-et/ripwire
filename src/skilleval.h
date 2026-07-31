@@ -21,7 +21,7 @@
 //     (the threshold is chosen on the same labels it is scored on) — never quote it as an expectation.
 //   * the TRIVIAL baseline (raw keyword-overlap-with-the-description) is always measured and printed —
 //     an arm that cannot beat it is measuring nothing.
-//   * ctxpack-router is NEVER a candidate: it is the fallback moment→skill map, not a destination, and
+//   * ripwire-router is NEVER a candidate: it is the fallback moment→skill map, not a destination, and
 //     it quotes every trigger phrase — a lexical keyword magnet. Its magnet-ness is measured separately
 //     (the router-magnet diagnostic row) instead of letting it silently eat every top-1.
 // Deterministic: no wall clock, no sampling, fixed iteration order, name-ascending tie-breaks; two runs
@@ -55,7 +55,7 @@ namespace skilleval
 
 struct SkillDoc
 {
-    std::string dirName;    // "ctxpack-orient" — the corpus's label vocabulary
+    std::string dirName;    // "ripwire-orient" — the corpus's label vocabulary
     std::string descText;   // the frontmatter `description:` block (what an LLM selector actually reads)
     std::string bodyText;   // everything after the closing frontmatter fence (for the bm25-full arm)
 };
@@ -131,7 +131,7 @@ inline void parseSkillMd( const std::string& text, std::string& descOut, std::st
 
 struct SkillSet
 {
-    std::vector<SkillDoc> candidates;   // name-sorted, EXCLUDING ctxpack-router
+    std::vector<SkillDoc> candidates;   // name-sorted, EXCLUDING ripwire-router
     SkillDoc              router;       // kept out-of-band for the magnet diagnostic
     bool                  hasRouter = false;
 };
@@ -151,7 +151,7 @@ inline SkillSet discoverSkills( const std::string& root )
         doc.dirName = entry.path().filename().string();
         parseSkillMd( readWholeFileText( md ), doc.descText, doc.bodyText );
 
-        if( doc.dirName == "ctxpack-router" ) { set.router = std::move( doc ); set.hasRouter = true; }
+        if( doc.dirName == "ripwire-router" ) { set.router = std::move( doc ); set.hasRouter = true; }
         else                                    set.candidates.push_back( std::move( doc ) );
     }
     std::sort( set.candidates.begin(), set.candidates.end(),
@@ -202,7 +202,7 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
                          std::vector<PromptRow>& rows )
 {
     std::ifstream in( path );
-    if( !in ) { std::fprintf( stderr, "ctxpack --eval-skills: cannot open '%s'\n", path.c_str() ); return false; }
+    if( !in ) { std::fprintf( stderr, "ripwire --eval-skills: cannot open '%s'\n", path.c_str() ); return false; }
 
     HashMap<std::string, std::uint32_t> indexOfSkill;
     for( std::uint32_t c = 0; c < candidates.size(); ++c ) indexOfSkill[ candidates[c].dirName ] = c;
@@ -211,7 +211,7 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
     std::string line;
     int         lineNumber = 0;
     const auto  bad = [ & ]( const char* why )
-    { std::fprintf( stderr, "ctxpack --eval-skills: %s:%d: %s\n", path.c_str(), lineNumber, why ); ok = false; };
+    { std::fprintf( stderr, "ripwire --eval-skills: %s:%d: %s\n", path.c_str(), lineNumber, why ); ok = false; };
 
     while( std::getline( in, line ) )
     {
@@ -250,7 +250,7 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
                 const std::string one   = labels.substr( from, ( comma == std::string::npos ? labels.size() : comma ) - from );
                 const auto        it    = indexOfSkill.find( one );
                 if( it == indexOfSkill.end() )
-                { bad( ( "unknown skill label '" + one + "' (ctxpack-router is never a legal label)" ).c_str() ); rowOk = false; break; }
+                { bad( ( "unknown skill label '" + one + "' (ripwire-router is never a legal label)" ).c_str() ); rowOk = false; break; }
                 row.permitted.push_back( it->second );
                 if( comma == std::string::npos ) break;
                 from = comma + 1;
@@ -489,21 +489,21 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     const std::size_t skillCount = set.candidates.size();
     if( skillCount < 2 )
     {
-        std::fprintf( stderr, "ctxpack --eval-skills: found %zu skill dir(s) under '%s' — ROOT must be a skills directory "
-                              "(one SKILL.md per subdir), e.g. `ctxpack skills --eval-skills=test/skillevalfix/prompts.tsv`\n",
+        std::fprintf( stderr, "ripwire --eval-skills: found %zu skill dir(s) under '%s' — ROOT must be a skills directory "
+                              "(one SKILL.md per subdir), e.g. `ripwire skills --eval-skills=test/skillevalfix/prompts.tsv`\n",
                       skillCount, root.c_str() );
         return 1;
     }
     for( const SkillDoc& s : set.candidates )
         if( s.descText.empty() )
-            std::fprintf( stderr, "ctxpack --eval-skills: note: %s has an empty description: block\n", s.dirName.c_str() );
+            std::fprintf( stderr, "ripwire --eval-skills: note: %s has an empty description: block\n", s.dirName.c_str() );
 
     std::vector<PromptRow> rows;
     if( !parseCorpus( labelsPath, set.candidates, rows ) ) return 1;
     std::size_t posCount = 0, negCount = 0;
     for( const PromptRow& r : rows ) ( r.permitted.empty() ? negCount : posCount )++;
     if( posCount == 0 )
-    { std::fprintf( stderr, "ctxpack --eval-skills: no positive rows in '%s'\n", labelsPath.c_str() ); return 1; }
+    { std::fprintf( stderr, "ripwire --eval-skills: no positive rows in '%s'\n", labelsPath.c_str() ); return 1; }
     std::size_t testSplitCount = 0, devSplitCount = 0;
     for( const PromptRow& r : rows ) ( r.split == Split::Dev ? devSplitCount : testSplitCount )++;
 
@@ -521,7 +521,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     const BagStats fullStats = buildBagStats( fullTexts );
     const BagStats nameStats = buildBagStats( nameTexts );
 
-    // router-magnet diagnostic corpus: the SAME desc arm with ctxpack-router allowed in as one more doc.
+    // router-magnet diagnostic corpus: the SAME desc arm with ripwire-router allowed in as one more doc.
     BagStats magnetStats;
     if( set.hasRouter )
     {
@@ -585,7 +585,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     }
 
     // ---- report ----
-    std::printf( "ctxpack --eval-skills  (skill routing over K=%zu candidate skills [ctxpack-router excluded]; "
+    std::printf( "ripwire --eval-skills  (skill routing over K=%zu candidate skills [ripwire-router excluded]; "
                  "%zu positive + %zu negative prompts; corpus '%s'; split test=%zu dev=%zu)\n",
                  skillCount, posCount, negCount, labelsPath.c_str(), testSplitCount, devSplitCount );
     std::printf( "  %-11s %7s %7s %7s   %7s   %s\n", "arm", "hit@1", "hit@2", "mrr", "sep-auc", "fire/abstain@ORACLE-th (upper bound)" );
@@ -664,7 +664,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     }
 
     if( set.hasRouter )
-        std::printf( "  router-magnet: with ctxpack-router ADMITTED as a candidate it takes top-1 on %zu/%zu positive prompts "
+        std::printf( "  router-magnet: with ripwire-router ADMITTED as a candidate it takes top-1 on %zu/%zu positive prompts "
                      "(%s arm) - why it is excluded above\n", routerMagnetWins, posCount, kArmName[kDiagArm] );
 
     // per-skill table (diagnostics arm): which skills never win when permitted (mis-described), which

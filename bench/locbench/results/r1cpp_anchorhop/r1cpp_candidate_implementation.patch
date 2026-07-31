@@ -21,21 +21,21 @@ index 1026916..82de6c1 100644
 +  **name-exact route and `--no-route` are byte-identical to pre-R1** (expansion never fires there);
 +  expansion is query-time only (no index/cache format change); the conceptual route is a
 +  full-distribution consumer, so MaxScore pruning is disabled exactly when expansion is active (the
-+  `CTXPACK_NO_PRUNE` byte-identity gate stays sound). The header self-declares what was lifted
-+  (`[anchor-hop: …]`). Ablation escape hatch: `CTXPACK_NO_ANCHORHOP=1` (gate + eval use only, not a
-+  user surface); `CTXPACK_ANCHORHOP_ALPHA/THETA` exist solely for the calibration sweep. Gate:
++  `RIPWIRE_NO_PRUNE` byte-identity gate stays sound). The header self-declares what was lifted
++  (`[anchor-hop: …]`). Ablation escape hatch: `RIPWIRE_NO_ANCHORHOP=1` (gate + eval use only, not a
++  user surface); `RIPWIRE_ANCHORHOP_ALPHA/THETA` exist solely for the calibration sweep. Gate:
 +  `test/anchorhopcheck.sh`; acceptance was the A7 two-tier discipline (held-out strict@10 must
 +  improve, token p50 within +5%, det-gate green) — numbers in the PLAN ledger.
  - **`--mcp` (Phase 5, last, optional — must not perturb any other path):** newline-delimited
    JSON over stdio (one JSON object per line, LF; **no** Content-Length headers). Blocking
    read loop on stdin; exit on EOF/SIGINT. Implement exactly three JSON-RPC 2.0 handlers:
-diff --git a/src/.ctxpack_quality_acks b/src/.ctxpack_quality_acks
+diff --git a/src/.ripwire_quality_acks b/src/.ripwire_quality_acks
 new file mode 100644
 index 0000000..7c352fb
 --- /dev/null
-+++ b/src/.ctxpack_quality_acks
++++ b/src/.ripwire_quality_acks
 @@ -0,0 +1,21 @@
-+# ctxpack quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude
++# ripwire quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude
 +# format: ack <kind> <16-hex-key> <ackNow> <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)
 +ack api-surface 057ef934dbcab301 7 R1-cpp anchor-hop expansion (PLAN_audit5Public2026 R1/R1-cpp decided design): new expansion path + LexRescorer exact-rescoring capsule; the added symbols/complexity/verbosity are the feature's inherent shape, behavior pinned by test/anchorhopcheck.sh + test/anchorhopprunecheck.sh
 +ack api-surface 50dfa4d9d6d3acb5 0 R1-cpp anchor-hop expansion (PLAN_audit5Public2026 R1/R1-cpp decided design): new expansion path + LexRescorer exact-rescoring capsule; the added symbols/complexity/verbosity are the feature's inherent shape, behavior pinned by test/anchorhopcheck.sh + test/anchorhopprunecheck.sh
@@ -159,10 +159,10 @@ index a624057..38626db 100644
 +{
 +    const std::size_t N = lex.size();
 +    if( N == 0 || N != ing.symbols.size() || g.outOff.size() != N + 1 ) return lex;
-+    if( std::getenv( "CTXPACK_NO_ANCHORHOP" ) ) return lex;               // ablation escape hatch (gate + evals)
++    if( std::getenv( "RIPWIRE_NO_ANCHORHOP" ) ) return lex;               // ablation escape hatch (gate + evals)
 +
-+    const float alpha = anchorHopEnvOverride( "CTXPACK_ANCHORHOP_ALPHA", anchorhopcfg::kHopAlpha );
-+    const float theta = anchorHopEnvOverride( "CTXPACK_ANCHORHOP_THETA", anchorhopcfg::kHopTheta );
++    const float alpha = anchorHopEnvOverride( "RIPWIRE_ANCHORHOP_ALPHA", anchorhopcfg::kHopAlpha );
++    const float theta = anchorHopEnvOverride( "RIPWIRE_ANCHORHOP_THETA", anchorhopcfg::kHopTheta );
 +
 +    // ── 1) top-m anchors by (lex desc, id asc), positive scores only — same shape as anchoredLexicalRank
 +    std::vector<NodeId> anchorIds( N );
@@ -308,7 +308,7 @@ index a7d9977..402a3db 100644
 +// protocol, the recorded root cause of its two-tier REJECT), lexicalScores can hand its integer BM25
 +// statistics to the caller in this capsule, and the survivors are re-scored on demand: SAME expressions,
 +// SAME evaluation order, SAME doubles → bit-identical floats to what the exhaustive branch would have
-+// produced (gate: test/anchorhopprunecheck.sh byte-compares pruned vs CTXPACK_NO_PRUNE=1 under expansion).
++// produced (gate: test/anchorhopprunecheck.sh byte-compares pruned vs RIPWIRE_NO_PRUNE=1 under expansion).
 +// The capsule is transient query state (alive only across the expansion call) — nothing here is cached.
 +struct LexRescorer
 +{
@@ -385,7 +385,7 @@ index a7d9977..402a3db 100644
 +
      // ── H2 (B0 round 2): MaxScore-style safe pruning — only when the caller opted in AND the env
      //    escape hatch is off. The exhaustive branch below is the pre-H2 code, byte-for-byte.
-     const bool pruneActive = pruneTopK > 0 && std::getenv( "CTXPACK_NO_PRUNE" ) == nullptr;
+     const bool pruneActive = pruneTopK > 0 && std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr;
 @@ -413,6 +472,7 @@ inline std::vector<float> lexicalScores( const IngestResult& ing, const std::vec
                  theta = heap.front();
              }
@@ -423,7 +423,7 @@ index 7d24d4a..3b8ee34 100644
 +        rc               = chooseForRanker( ing, task );
 +        routedConceptual = rc.which == LexMode::SubtokenBody;
 +    }
-+    const bool hopActive = routedConceptual && !std::getenv( "CTXPACK_NO_ANCHORHOP" );
++    const bool hopActive = routedConceptual && !std::getenv( "RIPWIRE_NO_ANCHORHOP" );
 +
      // H2 (B0 r2): --for's consumers only read the top-K of this rank, so lexicalScores may skip symbols that
      // provably cannot enter that top-K (exact MaxScore pruning — emitted bytes identical). --adaptive/--anchor
@@ -485,7 +485,7 @@ index 7d24d4a..3b8ee34 100644
          std::string headerStr;
 -        headerStr.reserve( 512 + taskNote.size() + routeNote.size() + adaptiveNote.size() + boostNote.size() + mentionNote.size() );
 +        headerStr.reserve( 512 + taskNote.size() + routeNote.size() + hopNote.size() + adaptiveNote.size() + boostNote.size() + mentionNote.size() );
-         headerStr += "<ctx><!-- ctxpack lens for \"";
+         headerStr += "<ctx><!-- ripwire lens for \"";
          headerStr += taskNote;
          headerStr += "\"";
          headerStr += routeNote;
@@ -504,7 +504,7 @@ index e156670..0a58b24 100644
 +    // R1: same contract as the CLI --for — the conceptual route expands via anchor-hop. R1-cpp: pruning
 +    // stays ON under expansion (K' widened to cover the top-m anchors; the <=2m surviving hop candidates
 +    // are re-scored exactly from the LexRescorer capsule — bit-identical floats, test/anchorhopprunecheck.sh).
-+    const bool hopActive = rc.which == LexMode::SubtokenBody && !std::getenv( "CTXPACK_NO_ANCHORHOP" );
++    const bool hopActive = rc.which == LexMode::SubtokenBody && !std::getenv( "RIPWIRE_NO_ANCHORHOP" );
      // H2 (B0 r2): the MCP `for` bundle reads only the top-forTopN of this rank plus every interface
      // (packLego) — same exact MaxScore pruning contract as the CLI --for (byte-identical output).
      std::vector<char> ifaceExact( ing.symbols.size(), 0 );
@@ -540,8 +540,8 @@ index e156670..0a58b24 100644
      // (serialize.h kForPayloadBudgetBytes). Lego + compose are rendered into memory FIRST so the <sigs>
      // budget is the exact remainder; emission ORDER is unchanged (header, sigs, lego, compose, </ctx>),
      // and when nothing trims the bytes are identical to the pre-H1 path.
--    std::string headerStr = "<ctx><!-- ctxpack lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + mentionNote + boostNote
-+    std::string headerStr = "<ctx><!-- ctxpack lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + hopNote + mentionNote + boostNote
+-    std::string headerStr = "<ctx><!-- ripwire lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + mentionNote + boostNote
++    std::string headerStr = "<ctx><!-- ripwire lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + hopNote + mentionNote + boostNote
                            + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->";
      const auto renderToString = [ ]( auto&& emitFn ) -> std::string
      {
@@ -601,12 +601,12 @@ diff --git a/test/regression.sh b/test/regression.sh
 index b94e135..b9157db 100755
 --- a/test/regression.sh
 +++ b/test/regression.sh
-@@ -178,7 +178,7 @@ if CTXPACK_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then o
+@@ -178,7 +178,7 @@ if RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then o
  
  # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
  #     dedicated standalone gate; run with the binary under test (skip any not yet present).
 -for _g in archcheck lintcheck swiftcheck ownerscheck baselinecheck resolvecheck canoncheck deadcheck hasacheck zoomcheck situdiffcheck xmlwellformed localitycheck mcpverbscheck regexcheck narrowcheck usescheck archmetricscheck querycheck qualitycheck clicheck grepcheck emptycorpuscheck bm25check rankbycheck callerscheck prcheck mcprobustcheck hostilecheck langcheck lintrulescheck prcontextcheck ccjsoncheck scipcheck mcpeditcheck redactcheck mcpstalecheck baselineportcheck clonecachecheck cachehashcheck tornreadcheck metricscheck propcostcheck coplintcheck forlenscheck exemplarcheck tokenbudgetcheck paginationcheck portablecachecheck mcphandlecheck fillordercheck jslangcheck expandrangecheck importnarrowcheck mcpreloadcheck reachcheck mapdiffcheck affectedcheck reportcheck evalcheck outlinecheck recallrelcheck treecheck javarubycheck jsonlangcheck type3clonecheck zonecheck sincecheck jsmetricscheck jsverbscheck mcprangeedgecheck narrowlangcheck rangecomposecheck unreachablecheck grepcontextcheck cyclecutcheck rubymetricscheck type3check sincewindowcheck zoneconsistencycheck w2verbscheck sincecochangecheck includeanglecheck includeprecisecheck crossdirincludecheck legocheck pyimportprecisecheck tsimportprecisecheck rustimportprecisecheck unresolvedcheck resolverhonestycheck depsprecisecheck cppoperatorcheck skillinstallcheck skilltruthcheck qualitystalecheck qualitykindscheck mcpeditkindcheck mcpeditracecheck swiftmemberscheck gointerfacecheck mcpflagshipcheck didyoumeancheck routecheck writetargetcheck clonelexcheck qualityexcludecheck prrenamecheck gitquotepathcheck mcpaudit4hardencheck mcpremotecheck regexbombcheck adaptivecutshapecheck columnarcommacheck overbudgetcommentcheck utf8scrubcheck wrapverbscheck cachesplitcheck testgatecheck headsnapcachecheck qsnapcachecheck qsnapprefetchcheck fficheck statgatecheck prbudgetcheck detailcheck candidatescheck batchcheck traceminecheck connectcheck artifactcheck indexoutcheck spectimingcheck multirootcheck cachefuzzcheck clonededupcheck doctorcheck evictioncheck adaptivecheck anchorcheck columnarcheck connectcorecheck expandtokencheck knownitemcheck mcpeditmodecheck mcpredactcheck mcpwatchercheck savecachecheck manifestcheck selfcontainedcheck dependencypincheck g1configcheck communitylabelcheck lintprecisioncheck isolateprovenancecheck deadprecisioncheck retrievalqualitycheck postingscheck chacheck cochangeboostcheck qualitysignalcheck hookcheck mentioncheck csharpcheck routeedgecheck relinkcheck mergescoutcheck editcheckcheck tracecheck notescheck packtaskcheck cppbenchcheck versioncheck aritycheck qchurncheck qschemetripcheck qualifiedresolvecheck racymtimecheck ordercheck jsoncheck ccheck portablebuildcheck weaksignalcheck withgraphcheck scorecardcheck publicgrepcheck multiswecheck; do
 +for _g in archcheck lintcheck swiftcheck ownerscheck baselinecheck resolvecheck canoncheck deadcheck hasacheck zoomcheck situdiffcheck xmlwellformed localitycheck mcpverbscheck regexcheck narrowcheck usescheck archmetricscheck querycheck qualitycheck clicheck grepcheck emptycorpuscheck bm25check rankbycheck callerscheck prcheck mcprobustcheck hostilecheck langcheck lintrulescheck prcontextcheck ccjsoncheck scipcheck mcpeditcheck redactcheck mcpstalecheck baselineportcheck clonecachecheck cachehashcheck tornreadcheck metricscheck propcostcheck coplintcheck forlenscheck exemplarcheck tokenbudgetcheck paginationcheck portablecachecheck mcphandlecheck fillordercheck jslangcheck expandrangecheck importnarrowcheck mcpreloadcheck reachcheck mapdiffcheck affectedcheck reportcheck evalcheck outlinecheck recallrelcheck treecheck javarubycheck jsonlangcheck type3clonecheck zonecheck sincecheck jsmetricscheck jsverbscheck mcprangeedgecheck narrowlangcheck rangecomposecheck unreachablecheck grepcontextcheck cyclecutcheck rubymetricscheck type3check sincewindowcheck zoneconsistencycheck w2verbscheck sincecochangecheck includeanglecheck includeprecisecheck crossdirincludecheck legocheck pyimportprecisecheck tsimportprecisecheck rustimportprecisecheck unresolvedcheck resolverhonestycheck depsprecisecheck cppoperatorcheck skillinstallcheck skilltruthcheck qualitystalecheck qualitykindscheck mcpeditkindcheck mcpeditracecheck swiftmemberscheck gointerfacecheck mcpflagshipcheck didyoumeancheck routecheck writetargetcheck clonelexcheck qualityexcludecheck prrenamecheck gitquotepathcheck mcpaudit4hardencheck mcpremotecheck regexbombcheck adaptivecutshapecheck columnarcommacheck overbudgetcommentcheck utf8scrubcheck wrapverbscheck cachesplitcheck testgatecheck headsnapcachecheck qsnapcachecheck qsnapprefetchcheck fficheck statgatecheck prbudgetcheck detailcheck candidatescheck batchcheck traceminecheck connectcheck artifactcheck indexoutcheck spectimingcheck multirootcheck cachefuzzcheck clonededupcheck doctorcheck evictioncheck adaptivecheck anchorcheck columnarcheck connectcorecheck expandtokencheck knownitemcheck mcpeditmodecheck mcpredactcheck mcpwatchercheck savecachecheck manifestcheck selfcontainedcheck dependencypincheck g1configcheck communitylabelcheck lintprecisioncheck isolateprovenancecheck deadprecisioncheck retrievalqualitycheck postingscheck chacheck cochangeboostcheck qualitysignalcheck hookcheck mentioncheck csharpcheck routeedgecheck relinkcheck mergescoutcheck editcheckcheck tracecheck notescheck packtaskcheck cppbenchcheck versioncheck aritycheck qchurncheck qschemetripcheck qualifiedresolvecheck racymtimecheck ordercheck jsoncheck ccheck portablebuildcheck weaksignalcheck withgraphcheck scorecardcheck publicgrepcheck multiswecheck anchorhopcheck anchorhopprunecheck; do
      [ -f "$ROOT/test/$_g.sh" ] || continue
-     if CTXPACK_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then ok "absorb gate ($_g.sh)"; else no "absorb gate ($_g.sh failed)"; fi
+     if RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then ok "absorb gate ($_g.sh)"; else no "absorb gate ($_g.sh failed)"; fi
  done

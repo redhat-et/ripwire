@@ -23,23 +23,23 @@
 #   (d) MUTATION TEST — a deliberately-wrong assertion fails, proving (a)-(c) are non-vacuous.
 #
 # Usage:
-#   test/clonededupcheck.sh                        # BIN=build/ctxpack, GOLD_BIN=build/ctxpack (self — (a) trivially holds)
-#   CTXPACK_BIN=build_p5w2/ctxpack GOLD_BIN=build/ctxpack test/clonededupcheck.sh   # deduped vs golden
+#   test/clonededupcheck.sh                        # BIN=build/ripwire, GOLD_BIN=build/ripwire (self — (a) trivially holds)
+#   RIPWIRE_BIN=build_p5w2/ripwire GOLD_BIN=build/ripwire test/clonededupcheck.sh   # deduped vs golden
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-GOLD="${GOLD_BIN:-$ROOT/build/ctxpack}"
+GOLD="${GOLD_BIN:-$ROOT/build/ripwire}"
 [ "${GOLD#/}" = "$GOLD" ] && GOLD="$ROOT/$GOLD"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]  || { echo "no ctxpack binary at $BIN — build first (cmake --build build_p5w2 -j)"; exit 2; }
+[ -x "$BIN" ]  || { echo "no ripwire binary at $BIN — build first (cmake --build build_p5w2 -j)"; exit 2; }
 [ -x "$GOLD" ] || { echo "no golden binary at $GOLD"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 

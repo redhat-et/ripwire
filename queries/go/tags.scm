@@ -1,4 +1,4 @@
-; ctxpack Go tags — derived from tree-sitter-go v0.23.4 queries/tags.scm.
+; ripwire Go tags — derived from tree-sitter-go v0.23.4 queries/tags.scm.
 ; Simplified: dropped the (comment)*@doc / #strip! / #set-adjacent! doc-comment machinery
 ; (we don't consume docs) and the bare (type_identifier)@name @reference.type (fires on every
 ; type mention — pure edge noise). Kept the definition set + call references.

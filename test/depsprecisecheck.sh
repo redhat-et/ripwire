@@ -17,12 +17,12 @@
 #   - the angle <dirB/x.h> contributes nothing                             ← angle → unresolved, honest
 # MONOTONICITY: precise resolution can only REMOVE or REDIRECT a wrong edge, never MANUFACTURE one.
 #
-# Usage:  test/depsprecisecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/depsprecisecheck.sh
+# Usage:  test/depsprecisecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/depsprecisecheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/depsprecisefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -30,7 +30,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "depsprecisecheck: BIN=$BIN  FIX=$FIX  TMP=$TMP"
 
 # --deps: emit the file→file graph, one XML tag per line for grep-able node/edge assertions.
@@ -81,7 +81,7 @@ command -v xmllint >/dev/null 2>&1 \
 # `<stabledeps>` gap must equal (consumer's printed instab − provider's printed instab) within 0.01, from
 # the document alone. Pre-fix, <f instab=> counted Ce over EVERY #include statement (system+third-party
 # included) while <stabledeps gap=> counted Ce over the project-only resolved graph — two different numbers
-# sharing one attribute name. Run against ctxpack's OWN source (self-hosting): it is where the plan's
+# sharing one attribute name. Run against ripwire's OWN source (self-hosting): it is where the plan's
 # worked example lives (src/mcp.h -> src/mcpverbs.h, claimed instab=0.52ish vs recomputed 0.25ish
 # pre-fix) — the small depsprecisefix fixture has no stabledeps violations to check.
 if command -v python3 >/dev/null 2>&1; then

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # forlenscheck.sh — the Wave-Q Q3 "quality lens on --for" gate.
 #
-#   test/forlenscheck.sh                       # uses build/ctxpack on test/fixture (+ a scratch git repo)
-#   CTXPACK_BIN=asan/ctxpack test/forlenscheck.sh
+#   test/forlenscheck.sh                       # uses build/ripwire on test/fixture (+ a scratch git repo)
+#   RIPWIRE_BIN=asan/ripwire test/forlenscheck.sh
 #
 # Q3 folds the quality FACTS (ccx + churn + clone-membership + tested= + change-amplification amp=) onto
 # the --for bundle's ranked <d> signatures — steering at read time (RESEARCH §1c: facts fed at read time
@@ -18,14 +18,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "forlenscheck: BIN=$BIN"
 

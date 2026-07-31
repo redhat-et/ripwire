@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # javarubycheck.sh — Java / Ruby ingest coverage gate.
 #
-# ctxpack --help now advertises Java (.java) and Ruby (.rb). This gate has one small file
+# ripwire --help now advertises Java (.java) and Ruby (.rb). This gate has one small file
 # per language, each with two methods where one calls the other, and pins assertions to
 # what the binary ACTUALLY does — verified by running it and reading the output before
 # writing any assertion (see the findings below).
@@ -10,7 +10,7 @@
 #   A.java — class A { int addOne(x); int addTwo(x) { return addOne(addOne(x)); } }
 #   b.rb   — def square(x); def sum_of_squares(a,b) { square(a) + square(b) }
 #
-# FINDINGS from running `ctxpack test/javarubyfix` and inspecting the raw output:
+# FINDINGS from running `ripwire test/javarubyfix` and inspecting the raw output:
 #   - A.java: 3 symbols — addOne (t="method"), addTwo (t="method"), A (t="cls"). Both
 #             methods are (method_declaration name:(identifier)) → @definition.method; the
 #             class is (class_declaration name:(identifier)) → @definition.class (t="cls").
@@ -25,14 +25,14 @@
 #
 # Usage:
 #   test/javarubycheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/javarubycheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/javarubycheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/javarubyfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -41,7 +41,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for XML assertions"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

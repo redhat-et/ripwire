@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # hostilecheck.sh — hostile-content XML/UTF-8 robustness gate.
 #
-# ctxpack streams a minified XML map by default and a self-contained HTML file with
+# ripwire streams a minified XML map by default and a self-contained HTML file with
 # --html; both are downstream consumers that must never choke on adversarial source
-# content. This gate feeds ctxpack a fixture (test/hostilefix/) engineered to contain:
+# content. This gate feeds ripwire a fixture (test/hostilefix/) engineered to contain:
 #   - a C++ doc-comment with raw XML metacharacters:  a < b && "quoted" & <tag>
 #   - a markdown heading that looks like a script-tag breakout: </script><script>alert(1)
 #   - a markdown heading mixing an emoji with CJK text (multi-byte UTF-8 stress)
@@ -19,14 +19,14 @@
 #
 # Usage:
 #   test/hostilecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/hostilecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/hostilecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/hostilefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -35,7 +35,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required"; exit 2; }
 command -v iconv   >/dev/null 2>&1 || { echo "iconv required"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
@@ -271,7 +271,7 @@ echo "=== A3-F15: a '-'-leading positional arg is never treated as a clonable gi
 # does NOT clone anything (no network access, no git invoked): a real clone would only be attempted for a
 # TRUE git URL (https://, http://, git@, ssh://), which none of these hostile strings are.
 
-DASH1="--upload-pack=touch /tmp/ctxpack-hostilecheck-pwned"
+DASH1="--upload-pack=touch /tmp/ripwire-hostilecheck-pwned"
 DASH2="-x"
 DASH3="--"
 
@@ -285,9 +285,9 @@ for hostile in "$DASH1" "$DASH2" "$DASH3"; do
     fi
 done
 
-[ ! -e /tmp/ctxpack-hostilecheck-pwned ] \
+[ ! -e /tmp/ripwire-hostilecheck-pwned ] \
     && ok "hostile positional: no side-effect file created (no shell/command injection occurred)" \
-    || { no "hostile positional: side-effect file WAS created — command injection!"; rm -f /tmp/ctxpack-hostilecheck-pwned; }
+    || { no "hostile positional: side-effect file WAS created — command injection!"; rm -f /tmp/ripwire-hostilecheck-pwned; }
 
 # static check: the clone command string in source hardens with '--' before the URL and a protocol
 # allow-list, so even a same-process regression is caught without needing a live network clone.

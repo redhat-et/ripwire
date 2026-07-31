@@ -27,18 +27,18 @@
 # test/qualnewfix/main.js. Java's "Inner" has no such collision — bisected empirically.)
 #
 # RED-FIRST (recorded 2026-07-31, plain dev build, both binaries same tree):
-#   pre-change (build/ctxpack_base): --callees=caller count="1" (Widget only) for all 3 languages.
-#   post-change (build/ctxpack):     --callees=caller count="3" (Widget + Inner/Boxed + the 3-seg
+#   pre-change (build/ripwire_base): --callees=caller count="1" (Widget only) for all 3 languages.
+#   post-change (build/ripwire):     --callees=caller count="3" (Widget + Inner/Boxed + the 3-seg
 #                                     class) for all 3 languages.
-# This gate reproduces that exact comparison live against build/ctxpack_base when present (skips,
+# This gate reproduces that exact comparison live against build/ripwire_base when present (skips,
 # does not fail, if the base binary is absent — e.g. a checkout that only ever built once).
 #
-# Usage:  test/qualnewcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/qualnewcheck.sh
+# Usage:  test/qualnewcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/qualnewcheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/qualnewfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -47,7 +47,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "qualnewcheck: BIN=$BIN  FIX=$FIX  TMP=$TMP"
 
 callees_count(){  # $1 file:sym  $2 expected count
@@ -100,24 +100,24 @@ command -v xmllint >/dev/null 2>&1 \
 # ── RED-FIRST live check against a committed pre-change binary, when present ────────────────────
 redfirst_check()
 {
-    local BASE="$ROOT/build/ctxpack_base"
-    [ -x "$BASE" ] || { skip "red-first: build/ctxpack_base not present (build it before any H4 edit to re-run this arm)"; return; }
+    local BASE="$ROOT/build/ripwire_base"
+    [ -x "$BASE" ] || { skip "red-first: build/ripwire_base not present (build it before any H4 edit to re-run this arm)"; return; }
     local before_ts before_js before_java
     before_ts="$(   "$BASE" "$FIX" --callees='main.ts:caller'   --no-cache 2>/dev/null | grep -oE 'count="[0-9]+"' | head -1 )"
     before_js="$(   "$BASE" "$FIX" --callees='main.js:caller'   --no-cache 2>/dev/null | grep -oE 'count="[0-9]+"' | head -1 )"
     before_java="$( "$BASE" "$FIX" --callees='Main.java:caller' --no-cache 2>/dev/null | grep -oE 'count="[0-9]+"' | head -1 )"
     if [ "$before_ts" = 'count="1"' ] && [ "$before_js" = 'count="1"' ] && [ "$before_java" = 'count="1"' ]; then
-        ok "red-first: build/ctxpack_base under-counts (count=\"1\", Widget only) on all 3 languages — this gate is a real regression fence"
+        ok "red-first: build/ripwire_base under-counts (count=\"1\", Widget only) on all 3 languages — this gate is a real regression fence"
     elif [ "$before_ts" = 'count="3"' ] && [ "$before_js" = 'count="3"' ] && [ "$before_java" = 'count="3"' ]; then
-        # H4 W2b post-merge fix: any lane that saves a POST-wave-2a binary as its ctxpack_base gets the
+        # H4 W2b post-merge fix: any lane that saves a POST-wave-2a binary as its ripwire_base gets the
         # widened counts here — that is a VINTAGE mismatch, not a regression; failing on it made this gate
         # unconditionally red in every later worktree. The fence itself is the literal-count arms above.
-        skip "red-first: build/ctxpack_base is wave-2a-or-later (count=\"3\" on all 3 — the qualified-new widening shipped in wave 2a) — vintage not applicable to this arm"
+        skip "red-first: build/ripwire_base is wave-2a-or-later (count=\"3\" on all 3 — the qualified-new widening shipped in wave 2a) — vintage not applicable to this arm"
     else
-        # ctxpack_base is an UNCOMMITTED local scratch binary of arbitrary vintage. This arm can only
+        # ripwire_base is an UNCOMMITTED local scratch binary of arbitrary vintage. This arm can only
         # assert when the binary is provably the pre-change reference (the 1/1/1 signature); any other
         # signature (mixed-vintage, incompatible/errored binary) is a vintage mismatch, not a regression.
-        skip "red-first: build/ctxpack_base is not the pre-change reference (ts=$before_ts js=$before_js java=$before_java, want 1/1/1) — vintage not applicable to this arm"
+        skip "red-first: build/ripwire_base is not the pre-change reference (ts=$before_ts js=$before_js java=$before_java, want 1/1/1) — vintage not applicable to this arm"
     fi
 }
 redfirst_check

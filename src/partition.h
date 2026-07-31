@@ -404,7 +404,7 @@ inline std::string partitionSummaryAttrs( const PartitionPlan& plan, const Parti
 // kTestGateLegend: it is a paragraph, not control flow. Inlined, ~27 lines of prose sat inside
 // packTaskPartitionText and made the driver read long when none of its LOGIC had grown.
 inline constexpr const char* kPartitionLegend =
-    "<!-- ctxpack partitioned task bundle: ONE shared common core plus N minimally overlapping per agent slices, "
+    "<!-- ripwire partitioned task bundle: ONE shared common core plus N minimally overlapping per agent slices, "
     "carved along the call graph's own community structure. Each bundle wraps one ctx document, exactly what a standalone "
     "pack task call with that slice would emit, so an orchestrator hands one bundle to one agent verbatim. budget_per_agent_tokens is "
     "the budget for core PLUS one partition, not the whole document; total_bytes is the bundles' combined size. "

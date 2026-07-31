@@ -10,7 +10,7 @@
 #   D  determinism                 → two runs byte-identical.
 #   E  mutation                    → a threshold raised above the measured similarity drops the near-miss pair.
 #
-# Independent of the ctxpack binary and of main.cpp (which this feature does not touch). Uses its OWN temp dir.
+# Independent of the ripwire binary and of main.cpp (which this feature does not touch). Uses its OWN temp dir.
 # Usage:  bash test/type3clonecheck.sh            (compiles with c++/clang++)
 #         CXX=clang++ bash test/type3clonecheck.sh
 
@@ -26,7 +26,7 @@ echo "type3clonecheck: CXX=$CXX"
 
 # ── compile the harness against clones.h (header-only): infra + src on the include path ───────────────────────
 # fastmath.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) in debug builds —
-# link it exactly as the real ctxpack target does, so the pair-cap degrade path resolves.
+# link it exactly as the real ripwire target does, so the pair-cap degrade path resolves.
 if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$BIN" 2> "$WORK/cc.log"; then

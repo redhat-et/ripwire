@@ -15,12 +15,12 @@
 #
 # Runs against the repo itself: churn is mined from git history, so the corpus must be a git checkout.
 #
-# Usage: bash test/churnjsonstampcheck.sh [path/to/ctxpack]
+# Usage: bash test/churnjsonstampcheck.sh [path/to/ripwire]
 # Exits non-zero on any failure; DOES NOT touch regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # house convention: the suite passes the binary via CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # house convention: the suite passes the binary via RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }

@@ -15,21 +15,21 @@
 #
 # S4 (cache path XDG/0700 hardening): with $TMPDIR unset and $XDG_CACHE_HOME set, both the default
 # per-root cache file (defaultCachePath) and the remote-clone cache dir land under
-# $XDG_CACHE_HOME/ctxpack, and that directory is created mode 0700.
+# $XDG_CACHE_HOME/ripwire, and that directory is created mode 0700.
 #
 # The cache-dir NAME is FNV-1a-64 of the URL (same algorithm as mcpCachePath in mcp.h) — this script
 # recomputes it in python3 to pre-seed the exact path resolveRemoteRoot will look for.
 #
 # Usage:
 #   test/clonecachecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/clonecachecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/clonecachecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -37,7 +37,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 fnv1a64(){   # $1 = string → 16-hex-digit FNV-1a-64, same algorithm as resolveRemoteRoot/mcpCachePath
     python3 -c "
@@ -57,7 +57,7 @@ URL="git@example.invalid:agentquality/repo.git"
 HASH="$( fnv1a64 "$URL" )"
 
 XDG="$TMP/xdg_a"; mkdir -p "$XDG"
-CACHEDIR="$XDG/ctxpack/ctxpack-remote-$HASH"
+CACHEDIR="$XDG/ripwire/ripwire-remote-$HASH"
 mkdir -p "$CACHEDIR/.git"                       # pre-seed a "clone" (just needs a .git dir to exist)
 echo "fake-object" > "$CACHEDIR/.git/HEAD"
 
@@ -102,7 +102,7 @@ grep -qi "cloning" "$TMP/a_stderr" \
 # fails, but the assertion is about the CODE PATH: --refetch must remove the cache and try `git clone`
 # (stderr says "cloning", exit is non-zero because the clone genuinely can't reach example.invalid).
 XDG2="$TMP/xdg_b"; mkdir -p "$XDG2"
-CACHEDIR2="$XDG2/ctxpack/ctxpack-remote-$HASH"
+CACHEDIR2="$XDG2/ripwire/ripwire-remote-$HASH"
 mkdir -p "$CACHEDIR2/.git"
 echo "fake-object" > "$CACHEDIR2/.git/HEAD"
 
@@ -128,7 +128,7 @@ grep -q "reusing cached clone of" "$TMP/b_stderr" \
 # ── (c) --refetch does not change behavior when absent (plain reuse case re-verified) ───────────────
 # Re-run (a) once more to confirm reuse is stable/idempotent without --refetch anywhere near it.
 XDG3="$TMP/xdg_c"; mkdir -p "$XDG3"
-CACHEDIR3="$XDG3/ctxpack/ctxpack-remote-$HASH"
+CACHEDIR3="$XDG3/ripwire/ripwire-remote-$HASH"
 mkdir -p "$CACHEDIR3/.git"
 env -u TMPDIR XDG_CACHE_HOME="$XDG3" "$BIN" "$URL" >"$TMP/c1_stderr" 2>"$TMP/c1_stderr" >/dev/null
 env -u TMPDIR XDG_CACHE_HOME="$XDG3" "$BIN" "$URL" >/dev/null 2>"$TMP/c2_stderr"
@@ -137,45 +137,45 @@ grep -q "reusing cached clone of" "$TMP/c2_stderr" \
     && ok "no --refetch: repeated invocation still reuses (unaffected by the new flag's mere existence)" \
     || no "no --refetch: repeated invocation stopped reusing"
 
-# ── (d) S4: cache path lands under \$XDG_CACHE_HOME/ctxpack with mode 0700 (TMPDIR unset) ───────────
+# ── (d) S4: cache path lands under \$XDG_CACHE_HOME/ripwire with mode 0700 (TMPDIR unset) ───────────
 XDG4="$TMP/xdg_d"; mkdir -p "$XDG4"
 CORPUS="$ROOT/test/fixture"
 env -u TMPDIR XDG_CACHE_HOME="$XDG4" "$BIN" "$CORPUS" >/dev/null 2>"$TMP/d_stderr"
 
-if [ -d "$XDG4/ctxpack" ]; then
-    ok "defaultCachePath: creates \$XDG_CACHE_HOME/ctxpack when TMPDIR is unset"
-    PERM="$(stat -f %Lp "$XDG4/ctxpack" 2>/dev/null || stat -c %a "$XDG4/ctxpack")"
+if [ -d "$XDG4/ripwire" ]; then
+    ok "defaultCachePath: creates \$XDG_CACHE_HOME/ripwire when TMPDIR is unset"
+    PERM="$(stat -f %Lp "$XDG4/ripwire" 2>/dev/null || stat -c %a "$XDG4/ripwire")"
     [ "$PERM" = "700" ] \
-        && ok "defaultCachePath: \$XDG_CACHE_HOME/ctxpack is mode 0700 ($PERM)" \
-        || no "defaultCachePath: \$XDG_CACHE_HOME/ctxpack mode is $PERM, expected 700"
-    # A4-P4: the auto-cache filename is now split by verb class → ctxpack-<hash>-{lean,rich}.bin (a plain
+        && ok "defaultCachePath: \$XDG_CACHE_HOME/ripwire is mode 0700 ($PERM)" \
+        || no "defaultCachePath: \$XDG_CACHE_HOME/ripwire mode is $PERM, expected 700"
+    # A4-P4: the auto-cache filename is now split by verb class → ripwire-<hash>-{lean,rich}.bin (a plain
     # map is the lean class). The <hash> stability + ladder/mode contract is unchanged. AUDIT5 Y4: new blobs
     # live in a 2-hex-char shard subdir (legacy flat blobs are still honored in place), so look in BOTH layouts.
-    find "$XDG4/ctxpack" -maxdepth 2 -type f | grep -q '/\([0-9a-f]\{2\}/\)\{0,1\}ctxpack-[0-9a-f]\{16\}-\(lean\|rich\)\.bin$' \
-        && ok "defaultCachePath: cache file named ctxpack-<hash>-<class>.bin lives under \$XDG_CACHE_HOME/ctxpack (flat or shard)" \
-        || no "defaultCachePath: no ctxpack-<hash>-<class>.bin found under \$XDG_CACHE_HOME/ctxpack (flat or shard)"
+    find "$XDG4/ripwire" -maxdepth 2 -type f | grep -q '/\([0-9a-f]\{2\}/\)\{0,1\}ripwire-[0-9a-f]\{16\}-\(lean\|rich\)\.bin$' \
+        && ok "defaultCachePath: cache file named ripwire-<hash>-<class>.bin lives under \$XDG_CACHE_HOME/ripwire (flat or shard)" \
+        || no "defaultCachePath: no ripwire-<hash>-<class>.bin found under \$XDG_CACHE_HOME/ripwire (flat or shard)"
 else
-    no "defaultCachePath: \$XDG_CACHE_HOME/ctxpack was not created"
+    no "defaultCachePath: \$XDG_CACHE_HOME/ripwire was not created"
 fi
 
-# same ladder for the remote-clone cache dir (S4 parity): a FRESH \$XDG_CACHE_HOME so ctxpack/ itself is
+# same ladder for the remote-clone cache dir (S4 parity): a FRESH \$XDG_CACHE_HOME so ripwire/ itself is
 # created by the binary (not pre-seeded by this script, which would just inherit the shell's umask and
 # prove nothing about the code). The clone attempt fails (unreachable URL) but cacheDirLadder() runs —
 # and therefore the mkdir(...,0700) — before the clone command is even built.
 XDG5="$TMP/xdg_e"; mkdir -p "$XDG5"
 env -u TMPDIR XDG_CACHE_HOME="$XDG5" "$BIN" "$URL" >/dev/null 2>"$TMP/e_stderr"
-if [ -d "$XDG5/ctxpack" ]; then
-    PERM_REMOTE="$(stat -f %Lp "$XDG5/ctxpack" 2>/dev/null || stat -c %a "$XDG5/ctxpack")"
+if [ -d "$XDG5/ripwire" ]; then
+    PERM_REMOTE="$(stat -f %Lp "$XDG5/ripwire" 2>/dev/null || stat -c %a "$XDG5/ripwire")"
     [ "$PERM_REMOTE" = "700" ] \
-        && ok "resolveRemoteRoot: \$XDG_CACHE_HOME/ctxpack (binary-created) is mode 0700 for the remote-clone cache too" \
-        || no "resolveRemoteRoot: \$XDG_CACHE_HOME/ctxpack mode is $PERM_REMOTE, expected 700"
+        && ok "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire (binary-created) is mode 0700 for the remote-clone cache too" \
+        || no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire mode is $PERM_REMOTE, expected 700"
 else
-    no "resolveRemoteRoot: \$XDG_CACHE_HOME/ctxpack was not created by the clone-cache path"
+    no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire was not created by the clone-cache path"
 fi
 
 # ── (e) STABLE per-root path: same root + same env -> same defaultCachePath (warm reuse still works) ─
 env -u TMPDIR XDG_CACHE_HOME="$XDG4" "$BIN" "$CORPUS" >/dev/null 2>/dev/null
-COUNT1="$(find "$XDG4/ctxpack" -maxdepth 2 -type f | grep -c '/\([0-9a-f]\{2\}/\)\{0,1\}ctxpack-[0-9a-f]\{16\}-\(lean\|rich\)\.bin$')"
+COUNT1="$(find "$XDG4/ripwire" -maxdepth 2 -type f | grep -c '/\([0-9a-f]\{2\}/\)\{0,1\}ripwire-[0-9a-f]\{16\}-\(lean\|rich\)\.bin$')"
 [ "$COUNT1" = "1" ] \
     && ok "defaultCachePath: two runs on the same root (same class) produce exactly ONE cache file (stable path, warm reuse intact)" \
     || no "defaultCachePath: expected exactly 1 cache file after 2 runs, found $COUNT1"

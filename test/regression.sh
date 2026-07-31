@@ -2,17 +2,17 @@
 # regression.sh — the "faster must never change the answer" guard (DV equivalence discipline) + the
 # determinism / well-formedness contracts. Run after ANY perf change (cache, parallel, svector, …):
 #
-#     test/regression.sh                 # uses build/ctxpack on test/fixture
-#     CTXPACK_BIN=asan/ctxpack test/regression.sh
+#     test/regression.sh                 # uses build/ripwire on test/fixture
+#     RIPWIRE_BIN=asan/ripwire test/regression.sh
 #     UPDATE_GOLDEN=1 test/regression.sh # accept a DELIBERATE output change (review the diff first!)
 #
 # Exits non-zero on any failure. The golden runs on the stable test/fixture corpus; det-gate +
-# cache-transparency compare ctxpack against itself so they hold on any corpus.
+# cache-transparency compare ripwire against itself so they hold on any corpus.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="${1:-test/fixture}"
 GOLD="$ROOT/test/golden.xml"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -20,13 +20,13 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"   # so the corpus path (and thus the XML) is repo-relative → golden is machine-independent
 
 echo "regression: BIN=$BIN  CORPUS=$CORPUS"
 
-# 0) G1 fresh-asan-binary check — detect if asan/ctxpack is stale (AUDIT5 F-OPS).
-if CTXPACK_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" >/dev/null 2>&1; then ok "G1 fresh-asan-binary gate (test/g1freshcheck.sh)"; else no "G1 fresh-asan-binary gate (test/g1freshcheck.sh failed)"; CTXPACK_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" 2>&1 | grep -E '(FAIL|stale asan binary)' | head -4; fi
+# 0) G1 fresh-asan-binary check — detect if asan/ripwire is stale (AUDIT5 F-OPS).
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" >/dev/null 2>&1; then ok "G1 fresh-asan-binary gate (test/g1freshcheck.sh)"; else no "G1 fresh-asan-binary gate (test/g1freshcheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" 2>&1 | grep -E '(FAIL|stale asan binary)' | head -4; fi
 
 # 1) determinism — same input, byte-identical baseline + three comparisons (SPEC §8).
 "$BIN" "$CORPUS" --no-cache >"$TMP/a" 2>/dev/null
@@ -166,21 +166,21 @@ printf '%s\n' "$mcpreq" | "$BIN" --mcp --no-stable >"$TMP/mcp_no"  2>/dev/null
 
 # 3j) skill security scan (P1-C) — run the dedicated gate (inject/exfil → exit 2; clean/docs → exit 0,
 #     incl. the documentation-not-attack precision case). Uses the same binary under test.
-if CTXPACK_BIN="$BIN" bash "$ROOT/test/skillscan.sh" >/dev/null 2>&1; then ok "skill scan gate (test/skillscan.sh)"; else no "skill scan gate (test/skillscan.sh failed)"; CTXPACK_BIN="$BIN" bash "$ROOT/test/skillscan.sh" 2>&1 | grep -i fail | head -4; fi
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/skillscan.sh" >/dev/null 2>&1; then ok "skill scan gate (test/skillscan.sh)"; else no "skill scan gate (test/skillscan.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/skillscan.sh" 2>&1 | grep -i fail | head -4; fi
 
 # 3m) --html graph export (P2-A) — run the dedicated gate (valid self-contained HTML, ≥3 nodes, deterministic,
 #     no external <script src>/<link href>). Uses the same binary under test.
-if CTXPACK_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" >/dev/null 2>&1; then ok "html export gate (test/htmlexport.sh)"; else no "html export gate (test/htmlexport.sh failed)"; CTXPACK_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" 2>&1 | grep -i fail | head -4; fi
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" >/dev/null 2>&1; then ok "html export gate (test/htmlexport.sh)"; else no "html export gate (test/htmlexport.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" 2>&1 | grep -i fail | head -4; fi
 
 # 3o) --compress body output (P2-B) — run the dedicated gate (comments stripped, string literals intact,
 #     blank-line runs collapsed, compressed < uncompressed, deterministic). Uses the same binary under test.
-if CTXPACK_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then ok "compress gate (test/compresscheck.sh)"; else no "compress gate (test/compresscheck.sh failed)"; CTXPACK_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" 2>&1 | grep -i fail | head -8; fi
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then ok "compress gate (test/compresscheck.sh)"; else no "compress gate (test/compresscheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" 2>&1 | grep -i fail | head -8; fi
 
 # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
 #     dedicated standalone gate; run with the binary under test (skip any not yet present).
 for _g in archcheck lintcheck swiftcheck ownerscheck baselinecheck resolvecheck canoncheck deadcheck hasacheck zoomcheck situdiffcheck xmlwellformed localitycheck mcpverbscheck regexcheck narrowcheck usescheck archmetricscheck querycheck qualitycheck clicheck grepcheck emptycorpuscheck bm25check rankbycheck callerscheck prcheck mcprobustcheck hostilecheck langcheck lintrulescheck prcontextcheck ccjsoncheck scipcheck mcpeditcheck redactcheck mcpstalecheck baselineportcheck clonecachecheck cachehashcheck tornreadcheck metricscheck propcostcheck coplintcheck forlenscheck exemplarcheck tokenbudgetcheck paginationcheck portablecachecheck mcphandlecheck fillordercheck jslangcheck expandrangecheck importnarrowcheck mcpreloadcheck reachcheck mapdiffcheck affectedcheck reportcheck evalcheck outlinecheck recallrelcheck treecheck javarubycheck jsonlangcheck type3clonecheck clonebandcheck zonecheck sincecheck jsmetricscheck jsverbscheck mcprangeedgecheck narrowlangcheck rangecomposecheck unreachablecheck grepcontextcheck cyclecutcheck rubymetricscheck type3check sincewindowcheck zoneconsistencycheck w2verbscheck sincecochangecheck includeanglecheck includeprecisecheck crossdirincludecheck legocheck pyimportprecisecheck tsimportprecisecheck rustimportprecisecheck unresolvedcheck resolverhonestycheck depsprecisecheck cppoperatorcheck skillinstallcheck skilltruthcheck qualitystalecheck qualitykindscheck mcpeditkindcheck mcpeditracecheck swiftmemberscheck gointerfacecheck mcpflagshipcheck didyoumeancheck routecheck writetargetcheck clonelexcheck qualityexcludecheck prrenamecheck gitquotepathcheck mcpaudit4hardencheck mcpremotecheck regexbombcheck adaptivecutshapecheck columnarcommacheck overbudgetcommentcheck utf8scrubcheck wrapverbscheck cachesplitcheck testgatecheck headsnapcachecheck qsnapcachecheck qsnapprefetchcheck fficheck statgatecheck prbudgetcheck detailcheck candidatescheck batchcheck traceminecheck connectcheck artifactcheck indexoutcheck spectimingcheck multirootcheck cachefuzzcheck clonededupcheck doctorcheck evictioncheck adaptivecheck anchorcheck columnarcheck connectcorecheck expandtokencheck knownitemcheck mcpeditmodecheck mcpredactcheck mcpwatchercheck savecachecheck manifestcheck selfcontainedcheck dependencypincheck g1configcheck communitylabelcheck lintprecisioncheck isolateprovenancecheck deadprecisioncheck retrievalqualitycheck postingscheck chacheck cochangeboostcheck qualitysignalcheck hookcheck mentioncheck csharpcheck routeedgecheck relinkcheck mergescoutcheck scoutkeycheck planlanescheck editcheckcheck tracecheck notescheck packtaskcheck cppbenchcheck versioncheck aritycheck qchurncheck qschemetripcheck qualifiedresolvecheck racymtimecheck ordercheck jsoncheck ccheck portablebuildcheck weaksignalcheck withgraphcheck scorecardcheck multiswecheck docmentioncheck crossrefcheck flagscheck partitioncheck metalcheck layoutcheck docdriftcheck skillevalcheck flipcheck historyoraclecheck landingcheck abicheck qualityorigincheck pranchorcheck scoutheadconflictcheck gitstampcheck gateabilitycheck deckcheck skillevalsplitcheck prrefsafecheck prmaskanchorcheck emittertruthcheck bundleidcheck chainidcheck crossrefdegradecheck grepscancheck qextractionkeycheck qackorigincheck ackonlycheck flagsurfacecheck argvdiffcheck qrowlocatorcheck qoriginoraclecheck qchurnmemocheck qrevtokencheck morecontractcheck flagsnoisecheck docanchorcheck dispatchordercheck guardmsgcheck flagtablecheck qualitycrosslangcheck lintbudgetcheck deadfiltercheck regexrefusecheck graphqueryrefusecheck hotspotsincecheck maxfilesizecheck matchcapturecheck skillscanreadcheck cochangesurprisecheck recallbudgetcheck exemplarconfcheck mdembedcheck legobundlecheck lintdedupcheck qualitysymcheck duprowcheck pagingsweepcheck selectorchaincheck modifierguardcheck truncvocabcheck attrvocabcheck usesselectorcheck recallevalcheck exercisescheck runhintcheck communitydrillcheck genrecallcheck expandcallscheck grepseamcheck testgatepagecheck jsonparitycheck selectorhonestycheck mentionsverbcheck a9disclosurecheck jsonredactcheck recalltotalcheck columnarattrcheck churnjsonstampcheck fornotesjsoncheck jsonrefusallegendcheck prnestedcapcheck emptyvaluerefusecheck numericrefusecheck mcptranchecheck mcpclidiffcheck mcpw2fixcheck selectorrefusecheck sigredactcheck fornotesbudgetcheck taskechocheck mcpw3fixcheck w3fixlegendcheck w3fixbudgetcheck mcpreadloopcheck recallbufcheck mcpeditpresencecheck mcpframehonestycheck churnjoincheck estchargecheck nulbytecheck bodydialectcheck jsonwalkcheck mcpcontractcheck probecheck fixedbufsweep shapingflagcheck gateexitcheck showcasecapturecheck legendcoveragecheck csharpcondcheck qualnewcheck objcfieldcheck goinstcheck mergechurncheck cppqualcheck floormarkcheck rustqualcheck callformcheck ripwirepubliccheck; do
     [ -f "$ROOT/test/$_g.sh" ] || continue
-    if CTXPACK_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then ok "absorb gate ($_g.sh)"; else no "absorb gate ($_g.sh failed)"; fi
+    if RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then ok "absorb gate ($_g.sh)"; else no "absorb gate ($_g.sh failed)"; fi
 done
 
 # 3l) arch-layer auto-tags (P3): a file node under a known layer dir gets a built-in layer= attribute

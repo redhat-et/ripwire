@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # recallbudgetcheck.sh — §P2 gate: --recall's two budget flags must actually work.
 #
-# --recall is the LARGEST output the tool produces (116 KB / ~29K tokens for a plain ctxpack-shaped query
+# --recall is the LARGEST output the tool produces (116 KB / ~29K tokens for a plain ripwire-shaped query
 # on this repo, 493 KB before the docs/captures relocation) and, before this gate, neither budget flag
 # bounded it:
 #   --recall=Q --max-tokens=2000     → 170,493 bytes — ~85x the asked-for budget (whole-doc-or-stop with
@@ -19,23 +19,23 @@
 #   4. the header carries an honest est_tokens covering the WHOLE payload (§P9.3), within 2x of bytes/2.5
 #   5. budgeted runs are deterministic (byte-identical run to run)
 #   6. an UNFLAGGED run is unchanged: same selection, same full bodies, no cut markers, legacy header
-#      prefix intact. With CTXPACK_BASE_BIN set to a pre-change binary, the body payload (everything
+#      prefix intact. With RIPWIRE_BASE_BIN set to a pre-change binary, the body payload (everything
 #      after the header line) is asserted BYTE-IDENTICAL to that binary's.
 #
-#   CTXPACK_BIN=build/ctxpack bash test/recallbudgetcheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/recallbudgetcheck.sh    # must FAIL (pre-fix binary)
-#   CTXPACK_BASE_BIN=/tmp/ctxpack_base CTXPACK_BIN=build/ctxpack bash test/recallbudgetcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/recallbudgetcheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/recallbudgetcheck.sh    # must FAIL (pre-fix binary)
+#   RIPWIRE_BASE_BIN=/tmp/ripwire_base RIPWIRE_BIN=build/ripwire bash test/recallbudgetcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-BASE_BIN="${CTXPACK_BASE_BIN:-}"
+BASE_BIN="${RIPWIRE_BASE_BIN:-}"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "recallbudgetcheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -170,7 +170,7 @@ cmp -s "$TMP/mt.out" "$TMP/mt2.out" \
 # ── 6. the UNFLAGGED run is unchanged — no default behavior change ──────────────────────────────────
 # §B9.2 PIN UPDATE: the denominator's noun moved from "docs" (which --doc-drift's docs= also claims, over a
 # DIFFERENT predicate) to "document files", which is what docFileMask actually counts. Shape unchanged.
-head -1 "$TMP/plain.out" | grep -qE "^ctxpack recall — \"$Q\" — [0-9]+ relevant of [0-9]+ document files, best-first" \
+head -1 "$TMP/plain.out" | grep -qE "^ripwire recall — \"$Q\" — [0-9]+ relevant of [0-9]+ document files, best-first" \
     && ok "unflagged: header prefix ('K relevant of N document files, best-first') intact" \
     || no "unflagged: header prefix changed: $( head -c 160 "$TMP/plain.out" )"
 grep -qE 'truncated|capped=1|omitted' "$TMP/plain.out" \
@@ -191,7 +191,7 @@ if [ -n "$BASE_BIN" ] && [ -x "$BASE_BIN" ]; then
         && ok "unflagged: body payload BYTE-IDENTICAL to the pre-change binary ($BASE_BIN)" \
         || no "unflagged: body payload differs from the pre-change binary ($BASE_BIN)"
 else
-    echo "  SKIP  pre-change byte-identity (set CTXPACK_BASE_BIN=<pre-change ctxpack> to enable)"
+    echo "  SKIP  pre-change byte-identity (set RIPWIRE_BASE_BIN=<pre-change ripwire> to enable)"
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

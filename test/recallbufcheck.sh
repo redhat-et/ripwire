@@ -32,12 +32,12 @@
 #       Those three are provably BOUNDED (fixed prose + integers only) and so are green on base too: their
 #       arms are the byte-identity guard for the conversion, not a second red.
 #
-# Usage:  test/recallbufcheck.sh [BIN]   |   CTXPACK_BIN=asan/ctxpack test/recallbufcheck.sh
+# Usage:  test/recallbufcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire test/recallbufcheck.sh
 # Both binding seams are live and both are exercised in CI-style use. Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 export LSAN_OPTIONS="suppressions=$ROOT/lsan_suppressions.txt"
 
@@ -45,7 +45,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the byte/JSON assertions"; exit 2; }
 
 echo "recallbufcheck: BIN=$BIN"

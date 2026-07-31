@@ -6,7 +6,7 @@
 # no-trigram .*) we assert THREE things:
 #   (S) prefiltered output == full-scan output   (--regex=PAT  vs  --regex=PAT --no-prefilter)
 #       — the full scan opens every file, so equality proves the prefilter dropped no match.
-#   (O) the file set ctxpack reports ⊇ the file set an INDEPENDENT `grep -lE` finds
+#   (O) the file set ripwire reports ⊇ the file set an INDEPENDENT `grep -lE` finds
 #       — a second, external oracle that the verifier itself can't bias.
 #   (D) output is byte-identical run-to-run (determinism contract).
 # Plus a NARROWING check: a pattern keyed on a token unique to one file must report fewer
@@ -14,12 +14,12 @@
 # (otherwise "sound" would be trivially satisfied by always scanning everything).
 #
 # Does NOT edit test/regression.sh.  Usage:
-#   CTXPACK_BIN=build/ctxpack bash test/regexcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/regexcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/regexcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/regexcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/regexfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -27,7 +27,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/regexfix dir — fixture missing"; exit 2; }
 cd "$ROOT"   # repo-relative paths in the XML, so the oracle paths line up
 
@@ -68,7 +68,7 @@ for p in "${PATS[@]}"; do
     fi
 done
 
-# ── (O) independent grep oracle: ctxpack's matched-FILE set must be a SUPERSET of grep -lE's ──
+# ── (O) independent grep oracle: ripwire's matched-FILE set must be a SUPERSET of grep -lE's ──
 # (BRE-safe subset of the battery; uses grep -E so the pattern syntax matches.)
 for p in 'compute' 'Widget' 'open|close' '[A-Z][a-z]+' 'Foo.*Bar' 'zylophoneXyzzy' '(open|close)'; do
     cx="$( "$BIN" "$CORPUS" --regex="$p" --no-cache 2>/dev/null | grep -o 'p="[^"]*"' | sed 's/p="//;s/:.*//' | sort -u )"
@@ -76,7 +76,7 @@ for p in 'compute' 'Widget' 'open|close' '[A-Z][a-z]+' 'Foo.*Bar' 'zylophoneXyzz
     miss=0
     while IFS= read -r f; do
         [ -z "$f" ] && continue
-        printf '%s\n' "$cx" | grep -qxF "$f" || { miss=1; echo "      grep matched $f but ctxpack dropped it"; }
+        printf '%s\n' "$cx" | grep -qxF "$f" || { miss=1; echo "      grep matched $f but ripwire dropped it"; }
     done <<< "$gp"
     [ "$miss" -eq 0 ] && ok "oracle ⊇ grep   $(printf '%-14s' "$p")" || no "oracle dropped a grep-matched file for /$p/"
 done

@@ -1,6 +1,6 @@
 #pragma once
 
-// Tiny stable C++ corpus for ctxpack regression golden. Has a real call edge (perimeter -> distance)
+// Tiny stable C++ corpus for ripwire regression golden. Has a real call edge (perimeter -> distance)
 // so PageRank has something to rank.
 
 struct Point

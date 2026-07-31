@@ -1,4 +1,4 @@
-; ctxpack C# tags — written for ctxpack (.cs). Derived from the upstream
+; ripwire C# tags — written for ripwire (.cs). Derived from the upstream
 ; tree-sitter/tree-sitter-c-sharp v0.23.5 grammar node-types (verified against node-types.json /
 ; grammar.js — the vendored queries/tags.scm ships no @reference.call and captures far less than we
 ; need, so this is hand-written, mirroring the Java/TypeScript convention already in this repo).

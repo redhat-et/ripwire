@@ -7,7 +7,7 @@
 # Background (AUDIT4 §G PARTIAL / A4-P1): computeHeadSnapshot already caches the HEAD *ingest*. The dominant
 # remaining cost is everything computeSnapshot then does on the HEAD tree — above all findClones +
 # findClonesType3 — all IMMUTABLE for a given (HEAD sha, excludes, scheme). This round serializes the computed
-# Snapshot to a sidecar blob (ctxpack-qsnap-<repoHex>-<exclHex>-<sha>.bin) with a magic+scheme header, an
+# Snapshot to a sidecar blob (ripwire-qsnap-<repoHex>-<exclHex>-<sha>.bin) with a magic+scheme header, an
 # embedded fnv(headSha), and an fnv1a64 checksum trailer; a warm hit deserializes it and RETURNS.
 #
 # Checks:
@@ -25,25 +25,25 @@
 #
 # Uses its OWN temp repo + a private XDG_CACHE_HOME (TMPDIR unset) so the qsnap blobs land in a dir we own and
 # can inspect. Does NOT edit regression.sh. Needs git.
-# Usage:  test/qsnapcachecheck.sh   |   CTXPACK_BIN=build_r2a1/ctxpack test/qsnapcachecheck.sh
+# Usage:  test/qsnapcachecheck.sh   |   RIPWIRE_BIN=build_r2a1/ripwire test/qsnapcachecheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
 XDG="$TMP/xdg"; mkdir -p "$XDG"
-CACHEDIR="$XDG/ctxpack"
+CACHEDIR="$XDG/ripwire"
 
 inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
 # AUDIT5 Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
-qsnapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ctxpack-qsnap-*.bin' 2>/dev/null; }
+qsnapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qsnap-*.bin' 2>/dev/null; }
 nqsnap(){ qsnapfiles | wc -l | tr -d ' '; }
 # --no-cache disables only the WORKING-tree auto-cache, never the HEAD-side qsnap cache — so the qsnap path is
 # exercised here, which is exactly what this gate needs.
@@ -66,7 +66,7 @@ echo "qsnapcachecheck: BIN=$BIN"
 # ── (a) equivalence + reuse (unchanged HEAD == working tree, 0 regressions) ────────────────────────────────
 run --no-cache >"$TMP/a1" 2>/dev/null; rc1=$?
 QF="$( qsnapfiles | head -1 )"
-[ -n "$QF" ] && ok "run 1 creates a qsnap Snapshot cache file" || no "no ctxpack-qsnap-*.bin after run 1"
+[ -n "$QF" ] && ok "run 1 creates a qsnap Snapshot cache file" || no "no ripwire-qsnap-*.bin after run 1"
 I1="$( [ -n "$QF" ] && inode_of "$QF" )"
 
 run --no-cache >"$TMP/a2" 2>/dev/null; rc2=$?

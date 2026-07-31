@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # fficheck.sh — the A4-R5 cross-language FFI binding-edge gate.
 #
-#   test/fficheck.sh                       # uses build/ctxpack on test/ffifix
-#   CTXPACK_BIN=asan/ctxpack test/fficheck.sh
+#   test/fficheck.sh                       # uses build/ripwire on test/ffifix
+#   RIPWIRE_BIN=asan/ripwire test/fficheck.sh
 #
 # Fixture test/ffifix/ exercises the three wave-1 binding patterns:
 #   pybind11 (module.cpp)  m.def("fast_transform",&fast_transform_impl) + Solver::step;
@@ -18,15 +18,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/ffifix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "fficheck: BIN=$BIN  CORPUS=$CORPUS"
 
 callers(){ "$BIN" "$CORPUS" --callers="$1" --no-cache 2>/dev/null; }

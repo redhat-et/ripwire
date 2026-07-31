@@ -37,19 +37,19 @@
 #       clock, no random seed, no network.
 #
 # Usage:
-#   test/mcpreadloopcheck.sh                                 # uses build/ctxpack
-#   test/mcpreadloopcheck.sh asan/ctxpack                    # positional binary  (the arm that matters)
-#   CTXPACK_BIN=asan/ctxpack test/mcpreadloopcheck.sh         # env binary
-#   CTXPACK_BIN_ALT=asan/ctxpack test/mcpreadloopcheck.sh     # + plain-vs-alt byte-identity arm
+#   test/mcpreadloopcheck.sh                                 # uses build/ripwire
+#   test/mcpreadloopcheck.sh asan/ripwire                    # positional binary  (the arm that matters)
+#   RIPWIRE_BIN=asan/ripwire test/mcpreadloopcheck.sh         # env binary
+#   RIPWIRE_BIN_ALT=asan/ripwire test/mcpreadloopcheck.sh     # + plain-vs-alt byte-identity arm
 #
 # For asan runs, export LSAN_OPTIONS=suppressions=lsan_suppressions.txt as usual.
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"       # BOTH seams — positional and env
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"       # BOTH seams — positional and env
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-ALT="${CTXPACK_BIN_ALT:-}"
+ALT="${RIPWIRE_BIN_ALT:-}"
 [ -n "$ALT" ] && [ "${ALT#/}" = "$ALT" ] && ALT="$ROOT/$ALT"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -58,7 +58,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the byte-level driver"; exit 2; }
 
 echo "mcpreadloopcheck: BIN=$BIN  FIX=$FIX${ALT:+  ALT=$ALT}"
@@ -454,10 +454,10 @@ cmp -s "$TMP/g.out" "$TMP/g2.out" \
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 if [ -n "$ALT" ]; then
 echo
-echo "=== (h) BIN vs CTXPACK_BIN_ALT byte-identity on the deterministic arms ==="
+echo "=== (h) BIN vs RIPWIRE_BIN_ALT byte-identity on the deterministic arms ==="
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
     if [ ! -x "$ALT" ]; then
-        no "(h) CTXPACK_BIN_ALT=$ALT is not executable"
+        no "(h) RIPWIRE_BIN_ALT=$ALT is not executable"
     else
         for pair in "a:--mcp" "b_lf:--mcp" "b_crlf:--mcp" "c:--mcp" "f:--mcp" "g:--mcp"; do
             tag="${pair%%:*}"

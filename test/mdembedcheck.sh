@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mdembedcheck.sh — §P7 gate: ctxpack's markdown-emitting verbs (--report, --recall) must produce
+# mdembedcheck.sh — §P7 gate: ripwire's markdown-emitting verbs (--report, --recall) must produce
 # EMBEDDABLE markdown — no run of four-or-more backticks anywhere in the output, so a consumer that wraps
 # the whole payload in a five-backtick fence (the standard trick for embedding markdown-that-itself-contains
 # fenced code) can always do so safely, no matter how many THREE-backtick fences the payload carries.
@@ -23,18 +23,18 @@
 # real doc-content regression to fix (widen the doc's own fence, or the consumer's) — not a signal to raise
 # the threshold in this script.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/mdembedcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/mdembedcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "mdembedcheck: BIN=$BIN  CORPUS=$ROOT"
 
 # a run of 4-or-more consecutive backticks, ANYWHERE in the payload (not anchored to line start — a run

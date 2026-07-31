@@ -5,10 +5,10 @@
 // <=20 to drop bulk sweeps): seed = the changed file with the MOST symbols (the change's likely hub); gold
 // = the OTHER changed files; measure recall@k. The HISTORICAL eval AVERAGES over the last N commits — a
 // real benchmark, not n=1 (the n=1 lesson: a single seed is noise). Rankers compared:
-//   ctxpack = PageRank teleported onto the seed file's symbols      (structural / importance)
+//   ripwire = PageRank teleported onto the seed file's symbols      (structural / importance)
 //   BM25    = file docs of WHOLE symbol+callee names               (lexical baseline)
 //   BM25sub = file docs of camelCase/snake SUBTOKENS               (deterministic-relatedness candidate, E#2)
-//   fused   = RRF(ctxpack, BM25sub)                                 (does structure ADD on top of lexical?)
+//   fused   = RRF(ripwire, BM25sub)                                 (does structure ADD on top of lexical?)
 //   anchored= anchoredLexicalRank over BM25body                     (--for --anchor's LARGER-style fusion, AUDIT3 steal #1)
 // Falls back to the current git diff (n=1) when no history is available. NOT a golden: on a live repo the
 // numbers move as commits land — it's a benchmark you re-run, not a byte-stable snapshot.
@@ -114,18 +114,18 @@ inline std::vector<float> anchoredFileScore( const IngestResult& ing, const Grap
 
 // §P11.12: the interpretive footer for --eval's ranker table, pulled into its own function so the 9-line
 // note doesn't inflate runEval's own verbosity (--quality-delta's LOC kind) — this table used to end with a
-// bare ranking, which reads as "ctxpack loses to BM25" without saying the two rows measure different things.
+// bare ranking, which reads as "ripwire loses to BM25" without saying the two rows measure different things.
 // --eval-retrieval next door already carries an equivalent note; this table needed the same treatment
 // (adoption decisions get read straight off it).
 inline void printEvalRankerNote()
 {
-    std::printf( "  note: `ctxpack` here is the DEFAULT MAP's structural-only PageRank (importance, not\n"
+    std::printf( "  note: `ripwire` here is the DEFAULT MAP's structural-only PageRank (importance, not\n"
                  "        relatedness) — it is NOT what a --for/--query retrieval call ranks with. BM25 /\n"
                  "        BM25sub / BM25body are QUERY-TIME lexical rankers (whole-name / subtoken /\n"
-                 "        subtoken+body); fused = RRF(ctxpack, BM25sub); anchored = BM25body + anchored PPR\n"
+                 "        subtoken+body); fused = RRF(ripwire, BM25sub); anchored = BM25body + anchored PPR\n"
                  "        expansion (--for --anchor, EXPERIMENTAL). The SHIPPED default for --for/--query is\n"
                  "        the subtoken+body lexical family (routed to name-exact only for an identifier-shaped\n"
-                 "        query — lexical.h chooseForRanker), so a gap between the ctxpack and BM25* rows here\n"
+                 "        query — lexical.h chooseForRanker), so a gap between the ripwire and BM25* rows here\n"
                  "        is structural-importance-vs-lexical-relatedness on a co-change task, not the shipped\n"
                  "        retrieval path losing to an alternative it was never running.\n" );
 }
@@ -192,7 +192,7 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
     {
         std::vector<std::uint32_t> cur;
         for( std::uint32_t f = 0; f < F; ++f ) if( currentDiff[f] ) cur.push_back( f );
-        if( cur.size() < 2 ) { std::fprintf( stderr, "ctxpack --eval: no git-history sample and <2 changed files\n" ); return 1; }
+        if( cur.size() < 2 ) { std::fprintf( stderr, "ripwire --eval: no git-history sample and <2 changed files\n" ); return 1; }
         qual.push_back( cur );
     }
 
@@ -207,7 +207,7 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
         for( std::uint32_t f : cs ) if( f != seed ) { gold[f] = 1; ++goldTotal; }
         if( goldTotal == 0 ) continue;
 
-        std::vector<char> seedMask( F, 0 );  seedMask[ seed ] = 1;    // ctxpack: PageRank teleported on the seed
+        std::vector<char> seedMask( F, 0 );  seedMask[ seed ] = 1;    // ripwire: PageRank teleported on the seed
         const std::vector<float> r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) );
         std::vector<float>       ctxScore( F, 0.f );
         for( const Symbol& s : ing.symbols ) ctxScore[ s.fileId ] += r[ s.id ];
@@ -233,15 +233,15 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
         addRecall( accDir, rankFiles( dScore ), gold, goldTotal );
         ++n;
     }
-    if( n == 0 ) { std::fprintf( stderr, "ctxpack --eval: no qualifying commits\n" ); return 1; }
+    if( n == 0 ) { std::fprintf( stderr, "ripwire --eval: no qualifying commits\n" ); return 1; }
 
     const double N   = n;
     const auto   row = [ & ]( const char* name, const EvalAcc& a )
     { std::printf( "  %-9s %8.1f%% %9.1f%% %9.1f%%\n", name, 100.0 * a.r5 / N, 100.0 * a.r10 / N, 100.0 * a.r20 / N ); };
-    std::printf( "ctxpack --eval  (co-change recovery, averaged over %d %s)\n",
+    std::printf( "ripwire --eval  (co-change recovery, averaged over %d %s)\n",
                  n, historical ? "historical commits" : "current diff [n=1, no history]" );
     std::printf( "  %-9s %9s %10s %10s\n", "ranker", "recall@5", "recall@10", "recall@20" );
-    row( "ctxpack", accCtx );   // structural (PageRank) — importance, not relatedness
+    row( "ripwire", accCtx );   // structural (PageRank) — importance, not relatedness
     row( "BM25",    accW );     // lexical, whole-name (the original baseline)
     row( "BM25sub", accS );     // lexical, SUBTOKEN names+callees (E#2 round 1 winner)
     row( "BM25body",accB );     // lexical, SUBTOKEN names+callees + WHOLE-FILE body (E#2 round 2)
@@ -357,7 +357,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
         if( phrase.empty() ) continue;
         sample.push_back( { id, s.name, std::move( phrase ) } );
     }
-    if( sample.empty() ) { std::fprintf( stderr, "ctxpack --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
+    if( sample.empty() ) { std::fprintf( stderr, "ripwire --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
 
     // rankers: subtoken+body (--for default), name-exact, anchored (over subtoken+body), routed (chooseForRanker).
     // Two query modes: name (a), doc-phrase (b). One RetrievalAcc per (ranker, mode).
@@ -403,7 +403,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
                      ranker, mode, a.mrr / N,
                      100.0 * double( a.r1 ) / N, 100.0 * double( a.r5 ) / N, 100.0 * double( a.r10 ) / N );
     };
-    std::printf( "ctxpack --eval-retrieval  (known-item, %zu doc-commented symbols; gold is in-corpus by construction)\n", sample.size() );
+    std::printf( "ripwire --eval-retrieval  (known-item, %zu doc-commented symbols; gold is in-corpus by construction)\n", sample.size() );
     std::printf( "  %-9s %-11s %6s %9s %9s %9s\n", "ranker", "query-mode", "MRR", "recall@1", "recall@5", "recall@10" );
     row( "subtoken", "name",      subN );
     row( "subtoken", "doc-phrase",subP );
@@ -435,8 +435,8 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
 // drift risk, proven by Gate #3 (metric-parity). Acc@k (ALL gold within top-k, bench/locbench's strict
 // definition) and MRR (reciprocal rank of the FIRST gold hit) are new, but score-vector-agnostic — no
 // separate ranking math. `random` is the analytic k/F floor, same shape as --eval's random row (no seed
-// excluded here). assisted/unassisted (§3.2 ctxpack_assisted tag) print as two SEPARATE tables, never
-// blended — the unassisted population is the only one that isn't grading ctxpack's own homework.
+// excluded here). assisted/unassisted (§3.2 ripwire_assisted tag) print as two SEPARATE tables, never
+// blended — the unassisted population is the only one that isn't grading ripwire's own homework.
 
 struct MinedPair
 {
@@ -560,7 +560,7 @@ inline bool parseMinedLine( const std::string& line, MinedPair& out )
     out.query = minedjson::unescape( line, qs, qe );
 
     bool assisted = false;
-    minedjson::findBool( line, "ctxpack_assisted", 0, assisted );   // absent → false (degrade)
+    minedjson::findBool( line, "ripwire_assisted", 0, assisted );   // absent → false (degrade)
     out.assisted = assisted;
 
     const std::size_t gf = line.find( "\"gold_files\"" );
@@ -626,11 +626,11 @@ inline void addMinedRow( MinedAcc& a, const std::vector<std::uint32_t>& ranked, 
 inline int runEvalMined( const std::string& root, const IngestResult& ing, const Graph& g, const std::string& path )
 {
     std::ifstream in( path );
-    if( !in ) { std::fprintf( stderr, "ctxpack --eval-mined: cannot open '%s'\n", path.c_str() ); return 1; }
+    if( !in ) { std::fprintf( stderr, "ripwire --eval-mined: cannot open '%s'\n", path.c_str() ); return 1; }
 
     // gold paths in the artifact are REPO-RELATIVE (the miner strips the repo root); ing.files carry
-    // the as-invoked crawl paths (absolute or CWD-relative). Index BOTH forms so `ctxpack /abs/repo
-    // --eval-mined=…` and `ctxpack relative/root --eval-mined=…` resolve the same gold set. Exact
+    // the as-invoked crawl paths (absolute or CWD-relative). Index BOTH forms so `ripwire /abs/repo
+    // --eval-mined=…` and `ripwire relative/root --eval-mined=…` resolve the same gold set. Exact
     // string keys only — no fuzzy suffix matching (a basename collision must not silently mis-credit
     // a ranker).
     const std::uint32_t F = std::uint32_t( ing.files.size() );
@@ -682,14 +682,14 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     }
     if( nPairs[0] + nPairs[1] == 0 )
     {
-        std::fprintf( stderr, "ctxpack --eval-mined: no qualifying pairs (>=2 in-corpus gold files) in '%s' "
+        std::fprintf( stderr, "ripwire --eval-mined: no qualifying pairs (>=2 in-corpus gold files) in '%s' "
                               "(%zu malformed, %zu under-qualified)\n", path.c_str(), skipped, underqualified );
         return 1;
     }
 
     const auto printTable = [ & ]( const char* label, MinedAcc& fA, MinedAcc& qA, MinedAcc& aA, std::size_t n )
     {
-        std::printf( "ctxpack --eval-mined  (%s, %zu session-mined pair%s; gold = Edit/Write targets, DESIGN_traceEvals.md)\n",
+        std::printf( "ripwire --eval-mined  (%s, %zu session-mined pair%s; gold = Edit/Write targets, DESIGN_traceEvals.md)\n",
                      label, n, n == 1 ? "" : "s" );
         if( n == 0 ) { std::printf( "  (no %s pairs)\n", label ); return; }
         const double N = double( n );
@@ -712,10 +712,10 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     };
 
     printTable( "unassisted", forA[0], queryA[0], anchorA[0], nPairs[0] );
-    printTable( "assisted (ctxpack_assisted=true — NOT independent evidence, see DESIGN_traceEvals.md §3.2)",
+    printTable( "assisted (ripwire_assisted=true — NOT independent evidence, see DESIGN_traceEvals.md §3.2)",
                forA[1], queryA[1], anchorA[1], nPairs[1] );
     if( skipped || underqualified )
-        std::fprintf( stderr, "ctxpack --eval-mined: skipped %zu malformed line(s), %zu under-qualified pair(s) (<2 in-corpus gold files)\n",
+        std::fprintf( stderr, "ripwire --eval-mined: skipped %zu malformed line(s), %zu under-qualified pair(s) (<2 in-corpus gold files)\n",
                      skipped, underqualified );
     return 0;
 }

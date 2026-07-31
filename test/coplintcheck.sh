@@ -7,12 +7,12 @@
 #   4. xmllint-clean output
 #   5. mutation-tested: edit expected counts → gate fails → restore → gate passes
 #
-#   CTXPACK_BIN=build/ctxpack bash test/coplintcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/coplintcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/coplintcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/coplintcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/coplintfix"
 RULES="$CORPUS/rules"
@@ -21,7 +21,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]    || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/coplintfix dir — fixture missing"; exit 2; }
 [ -d "$RULES" ]  || { echo "no test/coplintfix/rules dir — fixture missing"; exit 2; }
 

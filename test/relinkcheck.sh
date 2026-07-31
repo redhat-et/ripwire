@@ -15,16 +15,16 @@
 #
 # METHOD (per mutation case, on an isolated temp tree — NEVER the live repo, and detached from git so
 # no churn/hotspot input perturbs the map):
-#   1. cold-populate a warm cache on the PRE-mutation tree:   ctxpack DIR --cache=C
+#   1. cold-populate a warm cache on the PRE-mutation tree:   ripwire DIR --cache=C
 #   2. apply the mutation to the tree
-#   3. WARM (incremental) run reusing that now-stale cache:    ctxpack DIR --cache=C   -> warm.out
-#   4. COLD (full rebuild, no cache at all):                   ctxpack DIR --no-cache -> cold.out
+#   3. WARM (incremental) run reusing that now-stale cache:    ripwire DIR --cache=C   -> warm.out
+#   4. COLD (full rebuild, no cache at all):                   ripwire DIR --no-cache -> cold.out
 #   5. assert warm.out == cold.out  BYTE-FOR-BYTE
 #   Step 1's cache genuinely holds stale entries for the unchanged files, so the warm run must re-link
 #   correctly against them — the exact thing a scoped re-link could get wrong.
 #
 # Runs the whole matrix on TWO corpora: a hand-built multi-file fixture (cross-file calls, includes,
-# a class hierarchy — so resolution does real cross-file work) AND a COPY of ctxpack's own src/ (a
+# a class hierarchy — so resolution does real cross-file work) AND a COPY of ripwire's own src/ (a
 # large, real C++ tree). Both the lean default map AND the rich --for lens are checked (they use two
 # different cache families — lean vs rich — that must both stay byte-identical).
 #
@@ -34,20 +34,20 @@
 #
 # Usage:
 #   bash test/relinkcheck.sh
-#   CTXPACK_BIN=asan/ctxpack bash test/relinkcheck.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/relinkcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "relinkcheck: BIN=$BIN  TMP=$TMP"
 
@@ -277,11 +277,11 @@ run_case "addfile"   "$FIX" mut_addfile
 run_case "sigchange" "$FIX" mut_sigchange
 
 # =================================================================================================
-#  ARM 2 — a COPY of ctxpack's own src/ (large real C++ tree). Mutations target a real file.
+#  ARM 2 — a COPY of ripwire's own src/ (large real C++ tree). Mutations target a real file.
 #  We copy only src/ (headers + .cpp) into a git-free temp tree so churn is not an input and the
 #  live repo is never touched.
 # =================================================================================================
-echo "── arm 2: copy of ctxpack src/ (real large C++ tree) ──"
+echo "── arm 2: copy of ripwire src/ (real large C++ tree) ──"
 SRCCOPY="$TMP/srccopy"
 mkdir -p "$SRCCOPY"
 cp -R "$ROOT/src" "$SRCCOPY/src"

@@ -10,21 +10,21 @@
 #   (iii) INERT WITHOUT MENTIONS — prose that names nothing indexed (incl. "e.g." / version numbers) is
 #         BYTE-IDENTICAL boost-on vs boost-off.
 #   (iv)  SCOPE — --query and --for --no-route are untouched even with the boost active.
-#   (v)   DETERMINISM ×3, xmllint-clean, env (CTXPACK_NO_MENTION=1) == flag (--no-mention-boost)
+#   (v)   DETERMINISM ×3, xmllint-clean, env (RIPWIRE_NO_MENTION=1) == flag (--no-mention-boost)
 #         byte-for-byte, and the flag alone refuses loudly.
 #
-# Usage:  bash test/mentioncheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/mentioncheck.sh
+# Usage:  bash test/mentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/mentioncheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "mentioncheck: BIN=$BIN"
 
 # ── fixture: no git needed — the anchor is pure string work over the INDEX ──────────────────────────
@@ -100,7 +100,7 @@ grep -q 'mention anchor:' "$TMP/p1.xml" && no "header note must not appear when 
 # ── (iv) scope: --query and --no-route untouched even when active ────────────────────────────────────
 QM="widget pipeline in pkg/beta.py"
 "$BIN" "$FIX" --query="$QM" --no-cache >"$TMP/q1.xml" 2>/dev/null
-CTXPACK_NO_MENTION=1 "$BIN" "$FIX" --query="$QM" --no-cache >"$TMP/q2.xml" 2>/dev/null
+RIPWIRE_NO_MENTION=1 "$BIN" "$FIX" --query="$QM" --no-cache >"$TMP/q2.xml" 2>/dev/null
 cmp -s "$TMP/q1.xml" "$TMP/q2.xml" && ok "--query path untouched" || no "--query path affected"
 "$BIN" "$FIX" --for="$QM" --no-route --no-cache >"$TMP/nr1.xml" 2>/dev/null
 "$BIN" "$FIX" --for="$QM" --no-route --no-mention-boost --no-cache >"$TMP/nr2.xml" 2>/dev/null
@@ -117,8 +117,8 @@ if command -v xmllint >/dev/null; then
     xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "anchored bundle is xmllint-clean (G4)" || no "anchored bundle not well-formed"
 else ok "xmllint not present — skipped (G4 covered by xmlwellformed.sh)"; fi
 "$BIN" "$FIX" --for="$QM" --no-mention-boost --no-cache >"$TMP/f1.xml" 2>/dev/null
-CTXPACK_NO_MENTION=1 "$BIN" "$FIX" --for="$QM" --no-cache >"$TMP/f2.xml" 2>/dev/null
-cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "CTXPACK_NO_MENTION=1 == --no-mention-boost (byte-identical)" \
+RIPWIRE_NO_MENTION=1 "$BIN" "$FIX" --for="$QM" --no-cache >"$TMP/f2.xml" 2>/dev/null
+cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "RIPWIRE_NO_MENTION=1 == --no-mention-boost (byte-identical)" \
     || no "env disable and flag disable diverge"
 "$BIN" "$FIX" --no-mention-boost >/dev/null 2>"$TMP/refuse.err"
 [ $? -ne 0 ] && grep -q 'no-mention-boost' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"

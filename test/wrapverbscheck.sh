@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wrapverbscheck.sh — A4-S2 drift gate: `ctxpack wrap claude` must mention EVERY verb name the
+# wrapverbscheck.sh — A4-S2 drift gate: `ripwire wrap claude` must mention EVERY verb name the
 # live MCP server actually serves via tools/list, and must point at skills/install.sh. Without
 # this gate, a new MCP verb can ship (tools/list grows) without ever appearing in the wrap
 # recipe — the only portable adoption surface silently goes stale (exactly what A4-S2 found: 10
@@ -7,21 +7,21 @@
 #
 # Flow (mirrors test/mcpverbscheck.sh's JSON-RPC-over-stdin pattern):
 #   1. Start the MCP server, send initialize + tools/list, extract every tool "name".
-#   2. Run `ctxpack wrap claude`.
+#   2. Run `ripwire wrap claude`.
 #   3. Assert every live verb name appears in the wrap output (word-boundary match, so e.g.
 #      "for" doesn't false-positive on "before").
 #   4. Assert the wrap output names skills/install.sh.
 #
 # Usage:
-#   test/wrapverbscheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=build_w3i/ctxpack test/wrapverbscheck.sh
+#   test/wrapverbscheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=build_w3i/ripwire test/wrapverbscheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -29,7 +29,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "wrapverbscheck: BIN=$BIN"
@@ -65,7 +65,7 @@ LIVE_COUNT="$( wc -l <"$TMP/live_verbs" | tr -d ' ' )"
 [ "$LIVE_COUNT" -gt 0 ] && ok "tools/list returned $LIVE_COUNT verb(s)" || no "tools/list returned zero verbs"
 
 echo
-echo "=== 2. ctxpack wrap claude — verb coverage ==="
+echo "=== 2. ripwire wrap claude — verb coverage ==="
 
 WRAP_OUT="$( "$BIN" wrap claude 2>&1 )"
 
@@ -81,8 +81,8 @@ while IFS= read -r verb; do
     fi
 done <"$TMP/live_verbs"
 
-[ "$missing" -eq 0 ] && ok "all $LIVE_COUNT live verbs are mentioned in 'ctxpack wrap claude'" \
-                     || no "$missing live verb(s) missing from 'ctxpack wrap claude'"
+[ "$missing" -eq 0 ] && ok "all $LIVE_COUNT live verbs are mentioned in 'ripwire wrap claude'" \
+                     || no "$missing live verb(s) missing from 'ripwire wrap claude'"
 
 echo
 echo "=== 3. skills/install.sh line present ==="

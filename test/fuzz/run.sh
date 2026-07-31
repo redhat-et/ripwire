@@ -6,7 +6,7 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/../.." && pwd )"
 BUILD_DIR="${1:-$ROOT/fuzz}"
 DURATION_SEC="${2:-120}"
-JOBS="${CTXPACK_FUZZ_JOBS:-4}"
+JOBS="${RIPWIRE_FUZZ_JOBS:-4}"
 TMP="$( mktemp -d )"
 FAILED=0
 
@@ -37,7 +37,7 @@ mkdir -p "$TMP/artifacts" "$TMP/logs"
 run_one()
 {
     grammar="$1"
-    binary="$BUILD_DIR/ctxpack_fuzz_$grammar"
+    binary="$BUILD_DIR/ripwire_fuzz_$grammar"
     corpus="$TMP/corpus-$grammar"
     artifacts="$TMP/artifacts/$grammar"
     mkdir -p "$corpus" "$artifacts"

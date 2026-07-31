@@ -9,19 +9,19 @@
 # ahead of the trigram prefilter so that --no-prefilter refuses identically (the prefilter's own parse is
 # allowed to degrade; only the VERIFIER's compile means "the user's pattern is invalid").
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/regexrefusecheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/regexrefusecheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/regexrefusecheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/regexrefusecheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "regexrefusecheck: BIN=$BIN  ROOT=$ROOT"
 
 # refuseCase <label> <extra flags…> -- the last argument is the pattern

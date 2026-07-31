@@ -1,4 +1,4 @@
-// A minimal pybind11 module. ctxpack A4-R5 should link the Python-visible names
+// A minimal pybind11 module. ripwire A4-R5 should link the Python-visible names
 // ("fast_transform", "step") to the C++ definitions they bind.
 #include <pybind11/pybind11.h>
 

@@ -7,12 +7,12 @@
 # extra. Fixture: test/duprowfix/box.h reproduces the identical shape (a const/non-const accessor pair,
 # each called once from a third method so the resolver links the call to both candidates).
 #
-# Usage:  bash test/duprowcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/duprowcheck.sh
+# Usage:  bash test/duprowcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/duprowcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/duprowfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -20,7 +20,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/duprowfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 
@@ -63,7 +63,7 @@ OUT2="$( "$BIN" test/duprowfix --no-cache 2>/dev/null )"
 
 # ── 8) §A8.7: the v1 legend closes the shown=/overloads= arithmetic — the ONE clause a reader needs to
 # know rows + Σ(overloads-1) == shown, which was previously true but undocumented.
-printf '%s' "$OUT" | grep -oE '<!-- ctxpack v1[^>]*-->' | grep -q 'overloads=' \
+printf '%s' "$OUT" | grep -oE '<!-- ripwire v1[^>]*-->' | grep -q 'overloads=' \
     && ok "§A8.7: the v1 legend documents overloads=" \
     || no "§A8.7: the v1 legend has no overloads= clause"
 

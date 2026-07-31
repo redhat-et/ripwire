@@ -3,7 +3,7 @@
 # --doc-drift and --whereis, under --with-history.
 #
 #   test/historyoraclecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/historyoraclecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/historyoraclecheck.sh
 #
 # The fixture is BUILT here, not committed: the whole question is "what does git HISTORY say", so the corpus
 # has to be a real repository with a real commit that really deleted something. Fixed author/committer dates
@@ -24,19 +24,19 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "historyoraclecheck: git unavailable — skipping"; exit 0; }
 
 R="$TMP/repo"; mkdir -p "$R"
-export GIT_AUTHOR_NAME=ctxpack GIT_AUTHOR_EMAIL=ctxpack@example.invalid
-export GIT_COMMITTER_NAME=ctxpack GIT_COMMITTER_EMAIL=ctxpack@example.invalid
+export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid
+export GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
 export GIT_AUTHOR_DATE="2026-02-03T00:00:00Z" GIT_COMMITTER_DATE="2026-02-03T00:00:00Z"
 g(){ git -C "$R" "$@" >/dev/null 2>&1; }
 
@@ -175,13 +175,13 @@ cmp -s "$TMP/cold" "$TMP/warm" \
     && ok "doc-drift: warm (cached probe) == cold, byte-identical" \
     || { no "warm and cold disagree — a cached field changed the answer"; diff <(tr '<' '\n' <"$TMP/cold") <(tr '<' '\n' <"$TMP/warm") | head -6; }
 
-blob="$( find "$C2" -name 'ctxpack-qhist-*.bin' | head -1 )"
+blob="$( find "$C2" -name 'ripwire-qhist-*.bin' | head -1 )"
 [ -n "$blob" ] && ok "the probe memoized itself into a sha-keyed cache blob" \
-               || no "no ctxpack-qhist-*.bin blob was written (the probe would re-walk every run)"
+               || no "no ripwire-qhist-*.bin blob was written (the probe would re-walk every run)"
 
 # A CORRUPT blob must be a clean MISS (recompute), never a wrong answer.
 if [ -n "$blob" ]; then
-    printf 'not a ctxpack cache blob at all' > "$blob"
+    printf 'not a ripwire cache blob at all' > "$blob"
     TMPDIR="$C2" "$BIN" "$R" --doc-drift --with-history --detail=999 >"$TMP/corrupt" 2>/dev/null
     cmp -s "$TMP/cold" "$TMP/corrupt" \
         && ok "a corrupt cache blob recomputes to the same answer (magic/scheme/checksum guards hold)" \
@@ -216,7 +216,7 @@ TMPDIR="$C4" "$BIN" "$R" --whereis=vanishedContourWalker --with-history >"$TMP/w
 cmp -s "$TMP/wc" "$TMP/ww" && ok "whereis: warm == cold, byte-identical" || no "whereis warm/cold disagree"
 
 # ONE blob serves both verbs: doc-drift built it above in t2; whereis must not write a second family member.
-nblob="$( find "$C4" -name 'ctxpack-qhist-*.bin' | wc -l | tr -d ' ' )"
+nblob="$( find "$C4" -name 'ripwire-qhist-*.bin' | wc -l | tr -d ' ' )"
 [ "$nblob" = "1" ] && ok "one (repo, HEAD sha) blob serves every question on that commit" \
                    || no "expected 1 qhist blob for one HEAD, found $nblob"
 

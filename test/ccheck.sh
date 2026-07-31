@@ -19,7 +19,7 @@
 #           int run( void )     { return add_one( 41 ); }              (calls add_one, CROSS-FILE, CROSS-LANG)
 #           int compute( void ) { return add_two( 1 ); }               (calls add_two, cross-file)
 #
-# FINDINGS from running `ctxpack test/cfix` and inspecting the raw output:
+# FINDINGS from running `ripwire test/cfix` and inspecting the raw output:
 #   - files=3 symbols=9 edges=3 ambiguous=0 unresolved=0, clean stderr (no ABI/degrade).
 #   - util.h: add_one (t="fn") — the body-less PROTOTYPE, Lang::Cpp (`.h` stays C++-owned, L3 decided).
 #   - util.c: add_one/add_two/SQUARE (t="fn"), Point (t="cls"), PointT/Color (t="struct") — Lang::C.
@@ -37,15 +37,15 @@
 #
 # Usage:
 #   bash test/ccheck.sh
-#   CTXPACK_BIN=build/ctxpack bash test/ccheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/ccheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/ccheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/ccheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIX="$ROOT/test/cfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -53,7 +53,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for XML assertions"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

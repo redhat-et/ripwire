@@ -1,6 +1,6 @@
-# LocBench — ctxpack code-localization accuracy on a public benchmark
+# LocBench — ripwire code-localization accuracy on a public benchmark
 
-`run_locbench.py` measures how well ctxpack **localizes** the code an issue asks you to change, on a
+`run_locbench.py` measures how well ripwire **localizes** the code an issue asks you to change, on a
 public, LLM-free, externally-defined scoreboard: **Loc-Bench** (LocAgent, [arXiv 2503.09089](https://arxiv.org/abs/2503.09089),
 ACL'25), with a **SWE-bench-Lite** fallback. It is the public-benchmark sibling of the co-change
 retrieval proxy in [`../ANSWERQUALITY.md`](../ANSWERQUALITY.md) §1 — same deterministic, leave-nothing-out
@@ -40,7 +40,7 @@ comparator output is retained in the same file for the honest record.
 
 Implementation shipped with the win: persisted per-symbol subtoken postings in the rich cache (warm
 queries do zero per-file reads — property-gated), exhaustive-identical MaxScore pruning
-(`CTXPACK_NO_PRUNE=1` byte-identity gate), per-file Bloom pre-filter, and the deterministic
+(`RIPWIRE_NO_PRUNE=1` byte-identity gate), per-file Bloom pre-filter, and the deterministic
 rank-adaptive payload budget. Gates: `test/postingscheck.sh`, `test/routecheck.sh`,
 `test/retrievalqualitycheck.sh`, `test/knownitemcheck.sh`.
 
@@ -52,19 +52,19 @@ Each Loc-Bench instance = a real GitHub issue + the repo at the pre-fix commit +
 locations** (the files/functions the accepted fix patch actually touched). The harness, per instance:
 
 1. **checkout** the repo at `base_commit` (shallow, single-commit fetch, cached across runs);
-2. run ctxpack as the localizer — `ctxpack <repo> --for="<issue text>"` (+ two more arms below);
-3. **parse** the ranked symbols/files out of ctxpack's XML;
+2. run ripwire as the localizer — `ripwire <repo> --for="<issue text>"` (+ two more arms below);
+3. **parse** the ranked symbols/files out of ripwire's XML;
 4. **score** file-level Acc@k and function-level Acc@k + MRR against gold.
 
-Deterministic given `(dataset slice, ctxpack binary)`: no LLM, no RNG, stable instance order.
+Deterministic given `(dataset slice, ripwire binary)`: no LLM, no RNG, stable instance order.
 
 ### Three arms (all deterministic, same parse, same scoring)
 
 | arm | invocation | what it is |
 |---|---|---|
-| `for` | `ctxpack <repo> --for="<issue>"` | the flagship **task lens** (routed by default): a focused ~40-symbol reuse bundle |
-| `query` | `ctxpack <repo> --query="<issue>"` | **pure lexical BM25** — the full ranked symbol list, no compose/quality framing |
-| `anchor` | `ctxpack <repo> --for=... --anchor` | EXPERIMENTAL lexically-anchored **graph expansion** (PPR seeded from top lexical hits) |
+| `for` | `ripwire <repo> --for="<issue>"` | the flagship **task lens** (routed by default): a focused ~40-symbol reuse bundle |
+| `query` | `ripwire <repo> --query="<issue>"` | **pure lexical BM25** — the full ranked symbol list, no compose/quality framing |
+| `anchor` | `ripwire <repo> --for=... --anchor` | EXPERIMENTAL lexically-anchored **graph expansion** (PPR seeded from top lexical hits) |
 
 ### Metrics (matched to LocAgent §4.1)
 
@@ -75,17 +75,17 @@ Deterministic given `(dataset slice, ctxpack binary)`: no LLM, no RNG, stable in
   shows the "surfaced at least one right location" signal.)
 - **first-hit MRR** — reciprocal rank of the *first* gold function found (0 if none). Labeled "first-hit"
   so it is not confused with LocAgent's internal reciprocal-rank confidence aggregation.
-- **parse coverage** — fraction of gold functions ctxpack's parser emitted *at all* (the localizer's
+- **parse coverage** — fraction of gold functions ripwire's parser emitted *at all* (the localizer's
   ceiling: a function the parser never saw is an automatic miss, reported as its own number).
 
 ### Gold, and what we count honestly
 
 - **gold files** = files the fix patch touches; **gold functions** = Loc-Bench `edit_functions`
-  (`path:name`, or `path:Class.method` → matched on the bare method name ctxpack emits).
+  (`path:name`, or `path:Class.method` → matched on the bare method name ripwire emits).
 - **`added_functions`** (functions the patch *adds* — they do **not** exist at `base_commit`) are
   **structurally un-findable by any static localizer** and are **excluded** from the function denominator
   and reported apart, never folded into the wins.
-- **non-Python gold** (ctxpack speaks Py/TS/Go/Rust/C++/Swift/ObjC) is **skipped with a count**
+- **non-Python gold** (ripwire speaks Py/TS/Go/Rust/C++/Swift/ObjC) is **skipped with a count**
   (Loc-Bench is all-Python, so this is a guard, not a factor).
 - parse-coverage misses count as **automatic misses** in the strict Acc/MRR — the honest denominator.
 
@@ -95,8 +95,8 @@ No auth needed — the dataset is pulled row-by-row from the public HuggingFace 
 and cached to `--work-dir`. Clones and dataset cache live **only** under `--work-dir` (never in the repo).
 
 ```sh
-# ctxpack must be the CURRENT build. On this machine the PATH `ctxpack` may be stale — point at the fresh one:
-export CTXPACK=/path/to/ctxpack/build/ctxpack
+# ripwire must be the CURRENT build. On this machine the PATH `ripwire` may be stale — point at the fresh one:
+export RIPWIRE=/path/to/ripwire/build/ripwire
 
 # validation slice (25 instances)
 python3 bench/locbench/run_locbench.py --n 25 --work-dir /tmp/locbench --verbose
@@ -119,8 +119,8 @@ SWE-bench-Lite is provided as the documented fallback.
 
 ## Full-run results (n=560 — the complete Loc-Bench test set)
 
-**n=560, all instances, zero skips** (nonpy=0, checkout-fail=0, ctxpack-fail=0). Loc-Bench
-(`czlll/Loc-Bench_V1`, test split), ctxpack build as of this commit, on an M-series Mac; total run
+**n=560, all instances, zero skips** (nonpy=0, checkout-fail=0, ripwire-fail=0). Loc-Bench
+(`czlll/Loc-Bench_V1`, test split), ripwire build as of this commit, on an M-series Mac; total run
 ~28 min wall (checkouts dominate; cached). Per-instance rows: [`full560.json`](full560.json).
 `Acc@k` = strict (all gold within top-k), per the paper.
 
@@ -142,7 +142,7 @@ SWE-bench-Lite is provided as the documented fallback.
 | **`anchor`** | **41.6%** | **12.5%** |
 
 **Parse coverage: 1148/1149 gold functions = 99.9%** (301 `added_functions` excluded, structurally
-absent) — ctxpack's parser emits all but one gold function, so the ceiling here is the *ranker*
+absent) — ripwire's parser emits all but one gold function, so the ceiling here is the *ranker*
 (relevance ordering), not the parser.
 
 > **Footnote — the earlier n=60 validation slice** (first 60 instances, kept for comparison):
@@ -154,7 +154,7 @@ absent) — ctxpack's parser emits all but one gold function, so the ceiling her
 
 ### Honest reading of these numbers
 
-- **ctxpack ranks *symbols*; LocAgent-style BM25 ranks *files* (whole-file documents).** Our file-level
+- **ripwire ranks *symbols*; LocAgent-style BM25 ranks *files* (whole-file documents).** Our file-level
   score is derived by max-pooling symbol ranks up to their file, a strictly harder granularity for
   file-level Acc@1 — so **these numbers are not comparable to the paper's BM25 file Acc@1 (38.7%)** and
   we do not claim they are.
@@ -184,7 +184,7 @@ absent) — ctxpack's parser emits all but one gold function, so the ceiling her
 
 ## The honest comparison (cost vs accuracy, not parity)
 
-ctxpack is a **$0, zero-dependency, sub-second, deterministic ranker**. LocAgent / SweRank / Agentless are
+ripwire is a **$0, zero-dependency, sub-second, deterministic ranker**. LocAgent / SweRank / Agentless are
 **LLM and/or trained-reranker systems** — many API calls and seconds-to-minutes per instance. Their
 headline Loc-Bench numbers (for context, **not** a claim of parity):
 
@@ -194,21 +194,21 @@ headline Loc-Bench numbers (for context, **not** a claim of parity):
 | E5-base-v2 (embedding) | 49.6% | 39.4% | model inference, non-deterministic |
 | Agentless (Claude-3.5) | 72.6% | 58.8% | multi-call LLM |
 | LocAgent (Claude-3.5) | 77.7% | 73.4% | multi-call LLM agent |
-| **ctxpack `--anchor` (this harness, n=560 full set)** | **8.4%** (strict, symbol max-pool) | **4.5%** (strict) | **$0, deterministic, ~0.19s/inst, symbol-granularity** |
+| **ripwire `--anchor` (this harness, n=560 full set)** | **8.4%** (strict, symbol max-pool) | **4.5%** (strict) | **$0, deterministic, ~0.19s/inst, symbol-granularity** |
 
 The point of running this is not to beat an LLM agent at localization with a $0 ranker — it is to (a) put
-a **published, reproducible** number on ctxpack's deterministic floor, (b) show **parse coverage is not the
-bottleneck** (the map sees the code), and (c) frame ctxpack honestly as the **fast, free candidate
+a **published, reproducible** number on ripwire's deterministic floor, (b) show **parse coverage is not the
+bottleneck** (the map sees the code), and (c) frame ripwire honestly as the **fast, free candidate
 generator** that feeds those rerankers (cf. AUDIT4 A4-R6 `--format=candidates`), not their replacement.
 
 ## Caveats / limitations
 
 - File ranking = symbol max-pool (first gold-file appearance in the rank-ordered output). A dedicated
-  file-granularity retriever would likely score higher on file-level; ctxpack does not emit one.
+  file-granularity retriever would likely score higher on file-level; ripwire does not emit one.
 - Query = the first `--query-chars` (default 1200) of the issue `problem_statement`, verbatim, deterministic.
   No cleaning of issue boilerplate (that would be non-reproducible curation); a longer budget did not move
   the hard cases in spot checks.
 - Function match = exact bare-name within the (path-or-basename) matched file; two same-named methods in a
   file are indistinguishable at this granularity (rare).
-- Numbers move with the ctxpack binary and the dataset slice; re-run to reproduce. cf. `../BENCHMARK.md`
+- Numbers move with the ripwire binary and the dataset slice; re-run to reproduce. cf. `../BENCHMARK.md`
   (tokens + speed), `../ANSWERQUALITY.md` (co-change + known-item retrieval).

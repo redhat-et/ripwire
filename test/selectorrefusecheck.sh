@@ -15,20 +15,20 @@
 #   EXISTS, sending the reader after a rename that never happened. One enrichment, one arm — the "one
 #   shared guard, N arms" class. Fixed by lifting the message to src/selectorrefuse.h, which all six call.
 #
-# RED-FIRST: every arm below fails on build_base/ctxpack (the pre-wave binary) and passes on the fixed one.
+# RED-FIRST: every arm below fails on build_base/ripwire (the pre-wave binary) and passes on the fixed one.
 #
-# Usage:  bash test/selectorrefusecheck.sh [BIN]   |   CTXPACK_BIN=build_base/ctxpack bash test/…
+# Usage:  bash test/selectorrefusecheck.sh [BIN]   |   RIPWIRE_BIN=build_base/ripwire bash test/…
 # Exits non-zero on any failure. Does NOT edit regression.sh (test/pargates.py auto-discovers *check.sh).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "selectorrefusecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -216,7 +216,7 @@ for line in sys.stdin:
         done
         # REGRESSION: `uses` shares the hoisted sentence — its own wording must not have moved.
         MU="$( mcp_err '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"uses","arguments":{"path":"'"$R2"'","symbol":"two.h:lonely"}}}' )"
-        printf '%s' "$MU" | grep -q 'ctxpack <dir> --uses=two.h:lonely' \
+        printf '%s' "$MU" | grep -q 'ripwire <dir> --uses=two.h:lonely' \
             && ok "§B11.1 the hoist left MCP uses' own retry example intact" \
             || { no "§B11.1 hoisting the sentence changed MCP uses' message"; printf '   %s\n' "$MU"; }
     else

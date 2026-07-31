@@ -10,19 +10,19 @@
 #   bearer gate           — with a token, a missing/wrong Bearer → 401 (no index access); the right one → 200.
 #   edit refusal          — a remote edit verb (no --allow-remote-edits) → JSON-RPC error, file BYTE-IDENTICAL.
 #   workspace pinning      — a request naming a path OUTSIDE the startup workspace → clean error + NO rebuild
-#                           (CTXPACK_MCP_TIMINGS rebuilt=0), and the omitted-path form defaults to the workspace.
+#                           (RIPWIRE_MCP_TIMINGS rebuilt=0), and the omitted-path form defaults to the workspace.
 #   oversized body        — a > 8 MB body → 413; malformed HTTP → 400/405 and the server LIVES.
 #   2 sequential clients  — two back-to-back HTTP clients both get correct answers off the one warm index.
 #   hostile-input parity  — the mcpaudit4hardencheck corpus (25-digit start_line, XML-comment-breaking task)
 #                           degrades IDENTICALLY over HTTP — the hardened parser is transport-agnostic.
 #
-# Usage:  test/mcpremotecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/mcpremotecheck.sh
+# Usage:  test/mcpremotecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/mcpremotecheck.sh
 # Exits non-zero on any failure. Every mutation happens under a scratch mktemp dir; test/fixture is never
 # modified. Does NOT edit regression.sh or any other existing test file.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'cleanup' EXIT
@@ -33,7 +33,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 SRV_PID=""
 cleanup(){ [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; rm -rf "$TMP"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 command -v curl    >/dev/null 2>&1 || { echo "curl required (present on macOS/Linux)"; exit 2; }
 
@@ -43,7 +43,7 @@ echo "mcpremotecheck: BIN=$BIN  FIX=$FIX"
 PORT=$(( 20000 + ( $$ % 20000 ) ))
 URL="http://127.0.0.1:$PORT/mcp"
 MCP_ACCEPT='application/json, text/event-stream'
-MCP_CURRENT_INIT='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ctxpack-test","version":"1.0"}}}'
+MCP_CURRENT_INIT='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ripwire-test","version":"1.0"}}}'
 
 # Every ordinary request in this gate is a conforming Streamable-HTTP request. Individual negative tests
 # bypass this wrapper with `command curl` so one missing/bad header remains the only variable under test.
@@ -88,12 +88,12 @@ assert r["result"]["protocolVersion"] == "2025-11-25", r
               || no "initialize did not negotiate 2025-11-25: $( printf %s "$INIT_CURRENT" | head -c 160 )"
 
 for version in 2025-06-18 2025-03-26 2024-11-05; do
-    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ctxpack-test\",\"version\":\"1.0\"}}}"
+    body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ripwire-test\",\"version\":\"1.0\"}}}"
     got="$( curl -s -X POST "$URL" -d "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
     [ "$got" = "$version" ] && ok "initialize echoes supported $version" || no "initialize requested $version but returned '$got'"
 done
 
-UNSUPPORTED='{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"ctxpack-test","version":"1.0"}}}'
+UNSUPPORTED='{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"ripwire-test","version":"1.0"}}}'
 got="$( curl -s -X POST "$URL" -d "$UNSUPPORTED" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
 [ "$got" = "2025-11-25" ] && ok "unsupported initialize version negotiates to latest" || no "unsupported initialize version returned '$got'"
 
@@ -200,10 +200,10 @@ assert "error" not in r and ("<ctx>" in r["result"]["content"][0]["text"] or "<c
 ' 2>/dev/null && ok "omitted path defaults to the pinned workspace (answers normally)" \
              || no "omitted path did not default to the workspace: $( printf %s "$OMIT" | head -c 200 )"
 
-# the "NO rebuild" half of gate 10: restart with CTXPACK_MCP_TIMINGS and assert the off-workspace refusal
+# the "NO rebuild" half of gate 10: restart with RIPWIRE_MCP_TIMINGS and assert the off-workspace refusal
 # emits NO rebuilt=1 line (the refusal is built before getIndex, so mcpRebuildCounter cannot advance).
 stop_server
-if CTXPACK_MCP_TIMINGS=1 start_server; then
+if RIPWIRE_MCP_TIMINGS=1 start_server; then
     : > "$TMP/srv.err"   # clear the banner/startup lines so we only inspect this request's timing
     RB_BEFORE="$( grep -c 'rebuilt=' "$TMP/srv.err" 2>/dev/null || echo 0 )"
     curl -s -o /dev/null -X POST "$URL" \

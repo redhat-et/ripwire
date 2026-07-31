@@ -91,7 +91,7 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
                                        std::string_view extraNotes )
 {
     std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {} );
-    h += "<!-- ctxpack task bundle for ";
+    h += "<!-- ripwire task bundle for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else                 h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
     h.append( p.routeNote );

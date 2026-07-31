@@ -13,7 +13,7 @@ answers are compared byte-for-byte. A key that moves the answer is consumed. A k
 genuinely inert for that verb or its probe value was too weak to move it, so every probe value below is
 chosen to be answer-changing when honored (limit=1 truncates, kind= filters, paths= adds a whole root).
 
-Usage:  test/mcpcontractprobe.py <ctxpack-binary> <rootA> <rootB> [--json out.json]
+Usage:  test/mcpcontractprobe.py <ripwire-binary> <rootA> <rootB> [--json out.json]
 Prints one row per verb; exits 0 always (this is an instrument, not a gate — test/mcpcontractcheck.sh is
 the gate that pins its findings).
 
@@ -60,7 +60,7 @@ comparison, and the only rows worth reading are the two flagged DIVERGES.
   doc_drift                | path,kind,paths                         | path       | answers    | answers
   batch                    | path,queries,paths                      | path,queries| answers   | n/a (CLI --batch=FILE REFUSES)
 
-`required` is shown for a ROOTLESS server; a server started as `ctxpack <root> --mcp` drops `path` from
+`required` is shown for a ROOTLESS server; a server started as `ripwire <root> --mcp` drops `path` from
 every row, which is the point of rendering it from the policy rather than hardcoding it.
 
 THE THREE REMAINING DISAGREEMENTS, all reported rather than silently fixed:
@@ -86,7 +86,7 @@ import sys
 
 # ── the candidate key universe: every argument key any verb declares or reads ──────────────────────────
 # Values are chosen to MOVE the answer when the key is honored — an inert probe value would report a
-# consumed key as unconsumed, which is the direction that would make this table lie in ctxpack's favour.
+# consumed key as unconsumed, which is the direction that would make this table lie in ripwire's favour.
 def candidateValues( rootA, rootB ):
     return {
         "paths":         [ rootA, rootB ],   # the multi-root form: REPLACES path, so the corpus grows

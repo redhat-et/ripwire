@@ -6,13 +6,13 @@
 # split membership is stable (an explicit per-row column, not inferred), and a malformed split value
 # is refused as loudly as a malformed provenance value always was.
 #
-#   test/skillevalsplitcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/skillevalsplitcheck.sh
+#   test/skillevalsplitcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/skillevalsplitcheck.sh
 #
 # Exit 0 = ALL PASS, non-zero = SOME FAILED.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/skillevalfix/prompts.tsv"
 SKILLS="$ROOT/skills"
@@ -21,7 +21,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -f "$CORPUS" ] || { echo "no corpus at $CORPUS"; exit 2; }
 
 echo "skillevalsplitcheck: BIN=$BIN  CORPUS=$CORPUS"
@@ -85,7 +85,7 @@ cmp -s "$TMP/split_a" "$TMP/split_copy" \
 # ── 6) a hand-labelled dev row is honored: a single extra split=dev row shows up ONLY in the dev split,
 #    dev's own numbers move, and test's numbers are UNCHANGED (the two must never be conflated) ────────
 cp "$CORPUS" "$TMP/plusdev.tsv"
-printf 'Wire ctxpack into Cursor as an MCP server, tuning row.\tctxpack-mcp\tjudged\tdev\n' >>"$TMP/plusdev.tsv"
+printf 'Wire ripwire into Cursor as an MCP server, tuning row.\tripwire-mcp\tjudged\tdev\n' >>"$TMP/plusdev.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/plusdev.tsv" --no-cache >"$TMP/plusdevrun" 2>/dev/null
 grep -q "split test=${dataRows} dev=1" "$TMP/plusdevrun" \
     && ok "an added split=dev row is counted as dev=1, test stays at ${dataRows}" \
@@ -96,14 +96,14 @@ h1TestAfter=$( awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $
     || no "test split's numbers moved (${h1TestAfter}% vs ${h1Split}%) when a dev row was added — conflation bug"
 
 # ── 7) a malformed split value is refused as loudly as a malformed provenance value ──────────────────
-printf 'Some prompt\tctxpack-orient\tjudged\tstaging\n' >"$TMP/badsplit.tsv"
+printf 'Some prompt\tripwire-orient\tjudged\tstaging\n' >"$TMP/badsplit.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/badsplit.tsv" --no-cache >/dev/null 2>"$TMP/badsplerr"; rc_bs=$?
 { [ $rc_bs -ne 0 ] && grep -q 'unknown split' "$TMP/badsplerr"; } \
     && ok "an unrecognized split value ('staging') refuses loudly (rc=$rc_bs)" \
     || { no "unrecognized split value did not refuse cleanly (rc=$rc_bs)"; cat "$TMP/badsplerr"; }
 
 # ── 8) back-compat: a bare 3-column row (no split at all) still parses, defaulting to test ───────────
-printf 'Some other prompt\tctxpack-orient\tjudged\n' >"$TMP/nosplit.tsv"
+printf 'Some other prompt\tripwire-orient\tjudged\n' >"$TMP/nosplit.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/nosplit.tsv" --no-cache >"$TMP/nosplitrun" 2>"$TMP/nosplerr"; rc_ns=$?
 { [ $rc_ns -eq 0 ] && grep -q 'split test=1 dev=0' "$TMP/nosplitrun"; } \
     && ok "a 3-column row with no split column defaults to test (back-compat)" \

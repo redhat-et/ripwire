@@ -1,4 +1,4 @@
-; ctxpack Java tags — written for ctxpack (.java). Derived from the upstream
+; ripwire Java tags — written for ripwire (.java). Derived from the upstream
 ; tree-sitter-java v0.23.5 grammar node-types, verified against an AST dump (see the
 ; javarubycheck fixture). Java is a big grammar; we capture the OOP structure the call
 ; graph cares about and deliberately skip field/local noise.

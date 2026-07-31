@@ -17,22 +17,22 @@
 #       Signature text is excluded from the comparison (the serializer legitimately reads files for sigs).
 #   (e) PRUNING EQUIVALENCE (B0 round 2, H2) — MaxScore early termination is SAFE pruning, never an
 #       approximation: --for output (bundle AND candidates export) must be byte-identical with pruning
-#       force-disabled (CTXPACK_NO_PRUNE=1), on retrievalfix, src/, and the repo root (the largest local
+#       force-disabled (RIPWIRE_NO_PRUNE=1), on retrievalfix, src/, and the repo root (the largest local
 #       corpus). Warm rich-cache path — the pruned scorer runs over the persisted postings there.
 #
-# Usage: bash test/postingscheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/postingscheck.sh
+# Usage: bash test/postingscheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/postingscheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'chmod -R u+rw "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "postingscheck: BIN=$BIN"
 
@@ -79,7 +79,7 @@ else
 fi
 
 # ── (b) CACHE-VERSION BUMP: an old-version rich cache is rejected and rebuilt cleanly ─────────────────
-stats(){ CTXPACK_CACHE_STATS=1 "$BIN" "$TMP/rf" --cache="$TMP/rf.rich" --for="$QFIX" 2>&1 >/dev/null | grep -oE 'reparsed=[0-9]+' | cut -d= -f2; }
+stats(){ RIPWIRE_CACHE_STATS=1 "$BIN" "$TMP/rf" --cache="$TMP/rf.rich" --for="$QFIX" 2>&1 >/dev/null | grep -oE 'reparsed=[0-9]+' | cut -d= -f2; }
 R0="$( stats )"
 [ "$R0" = "0" ] && ok "(b) primed rich cache warm-hits (reparsed=0)" || no "(b) primed rich cache did not warm-hit (reparsed=$R0)"
 python3 - "$TMP/rf.rich" <<'PY'
@@ -133,14 +133,14 @@ else
 fi
 
 # ── (e) PRUNING EQUIVALENCE: MaxScore early termination must be invisible in the bytes ────────────────
-# same query, same corpus, warm rich cache: pruned (default) vs CTXPACK_NO_PRUNE=1 (exhaustive scoring).
+# same query, same corpus, warm rich cache: pruned (default) vs RIPWIRE_NO_PRUNE=1 (exhaustive scoring).
 pruneeq(){ # $1=dir $2=cache $3=query $4=label [$5=extra flags…]
     local dir="$1" cache="$2" query="$3" label="$4"; shift 4
     "$BIN" "$dir" --cache="$cache" --for="$query" "$@" >"$TMP/pe.on"  2>/dev/null
-    CTXPACK_NO_PRUNE=1 \
+    RIPWIRE_NO_PRUNE=1 \
     "$BIN" "$dir" --cache="$cache" --for="$query" "$@" >"$TMP/pe.off" 2>/dev/null
     if [ -s "$TMP/pe.on" ] && diff -q "$TMP/pe.on" "$TMP/pe.off" >/dev/null; then
-        ok "(e) $label: pruned --for byte-identical to CTXPACK_NO_PRUNE=1"
+        ok "(e) $label: pruned --for byte-identical to RIPWIRE_NO_PRUNE=1"
     else
         no "(e) $label: pruning CHANGED the --for output"
     fi

@@ -22,13 +22,13 @@
 #           the string "exemplar" (a real tool name) while the real `name` argument selects a DIFFERENT
 #           tool ("for"), and asserts the id does not leak in as the selected tool.
 #
-# Usage:  test/mcpaudit4hardencheck.sh   |   CTXPACK_BIN=asan/ctxpack test/mcpaudit4hardencheck.sh
+# Usage:  test/mcpaudit4hardencheck.sh   |   RIPWIRE_BIN=asan/ripwire test/mcpaudit4hardencheck.sh
 # Exits non-zero on any failure. Every mutation happens under a scratch mktemp dir; the checked-in
 # test/fixture is never modified. Does NOT edit regression.sh or any other existing test file.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -36,7 +36,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcpaudit4hardencheck: BIN=$BIN  FIX=$FIX"

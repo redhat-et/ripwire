@@ -3,7 +3,7 @@
 // crossref.h — the CROSS-BRANCH CONTENT INDEX: --whereis=SYM and --stray-content
 // (IDEAS_fieldNotes_2026-07-24.md §1). Evidence: a completed, soak-verified canyon fix sat UNMERGED on 1 of
 // 30 branches for two days while a ledger claim said "ported" — `git cherry` answers commit ANCESTRY, and
-// every other ctxpack verb indexes ONE worktree, so nothing could answer "where does this CONTENT live?".
+// every other ripwire verb indexes ONE worktree, so nothing could answer "where does this CONTENT live?".
 //
 // SCOPE, once, for both verbs (§B12.2): "every ref" here has always meant `refs/heads` — every LOCAL branch,
 // worktree branches included — and never `refs/remotes/*`; see enumerateRefs for why (they mirror the local
@@ -363,7 +363,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
 {
     if( shas.empty() ) return;
 
-    const std::string listPath = quality::cacheDirLadder() + "/ctxpack-crossref-" + std::to_string( ::getpid() ) + ".shas";
+    const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-" + std::to_string( ::getpid() ) + ".shas";
     {
         std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
         if( !lf )
@@ -1110,7 +1110,7 @@ inline bool insideArgumentList( std::string_view line, std::size_t at ) noexcept
     return depth > 0;
 }
 
-// Is this line SHAPED like a definition of `sym`? Declarative marker table over the languages ctxpack indexes
+// Is this line SHAPED like a definition of `sym`? Declarative marker table over the languages ripwire indexes
 // — deliberately LEXICAL, not AST-parsed: this is the REF-BLOB side, raw text that was never ingested, and
 // paying a tree-sitter parse per candidate blob to sharpen a hint would cost more than the hint is worth. HEAD
 // rows do NOT come here at all when the caller supplies the index's def sites (see relabelHeadHitsFromIndex):
@@ -1211,7 +1211,7 @@ inline std::vector<RawRow> lsTree( const std::string& root, const std::string& r
 }
 
 // A git tree path ("src/graph.h") against an index path relativised to the ingest ROOT ("graph.h" when the
-// tree was ingested as `ctxpack src`): equal, or the git path ends with the index path on a component
+// tree was ingested as `ripwire src`): equal, or the git path ends with the index path on a component
 // boundary. Never a realpath (determinism, same reasoning as arch.h::relForHash).
 inline bool sameTreePath( std::string_view gitPath, std::string_view indexRelPath ) noexcept
 {
@@ -1418,7 +1418,7 @@ inline void writeStrayEval( std::FILE* out, const EvalReport& rep )
 
     const std::size_t n   = rep.cases.size();
     const double      acc = n ? ( 100.0 * double( rep.correct ) / double( n ) ) : 0.0;
-    std::fprintf( out, "<!-- ctxpack stray-content eval: labelled verdict accuracy. Each row is one branch whose "
+    std::fprintf( out, "<!-- ripwire stray-content eval: labelled verdict accuracy. Each row is one branch whose "
                        "true state was established by hand; want= is the label, got= is what the classifier said. "
                        "A branch absent from the report scores as merged (merged refs are omitted by design). Use "
                        "this to MEASURE a threshold change instead of eyeballing it. -->" );
@@ -1493,12 +1493,12 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
 
     // G4: an XML comment may not contain a double hyphen, so this text (and writeWhereis's) names flags and
     // git subcommands WITHOUT their leading dashes. Keep it that way when editing.
-    std::fprintf( out, "<!-- ctxpack stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base "
+    std::fprintf( out, "<!-- ripwire stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base "
                        "with HEAD) that the live line does NOT have. v=\"superseded\" means the live line removed the same "
                        "base code this ref removed (redone/del) — it re-implemented the work, the case `git cherry` cannot "
                        "see; v=\"unmerged\" means the work is genuinely absent; merged refs are omitted. Read-only: git "
                        "cat-file/diff/ls-tree only, one batched cat-file for the whole sweep, every blob reduced once per "
-                       "sha. Line-granular, not semantic: see the ctxpack help text for the limits. ANCHORING is a "
+                       "sha. Line-granular, not semantic: see the ripwire help text for the limits. ANCHORING is a "
                        "deliberate hybrid: the SCOPE is base anchored (only lines the ref itself authored vs its merge base "
                        "are ever considered, so a file the ref never opened cannot appear because the live line moved), "
                        "while the ABSENCE test is HEAD anchored on purpose (does the live line have this content TODAY is "
@@ -1605,7 +1605,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                              : ( maxHits >= res.hits.size() ? int( res.hits.size() ) : int( maxHits ) );
     const PageWindow hitPage = pageWindow( res.hits.size(), rowCap, pageOffset );
 
-    std::fprintf( out, "<!-- ctxpack whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref "
+    std::fprintf( out, "<!-- ripwire whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref "
                        "SOURCE files before test files before docs, then definitions before references, then path and line. "
                        "The doc demotion is ORDER ONLY: a doc line that quotes a signature still reads as a definition to "
                        "the heuristic below and still says kind=\"def\", it is simply printed after the code. kind= is answered "

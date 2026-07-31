@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# type3check.sh — gate for the WIRING of Type-3 (gapped / near-miss) clone detection through the ctxpack
+# type3check.sh — gate for the WIRING of Type-3 (gapped / near-miss) clone detection through the ripwire
 # BINARY (findClonesType3 → --clones output + --quality-delta duplication regression). The unit-level
 # soundness of findClonesType3 itself is covered by type3clonecheck.sh (a header harness); this gate asserts
 # the two USER-FACING surfaces the binary exposes:
@@ -8,10 +8,10 @@
 #   2  --quality-delta flags a NEWLY-introduced Type-3 near-clone as a `duplication` regression (exit 2) —
 #      baseline WITHOUT the near-clone, add it, re-delta.
 #   3  both outputs are deterministic run-to-run and well-formed XML.
-# Usage:  test/type3check.sh   |   CTXPACK_BIN=asan/ctxpack test/type3check.sh
+# Usage:  test/type3check.sh   |   RIPWIRE_BIN=asan/ripwire test/type3check.sh
 # Exits non-zero on any failure. Self-contained (own temp dirs). Does NOT edit test/regression.sh.
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # situdiffcheck.sh — the S5-D situational_awareness(diff) MCP-verb gate.
 #
-#   test/situdiffcheck.sh                          # uses build/ctxpack on test/zoomfix
-#   CTXPACK_BIN=asan/ctxpack test/situdiffcheck.sh
+#   test/situdiffcheck.sh                          # uses build/ripwire on test/zoomfix
+#   RIPWIRE_BIN=asan/ripwire test/situdiffcheck.sh
 #
-# Drives the verb the way an agent would: newline-delimited JSON-RPC over stdin to `ctxpack --mcp`
+# Drives the verb the way an agent would: newline-delimited JSON-RPC over stdin to `ripwire --mcp`
 # (initialize, then tools/call situational_awareness with an explicit changed-file list). Asserts the
 # response is the 5-field JSON object — blast_radius, tests_to_run, forgotten, hotspot_alert,
 # modules_touched — all present; that blast_radius is computed correctly (the deterministic, git-independent
@@ -16,15 +16,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/zoomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "situdiffcheck: BIN=$BIN  CORPUS=$CORPUS"
@@ -100,7 +100,7 @@ mkdir -p "$CLEAN_REPO"
 git -C "$CLEAN_REPO" init -q
 git -C "$CLEAN_REPO" config user.email "test@test.com"
 git -C "$CLEAN_REPO" config user.name "Test"
-# create one committed C source file so ctxpack has something to ingest (avoids empty-dir edge case).
+# create one committed C source file so ripwire has something to ingest (avoids empty-dir edge case).
 printf 'int main(void) { return 0; }\n' > "$CLEAN_REPO/main.c"
 git -C "$CLEAN_REPO" add main.c
 git -C "$CLEAN_REPO" commit -q -m "init"

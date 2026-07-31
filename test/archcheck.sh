@@ -5,8 +5,8 @@
 # deny/allow rules WITHOUT explicit `layer NAME = ...` declarations.
 #
 # Usage:
-#   bash test/archcheck.sh                          |  bash test/archcheck.sh asan/ctxpack
-#   CTXPACK_BIN=asan/ctxpack bash test/archcheck.sh
+#   bash test/archcheck.sh                          |  bash test/archcheck.sh asan/ripwire
+#   RIPWIRE_BIN=asan/ripwire bash test/archcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 #
@@ -20,11 +20,11 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# BOTH seams. `bash test/<gate>.sh asan/ctxpack` is how regression.sh and every differential run pass a
-# binary; this gate read only CTXPACK_BIN, so a positional argument was accepted and silently ignored and
+# BOTH seams. `bash test/<gate>.sh asan/ripwire` is how regression.sh and every differential run pass a
+# binary; this gate read only RIPWIRE_BIN, so a positional argument was accepted and silently ignored and
 # a red-first run against a BASE binary came back ALL PASS against the binary already in build/.
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
 
 FIXTURE="$ROOT/test/archfix"
 fail=0
@@ -32,18 +32,18 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-# run every ctxpack invocation from inside the fixture dir so paths are `./render/…` `./test/…`
+# run every ripwire invocation from inside the fixture dir so paths are `./render/…` `./test/…`
 cd "$FIXTURE"
 
 echo "archcheck: BIN=$BIN  FIXTURE=$FIXTURE"
 
 # ── check 1: built-in-layer violation detected (exit 2) ───────────────────────────────────────────
 # rules.txt uses `deny test -> render` — both are BUILT-IN layer names with no `layer` declarations.
-# test/main.cpp includes render/shader.h, so ctxpack must detect the crossing and exit 2.
+# test/main.cpp includes render/shader.h, so ripwire must detect the crossing and exit 2.
 "$BIN" . --arch=rules.txt --no-cache >"$TMP/viol.xml" 2>/dev/null
 rc_viol=$?
 if [ "$rc_viol" -eq 2 ]; then

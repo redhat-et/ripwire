@@ -4,7 +4,7 @@
 // parser (scip.h) so graph.h can consume the overlay WITHOUT pulling in the protobuf reader or its
 // gitmine.h dependency. scip.h builds one of these from a decoded index; buildGraph reads it.
 //
-// Everything is keyed in ctxpack's OWN id space (NodeId + callee name), so buildGraph consults the
+// Everything is keyed in ripwire's OWN id space (NodeId + callee name), so buildGraph consults the
 // overlay with no SCIP knowledge of its own. Both vectors are SORTED (see scip.h buildScipOverlay), so
 // membership tests are deterministic and the resulting edge order is unchanged run-to-run.
 
@@ -21,7 +21,7 @@ namespace ctx
 
 // one call-site the index RESOLVED: the (fromSymbol, calleeName) key + the pinned target `to`. buildGraph
 // drops the name-based guess for exactly these call-sites and substitutes this precise edge. calleeName is
-// the ctxpack def NAME (matches Reference::calleeName), so the seam is a plain (id, name) lookup.
+// the ripwire def NAME (matches Reference::calleeName), so the seam is a plain (id, name) lookup.
 struct ScipCover { NodeId from; std::string calleeName; NodeId to; };
 
 // one PINNED directed call edge fromSymbol → toSymbol — the derived, sorted-unique (from,to) set used at

@@ -14,15 +14,15 @@
 #
 # Uses git-init fixtures + the auto-vs-HEAD baseline path (same idiom as qualitykindscheck.sh). Operates
 # entirely in temp dirs; the repo is never touched.
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/qualitysignalcheck.sh
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/qualitysignalcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # BOTH seams: positional AND env (a single-bound gate silently ignores the binary a red-first run hands it)
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional AND env (a single-bound gate silently ignores the binary a red-first run hands it)
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolutize BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qualitysignalcheck (git not available)"; exit 0; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
@@ -125,8 +125,8 @@ printf '%s' "$OAK" | grep -q 'kind="complexity" sym="f"' && [ "$( ecak )" = 2 ] 
 ( cd "$AK" && "$BIN" . --quality-ack='known refactor debt' --no-cache >/dev/null 2>&1 )
 AKEC=$?
 [ "$AKEC" = 0 ] && ok "ack ratchet: --quality-ack exits 0" || no "ack ratchet: --quality-ack should exit 0 (got $AKEC)"
-[ -f "$AK/.ctxpack_quality_acks" ] && grep -q 'known refactor debt' "$AK/.ctxpack_quality_acks" \
-    && ok "ack ratchet: .ctxpack_quality_acks written with the reason" \
+[ -f "$AK/.ripwire_quality_acks" ] && grep -q 'known refactor debt' "$AK/.ripwire_quality_acks" \
+    && ok "ack ratchet: .ripwire_quality_acks written with the reason" \
     || no "ack ratchet: acks sidecar missing or reason not recorded"
 
 OAK2="$( dak )"
@@ -213,7 +213,7 @@ SB="$WORK/stale"; mkdir -p "$SB/src"
 printf 'int a(){ return 1; }\n' > "$SB/src/a.cpp"
 ( cd "$SB" && git add -A >/dev/null 2>&1 && git commit -qm c1 >/dev/null 2>&1 )
 ( cd "$SB" && "$BIN" . --quality-baseline >/dev/null 2>&1 )
-[ -f "$SB/.ctxpack_quality_baseline" ] && ok "stale-baseline self-heal: sidecar written (setup)" || no "stale-baseline self-heal: sidecar not written (setup)"
+[ -f "$SB/.ripwire_quality_baseline" ] && ok "stale-baseline self-heal: sidecar written (setup)" || no "stale-baseline self-heal: sidecar not written (setup)"
 
 # 6a) reachable-ancestor case: commit more work on top — the pinned sha stays an ancestor of HEAD. Post-R3 that
 #     is STALE. ONE invocation only: this run deletes the sidecar, so a second call would legitimately hit the
@@ -227,7 +227,7 @@ printf '%s' "$OSBA" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
     || { no "R3: reachable-ancestor sidecar was still honored — the revoked carve-out is back"; printf '%s\n' "$OSBA" | head -c 300; }
 [ -z "$ESBA" ] && ok "R3: reachable-ancestor self-heal is silent (no stderr — the B10.1b noise fix survives)" \
     || no "stale-baseline self-heal: reachable-ancestor case printed stderr: $ESBA"
-[ -f "$SB/.ctxpack_quality_baseline" ] \
+[ -f "$SB/.ripwire_quality_baseline" ] \
     && no "R3: reachable-ancestor sidecar file NOT deleted (the CLI arm must self-heal it)" \
     || ok "R3: reachable-ancestor sidecar file deleted (self-healed)"
 
@@ -237,18 +237,18 @@ printf '%s' "$OSBA" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
 ( cd "$SB" && git checkout -q --orphan orphanbr >/dev/null 2>&1 && git rm -rf --cached . >/dev/null 2>&1 )
 printf 'int c(){ return 1; }\n' > "$SB/src/a.cpp"
 ( cd "$SB" && git add -A >/dev/null 2>&1 && git commit -qm "orphan root" >/dev/null 2>&1 )
-[ -f "$SB/.ctxpack_quality_baseline" ] && ok "stale-baseline self-heal: sidecar still present before the unreachable run" || no "stale-baseline self-heal: setup lost the sidecar"
+[ -f "$SB/.ripwire_quality_baseline" ] && ok "stale-baseline self-heal: sidecar still present before the unreachable run" || no "stale-baseline self-heal: setup lost the sidecar"
 OSBB="$( cd "$SB" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 ESBB="$( cd "$SB" && : )"   # nothing left to run — the prior call already consumed/healed the sidecar; re-check state below
 printf '%s' "$OSBB" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
     && ok "stale-baseline self-heal: unreachable sidecar self-heals (baseline=\"git-HEAD (stale sidecar removed)\")" \
     || { no "stale-baseline self-heal: unreachable sidecar not self-healed"; printf '%s\n' "$OSBB" | head -c 300; }
-[ -f "$SB/.ctxpack_quality_baseline" ] \
+[ -f "$SB/.ripwire_quality_baseline" ] \
     && no "stale-baseline self-heal: unreachable sidecar file NOT deleted (should self-heal)" \
     || ok "stale-baseline self-heal: unreachable sidecar file deleted (self-healed)"
 
 # ── 7) SORTED ACKS ROUND-TRIP (B10.1c) ──────────────────────────────────────────────────────────────────
-#   .ctxpack_quality_acks is merge-friendly: the reader tolerates an out-of-order file and CRLF line endings
+#   .ripwire_quality_acks is merge-friendly: the reader tolerates an out-of-order file and CRLF line endings
 #   (e.g. merged in from a different session/checkout); the writer ALWAYS re-emits fully (kind,key)-sorted,
 #   LF-only output on every write, regardless of what shape the file arrived in.
 ifs2(){ n=$1; s=''; i=1; while [ "$i" -le "$n" ]; do s="$s if(x>$i){ s++; }"; i=$(( i + 1 )); done; printf '%s' "$s"; }
@@ -260,8 +260,8 @@ printf 'int a( int x ){ int s=0;%s return s; }\nint b(){ return a(1); }\n' "$( i
 ( cd "$AR" && "$BIN" . --quality-ack='seed' --no-cache >/dev/null 2>&1 )
 # hand-scramble: prepend an out-of-order line and give it a CRLF terminator (a Windows-checkout merge shape).
 printf 'ack zzz-kind aaaaaaaaaaaaaaaa 1 legacy CRLF line\r\n' > "$AR/scrambled.tmp"
-cat "$AR/.ctxpack_quality_acks" >> "$AR/scrambled.tmp"
-mv "$AR/scrambled.tmp" "$AR/.ctxpack_quality_acks"
+cat "$AR/.ripwire_quality_acks" >> "$AR/scrambled.tmp"
+mv "$AR/scrambled.tmp" "$AR/.ripwire_quality_acks"
 # reader tolerance: the scrambled/CRLF file must still suppress the seeded finding correctly.
 OAR="$( cd "$AR" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 printf '%s' "$OAR" | grep -q 'acked="1"' \
@@ -270,17 +270,17 @@ printf '%s' "$OAR" | grep -q 'acked="1"' \
 # writer canonicalization: worsen the finding so a rewrite happens, then check the file is fully sorted + LF-only.
 printf 'int a( int x ){ int s=0;%s return s; }\nint b(){ return a(1); }\n' "$( ifs2 30 )" > "$AR/src/a.cpp"
 ( cd "$AR" && "$BIN" . --quality-ack='2nd' --no-cache >/dev/null 2>&1 )
-crcount="$( grep -c $'\r' "$AR/.ctxpack_quality_acks" 2>/dev/null || true )"
+crcount="$( grep -c $'\r' "$AR/.ripwire_quality_acks" 2>/dev/null || true )"
 [ "${crcount:-0}" = 0 ] \
     && ok "sorted acks round-trip: writer strips CRLF (LF-only canonical output)" \
     || no "sorted acks round-trip: rewritten acks file still contains CRLF"
-grep '^ack ' "$AR/.ctxpack_quality_acks" > "$AR/acklines.txt"
+grep '^ack ' "$AR/.ripwire_quality_acks" > "$AR/acklines.txt"
 if diff -q "$AR/acklines.txt" <( sort "$AR/acklines.txt" ) >/dev/null 2>&1; then
     ok "sorted acks round-trip: writer re-emits fully (kind,key)-sorted output"
 else
     no "sorted acks round-trip: rewritten acks file is not sorted"
 fi
-grep -q '^# format: ack ' "$AR/.ctxpack_quality_acks" \
+grep -q '^# format: ack ' "$AR/.ripwire_quality_acks" \
     && ok "sorted acks round-trip: format grammar documented in a header comment line" \
     || no "sorted acks round-trip: header comment missing the format grammar"
 
@@ -318,9 +318,9 @@ if command -v xmllint >/dev/null 2>&1; then
 fi
 
 # ── 9) D1 (AUDIT5, HIGH): sidecars must resolve against the ANALYZED ROOT, not the process CWD ────────────
-#   `ctxpack <rootB> --quality-ack` invoked from a FOREIGN cwd (its own separate, unrelated ctxpack
+#   `ripwire <rootB> --quality-ack` invoked from a FOREIGN cwd (its own separate, unrelated ripwire
 #   project — with its own committed baseline) must read/write ONLY rootB's sidecars. Before the fix, the
-#   bare relative filenames resolved against CWD: a foreign cwd's `.ctxpack_quality_acks` could get silently
+#   bare relative filenames resolved against CWD: a foreign cwd's `.ripwire_quality_acks` could get silently
 #   rewritten, and the stale-baseline self-heal could DELETE the foreign cwd's own (unrelated, legitimate)
 #   baseline. Both must now be impossible — the foreign cwd's sidecars are byte-identical before/after.
 FCWD="$WORK/foreigncwd"; mkdir -p "$FCWD/src"
@@ -328,10 +328,10 @@ FCWD="$WORK/foreigncwd"; mkdir -p "$FCWD/src"
 printf 'int foreignFn(){ return 1; }\n' > "$FCWD/src/f.cpp"
 ( cd "$FCWD" && git add -A >/dev/null 2>&1 && git commit -qm c1 >/dev/null 2>&1 )
 ( cd "$FCWD" && "$BIN" . --quality-baseline >/dev/null 2>&1 )
-[ -f "$FCWD/.ctxpack_quality_baseline" ] \
+[ -f "$FCWD/.ripwire_quality_baseline" ] \
     && ok "D1 foreign-cwd: foreign cwd's own baseline written (setup)" \
     || no "D1 foreign-cwd: foreign cwd's own baseline setup failed"
-FCWD_BASELINE_SNAPSHOT="$( cat "$FCWD/.ctxpack_quality_baseline" 2>/dev/null )"
+FCWD_BASELINE_SNAPSHOT="$( cat "$FCWD/.ripwire_quality_baseline" 2>/dev/null )"
 
 ROOTB="$WORK/rootb"; mkdir -p "$ROOTB/src"
 ( cd "$ROOTB" && git init -q && git config user.email t@t && git config user.name t )
@@ -346,32 +346,32 @@ ODEL="$( cd "$FCWD" && "$BIN" "$ROOTB" --quality-delta --no-cache 2>/dev/null )"
 printf '%s' "$ODEL" | grep -q 'kind="complexity" sym="g"' \
     && ok "D1 foreign-cwd: --quality-delta on rootB (from foreigncwd) sees ROOTB's own regression" \
     || { no "D1 foreign-cwd: rootB regression not detected"; printf '%s\n' "$ODEL" | tr '>' '\n' | grep '<r '; }
-[ -f "$ROOTB/.ctxpack_quality_acks" ] \
+[ -f "$ROOTB/.ripwire_quality_acks" ] \
     && no "D1 foreign-cwd: --quality-delta must not write an acks sidecar at all" \
     || ok "D1 foreign-cwd: no acks sidecar written by --quality-delta (correct — read-only verb)"
-[ "$( cat "$FCWD/.ctxpack_quality_baseline" 2>/dev/null )" = "$FCWD_BASELINE_SNAPSHOT" ] \
+[ "$( cat "$FCWD/.ripwire_quality_baseline" 2>/dev/null )" = "$FCWD_BASELINE_SNAPSHOT" ] \
     && ok "D1 foreign-cwd: foreign cwd's baseline UNCHANGED after --quality-delta targeted rootB" \
     || no "D1 foreign-cwd: foreign cwd's baseline was mutated by a call that should only ever touch rootB"
 
 # 9b) --quality-ack on rootB, invoked FROM foreigncwd: the ack must land in ROOTB, never in foreigncwd.
 EACK="$( cd "$FCWD" && "$BIN" "$ROOTB" --quality-ack='cross-cwd test' --no-cache >/dev/null 2>&1; echo $? )"
 [ "$EACK" = 0 ] && ok "D1 foreign-cwd: --quality-ack on rootB (from foreigncwd) exits 0" || no "D1 foreign-cwd: --quality-ack should exit 0 (got $EACK)"
-[ -f "$ROOTB/.ctxpack_quality_acks" ] && grep -q 'cross-cwd test' "$ROOTB/.ctxpack_quality_acks" \
-    && ok "D1 foreign-cwd: rootB's OWN .ctxpack_quality_acks written with the ack" \
+[ -f "$ROOTB/.ripwire_quality_acks" ] && grep -q 'cross-cwd test' "$ROOTB/.ripwire_quality_acks" \
+    && ok "D1 foreign-cwd: rootB's OWN .ripwire_quality_acks written with the ack" \
     || no "D1 foreign-cwd: rootB's acks sidecar missing or reason not recorded"
-[ -f "$FCWD/.ctxpack_quality_acks" ] \
-    && no "D1 foreign-cwd: foreign cwd's .ctxpack_quality_acks was WRONGLY created (D1 regression)" \
-    || ok "D1 foreign-cwd: foreign cwd got NO .ctxpack_quality_acks (correctly isolated)"
-[ "$( cat "$FCWD/.ctxpack_quality_baseline" 2>/dev/null )" = "$FCWD_BASELINE_SNAPSHOT" ] \
+[ -f "$FCWD/.ripwire_quality_acks" ] \
+    && no "D1 foreign-cwd: foreign cwd's .ripwire_quality_acks was WRONGLY created (D1 regression)" \
+    || ok "D1 foreign-cwd: foreign cwd got NO .ripwire_quality_acks (correctly isolated)"
+[ "$( cat "$FCWD/.ripwire_quality_baseline" 2>/dev/null )" = "$FCWD_BASELINE_SNAPSHOT" ] \
     && ok "D1 foreign-cwd: foreign cwd's baseline still UNCHANGED after --quality-ack targeted rootB" \
     || no "D1 foreign-cwd: foreign cwd's baseline was mutated by --quality-ack targeted at rootB"
 
 # 9c) --quality-baseline on rootB, invoked FROM foreigncwd: must write INTO rootB, never foreigncwd.
 ( cd "$FCWD" && "$BIN" "$ROOTB" --quality-baseline >/dev/null 2>&1 )
-[ -f "$ROOTB/.ctxpack_quality_baseline" ] \
+[ -f "$ROOTB/.ripwire_quality_baseline" ] \
     && ok "D1 foreign-cwd: --quality-baseline on rootB (from foreigncwd) writes INTO rootB" \
     || no "D1 foreign-cwd: rootB never got its own baseline written"
-[ "$( cat "$FCWD/.ctxpack_quality_baseline" 2>/dev/null )" = "$FCWD_BASELINE_SNAPSHOT" ] \
+[ "$( cat "$FCWD/.ripwire_quality_baseline" 2>/dev/null )" = "$FCWD_BASELINE_SNAPSHOT" ] \
     && ok "D1 foreign-cwd: foreign cwd's baseline still UNCHANGED after --quality-baseline targeted rootB" \
     || no "D1 foreign-cwd: --quality-baseline on rootB clobbered the foreign cwd's own baseline"
 
@@ -382,21 +382,21 @@ EACK="$( cd "$FCWD" && "$BIN" "$ROOTB" --quality-ack='cross-cwd test' --no-cache
 ( cd "$ROOTB" && git checkout -q --orphan orphanbr >/dev/null 2>&1 && git rm -rf --cached . >/dev/null 2>&1 )
 printf 'int h(){ return 1; }\n' > "$ROOTB/src/r.cpp"
 ( cd "$ROOTB" && git add -A >/dev/null 2>&1 && git commit -qm "orphan root" >/dev/null 2>&1 )
-[ -f "$ROOTB/.ctxpack_quality_baseline" ] \
+[ -f "$ROOTB/.ripwire_quality_baseline" ] \
     && ok "D1 foreign-cwd: rootB's now-stale (unreachable-pin) baseline present before the healing run" \
     || no "D1 foreign-cwd: setup lost rootB's baseline before the healing run"
 ODEL2="$( cd "$FCWD" && "$BIN" "$ROOTB" --quality-delta --no-cache 2>/dev/null )"
 printf '%s' "$ODEL2" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
     && ok "D1 foreign-cwd: rootB's unreachable-pin baseline self-heals (git-HEAD fallback)" \
     || { no "D1 foreign-cwd: rootB's stale baseline was not self-healed as expected"; printf '%s\n' "$ODEL2" | head -c 300; }
-[ -f "$ROOTB/.ctxpack_quality_baseline" ] \
+[ -f "$ROOTB/.ripwire_quality_baseline" ] \
     && no "D1 foreign-cwd: rootB's OWN stale baseline should have been deleted (self-heal target wrong)" \
     || ok "D1 foreign-cwd: rootB's own stale baseline correctly deleted (self-heal targeted the right root)"
-[ -f "$FCWD/.ctxpack_quality_baseline" ] && [ "$( cat "$FCWD/.ctxpack_quality_baseline" )" = "$FCWD_BASELINE_SNAPSHOT" ] \
+[ -f "$FCWD/.ripwire_quality_baseline" ] && [ "$( cat "$FCWD/.ripwire_quality_baseline" )" = "$FCWD_BASELINE_SNAPSHOT" ] \
     && ok "D1 foreign-cwd: foreign cwd's baseline SURVIVED rootB's self-heal (the HIGH-severity bug, fixed)" \
     || no "D1 foreign-cwd: foreign cwd's baseline was deleted or mutated by rootB's self-heal — D1 regression"
 # ── 10) DUPLICATE ACK LINES: MAX-WINS, NOT LAST-WINS (D2, AUDIT5) ───────────────────────────────────────────
-#   A hand-edited or badly-merged .ctxpack_quality_acks can contain two lines for the SAME (kind,key) with
+#   A hand-edited or badly-merged .ripwire_quality_acks can contain two lines for the SAME (kind,key) with
 #   different ackNow. The reader must keep the HIGHEST ackNow (the ratchet floor can only ever go UP via a
 #   duplicate) — never whichever line happens to be LAST in the file (last-wins would let a lower duplicate
 #   silently lower an already-accepted floor, and a rewrite would then bake that lowered floor back in).
@@ -409,15 +409,15 @@ ddp(){  ( cd "$DP" && "$BIN" . --quality-delta --no-cache 2>/dev/null ); }
 edp(){ ( cd "$DP" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? ); }
 
 ( cd "$DP" && "$BIN" . --quality-ack='seed' --no-cache >/dev/null 2>&1 )
-ACKLINE="$( grep '^ack complexity ' "$DP/.ctxpack_quality_acks" )"
+ACKLINE="$( grep '^ack complexity ' "$DP/.ripwire_quality_acks" )"
 [ -n "$ACKLINE" ] && ok "duplicate acks: seed ack line written (setup)" || no "duplicate acks: setup failed to write an ack line"
 HEXKEY="$( printf '%s' "$ACKLINE" | awk '{print $3}' )"
 REALNOW="$( printf '%s' "$ACKLINE" | awk '{print $4}' )"
 
 # append a DUPLICATE line for the same (kind,key) with a much LOWER ackNow, placed LAST in the file — exactly
 # the shape that would defeat a naive last-wins reader.
-printf 'ack complexity %s 1 duplicate-lower-should-not-win\n' "$HEXKEY" >> "$DP/.ctxpack_quality_acks"
-[ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ctxpack_quality_acks" )" = 2 ] \
+printf 'ack complexity %s 1 duplicate-lower-should-not-win\n' "$HEXKEY" >> "$DP/.ripwire_quality_acks"
+[ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = 2 ] \
     && ok "duplicate acks: two lines for the same (kind,key) now on disk (setup)" \
     || no "duplicate acks: setup did not produce a duplicate line"
 
@@ -432,12 +432,12 @@ printf '%s' "$ODP" | grep -q 'kind="complexity" sym="f"' \
 # a rewrite (another --quality-ack call) must collapse the duplicate to ONE canonical line, and it must keep
 # the HIGHER (real) value — not the lower duplicate that happened to sort last.
 ( cd "$DP" && "$BIN" . --quality-ack --no-cache >/dev/null 2>&1 )
-[ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ctxpack_quality_acks" )" = 1 ] \
+[ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = 1 ] \
     && ok "duplicate acks: rewrite collapses the duplicate to a single canonical line" \
     || no "duplicate acks: rewrite left more than one line for the same (kind,key)"
-grep -q "^ack complexity $HEXKEY $REALNOW " "$DP/.ctxpack_quality_acks" \
+grep -q "^ack complexity $HEXKEY $REALNOW " "$DP/.ripwire_quality_acks" \
     && ok "duplicate acks: collapsed line kept the HIGHER (real) ackNow=$REALNOW, not the lower duplicate" \
-    || { no "duplicate acks: collapsed line lost the higher ackNow"; grep "^ack complexity $HEXKEY " "$DP/.ctxpack_quality_acks"; }
+    || { no "duplicate acks: collapsed line lost the higher ackNow"; grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks"; }
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

@@ -23,21 +23,21 @@
 #
 # Usage:
 #   bash test/statgatecheck.sh
-#   CTXPACK_BIN=build_r2a3/ctxpack bash test/statgatecheck.sh
+#   RIPWIRE_BIN=build_r2a3/ripwire bash test/statgatecheck.sh
 #
 # Exits non-zero on any HARD failure; (b2) is informational only. Prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 note(){ printf '  NOTE  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "statgatecheck: BIN=$BIN  TMP=$TMP"
 
 mtime_ns(){ stat -f '%Fm' "$1" 2>/dev/null || stat -c '%.9Y' "$1" 2>/dev/null; }   # ns where the FS/stat supports it

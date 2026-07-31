@@ -21,7 +21,7 @@
 # Fixture mechanics. Tier-A "contract-change" needs a canonId that EXISTS in the baseline's per-symbol maps but
 # is ABSENT from its public set. That is exactly the shape of a baseline written by an older binary with a
 # narrower notion of "public", and it is reproduced deterministically here by stripping the `api ` lines out of
-# a freshly-written .ctxpack_quality_baseline sidecar. Nothing about the fix depends on the fixture's route to
+# a freshly-written .ripwire_quality_baseline sidecar. Nothing about the fix depends on the fixture's route to
 # that state — only on the two rows sharing an identity, which they do.
 #
 # Checks:
@@ -35,23 +35,23 @@
 #   (f) a magnitude-bearing ack is untouched: its token stays bare and the ratchet still re-reports on worsening.
 #
 # Own temp repo, own private cache dir. Needs git.
-# Usage:  test/qackorigincheck.sh   |   CTXPACK_BIN=build/ctxpack test/qackorigincheck.sh
+# Usage:  test/qackorigincheck.sh   |   RIPWIRE_BIN=build/ripwire test/qackorigincheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
 XDG="$TMP/xdg"; mkdir -p "$XDG"
 run(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$REPO" "$@"; }
-ACKS="$REPO/.ctxpack_quality_acks"
-BASE="$REPO/.ctxpack_quality_baseline"
+ACKS="$REPO/.ripwire_quality_acks"
+BASE="$REPO/.ripwire_quality_baseline"
 
 echo "qackorigincheck: BIN=$BIN"
 

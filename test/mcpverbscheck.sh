@@ -23,15 +23,15 @@
 # we don't need to create extra fixtures.
 #
 # Usage:
-#   test/mcpverbscheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/mcpverbscheck.sh
+#   test/mcpverbscheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/mcpverbscheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/zoomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -40,7 +40,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcpverbscheck: BIN=$BIN  CORPUS=$CORPUS"
@@ -316,7 +316,7 @@ esac
 # §B1.7 (2026-07-29): same root-attribute change — the legend comment still follows the ctx open tag,
 # but task=/route= attributes now sit between; assert the two meaning halves separately.
 { printf '%s' "$EXPLORE_INNER" | grep -qE '<ctx( |>)' \
-  && printf '%s' "$EXPLORE_INNER" | grep -q '<!-- ctxpack task bundle for' \
+  && printf '%s' "$EXPLORE_INNER" | grep -q '<!-- ripwire task bundle for' \
   && printf '%s' "$EXPLORE_INNER" | grep -q 'budget=' \
   && printf '%s' "$EXPLORE_INNER" | grep -q '<sigs>' \
   && printf '%s' "$EXPLORE_INNER" | grep -q '</ctx>'; } \

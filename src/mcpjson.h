@@ -350,7 +350,7 @@ namespace mcpdetail
     //     whose `path` was in the bytes, just past the cut).
     //
     // The HTTP transport was immune by accident (a Content-Length-short body never reaches dispatch,
-    // mcpserver.h), and stdio is the transport `ctxpack wrap claude` ships AND the one where the edit verbs
+    // mcpserver.h), and stdio is the transport `ripwire wrap claude` ships AND the one where the edit verbs
     // are enabled — so the gate lives in the SHARED handler (dispatchMcpLine), not in the stdio loop, and both
     // transports get the same verdict for the same bytes.
     //

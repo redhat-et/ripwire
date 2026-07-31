@@ -20,18 +20,18 @@
 # hand. Closes the defect class (the §P6.7 pattern, test/emittertruthcheck.sh's --format reconciliation, one
 # flag over): extract both lists from the LIVE binary and assert set-equality, so they can never fork again.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/testgatepagecheck.sh   |   CTXPACK_BIN=build_base/ctxpack …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/testgatepagecheck.sh   |   RIPWIRE_BIN=build_base/ripwire …
 # Exits non-zero on any failure. Does NOT edit regression.sh (test/pargates.py auto-discovers *check.sh).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "testgatepagecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -44,7 +44,7 @@ rc(){  perl -e 'alarm 20; exec @ARGV' "$BIN" "$@" --no-cache >/dev/null 2>&1; ec
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # §A3a fixture — a synthetic corpus with 30 untested offenders, well over the 25-row default page, built
-# fresh so this gate never depends on the live ctxpack repo's own (drifting) untested count. lib.cpp defines
+# fresh so this gate never depends on the live ripwire repo's own (drifting) untested count. lib.cpp defines
 # 30 leaf functions; caller.cpp defines 30 functions, each calling exactly one lib function — changing
 # lib.cpp therefore blast-radiuses into exactly 30 non-test callers, none of which any test reaches.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════

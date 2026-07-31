@@ -10,19 +10,19 @@
 # The invariant this gate freezes: a rule's count must equal what the SAME engine reports for the same
 # query under --match (ground truth), and must NOT change when another rule's matches explode.
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/lintbudgetcheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/lintbudgetcheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/lintbudgetcheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/lintbudgetcheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "lintbudgetcheck: BIN=$BIN  ROOT=$ROOT"
 
 # ── ground truth: the same engine, one query at a time (--match has always had its own full budget)

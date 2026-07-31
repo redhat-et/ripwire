@@ -17,20 +17,20 @@
 #   9  MCP verb smoke: tools/list carries `connect`; tools/call connect {path,symbols} returns the same
 #      <connect> payload, deterministic across two calls
 #
-# Usage:  test/connectcheck.sh              # uses build/ctxpack
-#         CTXPACK_BIN=asan/ctxpack test/connectcheck.sh
+# Usage:  test/connectcheck.sh              # uses build/ripwire
+#         RIPWIRE_BIN=asan/ripwire test/connectcheck.sh
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "connectcheck: BIN=$BIN"
 

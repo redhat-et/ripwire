@@ -4,7 +4,7 @@
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t4","name":"Read","input":{"file_path":"/repo/src/c.py"}}]}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t5","name":"Write","input":{"file_path":"/private/tmp/scratchpad/notes.md","content":"notes"}}]}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t6","name":"Edit","input":{"file_path":"/repo/src/d.py","old_string":"foo","new_string":"bar"}},{"type":"tool_use","id":"t7","name":"Edit","input":{"file_path":"/repo/src/d.py","old_string":"bar","new_string":"foo"}}]}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t8","name":"Bash","input":{"command":"ctxpack /repo --for=\"widget loader refactor\""}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t8","name":"Bash","input":{"command":"ripwire /repo --for=\"widget loader refactor\""}}]}}
 {"type":"user","message":{"role":"user","content":"ok thanks"}}
 {"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification> background task b12345 completed successfully with all outputs written to the log file </task-notification>"}}
 {"type":"user","message":{"role":"user","content":"now also update the changelog entry and bump the version number please"}}

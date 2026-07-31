@@ -21,12 +21,12 @@
 # Every JSON payload asserted here is first validated with python3 json.load — a shape claim about output
 # that does not parse is worthless.
 #
-# Usage:  test/jsonparitycheck.sh   |   CTXPACK_BIN=build_base/ctxpack test/jsonparitycheck.sh
+# Usage:  test/jsonparitycheck.sh   |   RIPWIRE_BIN=build_base/ripwire test/jsonparitycheck.sh
 # Exits non-zero on any failure. Never mutates the checked-in fixture. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -37,7 +37,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" >&2; }
 no(){ printf '  FAIL  %s\n' "$*" >&2; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 echo "jsonparitycheck: BIN=$BIN"
 

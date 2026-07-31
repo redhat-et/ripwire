@@ -11,12 +11,12 @@
 #   7. mutation-tested — flip the if-guard `return` into a same-block terminator and prove the
 #      false-positive guard would then fire (i.e. the guard is doing real work, not passing vacuously)
 #
-#   CTXPACK_BIN=build/ctxpack bash test/unreachablecheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/unreachablecheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/unreachablecheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/unreachablecheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/unreachablefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -24,7 +24,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]    || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/unreachablefix dir — fixture missing"; exit 2; }
 
 echo "unreachablecheck: BIN=$BIN  CORPUS=$CORPUS"

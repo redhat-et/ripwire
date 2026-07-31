@@ -7,10 +7,10 @@
 # a phantom `api-surface surface="contract-change" was="4" now="2"` row, and a gating exit 2, on a CLEAN
 # tree. The contract this gate pins: a clean working tree IS its own HEAD, so --quality-delta must be
 # vacuously exit 0 with regressions="0" — no matter what same-named symbols coexist across languages.
-# Usage:  test/qualitycrosslangcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/qualitycrosslangcheck.sh
+# Usage:  test/qualitycrosslangcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/qualitycrosslangcheck.sh
 # Exits non-zero on any failure. Does NOT edit regression.sh. Needs git.
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

@@ -2,7 +2,7 @@
 # docdriftcheck.sh — the field-notes §3 gate for --doc-drift, the doc-anchor verifier (src/docdrift.h).
 #
 #   test/docdriftcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/docdriftcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/docdriftcheck.sh
 #
 # The fixture test/docdriftfix/ is a half-stale design note (NOTES.md) over a two-header corpus. Every
 # anchor in it is labelled with the verdict the verb must reach, so ONE run proves both directions:
@@ -34,7 +34,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/docdriftfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -42,7 +42,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "docdriftcheck: BIN=$BIN  CORPUS=$CORPUS"
 
@@ -264,10 +264,10 @@ fi
 # and move the very counts it exists to pin.
 #
 # Regenerating is a DELIBERATE act, never a reflex to a red gate: confirm the diff is a change you meant,
-# then  ./build/ctxpack test/docdriftfix --doc-drift --no-cache > test/docdriftfix.golden.xml
+# then  ./build/ripwire test/docdriftfix --doc-drift --no-cache > test/docdriftfix.golden.xml
 #
 # r26-stamp Task A: the root <doc-drift> element now carries at="<sha>[+dirty]" — a stamp of the ENCLOSING
-# ctxpack checkout's own HEAD (test/docdriftfix is a plain directory, not its own repo, so git walks up to
+# ripwire checkout's own HEAD (test/docdriftfix is a plain directory, not its own repo, so git walks up to
 # THIS repo's .git), which by design changes on every commit to this tree. A byte-for-byte golden that
 # embedded it would break on the next unrelated commit, for a reason that has nothing to do with doc-drift
 # itself. Both sides of the comparison are normalized to strip JUST the root element's at= (never the

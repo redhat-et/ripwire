@@ -17,15 +17,15 @@
 # the C++ constant and reality are pinned to each other by observation, not by arithmetic agreement.
 #
 # Usage:
-#   test/mcpw2fixcheck.sh                                      # uses build/ctxpack
-#   test/mcpw2fixcheck.sh /path/to/other/ctxpack               # positional binary
-#   CTXPACK_BIN=build_prefix/ctxpack test/mcpw2fixcheck.sh     # env binary (the RED run)
+#   test/mcpw2fixcheck.sh                                      # uses build/ripwire
+#   test/mcpw2fixcheck.sh /path/to/other/ripwire               # positional binary
+#   RIPWIRE_BIN=build_prefix/ripwire test/mcpw2fixcheck.sh     # env binary (the RED run)
 #
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -33,7 +33,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcpw2fixcheck: BIN=$BIN  CORPUS=$ROOT"

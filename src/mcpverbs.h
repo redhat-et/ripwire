@@ -728,10 +728,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
     // Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1
     // competitor-win bucket; bench/headtohead). Pure string extraction + in-memory matching (no I/O),
-    // inert (byte-identical) when the text names nothing indexed. CTXPACK_NO_MENTION=1 (the shared
+    // inert (byte-identical) when the text names nothing indexed. RIPWIRE_NO_MENTION=1 (the shared
     // ablation env) disables it here too. Runs BEFORE the co-change prior, same as the CLI.
     std::string mentionNote;
-    if( !std::getenv( "CTXPACK_NO_MENTION" ) )
+    if( !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
         if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
@@ -749,10 +749,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // LocBench at warm p50 +19%; revisit on the C++ history eval. Mined per request (one `git log -500
     // --name-only` popen; the .git walk-up guard makes non-git roots free) rather than cached on McpIndex:
     // history moves when HEAD moves, which the mtime/content staleness stamp does not watch. The MCP verb
-    // has no per-call flags — CTXPACK_COCHANGE=1 (the shared opt-in env) enables it here.
+    // has no per-call flags — RIPWIRE_COCHANGE=1 (the shared opt-in env) enables it here.
     // Inert without usable history (depth-1 / non-git ⇒ support threshold unreachable ⇒ byte-identical output).
     std::string boostNote;
-    if( std::getenv( "CTXPACK_COCHANGE" ) && hasEnclosingGitRepo( root ) )
+    if( std::getenv( "RIPWIRE_COCHANGE" ) && hasEnclosingGitRepo( root ) )
     {
         const auto coSets = gitRecentCommitFileSets( root, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit );
         CoBoostInfo boostInfo;
@@ -768,9 +768,9 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // AUDIT5 R5 (doc-mention surfacing) — same default-on, route-agnostic contract as the CLI --for: a doc
     // that names one of the task's top-resolved symbols in a `backtick` (g.mentions, the same edges the
     // `mentions` MCP verb reads) is lifted into the bundle, strictly below that symbol's own score.
-    // CTXPACK_NO_DOC_MENTION=1 disables it here too (the shared ablation env, same as CTXPACK_NO_MENTION).
+    // RIPWIRE_NO_DOC_MENTION=1 disables it here too (the shared ablation env, same as RIPWIRE_NO_MENTION).
     std::string docMentionNote;
-    if( !std::getenv( "CTXPACK_NO_DOC_MENTION" ) )
+    if( !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
         if( applyDocMentionBoost( ix.g, lensRank, &docMentionInfo ) )
@@ -812,7 +812,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // budget is the exact remainder; emission ORDER is unchanged (header, sigs, lego, compose, </ctx>),
     // and when nothing trims the bytes are identical to the pre-H1 path.
     std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]" )   // §B1.7: same root attrs as the CLI twin
-                          + "<!-- ctxpack lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + mentionNote + boostNote + docMentionNote
+                          + "<!-- ripwire lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + mentionNote + boostNote + docMentionNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->";
     const auto renderToString = [ ]( auto&& emitFn ) -> std::string
     {
@@ -844,7 +844,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     const std::size_t fixedBytes = headerStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = kForPayloadBudgetBytes > fixedBytes ? kForPayloadBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
-    // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ctxpack_notes (a
+    // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ripwire_notes (a
     // small file); nullptr when EMPTY so the bundle stays byte-identical when there is nothing to surface.
     const notes::NoteIndex        noteIndex = notes::loadNoteIndex( root );
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
@@ -954,7 +954,7 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     // is how many of them collapsed into that one row — and the CLI defuses it in words while the MCP twin
     // shipped the identical ambiguity undefused. The name is deliberately NOT renamed (both meanings are
     // load-bearing on the CLI side); the disclosure is what travels.
-    std::fprintf( mem, "<!-- ctxpack owners: recency-weighted author ownership (half-life=6mo). "
+    std::fprintf( mem, "<!-- ripwire owners: recency-weighted author ownership (half-life=6mo). "
                        "bf=1 = one person holds >80%% of weighted commits (bus-factor risk); "
                        "authors=1 files fold into <uniform/> below. "
                        "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
@@ -1055,7 +1055,7 @@ inline std::string exemplarText( const std::string& root, const std::string& kin
     if( !mem ) return {};
     std::fprintf( mem, "<ctx>" );
     // §B6 M13: the rule is exemplar.h's kExemplarSelectionRule, rendered — not restated here in a fourth wording.
-    std::fprintf( mem, "<!-- ctxpack exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
+    std::fprintf( mem, "<!-- ripwire exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
                        "Copy its shape, not its text. -->",
                   ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), kExemplarSelectionRule );
     std::fprintf( mem, "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s>",
@@ -1169,7 +1169,7 @@ inline std::string qualifiedSelectorRefusal( const IngestResult& ing, const std:
     if( resolveAllByName( ing, bareName ).empty() )  return {};   // the bare half is not a symbol either
 
     return "qualified file:name selectors are CLI-only on this verb — pass the bare name '" + bareName
-         + "' (the union across its defs), or use the CLI form `ctxpack <dir> " + std::string( cliFlag ) + symbol
+         + "' (the union across its defs), or use the CLI form `ripwire <dir> " + std::string( cliFlag ) + symbol
          + "` for the narrowed answer";
 }
 
@@ -1431,7 +1431,7 @@ namespace connectemit
 // hand-written estimate of its own. Edit the text and the estimate follows automatically; that coupling is
 // the whole point of the constant. (G4: an XML comment may not contain a double hyphen.)
 inline constexpr char kConnectHeader[] =
-    "<!-- ctxpack connect: minimal joining subgraph over N task symbols (metric-closure 2-approx Steiner;"
+    "<!-- ripwire connect: minimal joining subgraph over N task symbols (metric-closure 2-approx Steiner;"
     " search is undirected so SHARED-CALLER joins are found, every <e f= t=/> keeps its TRUE caller->callee"
     " direction; graph-structured navigation per CodeCompass, arXiv 2602.20048). Call edges are name-based:"
     " dynamic dispatch / callbacks may hide connections -->";
@@ -1612,7 +1612,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
 
 // ─── quality_baseline / quality_delta verbs (the convergence-loop oracle over the warm index) ──────────────
 //
-// quality_baseline WRITES the `.ctxpack_quality_baseline` sidecar (a side-effect verb, like the edit verbs),
+// quality_baseline WRITES the `.ripwire_quality_baseline` sidecar (a side-effect verb, like the edit verbs),
 // stamping the current HEAD sha. quality_delta is READ-ONLY: it reports ONLY what the working tree made WORSE
 // vs the baseline (10 kinds), honoring the exact precedence the CLI --quality-delta uses:
 //   (1) an explicit sidecar (from quality_baseline) wins — UNLESS it is STALE (pinned at a different HEAD),
@@ -1648,7 +1648,7 @@ struct QualityDeltaOutcome
     std::string                       errMsg;        // on degrade (non-git, no sidecar)
     std::string                       baseMarker;    // "sidecar" | "git-HEAD" | "git-HEAD (stale sidecar …)" — see §B6 M10 below
     std::vector<ctx::quality::Regression> regs;
-    std::size_t                       ackedCount = 0;// findings suppressed by the .ctxpack_quality_acks ratchet (honest suppression)
+    std::size_t                       ackedCount = 0;// findings suppressed by the .ripwire_quality_acks ratchet (honest suppression)
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -1806,7 +1806,7 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
     return out;
 }
 
-// quality_baseline → writes `.ctxpack_quality_baseline` (side-effect verb) stamped with HEAD, returning a JSON
+// quality_baseline → writes `.ripwire_quality_baseline` (side-effect verb) stamped with HEAD, returning a JSON
 // summary of what it wrote. Reuses quality::computeSnapshot + writeBaseline + gitHeadSha — the exact CLI path.
 // The sidecar is written in `root` (same as the CLI, which uses cfg.rootPath). Returns "" + fills errOut when
 // the write fails (unwritable dir). Rebuilds ing/graph from disk so the snapshot keys match the CLI.
@@ -1838,7 +1838,7 @@ inline std::string qualityBaselineJson( const std::string& root, std::string& er
 // `from_trace`, `edit_check`. Each is a thin front door onto the SAME shared assembler its CLI sibling calls
 // (packtask.h / tracelocus.h / editcheck.h) — no forked logic, no drifting XML shape between the two
 // surfaces. `merge_scout` and `note-add`/`notes` stay CLI-only (write verbs / multi-ref UX; see
-// skills/ctxpack-mcp).
+// skills/ripwire-mcp).
 
 // `explore`/`pack_task` verb: the MCP twin of --pack-task — ONE call assembling the routed ranking + full
 // bodies + 1-hop callers + field notes + tests_to_run under ONE deterministic byte budget. Computes the lens
@@ -1846,7 +1846,7 @@ inline std::string qualityBaselineJson( const std::string& root, std::string& er
 // / applyMentionBoost / applyCoChangeBoost — then hands the populated LensRanking to packTaskBundleText()
 // (packtask.h), the SAME assembler --pack-task's CLI handler (main.cpp runPackTask) calls. `budgetTokens` 0
 // ⇒ the shared default (6000). No --anchor/--no-route equivalent over MCP (routing is always-on here, as it
-// is by default on the CLI; --anchor is a CLI-only CTXPACK_DEV-gated experiment).
+// is by default on the CLI; --anchor is a CLI-only RIPWIRE_DEV-gated experiment).
 //
 // `partitionCount` (field-notes §6) is the CLI's --partition=N over MCP — an ARGUMENT on this verb, not a
 // verb of its own, because it changes what `explore` returns (one bundle vs core + N slices) without changing
@@ -1871,7 +1871,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul );
     lr.routeNote = " [routed: " + rc.reason + "]";
 
-    if( !std::getenv( "CTXPACK_NO_MENTION" ) )
+    if( !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
         if( applyMentionBoost( ing, task, lr.rank, &mentionInfo ) )
@@ -1882,7 +1882,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
             lr.mentionNote = nb;
         }
     }
-    if( std::getenv( "CTXPACK_COCHANGE" ) && hasEnclosingGitRepo( root ) )
+    if( std::getenv( "RIPWIRE_COCHANGE" ) && hasEnclosingGitRepo( root ) )
     {
         const auto  coSets = gitRecentCommitFileSets( root, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit );
         CoBoostInfo boostInfo;
@@ -1894,7 +1894,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
             lr.boostNote = nb;
         }
     }
-    if( !std::getenv( "CTXPACK_NO_DOC_MENTION" ) )
+    if( !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
         if( applyDocMentionBoost( g, lr.rank, &docMentionInfo ) )
@@ -2569,7 +2569,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         // registry without one, THIS is the honest failure — never a silent ok="1" with an empty payload.
         DEGRADED_PATH_ALERT( "batch: a verb in the served registry has no dispatch arm" );
         return bad( "batch cannot answer '" + r.verb + "' — it is in the served registry but has no dispatch "
-                    "arm (a ctxpack bug: kBatchServedVerbs and runBatchSub have drifted)" );
+                    "arm (a ripwire bug: kBatchServedVerbs and runBatchSub have drifted)" );
     }
 
     r.ok = true;
@@ -2613,7 +2613,7 @@ inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t req
          + "\" requested=\"" + std::to_string( requested )
          + "\" cap=\"" + std::to_string( cap ) + "\"";
     if( requested > cap ) out += " capped=\"1\"";
-    out += "><!-- ctxpack batch: N read sub-queries answered in one sweep. Each <q> carries i=index, "
+    out += "><!-- ripwire batch: N read sub-queries answered in one sweep. Each <q> carries i=index, "
            "verb=sub-verb, ok=1|0; the sub-answer rides verbatim in CDATA (a mix of XML and JSON payloads); "
            "<dup-of q=\"i\"/> means this payload is byte-identical to the one already emitted at index i; "
            "ok=0 carries err= and no payload. Over-cap batches set capped=\"1\" with n<requested. -->";

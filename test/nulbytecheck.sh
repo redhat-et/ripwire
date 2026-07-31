@@ -37,8 +37,8 @@
 # the feature: an allowlist that grows by guess is how the next `.md` full of control bytes gets waved through.
 #
 #   bash test/nulbytecheck.sh                                   # scans the working tree
-#   bash test/nulbytecheck.sh /path/to/base/ctxpack             # BIN is accepted and unused (see below)
-#   CTXPACK_BIN=asan/ctxpack bash test/nulbytecheck.sh          # both seams bind the same way
+#   bash test/nulbytecheck.sh /path/to/base/ripwire             # BIN is accepted and unused (see below)
+#   RIPWIRE_BIN=asan/ripwire bash test/nulbytecheck.sh          # both seams bind the same way
 #
 # BIN is bound for suite uniformity and then not used: this gate reads SOURCE, so its red-first evidence is a
 # pre-fix source TREE (arm (b) supplies exactly that, permanently, out of git) rather than a pre-fix binary.
@@ -49,7 +49,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -180,13 +180,13 @@ echo "=== (c) every allowlisted extension is backed by a real tracked file ==="
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # The allowlist is the gate's only hole, so it is itself asserted: a row nothing matches is either a stale
 # leftover or a speculative exemption, and both are how a real NUL gets waved through later.
-CTXPACK_GATE_ROOT="$ROOT" python3 - <<'PY' || fail=1
+RIPWIRE_GATE_ROOT="$ROOT" python3 - <<'PY' || fail=1
 import os
 import re
 import subprocess
 import sys
 
-gate = os.path.join(os.environ["CTXPACK_GATE_ROOT"], "test", "nulbytecheck.sh")
+gate = os.path.join(os.environ["RIPWIRE_GATE_ROOT"], "test", "nulbytecheck.sh")
 src = open(gate, encoding="utf-8").read()
 block = src.split("BINARY_EXTENSIONS = {", 1)[1].split("}", 1)[0]
 rows = re.findall(r'"(\.[A-Za-z0-9]+)"', block)

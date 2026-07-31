@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # exemplarcheck.sh — the Wave-Q Q7 --exemplar verb gate.
 #
-#   test/exemplarcheck.sh                       # uses build/ctxpack on test/exemplarfix
-#   CTXPACK_BIN=asan/ctxpack test/exemplarcheck.sh
+#   test/exemplarcheck.sh                       # uses build/ripwire on test/exemplarfix
+#   RIPWIRE_BIN=asan/ripwire test/exemplarcheck.sh
 #
 # --exemplar=KIND|TASK returns the repo's BEST-IN-CLASS instance of what the agent is about to write,
 # selected by ROLE (kind + tested/fan-in/ccx composite, id tie-break) — NEVER by text similarity. This gate:
@@ -16,15 +16,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/exemplarfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "exemplarcheck: BIN=$BIN  CORPUS=$CORPUS"
 
 exemhdr(){ printf '%s' "$1" | grep -o '<exemplar[^>]*>' | head -1; }   # the <exemplar …> element from an output
@@ -100,7 +100,7 @@ ERR="$( "$BIN" "$CORPUS" --no-cache --exemplar=iface 2>&1 >/dev/null )"; RC=$?
 # Regression guards for the two reproduced betrayals: whole-repo --exemplar=fn returned `ingest` (ccx=294 —
 # the single most complex fn in the tree) as the shape to imitate; a "test gate shell script" task mapped to
 # kind=cls and returned a 3-line synthetic TEST FIXTURE. The fix binds ccx hard, de-prioritizes fixture paths,
-# and falls back to fn on a weak task match. These assertions run against the ctxpack repo itself.
+# and falls back to fn on a weak task match. These assertions run against the ripwire repo itself.
 SELF="$ROOT"
 CEIL=60   # kExemplarCcxCeiling = 4 × kCcxBar(15); see src/exemplar.h. A repo-root pick must be at/under it.
 

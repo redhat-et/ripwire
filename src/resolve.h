@@ -29,7 +29,7 @@
 //   Rule 3 — import/include-based file narrowing (IMPLEMENTED): when a call's name is ambiguous (K same-name
 //            defs across the repo) but the CALLER's file `#include`s / imports EXACTLY ONE of the files that
 //            defines it, resolve to that one file's def(s) and DROP the rest — a sound narrowing that needs no
-//            type/receiver info, only the include/import edges ctxpack already captures (IngestResult::includes,
+//            type/receiver info, only the include/import edges ripwire already captures (IngestResult::includes,
 //            resolved file→file by basename exactly like resolveIncludeAdj). Fires ONLY when precisely ONE
 //            INCLUDED file holds a candidate def (0 or ≥2 → degrade to §2a unchanged), and NEVER when the
 //            caller's OWN file also holds a candidate (that is the §2a same-file tier's job — Rule 3 is a
@@ -934,7 +934,7 @@ inline std::string canonicalId( std::string_view path, std::string_view scope, s
 
 // §B1.3: canonicalId over a symbol whose PATH SEGMENT is made relative to `root` — the one identity rule two
 // unrelated subsystems both need. quality.h's baselineCanonId (a committed baseline must key the same way
-// whether it was taken by `ctxpack .` or `ctxpack /abs/repo`) and serialize.h's field-note target (a note is
+// whether it was taken by `ripwire .` or `ripwire /abs/repo`) and serialize.h's field-note target (a note is
 // stored under a root-relative id) each spelled it out separately; two subsystems that must AGREE on one
 // identity while deriving it independently is how they drift. Pure string function of (path, root, scope,
 // name), so both keep their determinism contract. Degrades exactly as canonicalId does: no scope ⇒ the bare

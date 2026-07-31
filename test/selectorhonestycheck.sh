@@ -30,18 +30,18 @@
 # an unambiguous name is untouched, determinism, well-formedness) and pass on both by design.
 #
 #   test/selectorhonestycheck.sh
-#   CTXPACK_BIN=build_base/ctxpack test/selectorhonestycheck.sh   # must FAIL (RED proof)
+#   RIPWIRE_BIN=build_base/ripwire test/selectorhonestycheck.sh   # must FAIL (RED proof)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "selectorhonestycheck: BIN=$BIN  ROOT=$ROOT"
 
 # ── the fixture repo: one clean git tree, so the whereis HEAD rows can be checked against the index ──────

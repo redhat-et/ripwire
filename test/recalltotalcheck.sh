@@ -21,19 +21,19 @@
 # exactly the bug: the pre-fix binary reports total=8 no matter what --top-k is, so the two numbers a fixed
 # binary must agree on (small-k total= vs huge-k shown=) simply never agree pre-fix.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/recalltotalcheck.sh
-#         CTXPACK_BIN=build_base/ctxpack bash test/recalltotalcheck.sh   # must FAIL (pre-fix binary, RED)
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/recalltotalcheck.sh
+#         RIPWIRE_BIN=build_base/ripwire bash test/recalltotalcheck.sh   # must FAIL (pre-fix binary, RED)
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "recalltotalcheck: BIN=$BIN  TARGET=$ROOT (self-scan, broad query \"the\")"
 
 run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$ROOT" --recall="the" --no-cache "$@" 2>/dev/null; }

@@ -15,7 +15,7 @@ namespace ctx
 
 // ─── W4-#8: symbol-addressed EDIT verbs (replace_symbol_body / insert_before_symbol / insert_after_symbol) ───
 //
-// These are the FIRST write verbs — ctxpack is otherwise read-only, so the safety contract IS the feature.
+// These are the FIRST write verbs — ripwire is otherwise read-only, so the safety contract IS the feature.
 // Every failure path REFUSES with a JSON-RPC error and leaves the file byte-for-byte unchanged; a partial
 // write is never possible (splice happens in memory, then one atomic temp-file rename). The refusals:
 //   • symbol resolves to 0 defs → error listing the nearest names (agent picks a real one)
@@ -183,9 +183,9 @@ namespace mcpedit
     }
 
     // A3-F8: the advisory edit lock lives in the per-user CACHE DIR, keyed by an FNV-1a-64 hash of the
-    // absolute target path — NOT as a "<path>.ctxpack-lock" sidecar next to the target. The old sidecar was
+    // absolute target path — NOT as a "<path>.ripwire-lock" sidecar next to the target. The old sidecar was
     // created and never unlinked, so every MCP edit left permanent litter in the user's repo (git-status
-    // noise). The cache-dir path is a deterministic pure function of the target path, so two ctxpack processes
+    // noise). The cache-dir path is a deterministic pure function of the target path, so two ripwire processes
     // editing the SAME file still open the SAME lock file and flock still serializes them cross-process (the F1
     // guarantee is preserved) — it just never lands in the repo tree. Same cache-dir ladder as mcpCachePath.
     inline std::string editLockPath( const std::string& targetPath )
@@ -193,11 +193,11 @@ namespace mcpedit
         std::uint64_t h = 1469598103934665603ULL;      // FNV-1a-64 of the target path → a stable per-file lock name
         for( char c : targetPath ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
         char name[ 64 ];
-        std::snprintf( name, sizeof( name ), "ctxpack-edit-%016llx.lock", (unsigned long long)h );
+        std::snprintf( name, sizeof( name ), "ripwire-edit-%016llx.lock", (unsigned long long)h );
         return quality::cacheDirLadder() + "/" + name;   // shared per-user cache-dir ladder (no repo-tree sidecar)
     }
 
-    // F1: per-file advisory edit lock — serializes two COOPERATING ctxpack MCP edit operations on one file so
+    // F1: per-file advisory edit lock — serializes two COOPERATING ripwire MCP edit operations on one file so
     // they can't race a read→check→splice→rename lost-update. We lock a STABLE lockfile keyed by the target
     // path (editLockPath, A3-F8: in the per-user cache dir, not a repo-tree sidecar), NOT the target itself:
     // the atomic rename swaps the target's inode, so a flock on the target fd wouldn't cover the rename
@@ -339,7 +339,7 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     }
 
     // F1: hold a per-file advisory lock across the ENTIRE read→check→splice→rename below, so two cooperating
-    //     ctxpack MCP edit ops on one file serialize instead of racing (RAII: released at function return).
+    //     ripwire MCP edit ops on one file serialize instead of racing (RAII: released at function return).
     //     Degrades to lock-free on contention/failure — the re-check before the rename is the correctness floor.
     //     Keyed by the REAL disk path so cross-process serialization lands on the actual file, not the label.
     const mcpedit::EditLock editLock( disk );
@@ -382,7 +382,7 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     std::size_t newStart = 0, newEnd = 0;
     const std::string newBytes = mcpedit::applyEdit( op, src, a, b, text, newStart, newEnd );
 
-    // F1: RE-CHECK FRESHNESS IMMEDIATELY BEFORE THE RENAME. The advisory lock serializes cooperating ctxpack
+    // F1: RE-CHECK FRESHNESS IMMEDIATELY BEFORE THE RENAME. The advisory lock serializes cooperating ripwire
     //     edits, but a NON-cooperating external writer (editor/formatter on save) won't take the lock. So right
     //     before we swap the inode, re-read the file and compare its hash to the one we spliced against; if it
     //     changed, ABORT and refuse as stale — never rename our splice-over-stale-bytes on top of the other

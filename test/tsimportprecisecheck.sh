@@ -17,12 +17,12 @@
 # Also asserts B0 clean-specifier capture (--deps shows `./x`, not the clause), MONOTONICITY, determinism,
 # warm==cold, and well-formed XML.
 #
-# Usage:  test/tsimportprecisecheck.sh   |   CTXPACK_BIN=asan/ctxpack test/tsimportprecisecheck.sh
+# Usage:  test/tsimportprecisecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/tsimportprecisecheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/tsimportprecisefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -31,7 +31,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "tsimportprecisecheck: BIN=$BIN  FIX=$FIX  TMP=$TMP"
 
 callee_binds(){  # $1 caller  $2 expected-path-substr  $3 must-NOT-contain-substr (decoy)
@@ -96,10 +96,10 @@ monotonic_check()
     trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
 
     local OLDB="$TMP/oldbuild"
-    if ! ( cmake -S "$WT" -B "$OLDB" -DCTXPACK_NATIVE=ON >/dev/null 2>&1 && cmake --build "$OLDB" -j >/dev/null 2>&1 ); then
+    if ! ( cmake -S "$WT" -B "$OLDB" -DRIPWIRE_NATIVE=ON >/dev/null 2>&1 && cmake --build "$OLDB" -j >/dev/null 2>&1 ); then
         skip "monotonicity: pre-change build failed"; return
     fi
-    local OLDBIN="$OLDB/ctxpack"
+    local OLDBIN="$OLDB/ripwire"
     [ -x "$OLDBIN" ] || { skip "monotonicity: pre-change binary missing"; return; }
 
     local ao an

@@ -26,25 +26,25 @@
 #   P2.14 --rank-by=BOGUS / --format=BOGUS name the unknown VALUE and list the supported set (they used to
 #         claim the FLAG did not exist); every supported value still parses
 #   G4    every changed emitter stays xmllint-clean
-#   G5    the DEFAULT map (`ctxpack <dir>`, no flags) is byte-identical across two runs and gained no
+#   G5    the DEFAULT map (`ripwire <dir>`, no flags) is byte-identical across two runs and gained no
 #         attribute from this lane — flags stayed additive
 #
 # Usage:
 #   test/emittertruthcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/emittertruthcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/emittertruthcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 # attribute reader: attr <file> <name>  ->  the first value of name="…"
 attr(){ sed -n "s/.*[[:space:]]$2=\"\([^\"]*\)\".*/\1/p" "$1" | head -1; }

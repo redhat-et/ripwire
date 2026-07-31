@@ -3,12 +3,12 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/deadfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
 "$BIN" "$CORPUS" --dead-code --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --dead-code --no-cache >"$TMP/b" 2>/dev/null

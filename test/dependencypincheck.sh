@@ -46,7 +46,7 @@ else
 fi
 
 # ── (B) vendored, not fetched ─────────────────────────────────────────────────────────────────────
-if grep -q 'ctxpack_use_vendored_source' "$CMAKE"; then
+if grep -q 'ripwire_use_vendored_source' "$CMAKE"; then
     ok "dependencies are adopted from the in-repo vendored trees"
 else
     no "CMakeLists.txt no longer adopts the vendored dependency trees"
@@ -55,7 +55,7 @@ fi
 # The shared ~/.cache clone is exactly the escape hatch vendoring removed. If it comes back, a machine
 # with a primed cache builds green while a stranger's fresh clone silently fetches from github — the
 # worst kind of green, because the person who can see the failure is never the person who ran the gate.
-if grep -qE '\.cache/[a-z_]+-deps|ctxpack_use_shared_source' "$CMAKE"; then
+if grep -qE '\.cache/[a-z_]+-deps|ripwire_use_shared_source' "$CMAKE"; then
     no "CMakeLists.txt still has a shared-source-cache fallback (a network path by another name)"
 else
     ok "no shared-source-cache fallback remains"
@@ -89,7 +89,7 @@ if ! command -v cmake >/dev/null 2>&1; then
 else
     SCRATCH="$( mktemp -d )"
     trap 'rm -rf "$SCRATCH"' EXIT
-    if cmake -S "$ROOT" -B "$SCRATCH/b" -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DCTXPACK_TESTS=ON \
+    if cmake -S "$ROOT" -B "$SCRATCH/b" -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DRIPWIRE_TESTS=ON \
          > "$SCRATCH/cfg.log" 2>&1; then
         ok "configure succeeds with FETCHCONTENT_FULLY_DISCONNECTED=ON (nothing is fetched)"
     else

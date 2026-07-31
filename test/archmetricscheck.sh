@@ -21,15 +21,15 @@
 #
 # Floats are asserted to 2dp (the serializer's fixed precision) — a tolerance band, not bit-exact math.
 #
-# Usage:  bash test/archmetricscheck.sh [BIN]  |  CTXPACK_BIN=build/ctxpack bash test/archmetricscheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  bash test/archmetricscheck.sh [BIN]  |  RIPWIRE_BIN=build/ripwire bash test/archmetricscheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# BOTH seams. `bash test/<gate>.sh asan/ctxpack` is how regression.sh and every differential run pass a
-# binary; this gate read only CTXPACK_BIN, so a positional argument was accepted and silently ignored and
+# BOTH seams. `bash test/<gate>.sh asan/ripwire` is how regression.sh and every differential run pass a
+# binary; this gate read only RIPWIRE_BIN, so a positional argument was accepted and silently ignored and
 # a red-first run against a BASE binary came back ALL PASS against the binary already in build/.
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/archmetricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -37,7 +37,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/archmetricsfix dir — fixture missing"; exit 2; }
 [ -f "$FIX/sibling.arch" ] || { echo "no test/archmetricsfix/sibling.arch — fixture config missing"; exit 2; }
 cd "$ROOT"

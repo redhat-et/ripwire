@@ -2,7 +2,7 @@
 
 // scip.h — the SCIP precision overlay (Wave 4 #15 / long-planned in SPEC): consume a Sourcegraph
 // SCIP index (`--scip=index.scip`) as an OPTIONAL, zero-dependency precision layer over the name-based
-// call graph. Where the index covers a reference site, its resolution REPLACES ctxpack's name-based
+// call graph. Where the index covers a reference site, its resolution REPLACES ripwire's name-based
 // guess and the resulting edge is tagged `prov="scip"` so the honesty gauges (amb= / ambiguous=) report
 // exactly how much of the graph is precise vs guessed.
 //
@@ -16,7 +16,7 @@
 // (fetched during implementation): Index.documents=2, Document.relative_path=1/occurrences=2/symbols=3,
 // Occurrence.range=1/symbol=2/symbol_roles=3, SymbolInformation.symbol=1/display_name=6,
 // SymbolRole.Definition = 0x1 (bit 0). A SCIP `range` is [startLine, startChar, endChar] (3 ints, same
-// line) or [startLine, startChar, endLine, endChar] (4 ints); all 0-based. ctxpack `Symbol::line` is
+// line) or [startLine, startChar, endLine, endChar] (4 ints); all 0-based. ripwire `Symbol::line` is
 // 1-based, so we map scipStartLine + 1 ↔ symbol.line.
 //
 // Degrade, never throw (house style): a missing / unreadable / corrupt / truncated / mismatched-tree
@@ -26,7 +26,7 @@
 
 #include "model.h"
 #include "scipoverlay.h"        // ScipEdge / ScipCover / ScipOverlay — the data struct (also used by graph.h)
-#include "gitmine.h"            // resolveFileSuffix — map a SCIP relative_path to a ctxpack fileId
+#include "gitmine.h"            // resolveFileSuffix — map a SCIP relative_path to a ripwire fileId
 #include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
 
 #include <algorithm>
@@ -106,7 +106,7 @@ namespace scipwire
     };
 }   // namespace scipwire
 
-// ---- SCIP structural decode (proto → plain records, no ctxpack mapping yet) -------------------------
+// ---- SCIP structural decode (proto → plain records, no ripwire mapping yet) -------------------------
 // One occurrence as the wire yields it: 0-based start line + the SCIP symbol string + the role bitfield.
 struct ScipOccurrence
 {
@@ -217,7 +217,7 @@ inline bool scipDecodeIndex( const std::uint8_t* data, std::size_t size, std::ve
 
 // ---- load the whole file (bounded) -----------------------------------------------------------------
 // Read a .scip file into a byte buffer. Empty on any I/O failure (caller degrades). Bounded at 256 MiB
-// — a SCIP index larger than that on a repo ctxpack can parse is almost certainly the wrong file.
+// — a SCIP index larger than that on a repo ripwire can parse is almost certainly the wrong file.
 inline std::vector<std::uint8_t> scipReadFile( const char* path )
 {
     std::vector<std::uint8_t> bytes;
@@ -234,37 +234,37 @@ inline std::vector<std::uint8_t> scipReadFile( const char* path )
     return bytes;
 }
 
-// ---- map decoded SCIP → ctxpack node ids (the overlay) ---------------------------------------------
+// ---- map decoded SCIP → ripwire node ids (the overlay) ---------------------------------------------
 // Strategy (design decision 2):
-//   (a) DEFINITION occurrences (role bit 0x1) build a map scipSymbolString → ctxpack NodeId: match the
-//       document's relative_path to a ctxpack fileId (suffix match) and scipStartLine+1 to the symbol
-//       DEFINED at that (fileId, line). A def whose file/line does not exist in ctxpack's model (the
-//       index covers code ctxpack didn't parse) is simply skipped — the overlay stays a subset.
+//   (a) DEFINITION occurrences (role bit 0x1) build a map scipSymbolString → ripwire NodeId: match the
+//       document's relative_path to a ripwire fileId (suffix match) and scipStartLine+1 to the symbol
+//       DEFINED at that (fileId, line). A def whose file/line does not exist in ripwire's model (the
+//       index covers code ripwire didn't parse) is simply skipped — the overlay stays a subset.
 //   (b) REFERENCE occurrences (NOT definitions) whose scipSymbolString maps (via the def map above) to a
 //       known def produce a precise edge fromSymbol → thatDef. The enclosing `fromSymbol` is taken from
-//       ctxpack's OWN parse: the reference ctxpack captured at the SAME (fileId, line), whose fromSymbol
-//       is the exact byte-span-attributed enclosing definition. S5 STALENESS GATE: if ctxpack parsed NO
+//       ripwire's OWN parse: the reference ripwire captured at the SAME (fileId, line), whose fromSymbol
+//       is the exact byte-span-attributed enclosing definition. S5 STALENESS GATE: if ripwire parsed NO
 //       reference at (fileId, refLine1), the SCIP ref line does not correspond to a currently-parsed
 //       call site — the index is stale at this line — so the occurrence is DROPPED rather than attached
 //       to whatever current symbol happens to span the stale line. This degrades toward FEWER-but-CORRECT
 //       precise edges (never a wrong one): the prov="scip" edges that remain are trustworthy. The old
 //       "greatest def line ≤ occ line" line-scan silently mis-attributed under staleness; keying on
-//       ctxpack's own (file,line)→fromSymbol both fixes that and is strictly more precise than a line-scan.
+//       ripwire's own (file,line)→fromSymbol both fixes that and is strictly more precise than a line-scan.
 // Everything is derived from sorted inputs and the result is sorted+deduped, so the overlay — and thus
-// the graph — is byte-deterministic. `calleeName` in coveredFrom is the ctxpack def symbol's NAME, so it
+// the graph — is byte-deterministic. `calleeName` in coveredFrom is the ripwire def symbol's NAME, so it
 // matches Reference::calleeName at the buildGraph seam.
 // internalOccurrences / matchedOccurrencesPreDedup (A4-F21): the S5 staleness ratio's denominator and
 // numerator, computed HERE (not via ScipOverlay's own refOccurrences/edgesPinned fields, which are the
 // wrong pair for a ratio — see loadScipOverlay's comment) and handed back to the sole caller by reference.
 //   internalOccurrences        — ref occurrences whose SYMBOL resolved into scipDef (i.e. the index thinks
 //                                 it points at a def in THIS tree). Excludes external refs (the majority in
-//                                 real code — std::/library symbols the index also records but that ctxpack
+//                                 real code — std::/library symbols the index also records but that ripwire
 //                                 never could or should match) from the denominator: those aren't a
 //                                 freshness signal at all, just always-absent noise that deflated the old
 //                                 ratio (denominator = ALL occurrences including externals; a fresh index
 //                                 already "fails" most externals by construction, so old pct << true pct).
 //   matchedOccurrencesPreDedup — of those internal occurrences, how many matched a live (non-stale)
-//                                 ctxpack ref line PRE-dedup (every occurrence counted once, not collapsed
+//                                 ripwire ref line PRE-dedup (every occurrence counted once, not collapsed
 //                                 to unique (from,to) edges the way ov.edgesPinned is). Using the deduped
 //                                 edge count as the numerator against a per-occurrence denominator was the
 //                                 other half of the systematic deflation: N call-sites of the same callee
@@ -287,13 +287,13 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
         std::sort( v.begin(), v.end(), []( const LineDef& a, const LineDef& b ) noexcept
                    { return a.line != b.line ? a.line < b.line : a.id < b.id; } );
 
-    // (a) scipSymbolString → the ctxpack def NodeId at (relative_path, startLine+1). A relative_path that
-    // maps to no ctxpack file, or a def line with no ctxpack symbol, is skipped (subset semantics).
+    // (a) scipSymbolString → the ripwire def NodeId at (relative_path, startLine+1). A relative_path that
+    // maps to no ripwire file, or a def line with no ripwire symbol, is skipped (subset semantics).
     HashMap<std::string, NodeId> scipDef;
     for( const ScipDocument& doc : docs )
     {
         const std::uint32_t fid = resolveFileSuffix( ing, doc.relativePath );
-        if( fid == UINT32_MAX ) continue;                                // covers a tree ctxpack didn't map
+        if( fid == UINT32_MAX ) continue;                                // covers a tree ripwire didn't map
         for( const ScipOccurrence& occ : doc.occurrences )
         {
             if( !( occ.roles & 0x1u ) || occ.startLine < 0 || occ.symbol.empty() ) continue;   // definitions only
@@ -307,10 +307,10 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
         }
     }
 
-    // ctxpack's OWN reference sites, keyed (fileId, line) → enclosing fromSymbol. This is the ground truth
-    // the S5 gate matches SCIP ref occurrences against: a ctxpack Reference's fromSymbol was attributed by
+    // ripwire's OWN reference sites, keyed (fileId, line) → enclosing fromSymbol. This is the ground truth
+    // the S5 gate matches SCIP ref occurrences against: a ripwire Reference's fromSymbol was attributed by
     // BYTE-SPAN containment at ingest (authoritative), so it is both immune to the old line-scan's
-    // mis-attribution AND the freshness oracle — a SCIP ref line with no ctxpack reference is a STALE line.
+    // mis-attribution AND the freshness oracle — a SCIP ref line with no ripwire reference is a STALE line.
     // A line belongs to exactly one function body, so all refs on one (file,line) share one fromSymbol;
     // if two ever disagree (nested lambda edge case), keep the smallest NodeId for determinism.
     HashMap<std::uint64_t, NodeId> refEnclosing;
@@ -324,8 +324,8 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
         else if( rf.fromSymbol < it->second ) it->second = rf.fromSymbol;                        // deterministic tie-break
     }
 
-    // (b) reference occurrences → precise edges. Enclosing symbol comes from ctxpack's own parse at the
-    // SAME (fileId, line); a SCIP ref line with no ctxpack reference is STALE and DROPPED (S5 gate).
+    // (b) reference occurrences → precise edges. Enclosing symbol comes from ripwire's own parse at the
+    // SAME (fileId, line); a SCIP ref line with no ripwire reference is STALE and DROPPED (S5 gate).
     for( const ScipDocument& doc : docs )
     {
         const std::uint32_t fid = resolveFileSuffix( ing, doc.relativePath );
@@ -339,8 +339,8 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
             const NodeId to = dit->second;
             ++internalOccurrences;                                                                // S5 denominator: occurrences the index claims point INTO this tree
 
-            // S5 STALENESS GATE: enclosing symbol = ctxpack's own reference at (fid, refLine1). If there is
-            // no ctxpack reference at that exact line, the SCIP ref line is stale → DROP (do not attach it to
+            // S5 STALENESS GATE: enclosing symbol = ripwire's own reference at (fid, refLine1). If there is
+            // no ripwire reference at that exact line, the SCIP ref line is stale → DROP (do not attach it to
             // whatever current symbol spans the stale line — that is the silent mis-attribution this fixes).
             const std::uint32_t refLine1 = std::uint32_t( occ.startLine ) + 1;
             const std::uint64_t key      = ( std::uint64_t( fid ) << 32 ) | std::uint64_t( refLine1 );
@@ -387,7 +387,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
     if( bytes.empty() )
     {
         DEGRADED_PATH_ALERT( "--scip: index missing or unreadable — proceeding name-based" );
-        std::fprintf( stderr, "ctxpack --scip: cannot read index '%s' — proceeding name-based\n", p.c_str() );
+        std::fprintf( stderr, "ripwire --scip: cannot read index '%s' — proceeding name-based\n", p.c_str() );
         return {};
     }
 
@@ -395,7 +395,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
     if( !scipDecodeIndex( bytes.data(), bytes.size(), docs ) )
     {
         DEGRADED_PATH_ALERT( "--scip: corrupt/truncated index — proceeding name-based" );
-        std::fprintf( stderr, "ctxpack --scip: corrupt or truncated index '%s' — proceeding name-based\n", p.c_str() );
+        std::fprintf( stderr, "ripwire --scip: corrupt or truncated index '%s' — proceeding name-based\n", p.c_str() );
         return {};
     }
 
@@ -411,9 +411,9 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
     if( ov.empty() && !sawOccurrences )
     {
         // decoded fine, but nothing mapped AND no occurrence was even examined: the index describes a
-        // DIFFERENT tree than the one ctxpack parsed (wrong index / wrong root). Say so, proceed name-based.
+        // DIFFERENT tree than the one ripwire parsed (wrong index / wrong root). Say so, proceed name-based.
         DEGRADED_PATH_ALERT( "--scip: index covers no parsed file/line — proceeding name-based" );
-        std::fprintf( stderr, "ctxpack --scip: index '%s' matched no parsed (file,line) — proceeding name-based\n", p.c_str() );
+        std::fprintf( stderr, "ripwire --scip: index '%s' matched no parsed (file,line) — proceeding name-based\n", p.c_str() );
     }
     else if( sawOccurrences )
     {
@@ -426,7 +426,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
         // stays byte-identical and the det-gate holds.
         //
         // A4-F21 fix: the ratio used to be edgesPinned/refOccurrences — a denominator counting ALL ref
-        // occurrences (mostly external std::/library symbols the index also records but ctxpack can never
+        // occurrences (mostly external std::/library symbols the index also records but ripwire can never
         // match — not a freshness signal) against a numerator DEDUPED to unique (from,to) edges (N call-
         // sites of the same callee from one enclosing symbol → 1 edge). Both effects only ever push the pct
         // DOWN, so a perfectly fresh index still read low. Now: denominator = internalOccurrences (ref
@@ -441,7 +441,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
         // internal occurrences seen) or defs did not map. At a clean 100%/0-unmatched the hint would be misleading.
         const bool        stale = matchedOccurrencesPreDedup < internalOccurrences || ov.defsUnmatched > 0;
         std::fprintf( stderr,
-            "ctxpack: SCIP matched %d%% of occurrences (%zu/%zu), %zu defs unmatched, %zu external (unmatchable) occurrences skipped%s\n",
+            "ripwire: SCIP matched %d%% of occurrences (%zu/%zu), %zu defs unmatched, %zu external (unmatchable) occurrences skipped%s\n",
             pct, matchedOccurrencesPreDedup, internalOccurrences, ov.defsUnmatched, externalOccurrences,
             stale ? " — index may be from an older commit" : "" );
     }

@@ -8,11 +8,11 @@
 #include <limits>
 #include <vector>
 
-#if !defined( CTXPACK_FUZZ_LANGUAGE )
-#error "CTXPACK_FUZZ_LANGUAGE must name one linked tree-sitter grammar entry point"
+#if !defined( RIPWIRE_FUZZ_LANGUAGE )
+#error "RIPWIRE_FUZZ_LANGUAGE must name one linked tree-sitter grammar entry point"
 #endif
 
-extern "C" const TSLanguage* CTXPACK_FUZZ_LANGUAGE( void );
+extern "C" const TSLanguage* RIPWIRE_FUZZ_LANGUAGE( void );
 
 namespace
 {
@@ -24,7 +24,7 @@ struct ParserState
     ParserState()
     {
         parser = ts_parser_new();
-        const TSLanguage* language = CTXPACK_FUZZ_LANGUAGE();
+        const TSLanguage* language = RIPWIRE_FUZZ_LANGUAGE();
         if( parser == nullptr || language == nullptr || !ts_parser_set_language( parser, language ) )
             std::abort();
     }

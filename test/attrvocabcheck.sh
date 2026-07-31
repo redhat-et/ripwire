@@ -37,20 +37,20 @@
 #      document. serialize.h:524 had already decided this for the map family ("the REPORTED est_tokens must
 #      cover the whole payload the caller receives"); --connect is that rule applied where it had not been.
 #
-# Usage:  test/attrvocabcheck.sh              # uses build/ctxpack
-#         CTXPACK_BIN=asan/ctxpack test/attrvocabcheck.sh
+# Usage:  test/attrvocabcheck.sh              # uses build/ripwire
+#         RIPWIRE_BIN=asan/ripwire test/attrvocabcheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 echo "attrvocabcheck: BIN=$BIN"
 

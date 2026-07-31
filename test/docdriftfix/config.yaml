@@ -1,5 +1,5 @@
 ddfix:
   mode: exercise
   note: >
-    A file that EXISTS but no ctxpack grammar parses. NOTES.md anchors at config.yaml:2 so the gate can
+    A file that EXISTS but no ripwire grammar parses. NOTES.md anchors at config.yaml:2 so the gate can
     prove the verb says "not-indexed" rather than claiming the file is missing.

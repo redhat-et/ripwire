@@ -21,16 +21,16 @@
 #
 # Uses its own temp repo + a private TMPDIR (cacheDirLadder() prefers TMPDIR) so the qchurn-*.bin files
 # land in a directory we own and can inspect/clear. Needs git + perl(for nothing here, plain grep/wc).
-# Usage:  test/qchurncheck.sh   |   CTXPACK_BIN=build_w2e/ctxpack test/qchurncheck.sh
+# Usage:  test/qchurncheck.sh   |   RIPWIRE_BIN=build_w2e/ripwire test/qchurncheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
@@ -39,13 +39,13 @@ QTMP="$TMP/qtmp"; mkdir -p "$QTMP"   # our private TMPDIR — cacheDirLadder() l
 echo "qchurncheck: BIN=$BIN"
 
 # AUDIT5 Y4: shard-aware lookup — a blob may be flat under $QTMP or under $QTMP/<xx>/ (2-hex shard).
-qchurnfiles(){ find "$QTMP" -maxdepth 2 -type f -name 'ctxpack-qchurn-*.bin' 2>/dev/null; }
+qchurnfiles(){ find "$QTMP" -maxdepth 2 -type f -name 'ripwire-qchurn-*.bin' 2>/dev/null; }
 nqchurn(){ qchurnfiles | wc -l | tr -d ' '; }
 # name_only_count TRACEFILE — how many git child processes in this run's trace invoked --name-only (the
 # expensive walk gitCoChangeAndChurnCached guards). Any OTHER git call this run makes (rev-parse, HEAD
 # resolution, etc.) never contains "name-only", so this is a clean, argv-based signal — not a timing guess.
 name_only_count(){ grep -c "name-only" "$1" 2>/dev/null || true; }
-# run TRACEFILE ARGS... — invokes ctxpack against $REPO with our private TMPDIR + a fresh GIT_TRACE file.
+# run TRACEFILE ARGS... — invokes ripwire against $REPO with our private TMPDIR + a fresh GIT_TRACE file.
 run(){ local tf="$1"; shift; : > "$tf"; env TMPDIR="$QTMP" GIT_TRACE="$tf" "$BIN" "$REPO" "$@"; }
 
 mkdir -p "$REPO/src"
@@ -67,7 +67,7 @@ COLD_N="$( name_only_count "$TMP/trace_cold.log" )"
     && ok "cold --for run spawns the name-only walk ($COLD_N invocation(s))" \
     || no "cold run wrong (rc=$rcCold, name-only count=$COLD_N)"
 
-[ "$( nqchurn )" -ge 1 ] && ok "cold run writes a ctxpack-qchurn-*.bin blob" || no "no qchurn blob after cold run"
+[ "$( nqchurn )" -ge 1 ] && ok "cold run writes a ripwire-qchurn-*.bin blob" || no "no qchurn blob after cold run"
 
 run "$TMP/trace_warm.log" --for="helper" --no-cache >"$TMP/warm.out" 2>"$TMP/warm.err"; rcWarm=$?
 WARM_N="$( name_only_count "$TMP/trace_warm.log" )"

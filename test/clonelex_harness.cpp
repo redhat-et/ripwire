@@ -1,7 +1,7 @@
 // clonelex_harness.cpp — unit + mutation harness for the clone NORMALIZER's apostrophe/comment lexing
 // (src/clones.h, A4-F2 fix) and the O(1) keyword membership (A4-P3). clones.h is header-only, so this
 // calls normalizeSpan()/normalizeTokens()/cloneIsKeyword() directly and asserts the exact token stream —
-// far more precise than an end-to-end --clones diff, and independent of the ctxpack binary + main.cpp.
+// far more precise than an end-to-end --clones diff, and independent of the ripwire binary + main.cpp.
 //
 // The bug (A4-F2): ' unconditionally opened a "char literal" scanned to the next ' — so a Rust lifetime
 // ('a), a C++14 digit separator (1'000'000), or an apostrophe in a Python `#` comment (don't) swallowed

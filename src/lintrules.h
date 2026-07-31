@@ -223,7 +223,7 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
 
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
     {
-        std::fprintf( stderr, "ctxpack: lint-rules: %s:%zu: %s — file skipped\n", path.c_str(), lineNo + 1, why );
+        std::fprintf( stderr, "ripwire: lint-rules: %s:%zu: %s — file skipped\n", path.c_str(), lineNo + 1, why );
         DEGRADED_PATH_ALERT( "lint-rules: malformed rule file skipped" );
         return false;
     };
@@ -380,7 +380,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     std::error_code ec;
     if( !fs::is_directory( dir, ec ) )
     {
-        std::fprintf( stderr, "ctxpack: --lint-rules: not a directory: %s\n", dir.c_str() );
+        std::fprintf( stderr, "ripwire: --lint-rules: not a directory: %s\n", dir.c_str() );
         DEGRADED_PATH_ALERT( "lint-rules: dir missing" );
         return rules;
     }
@@ -401,7 +401,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     {
         // read the file
         std::FILE* fp = std::fopen( path.c_str(), "rb" );
-        if( fp == nullptr ) { std::fprintf( stderr, "ctxpack: --lint-rules: cannot read %s — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
+        if( fp == nullptr ) { std::fprintf( stderr, "ripwire: --lint-rules: cannot read %s — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
         std::string buf;
         {
             std::fseek( fp, 0, SEEK_END );
@@ -675,7 +675,7 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
 //    2023→2026) ──────────────────────────────────────────────────────────────────────────────────────────
 //
 // A DECLARATIVE constexpr table (house rule: tables over scattered ifs) of the deterministic error-masking
-// shapes ctxpack's --quality-delta flags as a NEW regression. Each row is one tree-sitter query that captures
+// shapes ripwire's --quality-delta flags as a NEW regression. Each row is one tree-sitter query that captures
 // the SUPPRESSING BLOCK (`@m`) — the catch body, the except handler body, or the swallowing arrow body — plus
 // an `emptyOnly` bit: when set, a hit counts ONLY if the captured block is EMPTY (its collapsed source is just
 // `{}`), so a catch that actually logs/rethrows is not a false positive. Python's `pass`/`...` handler bodies
@@ -694,7 +694,7 @@ struct ErrorMaskRule
 // The table. C-family (C/C++/ObjC), Java, TS/JS empty catches; Python bare/pass/ellipsis except handlers;
 // swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler). Go's ignored-error
 // `_ =` discard is deliberately OMITTED: distinguishing an error-typed discard from a benign `_ =` needs type
-// info ctxpack does not have, so a deterministic, low-false-positive rule is not available (documented skip).
+// info ripwire does not have, so a deterministic, low-false-positive rule is not available (documented skip).
 inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
     { "(catch_clause body: (compound_statement) @m)",                                    "empty-catch-cfamily", true  },  // C/C++/ObjC
     { "(catch_clause body: (block) @m)",                                                 "empty-catch-java",    true  },  // Java

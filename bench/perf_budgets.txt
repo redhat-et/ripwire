@@ -11,7 +11,7 @@
 #
 # updated label: cpp
 # updated corpus: historical, private corpus (not reproducible publicly) — regenerate the cpp label
-# on your own large C++ corpus with CTXPACK_PERF_CORPUS=<path> CTXPACK_PERF_LABEL=cpp bench/perfgate.sh --write-budgets
+# on your own large C++ corpus with RIPWIRE_PERF_CORPUS=<path> RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh --write-budgets
 # generated: 2026-07-06 21:56 UTC  machine: Darwin arm64
 #
 cold 255

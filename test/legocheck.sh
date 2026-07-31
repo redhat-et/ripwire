@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # legocheck.sh — inheritance / "Lego" view gate (interface → impls → factory).
 #
-#   test/legocheck.sh                        # uses build/ctxpack on test/legofix
-#   CTXPACK_BIN=asan/ctxpack test/legocheck.sh
+#   test/legocheck.sh                        # uses build/ripwire on test/legofix
+#   RIPWIRE_BIN=asan/ripwire test/legocheck.sh
 #
 # Corpus test/legofix (multi-language, IN-TREE but OUTSIDE test/fixture so the golden
 # never sees it): each language has an interface/base + >=2 concrete impls + a factory.
@@ -34,15 +34,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/legofix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "legocheck: BIN=$BIN  CORPUS=$CORPUS"
 

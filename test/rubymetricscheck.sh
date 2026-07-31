@@ -8,10 +8,10 @@
 # block_parameters / lambda_parameters for params; if/elsif/unless/while/until/for/when/rescue/conditional
 # + the trailing modifier forms for decisions; if/unless/while/until/for/case/case_match/rescue/conditional
 # for nesting).
-# Usage:  test/rubymetricscheck.sh   |   CTXPACK_BIN=asan/ctxpack test/rubymetricscheck.sh
+# Usage:  test/rubymetricscheck.sh   |   RIPWIRE_BIN=asan/ripwire test/rubymetricscheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh. Self-contained via mktemp.
 set -u
-BIN="${CTXPACK_BIN:-./build/ctxpack}"
+BIN="${RIPWIRE_BIN:-./build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

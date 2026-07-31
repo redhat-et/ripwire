@@ -205,7 +205,7 @@ inline bool isProsePath( std::string_view path )
 
 // ── the cache blob (per repo, per HEAD sha) ──────────────────────────────────────────────────────────────
 // Layout, all little-endian native (the blob never leaves this machine — the same assumption every other
-// ctxpack cache family makes):
+// ripwire cache family makes):
 //   u32 magic | u32 scheme | u8 truncated | u32 commitsWalked | u32 nameCount
 //   nameCount x { u16 nameLen, bytes | u8 fate | u16 commitLen, bytes | u16 dateLen, bytes | u16 pathLen, bytes }
 //   u64 fnv1a64 over every byte before it

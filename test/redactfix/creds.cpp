@@ -1,5 +1,5 @@
 // creds.cpp — redaction gate fixture. Every credential below is a CLEARLY FAKE, well-known EXAMPLE
-// value (AWS's own docs use AKIAIOSFODNN7EXAMPLE). ctxpack must redact each true-positive when it
+// value (AWS's own docs use AKIAIOSFODNN7EXAMPLE). ripwire must redact each true-positive when it
 // emits this file's body (--pack-top-n / --expand), and must leave the decoys at the bottom intact.
 
 #include <string>

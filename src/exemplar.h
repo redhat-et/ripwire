@@ -269,4 +269,4 @@ inline ExemplarPick selectExemplar( const IngestResult& ing, const Graph& g,
     return pick;
 }
 
-}   // namespace ctxpack
+}   // namespace ripwire

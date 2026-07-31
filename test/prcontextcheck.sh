@@ -12,14 +12,14 @@
 # non-git / clean-tree degrade paths (comment + files="0", exit 0).
 #
 # Usage:
-#   test/prcontextcheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/prcontextcheck.sh
+#   test/prcontextcheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/prcontextcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -27,7 +27,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "prcontextcheck: BIN=$BIN"
 
 # ── Build a synthetic git repo with a known call graph ──────────────────────────────────────────────

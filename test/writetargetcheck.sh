@@ -5,18 +5,18 @@
 # read, contradicting the header comment. Exits non-zero on any failure. Does NOT edit test/regression.sh.
 #
 #   test/writetargetcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/writetargetcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/writetargetcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/writetargetfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]    || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/writetargetfix dir — fixture missing"; exit 2; }
 
 echo "writetargetcheck: BIN=$BIN  CORPUS=$CORPUS"

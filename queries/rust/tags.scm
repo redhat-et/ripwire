@@ -1,4 +1,4 @@
-; ctxpack Rust tags — vendored from tree-sitter-rust v0.23.2 queries/tags.scm.
+; ripwire Rust tags — vendored from tree-sitter-rust v0.23.2 queries/tags.scm.
 ; Kept verbatim except: (1) the @reference.implementation patterns are dropped (impl blocks are
 ; not calls; they'd inflate edges without modeling call flow — SPEC §2a, calls drive edges);
 ; (2) H4 W3 adds the two `::`-path / turbofish call patterns below (upstream has neither, so

@@ -3,25 +3,25 @@
 # auto-surfaced field notes its XML sibling emits.
 #
 # The XML `--for` bundle attaches `<note d="…">…</note>` children to the `<d>` row (and `<f>` wrapper) of any
-# symbol/file that has a note in .ctxpack_notes. The JSON sibling emitted none, and carried no count either —
+# symbol/file that has a note in .ripwire_notes. The JSON sibling emitted none, and carried no count either —
 # so a consumer could not tell "this symbol has no note" from "the note was dropped on the way out". The
 # convention to mirror already exists one verb over: `--pack-task --json` reports notes/notes_kept/notes_total.
 #
 # Asserted here:
 #   (1) the note TEXT reaches the JSON row of the symbol it is attached to;
 #   (2) notes_total / notes_kept are present and agree with the XML sibling's note count;
-#   (3) the L3 INERTNESS contract holds: a tree with no .ctxpack_notes emits no notes keys at all
+#   (3) the L3 INERTNESS contract holds: a tree with no .ripwire_notes emits no notes keys at all
 #       (zero bytes, so every pre-feature byte-identity gate keeps passing);
 #   (4) `--pack-task --json`'s own notes convention is unchanged (it owns a dedicated notes section and must
 #       NOT grow inline row notes — its XML sigs carry none either);
 #   (5) determinism: two runs byte-identical.
 #
-# Usage: bash test/fornotesjsoncheck.sh [path/to/ctxpack]
+# Usage: bash test/fornotesjsoncheck.sh [path/to/ripwire]
 # Exits non-zero on any failure; DOES NOT touch regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # house convention: the suite passes the binary via CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # house convention: the suite passes the binary via RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -51,8 +51,8 @@ PY
 NOTED="$TMP/noted"; mk_tree "$NOTED"
 BARE="$TMP/bare";   mk_tree "$BARE"
 "$BIN" "$NOTED" --note-add="load_manifest_cache: $NOTE" >/dev/null 2>&1
-[ -s "$NOTED/.ctxpack_notes" ] || { no "--note-add did not write .ctxpack_notes — the gate has no input"; echo "FAILURES ABOVE"; exit 1; }
-[ -e "$BARE/.ctxpack_notes" ]  && { no "the bare tree must have NO notes file"; echo "FAILURES ABOVE"; exit 1; }
+[ -s "$NOTED/.ripwire_notes" ] || { no "--note-add did not write .ripwire_notes — the gate has no input"; echo "FAILURES ABOVE"; exit 1; }
+[ -e "$BARE/.ripwire_notes" ]  && { no "the bare tree must have NO notes file"; echo "FAILURES ABOVE"; exit 1; }
 
 "$BIN" "$NOTED" --for="$TASK" --json > "$TMP/for.json" 2>/dev/null || { no "--for --json exited non-zero"; echo "FAILURES ABOVE"; exit 1; }
 "$BIN" "$NOTED" --for="$TASK"        > "$TMP/for.xml"  2>/dev/null || { no "--for (XML) exited non-zero";  echo "FAILURES ABOVE"; exit 1; }

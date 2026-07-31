@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # canoncheck.sh — the S6-C canonical SCIP-style symbol-string gate.
 #
-#   test/canoncheck.sh                       # uses build/ctxpack on test/canonfix
-#   CTXPACK_BIN=asan/ctxpack test/canoncheck.sh
+#   test/canoncheck.sh                       # uses build/ripwire on test/canonfix
+#   RIPWIRE_BIN=asan/ripwire test/canoncheck.sh
 #
 # The fixture test/canonfix/canon.cpp has two classes A and B that BOTH define compute(); A::driver()
 # calls compute() (a bare member call). This gate asserts S6-C's contract:
@@ -14,15 +14,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/canonfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "canoncheck: BIN=$BIN  CORPUS=$CORPUS"
 
@@ -70,11 +70,11 @@ command -v xmllint >/dev/null 2>&1 && { printf '%s' "$MAP" | xmllint --noout - 2
 #    Xtra/Bravo tie on path-only locality, so the call stays honestly ambiguous — never a wrong confident pick.
 #    Delegated to test/localitycheck.sh so the full assertion set runs here too (canoncheck is run by regression).
 if [ -f "$ROOT/test/localitycheck.sh" ]; then
-    if CTXPACK_BIN="$BIN" bash "$ROOT/test/localitycheck.sh" >/dev/null 2>&1; then
+    if RIPWIRE_BIN="$BIN" bash "$ROOT/test/localitycheck.sh" >/dev/null 2>&1; then
         ok "locality tie-break is segment-aware (test/localitycheck.sh — no spurious cross-class prefix win)"
     else
         no "locality tie-break regression (test/localitycheck.sh failed — a spurious byte-prefix win)"
-        CTXPACK_BIN="$BIN" bash "$ROOT/test/localitycheck.sh" 2>&1 | grep -i fail | head -4
+        RIPWIRE_BIN="$BIN" bash "$ROOT/test/localitycheck.sh" 2>&1 | grep -i fail | head -4
     fi
 else
     no "test/localitycheck.sh missing (the HIGH-1 locality gate)"

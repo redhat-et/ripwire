@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # jslangcheck.sh — JavaScript / Bash ingest coverage gate.
 #
-# ctxpack --help now advertises JavaScript (.js/.jsx/.mjs/.cjs) and Bash (.sh/.bash/.zsh).
+# ripwire --help now advertises JavaScript (.js/.jsx/.mjs/.cjs) and Bash (.sh/.bash/.zsh).
 # This gate has one small file per language, each with two functions where one calls the
 # other, and pins assertions to what the binary ACTUALLY does — verified by running it and
 # reading the output before writing any assertion (see the findings below).
@@ -10,7 +10,7 @@
 #   a.js — addOne(), addTwo() (arrow-fn const) calls addOne(); module.exports = {...}
 #   b.sh — square(), sum_of_squares() calls square() (via $( square .. ))
 #
-# FINDINGS from running `ctxpack test/jslangfix` and inspecting the raw output:
+# FINDINGS from running `ripwire test/jslangfix` and inspecting the raw output:
 #   - a.js:  2 symbols (addOne, addTwo), t="fn" both. addOne is a function_declaration;
 #            addTwo is a `const addTwo = (x) => {..}` arrow-fn bound to a const (the
 #            lexical_declaration→variable_declarator→arrow_function tags.scm rule). The
@@ -27,14 +27,14 @@
 #
 # Usage:
 #   test/jslangcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/jslangcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/jslangcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/jslangfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -43,7 +43,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for XML assertions"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

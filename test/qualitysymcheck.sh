@@ -3,7 +3,7 @@
 # already uses, even when the tool is invoked with an ABSOLUTE root.
 #
 # THE BUG. sym= is a canonical id `path::scope::name` (resolve.h::canonicalId) whose PATH segment is
-# ing.files[fileId] AS THE CALLER SPELLED THE ROOT. `ctxpack .` embeds relative paths, but `ctxpack
+# ing.files[fileId] AS THE CALLER SPELLED THE ROOT. `ripwire .` embeds relative paths, but `ripwire
 # /abs/repo` embeds the FULL absolute path — so sym= carries a 150+ char absolute prefix while p= beside
 # it (quality::Regression::path, via relForHash) is already correctly root-relative. Two checkouts of the
 # same repo at different absolute paths then produce DIFFERENT sym= text for the identical finding, which
@@ -18,16 +18,16 @@
 # sandbox rather than touch the real repo (a clean tree has no working-tree diff to report).
 #
 # Own temp git repo, own temp build-independent BIN. Needs git.
-# Usage:  test/qualitysymcheck.sh   |   CTXPACK_BIN=build/ctxpack test/qualitysymcheck.sh
+# Usage:  test/qualitysymcheck.sh   |   RIPWIRE_BIN=build/ripwire test/qualitysymcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qualitysymcheck (git not available)"; exit 0; }
 
 # mktemp -d already returns an ABSOLUTE path — the whole point: invoke "$BIN" "$REPO" below, never

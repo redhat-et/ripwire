@@ -11,13 +11,13 @@
 #       SWAP the positive/negative labels and prove sep-auc inverts to exactly 1-auc (and lands < 0.5).
 #       A metric that cannot drop under sabotage measures nothing.
 #
-#   test/skillevalcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/skillevalcheck.sh
+#   test/skillevalcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/skillevalcheck.sh
 #
 # Exit 0 = ALL PASS, non-zero = SOME FAILED.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/skillevalfix/prompts.tsv"
 SKILLS="$ROOT/skills"
@@ -26,7 +26,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -f "$CORPUS" ] || { echo "no corpus at $CORPUS"; exit 2; }
 
 echo "skillevalcheck: BIN=$BIN  CORPUS=$CORPUS"
@@ -80,7 +80,7 @@ awk -v v="$auc" 'BEGIN{exit !(v+0 >= 0.90)}' \
 # ── 7) metric-can-fail A: deliberately WRONG labels ⇒ hit@1 collapses ─────────────────────────────────
 # every positive row is relabelled to one fixed wrong skill (rows that permit it get a different one).
 awk -F'\t' 'BEGIN{OFS="\t"} /^#/||$0==""{print;next} $2=="none"{print;next} \
-    {print $1, ($2 ~ /ctxpack-mcp/ ? "ctxpack-handoff" : "ctxpack-mcp"), $3}' "$CORPUS" >"$TMP/wrong.tsv"
+    {print $1, ($2 ~ /ripwire-mcp/ ? "ripwire-handoff" : "ripwire-mcp"), $3}' "$CORPUS" >"$TMP/wrong.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/wrong.tsv" --no-cache >"$TMP/w" 2>/dev/null
 h1w=$( awk '$1=="bm25-desc"{gsub("%","",$2); print $2}' "$TMP/w" )
 awk -v t="$h1" -v w="$h1w" 'BEGIN{exit !(w+0 < (t+0)/2.0)}' \
@@ -89,7 +89,7 @@ awk -v t="$h1" -v w="$h1w" 'BEGIN{exit !(w+0 < (t+0)/2.0)}' \
 
 # ── 8) metric-can-fail B: SWAPPED pos/neg labels ⇒ sep-auc inverts to exactly 1-auc, lands < 0.5 ──────
 awk -F'\t' 'BEGIN{OFS="\t"} /^#/||$0==""{print;next} \
-    $2=="none"{print $1,"ctxpack-orient","judged";next} {print $1,"none","neg"}' "$CORPUS" >"$TMP/swap.tsv"
+    $2=="none"{print $1,"ripwire-orient","judged";next} {print $1,"none","neg"}' "$CORPUS" >"$TMP/swap.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/swap.tsv" --no-cache >"$TMP/s" 2>/dev/null
 aucS=$( awk '$1=="bm25-desc"{print $5}' "$TMP/s" )
 awk -v t="$auc" -v s="$aucS" 'BEGIN{ d=s+0-(1.0-(t+0)); if(d<0)d=-d; exit !(d <= 0.01 && s+0 < 0.5) }' \
@@ -97,16 +97,16 @@ awk -v t="$auc" -v s="$aucS" 'BEGIN{ d=s+0-(1.0-(t+0)); if(d<0)d=-d; exit !(d <=
     || no "swapped labels gave sep-auc ${aucS} (true ${auc}) — the separation statistic is not label-driven"
 
 # ── 9) corpus integrity is enforced, not degraded around: unknown label ⇒ hard refusal ────────────────
-printf 'Some prompt\tctxpack-no-such-skill\tjudged\n' >"$TMP/bad.tsv"
+printf 'Some prompt\tripwire-no-such-skill\tjudged\n' >"$TMP/bad.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/bad.tsv" --no-cache >/dev/null 2>"$TMP/baderr"; rc_bad=$?
 { [ $rc_bad -ne 0 ] && grep -q 'unknown skill label' "$TMP/baderr"; } \
     && ok "unknown skill label refuses (rc=$rc_bad) — no silently fabricated sample" \
     || no "unknown label did not refuse (rc=$rc_bad)"
-printf 'Some prompt\tctxpack-router\tjudged\n' >"$TMP/bad2.tsv"
+printf 'Some prompt\tripwire-router\tjudged\n' >"$TMP/bad2.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/bad2.tsv" --no-cache >/dev/null 2>/dev/null; rc_r=$?
 [ $rc_r -ne 0 ] \
-    && ok "ctxpack-router as a label refuses (it is the map, not a destination)" \
-    || no "ctxpack-router accepted as a label"
+    && ok "ripwire-router as a label refuses (it is the map, not a destination)" \
+    || no "ripwire-router accepted as a label"
 
 # ── 10) a root that is not a skills directory refuses with a pointer, not a crash ────────────────────
 mkdir -p "$TMP/notskills"; printf 'int main(){return 0;}\n' >"$TMP/notskills/m.cpp"

@@ -13,7 +13,7 @@ Provide as much detail as you can:
 
 ## Scope
 
-ctxpack is a command-line indexing tool with the following security model:
+ripwire is a command-line indexing tool with the following security model:
 
 - **Input:** Arbitrary source code repositories on the local filesystem
 - **Output:** XML summaries and analysis results streamed to stdout or written to cache
@@ -32,7 +32,7 @@ This project is pre-1.0 and does not yet provide a compatibility guarantee. Secu
 
 ## Safe Practices
 
-When using ctxpack:
+When using ripwire:
 
 - Run it only on code you trust (or inspect before analyzing)
 - Use `--no-cache` or manage your cache directory if analyzing untrusted repositories in sequence

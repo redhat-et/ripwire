@@ -19,14 +19,14 @@
 # validation, so each guard answers in ~4 ms without parsing a corpus, spawning git, or walking history.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
 echo "guardmsgcheck: BIN=$BIN"
 
@@ -55,23 +55,23 @@ guard()
 }
 
 # ── the 20 guards, in source order ────────────────────────────────────────────────────────────────────
-# 1. no root at all → usage() dump (the only guard with no ctxpack: prefix)
+# 1. no root at all → usage() dump (the only guard with no ripwire: prefix)
 guard "no-root prints usage"        'ripgrep of AI context'
 
 # 2. --listen serves one fixed workspace, so it needs a root (bare --mcp does not)
 guard "--listen without a root"     'serves ONE workspace fixed at startup'  --listen=127.0.0.1:8765
 
-# 3/4. --anchor and --cochange-boost are CTXPACK_DEV-gated negative-result experiments. The unset matters:
-#      a developer running the suite with CTXPACK_DEV exported must still see this gate assert the dev refusal.
-unset CTXPACK_DEV
-guard "--anchor needs CTXPACK_DEV"            '--anchor is experimental'          "$NOROOT" --anchor
-guard "--cochange-boost needs CTXPACK_DEV"    '--cochange-boost is experimental'  "$NOROOT" --cochange-boost
+# 3/4. --anchor and --cochange-boost are RIPWIRE_DEV-gated negative-result experiments. The unset matters:
+#      a developer running the suite with RIPWIRE_DEV exported must still see this gate assert the dev refusal.
+unset RIPWIRE_DEV
+guard "--anchor needs RIPWIRE_DEV"            '--anchor is experimental'          "$NOROOT" --anchor
+guard "--cochange-boost needs RIPWIRE_DEV"    '--cochange-boost is experimental'  "$NOROOT" --cochange-boost
 
 # 5/6. …and past the dev gate, both are --for lens modifiers that must not silently no-op.
-export CTXPACK_DEV=1
+export RIPWIRE_DEV=1
 guard "--anchor alone"              '--anchor modifies --for=TASK'          "$NOROOT" --anchor
 guard "--cochange-boost alone"      '--cochange-boost modifies --for=TASK'  "$NOROOT" --cochange-boost
-unset CTXPACK_DEV
+unset RIPWIRE_DEV
 
 # 7-11. the remaining lens modifiers — each refuses alone rather than doing nothing
 guard "--no-route alone"            '--no-route modifies --for=TASK or --query=TERMS'         "$NOROOT" --no-route

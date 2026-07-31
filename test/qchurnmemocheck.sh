@@ -25,16 +25,16 @@
 #   (d) the report is byte-identical run-to-run (determinism law).
 #
 # Own temp repo. Needs git.
-# Usage:  test/qchurnmemocheck.sh   |   CTXPACK_BIN=build/ctxpack test/qchurnmemocheck.sh
+# Usage:  test/qchurnmemocheck.sh   |   RIPWIRE_BIN=build/ripwire test/qchurnmemocheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qchurnmemocheck (git not available)"; exit 0; }
 REALGIT="$( command -v git )"
 

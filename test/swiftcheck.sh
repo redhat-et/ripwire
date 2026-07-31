@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # test/swiftcheck.sh — S6-B gate: Swift mutating-keyword purity
 #
-# Verifies that ctxpack sets pure="1" on non-mutating struct methods and
+# Verifies that ripwire sets pure="1" on non-mutating struct methods and
 # does NOT set it on mutating methods.
 #
 # Usage:
 #   bash test/swiftcheck.sh
-#   CTXPACK_BIN=build/ctxpack bash test/swiftcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/swiftcheck.sh
 #
 # Exits 0 on ALL PASS, 1 on any failure.
 
 set -uo pipefail
 
-BIN="${CTXPACK_BIN:-build/ctxpack}"
+BIN="${RIPWIRE_BIN:-build/ripwire}"
 FIXTURE="test/swiftfix"
 PASS=0
 FAIL=0
@@ -20,7 +20,7 @@ FAIL=0
 pass() { echo "PASS: $1"; PASS=$(( PASS + 1 )); }
 fail() { echo "FAIL: $1"; FAIL=$(( FAIL + 1 )); }
 
-# Run ctxpack with --pack-signatures so the <sigs> block is emitted,
+# Run ripwire with --pack-signatures so the <sigs> block is emitted,
 # which is where pure="1" appears on each <d> element.
 OUTPUT="$( "$BIN" "$FIXTURE" --pack-signatures 2>&1 )"
 

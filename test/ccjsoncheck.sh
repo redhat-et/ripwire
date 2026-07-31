@@ -11,14 +11,14 @@
 #   - the :FILE form writes valid JSON to disk
 #
 # Usage:
-#   test/ccjsoncheck.sh                          # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/ccjsoncheck.sh
+#   test/ccjsoncheck.sh                          # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/ccjsoncheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -27,7 +27,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]  || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ]  || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ]  || { echo "no fixture dir at $FIX"; exit 2; }
 command -v python3 >/dev/null || { echo "python3 required for JSON validation"; exit 2; }
 echo "ccjsoncheck: BIN=$BIN"

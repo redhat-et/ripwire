@@ -14,19 +14,19 @@
 # Run against test/zoomfix (the fixture communitylabelcheck/zoomcheck already use — a corpus with enough
 # structure to produce several multi-member modules and real bridges) plus this repo for scale.
 #
-# Usage:  bash test/communitydrillcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/communitydrillcheck.sh
+# Usage:  bash test/communitydrillcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/communitydrillcheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/zoomfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "communitydrillcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 

@@ -14,7 +14,7 @@ file with the reason and count as evidence against the run, not for it.
    `src/packtask.h` since R1; the pack-task `--json` tail gained the mirroring `"hop"` key). Contract
    re-proven on this branch before any bench run: name-exact route, `--no-route`, and the plain map are
    **byte-identical to a main-built binary** (native AND ASan; `nr`/`ne`/`plain` diffs), and
-   `CTXPACK_NO_ANCHORHOP=1` on the conceptual route is byte-identical to main too (the env-ablated arm IS
+   `RIPWIRE_NO_ANCHORHOP=1` on the conceptual route is byte-identical to main too (the env-ablated arm IS
    the baseline). Gates: `test/anchorhopcheck.sh` (from the R1 archive) green.
 2. **The R1-recorded future-work cost lever, implemented: a top-m-anchor-restricted exact bound that
    re-enables MaxScore pruning under expansion.** R1 disabled pruning whenever the hop was active (the
@@ -22,7 +22,7 @@ file with the reason and count as evidence against the run, not for it.
    R1-cpp keeps pruning ON: K' = max(consumerK, m) keeps the top-m anchors provably exact, hop mass is
    computed from anchor scores + edge evidence only, and the ≤2m θ-surviving candidates are re-scored
    exactly on demand from the retained integer BM25 stats (`LexRescorer`, bit-identical floats). Gate
-   written first: `test/anchorhopprunecheck.sh` (pruned vs `CTXPACK_NO_PRUNE=1` byte-identical under a
+   written first: `test/anchorhopprunecheck.sh` (pruned vs `RIPWIRE_NO_PRUNE=1` byte-identical under a
    FIRING expansion, three consumer shapes incl. K < m; ablated-path prune-eq; mutation self-test) — wired
    into `test/regression.sh`'s absorb list.
 3. **α/θ re-calibrated on the C++ train split ONLY** (below). All other mechanics (m=10, 1-hop
@@ -43,8 +43,8 @@ file with the reason and count as evidence against the run, not for it.
 
 ## Calibration protocol (train only)
 
-`run_cppbench.py --arms for` against the SFML lock, binary = this branch's `build/ctxpack`:
-baseline arm = `CTXPACK_NO_ANCHORHOP=1`; sweep arms = `CTXPACK_ANCHORHOP_ALPHA ∈ {0.05, 0.10, 0.15, 0.20,
+`run_cppbench.py --arms for` against the SFML lock, binary = this branch's `build/ripwire`:
+baseline arm = `RIPWIRE_NO_ANCHORHOP=1`; sweep arms = `RIPWIRE_ANCHORHOP_ALPHA ∈ {0.05, 0.10, 0.15, 0.20,
 0.30, 0.40}` at θ=0.50, plus θ ∈ {0.25, 0.75} at the best α (8 candidate points, the R1 convention).
 Selection rule (decided now): maximize train strict file@10 delta; ties broken by least strict@1/MRR
 damage, then by smaller α (less reshaping). Chosen constants are baked into `graph.h anchorhopcfg` before
@@ -55,7 +55,7 @@ is verified byte-identical twice by the harness), so single-run sweep points are
 ## Acceptance gate (two-tier, A7 shape, applied to the held-out C++ run)
 
 **One shot.** After constants are baked, the held-out multiswe C++ run happens ONCE per arm
-(baseline = same binary `CTXPACK_NO_ANCHORHOP=1`, candidate = default), plus the timing protocol below.
+(baseline = same binary `RIPWIRE_NO_ANCHORHOP=1`, candidate = default), plus the timing protocol below.
 No re-runs after seeing numbers.
 
 - **Primary quality metric: strict file@10** (ALL primary gold files in the top-10 of the flat
@@ -83,7 +83,7 @@ No re-runs after seeing numbers.
 ## Python LocBench held-out — no-regression guard (quality) + cost spot-guard
 
 - **Quality guard (n=243 held-out, arm `for`, single warm run per instance — quality only, deterministic):**
-  candidate (final baked constants) vs baseline (`CTXPACK_NO_ANCHORHOP=1`), paired strict file@10 delta.
+  candidate (final baked constants) vs baseline (`RIPWIRE_NO_ANCHORHOP=1`), paired strict file@10 delta.
   **Guard fails if** mean delta < −1.0pp **or** the repo-clustered (78 clusters) bootstrap 95% CI lies
   entirely below 0 (a statistically resolved drop). "Noise-level wobble" (CI straddling 0 and mean within
   1pp of 0) holds the guard.
@@ -96,7 +96,7 @@ No re-runs after seeing numbers.
 
 1. C++ gate PASS + both Python guards HOLD → **ship always-on** (the same default-on surface R1 specified;
    SPEC retrieval addendum updated with the R1-cpp gate record + pruning-restoration contract).
-2. C++ gate PASS + Python quality guard FAILS → **opt-in flag, default off** (`CTXPACK_ANCHORHOP=1` stays
+2. C++ gate PASS + Python quality guard FAILS → **opt-in flag, default off** (`RIPWIRE_ANCHORHOP=1` stays
    an env/eval surface; no language-conditional ranking — a ranker that behaves differently per corpus
    language is rejected here as a determinism/simplicity product smell).
 3. C++ gate FAIL → **honest REJECT** (B3): revert product bytes, keep gates + archives + this record.

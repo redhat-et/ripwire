@@ -8,7 +8,7 @@
 # that commit actually touched. The harness, per instance:
 #   1. archives the SOURCE repo at the commit's PARENT (never the commit itself — no time-travel
 #      leakage: the fix the query describes must not already be visible to the localizer);
-#   2. runs ctxpack as the localizer in three arms: `--for` (shipping default, incl. the B8 mention
+#   2. runs ripwire as the localizer in three arms: `--for` (shipping default, incl. the B8 mention
 #      anchor), `--for --no-mention-boost` (ablation), `--query` (pure lexical BM25 baseline);
 #   3. parses the ranked candidates and scores strict file@1/3/5/10 (ALL gold files in top-k of one
 #      flat rank), lenient any@10, and first-hit MRR — same metric shapes as bench/locbench/run_locbench.py
@@ -53,15 +53,15 @@
 #    bench/cppbench/README.md at the pinned commit and pass that path; the frozen instance list
 #    itself does not depend on which clone you point at, since git commit SHAs are content-addressed.)
 #
-# Deterministic given (source repo's object graph at mining time, dataset.lock, ctxpack binary): no
+# Deterministic given (source repo's object graph at mining time, dataset.lock, ripwire binary): no
 # LLM, no RNG, stable instance order (frozen by dataset.lock once mined).
 import argparse, hashlib, json, pathlib, re, shutil, statistics, subprocess, sys, time
 
 HERE = pathlib.Path( __file__ ).resolve().parent
 LOCBENCH_DIR = HERE.parent / "locbench"
 
-# reuse-first: the candidate parser, file-rank scorer, subprocess wrapper (sh), and the timed ctxpack
-# runner (run_ctx — honors the same CTXPACK env var) are generic, not LocBench-specific — import rather
+# reuse-first: the candidate parser, file-rank scorer, subprocess wrapper (sh), and the timed ripwire
+# runner (run_ctx — honors the same RIPWIRE env var) are generic, not LocBench-specific — import rather
 # than re-derive, so scoring semantics stay byte-for-byte comparable across benches.
 sys.path.insert( 0, str( LOCBENCH_DIR ) )
 import run_locbench as lb   # noqa: E402  (path insert must precede this import)
@@ -212,7 +212,7 @@ def load_or_mine_lock( a ):
         raise SystemExit( "zero eligible instances mined — refusing to write an empty dataset.lock "
                           "(zero-fabrication contract)" )
     chash = content_hash( instances )
-    lock = dict( schema="ctxpack-cppbench-dataset-lock-v1", source_repo=str( pathlib.Path( source_repo ).resolve() ),
+    lock = dict( schema="ripwire-cppbench-dataset-lock-v1", source_repo=str( pathlib.Path( source_repo ).resolve() ),
                 branch_scope=a.branch_scope, gold_extensions=list( GOLD_EXTS ), cap=a.cap,
                 mining_stats=stats, selected_count=len( instances ), content_sha256=chash,
                 generated_unix=int( time.time() ), instances=instances )
@@ -234,7 +234,7 @@ class ArchiveCache:
     def _save_order( self ):
         self.order_path.write_text( json.dumps( self.order ) )
 
-    COMPLETE_MARKER = ".ctxpack_extract_complete"
+    COMPLETE_MARKER = ".ripwire_extract_complete"
 
     def extract( self, sha ):
         dst = self.dir / sha
@@ -268,7 +268,7 @@ class ArchiveCache:
             self.order.pop( s, None )
         self._save_order()
 
-# ── ctxpack invocation (run_ctx = lb.run_ctx, imported above) ───────────────
+# ── ripwire invocation (run_ctx = lb.run_ctx, imported above) ───────────────
 ARMS = ( "for", "for-no-mention", "query" )
 def arm_flags( arm, query, top_k ):
     if arm == "for":           return [ f"--for={query}", f"--top-k={top_k}" ]
@@ -332,7 +332,7 @@ def main():
         # keyed by PARENT sha (the tree actually indexed), not instance sha — sibling instances across
         # branches that share a parent (common in a multi-session repo) then reuse the same index instead
         # of rebuilding it, and scratch disk use is bounded by unique parents, not instance count.
-        rich_cache = index_dir / f"{parent}.rich.ctxpackcache"
+        rich_cache = index_dir / f"{parent}.rich.ripwirecache"
         if not rich_cache.exists():
             base = index_dir / parent
             _, _, irc = run_ctx( repo_path, [ f"--index-out={base}", "--top-k=1", "--no-cache" ] )

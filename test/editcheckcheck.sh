@@ -9,21 +9,21 @@
 #                                                incompatible caller flagged
 #   (c) brand-new symbol                     -> status="new-symbol"
 #   (d) unknown SYM                          -> refuses loudly (nonzero exit, stderr message)
-#   determinism x3, clean-tree -> "unchanged", and a WARM-TIME assertion (<= 100 ms on ctxpack's own src/,
+#   determinism x3, clean-tree -> "unchanged", and a WARM-TIME assertion (<= 100 ms on ripwire's own src/,
 #   after the qheadsnap/qsnap HEAD-snapshot cache is primed).
 #
 # Operates on a private temp git repo (never touches the real repo). Needs git.
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/editcheckcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/editcheckcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # BOTH seams: `bash test/editcheckcheck.sh asan/ctxpack` and CTXPACK_BIN=
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: `bash test/editcheckcheck.sh asan/ripwire` and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 WORK="$( mktemp -d )"; SHRINK="$( mktemp -d )"; trap 'rm -rf "$WORK" "$SHRINK"' EXIT
@@ -313,7 +313,7 @@ if [ -d "$ROOT/src" ] && [ -e "$ROOT/.git" ]; then
         fi
     fi
 else
-    printf '  SKIP  (g) clean-tree pin (not running inside the ctxpack repo checkout)\n'
+    printf '  SKIP  (g) clean-tree pin (not running inside the ripwire repo checkout)\n'
 fi
 
 # change= is defined in the legend and is emitted ONLY where it means something.
@@ -403,10 +403,10 @@ else
 fi
 rm -rf "$PYFIX"
 
-# ── WARM-TIME budget: <= 100 ms on ctxpack's OWN src/, after the qheadsnap/qsnap cache is primed ────────
+# ── WARM-TIME budget: <= 100 ms on ripwire's OWN src/, after the qheadsnap/qsnap cache is primed ────────
 # The 100 ms figure is a PLAIN-build budget. A sanitizer build runs this same path at 120-130 ms on the same
 # machine — measured on the pre-change BASE asan binary too, so it is the instrumentation, not a regression —
-# which made the whole gate permanently red under CTXPACK_BIN=asan/ctxpack and hid every real arm behind
+# which made the whole gate permanently red under RIPWIRE_BIN=asan/ripwire and hid every real arm behind
 # expected noise. Detected by ASKING THE BINARY (ASan prints its own flag help on any ASan-linked program)
 # rather than by matching "asan" in the path, which a differently-named build directory defeats silently.
 # This is a SKIP, not a FAIL: unlike a degrade-path assertion (trap #3), a perf budget on an instrumented
@@ -423,13 +423,13 @@ elif [ -d "$ROOT/src" ] && [ -e "$ROOT/.git" ]; then   # .git is a FILE (gitlink
     END_NS=$( date +%s%N 2>/dev/null || echo 0 )
     if [ "$START_NS" != "0" ] && [ "$END_NS" != "0" ]; then
         MS=$(( (END_NS - START_NS) / 1000000 ))
-        [ "$MS" -le 100 ] && ok "warm --edit-check on ctxpack's own src/ <= 100 ms (${MS} ms)" \
+        [ "$MS" -le 100 ] && ok "warm --edit-check on ripwire's own src/ <= 100 ms (${MS} ms)" \
                            || no "warm --edit-check exceeded the 100 ms budget (${MS} ms)"
     else
         printf '  SKIP  warm-time budget (no nanosecond-resolution date on this platform)\n'
     fi
 else
-    printf '  SKIP  warm-time budget (not running inside the ctxpack repo checkout)\n'
+    printf '  SKIP  warm-time budget (not running inside the ripwire repo checkout)\n'
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

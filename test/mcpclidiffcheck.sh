@@ -9,8 +9,8 @@
 # divergence is caught by arithmetic instead of by a human reading two outputs side by side.
 #
 # THE THREE SURFACES it compares, per verb:
-#   CLI    — `ctxpack <dir> --<flag>=…`
-#   LIVE   — a JSON-RPC tools/call piped into `ctxpack --mcp` on stdin  (what a real MCP client speaks to)
+#   CLI    — `ripwire <dir> --<flag>=…`
+#   LIVE   — a JSON-RPC tools/call piped into `ripwire --mcp` on stdin  (what a real MCP client speaks to)
 #   BATCH  — the same question inside the `batch` verb's sub-query chain (the SECOND dispatch)
 #
 # WHAT IT COMPARES (three lenses, each catching a different half of the class):
@@ -30,15 +30,15 @@
 # fail for reasons that are not bugs.
 #
 # Usage:
-#   test/mcpclidiffcheck.sh                                    # uses build/ctxpack
-#   test/mcpclidiffcheck.sh /path/to/other/ctxpack             # positional binary
-#   CTXPACK_BIN=build_base/ctxpack test/mcpclidiffcheck.sh     # env binary (the RED run)
+#   test/mcpclidiffcheck.sh                                    # uses build/ripwire
+#   test/mcpclidiffcheck.sh /path/to/other/ripwire             # positional binary
+#   RIPWIRE_BIN=build_base/ripwire test/mcpclidiffcheck.sh     # env binary (the RED run)
 #
 # Exits non-zero on any divergence. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -46,7 +46,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcpclidiffcheck: BIN=$BIN  CORPUS=$ROOT"
@@ -170,7 +170,7 @@ echo
 echo "=== LENS 2 — JSON key SET: CLI --json vs MCP ==="
 
 # W2FIX (2026-07-29): probe a DETERMINISTIC sandbox, not $ROOT. Probing the live repo made this arm
-# environment-dependent: a user-stamped ./.ctxpack_quality_baseline sidecar in the repo root fed the
+# environment-dependent: a user-stamped ./.ripwire_quality_baseline sidecar in the repo root fed the
 # two arms DIFFERENT baselines (the CLI trusted a sidecar the MCP arm judged stale and ignored). That
 # underlying divergence is now FIXED — R3 owner ruling 2026-07-29 revoked the CLI's reachable-ancestor
 # carve-out and both arms route through the one quality::selectBaseline seam, with the CLI/MCP agreement

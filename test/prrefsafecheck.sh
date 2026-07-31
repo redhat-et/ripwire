@@ -8,7 +8,7 @@
 # git as its own argv entry — and `git diff` honors `--output=FILE`, which TRUNCATES and rewrites FILE.
 # A ref beginning with `-` fails `merge-base` first, which is exactly what routed it into that fallback:
 #
-#   ctxpack repo "--pr-context=--output=/path/victim.txt"     # exit 0, victim.txt clobbered with "1\t1\ta.c"
+#   ripwire repo "--pr-context=--output=/path/victim.txt"     # exit 0, victim.txt clobbered with "1\t1\ta.c"
 #
 # The fix resolves the ref through `rev-parse --verify ...^{commit}` FIRST and diffs the resulting 40-hex
 # sha (a sha can never begin with `-`), with a trailing `--` so no later token can be read as an option.
@@ -31,14 +31,14 @@
 #   - determinism + xmllint-clean on the success path
 #
 # Usage:
-#   test/prrefsafecheck.sh                            # uses build/ctxpack
-#   CTXPACK_BIN=asan/ctxpack test/prrefsafecheck.sh
+#   test/prrefsafecheck.sh                            # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/prrefsafecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -46,7 +46,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "prrefsafecheck: BIN=$BIN"
 
 # ── fixture: an ordinary two-commit repo plus a second root for the multi-root form ───────────────────

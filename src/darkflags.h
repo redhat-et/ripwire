@@ -413,7 +413,7 @@ inline void forEachCodeByte( std::string_view line, const LineSyntax& syn, bool&
 //      that closed one literal and into the one that opened the next;
 //   3. the harvested name must be identifier-shaped.
 // `isInBlockComment` is threaded through from the file scan. Deliberately still permissive about WHICH call
-// it is: `std::getenv( "CTXPACK_NO_MENTION" )`, `os.getenv("X")` and `os.environ["X"]` all match.
+// it is: `std::getenv( "RIPWIRE_NO_MENTION" )`, `os.getenv("X")` and `os.environ["X"]` all match.
 inline constexpr std::string_view kEnvProbeTable[] = { "getenv", "environ.get", "environ[" };
 
 // The environment-variable name a `probe` occurrence at `at` reads, or "" when this occurrence is not a call
@@ -822,7 +822,7 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     std::vector<char> esc;
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
 
-    std::fprintf( out, "<!-- ctxpack flags: what is BUILT but DARK here. Three gate patterns in one report: ifndef/define "
+    std::fprintf( out, "<!-- ripwire flags: what is BUILT but DARK here. Three gate patterns in one report: ifndef/define "
                        "header gates (kind=\"compile\"), CMake option() switches (kind=\"cmake\"), and getenv reads "
                        "(kind=\"env\", default unset). dark=\"1\" means the default keeps the guarded code out of the build; "
                        "regions/loc size what it turns off. When one name is BOTH a header gate and a CMake option the CMake "

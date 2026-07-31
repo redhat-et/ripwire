@@ -2,7 +2,7 @@
 # abicheck.sh — the gate for `--stray-content --abi`, the cross-branch ABI-BREAK check (src/abicheck.h).
 #
 #   test/abicheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/abicheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/abicheck.sh
 #
 # The fixture is BUILT here, not committed (same reasoning as crossrefcheck.sh): the verb reads git refs,
 # so the corpus has to be a real repository with a real ref graph. Fixed author/committer dates keep it
@@ -36,19 +36,19 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "abicheck: git unavailable — skipping"; exit 0; }
 
 R="$TMP/repo"; mkdir -p "$R"
-export GIT_AUTHOR_NAME=ctxpack GIT_AUTHOR_EMAIL=ctxpack@example.invalid
-export GIT_COMMITTER_NAME=ctxpack GIT_COMMITTER_EMAIL=ctxpack@example.invalid
+export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid
+export GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
 export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
 g(){ git -C "$R" "$@" >/dev/null 2>&1; }
 

@@ -5,8 +5,8 @@
 # request for the whole ranked map, and expressed that refusal ONCE in kViewFlags' needs=/example= columns.
 # Nine of the then-33 rows were left with needs=nullptr, so the refusal they inherit was "none":
 #
-#     ctxpack test/fixture --since=        →  exit 0, the default 6000-symbol map, stderr EMPTY   (before)
-#     ctxpack test/fixture --since=zzqq9   →  a loud refusal                                      (one keystroke apart)
+#     ripwire test/fixture --since=        →  exit 0, the default 6000-symbol map, stderr EMPTY   (before)
+#     ripwire test/fixture --since=zzqq9   →  a loud refusal                                      (one keystroke apart)
 #
 # The audit's sharpest case is the question-shaped `--eval-*=` / `--since=`: an agent whose $FILE is unset
 # gets an atlas where it asked a question, at exit 0, with nothing on stderr to read. OWNER RULING
@@ -18,20 +18,20 @@
 # stderr before any serializer is chosen, and that has to stay true), and that a NON-empty value for the
 # same flag is untouched (a flag-triggered refusal would be a far worse bug than the one being fixed).
 #
-#   bash test/emptyvaluerefusecheck.sh                                     # build/ctxpack
-#   bash test/emptyvaluerefusecheck.sh build_base/ctxpack                  # must FAIL (pre-fix binary)
-#   CTXPACK_BIN=asan/ctxpack bash test/emptyvaluerefusecheck.sh
+#   bash test/emptyvaluerefusecheck.sh                                     # build/ripwire
+#   bash test/emptyvaluerefusecheck.sh build_base/ripwire                  # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=asan/ripwire bash test/emptyvaluerefusecheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
 [ -d test/fixture ] || { echo "no test/fixture corpus — this gate cannot run"; exit 2; }
 echo "emptyvaluerefusecheck: BIN=$BIN"
@@ -124,7 +124,7 @@ PY
 
     # A WRITE-PRONE row is probed against a THROWAWAY git corpus, never test/fixture — trap #14: a gate whose
     # own vectors write into the tree under test is a liability, and this sweep found that out by leaving a
-    # .ctxpack_quality_acks behind on its first run (`--quality-ack=` is EmptyValue::Meaningful, so the sweep
+    # .ripwire_quality_acks behind on its first run (`--quality-ack=` is EmptyValue::Meaningful, so the sweep
     # runs it, and running it is what writes the acks file). The copy is git-initialised because several
     # Meaningful rows need a repo — probing them in a bare directory would make them exit 1 for a reason that
     # has nothing to do with the empty value, which is a gate passing (or failing) for the wrong reason.

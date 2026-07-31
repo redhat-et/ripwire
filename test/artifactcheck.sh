@@ -23,22 +23,22 @@
 #       catches it first → same self-heal (both foreign-arch shapes degrade cleanly).
 #   (c) DRIFT-PROPORTIONAL reparse: build the artifact over F files, modify EXACTLY 2, restore. Assert
 #       (1) output equals a cold parse of the mutated tree AND (2) ONLY the 2 changed files re-parsed —
-#       an executable parse-count fact via the CTXPACK_CACHE_STATS observable (reparsed=2), so
+#       an executable parse-count fact via the RIPWIRE_CACHE_STATS observable (reparsed=2), so
 #       "restore cost is proportional to drift, not tree size" is proven, not just asserted in prose.
 #   (d) DETERMINISM: warm == cold at the same path (the v8 blob did not regress cache transparency).
 #   (e) MUTATION/liveness — prove the byte-identical comparisons above are live, not vacuously true.
 #
 # Usage:
 #   bash test/artifactcheck.sh
-#   CTXPACK_BIN=build_ia3/ctxpack bash test/artifactcheck.sh
+#   RIPWIRE_BIN=build_ia3/ripwire bash test/artifactcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
@@ -46,7 +46,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 note(){ printf '  NOTE  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "artifactcheck: BIN=$BIN  TMP=$TMP"
 
@@ -63,7 +63,7 @@ mkdir -p "$( dirname "$PATH_A" )" "$( dirname "$PATH_B" )"
 cp -R "$FIXTURE" "$PATH_A"
 cp -R "$FIXTURE" "$PATH_B"
 
-BLOB="$TMP/repo.ctxpackcache"
+BLOB="$TMP/repo.ripwirecache"
 "$BIN" "$PATH_A" --cache="$BLOB" --no-stable >"$TMP/a_build.xml" 2>"$TMP/a_build.err"
 rc_a=$?
 if [ "$rc_a" -eq 0 ] && [ -s "$BLOB" ]; then
@@ -165,7 +165,7 @@ fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # (c) DRIFT-PROPORTIONAL reparse — modify EXACTLY 2 of F files, restore; assert only those 2 re-parse
-#     (CTXPACK_CACHE_STATS observable) AND the output equals a cold parse of the mutated tree.
+#     (RIPWIRE_CACHE_STATS observable) AND the output equals a cold parse of the mutated tree.
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 DRIFT="$TMP/drift/repo"
 mkdir -p "$( dirname "$DRIFT" )"
@@ -177,7 +177,7 @@ DCACHE="$TMP/drift.cache"
 "$BIN" "$DRIFT" --cache="$DCACHE" --no-stable >/dev/null 2>/dev/null
 
 # SANITY: a fully warm re-run (zero changes) re-parses NOTHING (proves the observable isn't always-nonzero)
-STATS0="$( CTXPACK_CACHE_STATS=1 "$BIN" "$DRIFT" --cache="$DCACHE" --no-stable 2>&1 >/dev/null | grep 'cache-stats' )"
+STATS0="$( RIPWIRE_CACHE_STATS=1 "$BIN" "$DRIFT" --cache="$DCACHE" --no-stable 2>&1 >/dev/null | grep 'cache-stats' )"
 if echo "$STATS0" | grep -q 'reparsed=0 '; then
     ok "(c) zero-change warm run re-parses 0 files ($STATS0) — observable is live, not always-nonzero"
 else
@@ -191,7 +191,7 @@ printf '\ndef drift_added_two():\n    return 222\n'      >> "$DRIFT/app.py"
 
 # use a SEPARATE cache copy for the observable run so this measurement doesn't mutate the base artifact
 cp "$DCACHE" "$TMP/drift_probe.cache"
-STATS2="$( CTXPACK_CACHE_STATS=1 "$BIN" "$DRIFT" --cache="$TMP/drift_probe.cache" --no-stable 2>&1 >/dev/null | grep 'cache-stats' )"
+STATS2="$( RIPWIRE_CACHE_STATS=1 "$BIN" "$DRIFT" --cache="$TMP/drift_probe.cache" --no-stable 2>&1 >/dev/null | grep 'cache-stats' )"
 if echo "$STATS2" | grep -q 'reparsed=2 '; then
     ok "(c) DRIFT-PROPORTIONAL: modified 2 of $NFILES files → exactly 2 re-parsed ($STATS2) — restore cost tracks drift, not tree size"
 else

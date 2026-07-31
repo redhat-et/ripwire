@@ -23,8 +23,8 @@
 #  10  limit="0"   the sentinel is defined in-band and the INPUT flag still refuses 0.
 #  11  tree        the files identity reads true on a PAGED run.
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/w3fixlegendcheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/w3fixlegendcheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/w3fixlegendcheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/w3fixlegendcheck.sh   # must FAIL (pre-fix binary)
 #
 # NOTE arm 6 observes a DEGRADED_PATH_ALERT, which -DNDEBUG compiles out. It runs only when the binary can
 # emit one (probed, not assumed) and says so loudly when it skips, so a Release build cannot make it pass for
@@ -32,7 +32,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -40,7 +40,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the JSON + sweep arms"; exit 2; }
 echo "w3fixlegendcheck: BIN=$BIN  ROOT=$ROOT"
 

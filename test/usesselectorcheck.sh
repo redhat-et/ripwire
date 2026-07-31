@@ -16,21 +16,21 @@
 # suggests against the NAME half only.
 #
 # Run against this repo's own source tree (self-hosting) — the concrete symbols below (buildGraph,
-# NoteIndex::empty / ScipOverlay::empty as the overloaded-name pair) are real ctxpack symbols, not a fixture.
+# NoteIndex::empty / ScipOverlay::empty as the overloaded-name pair) are real ripwire symbols, not a fixture.
 #
-#   test/usesselectorcheck.sh                      # uses build/ctxpack on the repo root
-#   CTXPACK_BIN=build_base/ctxpack test/usesselectorcheck.sh   # must FAIL — the pre-fix binary (RED proof)
+#   test/usesselectorcheck.sh                      # uses build/ripwire on the repo root
+#   RIPWIRE_BIN=build_base/ripwire test/usesselectorcheck.sh   # must FAIL — the pre-fix binary (RED proof)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "usesselectorcheck: BIN=$BIN  ROOT=$ROOT"
 
 uses_elem(){ "$BIN" "$ROOT" --uses="$1" --no-cache 2>/dev/null | grep -o '<uses[^>]*>'; }

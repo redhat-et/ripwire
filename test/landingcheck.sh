@@ -13,19 +13,19 @@
 #           the kMaxPlanScout=12 cost bound: the 12 largest are scouted, the smallest is counted (bounded=1,
 #           scouted="0") and named, never silently dropped.
 #
-# Usage:  test/landingcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/landingcheck.sh
+# Usage:  test/landingcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/landingcheck.sh
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "landingcheck: git unavailable — skipping"; exit 0; }
 echo "landingcheck: BIN=$BIN"
 
@@ -33,8 +33,8 @@ echo "landingcheck: BIN=$BIN"
 # REPO — verdict + conflict fixture (crossrefcheck.sh's construction, plus a 2nd unmerged branch)
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 R="$TMP/repo"; mkdir -p "$R"
-export GIT_AUTHOR_NAME=ctxpack GIT_AUTHOR_EMAIL=ctxpack@example.invalid
-export GIT_COMMITTER_NAME=ctxpack GIT_COMMITTER_EMAIL=ctxpack@example.invalid
+export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid
+export GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
 export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
 g(){ git -C "$R" "$@" >/dev/null 2>&1; }
 
@@ -176,7 +176,7 @@ mkdir -p "$TMP/plain"; printf 'int main(){return 0;}\n' > "$TMP/plain/m.cpp"
 [ "$rc" -eq 1 ] && ok "--stray-content --plan on a non-git root refuses loudly (exit 1)" || no "non-git root did not exit 1 (rc=$rc)"
 
 # a SECOND, genuinely different repo — two identical paths dedup to one root (a pre-existing, unrelated
-# ctxpack behavior), so the multi-root refusal needs two distinct directories to actually exercise it.
+# ripwire behavior), so the multi-root refusal needs two distinct directories to actually exercise it.
 R3="$TMP/repo3"; mkdir -p "$R3"
 git -C "$R3" init -q -b main
 git -C "$R3" config commit.gpgsign false

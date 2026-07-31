@@ -9,11 +9,9 @@ tsan*/
 # incremental index caches (--cache=PATH)
 *.cache
 *.cache.tmp
-.ctxpack-cache
 .ripwire-cache
 
 # generated sidecars (--arch --baseline / --quality-baseline / --note-add in the CWD)
-.ctxpack_*
 .ripwire_*
 *.pptx.inspect.ndjson
 

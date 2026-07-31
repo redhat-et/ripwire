@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # jsonlangcheck.sh — JSON config-key ingest coverage gate.
 #
-# ctxpack --help now advertises JSON (.json) as a DATA language: object keys become
+# ripwire --help now advertises JSON (.json) as a DATA language: object keys become
 # searchable symbols (t="sec") so package.json / tsconfig.json config is findable by
 # --for / --grep with its enclosing key — but JSON emits NO call edges and a JSON key
 # NEVER resolves a same-spelled code symbol (lang-incompatible with everything).
@@ -13,7 +13,7 @@
 #                  + second-level keys (build,test / react,lodash / typescript)
 #   tsconfig.json — compilerOptions{target,module,strict} + include/exclude (array values)
 #
-# FINDINGS from running `ctxpack test/jsonfix` and inspecting the raw output:
+# FINDINGS from running `ripwire test/jsonfix` and inspecting the raw output:
 #   - Every captured key is t="sec" (SymKind::Section — same kind as a markdown heading).
 #   - TOP-LEVEL keys AND SECOND-LEVEL keys (keys inside a top-level object value) are
 #     indexed; ARRAY values are not descended (include/exclude yield no child symbols).
@@ -26,14 +26,14 @@
 #
 # Usage:
 #   test/jsonlangcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/jsonlangcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/jsonlangcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/jsonfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -42,7 +42,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for XML assertions"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 

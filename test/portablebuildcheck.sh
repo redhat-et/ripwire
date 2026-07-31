@@ -11,13 +11,13 @@
 # Checks:
 #   1) default (no flags) configure on THIS machine: if this machine really is Apple Silicon, the auto
 #      -mcpu=apple-m1 branch must fire (proves auto-detect still gives Apple-Silicon devs today's behavior).
-#   2) default configure + CTXPACK_PRETEND_LINUX=ON (the test-only hook): must emit -O2 -ffast-math
+#   2) default configure + RIPWIRE_PRETEND_LINUX=ON (the test-only hook): must emit -O2 -ffast-math
 #      -fno-finite-math-only and NOTHING Apple/host-specific (-mcpu=apple-m1 absent, -march=native absent).
 #      This is the provable half of "Linux/x86-64/aarch64 must configure cleanly with no Apple flags" —
 #      see the NOTE at the bottom for what this machine cannot prove.
-#   3) CTXPACK_NATIVE=ON: must emit -march=native (opt-in, unaffected by CTXPACK_PRETEND_LINUX).
+#   3) RIPWIRE_NATIVE=ON: must emit -march=native (opt-in, unaffected by RIPWIRE_PRETEND_LINUX).
 #   4) the real top-level CMakeLists.txt no longer hardcodes -mcpu=apple-m1 unconditionally (it must be
-#      confined to the CTXPACK_IS_APPLE_SILICON branch inside cmake/PortableFlags.cmake).
+#      confined to the RIPWIRE_IS_APPLE_SILICON branch inside cmake/PortableFlags.cmake).
 #   5) the real top-level CMakeLists.txt still routes through cmake/PortableFlags.cmake (didn't drift back
 #      to an inline literal).
 #
@@ -49,8 +49,8 @@ include("$MODULE")
 EOF
 }
 
-# Configure the probe with the given extra -D args; echoes the CTXPACK_ARCH_FLAGS line (without the
-# 'CTXPACK_ARCH_FLAGS:' prefix), or nothing if the configure failed outright.
+# Configure the probe with the given extra -D args; echoes the RIPWIRE_ARCH_FLAGS line (without the
+# 'RIPWIRE_ARCH_FLAGS:' prefix), or nothing if the configure failed outright.
 run_probe(){
     local dir="$1"; shift
     mk_probe "$dir"
@@ -59,10 +59,10 @@ run_probe(){
         printf 'CONFIGURE_FAILED\n'
         return
     fi
-    grep -o 'CTXPACK_ARCH_FLAGS:.*' "$log" | tail -1 | sed 's/^CTXPACK_ARCH_FLAGS://'
+    grep -o 'RIPWIRE_ARCH_FLAGS:.*' "$log" | tail -1 | sed 's/^RIPWIRE_ARCH_FLAGS://'
 }
 
-echo "portablebuildcheck: BIN=n/a (CMake-configure-level gate, no ctxpack binary needed)"
+echo "portablebuildcheck: BIN=n/a (CMake-configure-level gate, no ripwire binary needed)"
 
 # ── #1: default configure on THIS machine — Apple Silicon devs keep today's behavior ───────────────────
 hostFlags="$( run_probe "$TMP/host" )"
@@ -78,32 +78,32 @@ else
     printf '  SKIP  %s\n' "$skip_note"
 fi
 
-# ── #2: CTXPACK_PRETEND_LINUX=ON — the provable portable-path check ────────────────────────────────────
-linuxFlags="$( run_probe "$TMP/linux" -DCTXPACK_PRETEND_LINUX=ON )"
+# ── #2: RIPWIRE_PRETEND_LINUX=ON — the provable portable-path check ────────────────────────────────────
+linuxFlags="$( run_probe "$TMP/linux" -DRIPWIRE_PRETEND_LINUX=ON )"
 if [ "$linuxFlags" = "CONFIGURE_FAILED" ]; then
-    no "CTXPACK_PRETEND_LINUX=ON configure failed outright: $(tail -5 "$TMP/linux/configure.log" 2>/dev/null)"
+    no "RIPWIRE_PRETEND_LINUX=ON configure failed outright: $(tail -5 "$TMP/linux/configure.log" 2>/dev/null)"
 elif printf '%s' "$linuxFlags" | grep -q -- '-mcpu=apple-m1'; then
-    no "CTXPACK_PRETEND_LINUX=ON still emits -mcpu=apple-m1: '$linuxFlags'"
+    no "RIPWIRE_PRETEND_LINUX=ON still emits -mcpu=apple-m1: '$linuxFlags'"
 elif printf '%s' "$linuxFlags" | grep -q -- '-march=native'; then
-    no "CTXPACK_PRETEND_LINUX=ON still emits -march=native: '$linuxFlags'"
+    no "RIPWIRE_PRETEND_LINUX=ON still emits -march=native: '$linuxFlags'"
 elif printf '%s' "$linuxFlags" | grep -q -- '-O2' && printf '%s' "$linuxFlags" | grep -q -- '-ffast-math' \
      && printf '%s' "$linuxFlags" | grep -q -- '-fno-finite-math-only'; then
-    ok "CTXPACK_PRETEND_LINUX=ON configures clean with NO Apple/host-specific flag: '$linuxFlags'"
+    ok "RIPWIRE_PRETEND_LINUX=ON configures clean with NO Apple/host-specific flag: '$linuxFlags'"
 else
-    no "CTXPACK_PRETEND_LINUX=ON flags missing expected portable baseline: '$linuxFlags'"
+    no "RIPWIRE_PRETEND_LINUX=ON flags missing expected portable baseline: '$linuxFlags'"
 fi
 
-# ── #3: CTXPACK_NATIVE=ON stays opt-in and unaffected by the pretend-Linux hook ─────────────────────────
-nativeFlags="$( run_probe "$TMP/native" -DCTXPACK_NATIVE=ON -DCTXPACK_PRETEND_LINUX=ON )"
+# ── #3: RIPWIRE_NATIVE=ON stays opt-in and unaffected by the pretend-Linux hook ─────────────────────────
+nativeFlags="$( run_probe "$TMP/native" -DRIPWIRE_NATIVE=ON -DRIPWIRE_PRETEND_LINUX=ON )"
 if printf '%s' "$nativeFlags" | grep -q -- '-march=native'; then
-    ok "CTXPACK_NATIVE=ON emits -march=native regardless of CTXPACK_PRETEND_LINUX: '$nativeFlags'"
+    ok "RIPWIRE_NATIVE=ON emits -march=native regardless of RIPWIRE_PRETEND_LINUX: '$nativeFlags'"
 else
-    no "CTXPACK_NATIVE=ON did not emit -march=native: '$nativeFlags'"
+    no "RIPWIRE_NATIVE=ON did not emit -march=native: '$nativeFlags'"
 fi
 if printf '%s' "$nativeFlags" | grep -q -- '-mcpu=apple-m1'; then
-    no "CTXPACK_NATIVE=ON unexpectedly also emits -mcpu=apple-m1: '$nativeFlags'"
+    no "RIPWIRE_NATIVE=ON unexpectedly also emits -mcpu=apple-m1: '$nativeFlags'"
 else
-    ok "CTXPACK_NATIVE=ON does not also emit -mcpu=apple-m1"
+    ok "RIPWIRE_NATIVE=ON does not also emit -mcpu=apple-m1"
 fi
 
 # ── #4/#5: the REAL top-level CMakeLists.txt routes through the module, no reintroduced literal ─────────
@@ -112,15 +112,15 @@ if grep -Eq '^\s*add_compile_options\(-O2 -mcpu=apple-m1' "$CMAKE_TOP"; then
 else
     ok "CMakeLists.txt no longer hardcodes -mcpu=apple-m1 unconditionally"
 fi
-if grep -q 'include(cmake/PortableFlags.cmake)' "$CMAKE_TOP" && grep -q 'add_compile_options(\${CTXPACK_ARCH_FLAGS})' "$CMAKE_TOP"; then
+if grep -q 'include(cmake/PortableFlags.cmake)' "$CMAKE_TOP" && grep -q 'add_compile_options(\${RIPWIRE_ARCH_FLAGS})' "$CMAKE_TOP"; then
     ok "CMakeLists.txt routes the optimization profile through cmake/PortableFlags.cmake"
 else
     no "CMakeLists.txt does not route through cmake/PortableFlags.cmake"
 fi
 
 # NOTE (what this gate can prove vs what only Linux CI can prove): this machine is Apple-Silicon macOS, so
-# it can prove the FLAG-SELECTION LOGIC never emits an Apple-specific flag once CTXPACK_IS_APPLE_SILICON is
-# false (checks #2/#3 above, via the CTXPACK_PRETEND_LINUX hook), and that the real CMakeLists.txt wires
+# it can prove the FLAG-SELECTION LOGIC never emits an Apple-specific flag once RIPWIRE_IS_APPLE_SILICON is
+# false (checks #2/#3 above, via the RIPWIRE_PRETEND_LINUX hook), and that the real CMakeLists.txt wires
 # that logic in (checks #4/#5). It CANNOT prove that clang/gcc on actual Linux/x86-64 hardware accepts the
 # resulting flags and links a working binary, nor exercise CMAKE_SYSTEM_PROCESSOR values this host never
 # reports (e.g. "x86_64"). That end-to-end proof is exactly what .github/workflows/ci.yml's ubuntu-24.04

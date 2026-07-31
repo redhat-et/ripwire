@@ -22,13 +22,13 @@
 # EVERY expected count below is a LITERAL, read by hand off test/rustqualfix/src/*.rs (plan §7 trap 1: a
 # gate that derives its expected number the way the code does cannot catch the derivation).
 #
-# RED-FIRST (measured 2026-07-31, plain build, pre-lane binary kept as build/ctxpack_base):
+# RED-FIRST (measured 2026-07-31, plain build, pre-lane binary kept as build/ripwire_base):
 #   fixture header       edges=2  ambiguous=0                (now 14 / 1)
 #   --uses    0 for new, helper, tool, deepfn, generic, area, gadget_free, run   (now 4/2/1/1/1/1/1/1)
 #   --callers 0 for new, helper, tool, deepfn, generic, area, gadget_free, run   (now 2/2/1/1/1/1/1/1)
 #   --callees caller=2, crossdir_caller=0, amb_caller=0, bump=0, spin=0          (now 8/2/2/1/1)
 #   --expand=bump returned the WHOLE `impl Widget { … }` block                   (now just bump's body)
-#   34 of the gate's then-49 checks FAILED against build/ctxpack_base; the counts above predate the V3
+#   34 of the gate's then-49 checks FAILED against build/ripwire_base; the counts above predate the V3
 #   fixture additions (a top-level `new`, src/plainmod.rs, crossdir_amb, the detached pair), so read them
 #   as the shape of the original red, not as literals to re-derive. The gate is now 56 checks.
 #   The 15 that pass on BOTH are, by construction, controls and regression guards rather than evidence of
@@ -50,12 +50,12 @@
 # its evidence is that rewriting `Self::detached()` bare moves --callees=bump 2 -> 3 and adds amb="1"
 # (measured; recorded at the arm and in the fixture).
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/rustqualcheck.sh   |   bash test/rustqualcheck.sh asan/ctxpack
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/rustqualcheck.sh   |   bash test/rustqualcheck.sh asan/ripwire
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"      # BOTH seams: positional arg and CTXPACK_BIN=
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional arg and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolute BEFORE we cd away
 # RELATIVE corpus paths (we cd to $ROOT below): every `p="…"` the gate matches is echoed back as the
 # caller spelled the root, so an absolute root would make every path assertion below unwritable.
@@ -65,7 +65,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$ROOT/$FIX" ] || { echo "no test/rustqualfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 

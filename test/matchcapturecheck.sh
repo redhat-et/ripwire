@@ -14,19 +14,19 @@
 # auto_captured="1") or REFUSES with the add-@name message. A bare hits="0" from a query that bound nothing
 # must be unreachable.
 #
-#   CTXPACK_BIN=build/ctxpack      bash test/matchcapturecheck.sh
-#   CTXPACK_BIN=build_base/ctxpack bash test/matchcapturecheck.sh   # must FAIL (pre-fix binary)
+#   RIPWIRE_BIN=build/ripwire      bash test/matchcapturecheck.sh
+#   RIPWIRE_BIN=build_base/ripwire bash test/matchcapturecheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "matchcapturecheck: BIN=$BIN  ROOT=$ROOT"
 
 hitsOf(){ grep -oE ' hits="[0-9]+"' "$1" | head -1 | grep -oE '[0-9]+'; }

@@ -5,9 +5,9 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-RUNS="${CTXPACK_REP_PERF_RUNS:-5}"
+RUNS="${RIPWIRE_REP_PERF_RUNS:-5}"
 FIXTURE_HASH="a22b4425ff9750e75d35fb510443a65f54c3cc0c"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
@@ -65,25 +65,25 @@ median_ms()
 
 INDEX="$TMP/index"
 "$BIN" "$CORPUS" --index-out="$INDEX" >/dev/null 2>"$TMP/index.err" || { cat "$TMP/index.err"; exit 1; }
-[ -s "$INDEX.lean.ctxpackcache" ] && [ -s "$INDEX.rich.ctxpackcache" ] || { echo "representative_perfgate: index preflight failed"; exit 1; }
+[ -s "$INDEX.lean.ripwirecache" ] && [ -s "$INDEX.rich.ripwirecache" ] || { echo "representative_perfgate: index preflight failed"; exit 1; }
 ( cd "$CORPUS" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 ) || { echo "representative_perfgate: quality baseline preflight failed"; exit 1; }
 
-richBefore="$( shasum "$INDEX.rich.ctxpackcache" | awk '{print $1}' )"
-CTXPACK_CACHE_STATS=1 "$BIN" "$CORPUS" --for=distance --cache="$INDEX.rich.ctxpackcache" >"$TMP/retrieval.out" 2>"$TMP/retrieval.err" \
+richBefore="$( shasum "$INDEX.rich.ripwirecache" | awk '{print $1}' )"
+RIPWIRE_CACHE_STATS=1 "$BIN" "$CORPUS" --for=distance --cache="$INDEX.rich.ripwirecache" >"$TMP/retrieval.out" 2>"$TMP/retrieval.err" \
     || { echo "representative_perfgate: retrieval preflight failed"; exit 1; }
-richAfter="$( shasum "$INDEX.rich.ctxpackcache" | awk '{print $1}' )"
+richAfter="$( shasum "$INDEX.rich.ripwirecache" | awk '{print $1}' )"
 [ "$richBefore" = "$richAfter" ] && grep -q 'cache-stats.*reparsed=0' "$TMP/retrieval.err" \
     || { echo "representative_perfgate: retrieval did not consume the warm rich index unchanged"; cat "$TMP/retrieval.err"; exit 1; }
 "$BIN" "$CORPUS" --report --no-cache >"$TMP/report.out" 2>/dev/null || { echo "representative_perfgate: report preflight failed"; exit 1; }
 ( cd "$CORPUS" && "$BIN" . --quality-delta --no-cache >"$TMP/quality.out" 2>/dev/null ) \
     || { echo "representative_perfgate: quality-delta preflight failed"; exit 1; }
 "$BIN" "$CORPUS" --dead-code --no-cache >"$TMP/dead.out" 2>/dev/null || { echo "representative_perfgate: dead-code preflight failed"; exit 1; }
-[ -s "$TMP/retrieval.out" ] && grep -q '^# ctxpack architecture report' "$TMP/report.out" \
+[ -s "$TMP/retrieval.out" ] && grep -q '^# ripwire architecture report' "$TMP/report.out" \
     && grep -q 'quality-delta' "$TMP/quality.out" && grep -q 'dead-code' "$TMP/dead.out" \
     || { echo "representative_perfgate: semantic preflight failed"; exit 1; }
 
 coldMs="$( median_ms "$BIN" "$CORPUS" --no-cache )" || exit 1
-retrievalMs="$( median_ms "$BIN" "$CORPUS" --for=distance --cache="$INDEX.rich.ctxpackcache" )" || exit 1
+retrievalMs="$( median_ms "$BIN" "$CORPUS" --for=distance --cache="$INDEX.rich.ripwirecache" )" || exit 1
 reportMs="$( median_ms "$BIN" "$CORPUS" --report --no-cache )" || exit 1
 qualityMs="$( median_ms sh -c 'cd "$1" && "$2" . --quality-delta --no-cache' sh "$CORPUS" "$BIN" )" || exit 1
 deadMs="$( median_ms "$BIN" "$CORPUS" --dead-code --no-cache )" || exit 1

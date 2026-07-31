@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # metricscheck.sh — the Wave-Q Q-compute per-symbol metrics gate (loc/params/nest/cbo/lcom4/tested/amp).
 #
-#   test/metricscheck.sh                       # uses build/ctxpack on test/metricsfix
-#   CTXPACK_BIN=asan/ctxpack test/metricscheck.sh
+#   test/metricscheck.sh                       # uses build/ripwire on test/metricsfix
+#   RIPWIRE_BIN=asan/ripwire test/metricscheck.sh
 #
 # These metrics are DESCRIPTIVE facts surfaced on --metrics ONLY (never gates on the default map — the
 # steering thesis). This gate asserts:
@@ -17,15 +17,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/metricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "metricscheck: BIN=$BIN  CORPUS=$CORPUS"
 
 # ── the metrics map (with --metrics) and the default map (without) ─────────────────────────────────────

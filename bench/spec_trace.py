@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # spec_trace.py — the MEASURE-FIRST experiment for DESIGN_specPrefetch.md.
 #
-# WHAT THIS IS. Drives a live `ctxpack --mcp` server over stdin/stdout with a realistic ~20-call agent
+# WHAT THIS IS. Drives a live `ripwire --mcp` server over stdin/stdout with a realistic ~20-call agent
 # session and measures the per-request wall time, attributing each request to "warm reuse" vs a full index
 # "rebuild" (the only latency the speculative-prefetch design could hide). It exists to DECIDE whether the
 # mechanism is worth building — "measure says don't build it" is a first-class, expected outcome (design §0).
 #
-# HOW IT MEASURES. The server, run with CTXPACK_MCP_TIMINGS=1 (env var — the design named a `--mcp-timings`
+# HOW IT MEASURES. The server, run with RIPWIRE_MCP_TIMINGS=1 (env var — the design named a `--mcp-timings`
 # CLI flag but cli.h/main.cpp are owned by a concurrent agent this round; the env var mirrors the existing
-# CTXPACK_CACHE_STATS precedent in ingest.cpp, zero-cost when unset), emits ONE stderr line per request:
-#     ctxpack-timing verb=<v> wall_ms=<f> rebuilt=<0|1>
+# RIPWIRE_CACHE_STATS precedent in ingest.cpp, zero-cost when unset), emits ONE stderr line per request:
+#     ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1>
 # stdout stays pure JSON-RPC. This harness zips those stderr lines (in order) with the requests it sent.
 #
 # CORPORA. (a) this repo (writable → gets the edit-verb step on a throwaway scratch file it creates and
-# deletes) and (b) a large private C++ corpus, if CTXPACK_BENCH_ROOT points at one (READ-ONLY → the edit
+# deletes) and (b) a large private C++ corpus, if RIPWIRE_BENCH_ROOT points at one (READ-ONLY → the edit
 # step is SKIPPED and noted; nothing under it is modified — quality_delta/read verbs write only to the
 # cache dir, never the repo). Historical numbers measured against such a corpus are not reproducible
 # publicly; re-run against your own to reproduce the shape.
@@ -26,10 +26,10 @@
 #       harness never commits: honoring the "no git commit/add" rule).
 #
 # USAGE:
-#   python3 bench/spec_trace.py --bin build/ctxpack                 # both default corpora, 5 reps
-#   python3 bench/spec_trace.py --bin build_ic2/ctxpack --reps 7
-#   python3 bench/spec_trace.py --bin build/ctxpack --repo .        # a single corpus
-#   python3 bench/spec_trace.py --bin build/ctxpack --determinism   # A/B: prot. bytes identical on/off env
+#   python3 bench/spec_trace.py --bin build/ripwire                 # both default corpora, 5 reps
+#   python3 bench/spec_trace.py --bin build_ic2/ripwire --reps 7
+#   python3 bench/spec_trace.py --bin build/ripwire --repo .        # a single corpus
+#   python3 bench/spec_trace.py --bin build/ripwire --determinism   # A/B: prot. bytes identical on/off env
 #
 # Stdlib-only, deterministic control flow, no network. Wall times are machine/thermal-dependent (medians
 # over reps, same discipline as bench/perfgate.sh) — run on a quiet machine.
@@ -44,22 +44,22 @@ import sys
 import time
 
 THIS_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CANYON = os.environ.get("CTXPACK_BENCH_ROOT", "/path/to/your/large/private/cpp/corpus")
+CANYON = os.environ.get("RIPWIRE_BENCH_ROOT", "/path/to/your/large/private/cpp/corpus")
 
-TIMING_RE = re.compile(r"^ctxpack-timing verb=(\S+) wall_ms=([0-9.]+) rebuilt=([01])")
+TIMING_RE = re.compile(r"^ripwire-timing verb=(\S+) wall_ms=([0-9.]+) rebuilt=([01])")
 
 
 # ── a driven MCP server session ─────────────────────────────────────────────────────────────────────
 class Server:
-    """One live `ctxpack --mcp` process. Requests go in one at a time; the matching response line is read
+    """One live `ripwire --mcp` process. Requests go in one at a time; the matching response line is read
     back synchronously (the server flushes per line). Per-request timing lands on stderr, collected on close."""
 
     def __init__(self, binpath, timings=True):
         env = dict(os.environ)
         if timings:
-            env["CTXPACK_MCP_TIMINGS"] = "1"
+            env["RIPWIRE_MCP_TIMINGS"] = "1"
         else:
-            env.pop("CTXPACK_MCP_TIMINGS", None)
+            env.pop("RIPWIRE_MCP_TIMINGS", None)
         self.errfile = open(_tmp("stderr"), "w+")
         self.proc = subprocess.Popen(
             [binpath, "--mcp"],
@@ -127,7 +127,7 @@ def clear_qsnap_caches():
             dirs.append(d.rstrip("/"))
     removed = 0
     for d in dirs:
-        for pat in ("ctxpack-qsnap-*", "ctxpack-qheadsnap-*"):
+        for pat in ("ripwire-qsnap-*", "ripwire-qheadsnap-*"):
             for f in glob.glob(os.path.join(d, pat)):
                 try:
                     os.remove(f)
@@ -358,15 +358,15 @@ def determinism_check(binpath, repo):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bin", default=os.path.join(THIS_REPO, "build", "ctxpack"))
+    ap.add_argument("--bin", default=os.path.join(THIS_REPO, "build", "ripwire"))
     ap.add_argument("--reps", type=int, default=5)
-    ap.add_argument("--repo", default=None, help="single corpus; default = both (this repo + $CTXPACK_BENCH_ROOT, if set and present)")
+    ap.add_argument("--repo", default=None, help="single corpus; default = both (this repo + $RIPWIRE_BENCH_ROOT, if set and present)")
     ap.add_argument("--determinism", action="store_true", help="run only the env ON/OFF byte-identity A/B")
     args = ap.parse_args()
 
     binpath = args.bin if os.path.isabs(args.bin) else os.path.join(os.getcwd(), args.bin)
     if not os.access(binpath, os.X_OK):
-        print(f"no executable ctxpack at {binpath} — build first", file=sys.stderr)
+        print(f"no executable ripwire at {binpath} — build first", file=sys.stderr)
         return 2
 
     if args.determinism:

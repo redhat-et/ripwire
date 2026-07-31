@@ -1,4 +1,4 @@
-; ctxpack Ruby tags — written for ctxpack (.rb). Derived from the upstream
+; ripwire Ruby tags — written for ripwire (.rb). Derived from the upstream
 ; tree-sitter-ruby v0.23.1 grammar node-types, verified against an AST dump (see the
 ; javarubycheck fixture).
 ;

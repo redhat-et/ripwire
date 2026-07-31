@@ -16,15 +16,15 @@
 # restated the table could not catch the table (the M14 lesson).
 #
 # Usage:
-#   test/mcpw3fixcheck.sh                                      # uses build/ctxpack
-#   test/mcpw3fixcheck.sh /path/to/other/ctxpack               # positional binary
-#   CTXPACK_BIN=build_base/ctxpack test/mcpw3fixcheck.sh       # env binary (the RED run)
+#   test/mcpw3fixcheck.sh                                      # uses build/ripwire
+#   test/mcpw3fixcheck.sh /path/to/other/ripwire               # positional binary
+#   RIPWIRE_BIN=build_base/ripwire test/mcpw3fixcheck.sh       # env binary (the RED run)
 #
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -32,7 +32,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcpw3fixcheck: BIN=$BIN  CORPUS=$ROOT"
@@ -253,7 +253,7 @@ case "$( mcp_text "$( call situational_awareness '{"path":"'"$ROOT"'","diff":["a
     *) ok "H5: a wrong-shaped diff can no longer produce a confidently-wrong clean-tree answer";;
 esac
 # no over-refusal: every one of those fields still works when given a STRING.
-for probe in 'whereis|symbol|"escapeXml"' 'stray_content|kind|"main"' 'flags|kind|"CTXPACK"' \
+for probe in 'whereis|symbol|"escapeXml"' 'stray_content|kind|"main"' 'flags|kind|"RIPWIRE"' \
              'doc_drift|kind|"README"' 'owners|symbol|"escapeXml"' 'for|task|"json escape"'; do
     IFS='|' read -r verb field val <<EOF
 $probe

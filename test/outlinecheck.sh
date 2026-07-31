@@ -15,18 +15,18 @@
 # The two SENTINEL_* tokens are unique strings that live ONLY inside elided blocks, so their ABSENCE from
 # the skeleton is a precise witness that block bodies were dropped (not just "output looks shorter").
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/outlinecheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/outlinecheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "outlinecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -50,7 +50,7 @@ int classify( int n )
 }
 int plain() { return 42; }
 EOF
-# make the sentinels compile-irrelevant (this fixture is never compiled; ctxpack only parses text)
+# make the sentinels compile-irrelevant (this fixture is never compiled; ripwire only parses text)
 
 run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 OUT="$( run --outline=classify )"

@@ -1,8 +1,8 @@
 # agentloop — Phase B4 agent-in-the-loop eval
 
-Everything ctxpack has measured so far (`bench/locbench/`, `bench/ANSWERQUALITY.md`) scores
+Everything ripwire has measured so far (`bench/locbench/`, `bench/ANSWERQUALITY.md`) scores
 **retrieval quality** — did the ranked candidate list contain the right file/function. It has never
-measured the thing that actually matters: **does giving a coding agent ctxpack change whether it
+measured the thing that actually matters: **does giving a coding agent ripwire change whether it
 solves the task.** This directory is that harness.
 
 Design source: `PLAN_researchImprove2026.md` Phase B4 and
@@ -11,8 +11,8 @@ Design source: `PLAN_researchImprove2026.md` Phase B4 and
 **Status: EXEC STEP WIRED, NOT YET RUN.** `select_tasks.py` and `analyze.py` are complete and runnable
 today. `run_agentloop.py`'s run-matrix/schema/`--dry-run` machinery is complete and runnable, and
 `run_one()` is now wired to candidate harness (A) — `claude -p` with a per-arm tool allowlist and a
-generated `--mcp-config` for the `ctxpack_mcp` arm (see the module docstring's EXEC STUB section and
-`write_mcp_config()`'s docstring for the verified `ctxpack --mcp` invocation). `--evaluator=swebench`
+generated `--mcp-config` for the `ripwire_mcp` arm (see the module docstring's EXEC STUB section and
+`write_mcp_config()`'s docstring for the verified `ripwire --mcp` invocation). `--evaluator=swebench`
 (resolved= via the official swebench PyPI harness + Docker) is coded to the documented CLI interface but
 UNEXERCISED — neither Docker nor the `swebench` package is installed anywhere this was built, so several
 field/flag names carry an explicit `TODO-verify` in `run_swebench_harness()`; `--evaluator=none` needs
@@ -29,7 +29,7 @@ https://arxiv.org/html/2601.11868v1):
 | arm | what the agent has |
 |---|---|
 | `baseline` | grep / read / glob only |
-| `ctxpack_mcp` | same agent + ctxpack wired in as an MCP server |
+| `ripwire_mcp` | same agent + ripwire wired in as an MCP server |
 
 **Seeds:** K=3 per (task, arm). A single-seed SWE-bench number is an unreliable "lucky pass"
 (https://arxiv.org/pdf/2605.12925) — always report across seeds, never a single run.
@@ -59,14 +59,14 @@ comment for the exact attribution; `compare_runs.py` itself is not imported or m
 
 Mirrors the two-tier gate `PLAN_researchImprove2026.md` Phase B1 proposes for LocBench, adapted here:
 
-1. **Hard floor:** resolved-rate delta bootstrap 95% lower bound must be `> 0` (ctxpack_mcp beats
+1. **Hard floor:** resolved-rate delta bootstrap 95% lower bound must be `> 0` (ripwire_mcp beats
    baseline with high confidence, not just on the point estimate).
-2. **Soft utility check:** the cost/wall-clock/token overhead of the `ctxpack_mcp` arm must not erase
+2. **Soft utility check:** the cost/wall-clock/token overhead of the `ripwire_mcp` arm must not erase
    the win — report the paired ratio deltas (`analyze.py`'s `tokens_out_ratio_p50/p95`, etc.) alongside
    the resolved-rate delta and make the call by inspection; a fixed cost ceiling is deliberately not
    hard-coded here (R4's whole point is quality-adjusted acceptance, not a flat cap).
 3. **Localization correlation** (secondary, "buys the answer LocBench cannot"): report whether
-   `localization_hit` delta and `resolved` delta move together — if ctxpack lifts localization but not
+   `localization_hit` delta and `resolved` delta move together — if ripwire lifts localization but not
    resolution, that is a real, reportable finding, not a harness bug.
 
 This is a draft, not yet exercised on real data — revisit once the pilot (below) has results.
@@ -79,7 +79,7 @@ python3 bench/agentloop/select_tasks.py --work-dir /tmp/agentloop
 
 Rule (verify against `bench/locbench/run_locbench.py`'s `frozen_partition()` — do not trust this
 README, read the code): a SWE-bench-Lite instance is **excluded** if
-`sha256("ctxpack-a7-v2\0" + repo.lower()).digest()[0] < 128` (i.e. the same repo would land in
+`sha256("ripwire-a7-v2\0" + repo.lower()).digest()[0] < 128` (i.e. the same repo would land in
 LocBench's TRAIN partition). This needs no LocBench re-fetch — it's a pure function of the repo
 string, applied directly to SWE-bench-Lite's repo field.
 
@@ -129,7 +129,7 @@ python3 bench/agentloop/analyze.py --results /tmp/agentloop/dry.json
 
 `run_agentloop.py`'s `run_one()` is wired to candidate **(A)** — `claude -p` (Claude Code
 print/non-interactive mode) with a tool allowlist per arm and a generated `--mcp-config` for the
-`ctxpack_mcp` arm only (module docstring EXEC STUB section has the exact invocation). Candidate **(B)**
+`ripwire_mcp` arm only (module docstring EXEC STUB section has the exact invocation). Candidate **(B)**
 (SWE-agent / mini-swe-agent) remains undocumented-as-unimplemented — (A) was chosen, per the module
 docstring's "pick ONE, do not half-wire both."
 
@@ -150,7 +150,7 @@ spending anything on the 6-run pilot:
 ```sh
 python3 bench/agentloop/run_agentloop.py --live \
     --tasks-lock bench/agentloop/tasks.lock \
-    --limit 3 --seeds 1 --arms baseline,ctxpack_mcp \
+    --limit 3 --seeds 1 --arms baseline,ripwire_mcp \
     --harness claude-code-p --model <model-id> \
     --work-dir /tmp/agentloop --evaluator none \
     --results-out /tmp/agentloop/pilot.json
@@ -160,7 +160,7 @@ python3 bench/agentloop/analyze.py --results /tmp/agentloop/pilot.json
 
 That's **3 tasks x 2 arms x 1 seed = 6 runs**, ~$2-9 at the $0.30-$1.50/instance estimate — small
 enough to sanity-check the harness plumbing (checkout succeeds, patch applies, MCP server registers
-in the `ctxpack_mcp` arm only, cost/token accounting comes back non-null) before committing to the
+in the `ripwire_mcp` arm only, cost/token accounting comes back non-null) before committing to the
 full run. Pass `--evaluator swebench` once Docker + `pip install swebench` are available to get real
 `resolved=` scores instead of `null`.
 

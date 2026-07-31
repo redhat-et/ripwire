@@ -17,20 +17,20 @@
 # Every expected value below is hand-computed from the fixture's #include counts, not
 # observed-and-frozen.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/cyclecutcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/cyclecutcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success. Does NOT edit
 # regression.sh or any other file — self-contained gate + fixture.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/cyclecutfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/cyclecutfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 echo "cyclecutcheck: BIN=$BIN  CORPUS=test/cyclecutfix"

@@ -8,31 +8,31 @@
 # re-crawls and re-hashes bytes every invocation, so an equal mtime never masks a content change.
 #
 # Recipe (RESEARCH_agentQuality2026.md §3c "G-A1"):
-#   1. write a source file, run ctxpack with --cache=<tmp>/c.bin to populate (cold)
+#   1. write a source file, run ripwire with --cache=<tmp>/c.bin to populate (cold)
 #   2. save a copy of the file's bytes (for touch -r reference)
 #   3. EDIT the file's content (remove the old symbol, add a new one)
 #   4. touch -r <saved-ref> <file>          — restore the mtime EXACTLY (also restore dir mtime,
 #                                              belt-and-suspenders; the CLI re-crawls so it shouldn't
 #                                              matter, but keep the attack as hostile as possible)
-#   5. run ctxpack again with the SAME --cache=<tmp>/c.bin (warm)
+#   5. run ripwire again with the SAME --cache=<tmp>/c.bin (warm)
 #   6. the NEW symbol MUST appear in the warm output; the OLD symbol must be GONE
 #
 # Usage:
 #   bash test/cachehashcheck.sh
-#   CTXPACK_BIN=asan/ctxpack bash test/cachehashcheck.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/cachehashcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "cachehashcheck: BIN=$BIN  TMP=$TMP"
 

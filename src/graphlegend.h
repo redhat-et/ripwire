@@ -97,19 +97,19 @@ inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true"
 // widening round proved false and which no extractor can make true — the sentence promised exhaustiveness
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
-    "<!-- ctxpack uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|read|write|import|extends; "
+    "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|read|write|import|extends; "
     "p=file:line) — a floor, see counts_floor below. ";
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
-    "<!-- ctxpack impact: transitive blast radius — symbols that reach SYM via calls (review before changing SYM). ";
+    "<!-- ripwire impact: transitive blast radius — symbols that reach SYM via calls (review before changing SYM). ";
 
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
 // attributes sits in test/legendcoverage_baseline.txt). ONE legend serves both forms: the two verbs are one
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
 // vocabulary §3.4 forbids.
 inline constexpr const char* kCallHierarchyLegendOpen =
-    "<!-- ctxpack callers/callees: the 1-hop call hierarchy read straight off the call graph. The callers form "
+    "<!-- ripwire callers/callees: the 1-hop call hierarchy read straight off the call graph. The callers form "
     "lists the symbols that CALL of=; the callees form lists the symbols of= itself calls. of= is the selector "
     "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
     "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. ";

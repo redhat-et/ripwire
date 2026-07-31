@@ -1,4 +1,4 @@
-// bench_sort_large.cpp — large-N sort tournament for ctxpack's graph-edge shape.
+// bench_sort_large.cpp — large-N sort tournament for ripwire's graph-edge shape.
 //
 // The production edge list is a dense POD array sorted by `(from,to)` before building out-edge and
 // in-edge CSR. This benchmark pushes that exact shape past cache-sized inputs and compares:
@@ -7,9 +7,9 @@
 //   C stable byte-radix on the two uint32 keys (src/sortutil.h)
 //
 // Build:
-//   c++ -O3 -march=native -std=c++23 bench/bench_sort_large.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ctxpack_bench_sort_large
+//   c++ -O3 -march=native -std=c++23 bench/bench_sort_large.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_bench_sort_large
 // Run:
-//   /tmp/ctxpack_bench_sort_large 4000000
+//   /tmp/ripwire_bench_sort_large 4000000
 
 #include "fastSort.h"
 #include "sortutil.h"
@@ -265,14 +265,14 @@ int main( int argc, char** argv )
     const std::size_t edgeCount = argc >= 2 ? std::strtoull( argv[ 1 ], nullptr, 10 ) : 2'000'000ull;
     const std::uint32_t nodeCount = std::uint32_t( std::max<std::size_t>( 1024, edgeCount / 8 ) );
     const double payloadMiB = double( edgeCount * sizeof( Edge ) ) / ( 1024.0 * 1024.0 );
-    std::printf( "ctxpack edge sort large-N: %zu edges, %u nodes, %.1f MiB edge array (scratch doubles radix working set)\n",
+    std::printf( "ripwire edge sort large-N: %zu edges, %u nodes, %.1f MiB edge array (scratch doubles radix working set)\n",
                  edgeCount, nodeCount, payloadMiB );
 
     benchCase( "random", makeRandomEdges( edgeCount, nodeCount ) );
     benchCase( "graph-like", makeGraphLikeEdges( edgeCount, nodeCount ) );
     benchCase( "nearly-sorted", makeNearlySortedEdges( edgeCount, nodeCount ) );
 
-    std::printf( "\nctxpack score sort large-N: %zu ids, %.1f MiB score array\n",
+    std::printf( "\nripwire score sort large-N: %zu ids, %.1f MiB score array\n",
                  edgeCount, double( edgeCount * sizeof( float ) ) / ( 1024.0 * 1024.0 ) );
     benchScoreCase( "score-random", makeRandomScores( edgeCount ) );
     benchScoreCase( "score-tied", makeTiedScores( edgeCount ) );

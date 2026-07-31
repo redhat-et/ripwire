@@ -31,16 +31,16 @@
 #
 # Own temp repos. Needs git. The DEGRADED alerts are compiled out under NDEBUG, so (c)'s alert sub-check is
 # skipped when the binary is a Release build (this is the CI-builds-Release blind spot, logged in CLAUDE.md).
-# Usage:  test/qoriginoraclecheck.sh   |   CTXPACK_BIN=build/ctxpack test/qoriginoraclecheck.sh
+# Usage:  test/qoriginoraclecheck.sh   |   RIPWIRE_BIN=build/ripwire test/qoriginoraclecheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qoriginoraclecheck (git not available)"; exit 0; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
@@ -98,7 +98,7 @@ printf 'int seed( int a ) { return a + 1; }\n' > "$S/lib.cpp"
 commit "$S" init
 gnarly >> "$S/inc/api.h"
 NOSIDE="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; rcn=$?
-: > "$S/.ctxpack_quality_baseline"
+: > "$S/.ripwire_quality_baseline"
 ZERO="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>"$WORK/s_err" )"; rcz=$?
 { [ "$ZERO" = "$NOSIDE" ] && [ "$rcz" -eq "$rcn" ]; } \
     && ok "a 0-byte sidecar gives the SAME answer as no sidecar (treated as absent, exit $rcz)" \
@@ -108,9 +108,9 @@ grep -q 'auto-comparing the working tree vs git HEAD' "$WORK/s_err" \
     || { no "no git-HEAD fallback message for the 0-byte sidecar"; head -3 "$WORK/s_err"; }
 
 # ── (c) a genuine pre-Q1 sidecar still fails CLOSED, for every kind ────────────────────────────────────────
-( cd "$S" && git checkout -q -- . ) ; rm -f "$S/.ctxpack_quality_baseline"
+( cd "$S" && git checkout -q -- . ) ; rm -f "$S/.ripwire_quality_baseline"
 ( cd "$S" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-grep -v '^loc ' "$S/.ctxpack_quality_baseline" > "$WORK/preq1" && cp "$WORK/preq1" "$S/.ctxpack_quality_baseline"
+grep -v '^loc ' "$S/.ripwire_quality_baseline" > "$WORK/preq1" && cp "$WORK/preq1" "$S/.ripwire_quality_baseline"
 gnarly >> "$S/inc/api.h"
 cat >> "$S/lib.cpp" <<'EOF'
 int copyA( int a ) { int q = 0; for( int i = 0; i < a; ++i ) { q += i * 7; } return q; }

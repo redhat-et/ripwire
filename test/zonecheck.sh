@@ -3,7 +3,7 @@
 # per-module <m zone="pain|useless|ok"> attribute (src/arch.h::computeModuleMetrics).
 #
 # HONESTY LABEL (do not lose this in a rewrite): Martin I/A/D and the derived zone classification are
-# FOLKLORE — widely implemented (NDepend, Sonargraph, ctxpack) but with no independent outcome-based
+# FOLKLORE — widely implemented (NDepend, Sonargraph, ripwire) but with no independent outcome-based
 # study validating that D (or the pain/useless corners) predicts defects or maintenance cost. See
 # src/arch.h's "EVIDENCE NOTE" above computeModuleMetrics, and RESEARCH_agentQuality2026.md §1a. This
 # gate checks the classification is computed CORRECTLY and DETERMINISTICALLY from I/A — it is not, and
@@ -37,12 +37,12 @@
 #              to land on (here D=0.00 would coincidentally read "ok" under the old logic — that
 #              coincidence is exactly why the exclusion has to be unconditional, not "only when D is bad").
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/zonecheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/zonecheck.sh
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/zonecheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/zonecheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/zonefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -50,7 +50,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/zonefix dir — fixture missing"; exit 2; }
 [ -f "$FIX/zone.arch" ] || { echo "no test/zonefix/zone.arch — fixture rules file missing"; exit 2; }
 cd "$ROOT"

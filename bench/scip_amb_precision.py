@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""scip_amb_precision.py — measure the PRECISION of ctxpack's amb=-flagged call edges against
-Sourcegraph SCIP ground truth, using ctxpack's OWN --scip overlay as the oracle (no src changes).
+"""scip_amb_precision.py — measure the PRECISION of ripwire's amb=-flagged call edges against
+Sourcegraph SCIP ground truth, using ripwire's OWN --scip overlay as the oracle (no src changes).
 
 Method (deterministic; full census, no sampling):
   For a repo R with a scip-python index R.scip:
-    * baseline = `ctxpack R --top-k=100000 --no-cache`             (name-based edges)
-    * overlay  = `ctxpack R --scip=R.scip --top-k=100000 --no-cache` (edges SCIP resolved carry prov="scip")
+    * baseline = `ripwire R --top-k=100000 --no-cache`             (name-based edges)
+    * overlay  = `ripwire R --scip=R.scip --top-k=100000 --no-cache` (edges SCIP resolved carry prov="scip")
   --top-k=100000 defeats the default 200-symbol map truncation so EVERY symbol + edge renders.
 
-  ctxpack renders each call edge as <c n="NAME"/> (the callee NAME; no target id). A name X with
-  >1 in-corpus definition is AMBIGUOUS by ctxpack's own criterion (the resolver keeps every same-name
+  ripwire renders each call edge as <c n="NAME"/> (the callee NAME; no target id). A name X with
+  >1 in-corpus definition is AMBIGUOUS by ripwire's own criterion (the resolver keeps every same-name
   def -> a split edge, and the owning symbol carries amb="K"). The overlay REPLACES the covered site's
   guess with SCIP's single resolved target, tagged prov="scip"; the dropped split candidates are the
   edges SCIP DISCONFIRMED.
@@ -73,14 +73,14 @@ def analyze(binp, repo, scip):
     bb, defc = parse(base)
     ob, _ = parse(over)
 
-    # Denominator universe = CTXPACK's own emitted edges (this is "fraction of ctxpack edges SCIP
-    # confirms"). We look only at (symbol, calleeName=X) buckets where (a) ctxpack emitted >=1 edge to X
-    # AND (b) the overlay pinned >=1 prov="scip" edge to X (i.e. SCIP SPEAKS about this ctxpack edge).
-    # confirmed = min(pinned, emitted): ctxpack's edges to X that hit one of SCIP's resolved targets,
-    # capped at what ctxpack actually emitted so SCIP-ONLY edges (calls ctxpack missed, emitted==0) are
+    # Denominator universe = RIPWIRE's own emitted edges (this is "fraction of ripwire edges SCIP
+    # confirms"). We look only at (symbol, calleeName=X) buckets where (a) ripwire emitted >=1 edge to X
+    # AND (b) the overlay pinned >=1 prov="scip" edge to X (i.e. SCIP SPEAKS about this ripwire edge).
+    # confirmed = min(pinned, emitted): ripwire's edges to X that hit one of SCIP's resolved targets,
+    # capped at what ripwire actually emitted so SCIP-ONLY edges (calls ripwire missed, emitted==0) are
     # excluded from precision — they are a RECALL story, tracked separately in scip_only.
     agg = {"amb": [0, 0, 0], "nonamb": [0, 0, 0]}   # [confirmed, emitted, nbuckets]
-    scip_only = {"amb": 0, "nonamb": 0}             # prov buckets where ctxpack emitted NOTHING for X
+    scip_only = {"amb": 0, "nonamb": 0}             # prov buckets where ripwire emitted NOTHING for X
     for key, oedges in ob.items():
         oprov = collections.Counter(cn for cn, p in oedges if p)
         if not oprov:
@@ -90,7 +90,7 @@ def analyze(binp, repo, scip):
             g = "amb" if defc.get(name, 0) > 1 else "nonamb"
             emitted = bcount.get(name, 0)
             if emitted == 0:
-                scip_only[g] += 1               # SCIP resolved a call ctxpack's name-based parse missed
+                scip_only[g] += 1               # SCIP resolved a call ripwire's name-based parse missed
                 continue
             agg[g][0] += min(ns, emitted)
             agg[g][1] += emitted
@@ -98,7 +98,7 @@ def analyze(binp, repo, scip):
     return agg, scip_only
 
 def main():
-    binp = os.environ.get("CTXPACK", "./build/ctxpack")
+    binp = os.environ.get("RIPWIRE", "./build/ripwire")
     # (label, repo_dir, scip_index) — fixed list => deterministic
     targets = [(sys.argv[i], sys.argv[i+1], sys.argv[i+2]) for i in range(1, len(sys.argv), 3)]
     for label, repo, scip in targets:
@@ -107,7 +107,7 @@ def main():
         for g in ("amb", "nonamb"):
             c, e, n = agg[g]
             p = (c / e) if e else float("nan")
-            print("  %-7s covered-buckets=%-5d ctxpack_edges=%-6d scip_confirmed=%-6d  precision=%.3f  scip_only(missed by ctxpack)=%d"
+            print("  %-7s covered-buckets=%-5d ripwire_edges=%-6d scip_confirmed=%-6d  precision=%.3f  scip_only(missed by ripwire)=%d"
                   % (g, n, e, c, p, scip_only[g]))
         print()
 

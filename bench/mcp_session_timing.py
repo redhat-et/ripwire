@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure analyze requests inside one already-started ctxpack MCP stdio session."""
+"""Measure analyze requests inside one already-started ripwire MCP stdio session."""
 
 import json
 import statistics
@@ -16,13 +16,13 @@ def exchange(process: subprocess.Popen[str], request: dict) -> dict:
     process.stdin.flush()
     line = process.stdout.readline()
     if not line:
-        raise RuntimeError("ctxpack MCP closed before responding")
+        raise RuntimeError("ripwire MCP closed before responding")
     return json.loads(line)
 
 
 def main() -> int:
     if len(sys.argv) != 4:
-        print("usage: mcp_session_timing.py CTXPACK_BIN CORPUS RUNS", file=sys.stderr)
+        print("usage: mcp_session_timing.py RIPWIRE_BIN CORPUS RUNS", file=sys.stderr)
         return 2
     binary, corpus, runs_text = sys.argv[1:]
     runs = int(runs_text)
@@ -30,7 +30,7 @@ def main() -> int:
         raise RuntimeError("MCP timing requires at least five requests")
     timing_log = tempfile.TemporaryFile(mode="w+t")
     environment = os.environ.copy()
-    environment["CTXPACK_MCP_TIMINGS"] = "1"
+    environment["RIPWIRE_MCP_TIMINGS"] = "1"
     process = subprocess.Popen(
         [binary, "--mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=timing_log,
         text=True, bufsize=1, env=environment,

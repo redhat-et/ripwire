@@ -78,19 +78,19 @@
 #        are pinned next to the table and re-derived every run, so no figure in this file is printed without
 #        being checked. The header's own count had already rotted by one before this arm existed.
 #
-# Usage:  test/fixedbufsweep.sh [BIN]   |   CTXPACK_BIN=asan/ctxpack bash test/fixedbufsweep.sh
+# Usage:  test/fixedbufsweep.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fixedbufsweep.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the source sweep"; exit 2; }
 
 echo "fixedbufsweep: BIN=$BIN"
@@ -125,7 +125,7 @@ TABLE = {
     # ── src/infra/profileScope.h — the opt-in self-profiler's REPORT formatter ───────────────────────────
     # Not markup by construction, and doubly so: the report is human-readable text printed to stdout by
     # prof::report(), never an element of the XML document; and the whole facility compiles to ((void)0)
-    # unless -DCTXPACK_PROFILE=ON, so none of these three buffers exists in a normal binary. A truncation
+    # unless -DRIPWIRE_PROFILE=ON, so none of these three buffers exists in a normal binary. A truncation
     # here shortens one line of a developer's timing table. It cannot land inside a tag.
     ( "src/infra/profileScope.h", "nameBuf" ):  ( 2, "not-markup", "nameBuf[160] x2 at :721/:723: '%s [%s]' over trim_pretty's fn[96] plus Site::description, a compile-time string literal from the PROFILE_SCOPE_DESCRIBE call site. Printed as a timing-table row, never emitted as a document." ),
     ( "src/infra/profileScope.h", "locBuf" ):   ( 1, "not-markup", "locBuf[64] at :724: '%s:%d' over Site::file (__FILE__, a compile-time literal) and Site::line. Same timing table; a truncated path costs a developer legibility, nothing else." ),

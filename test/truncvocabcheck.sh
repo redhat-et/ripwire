@@ -35,20 +35,20 @@
 #
 # Usage:
 #   test/truncvocabcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/truncvocabcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/truncvocabcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "truncvocabcheck: python3 required"; exit 2; }
 
 echo "truncvocabcheck: BIN=$BIN"
@@ -110,14 +110,14 @@ cap map           "$BIG"
 cap expand        "$BIG" --expand=packBodies
 cap fordetail     "$BIG" --for="emit full definition bodies" --detail=3
 cap packtasktests "$ROOT" --pack-task="escapeXml"          # this shape reaches the <tests> section
-# <notes> only exists where a .ctxpack_notes does, so build one — in a THROWAWAY corpus, never the tree.
+# <notes> only exists where a .ripwire_notes does, so build one — in a THROWAWAY corpus, never the tree.
 NOTECORP="$TMP/notecorp"; mkdir -p "$NOTECORP"
 cat > "$NOTECORP/widget.c" <<'NOTE_EOF'
 int widgetHelper( int x ) { return x + 1; }
 int widgetMain( int x ) { return widgetHelper( x ) * 2; }
 NOTE_EOF
 "$BIN" "$NOTECORP" --note-add="widgetHelper: the off-by-one lives here" >/dev/null 2>&1
-[ -s "$NOTECORP/.ctxpack_notes" ] || { echo "truncvocabcheck: --note-add wrote no notes — the <notes> roster arm cannot run"; exit 2; }
+[ -s "$NOTECORP/.ripwire_notes" ] || { echo "truncvocabcheck: --note-add wrote no notes — the <notes> roster arm cannot run"; exit 2; }
 cap packtasknotes "$NOTECORP" --pack-task="widgetHelper off by one"
 
 python3 - "$TMP" <<'PY'

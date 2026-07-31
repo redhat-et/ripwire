@@ -29,7 +29,7 @@ test|tests|fixture|fixtures|testdata, or a component equals `present`, or the pa
 Usage:
   python3 bench/recalleval/run_recalleval.py [--bin BIN] [--root DIR] [--lane recall|ranking|both]
                                              [--top-k N] [--verbose]
-  CTXPACK_BIN overrides --bin (gate convention). Default bin: <repo>/build/ctxpack.
+  RIPWIRE_BIN overrides --bin (gate convention). Default bin: <repo>/build/ripwire.
 
 Output: per-lane human table + machine-readable `AGG\t<lane>\t...` rows (greppable, diff-stable —
 the determinism gate runs the harness twice and diffs stdout byte-for-byte).
@@ -116,7 +116,7 @@ def run_binary(bin_path, root, args):
     proc = subprocess.run([bin_path, "."] + args, cwd=root, stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL, timeout=120)
     if proc.returncode != 0:
-        raise RuntimeError("ctxpack %s exited %d" % (" ".join(args), proc.returncode))
+        raise RuntimeError("ripwire %s exited %d" % (" ".join(args), proc.returncode))
     return proc.stdout.decode("utf-8", errors="replace")
 
 
@@ -217,8 +217,8 @@ def run_lane(name, labels, bin_path, root, ranker, verbose):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="held-out recall/ranking eval over the built ctxpack binary")
-    ap.add_argument("--bin", default=os.environ.get("CTXPACK_BIN", os.path.join(REPO, "build", "ctxpack")))
+    ap = argparse.ArgumentParser(description="held-out recall/ranking eval over the built ripwire binary")
+    ap.add_argument("--bin", default=os.environ.get("RIPWIRE_BIN", os.path.join(REPO, "build", "ripwire")))
     ap.add_argument("--root", default=REPO)
     ap.add_argument("--lane", choices=("recall", "ranking", "both"), default="both")
     ap.add_argument("--top-k", type=int, default=10, help="candidate depth for the ranking lane")

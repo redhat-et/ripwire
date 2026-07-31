@@ -7,7 +7,7 @@
 #include "graph.h"   // resolveIncludeAdj — for the "surprising" (changes together, no transitive static dep) flag
 #include "mention.h" // mention_detail::baseNameOf — the SAME "basename of a path" primitive binstale.h/docdrift.h reuse
 #include "lintrules.h"      // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
-#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DCTXPACK_PROFILE=ON)
+#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "Diagnostics.h"    // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
 #include "stdinline.h"      // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
 #include "jsonesc.h"        // A4-F27 residual: ctx::shSingleQuote lives here (lightest shared header) —
@@ -168,7 +168,7 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
     // §B12.7: this line used to promise "all-history (no scoping)", which is ONE caller's policy — the
     // churn ranker falls back to its own 18-month default window instead (its root stamps window="18mo").
     // The scope resolver cannot know its caller, so the message states only what is true from here.
-    std::fprintf( stderr, "ctxpack: --since='%s' is not a git revision or recognizable date — ignoring it; the verb's own default window applies\n", val.c_str() );
+    std::fprintf( stderr, "ripwire: --since='%s' is not a git revision or recognizable date — ignoring it; the verb's own default window applies\n", val.c_str() );
     return scope;   // active=false
 }
 
@@ -192,7 +192,7 @@ inline std::string sinceLogArgs( const SinceScope& scope, const char* fallbackSi
 // ITSELF introduced (an "evil merge": a conflict resolved by writing something neither parent had, or a file
 // added while resolving) — has zero history lines anywhere in the stream. It read churn=0, it was missing from
 // --owners entirely, and NOTHING disclosed it: a measured-looking zero, which is the one shape this file's
-// whole disclosure apparatus exists to prevent. Measured on the ctxpack repo before this fix: 2 of 1028
+// whole disclosure apparatus exists to prevent. Measured on the ripwire repo before this fix: 2 of 1028
 // tracked paths (IDEAS_fieldNotes_2026-07-25.md, NEXT_SESSION_2026-07-26.md) had no --owners row at all while
 // being ordinary, present, tracked files.
 //
@@ -200,7 +200,7 @@ inline std::string sinceLogArgs( const SinceScope& scope, const char* fallbackSi
 // this merge itself did", and nothing else. The alternatives were MEASURED, not weighed by taste, on a fixture
 // whose per-file truth is known by reading its history (test/mergechurncheck.sh builds it) and on this repo:
 //
-//   variant                      branchfile.cpp   mergeonly.cpp   shared.cpp   ctxpack-repo path-lines
+//   variant                      branchfile.cpp   mergeonly.cpp   shared.cpp   ripwire-repo path-lines
 //                                (truth: 3)       (truth: 1)      (truth: 4)   (this file's own history)
 //   ------------------------------------------------------------------------------------------------------
 //   no flag (the defect)         3  ok            0  MISSING      3  MISSING   3618  — 1026 paths
@@ -312,7 +312,7 @@ inline bool isBoundarySuffix( std::string_view indexedPath, std::string_view git
 // join has. Two rewrites, in ONE pass so there is no second place to keep in step:
 //   * every `/./` seam collapses — workspace.h spells a merged-root file `<label>/./<rel>` (the `./` is what
 //     makes a single-root id an exact suffix of the workspace id, §P8.7) and git spells it without the seam;
-//   * a LEADING `./` is dropped, repeatedly — a `ctxpack .` run spells every file `./<rel>` and git never does.
+//   * a LEADING `./` is dropped, repeatedly — a `ripwire .` run spells every file `./<rel>` and git never does.
 // The seam test goes first so `/./x` collapses to `/x` rather than losing its leading slash.
 // Deliberately NOT case folding: this filesystem is case-insensitive, so a git path differing from an indexed
 // path only in case means the committed spelling has DRIFTED from the on-disk spelling. That is a fact worth
@@ -614,7 +614,7 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
 inline void noteGitJoinDegradeOnce( std::atomic<bool>& hasReported, const std::string& humanSentence )
 {
     if( hasReported.exchange( true, std::memory_order_relaxed ) ) return;
-    std::fprintf( stderr, "ctxpack: %s\n", humanSentence.c_str() );
+    std::fprintf( stderr, "ripwire: %s\n", humanSentence.c_str() );
     DEGRADED_PATH_ALERT( "gitmine: a git-history path join was left unmade — see the stderr line naming the state and the path" );
 }
 

@@ -4,12 +4,12 @@
 # The ingest CORE (cache v8, kArtifactArch self-heal, drift observable) is proven by artifactcheck.sh. This
 # gate proves the CLI SURFACE that turns that core into the team artifact:
 #
-#   (a) GENERATE-AND-EXIT — `--index-out=BASE` writes BOTH BASE.lean.ctxpackcache and BASE.rich.ctxpackcache,
+#   (a) GENERATE-AND-EXIT — `--index-out=BASE` writes BOTH BASE.lean.ripwirecache and BASE.rich.ripwirecache,
 #       exits 0, and emits NO map on stdout (CI writes an artifact, it does not stream a map).
 #   (b) RESTORE-EQUIVALENCE from a COPIED checkout at a DIFFERENT path:
-#         - a map/nav verb restored via BASE.lean.ctxpackcache == a cold run (byte-identical) + GENUINE warm
+#         - a map/nav verb restored via BASE.lean.ripwirecache == a cold run (byte-identical) + GENUINE warm
 #           hit (the lean blob bytes are untouched by the consume — a real reuse, not a disguised reparse);
-#         - the flagship `--for` restored via BASE.rich.ctxpackcache == a cold `--for` (byte-identical) —
+#         - the flagship `--for` restored via BASE.rich.ripwirecache == a cold `--for` (byte-identical) —
 #           the reason both families ship: --for ingests RICH, a lean-only artifact would leave it cold.
 #   (c) --exclude VARIATION — excludes shape the crawl, so an artifact built WITH an exclude differs in bytes
 #       from one built WITHOUT it, AND a map restored from the excluded artifact == a cold run under the same
@@ -21,21 +21,21 @@
 # The blobs are NOT byte-identical run-to-run (the v8 header stamps the blob write wall-time); the CONTRACT
 # proven here is RESTORE-EQUIVALENCE, never blob-byte-identity — matching what --help/README state.
 #
-# Usage:  bash test/indexoutcheck.sh   |   CTXPACK_BIN=build_ic1/ctxpack bash test/indexoutcheck.sh
+# Usage:  bash test/indexoutcheck.sh   |   RIPWIRE_BIN=build_ic1/ripwire bash test/indexoutcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 # Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "indexoutcheck: BIN=$BIN  TMP=$TMP"
 FIXTURE="$ROOT/test/fixture"
@@ -51,8 +51,8 @@ cp -R "$FIXTURE" "$PATH_A"
 BASE="$TMP/idx"
 "$BIN" "$PATH_A" --index-out="$BASE" >"$TMP/gen.out" 2>"$TMP/gen.err"
 rc_gen=$?
-LEAN="$BASE.lean.ctxpackcache"
-RICH="$BASE.rich.ctxpackcache"
+LEAN="$BASE.lean.ripwirecache"
+RICH="$BASE.rich.ripwirecache"
 
 [ "$rc_gen" -eq 0 ] && ok "(a) --index-out exits 0" || { no "(a) --index-out exit $rc_gen"; cat "$TMP/gen.err"; }
 { [ -s "$LEAN" ] && [ -s "$RICH" ]; } \
@@ -114,7 +114,7 @@ diff -q "$TMP/a_cold.xml" "$TMP/b_cold.xml" >/dev/null 2>&1 \
 EXC="geometry"
 "$BIN" "$PATH_A" --index-out="$TMP/idx_exc" --exclude="$EXC" >/dev/null 2>"$TMP/gen_exc.err"
 rc_exc=$?
-LEAN_EXC="$TMP/idx_exc.lean.ctxpackcache"
+LEAN_EXC="$TMP/idx_exc.lean.ripwirecache"
 [ "$rc_exc" -eq 0 ] && [ -s "$LEAN_EXC" ] \
     && ok "(c) --index-out --exclude=$EXC generated an artifact (exit 0)" \
     || { no "(c) --index-out with --exclude failed (exit $rc_exc)"; cat "$TMP/gen_exc.err"; }
@@ -128,7 +128,7 @@ else
 fi
 
 # restore from the excluded artifact == a cold run under the SAME exclude (excludes baked in, restore correct)
-"$BIN" "$PATH_B" --cache="$TMP/idx_exc.lean.ctxpackcache" --exclude="$EXC" --no-stable >"$TMP/exc_warm.xml" 2>/dev/null
+"$BIN" "$PATH_B" --cache="$TMP/idx_exc.lean.ripwirecache" --exclude="$EXC" --no-stable >"$TMP/exc_warm.xml" 2>/dev/null
 "$BIN" "$PATH_B" --no-cache --exclude="$EXC" --no-stable                                >"$TMP/exc_cold.xml" 2>/dev/null
 diff -q "$TMP/exc_warm.xml" "$TMP/exc_cold.xml" >/dev/null 2>&1 \
     && ok "(c) restore from the excluded artifact == cold under the same --exclude (byte-identical)" \

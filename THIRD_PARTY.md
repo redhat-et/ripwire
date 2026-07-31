@@ -70,8 +70,9 @@ Notes:
 - `deps/swift` is pinned to a bare commit rather than a tag because upstream's default branch does
   not carry a generated `parser.c`; that commit's generated output is what is vendored here.
 - `deps/ts_typescript` keeps `common/scanner.h`, which both sub-grammars' `src/scanner.c` include.
-- `deps/doctest` keeps the single header plus `doctest/parts`, `doctest/extensions`,
-  `scripts/version.txt` and `scripts/cmake/` — everything its own `CMakeLists.txt` reads. It is
-  compiled only when the repository is configured with `-DCTXPACK_TESTS=ON`.
+- `deps/doctest` keeps the single header plus `doctest/parts/`, `scripts/version.txt` and
+  `scripts/cmake/` — everything its own `CMakeLists.txt` reads. Its `doctest/extensions/` MPI
+  headers are dropped: they include an external `<mpi.h>` this build never compiles. doctest is
+  built only when the repository is configured with `-DRIPWIRE_TESTS=ON`.
 - Nothing in `third_party/deps/` is modified. Re-deriving any row is `git clone` + `git checkout
   <pinned commit>` + the prune described above; a diff against the upstream commit is the audit.

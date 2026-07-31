@@ -2,7 +2,7 @@
 # flipcheck.sh — the gate for `--flags --flip=NAME`, the ONE-GATE BLAST RADIUS (src/flipimpact.h).
 #
 #   test/flipcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/flipcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/flipcheck.sh
 #
 # --flags answers "what is dark here" and hands back a LIST. --flip answers the only question that list
 # leads to: if I turn THIS one on, what becomes live, which symbols hold it, what do they reach, and which
@@ -27,7 +27,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/flagsfix"
 ALIASFIX="$ROOT/test/flagsaliasfix"
@@ -36,7 +36,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "flipcheck: BIN=$BIN"
 

@@ -1,5 +1,5 @@
 // Alternating A/B benchmark for the pre-A6 per-pass radix versus the vendored single-read histogram core.
-// Build: c++ -O3 -march=native -std=c++23 bench/bench_radix_ab.cpp src/infra/fastmath.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ctxpack_radix_ab
+// Build: c++ -O3 -march=native -std=c++23 bench/bench_radix_ab.cpp src/infra/fastmath.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_radix_ab
 
 #include "radixSort.h"
 #include "sortutil.h"
@@ -193,10 +193,10 @@ void benchEdges( std::size_t count )
 int main( int argc, char** argv )
 {
     const std::size_t count = argc > 1 ? std::strtoull( argv[ 1 ], nullptr, 10 ) : 2'000'000;
-    const char* machine = std::getenv( "CTXPACK_MACHINE" );
+    const char* machine = std::getenv( "RIPWIRE_MACHINE" );
     if( machine == nullptr )
         machine = "local";
-    std::printf( "ctxpack radix A/B: count=%zu machine=%s samples=7 policy=alternating A/B\n", count, machine );
+    std::printf( "ripwire radix A/B: count=%zu machine=%s samples=7 policy=alternating A/B\n", count, machine );
     benchScores( count, false );
     benchScores( count, true );
     benchAdaptive( count );

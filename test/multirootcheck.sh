@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # multirootcheck.sh — the DESIGN_multiRoot.md §8 gate set for multi-root workspaces
-# (`ctxpack <dir1> <dir2>` → ONE merged graph with evidence-gated cross-root edges).
+# (`ripwire <dir1> <dir2>` → ONE merged graph with evidence-gated cross-root edges).
 #
 # Fixture: test/multirootfix/{svc,cli} — two mini-repos, COPIED to a scratch dir and `git init`-ed there
 # with DISTINCT histories/authors (never in-tree: nested .git dirs don't belong in this repo). cli/
@@ -10,7 +10,7 @@
 #   G-edge    cross-root call edge into svc's def exists (labeled path), and only via evidence
 #   G-forbid  the decoy stays cross-root-edge-less AND merged ambiguous= == sum of the solo runs;
 #             MUTATION: point cli's include at the decoy's file → the cross-root edge flips WITH it
-#   G-order   `ctxpack svc cli` ≡ `ctxpack cli svc` byte-identical (×3) + warm==cold + xmllint (G4)
+#   G-order   `ripwire svc cli` ≡ `ripwire cli svc` byte-identical (×3) + warm==cold + xmllint (G4)
 #   G-git     per-root history isolation: --owners attributes each root's same-named util.cpp to ITS
 #             OWN repo author, never the sibling's
 #   G-seam    the churn-backed verbs on roots that are SUBDIRS of ONE repo (a second fixture) — git's
@@ -19,22 +19,22 @@
 #   G-pr      --pr-context multi-root (DESIGN §5/§7): one <pr-context root=> section per root inside a
 #             <pr-context-workspace> wrapper, labeled changed-file paths, the svc change's blast radius
 #             crossing into cli's caller via the evidence edge, determinism + reorder + xmllint, AND the
-#             N=1 byte-identity guard (single-root --pr-context == the committed build/ctxpack)
+#             N=1 byte-identity guard (single-root --pr-context == the committed build/ripwire)
 #   G-cache   per-root incrementality: warm rerun reparsed=0 for both roots; touch ONE cli file →
-#             only cli reparses (CTXPACK_CACHE_STATS) and svc's cache blob is byte-identical
+#             only cli reparses (RIPWIRE_CACHE_STATS) and svc's cache blob is byte-identical
 #   G-solo    N=1 quarantine: single-root output byte-identical to test/golden.xml (today's binary)
 #   refusals  --quality-delta/--test-gate/--eval*/--arch --baseline/--index-out/--cache/
 #             --scip/--batch each refuse with ONE stderr line + exit 1 (never 2/3/4)
 #             (--pr-context is NO LONGER here — it ships per-root sections, see G-pr)
 #   hygiene   duplicate root dedupes with a stderr note; nested roots hard-error (exit 1)
 #
-# Usage:  test/multirootcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/multirootcheck.sh
+# Usage:  test/multirootcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/multirootcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-# BOTH seams. This gate took CTXPACK_BIN only, so `bash test/multirootcheck.sh <base>/ctxpack` SILENTLY ran
-# against build/ctxpack — a red-first run against a pre-fix binary passed for the wrong reason (trap #20).
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+# BOTH seams. This gate took RIPWIRE_BIN only, so `bash test/multirootcheck.sh <base>/ripwire` SILENTLY ran
+# against build/ripwire — a red-first run against a pre-fix binary passed for the wrong reason (trap #20).
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/multirootfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -43,7 +43,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "multirootcheck: BIN=$BIN  FIX=$FIX  TMP=$TMP"
 
 # ── scratch workspace: sibling checkouts svc/ + cli/, each its own git repo with a distinct history ──
@@ -239,20 +239,20 @@ cmp -s "$TMP/seam.plain" "$TMP/seam.churn" \
   && no "G-seam: --rank-by=churn is BYTE-IDENTICAL to the plain map — the churn signal is all zero" \
   || ok "G-seam: --rank-by=churn re-ranks (churn is a real signal in a subdir-root workspace)"
 
-# ── G-cache: per-root blobs + drift-proportional incrementality (CTXPACK_CACHE_STATS) ───────────────
+# ── G-cache: per-root blobs + drift-proportional incrementality (RIPWIRE_CACHE_STATS) ───────────────
 GC="$TMP/gcache"; mkdir -p "$GC"
 TMPDIR="$GC" "$BIN" "$WS/svc" "$WS/cli" >/dev/null 2>"$TMP/cold.err"        # cold: writes one blob per root
-TMPDIR="$GC" CTXPACK_CACHE_STATS=1 "$BIN" "$WS/svc" "$WS/cli" >/dev/null 2>"$TMP/warm.err"
+TMPDIR="$GC" RIPWIRE_CACHE_STATS=1 "$BIN" "$WS/svc" "$WS/cli" >/dev/null 2>"$TMP/warm.err"
 warm_lines="$( grep -c 'cache-stats' "$TMP/warm.err" || true )"
 warm_zero="$( grep -c 'reparsed=0' "$TMP/warm.err" || true )"
 if [ "$warm_lines" = "2" ] && [ "$warm_zero" = "2" ]; then ok "G-cache: warm run reparses nothing in either root"
 else no "G-cache: warm run stats unexpected: $( tr '\n' ';' <"$TMP/warm.err" )"; fi
 # identify svc's blob: only two blobs exist; snapshot both, then dirty ONE cli file.
 # AUDIT5 Y4: shard-aware lookup — blobs may be flat under $GC or under $GC/<xx>/ (2-hex shard).
-blobsum(){ find "$GC" -maxdepth 2 -type f -name 'ctxpack-*.bin' 2>/dev/null | sort | xargs -I{} md5 -q {} 2>/dev/null || find "$GC" -maxdepth 2 -type f -name 'ctxpack-*.bin' 2>/dev/null | sort | xargs md5sum; }
+blobsum(){ find "$GC" -maxdepth 2 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs -I{} md5 -q {} 2>/dev/null || find "$GC" -maxdepth 2 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs md5sum; }
 blobsum >"$TMP/blobs.before"
 printf '\n// dirty\n' >> "$WS/cli/src/cli_helper.cpp"
-TMPDIR="$GC" CTXPACK_CACHE_STATS=1 "$BIN" "$WS/svc" "$WS/cli" >/dev/null 2>"$TMP/dirty.err"
+TMPDIR="$GC" RIPWIRE_CACHE_STATS=1 "$BIN" "$WS/svc" "$WS/cli" >/dev/null 2>"$TMP/dirty.err"
 blobsum >"$TMP/blobs.after"
 dirty_zero="$( grep -c 'reparsed=0' "$TMP/dirty.err" || true )"
 dirty_one="$( grep -c 'reparsed=1' "$TMP/dirty.err" || true )"
@@ -332,13 +332,13 @@ grep -q 'pr-context-workspace' "$TMP/prc_solo_new.xml" \
 grep -q 'root="' "$TMP/prc_solo_new.xml" \
   && no "G-pr N=1: single-root leaked a root= attribute" \
   || ok "G-pr N=1: single-root header carries no root= attribute"
-REF="$ROOT/build/ctxpack"
+REF="$ROOT/build/ripwire"
 if [ -x "$REF" ] && [ "$REF" != "$BIN" ]; then
   TMPDIR="$CACHE" "$REF" "$PRW/svc" --pr-context >"$TMP/prc_solo_ref.xml" 2>/dev/null
   diff -q "$TMP/prc_solo_new.xml" "$TMP/prc_solo_ref.xml" >/dev/null \
-    && ok "G-pr N=1: single-root --pr-context byte-identical to committed build/ctxpack" \
-    || no "G-pr N=1: single-root --pr-context diverged from committed build/ctxpack"
-else skip "G-pr N=1: reference build/ctxpack unavailable for the byte diff"; fi
+    && ok "G-pr N=1: single-root --pr-context byte-identical to committed build/ripwire" \
+    || no "G-pr N=1: single-root --pr-context diverged from committed build/ripwire"
+else skip "G-pr N=1: reference build/ripwire unavailable for the byte diff"; fi
 
 # ── multi-root verbs stay deterministic + well-formed on the payoff surface ─────────────────────────
 run "$WS/svc" "$WS/cli" --impact=svc_handle >"$TMP/imp1.xml" 2>/dev/null

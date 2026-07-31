@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# skilltruthcheck.sh — executable truth gate for claims shipped in ctxpack skills.
+# skilltruthcheck.sh — executable truth gate for claims shipped in ripwire skills.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no executable ctxpack binary: $BIN"; exit 2; }
+[ -x "$BIN" ] || { echo "no executable ripwire binary: $BIN"; exit 2; }
 
-SEC="$ROOT/skills/ctxpack-security-scan/SKILL.md"
-EFF="$ROOT/skills/ctxpack-efficient/SKILL.md"
-PERF="$ROOT/skills/ctxpack-perf-target/SKILL.md"
-ROUTER="$ROOT/skills/ctxpack-router/SKILL.md"
+SEC="$ROOT/skills/ripwire-security-scan/SKILL.md"
+EFF="$ROOT/skills/ripwire-efficient/SKILL.md"
+PERF="$ROOT/skills/ripwire-perf-target/SKILL.md"
+ROUTER="$ROOT/skills/ripwire-router/SKILL.md"
 # The catalog-count assertions used to aim at an architecture skill that lived only in the author's
 # personal agent config and never shipped with the repo. A gate must assert against a file a clone
 # actually has, so they now aim at the two SHIPPED skills that make the same claims: the MCP skill
 # names the verb count and the quality skill names the kind count. Same claim, same teeth, on files
 # every reader can see.
-MCPSKILL="$ROOT/skills/ctxpack-mcp/SKILL.md"
-QUAL="$ROOT/skills/ctxpack-quality-bar/SKILL.md"
+MCPSKILL="$ROOT/skills/ripwire-mcp/SKILL.md"
+QUAL="$ROOT/skills/ripwire-quality-bar/SKILL.md"
 
 # JSON is indexed and literal retrieval works; semantic MCP-config auditing remains a manual review.
 jsonOut="$( "$BIN" "$ROOT/test/jsonfix" --grep=dependencies --no-cache 2>/dev/null )"
@@ -37,7 +37,7 @@ fi
     || no "security skill does not state the manual semantic-review boundary"
 
 # Portable artifact guidance must describe the complete two-artifact generation and consumption workflow.
-{ grep -q -- '--index-out=BASE' "$EFF" && grep -q 'lean.ctxpackcache' "$EFF" && grep -q 'rich.ctxpackcache' "$EFF"; } \
+{ grep -q -- '--index-out=BASE' "$EFF" && grep -q 'lean.ripwirecache' "$EFF" && grep -q 'rich.ripwirecache' "$EFF"; } \
     && ok "efficient skill documents --index-out lean/rich artifacts" \
     || no "efficient skill omits the complete --index-out lean/rich workflow"
 

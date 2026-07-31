@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tornreadcheck.sh — G-C: a torn read (file rewritten mid-parse) never crashes and self-heals.
 #
-# Regression fence (RESEARCH_agentQuality2026.md §3a / §3c): the audit reproduced that ctxpack's
+# Regression fence (RESEARCH_agentQuality2026.md §3a / §3c): the audit reproduced that ripwire's
 # ingest is structurally self-healing against concurrent rewrites — the cache keys hash(bytes actually
 # read)->facts(those bytes), so a torn read just produces a parse of SOME transient byte sequence,
 # never a crash, and the NEXT whole read hashes differently and reparses cleanly. The audit's own
@@ -11,10 +11,10 @@
 # Recipe (RESEARCH_agentQuality2026.md §3c "G-C"):
 #   1. in a mktemp dir, background a writer loop that rapidly rewrites a .cpp file with varying
 #      content (bounded iteration count so the gate finishes in well under a minute)
-#   2. concurrently run `ctxpack <dir> --no-cache` ~60 times, asserting the exit code is never a
+#   2. concurrently run `ripwire <dir> --no-cache` ~60 times, asserting the exit code is never a
 #      crash-range code (>= 128, i.e. killed by a signal) on EACH run
 #   3. wait for the writer to finish
-#   4. a FINAL `ctxpack <dir> | xmllint --noout -` must be clean — the tool converges to a valid
+#   4. a FINAL `ripwire <dir> | xmllint --noout -` must be clean — the tool converges to a valid
 #      parse of whatever the file's resting content ends up being
 #
 # This is a RACE, not a deterministic-bytes test — we assert the INVARIANT (no crash, ever; final
@@ -22,20 +22,20 @@
 #
 # Usage:
 #   bash test/tornreadcheck.sh
-#   CTXPACK_BIN=asan/ctxpack bash test/tornreadcheck.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/tornreadcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "tornreadcheck: BIN=$BIN  TMP=$TMP"
 
@@ -53,7 +53,7 @@ REWRITES=4000
 ) &
 WRITER_PID=$!
 
-# ── foreground: ~60 concurrent ctxpack runs, asserting no crash-range exit code on ANY of them ───
+# ── foreground: ~60 concurrent ripwire runs, asserting no crash-range exit code on ANY of them ───
 RUNS=60
 crash_count=0
 crash_run=""

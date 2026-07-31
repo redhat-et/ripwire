@@ -1,6 +1,6 @@
 #pragma once
 
-// wrap.h — `ctxpack wrap <agent>`: print the copy-paste recipe that wires ctxpack into a coding
+// wrap.h — `ripwire wrap <agent>`: print the copy-paste recipe that wires ripwire into a coding
 // agent's loop. The adoption pattern from the competitive scan: get the deterministic map/MCP IN
 // FRONT of the agent instead of waiting to be invoked by hand. Pure — prints to stdout, no side
 // effects, no config mutation (the user reviews + runs it), deterministic. MCP-speaking agents get
@@ -59,10 +59,10 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent )
 inline void wrapList( std::FILE* out )
 {
     std::fprintf( out,
-        "ctxpack wrap <agent> — print the recipe to wire ctxpack into an agent's loop.\n"
+        "ripwire wrap <agent> — print the recipe to wire ripwire into an agent's loop.\n"
         "  MCP agents:  claude  cursor  codex  windsurf  gemini\n"
         "  repo-map:    aider\n"
-        "  example:     ctxpack wrap claude\n"
+        "  example:     ripwire wrap claude\n"
         "  --all        detect every installed agent + emit each one's config\n" );
 }
 
@@ -84,10 +84,10 @@ inline std::string wrapTomlString( const std::string_view value )
 inline void wrapMcpJson( const char* configPath )
 {
     std::printf(
-        "# ctxpack -> add to %s\n"
+        "# ripwire -> add to %s\n"
         "{\n"
         "  \"mcpServers\": {\n"
-        "    \"ctxpack\": { \"command\": \"ctxpack\", \"args\": [\"--mcp\"] }\n"
+        "    \"ripwire\": { \"command\": \"ripwire\", \"args\": [\"--mcp\"] }\n"
         "  }\n"
         "}\n", configPath );
 }
@@ -170,7 +170,7 @@ inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
         for( const SkillFinding& f : findings )
         {
             if( f.sev == SkillSeverity::Info ) continue;   // silent on INFO
-            std::fprintf( stderr, "ctxpack wrap: %s  %s:%d  %s  — \"%s\"\n",
+            std::fprintf( stderr, "ripwire wrap: %s  %s:%d  %s  — \"%s\"\n",
                           skillSeverityStr( f.sev ), p.c_str(), f.line, f.rule, f.excerpt.c_str() );
         }
     }
@@ -184,11 +184,11 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     if( agent == "claude" )
     {
         std::printf(
-            "# ctxpack -> Claude Code (MCP — deterministic, no LLM, no embeddings)\n"
-            "claude mcp add ctxpack -- ctxpack --mcp\n"
+            "# ripwire -> Claude Code (MCP — deterministic, no LLM, no embeddings)\n"
+            "claude mcp add ripwire -- ripwire --mcp\n"
             "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
         for( const std::string& line : verbLines ) std::printf( "%s\n", line.c_str() );
-        std::printf( "# (no-MCP one-shot orientation: ctxpack . --for=\"<task>\" --max-tokens=2000)\n" );
+        std::printf( "# (no-MCP one-shot orientation: ripwire . --for=\"<task>\" --max-tokens=2000)\n" );
     }
     else if( agent == "cursor" )
         wrapMcpJson( ".cursor/mcp.json  (project)  or  ~/.cursor/mcp.json  (global)" );
@@ -200,16 +200,16 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     {
         const std::string command = wrapTomlString( executablePath );
         std::printf(
-            "# ctxpack -> OpenAI Codex CLI — add to ~/.codex/config.toml\n"
-            "[mcp_servers.ctxpack]\n"
+            "# ripwire -> OpenAI Codex CLI — add to ~/.codex/config.toml\n"
+            "[mcp_servers.ripwire]\n"
             "command = \"%s\"\n"
             "args = [\"--mcp\"]\n", command.c_str() );
     }
     else if( agent == "aider" )
         std::printf(
-            "# ctxpack -> aider (no MCP; feed a ranked repo map as read-only context)\n"
-            "ctxpack . --for=\"<your task>\" --max-tokens=2000 > .ctxpack-map.txt\n"
-            "aider --read .ctxpack-map.txt\n"
+            "# ripwire -> aider (no MCP; feed a ranked repo map as read-only context)\n"
+            "ripwire . --for=\"<your task>\" --max-tokens=2000 > .ripwire-map.txt\n"
+            "aider --read .ripwire-map.txt\n"
             "# re-run the first line when the tree changes; the warm cache makes it ~instant.\n" );
 
     // every MCP agent recipe also gets the grouped verb list printed as a comment (cursor/windsurf/
@@ -242,7 +242,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
     if( maxWrapSev >= 2 && !force )
     {
         std::fprintf( stderr,
-            "ctxpack wrap: CRITICAL skill findings above — refusing to emit recipe.\n"
+            "ripwire wrap: CRITICAL skill findings above — refusing to emit recipe.\n"
             "              Fix the skills or re-run with --force to proceed anyway.\n" );
         return 1;
     }
@@ -283,7 +283,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
         return 0;
     }
 
-    std::fprintf( stderr, "ctxpack wrap: unknown agent '%.*s'\n", int( agent.size() ), agent.data() );
+    std::fprintf( stderr, "ripwire wrap: unknown agent '%.*s'\n", int( agent.size() ), agent.data() );
     wrapList( stderr );
     wrapMcpJson( "your client's MCP config (generic stanza)" );   // don't leave them stuck
     return 2;

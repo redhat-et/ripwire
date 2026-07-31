@@ -4,7 +4,7 @@
 // deepNest(a,b,c):  3 params, 3-deep nesting (if > for > if), calls nothing in-repo, loc=14, ccx=6
 // callsBoth(x):     1 param, 0 nesting, calls leaf()+deepNest() -> cbo=2, loc=4
 //
-// Values below were measured by running `ctxpack test/w2verbsfix --metrics` and reading the
+// Values below were measured by running `ripwire test/w2verbsfix --metrics` and reading the
 // output before being pinned as assertions in w2verbscheck.sh (house style: hand-verify, don't guess).
 
 class Shapes

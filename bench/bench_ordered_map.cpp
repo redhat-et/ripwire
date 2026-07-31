@@ -1,4 +1,4 @@
-// bench_ordered_map.cpp - ordered-map tournament for ctxpack quality hot paths.
+// bench_ordered_map.cpp - ordered-map tournament for ripwire quality hot paths.
 //
 // The quality-delta code uses sorted numeric maps keyed by fnv1a64(canonId): aggregate MAX
 // metrics, insert "seen" sets, lookup baseline/current maps, then sometimes iterate in key order.
@@ -6,9 +6,9 @@
 // S+tree `dynamic_map` for that exact uint64 -> tiny-value shape.
 //
 // Build:
-//   c++ -O3 -march=native -std=c++23 bench/bench_ordered_map.cpp -Isrc/infra -Ithird_party -o /tmp/ctxpack_bench_ordered_map
+//   c++ -O3 -march=native -std=c++23 bench/bench_ordered_map.cpp -Isrc/infra -Ithird_party -o /tmp/ripwire_bench_ordered_map
 // Run:
-//   /tmp/ctxpack_bench_ordered_map 1000000
+//   /tmp/ripwire_bench_ordered_map 1000000
 
 #include "btree.hpp"
 #include "dynamic_map.hpp"

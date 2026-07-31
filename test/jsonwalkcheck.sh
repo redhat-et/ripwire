@@ -16,19 +16,19 @@
 # hand-rolled fourth copy reds this gate rather than silently re-forking the family.
 #
 # Usage:  test/jsonwalkcheck.sh [BIN]        (BIN only selects which CMake build dir supplies the flags)
-#         CTXPACK_BIN=asan/ctxpack test/jsonwalkcheck.sh
+#         RIPWIRE_BIN=asan/ripwire test/jsonwalkcheck.sh
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "jsonwalkcheck: BIN=$BIN"
 
@@ -76,8 +76,8 @@ fi
 # ── part 2: BEHAVIOURAL — compile + run the differential driver ───────────────────────────────────
 # Recipe borrowed from includeprecisecheck.sh: reuse the exact flags/objects CMake produced for $BIN.
 BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
-FLAGS_MK="$BUILD_DIR/CMakeFiles/ctxpack.dir/flags.make"
-LINK_TXT="$BUILD_DIR/CMakeFiles/ctxpack.dir/link.txt"
+FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"
+LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
 if [ ! -f "$FLAGS_MK" ] || [ ! -f "$LINK_TXT" ]; then
   no "cannot find CMake flags/link under $BUILD_DIR — the differential arm needs a CMake-built binary"
   [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
@@ -89,8 +89,8 @@ eval "CXX_DEFINES=(  $( grep -m1 '^CXX_DEFINES ='  "$FLAGS_MK" | sed 's/^CXX_DEF
 eval "CXX_INCLUDES=( $( grep -m1 '^CXX_INCLUDES =' "$FLAGS_MK" | sed 's/^CXX_INCLUDES =//' ) )"
 
 LINK_BODY="$( sed -E 's#^[^ ]+ ##' "$LINK_TXT" )"
-LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#-o +ctxpack##' )"
-LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#[^ "]*ctxpack.dir/src/main.cpp.o##' )"
+LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#-o +ripwire##' )"
+LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#[^ "]*ripwire.dir/src/main.cpp.o##' )"
 LINK_BODY="$( printf '%s' "$LINK_BODY" | tr -d '"' )"
 
 DRIVER="$ROOT/test/jsonwalk_unit.cpp"
@@ -98,13 +98,13 @@ DRIVER="$ROOT/test/jsonwalk_unit.cpp"
 
 OBJ="$TMP/jsonwalk.o"
 ( cd "$BUILD_DIR" && "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -c "$DRIVER" -o "$OBJ" ) 2>"$TMP/cc.err"
-if [ $? -eq 0 ]; then ok "differential driver compiles against ctxpack flags"
+if [ $? -eq 0 ]; then ok "differential driver compiles against ripwire flags"
 else no "differential driver failed to compile"; sed -n '1,40p' "$TMP/cc.err"; echo "SOME CHECKS FAILED"; exit 1; fi
 
 UNIT="$TMP/jsonwalk"
 # shellcheck disable=SC2086
 ( cd "$BUILD_DIR" && "$CXX" "${CXX_FLAGS[@]}" "$OBJ" $LINK_BODY -o "$UNIT" ) 2>"$TMP/ld.err"
-if [ $? -eq 0 ]; then ok "differential driver links against ctxpack objects"
+if [ $? -eq 0 ]; then ok "differential driver links against ripwire objects"
 else no "differential driver failed to link"; sed -n '1,40p' "$TMP/ld.err"; echo "SOME CHECKS FAILED"; exit 1; fi
 
 "$UNIT" >"$TMP/unit.out" 2>&1

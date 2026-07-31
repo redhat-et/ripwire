@@ -539,7 +539,7 @@ inline void writeAnchorNote( std::FILE* out, const std::string& anchorAttr )
 }
 
 // §P11.7 — the FLAGSHIP review bundle led with its least reviewable file. Sections were emitted in path
-// order, so on ctxpack's own tree `CHANGELOG.md` came first and spent the reader's whole first screen on 31
+// order, so on ripwire's own tree `CHANGELOG.md` came first and spent the reader's whole first screen on 31
 // markdown headings rendered as callers="0" symbol rows, with the files something actually depends on below
 // the fold. Re-key on the blast radius: transitive-dependent count DESC, path ASC to break ties, so the
 // order is still a total, deterministic function of the corpus. Nothing is added or dropped — the same
@@ -635,7 +635,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     for( std::uint32_t f = 0; f < F; ++f ) if( changedFile[f] ) changed.push_back( f );
     std::sort( changed.begin(), changed.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
-    std::fprintf( out, "<!-- ctxpack pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
+    std::fprintf( out, "<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
                  "base=%s. skipped_mode_only=diffs that changed a file's MODE and nothing else (e.g. chmod) excluded from the changed set; a pure RENAME is content-identical too but is NOT excluded — it is a changed file, listed at its new path. files= means two different things by DEPTH here and is deliberately not renamed (15 consumers read the root one): "
                  "on the ROOT it is the CHANGED file count; on each <impact/> child it is the distinct files dependents= reaches (changed + non-changed), so dependents=\"0\" implies files=\"0\" and vice versa — never an "
                  "impossible-looking dependents>0/files=0. files_other= on the same <impact/> is the non-changed subset (a changed file's dependents inside OTHER changed files have no <f> row of their own — they are already shown "

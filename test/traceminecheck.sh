@@ -2,10 +2,10 @@
 # traceminecheck.sh — the gate for DESIGN_traceEvals.md's session-trace-mined eval (bench/mine_traces.py
 # + --eval-mined). Four checks, per the design's §6:
 #   1) miner determinism on a checked-in synthetic fixture (test/traceminefix/sample_session.jsonl) —
-#      two runs byte-identical; exact pair count / gold set / ctxpack_assisted flag asserted by value.
+#      two runs byte-identical; exact pair count / gold set / ripwire_assisted flag asserted by value.
 #      The fixture exercises: a real user turn, a synthetic tool_result-only "user" event (must be
 #      filtered), an in-repo Edit, a scratchpad Write (must be excluded), a Read (must never gold), a
-#      reverted Edit pair (must drop), a ctxpack-Bash call (must set ctxpack_assisted=true), and a
+#      reverted Edit pair (must drop), a ripwire-Bash call (must set ripwire_assisted=true), and a
 #      second segment triggered by a later real user turn (boundary-after-edit rule).
 #   2) privacy gate — the miner refuses to write inside the target repo without --export-sanitized
 #      (non-zero exit AND no file created); with --export-sanitized it succeeds and the verbatim query
@@ -16,19 +16,19 @@
 #      recallAtK/rankFiles every other eval mode uses, not a drifted reimplementation.
 #   4) det-gate — --eval-mined stdout is byte-identical run-to-run.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack test/traceminecheck.sh   (needs python3; git optional)
+# Usage:  RIPWIRE_BIN=build/ripwire test/traceminecheck.sh   (needs python3; git optional)
 # Exits non-zero on any failure. Does NOT edit regression.sh or ~/.claude.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 MINER="$ROOT/bench/mine_traces.py"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -f "$MINER" ] || { echo "no miner at $MINER"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 echo "traceminecheck: BIN=$BIN  MINER=$MINER"
@@ -64,9 +64,9 @@ checks.append(("pair1 gold == {src/a.py, src/b.py}", sorted(g["path"] for g in a
 checks.append(("pair1 excludes src/c.py (Read)", all(g["path"] != "src/c.py" for g in a["gold_files"])))
 checks.append(("pair1 excludes src/d.py (reverted Edit)", all(g["path"] != "src/d.py" for g in a["gold_files"])))
 checks.append(("pair1 excludes the scratchpad Write", all("scratchpad" not in g["path"] for g in a["gold_files"])))
-checks.append(("pair1 ctxpack_assisted == true", a["ctxpack_assisted"] is True))
+checks.append(("pair1 ripwire_assisted == true", a["ripwire_assisted"] is True))
 checks.append(("pair2 gold == {CHANGELOG.md, VERSION}", sorted(g["path"] for g in b["gold_files"]) == ["CHANGELOG.md", "VERSION"]))
-checks.append(("pair2 ctxpack_assisted == false", b["ctxpack_assisted"] is False))
+checks.append(("pair2 ripwire_assisted == false", b["ripwire_assisted"] is False))
 checks.append(("no query contains harness task-notification text (origin.kind filter)",
                all("task-notification" not in r["query"] for r in recs)))
 checks.append(("miner_version == 1 on both", a["miner_version"] == 1 and b["miner_version"] == 1))

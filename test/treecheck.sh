@@ -17,19 +17,19 @@
 #   (4) the top symbol per file matches the top-ranked symbol of that file in the default map
 #       (chain.cpp → d4, util.cpp → hot)  — so grouping+ordering agree with the ground-truth ranking
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/treecheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/treecheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/queryfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/queryfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 echo "treecheck: BIN=$BIN  CORPUS=test/queryfix"

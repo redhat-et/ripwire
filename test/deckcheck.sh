@@ -3,14 +3,14 @@
 # ripwirepubliccheck.sh lesson (match its idiom below) to a different lie: a deck-build agent last
 # round fabricated `--doc-drift --dated` — plausible, wrong, and it shipped into a 20-slide deck,
 # caught only because an orchestrator happened to grep the built binary's --help text by hand.
-# This gate makes that grep automatic and runs it on every prose source that quotes ctxpack flags.
+# This gate makes that grep automatic and runs it on every prose source that quotes ripwire flags.
 #
 # Scope (what counts as "prose that quotes flags"):
 #   present/*.py, present/*.js — the deck-build SCRIPTS (deck1-3 are Python, deck4 is JS); their string
 #                    literals are what actually ships onto slides. present/*.pptx/.pdf/.html are BUILT
 #                    ARTIFACTS, not sources: the .html export especially is full of `--ink`/`--panel`-
 #                    style CSS custom properties that collide with the flag-token shape and are not
-#                    ctxpack flags at all, and the orchestrator's working tree regenerates these —
+#                    ripwire flags at all, and the orchestrator's working tree regenerates these —
 #                    scanning generated output would make this gate flap on files this agent doesn't
 #                    own. Scan the scripts that GENERATE the deck, not the deck.
 #   README.md      — the public-facing usage doc; same fabrication risk as a slide.
@@ -33,7 +33,7 @@
 # A token is allowed if EITHER:
 #   (a) it appears in `$BIN --help` (the ground truth: what the shipped binary actually parses), or
 #   (b) it is listed in test/deckcheck_allowlist.txt with a reason — genuine prose false positives:
-#       a REAL ctxpack flag --help deliberately omits (CTXPACK_DEV-gated experiment, deprecated
+#       a REAL ripwire flag --help deliberately omits (RIPWIRE_DEV-gated experiment, deprecated
 #       --order alias, a `wrap`-subcommand-only flag), or a flag that belongs to a DIFFERENT tool
 #       quoted in a worked example (xmllint --noout, git --raw, cmake --build, aider --read,
 #       this repo's own install.sh --hook/--codex/--claude).
@@ -42,25 +42,25 @@
 # The allowlist is also checked for ROT: an entry no longer referenced anywhere in the scanned
 # sources fails the gate too — an allowlist is not a place old exemptions go to hide forever.
 #
-# Usage:  bash test/deckcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/deckcheck.sh
+# Usage:  bash test/deckcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/deckcheck.sh
 # Exit codes: 0 = clean. 1 = at least one fabricated/unlisted flag, or a stale allowlist entry.
 #             2 = usage error (no binary, no --help output).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 cd "$ROOT" || { echo "deckcheck: cannot cd to repo root $ROOT"; exit 2; }
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 ALLOWLIST="$ROOT/test/deckcheck_allowlist.txt"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-[ -x "$BIN" ] || { echo "deckcheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "deckcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -f "$ALLOWLIST" ] || { echo "deckcheck: missing allowlist $ALLOWLIST"; exit 2; }
 
 echo "deckcheck: BIN=$BIN"
 
 # ── the token shape, used identically on --help and on prose ────────────────────────────────────────
-# Case-INSENSITIVE first char and `_` allowed, deliberately wider than any real ctxpack flag: a
+# Case-INSENSITIVE first char and `_` allowed, deliberately wider than any real ripwire flag: a
 # fabrication must be EXTRACTED before it can be judged. The old shape was anchored to a lowercase
 # [a-z] and excluded `_`, so `--Doc-Drift` or `--doc_drift` yielded NO TOKEN AT ALL and a capitalized
 # or underscored fabrication sailed through silently — the gate's worst failure mode, since it looks

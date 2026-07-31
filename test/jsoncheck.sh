@@ -15,14 +15,14 @@
 #
 # A self-contained tmp git repo fixture (not test/fixture — that one is shared by other goldens and isn't
 # its own git repo) gives --quality-delta/--test-gate a real, controlled HEAD + working-tree diff so this
-# gate never drifts as the LIVE ctxpack repo's own history changes.
+# gate never drifts as the LIVE ripwire repo's own history changes.
 #
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/jsoncheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/jsoncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 # NOTE: ok/no print to STDERR (not stdout) — several checks below capture a verb's raw --json output via
@@ -31,7 +31,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" >&2; }
 no(){ printf '  FAIL  %s\n' "$*" >&2; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found — required to validate JSON"; exit 2; }
 echo "jsoncheck: BIN=$BIN"
 
@@ -116,7 +116,7 @@ printf '%s' "$XML1" | grep -q "t=\"$JT0\"" \
     || no "default map: first symbol t='$JT0' not found in the XML sibling"
 
 # G5: plain (no --json) output is untouched — spot-check the XML still starts with the schema comment.
-printf '%s' "$XML1" | head -c 20 | grep -q '<!-- ctxpack' \
+printf '%s' "$XML1" | head -c 20 | grep -q '<!-- ripwire' \
     && ok "G5: default map WITHOUT --json is still plain XML (untouched)" \
     || no "G5: default map without --json looks different — --json must be purely additive"
 

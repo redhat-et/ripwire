@@ -2,9 +2,9 @@
 # sigredactcheck.sh — gate for W3-N1 (the §B0 family's next member): a SIGNATURE is emitted text too.
 #
 # Usage:
-#   test/sigredactcheck.sh                       # uses build/ctxpack
-#   test/sigredactcheck.sh asan/ctxpack
-#   CTXPACK_BIN=build_base/ctxpack test/sigredactcheck.sh    # red-first: every sig arm MUST fail here
+#   test/sigredactcheck.sh                       # uses build/ripwire
+#   test/sigredactcheck.sh asan/ripwire
+#   RIPWIRE_BIN=build_base/ripwire test/sigredactcheck.sh    # red-first: every sig arm MUST fail here
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
@@ -32,7 +32,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
@@ -42,7 +42,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # hard input requirements — a missing input is a FAILURE of the gate, never a silent skip
-[ -x "$BIN" ] || { echo "sigredactcheck: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "sigredactcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "sigredactcheck: python3 is required (JSON arms)"; exit 2; }
 
 echo "sigredactcheck: BIN=$BIN"

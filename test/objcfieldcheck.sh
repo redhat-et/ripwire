@@ -10,29 +10,29 @@
 # message sends, not field_expression), so this is a probe-level (extraction) fix, not a
 # resolution fix — the fixture deliberately has no symbol named "init", so the reference stays
 # UNRESOLVED after the fix too. This gate therefore asserts the RAW EXTRACTION via
-# ctxpack_probe (which prints refs pre-resolution), not --callees/--uses (which would show no
+# ripwire_probe (which prints refs pre-resolution), not --callees/--uses (which would show no
 # change at all, since the ref never resolves either before or after).
 #
 # Fixture test/objcfieldfix/main.m:
 #   freeFn()    — control: bare C call (already captured pre-H4)
 #   ops->init() — field-expression call (H4 widening: now extracted, still resolves to nothing)
 #
-# RED-FIRST (recorded 2026-07-31, plain dev build, both binaries same tree, via ctxpack_probe):
-#   pre-change (ctxpack_probe_base): caller's raw refs = "freeFn ops"       (2 refs; no "init")
-#   post-change (ctxpack_probe):     caller's raw refs = "freeFn init ops" (3 refs; "init" present)
-# This gate reproduces that exact comparison live against build/ctxpack_probe_base when present.
+# RED-FIRST (recorded 2026-07-31, plain dev build, both binaries same tree, via ripwire_probe):
+#   pre-change (ripwire_probe_base): caller's raw refs = "freeFn ops"       (2 refs; no "init")
+#   post-change (ripwire_probe):     caller's raw refs = "freeFn init ops" (3 refs; "init" present)
+# This gate reproduces that exact comparison live against build/ripwire_probe_base when present.
 #
-# Usage:  test/objcfieldcheck.sh   |   CTXPACK_PROBE=asan/ctxpack_probe test/objcfieldcheck.sh
+# Usage:  test/objcfieldcheck.sh   |   RIPWIRE_PROBE=asan/ripwire_probe test/objcfieldcheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 # V1 MED-1 fix: the probe must FOLLOW the binary under test (house pattern, probecheck.sh) — the
-# harness invokes gates with CTXPACK_BIN only, never CTXPACK_PROBE, so a hardcoded build/ default
+# harness invokes gates with RIPWIRE_BIN only, never RIPWIRE_PROBE, so a hardcoded build/ default
 # made an asan/base run validate the wrong build's extraction.
-PROBE="${CTXPACK_PROBE:-${BIN}_probe}"
+PROBE="${RIPWIRE_PROBE:-${BIN}_probe}"
 [ "${PROBE#/}" = "$PROBE" ] && PROBE="$ROOT/$PROBE"
 FIX="$ROOT/test/objcfieldfix"
 fail=0
@@ -40,8 +40,8 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
-[ -x "$PROBE" ] || { echo "no ctxpack_probe binary at $PROBE — build first (cmake --build build -j)"; exit 2; }
-[ -x "$BIN" ]   || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$PROBE" ] || { echo "no ripwire_probe binary at $PROBE — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ]   || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "objcfieldcheck: PROBE=$PROBE  BIN=$BIN  FIX=$FIX"
 
 # ── extraction: probe's raw "calls:" line for caller must now include "init" ────────────────────
@@ -78,15 +78,15 @@ command -v xmllint >/dev/null 2>&1 \
 # ── RED-FIRST live check against a committed pre-change probe binary, when present ──────────────
 redfirst_check()
 {
-    # Deliberately NOT derived from CTXPACK_BIN: this arm wants the hand-saved PRE-CHANGE artifact
+    # Deliberately NOT derived from RIPWIRE_BIN: this arm wants the hand-saved PRE-CHANGE artifact
     # (a lane copies it before editing), whatever binary is under test. Absent -> honest SKIP below.
-    local BASEPROBE="$ROOT/build/ctxpack_probe_base"
-    [ -x "$BASEPROBE" ] || { skip "red-first: build/ctxpack_probe_base not present"; return; }
+    local BASEPROBE="$ROOT/build/ripwire_probe_base"
+    [ -x "$BASEPROBE" ] || { skip "red-first: build/ripwire_probe_base not present"; return; }
     local before
     before="$( "$BASEPROBE" "$FIX" 2>/dev/null | grep -A1 '\[   1\] caller' | tail -1 )"
     case "$before" in
-      *"calls: freeFn ops"*) ok "red-first: ctxpack_probe_base's caller refs = 'freeFn ops' (no init) — this gate is a real regression fence" ;;
-      *"init"*) no "red-first FAILED: ctxpack_probe_base ALREADY extracts init (got: $before) — base binary may already carry this fix" ;;
+      *"calls: freeFn ops"*) ok "red-first: ripwire_probe_base's caller refs = 'freeFn ops' (no init) — this gate is a real regression fence" ;;
+      *"init"*) no "red-first FAILED: ripwire_probe_base ALREADY extracts init (got: $before) — base binary may already carry this fix" ;;
       *) no "red-first: unexpected pre-change output ($before)" ;;
     esac
 }

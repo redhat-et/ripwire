@@ -16,7 +16,7 @@
 #     pins that deliberate gap rather than letting it silently drift into "accidentally fixed" or "spread
 #     further"
 #   - non-git directory: at= is OMITTED entirely on --doctor and --doc-drift (never at="none")
-#   - the bare default map (`ctxpack <dir>`, no verb) never grows an at= and never shells out to git —
+#   - the bare default map (`ripwire <dir>`, no verb) never grows an at= and never shells out to git —
 #     `<r>` stays byte-for-byte `<r>` on BOTH a git and a non-git root
 #   - --map-diff (which already shells out to git for the diff) DOES stamp `<r at="...">`, single-root only
 #   - determinism: two runs over the SAME repo state are byte-identical for every stamped verb
@@ -24,27 +24,27 @@
 #
 # Usage:
 #   test/gitstampcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/gitstampcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/gitstampcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "gitstampcheck: git unavailable — skipping"; exit 0; }
 
 echo "gitstampcheck: BIN=$BIN"
 
 R="$TMP/repo"; mkdir -p "$R/src"
-export GIT_AUTHOR_NAME=ctxpack GIT_AUTHOR_EMAIL=ctxpack@example.invalid
-export GIT_COMMITTER_NAME=ctxpack GIT_COMMITTER_EMAIL=ctxpack@example.invalid
+export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid
+export GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
 # RECENT dates (1 day ago), not a fixed calendar date: --hotspots scopes churn to "12 months ago" against
 # WALL-CLOCK now, so a hardcoded past date would eventually age out of that window and fail this gate for
 # a reason that has nothing to do with the stamp being tested.

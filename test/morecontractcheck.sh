@@ -2,7 +2,7 @@
 # morecontractcheck.sh — the gate for the `<more N=/>` TRUNCATION CONTRACT (r27 P0.5).
 #
 #   test/morecontractcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/morecontractcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/morecontractcheck.sh
 #
 # The claim being pinned is one sentence: NOTHING IS DROPPED WITHOUT A NUMBER. A capped list prints at most
 # `cap` rows and, whenever it holds more than that, exactly one `<more X=/>` whose X is the count it did not
@@ -33,14 +33,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "morecontractcheck: BIN=$BIN"
 

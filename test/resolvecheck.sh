@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # resolvecheck.sh — the P2-D one-hop type-narrowing gate (Rule 1: class membership).
 #
-#   test/resolvecheck.sh                       # uses build/ctxpack on test/resolvefix
-#   CTXPACK_BIN=asan/ctxpack test/resolvecheck.sh
+#   test/resolvecheck.sh                       # uses build/ripwire on test/resolvefix
+#   RIPWIRE_BIN=asan/ripwire test/resolvecheck.sh
 #
 # The fixture test/resolvefix/shapes.cpp has two classes A and B that BOTH define process();
 # A::run() calls this->process(). Under the bare §2a ladder `process` is ambiguous and run gets
@@ -12,15 +12,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/resolvefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "resolvecheck: BIN=$BIN  CORPUS=$CORPUS"
 

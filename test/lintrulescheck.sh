@@ -15,12 +15,12 @@
 #      combinator block (empty '|') alerts + skips the file whole; combinators are deterministic.
 # Does NOT edit test/regression.sh (the orchestrator wires it).
 #
-#   CTXPACK_BIN=build/ctxpack bash test/lintrulescheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/lintrulescheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/lintrulescheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/lintrulescheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/lintrulesfix"
 RULES="$CORPUS/rules"
@@ -30,7 +30,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ]    || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/lintrulesfix dir — fixture missing"; exit 2; }
 [ -d "$RULES" ]  || { echo "no test/lintrulesfix/rules dir — fixture missing"; exit 2; }
 

@@ -26,21 +26,21 @@
 #      it, green, on base_w3 — five `grep -q '<bodies>'` assertions that stopped matching when <bodies>
 #      gained shown=/total=/capped= (§B8.3's truncation-vocabulary sweep) plus the (A2a) body-identity arm
 #      built on the same string. Fixed at the assertions AND with the exit below.
-#   2. it ignored $1 — `test/tracecheck.sh asan/ctxpack` silently tested build/ctxpack. Same seam W3FIX
+#   2. it ignored $1 — `test/tracecheck.sh asan/ripwire` silently tested build/ripwire. Same seam W3FIX
 #      fixed in tokenbudgetcheck; both binding forms are live now.
 #
 # Operates on a private temp tree (never touches the real repo). No git needed.
-# Usage:  test/tracecheck.sh [BIN]   |   CTXPACK_BIN=asan/ctxpack bash test/tracecheck.sh
+# Usage:  test/tracecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/tracecheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/app" "$WORK/src" "$WORK/web" "$WORK/lib" "$WORK/traces"

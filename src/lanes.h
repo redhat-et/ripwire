@@ -6,9 +6,9 @@
 //
 // The field has 100+ worktree-orchestrator UIs and none of them computes lane conflicts from a code graph;
 // spec-driven decomposers split a task in PROSE and cannot predict which halves collide. This verb emits the
-// machine-readable plan those tools consume. ctxpack is the planning brain and never the agent runner: the
-// plan is advisory, ctxpack does not police it, and nothing here writes a file (the artifact is stdout —
-// `ctxpack . --plan-lanes=3 --task="…" > .ctxpack_lanes.json`, so the tool stays read-only and a reviewer
+// machine-readable plan those tools consume. ripwire is the planning brain and never the agent runner: the
+// plan is advisory, ripwire does not police it, and nothing here writes a file (the artifact is stdout —
+// `ripwire . --plan-lanes=3 --task="…" > .ripwire_lanes.json`, so the tool stays read-only and a reviewer
 // verifies a committed plan by re-running the command and diffing).
 //
 // ── COMPOSITION ONLY, like landingplan.h ──────────────────────────────────────────────────────────────────
@@ -40,8 +40,8 @@
 // what a lane agent does.
 //
 // Fixing canonicalId itself is the right long-term change and is deliberately NOT in v1: it is the emitted
-// identity of the whole tool (the golden map's id=, the --for/--pack-task chaining contract, .ctxpack_notes
-// targets, .ctxpack_quality_acks keying, the quality-delta origin oracle, the qsnap blobs), so it is a round
+// identity of the whole tool (the golden map's id=, the --for/--pack-task chaining contract, .ripwire_notes
+// targets, .ripwire_quality_acks keying, the quality-delta origin oracle, the qsnap blobs), so it is a round
 // with two committed-file migrations, not a lane. v1 gets soundness from its own key and states the residual.
 //
 // ── §FOLD — the residual, and why over-reporting is the SAFE direction ────────────────────────────────────
@@ -660,7 +660,7 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
 
     // §7.6 — the plan is advisory and it is stamped.
     addWarning( result.warnings, "claims-are-advisory", "info",
-                "Nothing stops a lane editing outside its claims and ctxpack does not police it — that is the orchestrator's job. "
+                "Nothing stops a lane editing outside its claims and ripwire does not police it — that is the orchestrator's job. "
                 "The plan is stamped with the sha it was computed against (at=); read at another sha it describes a tree that has "
                 "moved, and the l= locators rot first. Regenerating is cheap; treat a committed plan as re-derivable, never as "
                 "authoritative because it was committed." );
@@ -890,8 +890,8 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
 
 // ── JSON emission ─────────────────────────────────────────────────────────────────────────────────────────
 // JSON on stdout, always, and deliberately not the house XML default: the artifact's consumer is a program (a
-// worktree manager), so making stdout BE the file means `ctxpack . --plan-lanes=3 --task=… > .ctxpack_lanes.json`
-// is the entire write path — no sidecar writer to drift from the printer, ctxpack stays read-only, and a
+// worktree manager), so making stdout BE the file means `ripwire . --plan-lanes=3 --task=… > .ripwire_lanes.json`
+// is the entire write path — no sidecar writer to drift from the printer, ripwire stays read-only, and a
 // reviewer verifies a committed plan by re-running and diffing.
 
 inline void writeJsonStringOrNull( std::FILE* out, const std::string& value )

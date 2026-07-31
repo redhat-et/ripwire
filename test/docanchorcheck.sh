@@ -2,7 +2,7 @@
 # docanchorcheck.sh — the EOF-BOUNDARY and ATTRIBUTE-VOCABULARY gate for --doc-drift (r27 tasks 3 and 6).
 #
 #   test/docanchorcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/docanchorcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/docanchorcheck.sh
 #
 # ── 1) the phantom line (an index-vs-count bug) ───────────────────────────────────────────────────────
 # darkflags.h::forEachLine walked `i <= bytes.size()`, so a file's terminating `\n` opened one more, empty,
@@ -26,14 +26,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "docanchorcheck: BIN=$BIN"
 

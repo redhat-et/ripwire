@@ -18,12 +18,12 @@
 # Assertions are on MEANING (a flag is named / an example is runnable / a contract clause is present), never
 # on whole sentences.
 #
-# Usage: bash test/jsonrefusallegendcheck.sh [path/to/ctxpack]
+# Usage: bash test/jsonrefusallegendcheck.sh [path/to/ripwire]
 # Exits non-zero on any failure; DOES NOT touch regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # house convention: the suite passes the binary via CTXPACK_BIN
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # house convention: the suite passes the binary via RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -55,7 +55,7 @@ case "$MSG" in *--grep*)  no "the refusal still names --grep, a flag the user ne
                *)         ok "the refusal no longer names --grep" ;; esac
 
 # (2) a RUNNABLE example — and it must actually run
-EG="$( printf '%s' "$MSG" | grep -oE 'ctxpack <dir> --[a-z-]+=[A-Za-z_]+ --json' | head -1 )"
+EG="$( printf '%s' "$MSG" | grep -oE 'ripwire <dir> --[a-z-]+=[A-Za-z_]+ --json' | head -1 )"
 if [ -n "$EG" ]; then
     ok "the refusal carries an example ($EG)"
     EGFLAG="$( printf '%s' "$EG" | grep -oE '\-\-[a-z-]+=[A-Za-z_]+' | head -1 | sed 's/=.*//' )"

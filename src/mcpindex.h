@@ -29,12 +29,12 @@
 #include <sys/time.h>      // struct timespec for a non-blocking kevent poll
 #include <fcntl.h>         // open() the watched dir fds + O_CREAT for the per-file edit lockfile
 #include <unistd.h>        // close()
-#include <sys/file.h>      // flock(LOCK_EX|LOCK_NB) — the ctxpack-vs-ctxpack edit serializer (F1)
+#include <sys/file.h>      // flock(LOCK_EX|LOCK_NB) — the ripwire-vs-ripwire edit serializer (F1)
 
-#include <atomic>          // CTXPACK_MCP_TIMINGS rebuild-count observable (env-gated stderr timing; off → untouched)
+#include <atomic>          // RIPWIRE_MCP_TIMINGS rebuild-count observable (env-gated stderr timing; off → untouched)
 #include <cctype>
 #include <cerrno>          // errno / EWOULDBLOCK — the edit-lock bounded-acquire loop (F1)
-#include <chrono>          // CTXPACK_MCP_TIMINGS per-request steady_clock wall (env-gated)
+#include <chrono>          // RIPWIRE_MCP_TIMINGS per-request steady_clock wall (env-gated)
 #include <ctime>           // nanosleep — the edit-lock bounded-acquire backoff (F1)
 #include <cstdint>
 #include <cstdio>
@@ -402,13 +402,13 @@ struct McpIndex
 
 // cache file path, deterministic per (user, root). A fixed world-writable /tmp path is a symlink/poisoning
 // target on multi-user machines, so prefer per-user locations: $TMPDIR (per-user on macOS), else
-// $XDG_CACHE_HOME/ctxpack (created 0700), else fall back to the /tmp name.
+// $XDG_CACHE_HOME/ripwire (created 0700), else fall back to the /tmp name.
 inline std::string mcpCachePath( const std::string& root )
 {
     std::uint64_t h = 1469598103934665603ULL;     // FNV-1a of the root → a stable per-root cache name
     for( char c : root ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
     char name[ 64 ];
-    std::snprintf( name, sizeof( name ), "ctxpack-mcp-%016llx.cache", (unsigned long long)h );
+    std::snprintf( name, sizeof( name ), "ripwire-mcp-%016llx.cache", (unsigned long long)h );
 
     const char* tmpDir = std::getenv( "TMPDIR" );
     if( tmpDir && *tmpDir )
@@ -421,7 +421,7 @@ inline std::string mcpCachePath( const std::string& root )
     const char* xdgCache = std::getenv( "XDG_CACHE_HOME" );
     if( xdgCache && *xdgCache )
     {
-        std::string d = std::string( xdgCache ) + "/ctxpack";
+        std::string d = std::string( xdgCache ) + "/ripwire";
         ::mkdir( d.c_str(), 0700 );               // EEXIST is fine; other failures degrade at cache-write time
         return d + "/" + name;
     }
@@ -550,7 +550,7 @@ inline void invalidateMcpIndex()
     mcpIndexSlot().valid = false;
 }
 
-// CTXPACK_MCP_TIMINGS observable (MEASURE-FIRST, mirrors ingest.cpp's CTXPACK_CACHE_STATS precedent): a
+// RIPWIRE_MCP_TIMINGS observable (MEASURE-FIRST, mirrors ingest.cpp's RIPWIRE_CACHE_STATS precedent): a
 // monotone count of FULL getIndex() rebuilds (the staleness/edit path — NOT warm reuses). The spec_trace
 // harness reads it before/after each request to attribute per-request wall time to "rebuilt" vs "warm".
 // Relaxed: the only reader is the same-thread timing print in runMcp, ordered by the request it wraps.
@@ -598,26 +598,26 @@ inline std::string mcpWorkspaceKey( const std::vector<std::string>& rootArgs, st
 //   (3) discard-on-error — any failure in the worker is swallowed (optional work; the lazy path still covers it).
 //   (4) GO-at-scale — gated on a cheap file-count heuristic (default 500; §8 measured the win is corpus-
 //                     dependent: NO-GO on small repos, GO on large) so a small repo never pays a useless
-//                     ~700 ms background HEAD ingest per commit. Test override: CTXPACK_QSNAP_PREFETCH_MIN_FILES.
+//                     ~700 ms background HEAD ingest per commit. Test override: RIPWIRE_QSNAP_PREFETCH_MIN_FILES.
 // MONOTONE FRESHNESS: computeHeadSnapshot re-reads gitHeadSha at run time and keys the qsnap by THAT sha, so a
 // prefetched blob is byte-identical to what lazy would compute for the same sha and can NEVER be served for a
 // different (newer) HEAD — the filename key IS the sha. A prefetch that lost the HEAD race just leaves an
 // unused older-sha file, LRU-evicted by the existing keep=2 family evictor.
 
 // process-wide prefetch state: the single-flight guard, the last HEAD-token we acted on, and a spawn counter
-// (observable under CTXPACK_MCP_TIMINGS for the single-flight gate).
+// (observable under RIPWIRE_MCP_TIMINGS for the single-flight gate).
 inline std::atomic<bool>&          mcpPrefetchInFlight()   { static std::atomic<bool>          f{ false }; return f; }
 inline std::atomic<std::uint64_t>& mcpPrefetchLastToken() { static std::atomic<std::uint64_t> t{ 0 };     return t; }
 inline std::atomic<std::uint64_t>& mcpPrefetchSpawnCount(){ static std::atomic<std::uint64_t> n{ 0 };     return n; }
 
 // the file-count threshold below which prefetch never fires (§8: small repos have a cheap cold HEAD snapshot →
-// no latency to hide, only a wasted background burn). CTXPACK_QSNAP_PREFETCH_MIN_FILES overrides it (test
+// no latency to hide, only a wasted background burn). RIPWIRE_QSNAP_PREFETCH_MIN_FILES overrides it (test
 // surface — lets a small fixture repo exercise the mechanism). Parsed ONCE (static), so it is a fixed constant.
 inline std::size_t mcpPrefetchMinFiles()
 {
     static const std::size_t v = []() -> std::size_t
     {
-        if( const char* e = std::getenv( "CTXPACK_QSNAP_PREFETCH_MIN_FILES" ) )
+        if( const char* e = std::getenv( "RIPWIRE_QSNAP_PREFETCH_MIN_FILES" ) )
         {
             char*                    end = nullptr;
             const unsigned long long n   = std::strtoull( e, &end, 10 );
@@ -714,8 +714,8 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
     mcpPrefetchLastToken().store( token, std::memory_order_relaxed );  // we won → this move is ours
     mcpPrefetchSpawnCount().fetch_add( 1, std::memory_order_relaxed );
 
-    const bool timingsOn = std::getenv( "CTXPACK_MCP_TIMINGS" ) != nullptr;
-    if( timingsOn ) { std::fprintf( stderr, "ctxpack-prefetch spawn root=%s\n", root.c_str() ); std::fflush( stderr ); }
+    const bool timingsOn = std::getenv( "RIPWIRE_MCP_TIMINGS" ) != nullptr;
+    if( timingsOn ) { std::fprintf( stderr, "ripwire-prefetch spawn root=%s\n", root.c_str() ); std::fflush( stderr ); }
 
     // DETACHED worker: copies `root` by value (no dangling), runs the SAME computeHeadSnapshot the lazy
     // quality_delta uses with the SAME default args (so it warms the IDENTICAL qsnap key), then clears the
@@ -726,7 +726,7 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
         struct FlagGuard { ~FlagGuard(){ mcpPrefetchInFlight().store( false, std::memory_order_release ); } } guard;
         try   { (void)ctx::quality::computeHeadSnapshot( root ); }      // side effect: warm the sha-keyed qsnap (atomic publish)
         catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
-        if( timingsOn ) { std::fprintf( stderr, "ctxpack-prefetch done root=%s\n", root.c_str() ); std::fflush( stderr ); }
+        if( timingsOn ) { std::fprintf( stderr, "ripwire-prefetch done root=%s\n", root.c_str() ); std::fflush( stderr ); }
     } ).detach();
 }
 

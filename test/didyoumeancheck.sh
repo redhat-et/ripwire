@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # didyoumeancheck.sh — gate for AUDIT3 A3-F16a/b:
 #
-#   (a) every SYM-taking verb's "not found" stderr message ("ctxpack: --X symbol not found: Y") now
+#   (a) every SYM-taking verb's "not found" stderr message ("ripwire: --X symbol not found: Y") now
 #       appends a nearest-name suggestion ("(did you mean 'Z'?)") when a plausible near-miss exists in
 #       the corpus. Covers --callers/--callees/--around/--expand/--lego/--path/--impact/--mentions/--owners.
 #   (b) --graph-query parse errors append a one-line grammar reminder + worked example ("grammar: ...")
@@ -13,13 +13,13 @@
 #
 # Usage:
 #   test/didyoumeancheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/didyoumeancheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/didyoumeancheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/queryfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -28,7 +28,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/queryfix dir — fixture missing"; exit 2; }
 
 echo "didyoumeancheck: BIN=$BIN  CORPUS=$FIX"
@@ -39,7 +39,7 @@ echo "=== A3-F16a: nearest-name suggestion on SYM-verb 'not found' errors ==="
 # ═══════════════════════════════════════════════════════════════════════════
 
 check_dym(){
-    # $1 = human label, $2.. = ctxpack args (after FIX); asserts stderr has "did you mean 'EXPECT'" where
+    # $1 = human label, $2.. = ripwire args (after FIX); asserts stderr has "did you mean 'EXPECT'" where
     # EXPECT is $3 (the 3rd positional after label/expect is passed as the rest of the args array)
     local label="$1" expect="$2"; shift 2
     local out
@@ -98,9 +98,9 @@ echo
 echo "=== §P12.1: true edit-distance suggester (self-corpus — needs a real decoy in-prefix) ==="
 # ═══════════════════════════════════════════════════════════════════════════
 # test/queryfix is too small to exercise the old bug (shared-prefix*4 - |lenDelta|): it needs a corpus with
-# an unrelated symbol that shares a long prefix with the typo. ctxpack's own src/ has exactly that —
+# an unrelated symbol that shares a long prefix with the typo. ripwire's own src/ has exactly that —
 # src/search.h's parseAlt() shares "pars"/"pare" with a typo'd parseArgs and used to outscore it. Run
-# against ROOT itself so parseArgs/buildGraph/runEval (real ctxpack symbols) are in the pool.
+# against ROOT itself so parseArgs/buildGraph/runEval (real ripwire symbols) are in the pool.
 check_dym_self(){
     local label="$1" expect="$2"; shift 2
     local out

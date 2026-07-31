@@ -1,5 +1,5 @@
 {
-  "schema": "ctxpack-multiswe-dataset-lock-v1",
+  "schema": "ripwire-multiswe-dataset-lock-v1",
   "source_dataset": "ByteDance-Seed/Multi-SWE-bench",
   "source_dataset_url": "https://huggingface.co/datasets/ByteDance-Seed/Multi-SWE-bench",
   "source_dataset_revision": "56ff018c04a38e27ada1e9d0a6d5839a51f88f0d",

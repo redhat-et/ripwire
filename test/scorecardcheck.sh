@@ -10,15 +10,15 @@
 #
 # Usage:
 #   bash test/scorecardcheck.sh
-#   CTXPACK_BIN=build/ctxpack bash test/scorecardcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/scorecardcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/scorecardcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/scorecardcheck.sh
 #
 # Exits 0 on ALL PASS, non-zero on any failure.
 
 set -uo pipefail
 
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 SCORECARD="$ROOT/scripts/scorecard.sh"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -27,7 +27,7 @@ fail=0
 ok() { printf '  PASS  %s\n' "$*"; }
 no() { printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "error: no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "error: no ripwire binary at $BIN — build first"; exit 2; }
 [ -x "$SCORECARD" ] || { echo "error: no scorecard script at $SCORECARD"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 required"; exit 2; }
 
@@ -38,7 +38,7 @@ echo "scorecardcheck: BIN=$BIN"
 OUT1="$TMP/scorecard1.md"
 OUT2="$TMP/scorecard2.md"
 
-if CTXPACK_BIN="$BIN" bash "$SCORECARD" >"$OUT1" 2>"$TMP/sc1.err"; then
+if RIPWIRE_BIN="$BIN" bash "$SCORECARD" >"$OUT1" 2>"$TMP/sc1.err"; then
   ok "scorecard.sh exit 0 (first run)"
 else
   no "scorecard.sh exit non-zero: $(cat "$TMP/sc1.err" | head -3)"
@@ -151,7 +151,7 @@ fi
 
 # ─── Determinism check ─────────────────────────────────────────────────────────────────────
 
-if CTXPACK_BIN="$BIN" bash "$SCORECARD" >"$OUT2" 2>"$TMP/sc2.err"; then
+if RIPWIRE_BIN="$BIN" bash "$SCORECARD" >"$OUT2" 2>"$TMP/sc2.err"; then
   ok "scorecard.sh exit 0 (second run)"
 else
   no "scorecard.sh exit non-zero on second run: $(cat "$TMP/sc2.err" | head -3)"

@@ -10,8 +10,8 @@
 # `argCount > params` (no default can rescue a call with too many args), in ALL languages; for
 # `argCount < params` the def stays a candidate and correctly re-enters `amb=` when multiple defs survive.
 #
-#   test/aritycheck.sh                       # uses build/ctxpack on test/arityfix/{cpp,py,toomany}
-#   CTXPACK_BIN=asan/ctxpack test/aritycheck.sh
+#   test/aritycheck.sh                       # uses build/ripwire on test/arityfix/{cpp,py,toomany}
+#   RIPWIRE_BIN=asan/ripwire test/aritycheck.sh
 #
 # Three fixtures:
 #   cpp/     — the audit's exact repro: f.h declares `f(int x, int y=5)` (proto only); a.cpp defines
@@ -32,15 +32,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIX="$ROOT/test/arityfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "aritycheck: BIN=$BIN  FIX=$FIX"
 
 callees(){ "$BIN" "$1" --callees="$2" --no-cache 2>/dev/null; }

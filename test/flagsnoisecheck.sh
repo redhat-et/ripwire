@@ -2,7 +2,7 @@
 # flagsnoisecheck.sh — the SIGNAL/NOISE gate for --flags' env lane (r27 P5).
 #
 #   test/flagsnoisecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/flagsnoisecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/flagsnoisecheck.sh
 #
 # `--flags` answers "what is built but dark here". A gate it INVENTED is worse than a gate it missed: the
 # reader has no way to tell the two apart, and one bogus row costs the same hand-verification the verb exists
@@ -28,14 +28,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "flagsnoisecheck: BIN=$BIN"
 

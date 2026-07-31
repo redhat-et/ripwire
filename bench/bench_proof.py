@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# bench_proof.py — the "is it actually useful?" benchmark for ctxpack. Reproducible: re-run to reproduce.
-#   (1) TOKEN REDUCTION — for realistic agent questions, ctxpack's structured answer vs the naive thing
+# bench_proof.py — the "is it actually useful?" benchmark for ripwire. Reproducible: re-run to reproduce.
+#   (1) TOKEN REDUCTION — for realistic agent questions, ripwire's structured answer vs the naive thing
 #       (grep-dump / read-the-whole-files). Real GPT-4 token counts (tiktoken cl100k_base).
-#   (2) WALL-CLOCK vs AIDER — ctxpack (C++23) vs aider's repo-map (Python + NetworkX) on the SAME repo.
+#   (2) WALL-CLOCK vs AIDER — ripwire (C++23) vs aider's repo-map (Python + NetworkX) on the SAME repo.
 #       Same algorithm (tree-sitter + PageRank) → the delta is the compiled-vs-interpreted thesis, measured.
 # Honest by construction: empty results are skipped, grep-parity is shown separately (not in the headline).
-# Set CTXPACK_BIN / CTXPACK_BENCH_ROOT to point at your own built binary and a large private C++ corpus
+# Set RIPWIRE_BIN / RIPWIRE_BENCH_ROOT to point at your own built binary and a large private C++ corpus
 # (the historical numbers in bench/PROFILE.md and bench/ANSWERQUALITY.md were measured against one such
 # corpus and are not reproducible publicly; re-run this script against your own to reproduce the shape).
 import subprocess, time, os, re, glob, shutil, statistics
@@ -13,8 +13,8 @@ import tiktoken
 ENC = tiktoken.get_encoding("cl100k_base")
 def toks(s): return len(ENC.encode(s, disallowed_special=()))
 
-CTX  = os.environ.get("CTXPACK_BIN", "./build/ctxpack")
-ROOT = os.environ.get("CTXPACK_BENCH_ROOT", "/path/to/your/large/private/cpp/corpus")
+CTX  = os.environ.get("RIPWIRE_BIN", "./build/ripwire")
+ROOT = os.environ.get("RIPWIRE_BENCH_ROOT", "/path/to/your/large/private/cpp/corpus")
 CANYON, STEER = ROOT+"/canyon", ROOT+"/steer"
 EXTS = (".cpp",".h",".hpp",".mm",".cc",".c")
 
@@ -40,9 +40,9 @@ def src_files(d, exclude_bullet=False):
     return fs
 
 print("="*94)
-print("(1) TOKEN REDUCTION  — ctxpack structured answer vs the naive baseline  (real GPT-4 tokens)")
+print("(1) TOKEN REDUCTION  — ripwire structured answer vs the naive baseline  (real GPT-4 tokens)")
 print("="*94)
-print(f"{'task':30} {'ctxpack':>9} {'baseline':>10} {'saved':>7} {'factor':>8}")
+print(f"{'task':30} {'ripwire':>9} {'baseline':>10} {'saved':>7} {'factor':>8}")
 hl_c=hl_b=0
 # WHO-CALLS: structured caller list vs the raw grep dump an agent reads
 for name,sym in [("who calls materialize","materialize"),("who calls simulateRun","simulateRun"),("who calls evaluateGenome","evaluateGenome")]:
@@ -60,14 +60,14 @@ for name,d,arg in [("orient: feedback loop",CANYON,'--for=human feedback loop at
     print(f"{name:30} {c:>9} {b:>10} {100*(1-c/b):>6.1f}% {b/c:>7.1f}x   [vs whole files]")
 print("-"*94)
 print(f"{'HEADLINE TOTAL':30} {hl_c:>9} {hl_b:>10} {100*(1-hl_c/hl_b):>6.1f}% {hl_b/hl_c:>7.1f}x")
-print(f"\n→ across these agent questions, ctxpack used {100*(1-hl_c/hl_b):.0f}% fewer tokens ({hl_b/hl_c:.1f}x less) than the naive read.\n")
+print(f"\n→ across these agent questions, ripwire used {100*(1-hl_c/hl_b):.0f}% fewer tokens ({hl_b/hl_c:.1f}x less) than the naive read.\n")
 # HONEST parity note: grep-like modes add structure at ~same cost — NOT a reducer.
-print("parity (shown for honesty — ctxpack's grep mode adds enclosing-symbol structure at ~grep cost):")
+print("parity (shown for honesty — ripwire's grep mode adds enclosing-symbol structure at ~grep cost):")
 for name,term in [("--grep frantic","frantic"),("--grep FirePolicy","FirePolicy")]:
     c=toks(run([CTX,CANYON,"--no-cache",f"--grep={term}"])); b=toks(grep_dump(term,CANYON))
     print(f"  {name:28} {c:>9} {b:>10} {100*(1-c/b):>+6.1f}%   (structure, not reduction)")
 
-# ---- (2) wall-clock: ctxpack vs aider, same repo ----
+# ---- (2) wall-clock: ripwire vs aider, same repo ----
 def best_ms(fn,reps):
     return min(fn() for _ in range(reps))*1000
 def ctx_cold(d):
@@ -87,9 +87,9 @@ def aider_cold_ms(repo,reps):
     return best*1000
 
 print("\n"+"="*94)
-print("(2) WALL-CLOCK  — ctxpack (C++23) vs aider repo-map (Python+NetworkX), SAME repo, cold build")
+print("(2) WALL-CLOCK  — ripwire (C++23) vs aider repo-map (Python+NetworkX), SAME repo, cold build")
 print("="*94)
-print(f"{'repo':16} {'files':>6} {'ctxpack cold':>13} {'ctxpack warm':>13} {'aider cold':>11} {'speedup':>8}")
+print(f"{'repo':16} {'files':>6} {'ripwire cold':>13} {'ripwire warm':>13} {'aider cold':>11} {'speedup':>8}")
 for nm,d,reps in [("infrastucture",ROOT+"/infrastucture",3),("steer",STEER,3),("sound",ROOT+"/sound",3),("canyon",CANYON,3),("whole repo",ROOT,1)]:
     nf=files_n(d)
     cold=best_ms(lambda:_t(lambda:subprocess.run([CTX,d,"--no-cache"],capture_output=True)),reps)

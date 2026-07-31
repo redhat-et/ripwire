@@ -1,6 +1,6 @@
 // tsprobe.cpp — Phase 1/2 PROOF binary.
 //
-// Usage: ctxpack_probe <directory>
+// Usage: ripwire_probe <directory>
 // Crawls the directory, runs ingest(), and prints:
 //   - file count, symbol count by kind, reference count;
 //   - the first ~40 symbols (name / kind / lang / file:line) each followed by its references.
@@ -26,7 +26,7 @@ namespace
 // order. The static_assert is the real guard: this file used to carry a 5-arm switch and a hardcoded
 // `std::array<int, 6>` counter beside it, so every language appended to Lang after the original five
 // printed "?" and — worse — indexed the counter array off its end. A plain .c corpus (Lang::C == 15)
-// crashed ctxpack_probe outright (H4 grammar survey). Sized off the enum, the next append breaks the
+// crashed ripwire_probe outright (H4 grammar survey). Sized off the enum, the next append breaks the
 // BUILD here instead.
 // The "?" at index 12 is Lang::Unknown's own label, not a hole — the enum keeps Unknown mid-table so
 // serialize.h's calibration array can size on it (model.h documents why), and ingest never assigns it.
@@ -84,7 +84,7 @@ int main( int argc, char** argv )
     for( const ctx::Symbol& s : ir.symbols )
         ++langCount[ langIndex( s.lang ) ];
 
-    std::printf( "==== ctxpack ingest probe ====\n" );
+    std::printf( "==== ripwire ingest probe ====\n" );
     std::printf( "root:        %s\n", root );
     std::printf( "files:       %zu\n", ir.files.size() );
     std::printf( "symbols:     %zu\n", ir.symbols.size() );

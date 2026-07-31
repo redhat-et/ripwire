@@ -1,11 +1,11 @@
-# ctxpack — answer quality (does the context actually help?)
+# ripwire — answer quality (does the context actually help?)
 
 The published gaps so far were **cheaper** (96% fewer tokens) and **faster** (9–42× vs aider). Both are
-*efficiency*. The honest open question is **quality**: does ctxpack's context make an agent's answer
+*efficiency*. The honest open question is **quality**: does ripwire's context make an agent's answer
 *better*? This closes it as far as is measurable without a live agent fleet — with a real **retrieval
 proxy** now, and a **runnable end-to-end harness** for the task-success number.
 
-## 1. Retrieval recall — the proxy (real, reproducible: `ctxpack <repo> --eval`)
+## 1. Retrieval recall — the proxy (real, reproducible: `ripwire <repo> --eval`)
 The established proxy (RepoGraph, aider): for real historical multi-file commits, does the tool surface
 the *other* files a change touched, given one seed file? Gold = git's co-changed set per commit; seed =
 the most-symbol file; measure **recall@k** of the rest, averaged over the last 80 qualifying commits.
@@ -16,68 +16,68 @@ recall@5 / @10 / @20:
 
 | ranker | @5 | @10 | @20 | what it is |
 |---|---|---|---|---|
-| **ctxpack lexical** (`--for`/`--query`, BM25body) | **40.3%** | 46.2% | 53.2% | subtoken names+callees + file body |
+| **ripwire lexical** (`--for`/`--query`, BM25body) | **40.3%** | 46.2% | 53.2% | subtoken names+callees + file body |
 | BM25 (whole-name) | 34.4% | **52.3%** | **59.1%** | lexical baseline |
-| ctxpack structural (PageRank) | 3.8% | 6.4% | 6.4% | **importance, not relatedness** |
+| ripwire structural (PageRank) | 3.8% | 6.4% | 6.4% | **importance, not relatedness** |
 | same-directory | 1.8% | 5.8% | 8.6% | cheapest real prior |
 | random | 0.3% | 0.6% | 1.3% | floor |
 
-**→ ctxpack's lexical retrieval recovers ~40% of a real change's files at top-5 (≈53% at top-20) —
+**→ ripwire's lexical retrieval recovers ~40% of a real change's files at top-5 (≈53% at top-20) —
 a 30–130× lift over random, and far above the same-directory prior.**
 
-**The honest finding (ctxpack's own `--eval` has said this all along):** *relatedness is lexical,
-importance is structural.* PageRank — ctxpack's headline ranker — is the wrong tool for "what else does
-this change touch" (3.8% @5, barely above same-dir); the win comes from ctxpack's **lexical** modes, and
+**The honest finding (ripwire's own `--eval` has said this all along):** *relatedness is lexical,
+importance is structural.* PageRank — ripwire's headline ranker — is the wrong tool for "what else does
+this change touch" (3.8% @5, barely above same-dir); the win comes from ripwire's **lexical** modes, and
 **fusing** structure into lexical *hurts* (fused 7.7% @5 < lexical 40%). We ship the signal that wins and
 say so — facts, not verdicts.
 
 ## 2. End-to-end task success — the harness (`bench/swebench_eval.py`)
 Retrieval recall is the *leading indicator*; the real number is **resolve rate on SWE-bench** with vs
-without ctxpack context. That needs a live LLM + the dataset + the official sandboxed scorer, so it is
+without ripwire context. That needs a live LLM + the dataset + the official sandboxed scorer, so it is
 **not run here** — but the harness is real and runnable:
 
 ```sh
 pip install datasets anthropic swebench         # + ANTHROPIC_API_KEY, + Docker for the scorer
 python bench/swebench_eval.py --dataset princeton-nlp/SWE-bench_Lite --n 50
-# → preds_baseline.jsonl (problem statement only)  and  preds_ctxpack.jsonl (+ ctxpack --for context)
+# → preds_baseline.jsonl (problem statement only)  and  preds_ripwire.jsonl (+ ripwire --for context)
 python -m swebench.harness.run_evaluation --predictions_path preds_baseline.jsonl --run_id base ...
-python -m swebench.harness.run_evaluation --predictions_path preds_ctxpack.jsonl --run_id ctx  ...
-# compare the two resolve rates — the delta IS ctxpack's task-success contribution
+python -m swebench.harness.run_evaluation --predictions_path preds_ripwire.jsonl --run_id ctx  ...
+# compare the two resolve rates — the delta IS ripwire's task-success contribution
 ```
-The harness only owns the ctxpack-specific part (generate predictions for two arms); **scoring is the
+The harness only owns the ripwire-specific part (generate predictions for two arms); **scoring is the
 official `swebench` harness** — no reinvented, gameable scorer. The hypothesis to test, grounded in the
 proxy above and RepoGraph's **+32.8% SWE-bench from structural retrieval [arXiv 2410.14684]**: the
-ctxpack arm resolves more, because it walks in already knowing the files the fix spans.
+ripwire arm resolves more, because it walks in already knowing the files the fix spans.
 
 ## 3. End-to-end pilot — run here (N=2, the real fix-the-failing-test loop)
 The §2 harness needs a key + Docker. To get a *real* end-to-end signal now, I ran a small agent A/B
 directly: inject a realistic localized bug into a **big** private C++ tree (1574 files; historical,
 private corpus, not reproducible publicly), then have an
-identical coding agent fix it **with vs without ctxpack**, scored by whether the subsystem doctest passes
+identical coding agent fix it **with vs without ripwire**, scored by whether the subsystem doctest passes
 (`infrastucture/build_tests.sh release`, exit 0). Same task, same oracle, isolated git worktrees; the only
-difference is whether the agent may use `ctxpack` to navigate. I scored by re-running the oracle myself.
+difference is whether the agent may use `ripwire` to navigate. I scored by re-running the oracle myself.
 
 | bug (symptom the agent saw) | arm | resolved? | tokens | localization |
 |---|---|---|---|---|
 | kdtree `size()` off-by-one (`tree.size()==400` fails) | baseline | ✅ | 66k | ~4 grep/read steps |
-| | **+ctxpack** | ✅ | **43k** | 2 steps (`--grep "class KdTree"` → exact line) |
+| | **+ripwire** | ✅ | **43k** | 2 steps (`--grep "class KdTree"` → exact line) |
 | arena `used()` off-by-one (`arena.used()==0` fails) | baseline | ✅ | 51k | ~4 grep/read steps |
-| | **+ctxpack** | ✅ | **45k** | 1 step (`--grep "used()"` → exact line) |
+| | **+ripwire** | ✅ | **45k** | 1 step (`--grep "used()"` → exact line) |
 
-**→ Both arms resolved both bugs (2/2). ctxpack didn't change *whether* the fix happened — it changed
+**→ Both arms resolved both bugs (2/2). ripwire didn't change *whether* the fix happened — it changed
 *how cheaply*: ~25% fewer tokens (88k vs 118k) and 1-command localization vs ~4 grep/read steps.**
 
 Honest reading: these bugs were *solvable either way* (a capable agent + a symptom that named the failing
-test). ctxpack's value here is **efficiency** (cost, directness) — consistent with the retrieval proxy.
+test). ripwire's value here is **efficiency** (cost, directness) — consistent with the retrieval proxy.
 The **resolve-rate** lift RepoGraph reports (+32.8%) needs bugs hard enough that the baseline runs out of
 budget localizing, which a 2-bug pilot on named-symptom defects doesn't reach — that is exactly what the
 full-scale harness (§2) measures (many tasks, harder localization, resolve-rate per arm). **N=2 is
 directional, not significant** — but it is a real end-to-end loop with tests-pass scoring, run here.
 
 ## Honest status
-- **Proven:** cheaper (tokens), faster (wall-clock), and now **retrieval recall** — ctxpack surfaces the
-  right files far above random/same-dir. Reproduce: `ctxpack <repo> --eval`.
-- **Pilot, run here (§3):** a real 2-bug end-to-end loop — both arms resolve; +ctxpack is ~25% cheaper
+- **Proven:** cheaper (tokens), faster (wall-clock), and now **retrieval recall** — ripwire surfaces the
+  right files far above random/same-dir. Reproduce: `ripwire <repo> --eval`.
+- **Pilot, run here (§3):** a real 2-bug end-to-end loop — both arms resolve; +ripwire is ~25% cheaper
   (tokens) and localizes in 1 command vs ~4 grep/read steps. Measured, but **N=2 = directional**.
 - **Not yet run at scale:** the SWE-bench resolve-rate (needs a key + dataset + Docker); the harness is
   here. So we claim **cheaper + more direct** end-to-end (small N) and **better retrieval** — not yet a
@@ -160,9 +160,9 @@ the doc-comment's first line — and measures the rank of the gold symbol (in th
 so leave-nothing-out is correct) for four rankers: **subtoken+body** (`lexicalScores`, `--for` default),
 **name-exact** (`lexicalScoresNameExact`), **anchored** (`anchoredLexicalRank` over subtoken+body), and
 **routed** (`chooseForRanker`'s pick). Deterministic (the gold rank is a pure function of the score
-vector). Reproduce: `ctxpack <dir> --eval-retrieval`.
+vector). Reproduce: `ripwire <dir> --eval-retrieval`.
 
-### `ctxpack src/` (150 doc-commented symbols)
+### `ripwire src/` (150 doc-commented symbols)
 ```
   ranker    query-mode     MRR  recall@1  recall@5 recall@10
   subtoken  name         0.859     76.7%     97.3%     98.7%
@@ -176,7 +176,7 @@ vector). Reproduce: `ctxpack <dir> --eval-retrieval`.
 ```
 (routed/doc-phrase 0.993 is the CONFIDENCE-GATED router — before the gate it was 0.427; see the note below.)
 
-### `ctxpack .` (repo root; 150 doc-commented symbols)
+### `ripwire .` (repo root; 150 doc-commented symbols)
 ```
   ranker    query-mode     MRR  recall@1  recall@5 recall@10
   subtoken  name         0.725     63.3%     83.3%     84.7%
@@ -245,7 +245,7 @@ better ranker on each mode).
 The retrieval proxy (§1) is on *our own* co-change gold; this puts a number on an **external, published**
 benchmark: **Loc-Bench** (LocAgent, [arXiv 2503.09089](https://arxiv.org/abs/2503.09089), ACL'25) — 560
 instances of (GitHub issue → repo@commit → gold edit files/functions). `bench/locbench/run_locbench.py`
-checks out each repo, runs ctxpack as the localizer in three arms (`--for` task lens / `--query` pure
+checks out each repo, runs ripwire as the localizer in three arms (`--for` task lens / `--query` pure
 lexical / `--for --anchor` graph expansion), parses the ranked symbols, and scores the paper's **strict
 Acc@k** (all gold within top-k) + first-hit MRR. Deterministic, LLM-free, no auth (public HF datasets-server
 API). SWE-bench-Lite is the built-in fallback. See `bench/locbench/README.md` for metric defs + the
@@ -275,7 +275,7 @@ Parse coverage **1148/1149 = 99.9%** (301 `added_functions` structurally absent,
   our symbol-granularity numbers, and we don't claim parity** — the frame is cost-vs-accuracy). The
   multi-file subset stays single-digit (see the n=60 footnote).
 - **Parse coverage is 99.9%** — the map *sees* the gold functions; the ceiling is ranking, not parsing.
-  This reframes ctxpack honestly as the fast, free **candidate feed** into a reranker (A4-R6), not its rival.
+  This reframes ripwire honestly as the fast, free **candidate feed** into a reranker (A4-R6), not its rival.
 - **The lens beats raw lexical at file localization, decisively at full N**: `--for`/`--anchor` surface a
   correct file in the top-10 **~4.5×** as often as `--query` (lenient 39.8/41.6% vs 8.9%; strict file@10
   28.8/29.6% vs 4.6%) — the focused bundle concentrates the right file; the flat BM25 list buries it.
@@ -287,7 +287,7 @@ Parse coverage **1148/1149 = 99.9%** (301 `added_functions` structurally absent,
   expansion earns its keep on symbol-granularity localization. Verdict: **keep `--anchor`**; the margins
   do not yet justify defaulting it.
 
-Reproduce: `CTXPACK=./build/ctxpack python3 bench/locbench/run_locbench.py --n 560 --work-dir /tmp/locbench`.
+Reproduce: `RIPWIRE=./build/ripwire python3 bench/locbench/run_locbench.py --n 560 --work-dir /tmp/locbench`.
 
 ---
 
@@ -296,21 +296,21 @@ Reproduce: `CTXPACK=./build/ctxpack python3 bench/locbench/run_locbench.py --n 5
 CLAUDE.md tells an agent to *trust the honesty gauges*: a symbol's `amb="K"` means K of its calls hit a
 name with multiple defs (the resolver kept them all as a split), so *read the source if which-target
 matters* — and, implicitly, that **un**-flagged call edges are safe to trust. This puts a **number** on
-that guidance by checking ctxpack's name-based call edges against an **independent, type-aware oracle**:
+that guidance by checking ripwire's name-based call edges against an **independent, type-aware oracle**:
 Sourcegraph **SCIP** indexes produced by `scip-python` (Pyright under the hood), consumed through
-ctxpack's own `--scip` precision overlay (`src/scip.h`) — where SCIP resolves a call site, its target
-**replaces** ctxpack's name-based guess and the surviving edge is tagged `prov="scip"`. This is
+ripwire's own `--scip` precision overlay (`src/scip.h`) — where SCIP resolves a call site, its target
+**replaces** ripwire's name-based guess and the surviving edge is tagged `prov="scip"`. This is
 measurement only: no resolver change — the number *informs* a future decision (whether to collapse a
 split to a single best guess), it does not make one.
 
 **Method (deterministic full census; `bench/scip_amb_precision.py`).** For each repo we diff two runs at
 `--top-k=100000` (defeats the 200-symbol map truncation so *every* edge renders): the baseline name-based
-map and the `--scip` overlay. ctxpack renders a call edge as `<c n="X"/>` (callee **name**, no target id);
-a name X with **>1 in-corpus definition** is ambiguous **by ctxpack's own criterion** (the resolver keeps
+map and the `--scip` overlay. ripwire renders a call edge as `<c n="X"/>` (callee **name**, no target id);
+a name X with **>1 in-corpus definition** is ambiguous **by ripwire's own criterion** (the resolver keeps
 every same-name def → a split → the owning symbol carries `amb=`). For each `(symbol, X)` bucket where
-ctxpack emitted ≥1 edge **and** the overlay pinned ≥1 `prov="scip"` edge (i.e. **SCIP speaks** about that
-edge), precision = `min(scip_pinned, ctxpack_emitted) / ctxpack_emitted`, grouped by whether X is
-ambiguous. SCIP-only edges (ctxpack emitted nothing — a *recall* gap, not a precision datum) are excluded
+ripwire emitted ≥1 edge **and** the overlay pinned ≥1 `prov="scip"` edge (i.e. **SCIP speaks** about that
+edge), precision = `min(scip_pinned, ripwire_emitted) / ripwire_emitted`, grouped by whether X is
+ambiguous. SCIP-only edges (ripwire emitted nothing — a *recall* gap, not a precision datum) are excluded
 from precision and reported separately.
 
 **Two indexed repos** (small, self-contained, real `.py` source; from the LocBench cache):
@@ -322,7 +322,7 @@ from precision and reported separately.
 
 **Result — precision where SCIP provides ground truth:**
 
-| repo | group | buckets (n) | ctxpack edges | SCIP-confirmed | **precision** | SCIP-only (ctxpack missed) |
+| repo | group | buckets (n) | ripwire edges | SCIP-confirmed | **precision** | SCIP-only (ripwire missed) |
 |---|---|---|---|---|---|---|
 | loguru | **amb-flagged** | 300 | 794 | 300 | **0.378** | 5 |
 | loguru | non-amb (control) | 460 | 460 | 460 | **1.000** | 4 |
@@ -337,18 +337,18 @@ from precision and reported separately.
 - **But be honest about *why* each side lands where it does.** The non-amb 1.000 is **largely by
   construction**: a unique-name edge has only *one* possible target, so an independent oracle *cannot*
   pick differently — it is a consistency check, not an independent win. And the amb precision is
-  essentially **1 / (mean split width)**: ctxpack emits *all* candidates for an ambiguous call, so of the
+  essentially **1 / (mean split width)**: ripwire emits *all* candidates for an ambiguous call, so of the
   N edges it renders, only SCIP's one true target is "correct" → precision ≈ 1/N. loguru's ambiguous
   names (many identically-named test fixtures — `patch`, `sink`, `writer`…) give wide splits (2.6
   edges/bucket → 0.38); rq's ambiguous method names give narrow splits (1.2 edges/bucket → 0.84). So the
   amb number is **repo-dependent and dominated by split width**, not by a resolver "guess" being right or
-  wrong (ctxpack does not commit to one guess — it keeps the split).
-- **The decision this informs:** if ctxpack were to collapse each split to a *single* best-ranked guess,
+  wrong (ripwire does not commit to one guess — it keeps the split).
+- **The decision this informs:** if ripwire were to collapse each split to a *single* best-ranked guess,
   how often would that guess be SCIP's target? This census cannot answer that (the XML exposes no
-  per-candidate rank), but it bounds the ceiling: SCIP's target is among ctxpack's emitted candidates for
+  per-candidate rank), but it bounds the ceiling: SCIP's target is among ripwire's emitted candidates for
   **98.4% (loguru) / 57.5% (rq)** of the ambiguous calls SCIP resolved — the rest (`SCIP-only`: 5 / 384)
-  are calls ctxpack's name-based parse emitted **no** candidate for at all (typed-receiver method calls
-  Pyright resolves but a name matcher can't). rq's large SCIP-only count is a **ctxpack recall** limit,
+  are calls ripwire's name-based parse emitted **no** candidate for at all (typed-receiver method calls
+  Pyright resolves but a name matcher can't). rq's large SCIP-only count is a **ripwire recall** limit,
   orthogonal to the precision question but a real ceiling on what disambiguating the splits could recover.
 
 **Caveats (this is a directional n=2 probe, not a verdict):**
@@ -358,11 +358,11 @@ from precision and reported separately.
 - **Partial coverage (26% / 47% of internal occurrences).** The overlay matched only a subset of SCIP's
   ref occurrences to a current call site, and left 2222 / 2838 SCIP *defs* unmatched — not because the
   index is stale (it was generated from the exact indexed tree) but because `scip-python`/Pyright and
-  ctxpack's tree-sitter attribute a definition's **line** differently (decorators, the `def` line vs the
+  ripwire's tree-sitter attribute a definition's **line** differently (decorators, the `def` line vs the
   name token). Precision is measured only over the covered subset; the overlay's own "may be from an
   older commit" stderr hint is a **false positive** here and is itself a finding about that diagnostic.
 - **The precise-edge set is deduped to unique `(symbol,target)` edges**, so repeated identical calls
-  collapse in the numerator while the denominator counts ctxpack's raw emitted edges → the amb precision
+  collapse in the numerator while the denominator counts ripwire's raw emitted edges → the amb precision
   is a mild **lower bound** on true per-target precision.
 - **n=2 repos, both small and both heavy in tests** — the split-width distribution (and thus the amb
   number) will differ on larger application code. The **direction** is robust (amb < non-amb, flag is
@@ -373,7 +373,7 @@ Reproduce (needs Node + `scip-python`; the two indexes are regenerable from the 
 npm install -g @sourcegraph/scip-python
 ( cd <loguru-checkout> && scip-python index --output /tmp/loguru.scip --project-name loguru . )
 ( cd <rq-checkout>     && scip-python index --output /tmp/rq.scip     --project-name rq     . )
-CTXPACK=./build/ctxpack python3 bench/scip_amb_precision.py \
+RIPWIRE=./build/ripwire python3 bench/scip_amb_precision.py \
     loguru <loguru-checkout> /tmp/loguru.scip \
     rq     <rq-checkout>     /tmp/rq.scip
 ```
@@ -393,7 +393,7 @@ project's user actually cares about. `bench/cppbench/run_cppbench.py` builds a L
 commit touched, indexed **at the parent commit** via read-only `git archive` — no time-travel leakage,
 no writes to the shared tree). 120 instances frozen in `dataset.lock` (content-hash, fail-closed);
 117 scored, 3 unindexable-gold exclusions printed with reasons, zero silent skips, determinism ×2 per
-arm run. Smoke gate: `test/cppbenchcheck.sh` (in the regression absorb loop; runs on ctxpack's own repo,
+arm run. Smoke gate: `test/cppbenchcheck.sh` (in the regression absorb loop; runs on ripwire's own repo,
 never the shared tree).
 
 **Scoreboard (strict = ALL gold files within top-k of one flat rank):**

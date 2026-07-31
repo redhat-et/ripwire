@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # csharpcondcheck.sh — H4 round: C# call-FORM coverage gate (conditional access `?.` + ref-vs-edge
-# accounting). Modeled on csharpcheck.sh / javarubycheck.sh conventions (CTXPACK_BIN, --no-cache,
+# accounting). Modeled on csharpcheck.sh / javarubycheck.sh conventions (RIPWIRE_BIN, --no-cache,
 # PASS/FAIL per check, ALL PASS on success, mutation arm so the edge assertions are non-tautological).
 #
 # Fixture: test/csharpfix is NOT reused — this gate needs a single file holding every call SPELLING,
@@ -40,15 +40,15 @@
 #
 # Usage:
 #   bash test/csharpcondcheck.sh
-#   CTXPACK_BIN=build/ctxpack bash test/csharpcondcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/csharpcondcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/csharpcondcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/csharpcondcheck.sh
 #
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIX="$ROOT/test/csharpcondfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -56,7 +56,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 
 echo "csharpcondcheck: BIN=$BIN  FIX=$FIX"

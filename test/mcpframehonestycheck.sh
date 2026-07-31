@@ -36,16 +36,16 @@
 # rather than re-listing the expectations, and the batch verb's own sub-query chain is probed in (E4).
 #
 # Usage:
-#   test/mcpframehonestycheck.sh                                  # uses build/ctxpack
-#   test/mcpframehonestycheck.sh /path/to/other/ctxpack           # positional binary (the RED run)
-#   CTXPACK_BIN=asan/ctxpack test/mcpframehonestycheck.sh         # env binary
+#   test/mcpframehonestycheck.sh                                  # uses build/ripwire
+#   test/mcpframehonestycheck.sh /path/to/other/ripwire           # positional binary (the RED run)
+#   RIPWIRE_BIN=asan/ripwire test/mcpframehonestycheck.sh         # env binary
 #
 # Exits non-zero on any failure. Every mutation happens under a scratch mktemp dir; test/fixture is never
 # modified. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -53,7 +53,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 command -v shasum  >/dev/null 2>&1 || { echo "shasum required for the §H3 byte-identity assertion"; exit 2; }
 
@@ -478,22 +478,22 @@ print( json.loads( r["result"]["content"][0]["text"] )["baseline"] )
 [ "$( marker )" = "git-HEAD" ] \
     && ok "(H) no sidecar → baseline=\"git-HEAD\"" \
     || no "(H) no-sidecar marker is $( marker ), want git-HEAD"
-printf 'not a baseline at all\nzzz\n' >"$WQ/.ctxpack_quality_baseline"
+printf 'not a baseline at all\nzzz\n' >"$WQ/.ripwire_quality_baseline"
 CORRUPT="$( marker )"
 case "$CORRUPT" in
     *"unreadable sidecar"*) ok "(H) a CORRUPT sidecar is disclosed in the marker: \"$CORRUPT\"";;
     "git-HEAD") no "(H) a corrupt sidecar still reads as NO sidecar — the only disclosure is a stderr alert no client sees";;
     *) no "(H) corrupt-sidecar marker: $CORRUPT";;
 esac
-: >"$WQ/.ctxpack_quality_baseline"
+: >"$WQ/.ripwire_quality_baseline"
 case "$( marker )" in
     *"unreadable sidecar"*) ok "(H) an EMPTY sidecar reports the same state (readBaseline rejects both identically)";;
     *) no "(H) empty-sidecar marker: $( marker )";;
 esac
-[ -s "$WQ/.ctxpack_quality_baseline" ] || [ -f "$WQ/.ctxpack_quality_baseline" ] \
+[ -s "$WQ/.ripwire_quality_baseline" ] || [ -f "$WQ/.ripwire_quality_baseline" ] \
     && ok "(H) the read-only arm LEFT the unreadable sidecar on disk (quality_delta never deletes)" \
     || no "(H) the MCP arm deleted a sidecar — this verb is read-only"
-rm -f "$WQ/.ctxpack_quality_baseline"
+rm -f "$WQ/.ripwire_quality_baseline"
 printf '%s\n' "$( call quality_baseline '{"path":"'"$WQ"'"}' )" | "$BIN" --mcp >/dev/null 2>&1
 [ "$( marker )" = "sidecar" ] \
     && ok "(H) control: a VALID sidecar is still honored (baseline=\"sidecar\")" \

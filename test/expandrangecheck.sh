@@ -5,15 +5,15 @@
 # path.
 #
 # Usage:
-#   test/expandrangecheck.sh                          # uses build/ctxpack on test/expandrangefix
-#   CTXPACK_BIN=asan/ctxpack test/expandrangecheck.sh
+#   test/expandrangecheck.sh                          # uses build/ripwire on test/expandrangefix
+#   RIPWIRE_BIN=asan/ripwire test/expandrangecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/expandrangefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -22,7 +22,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/expandrangefix directory"; exit 2; }
 
 echo "expandrangecheck: BIN=$BIN  CORPUS=$CORPUS"

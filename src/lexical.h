@@ -8,7 +8,7 @@
 
 #include "model.h"
 #include "lexindex.h"           // B0: the ONE subtoken state machine + docCommentStart + persisted-stats types
-#include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DCTXPACK_PROFILE=ON)
+#include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "sortutil.h"           // deterministic sanitizer-clean score sorting for adaptive cuts
 
 #include <algorithm>
@@ -83,7 +83,7 @@ inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 // exhaustive loop would produce for a no-match doc — but here even matching docs below the bound are
 // skipped). Safety is absolute, not approximate: the emitted top-K set, their EXACT scores, and their
 // (score desc, id asc) order are byte-identical to exhaustive scoring — see the bound derivation at the
-// pruned loop. 0 = exhaustive (every earlier call site, --query, evals). CTXPACK_NO_PRUNE=1 in the
+// pruned loop. 0 = exhaustive (every earlier call site, --query, evals). RIPWIRE_NO_PRUNE=1 in the
 // environment force-disables pruning (the postingscheck equivalence gate flips it).
 // symbolScoreMul (§P4 tier de-prioritization, filter.h rankTierSymbolMultipliers): an optional per-symbol
 // (0,1] multiplier applied exactly where the Section down-weight is — INSIDE the scoring loop, so MaxScore
@@ -306,7 +306,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
             catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial counts instead
             {
-                std::fprintf( stderr, "ctxpack: lexical scan worker degraded (exception swallowed)\n" );
+                std::fprintf( stderr, "ripwire: lexical scan worker degraded (exception swallowed)\n" );
             }
         };
         const std::size_t hwThreadCount = std::thread::hardware_concurrency();
@@ -331,7 +331,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     // ── H2 (B0 round 2): MaxScore-style safe pruning — only when the caller opted in AND the env
     //    escape hatch is off. The exhaustive branch below is the pre-H2 code, byte-for-byte.
-    const bool pruneActive = pruneTopK > 0 && std::getenv( "CTXPACK_NO_PRUNE" ) == nullptr;
+    const bool pruneActive = pruneTopK > 0 && std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr;
     if( pruneActive )
     {
         // one pass: candidates (any tf > 0 — every other doc scores EXACTLY the same +0.0f either way),

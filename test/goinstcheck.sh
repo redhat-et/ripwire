@@ -21,25 +21,25 @@
 #   Generic[int](1)  — explicit instantiation: investigated, REJECTED, stays uncaptured
 #   fs[i](3)         — index-then-call (inside take()): must NEVER appear as a call to "fs"
 #
-# Usage:  test/goinstcheck.sh   |   CTXPACK_BIN=asan/ctxpack test/goinstcheck.sh   (probe follows BIN)
+# Usage:  test/goinstcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/goinstcheck.sh   (probe follows BIN)
 # Exits non-zero on any failure (i.e. on any DRIFT from the rejected/documented behavior).
 # Does NOT edit test/regression.sh or test/golden.xml.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-# V1 MED-2 fix: honor the harness convention — regression.sh/pargates pass CTXPACK_BIN only, so
+# V1 MED-2 fix: honor the harness convention — regression.sh/pargates pass RIPWIRE_BIN only, so
 # the probe is derived from the binary under test (house pattern, probecheck.sh), not a hardcoded
 # build/ path that silently validates a stale tree.
-PROBE="${CTXPACK_PROBE:-${BIN}_probe}"
+PROBE="${RIPWIRE_PROBE:-${BIN}_probe}"
 [ "${PROBE#/}" = "$PROBE" ] && PROBE="$ROOT/$PROBE"
 FIX="$ROOT/test/goinstfix"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$PROBE" ] || { echo "no ctxpack_probe binary at $PROBE — build first (cmake --build build -j)"; exit 2; }
+[ -x "$PROBE" ] || { echo "no ripwire_probe binary at $PROBE — build first (cmake --build build -j)"; exit 2; }
 echo "goinstcheck: PROBE=$PROBE  FIX=$FIX"
 
 out="$( "$PROBE" "$FIX" 2>/dev/null )"

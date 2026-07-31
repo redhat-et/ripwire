@@ -4,22 +4,22 @@
 # over the ccx bar, new duplication, newly-dead), exit 2 on new debt / 0 when clean / 1 with no baseline.
 #
 # Operates entirely in a temp dir (the baseline sidecar lands in CWD), so the repo is never touched.
-# Usage:  CTXPACK_BIN=build/ctxpack bash test/qualitycheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/qualitycheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/src"
 # clean baseline state: one trivial fn + a caller (so nothing is dead)
 printf 'int simple(){ return 1; }\nint useit(){ return simple(); }\n' > "$WORK/src/a.cpp"
-cd "$WORK"                                            # so .ctxpack_quality_baseline is written HERE, not in the repo
+cd "$WORK"                                            # so .ripwire_quality_baseline is written HERE, not in the repo
 echo "qualitycheck: BIN=$BIN  (temp corpus)"
 
 dq(){ "$BIN" . --quality-delta --no-cache 2>/dev/null; }
@@ -27,7 +27,7 @@ ec(){ "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $?; }
 
 # ── 1) snapshot the clean state ───────────────────────────────────────────────────────────────────────
 "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1
-[ -f .ctxpack_quality_baseline ] && ok "--quality-baseline writes the sidecar" || no "no .ctxpack_quality_baseline written"
+[ -f .ripwire_quality_baseline ] && ok "--quality-baseline writes the sidecar" || no "no .ripwire_quality_baseline written"
 
 # ── 2) no change ⇒ zero regressions, exit 0 ───────────────────────────────────────────────────────────
 { dq | grep -q 'regressions="0"'; } && [ "$( ec )" = 0 ] \
@@ -69,7 +69,7 @@ fi
 # ── 4b) Q1 kinds: verbosity / nesting / params / api-surface ───────────────────────────────────────────
 # A dedicated sub-corpus so each new kind fires on a crafted regression and does NOT fire unchanged. Each
 # target is CALLED (so not dead) and defined in a .cpp (so not itself public, isolating api-surface).
-QD="$WORK/qd"; mkdir -p "$QD/src"; rm -f "$QD/.ctxpack_quality_baseline"
+QD="$WORK/qd"; mkdir -p "$QD/src"; rm -f "$QD/.ripwire_quality_baseline"
 # baseline: a small fn (few lines / shallow / 1 param), a public header decl, and callers so nothing is dead.
 printf 'int grow( int a ){ return a+1; }\n'                                   >  "$QD/src/g.cpp"
 printf 'int deepen( int a ){ if(a>0){ return a; } return 0; }\n'             >> "$QD/src/g.cpp"
@@ -108,7 +108,7 @@ fi
 
 # ── 4c) THE OVERLOAD/CANONID TRAP: overloads share a canonId → MAX-aggregated on both sides so a re-run ─
 #        with NO edit reports ZERO regressions (a low-metric overload written last must not phantom-regress).
-OV="$WORK/ov"; mkdir -p "$OV/src"; rm -f "$OV/.ctxpack_quality_baseline"
+OV="$WORK/ov"; mkdir -p "$OV/src"; rm -f "$OV/.ripwire_quality_baseline"
 # two overloads of ovl(): a BIG one (high loc/nest/params) then a SMALL one written LAST (the trap trigger).
 { printf 'int ovl( int a, int b, int c, int d, int e, int f ){\n'
   for i in $( seq 1 70 ); do printf '  a = a + %d;\n' "$i"; done
@@ -124,20 +124,20 @@ OVOUT="$( cd "$OV" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
     || { no "overload phantom regression (the trap): exit $OVEC"; printf '%s\n' "$OVOUT" | tr '>' '\n' | grep '<r '; }
 
 # ── 5) missing baseline ⇒ a clean exit 1 with guidance (not a crash) ──────────────────────────────────
-rm -f .ctxpack_quality_baseline
+rm -f .ripwire_quality_baseline
 [ "$( ec )" = 1 ] && ok "no baseline → exit 1 (tells you to run --quality-baseline first)" || no "missing baseline should exit 1"
 
 # ── 6) baseline-format compatibility: an old v1 baseline (no loc/nest/params/api lines) must not crash ─
 #       reading it — the new kinds count against baseline 0 (intended re-baseline prompt), never a parse error.
 V1="$WORK/v1"; mkdir -p "$V1/src"
 printf 'int f(){ return 0; }\nint g(){ return f(); }\n' > "$V1/src/a.cpp"
-printf '# ctxpack quality baseline v1 — regenerate with --quality-baseline; do not hand-edit\n' > "$V1/.ctxpack_quality_baseline"
+printf '# ripwire quality baseline v1 — regenerate with --quality-baseline; do not hand-edit\n' > "$V1/.ripwire_quality_baseline"
 V1EC="$( cd "$V1" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? )"
 [ "$V1EC" = 0 ] || [ "$V1EC" = 2 ] && ok "v1 baseline (no new-kind lines) read without crash (exit $V1EC)" || no "v1 baseline read crashed (exit $V1EC)"
 
 # ── 7) T0.1 — AUTO-BASELINE vs git HEAD when NO sidecar exists ─────────────────────────────────────────
 #       In a synthetic git repo: commit a clean tree, then edit a function to add LOC+nesting (a real
-#       regression). With NO .ctxpack_quality_baseline, --quality-delta must auto-compare vs HEAD and report
+#       regression). With NO .ripwire_quality_baseline, --quality-delta must auto-compare vs HEAD and report
 #       the regression (exit 2). A clean tree (== HEAD) → exit 0, zero regressions. Determinism holds (HEAD
 #       content is fixed). The explicit-sidecar path still wins (precedence). The overload trap stays fixed
 #       against the HEAD side too. A non-git dir with no sidecar keeps the exit-1 degrade (covered in §5).
@@ -150,7 +150,7 @@ if command -v git >/dev/null 2>&1; then
     ecgh(){ ( cd "$GH" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? ); }
 
     # 7a) clean working tree (identical to HEAD) → zero regressions, exit 0 — NO sidecar present.
-    [ ! -f "$GH/.ctxpack_quality_baseline" ] || rm -f "$GH/.ctxpack_quality_baseline"
+    [ ! -f "$GH/.ripwire_quality_baseline" ] || rm -f "$GH/.ripwire_quality_baseline"
     CLEAN="$( dgh )"
     { printf '%s' "$CLEAN" | grep -q 'baseline="git-HEAD"'; } \
         && ok "T0.1 auto-baseline: no sidecar → compares vs git-HEAD (baseline=\"git-HEAD\")" \
@@ -184,7 +184,7 @@ if command -v git >/dev/null 2>&1; then
     { printf '%s' "$SC" | grep -q 'baseline="sidecar"' && printf '%s' "$SC" | grep -q 'regressions="0"' && [ "$( ecgh )" = 0 ]; } \
         && ok "T0.1 precedence: explicit sidecar wins over HEAD (baseline=\"sidecar\", 0 regressions vs itself)" \
         || { no "T0.1 precedence: explicit sidecar should win + report clean"; printf '%s\n' "$SC" | head -c 300; }
-    rm -f "$GH/.ctxpack_quality_baseline"
+    rm -f "$GH/.ripwire_quality_baseline"
 
     # 7e) OVERLOAD TRAP vs HEAD — the HEAD side goes through the SAME MAX-aggregation, so committing an
     #     overload pair (big then small-last) and re-running with NO edit must report ZERO regressions.

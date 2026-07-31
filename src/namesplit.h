@@ -9,7 +9,7 @@
 //                    must lose its template arguments before `immediateScope()` takes its last `::` segment
 //                    (otherwise the qualifier extracts as the garbage `size_t>` and the canonical tier misses).
 // ingest.cpp cannot include tracelocus.h (that header pulls graph.h + serialize.h — the whole model), so the
-// scanner lives here, in a leaf header with no ctxpack dependency but Diagnostics.h. Duplicating it was the
+// scanner lives here, in a leaf header with no ripwire dependency but Diagnostics.h. Duplicating it was the
 // alternative and is exactly the clone class `--quality-delta` flags.
 //
 // tracelocus.h keeps its `tracelocus_detail::stripTrailingGroup` / `stripTemplateArgs` spellings via
@@ -37,7 +37,7 @@ namespace namesplit
 // `-fno-sanitize-recover=all`, so the process ABORTS. It only fires when the scan runs off the front, i.e.
 // on an UNBALANCED trailing group — which a C++ operator name supplies routinely: a demangled frame
 // `nsx::ops::operator>(S const&, S const&)` reduces to `nsx::ops::operator>`, whose trailing `>` has no
-// opener. Measured before the fix: `asan/ctxpack <corpus> --from-trace=<that frame>` exited 134.
+// opener. Measured before the fix: `asan/ripwire <corpus> --from-trace=<that frame>` exited 134.
 // The `cursor`/`index` split below cannot wrap: cursor is only decremented while it is strictly positive.
 inline std::string_view stripTrailingGroup( std::string_view f, char open, char close ) noexcept
 {

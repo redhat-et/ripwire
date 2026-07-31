@@ -9,7 +9,7 @@
 //   SCOPE-CREEP — body requests tools absent from the allowed-tools: frontmatter (WARN)
 //   FRONTMATTER — YAML keys attempting to set model/system/temperature (WARN)
 //
-// No tree-sitter — ctxpack has no markdown grammar. Pure line-iteration, PLUS a second pass inside
+// No tree-sitter — ripwire has no markdown grammar. Pure line-iteration, PLUS a second pass inside
 // `scanSkillText` over a whitespace-normalized join of the body (INJECTION only) to catch a phrase
 // split across a newline.
 // Pattern matching: std::regex throughout (ECMAScript, icase where relevant); INJECTION patterns
@@ -147,7 +147,7 @@ inline std::vector<ExfilPattern> buildExfilPatterns()
     std::vector<ExfilPattern> v;
 
     // Any reference to the API key environment variable. A bare prose mention (a skill that DOCUMENTS the
-    // pattern, e.g. ctxpack's own audit skills) is not exfiltration — require command context (a fenced
+    // pattern, e.g. ripwire's own audit skills) is not exfiltration — require command context (a fenced
     // run-block or a co-occurring transmit verb on the line). See scanSkillText's cmdContext gate.
     v.push_back( {
         "EXFILTRATE:api-key",

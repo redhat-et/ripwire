@@ -2,12 +2,12 @@
 # lintcheck.sh — S6-A gate: assert each new lint rule fires on test/lintfix/, and that
 # output is deterministic (run twice, diff). Does NOT edit test/regression.sh.
 #
-#   CTXPACK_BIN=build/ctxpack bash test/lintcheck.sh
-#   CTXPACK_BIN=asan/ctxpack  bash test/lintcheck.sh
+#   RIPWIRE_BIN=build/ripwire bash test/lintcheck.sh
+#   RIPWIRE_BIN=asan/ripwire  bash test/lintcheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/lintfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -15,7 +15,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/lintfix dir — fixture missing"; exit 2; }
 
 echo "lintcheck: BIN=$BIN  CORPUS=$CORPUS"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qualitystalecheck.sh — gate for the STALE-baseline guard on --quality-delta. A .ctxpack_quality_baseline
+# qualitystalecheck.sh — gate for the STALE-baseline guard on --quality-delta. A .ripwire_quality_baseline
 # left by an abandoned/parallel session (or written before a commit) used to SILENTLY take precedence and
 # report a wall of false regressions on an otherwise-clean tree — the flagship "before I push" reflex
 # punishing the agent who obeyed it (adoption-audit finding). The fix stamps the HEAD sha into the sidecar.
@@ -20,7 +20,7 @@
 # (quality::selectBaseline); the per-arm difference is policy only (CLI unlinks and says "removed", the
 # read-only MCP verb keeps the file and says "ignored"). Arms 3 and 3b below assert the NEW meaning; the old
 # reachable-ancestor-is-honored expectation is deliberately inverted here, not deleted.
-# Usage:  test/qualitystalecheck.sh   |   test/qualitystalecheck.sh asan/ctxpack   |   CTXPACK_BIN=asan/ctxpack test/qualitystalecheck.sh
+# Usage:  test/qualitystalecheck.sh   |   test/qualitystalecheck.sh asan/ripwire   |   RIPWIRE_BIN=asan/ripwire test/qualitystalecheck.sh
 # Exits non-zero on any failure. Does NOT edit regression.sh. Needs git.
 #
 # w1 FIXUP (2026-07-29) — arms 7 and 8 cover the two MED findings the wave-1 verifier raised against R3's seam:
@@ -29,7 +29,7 @@
 # file was stale-and-just-dropped, or stale-and-STILL-THERE (arm 8).
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
@@ -49,7 +49,7 @@ git add a.cpp; git commit -qm init
 # 1) --quality-baseline stamps the current HEAD sha into the sidecar
 "$BIN" "$REPO" --quality-baseline --no-cache >/dev/null 2>&1
 head_sha="$( git -C "$REPO" rev-parse HEAD )"
-grep -q "^head $head_sha$" "$REPO/.ctxpack_quality_baseline" \
+grep -q "^head $head_sha$" "$REPO/.ripwire_quality_baseline" \
     && ok "--quality-baseline stamps the HEAD sha into the sidecar" \
     || no "sidecar is missing the 'head <HEAD-sha>' stamp"
 
@@ -74,7 +74,7 @@ advanced_err="$(cat "$REPO/.stderr.tmp")"; rm -f "$REPO/.stderr.tmp"
     || { no "R3: reachable-ancestor pin was still honored — the revoked carve-out is back"; echo "     got: $(echo "$advanced_out" | grep -oE 'baseline="[^"]*" regressions="[0-9]+"')"; }
 [ -z "$advanced_err" ] && ok "R3: reachable-ancestor self-heal prints no stderr (B10.1b no-warning-spam fix intact)" \
     || no "reachable-ancestor case printed stderr: $advanced_err"
-[ -f "$REPO/.ctxpack_quality_baseline" ] \
+[ -f "$REPO/.ripwire_quality_baseline" ] \
     && no "R3: reachable-ancestor sidecar file NOT deleted (the CLI arm must self-heal it)" \
     || ok "R3: reachable-ancestor sidecar file deleted (self-healed)"
 
@@ -99,7 +99,7 @@ int gnarly( int a, int b, int c, int d, int e, int g )
 }
 CPPEOF
 ( cd "$MREPO" && git add a.cpp && git commit -qm B ) >/dev/null 2>&1
-git -C "$MREPO" merge-base --is-ancestor "$(sed -n 's/^head //p' "$MREPO/.ctxpack_quality_baseline")" HEAD \
+git -C "$MREPO" merge-base --is-ancestor "$(sed -n 's/^head //p' "$MREPO/.ripwire_quality_baseline")" HEAD \
     && ok "R3 incident shape: the pin IS a reachable ancestor of HEAD (the setup the carve-out used to trust)" \
     || no "R3 incident shape: setup failed — the pin is not an ancestor of HEAD"
 mcp_line="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -109,7 +109,7 @@ mcp_regs="$( printf '%s' "$mcp_line" | sed -n 's/.*\\"regressions\\":\([0-9]*\).
 printf '%s' "$mcp_line" | grep -q 'stale sidecar ignored' \
     && ok "R3 incident shape: MCP quality_delta calls the ancestor-pinned sidecar stale (\"ignored\")" \
     || { no "R3 incident shape: MCP did not report the sidecar as stale"; printf '     got: %s\n' "$(printf '%s' "$mcp_line" | head -c 200)"; }
-[ -f "$MREPO/.ctxpack_quality_baseline" ] \
+[ -f "$MREPO/.ripwire_quality_baseline" ] \
     && ok "R3 incident shape: MCP is READ-ONLY — the sidecar file survives its run" \
     || no "R3 incident shape: the read-only MCP verb DELETED the sidecar"
 mcp_err="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -135,7 +135,7 @@ rm -rf "$MREPO"
 #    git shape — an unresolvable/divergent history — which must still self-heal rather than error or crash.
 #    Arm 3 consumed the sidecar, so re-pin at the current HEAD first.
 "$BIN" "$REPO" --quality-baseline --no-cache >/dev/null 2>&1
-[ -f "$REPO/.ctxpack_quality_baseline" ] || no "setup: could not re-pin the sidecar before the orphan arm"
+[ -f "$REPO/.ripwire_quality_baseline" ] || no "setup: could not re-pin the sidecar before the orphan arm"
 git checkout -q --orphan orphanbr
 git rm -rf --cached . >/dev/null 2>&1
 printf 'int g(){ return 1; }\n' > a.cpp
@@ -149,7 +149,7 @@ echo "$unreachable_combined" | grep -q 'baseline="git-HEAD (stale sidecar remove
     || { no "unreachable-pin sidecar was not self-healed"; echo "     got: $(echo "$unreachable_combined" | grep -oE 'baseline="[^"]*"')"; }
 [ -z "$unreachable_err" ] && ok "unreachable-pin self-heal prints no stderr (no warning spam)" \
     || no "unreachable-pin self-heal printed stderr: $unreachable_err"
-[ -f "$REPO/.ctxpack_quality_baseline" ] \
+[ -f "$REPO/.ripwire_quality_baseline" ] \
     && no "unreachable-pin sidecar file NOT deleted (should self-heal)" \
     || ok "unreachable-pin sidecar file deleted (self-healed)"
 
@@ -157,12 +157,12 @@ echo "$unreachable_combined" | grep -q 'baseline="git-HEAD (stale sidecar remove
 #    line → an unstamped sidecar's pinned sha reads "" (unresolvable) → must self-heal exactly like an
 #    unreachable pin, not be trusted as a floor.
 "$BIN" "$REPO" --quality-baseline --no-cache >/dev/null 2>&1
-grep -v "^head " "$REPO/.ctxpack_quality_baseline" > "$REPO/.b.tmp" && mv "$REPO/.b.tmp" "$REPO/.ctxpack_quality_baseline"
+grep -v "^head " "$REPO/.ripwire_quality_baseline" > "$REPO/.b.tmp" && mv "$REPO/.b.tmp" "$REPO/.ripwire_quality_baseline"
 unstamped="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"
 echo "$unstamped" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
     && ok "unstamped sidecar self-heals (cannot verify freshness → removed), not silently trusted" \
     || { no "unstamped sidecar was trusted (the exact silent-false-regressions bug)"; echo "     got: $(echo "$unstamped" | grep -oE 'baseline="[^"]*"')"; }
-[ -f "$REPO/.ctxpack_quality_baseline" ] \
+[ -f "$REPO/.ripwire_quality_baseline" ] \
     && no "unstamped sidecar file NOT deleted (should self-heal)" \
     || ok "unstamped sidecar file deleted (self-healed)"
 
@@ -190,13 +190,13 @@ RREPO="$(mktemp -d)"; ROSANDBOXES="$ROSANDBOXES $RREPO"
 ( cd "$RREPO" && git init -q . && git config user.email x@y && git config user.name x \
   && printf 'int f( int x ){ return x + 1; }\n' > a.cpp && git add a.cpp && git commit -qm A ) >/dev/null 2>&1
 "$BIN" "$RREPO" --quality-baseline --no-cache >/dev/null 2>&1
-[ -f "$RREPO/.ctxpack_quality_baseline" ] || no "setup(7): could not pin a sidecar in the read-only-dir sandbox"
+[ -f "$RREPO/.ripwire_quality_baseline" ] || no "setup(7): could not pin a sidecar in the read-only-dir sandbox"
 git -C "$RREPO" commit -qam "advance HEAD (the pin goes stale)" --allow-empty >/dev/null 2>&1
 chmod a-w "$RREPO"                                     # unlink of an entry needs write on the PARENT dir → the self-heal must fail
 # stderr sink lives OUTSIDE the read-only sandbox, and stdout/stderr come from ONE invocation.
 ro_out="$("$BIN" "$RREPO" --quality-delta --no-cache 2>"$REPO/.ro.err")"
 ro_err="$(cat "$REPO/.ro.err")"; ro_alerts="$( grep -c 'math degraded' "$REPO/.ro.err" )"; rm -f "$REPO/.ro.err"
-[ -f "$RREPO/.ctxpack_quality_baseline" ] \
+[ -f "$RREPO/.ripwire_quality_baseline" ] \
     && ok "read-only dir: the stale sidecar really did SURVIVE the self-heal (the premise of this arm)" \
     || no "read-only dir: the sidecar was deleted anyway — the sandbox is not read-only, arm 7 proves nothing"
 echo "$ro_out" | grep -q 'baseline="git-HEAD (stale sidecar ignored)"' \
@@ -209,7 +209,7 @@ if [ "$alerts_observable" -eq 1 ]; then
     [ "$ro_alerts" -eq 1 ] \
         && ok "failed unlink fires exactly ONE [math degraded] alert (the plain build can observe the degrade)" \
         || no "expected exactly 1 [math degraded] alert on the failed unlink, got $ro_alerts"
-    printf '%s' "$ro_err" | grep -q 'math degraded.*ctxpack_quality_baseline' \
+    printf '%s' "$ro_err" | grep -q 'math degraded.*ripwire_quality_baseline' \
         && ok "…and the alert NAMES the sidecar that stayed on disk" \
         || { no "the alert does not name the sidecar"; printf '     got: %s\n' "$( printf '%s' "$ro_err" | grep 'math degraded' | head -1 )"; }
     printf '%s' "$ro_err" | grep -q 'math degraded.*git HEAD' \
@@ -234,7 +234,7 @@ mkorphan()   # $1 = dir; leaves a stale pin + an unborn HEAD
     ( cd "$1" && git checkout -q --orphan unbornbr && git rm -rf --cached . ) >/dev/null 2>&1
 }
 NOHEAD="$(mktemp -d)"; mkorphan "$NOHEAD"
-{ [ -f "$NOHEAD/.ctxpack_quality_baseline" ] && ! git -C "$NOHEAD" rev-parse --verify -q HEAD >/dev/null 2>&1; } \
+{ [ -f "$NOHEAD/.ripwire_quality_baseline" ] && ! git -C "$NOHEAD" rev-parse --verify -q HEAD >/dev/null 2>&1; } \
     && ok "setup(8): a stale-pinned sidecar in a repo whose HEAD does NOT resolve (unborn branch)" \
     || no "setup(8): sandbox is not the stale-pin + no-HEAD shape"
 "$BIN" "$NOHEAD" --quality-delta --no-cache >/dev/null 2>"$REPO/.nohead.err"
@@ -246,7 +246,7 @@ printf '%s' "$nohead_err" | grep -q 'was STALE (pinned at a different HEAD)' \
 printf '%s' "$nohead_err" | grep -q 'has been removed' \
     && ok "…and says the stale sidecar HAS BEEN REMOVED (the unlink landed here)" \
     || { no "the successful-unlink case does not say the file was removed"; printf '     got: %s\n' "$nohead_err"; }
-printf '%s' "$nohead_err" | grep -qF "no $NOHEAD/.ctxpack_quality_baseline" \
+printf '%s' "$nohead_err" | grep -qF "no $NOHEAD/.ripwire_quality_baseline" \
     && no "stale + no-HEAD fatal still claims \"no <file>\" — the pre-fix false statement" \
     || ok "stale + no-HEAD fatal no longer claims \"no <file>\" for a sidecar that DID exist"
 rm -rf "$NOHEAD"
@@ -257,7 +257,7 @@ chmod a-w "$NOHEADRO"
 "$BIN" "$NOHEADRO" --quality-delta --no-cache >/dev/null 2>"$REPO/.nohead2.err"
 nohead2_rc=$?; nohead2_err="$(cat "$REPO/.nohead2.err")"; rm -f "$REPO/.nohead2.err"
 [ "$nohead2_rc" -eq 1 ] && ok "stale + no-HEAD + failed unlink still exits 1" || no "stale + no-HEAD + failed unlink exit code is $nohead2_rc, expected 1"
-[ -f "$NOHEADRO/.ctxpack_quality_baseline" ] \
+[ -f "$NOHEADRO/.ripwire_quality_baseline" ] \
     && ok "stale + no-HEAD + read-only dir: the sidecar is STILL on disk (the premise of 8b)" \
     || no "8b premise broken: the sidecar was removed from a read-only dir"
 printf '%s' "$nohead2_err" | grep -q 'was STALE (pinned at a different HEAD)' \
@@ -265,7 +265,7 @@ printf '%s' "$nohead2_err" | grep -q 'was STALE (pinned at a different HEAD)' \
 printf '%s' "$nohead2_err" | grep -q 'still on disk' \
     && ok "8b: the fatal says the stale sidecar is STILL ON DISK (agrees with the failed unlink)" \
     || { no "8b: the fatal does not admit the file survived"; printf '     got: %s\n' "$nohead2_err"; }
-printf '%s' "$nohead2_err" | grep -qF "no $NOHEADRO/.ctxpack_quality_baseline" \
+printf '%s' "$nohead2_err" | grep -qF "no $NOHEADRO/.ripwire_quality_baseline" \
     && no "8b: the fatal claims \"no <file>\" while that exact file exists — the false-statement finding" \
     || ok "8b: the fatal never claims \"no <file>\" for a file that exists"
 
@@ -278,7 +278,7 @@ printf '%s' "$nohead2_err" | grep -qF "no $NOHEADRO/.ctxpack_quality_baseline" \
 #     exist. Reuses $nohead2_err and $alerts_observable from arm 8b/the probe above rather than re-building
 #     the read-only sandbox a third time.
 if [ "$alerts_observable" -eq 1 ]; then
-    printf '%s' "$nohead2_err" | grep -q 'math degraded.*ctxpack_quality_baseline' \
+    printf '%s' "$nohead2_err" | grep -q 'math degraded.*ripwire_quality_baseline' \
         && ok "8c: the no-HEAD read-only-dir case still fires the stale-unlink alert" \
         || no "8c: expected a [math degraded] stale-unlink alert in the no-HEAD case too"
     printf '%s' "$nohead2_err" | grep -q 'math degraded.*falls back to git HEAD' \

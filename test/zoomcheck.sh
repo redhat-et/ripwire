@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # zoomcheck.sh — the S5-D --zoom gate (multi-level Louvain → NESTED module hierarchy).
 #
-#   test/zoomcheck.sh                          # uses build/ctxpack on test/zoomfix
-#   CTXPACK_BIN=asan/ctxpack test/zoomcheck.sh
+#   test/zoomcheck.sh                          # uses build/ripwire on test/zoomfix
+#   RIPWIRE_BIN=asan/ripwire test/zoomcheck.sh
 #
 # The fixture test/zoomfix has 3 directories (core/, io/, util/), each holding TWO tight call-clusters plus a
 # top-level app.cpp that bridges all three. Single-level Louvain finds 6 communities; multi-level CONTRACTS
@@ -13,15 +13,15 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/zoomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "zoomcheck: BIN=$BIN  CORPUS=$CORPUS"
 

@@ -16,13 +16,13 @@
 #
 # Usage:
 #   test/rangecomposecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/rangecomposecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/rangecomposecheck.sh
 #
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 JSFIX="$ROOT/test/jsmetricsfix"
 CPPFIX="$ROOT/test/expandrangefix"
@@ -31,7 +31,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$JSFIX" ]  || { echo "no test/jsmetricsfix directory (expected from jsmetricscheck.sh)"; exit 2; }
 [ -d "$CPPFIX" ] || { echo "no test/expandrangefix directory"; exit 2; }
 

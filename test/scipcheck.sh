@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # scipcheck.sh — the W4-#15 SCIP precision-overlay gate.
 #
-#   test/scipcheck.sh                       # uses build/ctxpack on test/scipfix
-#   CTXPACK_BIN=asan/ctxpack test/scipcheck.sh
+#   test/scipcheck.sh                       # uses build/ripwire on test/scipfix
+#   RIPWIRE_BIN=asan/ripwire test/scipcheck.sh
 #
 # The fixture test/scipfix/ has two sibling files (alpha.cpp, beta.cpp) that each define a same-named
-# free function `handler`, and caller.cpp whose `run()` makes a bare `handler()` call. ctxpack's name
+# free function `handler`, and caller.cpp whose `run()` makes a bare `handler()` call. ripwire's name
 # resolver keeps BOTH defs (same dir → tier 2) → an AMBIGUOUS split edge. The generated SCIP index
 # (index.scip, from make_index.py — hand-rolled protobuf, stdlib only) pins the call to alpha.cpp's
 # `handler`. This gate asserts the overlay contract:
@@ -15,13 +15,13 @@
 #   * deterministic (run twice → byte-identical), xmllint-clean well-formed XML
 #   * a CORRUPT (truncated) index → a stderr alert AND output byte-IDENTICAL to the no---scip run
 #     (degrade, never fail); a MISSING index → same
-#   * FUZZ: 20 random truncations / byte-flips of the index → ctxpack never crashes (exit 0/degrades)
+#   * FUZZ: 20 random truncations / byte-flips of the index → ripwire never crashes (exit 0/degrades)
 # Exits non-zero on any failure. Does NOT touch regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 CORPUS="$ROOT/test/scipfix"
 GEN="$CORPUS/make_index.py"
 IDX="$CORPUS/index.scip"
@@ -31,7 +31,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "scipcheck: BIN=$BIN  CORPUS=$CORPUS"
 
@@ -81,7 +81,7 @@ printf '%s' "$RUN_OV" | grep -q 'amb=' && { no "run still carries amb= under --s
 diff -q "$TMP/ov1" "$TMP/ov2" >/dev/null && ok "determinism (overlay byte-identical, $(wc -c <"$TMP/ov1" | tr -d ' ') B)" \
     || no "determinism (overlay non-deterministic)"
 
-# 4) WELL-FORMED — the overlay output is valid XML (extract the <r>…</r> document; ctxpack emits it raw).
+# 4) WELL-FORMED — the overlay output is valid XML (extract the <r>…</r> document; ripwire emits it raw).
 if command -v xmllint >/dev/null 2>&1; then
 # §P8 (2026-07-28) — REPINNED: the map root is now `<r est_tokens="N">` (the flagship map's own size
 # became a machine-readable ATTRIBUTE instead of comment-only text). These extractions matched the literal
@@ -108,7 +108,7 @@ grep -qi 'scip' "$TMP/corrupt.err" && ok "corrupt index → stderr alert emitted
 [ $rcm -eq 0 ] && diff -q <(printf '%s' "$NOSCIP") "$TMP/miss.out" >/dev/null && grep -qi 'scip' "$TMP/miss.err" \
     && ok "missing index → exit 0, output identical, alert emitted" || no "missing index degrade contract broken"
 
-# 6) FUZZ — 20 random truncations / byte-flips of the index must never crash ctxpack (it degrades).
+# 6) FUZZ — 20 random truncations / byte-flips of the index must never crash ripwire (it degrades).
 SZ="$( wc -c <"$IDX" | tr -d ' ' )"
 crashes=0
 for i in $( seq 1 20 ); do
@@ -174,7 +174,7 @@ grep -q 'n="handler" prov="scip"' "$TMP/external.out" \
 # 8) S5 STALE-INDEX MIS-ATTRIBUTION GATE — an index from an OLDER commit (make_index.py --stale) records
 #    the caller's `handler` reference ONE LINE OFF the real call site. The OLD line-scan trusted that stale
 #    line and pinned run→handler prov="scip" (silent mis-attribution). The fix keys the enclosing symbol on
-#    ctxpack's OWN reference at that exact (file,line): no parsed reference there → the occurrence is DROPPED.
+#    ripwire's OWN reference at that exact (file,line): no parsed reference there → the occurrence is DROPPED.
 #    ASSERT: (a) the match-ratio note fires flagging staleness; (b) NO wrong precise edge — no prov="scip"
 #    anywhere, no precise= in the header, run reverts to the honest name-based ambiguous split; (c) valid xml.
 python3 "$GEN" --stale "$TMP/stale.scip" 2>/dev/null && ok "make_index.py --stale generated a stale index" \

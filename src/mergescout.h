@@ -3,7 +3,7 @@
 // mergescout.h — L1: --merge-scout=REF[,REF...] (PLAN_agentLeverage2026.md §L1), the read-only
 // cross-branch overlap oracle. Evidence: a 2026-07-14 round hand-computed a landing order for 5
 // concurrent agent branches by eyeballing which touched the same symbols — pure set intersection over
-// data ctxpack already has.
+// data ripwire already has.
 //
 // For each REF, materialize (git-archive, read-only) BOTH its own tree and its merge-base-with-HEAD
 // tree — reusing quality.h's materializeCommitTree, and (Y1, AUDIT5 P1) ingest()'s own incremental
@@ -136,7 +136,7 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
 // family so a multi-arm scout run's ~2*refCount+1 distinct trees don't thrash quality.h's own 2-slot
 // keep cap. No extra per-family eviction cap here: the dir-wide 2 GiB / 30-day sweep
 // (quality::sweepStaleCacheBlobsOnce) already runs on every ingest() saveCache and matches the
-// "ctxpack-" prefix generically, so it backstops this family too.
+// "ripwire-" prefix generically, so it backstops this family too.
 constexpr std::uint32_t kMsCacheScheme = 1;
 
 inline std::string msExclHex( const std::vector<std::string>& excludes )
@@ -611,7 +611,7 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
 
     // G4: an XML comment may not contain a double hyphen, so this text names flags and attributes WITHOUT
     // their leading dashes (the same constraint crossref.h's own comments call out). Keep it that way.
-    std::fprintf( out, "<!-- ctxpack merge-scout: read-only cross-branch overlap for %zu arm(s) — same-symbol change "
+    std::fprintf( out, "<!-- ripwire merge-scout: read-only cross-branch overlap for %zu arm(s) — same-symbol change "
                        "on two arms = conflict, same-file/different-symbol = textual risk. landing = "
                        "fewest-conflicts-first greedy (ties: ref name asc). Every tree is a git-archive TEMP COPY "
                        "(read-only); the real working tree/refs are never touched. ANCHORING: every arm is diffed "

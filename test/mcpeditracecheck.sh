@@ -4,7 +4,7 @@
 # F1 (MEDIUM): the edit verbs (replace_symbol_body / insert_*) did an UNLOCKED read→freshness-check→splice→
 #   atomic-rename. A concurrent writer committing to the same file in the [read..rename] window had its write
 #   SILENTLY LOST while BOTH parties reported success (audit: 24-25/25 LOST_W). The fix is two-layered:
-#     (1) a per-file advisory flock so two COOPERATING ctxpack edits (or any writer that respects the lock)
+#     (1) a per-file advisory flock so two COOPERATING ripwire edits (or any writer that respects the lock)
 #         fully SERIALIZE — this is a HARD, deterministic guarantee (checks 1 + 3 below), and
 #     (2) a freshness RE-CHECK immediately before the atomic rename, so a NON-cooperating external writer's
 #         committed change is DETECTED and the edit REFUSES instead of silently clobbering (check 2).
@@ -24,14 +24,14 @@
 #
 # Usage:
 #   test/mcpeditracecheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/mcpeditracecheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/mcpeditracecheck.sh
 #   RACE_TRIALS=20 test/mcpeditracecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Does NOT edit regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -40,7 +40,7 @@ TRIALS="${RACE_TRIALS:-15}"
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 
 echo "mcpeditracecheck: BIN=$BIN  TRIALS=$TRIALS"
@@ -50,23 +50,23 @@ read -r -d '' PREAMBLE <<'PYEOF'
 import sys, os, json, subprocess, threading, time, tempfile, fcntl
 BIN = sys.argv[1]
 
-def atomic_write(path, data):                          # a concurrent atomic commit (mirrors ctxpack's atomicWrite)
+def atomic_write(path, data):                          # a concurrent atomic commit (mirrors ripwire's atomicWrite)
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(dir=d)
     os.fdopen(fd, "w").write(data)
     os.rename(tmp, path)
 
 def edit_lock_path(target):                            # A3-F8: mirror C++ mcpedit::editLockPath (cache-dir keyed lock,
-    h = 1469598103934665603                             #   NOT a repo-tree "<path>.ctxpack-lock" sidecar). FNV-1a-64 of
+    h = 1469598103934665603                             #   NOT a repo-tree "<path>.ripwire-lock" sidecar). FNV-1a-64 of
     for c in target.encode("utf-8", "surrogateescape"):#   the (absolute) ingested target path → a stable per-file name,
         h = ((h ^ c) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
-    name = "ctxpack-edit-%016x.lock" % h
-    tmpdir = os.environ.get("TMPDIR")                  # same cacheDirLadder(): $TMPDIR → $XDG_CACHE_HOME/ctxpack → /tmp
+    name = "ripwire-edit-%016x.lock" % h
+    tmpdir = os.environ.get("TMPDIR")                  # same cacheDirLadder(): $TMPDIR → $XDG_CACHE_HOME/ripwire → /tmp
     if tmpdir:
         return os.path.join(tmpdir, name)
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg:
-        d = os.path.join(xdg, "ctxpack"); os.makedirs(d, exist_ok=True); return os.path.join(d, name)
+        d = os.path.join(xdg, "ripwire"); os.makedirs(d, exist_ok=True); return os.path.join(d, name)
     return os.path.join("/tmp", name)
 
 PAD = ("// pad " + "x"*60 + "\n") * 14000               # ~980 KB comment pad → widens the [read..rename] window
@@ -198,9 +198,9 @@ echo "  (informational) residual [re-check..rename] window is minimized-but-nonz
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
-echo "=== 3. F1 ctxpack-vs-ctxpack — two concurrent EDIT ops on one file cannot both clobber (exactly one body) ==="
+echo "=== 3. F1 ripwire-vs-ripwire — two concurrent EDIT ops on one file cannot both clobber (exactly one body) ==="
 # ═══════════════════════════════════════════════════════════════════════════
-# Two ctxpack edit ops on the SAME file at once: the advisory lock serializes them, so the file ends with
+# Two ripwire edit ops on the SAME file at once: the advisory lock serializes them, so the file ends with
 # EXACTLY ONE of the two edited bodies (never a torn interleave, never both-lost).
 python3 - "$BIN" "$TMP/vs" <<PYEOF > "$TMP/vs.out" 2>/dev/null
 $PREAMBLE
@@ -226,7 +226,7 @@ VS="$( tail -1 "$TMP/vs.out" )"
 echo "  vs summary: $VS"
 VS_ONE="$( printf '%s' "$VS" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["exactly_one_body"] and d["n_fn"]==1)' 2>/dev/null )"
 [ "$VS_ONE" = "True" ] \
-    && ok "F1 vs: two concurrent ctxpack edits serialized — exactly one well-formed body on disk" \
+    && ok "F1 vs: two concurrent ripwire edits serialized — exactly one well-formed body on disk" \
     || no "F1 vs: file did not end with exactly one of the two edited bodies: $VS"
 
 # ═══════════════════════════════════════════════════════════════════════════

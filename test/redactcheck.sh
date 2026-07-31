@@ -2,8 +2,8 @@
 # redactcheck.sh — gate for W4-#7: deterministic secret redaction of emitted body content.
 #
 # Usage:
-#   test/redactcheck.sh                          # uses build/ctxpack on test/redactfix
-#   CTXPACK_BIN=asan/ctxpack test/redactcheck.sh
+#   test/redactcheck.sh                          # uses build/ripwire on test/redactfix
+#   RIPWIRE_BIN=asan/ripwire test/redactcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # DO NOT edit regression.sh — this is a standalone gate invoked from there.
@@ -19,7 +19,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/redactfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -28,7 +28,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$CORPUS" ] || { echo "no test/redactfix directory"; exit 2; }
 
 echo "redactcheck: BIN=$BIN  CORPUS=$CORPUS"
@@ -74,7 +74,7 @@ grep -q 'REDACTED:jwt' "$TMP/pack.xml" && ok "jwt redaction marker present in --
 # ── 2) exactly one stderr summary line, count-by-type ───────────────────────────────────────────────
 lines="$( grep -c 'redacted .* secret' "$TMP/pack.err" )"
 [ "$lines" -eq 1 ] && ok "exactly one stderr summary line" || no "expected 1 stderr summary line, got $lines"
-grep -q 'ctxpack: redacted .* from emitted context (' "$TMP/pack.err" && ok "stderr summary is count-by-type" || { no "stderr summary shape wrong"; cat "$TMP/pack.err"; }
+grep -q 'ripwire: redacted .* from emitted context (' "$TMP/pack.err" && ok "stderr summary is count-by-type" || { no "stderr summary shape wrong"; cat "$TMP/pack.err"; }
 
 # ── 3) --expand on a single symbol also redacts ─────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --expand=loadAwsKey --no-cache >"$TMP/exp.xml" 2>/dev/null

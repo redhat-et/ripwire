@@ -17,7 +17,7 @@
 #include "lexindex.h"            // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 
 #include "Diagnostics.h"
-#include "profileScope.h"        // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DCTXPACK_PROFILE=ON)
+#include "profileScope.h"        // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <tree_sitter/api.h>
 
@@ -26,7 +26,7 @@
 #include <cctype>
 #include <chrono>       // A4-P7: wall-clock cache-write timestamp for the racy-git rule
 #include <cstdio>
-#include <cstdlib>      // std::getenv — CTXPACK_CACHE_STATS drift observable
+#include <cstdlib>      // std::getenv — RIPWIRE_CACHE_STATS drift observable
 #include <cstring>
 #include <sys/stat.h>   // A4-P7: stat() for the (size,mtime) warm-run shortcut
 #include <unistd.h>     // getpid — unique per-process cache temp name
@@ -595,7 +595,7 @@ TSQuery* compileQueryStandalone( const LangEntry& le )
     TSQueryError  errType = TSQueryErrorNone;
     TSQuery*      q       = ts_query_new( le.grammar(), scm.data(), static_cast<std::uint32_t>( scm.size() ), &errOff, &errType );
     if( q == nullptr )
-        std::fprintf( stderr, "[ctxpack] tags.scm compile error for %s at byte %u (err %d) — skipping language\n",
+        std::fprintf( stderr, "[ripwire] tags.scm compile error for %s at byte %u (err %d) — skipping language\n",
                       std::string( le.querySub ).c_str(), errOff, (int)errType );
     return q;
 }
@@ -695,7 +695,7 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   path (`<root-arg>/<rel>`, root-spelling-dependent) to a ROOT-RELATIVE key via relForHash — the
 //   same lexical root-prefix strip S2 uses for the baseline sidecars. This makes the cache PORTABLE
 //   (committable): a cache built at one root spelling/absolute path is re-absolutized against the
-//   CURRENT invocation's root on load, so `repo.ctxpackcache` built in CI or by a teammate at a
+//   CURRENT invocation's root on load, so `repo.ripwirecache` built in CI or by a teammate at a
 //   different checkout path still warm-hits. Old (v2) caches store the pre-T5 key shape; bumping
 //   this field makes loadCache's version guard reject them outright (magic/version/parserVer must
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
@@ -1358,7 +1358,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         return;
     }
 
-    // A5 (cache-dir hygiene): --doctor measured ~11,914 ctxpack-* blobs / 2.4 GB accumulating in the cache-ladder
+    // A5 (cache-dir hygiene): --doctor measured ~11,914 ripwire-* blobs / 2.4 GB accumulating in the cache-ladder
     // dir because only the qsnap/qheadsnap families ever evicted — this main parse-cache family (this very
     // `path`) never did. Best-effort, silent, at most once per process (see sweepStaleCacheBlobsOnce for the
     // policy + the concurrency-safety argument). `path` is the blob we just rename()'d into place, so it is
@@ -3476,7 +3476,7 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
     if( !ts_parser_set_language( parser, lang ) || !grammarAbiOk( lang ) )
     {
         // never emit a silently-empty tree — say which language we dropped (SPEC §7).
-        std::fprintf( stderr, "[ctxpack] grammar ABI mismatch or set_language failed for %s — skipping language\n",
+        std::fprintf( stderr, "[ripwire] grammar ABI mismatch or set_language failed for %s — skipping language\n",
                       std::string( le.querySub ).c_str() );
         return false;
     }
@@ -4160,7 +4160,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     std::atomic<bool> dirty{ false };
 
     // A1 (team-index) — drift-proportional observable: count files that actually RE-PARSED (cache miss /
-    // changed / new). Emitted to stderr only when CTXPACK_CACHE_STATS is set (off by default → zero
+    // changed / new). Emitted to stderr only when RIPWIRE_CACHE_STATS is set (off by default → zero
     // perturbation to any output/determinism gate), so a test can assert "restore cost is proportional to
     // drift" (modify N of F files → reparsed=N) as an executable fact, not just prose. Relaxed: a monotone
     // counter whose only reader is the post-join print, ordered by the pool join below.
@@ -4472,7 +4472,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         // the skip is a degrade with a one-line stderr note, matching the SPEC §1 skip style.
                         if( le->lang == Lang::Json && jsonNestsTooDeep( bytes ) )
                         {
-                            std::fprintf( stderr, "[ctxpack] %s: json nesting > %u levels — treated as data, not config (skipped)\n",
+                            std::fprintf( stderr, "[ripwire] %s: json nesting > %u levels — treated as data, not config (skipped)\n",
                                           path.c_str(), kMaxJsonNestDepth );
                             continue;
                         }
@@ -4585,13 +4585,13 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         }
 
         // A1 (team-index) — drift-proportional observable: report how many files re-parsed vs reused,
-        // ONLY when CTXPACK_CACHE_STATS is set (off by default → no stdout/stderr perturbation on any
+        // ONLY when RIPWIRE_CACHE_STATS is set (off by default → no stdout/stderr perturbation on any
         // normal run or gate). A warm restore over a tree with N-of-F files changed prints reparsed=N,
         // making the "restore cost is proportional to drift, not tree size" claim executable.
-        if( std::getenv( "CTXPACK_CACHE_STATS" ) != nullptr )
+        if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )
         {
             const std::size_t reparsed = reparsedCount.load( std::memory_order_relaxed );
-            std::fprintf( stderr, "ctxpack: cache-stats reparsed=%zu reused=%zu files=%zu\n",
+            std::fprintf( stderr, "ripwire: cache-stats reparsed=%zu reused=%zu files=%zu\n",
                           reparsed, ( nfiles >= reparsed ? nfiles - reparsed : std::size_t( 0 ) ), nfiles );
         }
 
@@ -5287,7 +5287,7 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
         for( const auto& [g, qs] : byGrammar ) { for( const auto& [q, tag] : qs ) if( tag == spec.tag ) { any = true; break; } if( any ) break; }
         if( !any )
         {
-            std::fprintf( stderr, "ctxpack: AST query did not compile for any grammar: %.*s\n", int( spec.query.size() ), spec.query.data() );
+            std::fprintf( stderr, "ripwire: AST query did not compile for any grammar: %.*s\n", int( spec.query.size() ), spec.query.data() );
             if( uncompiledOut ) uncompiledOut->push_back( spec.query );
         }
     }

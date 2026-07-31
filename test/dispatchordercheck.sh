@@ -34,8 +34,8 @@
 
 set -u
 
-BIN="${1:-${CTXPACK_BIN:-./build/ctxpack}}"   # CA4: this gate ignored $1, so a caller passing a binary
-FIX="${FIX:-test/queryfix}"                    # positionally silently measured build/ctxpack instead (trap #20)
+BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"   # CA4: this gate ignored $1, so a caller passing a binary
+FIX="${FIX:-test/queryfix}"                    # positionally silently measured build/ripwire instead (trap #20)
 fails=0
 
 pass() { echo "  PASS  $1"; }
@@ -113,7 +113,7 @@ for (( pi = 0; pi + 1 < ${#PREC_VERBS[@]}; pi++ )); do
     prec_pairs=$((prec_pairs + 1))
     if ! cmp -s "$PRECTMP/solo" "$PRECTMP/both"; then
         fail "precedence $AFLAG+$BFLAG: stdout differs from the winner's solo run — $AFLAG did NOT answer"
-    elif ! grep -q "ctxpack: $AFLAG takes precedence" "$PRECTMP/err"; then
+    elif ! grep -q "ripwire: $AFLAG takes precedence" "$PRECTMP/err"; then
         fail "precedence $AFLAG+$BFLAG: stderr does not name $AFLAG as the winner (got: $( head -c 120 "$PRECTMP/err" ))"
     elif ! grep -q "IGNORED this run: .*$BFLAG" "$PRECTMP/err"; then
         fail "precedence $AFLAG+$BFLAG: stderr does not name $BFLAG as ignored"

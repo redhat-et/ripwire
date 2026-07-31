@@ -25,7 +25,7 @@
 #
 # Part C — A3-F6: tools/call argument scoping (params.arguments only, envelope keys can't shadow).
 #
-# Part D — AUDIT5 D3/D4 (plan X7): `ctxpack <root> --mcp`'s startup root as the stdio default:
+# Part D — AUDIT5 D3/D4 (plan X7): `ripwire <root> --mcp`'s startup root as the stdio default:
 #   (D-1) an omitted `path` on a READ verb resolves against the startup root.
 #   (D-2) an EDIT verb given a `path` OUTSIDE the startup root refuses with the named workspace-pin
 #         error, and the startup-root workspace is left byte-identical.
@@ -37,14 +37,14 @@
 #
 # Usage:
 #   test/mcprobustcheck.sh
-#   CTXPACK_BIN=asan/ctxpack test/mcprobustcheck.sh
+#   RIPWIRE_BIN=asan/ripwire test/mcprobustcheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
 # Does NOT edit regression.sh or mcpverbscheck.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -53,7 +53,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 
 echo "mcprobustcheck: BIN=$BIN  FIX=$FIX"
@@ -157,12 +157,12 @@ PYEOF
 # Current lifecycle negotiation: supported versions are echoed; unsupported/missing versions use the
 # latest server version as a compatibility policy. These checks cover stdio independently of HTTP headers.
 for version in 2025-11-25 2025-06-18 2025-03-26 2024-11-05; do
-    reply="$( mcp_call "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ctxpack-test\",\"version\":\"1.0\"}}}" )"
+    reply="$( mcp_call "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ripwire-test\",\"version\":\"1.0\"}}}" )"
     got="$( printf '%s' "$reply" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
     [ "$got" = "$version" ] && ok "initialize negotiates supported $version" || no "initialize requested $version but returned '$got'"
 done
 
-reply="$( mcp_call '{"jsonrpc":"2.0","id":9,"method":"initialize","params":{"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"ctxpack-test","version":"1.0"}}}' )"
+reply="$( mcp_call '{"jsonrpc":"2.0","id":9,"method":"initialize","params":{"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"ripwire-test","version":"1.0"}}}' )"
 got="$( printf '%s' "$reply" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
 [ "$got" = "2025-11-25" ] && ok "unsupported initialize version negotiates latest" || no "unsupported initialize version returned '$got'"
 
@@ -410,11 +410,11 @@ esac
 echo
 echo "=== Part D: X7 (AUDIT5 D3/D4) — stdio startup-root default + edit-verb workspace pin ==="
 # ═══════════════════════════════════════════════════════════════════════════
-# `ctxpack <root> --mcp` (a startup root on the command line) now behaves like the remote HTTP
+# `ripwire <root> --mcp` (a startup root on the command line) now behaves like the remote HTTP
 # transport's own pinned-workspace default, but SOFTER: an omitted `path` defaults to that root for
 # EVERY verb (read and edit alike); only the 3 EDIT verbs are refused when an EXPLICIT `path` resolves
 # OUTSIDE it (read verbs stay unrestricted — a multi-root user reading a sibling checkout is a feature,
-# per the decided policy). A bare `ctxpack --mcp` (no root, exercised everywhere else in this file via
+# per the decided policy). A bare `ripwire --mcp` (no root, exercised everywhere else in this file via
 # mcp_call()) is untouched: no default exists, so every verb still requires its own `path` (D-5).
 # NEVER edits test/fixture itself: every mutation happens on a scratch COPY under a fresh mktemp root.
 

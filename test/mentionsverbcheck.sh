@@ -13,25 +13,25 @@
 # information; a row must not carry a fake locator.
 #
 # Fixture: pkg/alpha.py defines widget_pipeline_process. multi.md backtick-mentions it THREE times: once
-# in body prose under no specific heading (attributes to the file-level Section — every ctxpack markdown
+# in body prose under no specific heading (attributes to the file-level Section — every ripwire markdown
 # file gets one, spanning the whole file) and twice more directly ON a heading's own line ("## `sym`
 # details" — a heading span covers only its own line, so a backtick THERE binds a DIFFERENT enclosing
 # Section than body prose below it). That is 3 distinct (def, enclosing-Section) edges in ONE file — the
 # exact shape that inflated docs=3x pre-fix. single.md mentions it once, for a plain 1x control.
 #
-# Usage:  bash test/mentionsverbcheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/mentionsverbcheck.sh
-#         CTXPACK_BIN=build_base/ctxpack bash test/mentionsverbcheck.sh    # must FAIL (pre-fix binary)
+# Usage:  bash test/mentionsverbcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/mentionsverbcheck.sh
+#         RIPWIRE_BIN=build_base/ripwire bash test/mentionsverbcheck.sh    # must FAIL (pre-fix binary)
 # Exits non-zero on any failure. Self-contained (own temp dir). Does NOT edit test/regression.sh.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "mentionsverbcheck: BIN=$BIN"
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT

@@ -14,14 +14,14 @@
 #
 # Usage:
 #   bash test/baselinecheck.sh
-#   CTXPACK_BIN=asan/ctxpack bash test/baselinecheck.sh
+#   RIPWIRE_BIN=asan/ripwire bash test/baselinecheck.sh
 #
 # Exits non-zero on any failure; prints PASS/FAIL per check; prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative CTXPACK_BIN
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
 
 FIXTURE="$ROOT/test/baselinefix"
 fail=0
@@ -29,7 +29,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 # Work in a temp copy so the sidecar never pollutes the fixture or the repo.
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -37,11 +37,11 @@ WORK="$TMP/baselinefix"
 cp -R "$FIXTURE" "$WORK"
 
 RULES="$WORK/rules.txt"
-SIDECAR="$WORK/.ctxpack_arch_baseline"
+SIDECAR="$WORK/.ripwire_arch_baseline"
 
 echo "baselinecheck: BIN=$BIN  FIXTURE=$FIXTURE"
 
-# Change into the work dir so ctxpack resolves paths relative to it (consistent with archcheck.sh).
+# Change into the work dir so ripwire resolves paths relative to it (consistent with archcheck.sh).
 cd "$WORK"
 
 # ── step 1: --baseline writes the sidecar and exits 0 ────────────────────────────────────────────
@@ -55,9 +55,9 @@ fi
 
 # Sidecar must exist
 if [ -f "$SIDECAR" ]; then
-    ok "step 1: sidecar written (.ctxpack_arch_baseline exists)"
+    ok "step 1: sidecar written (.ripwire_arch_baseline exists)"
 else
-    no "step 1: sidecar missing (.ctxpack_arch_baseline not created)"
+    no "step 1: sidecar missing (.ripwire_arch_baseline not created)"
 fi
 
 # Sidecar must contain exactly 2 hex hashes (one per violation)

@@ -18,21 +18,21 @@
 #         lifted; docs are capped per-anchor even when many mention the same symbol (bounded, not flooding).
 #   (iv)  INERT WITHOUT MENTIONS — a query whose resolved symbol nobody mentions leaves output BYTE-IDENTICAL
 #         boost-on vs boost-off.
-#   (v)   DETERMINISM x3, xmllint-clean, env (CTXPACK_NO_DOC_MENTION=1) == flag (--no-doc-mention) byte-for-
+#   (v)   DETERMINISM x3, xmllint-clean, env (RIPWIRE_NO_DOC_MENTION=1) == flag (--no-doc-mention) byte-for-
 #         byte, and the flag alone refuses loudly; --pack-task carries the same note (shared computeLensRanking).
 #
-# Usage:  bash test/docmentioncheck.sh   |   CTXPACK_BIN=asan/ctxpack bash test/docmentioncheck.sh
+# Usage:  bash test/docmentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/docmentioncheck.sh
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "docmentioncheck: BIN=$BIN"
 
 # ── fixture: a code symbol (compute_widget_total), a design doc that backtick-mentions it in prose sharing
@@ -146,8 +146,8 @@ if command -v xmllint >/dev/null; then
     xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "doc-mention bundle is xmllint-clean (G4)" || no "doc-mention bundle not well-formed"
 else ok "xmllint not present — skipped (G4 covered by xmlwellformed.sh)"; fi
 "$BIN" "$FIX" --for="$Q" --no-doc-mention --no-cache >"$TMP/f1.xml" 2>/dev/null
-CTXPACK_NO_DOC_MENTION=1 "$BIN" "$FIX" --for="$Q" --no-cache >"$TMP/f2.xml" 2>/dev/null
-cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "CTXPACK_NO_DOC_MENTION=1 == --no-doc-mention (byte-identical)" \
+RIPWIRE_NO_DOC_MENTION=1 "$BIN" "$FIX" --for="$Q" --no-cache >"$TMP/f2.xml" 2>/dev/null
+cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "RIPWIRE_NO_DOC_MENTION=1 == --no-doc-mention (byte-identical)" \
     || no "env disable and flag disable diverge"
 "$BIN" "$FIX" --no-doc-mention >/dev/null 2>"$TMP/refuse.err"
 [ $? -ne 0 ] && grep -q 'no-doc-mention' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"

@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 # scripts/scorecard.sh — per-language resolution honesty scorecard
 #
-# For each language supported by ctxpack, runs the binary on a representative test fixture,
+# For each language supported by ripwire, runs the binary on a representative test fixture,
 # extracts resolution statistics (symbols, edges, ambiguous edge count), computes the
 # ambiguity rate (ambiguous/edges), and emits a markdown table sorted by language name.
 #
-# The table documents ctxpack's honesty about its call-graph precision: where dynamic
+# The table documents ripwire's honesty about its call-graph precision: where dynamic
 # dispatch, callbacks, or multi-definition scenarios make the name-based resolver uncertain,
 # the amb= counter reports it explicitly so users know when to drop to reading source.
 #
 # Output is deterministic (same table on every run of the same tree).
 #
 # Usage:
-#   scripts/scorecard.sh              # uses build/ctxpack
-#   CTXPACK_BIN=./asan/ctxpack scripts/scorecard.sh
+#   scripts/scorecard.sh              # uses build/ripwire
+#   RIPWIRE_BIN=./asan/ripwire scripts/scorecard.sh
 #
 # Exits 0 on success (table emitted), non-zero on failure (missing binary, corrupt output, etc.).
 
 set -uo pipefail
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-[ -x "$BIN" ] || { echo "error: no ctxpack binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -x "$BIN" ] || { echo "error: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for XML parsing"; exit 2; }
 
 # ─── Language fixture map (language name → representative test fixture) ───────────────────
@@ -44,7 +44,7 @@ TypeScript langfix
 FIXTURE_EOF
 
 # ─── Extract resolution statistics from a fixture ─────────────────────────────────────────
-# Given a fixture path, run ctxpack, parse the XML header comment, and emit:
+# Given a fixture path, run ripwire, parse the XML header comment, and emit:
 #   language symbols edges ambiguous amb_rate
 # where amb_rate = ambiguous / edges (or "N/A" if edges=0).
 
@@ -52,15 +52,15 @@ extract_stats() {
   local fixture="$1"
   local lang="$2"
 
-  # Run ctxpack on the fixture
+  # Run ripwire on the fixture
   local output="$TMP/${lang}.xml"
   if ! "$BIN" "$fixture" >"$output" 2>"$TMP/${lang}.err"; then
-    echo "error: ctxpack failed on $fixture: $(cat "$TMP/${lang}.err")" >&2
+    echo "error: ripwire failed on $fixture: $(cat "$TMP/${lang}.err")" >&2
     return 1
   fi
 
   # Parse the XML header comment for statistics
-  # Header format: <!-- ctxpack v1 ...legend...--> <!-- files=N symbols=M edges=E shown=... est_tokens=... ambiguous=A unresolved=... -->
+  # Header format: <!-- ripwire v1 ...legend...--> <!-- files=N symbols=M edges=E shown=... est_tokens=... ambiguous=A unresolved=... -->
   # We need to extract: symbols=, edges=, ambiguous=
   python3 - "$output" "$lang" <<'PYEOF'
 import sys, re
