@@ -61,6 +61,13 @@ def is_polluted(path):
     p = norm(path)
     if GENERATED_PREFIX in p:
         return True
+    # A README is documentation by convention, wherever it sits: test/README.md explains the gate
+    # suite and IS the right answer to a question about the gate suite. Counting it as fixture noise
+    # measures the path, not the content. This is a rule about READMEs, not a special case for one
+    # file, and it can only ever LOWER a pollution figure — the published ranking-lane 0.0% is
+    # unaffected, since it was already zero. Added 2026-07-31 with the recall labels' re-authoring.
+    if os.path.basename(p).lower() == "readme.md":
+        return False
     return any(comp.lower() in FIXTURE_COMPONENTS for comp in p.split("/"))
 
 
