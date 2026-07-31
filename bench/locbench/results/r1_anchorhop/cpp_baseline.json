@@ -1,0 +1,3846 @@
+{
+  "source_repo": "<local SFML checkout — clone github.com/SFML/SFML @ the SHA in bench/cppbench/dataset.lock>",
+  "dataset_lock_sha256": "81d7bb77eb5cbb9581d1f9c34b2d73588aa16181fc9594c99ae1e5b7a80ae376",
+  "n_mined": 120,
+  "n_scored": 115,
+  "skipped_unindexable": 5,
+  "wall_total": 948.434084125096,
+  "arms": {
+    "for": {
+      "n": 115,
+      "f1": 8,
+      "f3": 17,
+      "f5": 23,
+      "f10": 36,
+      "any10": 52,
+      "mrr": 25.242989914223042,
+      "wall": 141.89864156482508
+    }
+  },
+  "instances": [
+    {
+      "sha": "a91a7f6a888a4636493107c33d4faec96bdc1509",
+      "parent": "bc85ba177da9e4687e5e99d51020243366929cc4",
+      "subject": "Fixed network tests inadvertently causing network access even when network access is disabled via configuration. Fixes #3709",
+      "gold_files": [
+        "test/Network/Dns.test.cpp",
+        "test/Network/Http.test.cpp",
+        "test/Network/IpAddress.test.cpp",
+        "test/Network/Sftp.test.cpp"
+      ],
+      "primary_files": [
+        "test/Network/Sftp.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Network/Http.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        },
+        {
+          "file": "test/Network/IpAddress.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        },
+        {
+          "file": "test/Network/Sftp.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 473,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.3717
+        }
+      }
+    },
+    {
+      "sha": "01071fa097301ccb364a943db4fd3fd9ebbd8768",
+      "parent": "3c936e16ddece516f786cbb0912882391ecd70be",
+      "subject": "Fixed sound effects example incorrectly using source sample rate instead of device sample rate when constructing processing filters.",
+      "gold_files": [
+        "examples/sound_effects/SoundEffects.cpp"
+      ],
+      "primary_files": [
+        "examples/sound_effects/SoundEffects.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/sound_effects/SoundEffects.cpp",
+          "scope": "",
+          "name": "HighPassFilter"
+        },
+        {
+          "file": "examples/sound_effects/SoundEffects.cpp",
+          "scope": "",
+          "name": "LowPassFilter"
+        },
+        {
+          "file": "examples/sound_effects/SoundEffects.cpp",
+          "scope": "",
+          "name": "Echo"
+        }
+      ],
+      "n_universe_files": 470,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 1.3082
+        }
+      }
+    },
+    {
+      "sha": "991ad426c3dcc4e9b6deaf353586b2d0ef9a2093",
+      "parent": "97fa81b43c8d6cabf5fbacb957dd75b991923062",
+      "subject": "Set audio playback periodSizeInFrames to 64 to allow playing very short duration audio clips on high sample rate devices.",
+      "gold_files": [
+        "src/SFML/Audio/AudioDevice.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/AudioDevice.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "initialize"
+        }
+      ],
+      "n_universe_files": 470,
+      "arms": {
+        "for": {
+          "file_first": 8,
+          "file_worst": 8,
+          "wall": 1.6305
+        }
+      }
+    },
+    {
+      "sha": "548cdb9c394da1b08e563a1d7f6fa6225a6f3ece",
+      "parent": "3515628b726eda8b5f6ddad86212f43113e784ef",
+      "subject": "Avoid symbol conflict when static linking with a lib shipping own QOI",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 470,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.2307
+        }
+      }
+    },
+    {
+      "sha": "3fcf79f908903ff6ad0f836d8f4bacaf6a0a8647",
+      "parent": "d2580780fde555e7562664daa6f056ddca7e7a00",
+      "subject": "Added support for retrieving the library version that is loaded at runtime via sf::version().",
+      "gold_files": [
+        "examples/text/Text.cpp",
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "primary_files": [
+        "examples/text/Text.cpp",
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/text/Text.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "",
+          "name": "MbedTlsSharedState"
+        }
+      ],
+      "n_universe_files": 468,
+      "arms": {
+        "for": {
+          "file_first": 9,
+          "file_worst": null,
+          "wall": 1.9803
+        }
+      }
+    },
+    {
+      "sha": "d2580780fde555e7562664daa6f056ddca7e7a00",
+      "parent": "1e6f1b2326c77f02c71fb31c3deff94dbeaba794",
+      "subject": "Allow configuring the maximum number of file descriptors opened during network tests with the SFML_NETWORK_TESTS_MAX_FDS CMake option and set its default to 256 to stay under the common system limit of 1024, CI sets it to higher values on systems known to have higher limits.",
+      "gold_files": [
+        "test/Network/SocketSelector.test.cpp"
+      ],
+      "primary_files": [
+        "test/Network/SocketSelector.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Network/SocketSelector.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 468,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.9775
+        }
+      }
+    },
+    {
+      "sha": "1e6f1b2326c77f02c71fb31c3deff94dbeaba794",
+      "parent": "9120eeb6a36186961b80efece608caaba606d64e",
+      "subject": "Allow loading a CA certificates from a custom path using the SFML_CA_PATH CMake option.",
+      "gold_files": [
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "",
+          "name": "loadSystemCertificates"
+        }
+      ],
+      "n_universe_files": 468,
+      "arms": {
+        "for": {
+          "file_first": 15,
+          "file_worst": 15,
+          "wall": 1.7619
+        }
+      }
+    },
+    {
+      "sha": "9120eeb6a36186961b80efece608caaba606d64e",
+      "parent": "22fdc90906940b09e0cc307484e4a0ed41c4409d",
+      "subject": "Fixed and improved multiple issues with the X11 window implementation.",
+      "gold_files": [
+        "src/SFML/Window/Unix/WindowImplX11.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Unix/WindowImplX11.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "",
+          "name": "findExecutableName"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "",
+          "name": "ewmhSupported"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "WindowImplX11"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "",
+          "name": "~WindowImplX11"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "setSize"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "setMaximumSize"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "setIcon"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "grabFocus"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "switchToFullscreen"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "setProtocols"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "initialize"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "updateLastInputTime"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "processEvent"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "setWindowSizeConstraints"
+        }
+      ],
+      "n_universe_files": 468,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 1.894
+        }
+      }
+    },
+    {
+      "sha": "22fdc90906940b09e0cc307484e4a0ed41c4409d",
+      "parent": "140be9c2f44f0733a3c40700bc3ec4b2bf8041f2",
+      "subject": "Use explicit string/path conversion functions on libssh2 calls",
+      "gold_files": [
+        "src/SFML/Network/Sftp.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/Sftp.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "",
+          "name": "SftpSessionDeleter"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "resolvePath"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "getAttributes"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "getDirectoryListing"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "createDirectory"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "rename"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "download"
+        },
+        {
+          "file": "src/SFML/Network/Sftp.cpp",
+          "scope": "Sftp",
+          "name": "upload"
+        }
+      ],
+      "n_universe_files": 468,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 1.5694
+        }
+      }
+    },
+    {
+      "sha": "5c71e1d4a4ef2045197a3c320414d4a800553ff5",
+      "parent": "ae01ab9e7137da4dce9feb4b0db52e30910499e9",
+      "subject": "Added support for SFTP as a replacement for FTP, since FTP does not support secure connections.",
+      "gold_files": [
+        "examples/ftp/Ftp.cpp",
+        "src/SFML/Network/Ftp.cpp",
+        "test/Network/Ftp.test.cpp"
+      ],
+      "primary_files": [
+        "examples/ftp/Ftp.cpp",
+        "src/SFML/Network/Ftp.cpp",
+        "test/Network/Ftp.test.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 462,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.6607
+        }
+      }
+    },
+    {
+      "sha": "ae01ab9e7137da4dce9feb4b0db52e30910499e9",
+      "parent": "a47d27915c51d68b3a6f5878d8f6d470926457f4",
+      "subject": "Fixed SocketSelector epoll implementation not correctly interpreting Time::Zero as a request to wait indefinitely.",
+      "gold_files": [
+        "src/SFML/Network/SocketSelector.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/SocketSelector.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/SocketSelector.cpp",
+          "scope": "",
+          "name": "SocketSelector"
+        }
+      ],
+      "n_universe_files": 462,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 1.6628
+        }
+      }
+    },
+    {
+      "sha": "a47d27915c51d68b3a6f5878d8f6d470926457f4",
+      "parent": "54434fdc7cdfada8cd8c8cf98308ddbacbd31fbf",
+      "subject": "Use CGWarpMouseCursorPosition to set mouse position on mac",
+      "gold_files": [
+        "src/SFML/Window/macOS/InputImpl.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/InputImpl.mm"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/macOS/InputImpl.mm",
+          "scope": "",
+          "name": "setMousePosition"
+        }
+      ],
+      "n_universe_files": 462,
+      "arms": {
+        "for": {
+          "file_first": 7,
+          "file_worst": 7,
+          "wall": 1.8547
+        }
+      }
+    },
+    {
+      "sha": "54434fdc7cdfada8cd8c8cf98308ddbacbd31fbf",
+      "parent": "95ddf1ff89d41a03537924f2fb49fb35212e0154",
+      "subject": "Remove NSOpenGLPFAAccelerated attribute to allow mac software renderer",
+      "gold_files": [
+        "src/SFML/Window/macOS/SFContext.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/SFContext.mm"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 462,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 2.1851
+        }
+      }
+    },
+    {
+      "sha": "95ddf1ff89d41a03537924f2fb49fb35212e0154",
+      "parent": "c267bbaa908e39ca60ca78202f1f80f9598ce094",
+      "subject": "Fixed allocated buffer being too small when converting CFStringRef to std::string in the macOS joystick implementation.",
+      "gold_files": [
+        "src/SFML/Window/macOS/JoystickImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/JoystickImpl.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 462,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 2.1301
+        }
+      }
+    },
+    {
+      "sha": "c267bbaa908e39ca60ca78202f1f80f9598ce094",
+      "parent": "047da4f6ecd62c384a96057ca97ecf4fa78f8873",
+      "subject": "Added additional sf::SocketSelector implementations using IOCP/epoll/kqueue and provide an API to take advantage of the readiness events.",
+      "gold_files": [
+        "src/SFML/Network/SocketSelector.cpp",
+        "src/SFML/Network/TcpSocket.cpp",
+        "test/Network/SocketSelector.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/SocketSelector.cpp",
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "TcpSocket",
+          "name": "connect"
+        },
+        {
+          "file": "test/Network/SocketSelector.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 460,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 13,
+          "wall": 1.8213
+        }
+      }
+    },
+    {
+      "sha": "f5e4f1639e2b4e4d2a08e9cf7e6e0cf0b3b9cbd3",
+      "parent": "01e9c2e123a49035b3ac3e9cde0c3dc110e138b1",
+      "subject": "Update SheenBidi to 3.0 to support Unicode 17.0",
+      "gold_files": [
+        "src/SFML/Graphics/Text.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Text.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "",
+          "name": "segmentString"
+        }
+      ],
+      "n_universe_files": 458,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.9308
+        }
+      }
+    },
+    {
+      "sha": "01e9c2e123a49035b3ac3e9cde0c3dc110e138b1",
+      "parent": "981343ab3b742a2b0a530094907ced146a0f0e46",
+      "subject": "Update cpp-unicodelib to support Unicode 17.0",
+      "gold_files": [
+        "extlibs/headers/cpp-unicodelib/unicodelib.h",
+        "extlibs/headers/cpp-unicodelib/unicodelib_encodings.h",
+        "extlibs/headers/cpp-unicodelib/unicodelib_names.h"
+      ],
+      "primary_files": [
+        "extlibs/headers/cpp-unicodelib/unicodelib.h",
+        "extlibs/headers/cpp-unicodelib/unicodelib_encodings.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "is_sentence_boundary"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "Block"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "block"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "Script"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "NormalizationProperties"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "GraphemeBreak"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "WordBreak"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "SentenceBreak"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "Emoji"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "get_value"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "is_language_qualified"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib.h",
+          "scope": "",
+          "name": "to_titlecase"
+        },
+        {
+          "file": "extlibs/headers/cpp-unicodelib/unicodelib_encodings.h",
+          "scope": "",
+          "name": "decode"
+        }
+      ],
+      "n_universe_files": 458,
+      "arms": {
+        "for": {
+          "file_first": 48,
+          "file_worst": null,
+          "wall": 1.7764
+        }
+      }
+    },
+    {
+      "sha": "163532933509805977b6e9f3fcfc1d6e5e1644a6",
+      "parent": "4d06ccb1e9f2778d3c024b0208844bd92a393f89",
+      "subject": "Make Unicode conversions more robust against invalid data and turned conversion replacement character into an optional.",
+      "gold_files": [
+        "examples/event_handling/EventHandling.cpp",
+        "src/SFML/System/String.cpp",
+        "test/System/String.test.cpp",
+        "test/System/Utf.test.cpp"
+      ],
+      "primary_files": [
+        "examples/event_handling/EventHandling.cpp",
+        "src/SFML/System/String.cpp",
+        "test/System/String.test.cpp",
+        "test/System/Utf.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "std",
+          "name": "wstring"
+        },
+        {
+          "file": "test/System/String.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        },
+        {
+          "file": "test/System/Utf.test.cpp",
+          "scope": "",
+          "name": "decltype"
+        },
+        {
+          "file": "test/System/Utf.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 458,
+      "arms": {
+        "for": {
+          "file_first": 37,
+          "file_worst": null,
+          "wall": 1.7686
+        }
+      }
+    },
+    {
+      "sha": "4d06ccb1e9f2778d3c024b0208844bd92a393f89",
+      "parent": "f3283d323a520934b6d0aa07deaeb15592fc901b",
+      "subject": "When backgrounding on android we still need to recreate the surface",
+      "gold_files": [
+        "src/SFML/Main/MainAndroid.cpp",
+        "src/SFML/Window/Android/WindowImplAndroid.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Main/MainAndroid.cpp",
+        "src/SFML/Window/Android/WindowImplAndroid.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Main/MainAndroid.cpp",
+          "scope": "",
+          "name": "onNativeWindowCreated"
+        },
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "WindowImplAndroid",
+          "name": "processEvents"
+        },
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "WindowImplAndroid",
+          "name": "forwardEvent"
+        }
+      ],
+      "n_universe_files": 458,
+      "arms": {
+        "for": {
+          "file_first": 18,
+          "file_worst": null,
+          "wall": 1.8753
+        }
+      }
+    },
+    {
+      "sha": "c8d72318eb78bf4f2d82c78c1f66e232599aedee",
+      "parent": "68f95b25748cf9b32e997c44bf8305885d2150e6",
+      "subject": "Remove redundant documentation comments in private implementation files",
+      "gold_files": [
+        "src/SFML/Window/macOS/SFOpenGLView+mouse_priv.h",
+        "src/SFML/Window/macOS/SFOpenGLView.h"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/SFOpenGLView+mouse_priv.h",
+        "src/SFML/Window/macOS/SFOpenGLView.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/macOS/SFOpenGLView.h",
+          "scope": "",
+          "name": "WindowImplCocoa"
+        }
+      ],
+      "n_universe_files": 459,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.9937
+        }
+      }
+    },
+    {
+      "sha": "1e5c42888f913851a2e3dcfb7189b407b141f4ba",
+      "parent": "dff31fcaffa5a0ba968ef837bf05b2f6e172f38f",
+      "subject": "Deprecate sf::Touch functions which just use cached event data",
+      "gold_files": [
+        "examples/opengl/OpenGL.cpp",
+        "examples/tennis/Tennis.cpp"
+      ],
+      "primary_files": [
+        "examples/opengl/OpenGL.cpp",
+        "examples/tennis/Tennis.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/opengl/OpenGL.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "examples/tennis/Tennis.cpp",
+          "scope": "",
+          "name": "main"
+        }
+      ],
+      "n_universe_files": 459,
+      "arms": {
+        "for": {
+          "file_first": 33,
+          "file_worst": 57,
+          "wall": 1.2482
+        }
+      }
+    },
+    {
+      "sha": "dff31fcaffa5a0ba968ef837bf05b2f6e172f38f",
+      "parent": "e6b7934640fc8c05ad67dda24c448da6977805d2",
+      "subject": "Prevent crash when getting touch position for a finger that isn't down",
+      "gold_files": [
+        "src/SFML/Window/Android/InputImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Android/InputImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Android/InputImpl.cpp",
+          "scope": "",
+          "name": "setMousePosition"
+        },
+        {
+          "file": "src/SFML/Window/Android/InputImpl.cpp",
+          "scope": "",
+          "name": "isTouchDown"
+        }
+      ],
+      "n_universe_files": 459,
+      "arms": {
+        "for": {
+          "file_first": 7,
+          "file_worst": 7,
+          "wall": 1.1226
+        }
+      }
+    },
+    {
+      "sha": "e6b7934640fc8c05ad67dda24c448da6977805d2",
+      "parent": "5e7f5c7e0534eef0f81f2da20b73ff939af078a5",
+      "subject": "Block window creation on android until async process finishes",
+      "gold_files": [
+        "src/SFML/Window/Android/WindowImplAndroid.cpp",
+        "src/SFML/Window/EglContext.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Android/WindowImplAndroid.cpp",
+        "src/SFML/Window/EglContext.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "WindowImplAndroid",
+          "name": "WindowImplAndroid"
+        },
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "WindowImplAndroid",
+          "name": "processEvents"
+        },
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "WindowImplAndroid",
+          "name": "forwardEvent"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "EglContext",
+          "name": "EglContext"
+        }
+      ],
+      "n_universe_files": 459,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 28,
+          "wall": 1.1495
+        }
+      }
+    },
+    {
+      "sha": "5e7f5c7e0534eef0f81f2da20b73ff939af078a5",
+      "parent": "dea1a3c687028aa90880165cd5dbf4cfef1e9284",
+      "subject": "Use viewWillTransitionToSize to handle orientation changes on iOS",
+      "gold_files": [
+        "src/SFML/Window/iOS/SFAppDelegate.mm",
+        "src/SFML/Window/iOS/SFViewController.mm",
+        "src/SFML/Window/iOS/WindowImplUIKit.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/iOS/SFAppDelegate.mm",
+        "src/SFML/Window/iOS/SFViewController.mm",
+        "src/SFML/Window/iOS/WindowImplUIKit.mm"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/iOS/SFAppDelegate.mm",
+          "scope": "",
+          "name": "application:"
+        },
+        {
+          "file": "src/SFML/Window/iOS/SFAppDelegate.mm",
+          "scope": "",
+          "name": "applicationWillTerminate:"
+        }
+      ],
+      "n_universe_files": 460,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 1.111
+        }
+      }
+    },
+    {
+      "sha": "009be911c6b85496e74068d54e5af670176d3c17",
+      "parent": "9345919718b44ca40c2137c8cd3d80380d2b2f3e",
+      "subject": "[Backport] Fixed wrong sample count being reported for certain ogg audio files",
+      "gold_files": [
+        "src/SFML/Audio/SoundFileReaderOgg.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/SoundFileReaderOgg.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/SoundFileReaderOgg.cpp",
+          "scope": "SoundFileReaderOgg",
+          "name": "open"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 12,
+          "file_worst": 12,
+          "wall": 0.2045
+        }
+      }
+    },
+    {
+      "sha": "9345919718b44ca40c2137c8cd3d80380d2b2f3e",
+      "parent": "672c67a365c0ca7c589f861a35f79eeafd3cf31f",
+      "subject": "Define character traits for sf::Uint8, sf::Uint16, and sf::Uint32",
+      "gold_files": [
+        "src/SFML/System/String.cpp",
+        "src/SFML/Window/OSX/ClipboardImpl.mm",
+        "src/SFML/Window/Unix/ClipboardImpl.cpp",
+        "src/SFML/Window/Unix/WindowImplX11.cpp",
+        "src/SFML/Window/iOS/ClipboardImpl.mm"
+      ],
+      "primary_files": [
+        "src/SFML/System/String.cpp",
+        "src/SFML/Window/OSX/ClipboardImpl.mm",
+        "src/SFML/Window/Unix/ClipboardImpl.cpp",
+        "src/SFML/Window/Unix/WindowImplX11.cpp",
+        "src/SFML/Window/iOS/ClipboardImpl.mm"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "String",
+          "name": "String"
+        },
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "String",
+          "name": "toWideString"
+        },
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "String",
+          "name": "toUtf8"
+        },
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "String",
+          "name": "toUtf16"
+        },
+        {
+          "file": "src/SFML/Window/Unix/ClipboardImpl.cpp",
+          "scope": "ClipboardImpl",
+          "name": "processEvent"
+        },
+        {
+          "file": "src/SFML/Window/Unix/WindowImplX11.cpp",
+          "scope": "WindowImplX11",
+          "name": "setTitle"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 71,
+          "file_worst": null,
+          "wall": 0.2071
+        }
+      }
+    },
+    {
+      "sha": "7a7138b02fb56ca12c888847987e68ca51614d5e",
+      "parent": "1e859750e33ea26ba21210b4728606564840dc6a",
+      "subject": "Added boolean return value to sf::Http::setHost. Added test to sf::Http::setHost. Made sf::Http::sendRequest const.",
+      "gold_files": [
+        "src/SFML/Network/Http.cpp",
+        "src/SFML/Network/IpAddress.cpp",
+        "test/Network/Http.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/Http.cpp",
+        "src/SFML/Network/IpAddress.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/Http.cpp",
+          "scope": "Http",
+          "name": "Http"
+        },
+        {
+          "file": "src/SFML/Network/Http.cpp",
+          "scope": "Http",
+          "name": "setHost"
+        },
+        {
+          "file": "src/SFML/Network/Http.cpp",
+          "scope": "Http",
+          "name": "sendRequest"
+        },
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "getPublicAddress"
+        },
+        {
+          "file": "test/Network/Http.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 463,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 3,
+          "wall": 1.0229
+        }
+      }
+    },
+    {
+      "sha": "1fabb8070def5658d65dadbc4d0c614ebcbb2b29",
+      "parent": "31ff20128f6152daf34c385033337dd9d9d39fe4",
+      "subject": "Move vector function definitions to inline file so static_asserts are hit correctly",
+      "gold_files": [
+        "src/SFML/System/Vector2.cpp",
+        "src/SFML/System/Vector3.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/Vector2.cpp",
+        "src/SFML/System/Vector3.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 465,
+      "arms": {
+        "for": {
+          "file_first": 59,
+          "file_worst": null,
+          "wall": 1.1101
+        }
+      }
+    },
+    {
+      "sha": "ec031ac88b12d722b546bff7934494a4fbd13fec",
+      "parent": "78a75d833345b6af5aec487f7569c3618429c1eb",
+      "subject": "Added TCP transport layer security and HTTP(S) examples.",
+      "gold_files": [
+        "examples/sockets/Sockets.cpp",
+        "examples/sockets/TCP.cpp"
+      ],
+      "primary_files": [
+        "examples/sockets/Sockets.cpp",
+        "examples/sockets/TCP.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/sockets/Sockets.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "examples/sockets/TCP.cpp",
+          "scope": "",
+          "name": "runTcpServer"
+        },
+        {
+          "file": "examples/sockets/TCP.cpp",
+          "scope": "",
+          "name": "runTcpClient"
+        }
+      ],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.1198
+        }
+      }
+    },
+    {
+      "sha": "78a75d833345b6af5aec487f7569c3618429c1eb",
+      "parent": "9aead04dc4066a9dac1519f499753ac96207b123",
+      "subject": "Added support for TCP transport layer security and HTTPS.",
+      "gold_files": [
+        "src/SFML/Network/Http.cpp",
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/Http.cpp",
+        "src/SFML/Network/TcpSocket.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/Http.cpp",
+          "scope": "Http",
+          "name": "setHost"
+        },
+        {
+          "file": "src/SFML/Network/Http.cpp",
+          "scope": "Http",
+          "name": "sendRequest"
+        },
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "TcpSocket",
+          "name": "connect"
+        },
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "TcpSocket",
+          "name": "disconnect"
+        },
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "TcpSocket",
+          "name": "send"
+        },
+        {
+          "file": "src/SFML/Network/TcpSocket.cpp",
+          "scope": "TcpSocket",
+          "name": "receive"
+        }
+      ],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.1717
+        }
+      }
+    },
+    {
+      "sha": "9aead04dc4066a9dac1519f499753ac96207b123",
+      "parent": "e9d29c15c18540d167cb9b0a8609082cb5b794b1",
+      "subject": "Add key release events to event handling example",
+      "gold_files": [
+        "examples/event_handling/EventHandling.cpp"
+      ],
+      "primary_files": [
+        "examples/event_handling/EventHandling.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 1.0777
+        }
+      }
+    },
+    {
+      "sha": "81ca611c107003c970d8f4253d80989a77cee6cc",
+      "parent": "e39c0d87c0e8dc689a50fb45eed83271e55be5fd",
+      "subject": "Send resized event when creating a window on iOS",
+      "gold_files": [
+        "src/SFML/Window/iOS/WindowImplUIKit.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/iOS/WindowImplUIKit.mm"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": 57,
+          "file_worst": 57,
+          "wall": 1.1074
+        }
+      }
+    },
+    {
+      "sha": "3e0e58601a00eb150a7ca46898c3a82d274a51ba",
+      "parent": "5ac15b3c0677a934b58afc322dfd1192c7086eda",
+      "subject": "Add more touch events to example and fix for iOS",
+      "gold_files": [
+        "examples/event_handling/EventHandling.cpp"
+      ],
+      "primary_files": [
+        "examples/event_handling/EventHandling.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/event_handling/EventHandling.cpp",
+          "scope": "",
+          "name": "main"
+        }
+      ],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 1.0487
+        }
+      }
+    },
+    {
+      "sha": "e97efa15b12f03dded9b2f865877182a29689c1f",
+      "parent": "9a590fdd00d3b4389c5f0e855ed157d78ca96952",
+      "subject": "Include main so stencil example runs on iOS",
+      "gold_files": [
+        "examples/stencil/Stencil.cpp"
+      ],
+      "primary_files": [
+        "examples/stencil/Stencil.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 1.1594
+        }
+      }
+    },
+    {
+      "sha": "df49e328ab1b2b449e7b7373bcea633847401616",
+      "parent": "dbe4f499ba2a290f1ff0b8b21e5352484f7300fa",
+      "subject": "Fixed wrong sample count being reported for certain ogg audio files. Fixes #3578",
+      "gold_files": [
+        "src/SFML/Audio/SoundFileReaderOgg.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/SoundFileReaderOgg.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/SoundFileReaderOgg.cpp",
+          "scope": "SoundFileReaderOgg",
+          "name": "open"
+        }
+      ],
+      "n_universe_files": 461,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 0.9911
+        }
+      }
+    },
+    {
+      "sha": "ccd2184c7eabe57793a311e5082814ce5651213b",
+      "parent": "a48d594f4474d8b95a609f64602ff6cecf5ef69c",
+      "subject": "Fix issue with bad re-creation of windows on Android",
+      "gold_files": [
+        "src/SFML/Window/Android/WindowImplAndroid.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Android/WindowImplAndroid.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "",
+          "name": "m_size"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 35,
+          "file_worst": 35,
+          "wall": 0.9416
+        }
+      }
+    },
+    {
+      "sha": "a48d594f4474d8b95a609f64602ff6cecf5ef69c",
+      "parent": "e7d6a7acab0efbdd416d85895d49192d7b454b3f",
+      "subject": "Fixed normalized texture coordinates when NPOT textures aren't supported",
+      "gold_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Texture.cpp",
+          "scope": "Texture",
+          "name": "bind"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 11,
+          "file_worst": 11,
+          "wall": 1.4518
+        }
+      }
+    },
+    {
+      "sha": "e7d6a7acab0efbdd416d85895d49192d7b454b3f",
+      "parent": "59069e3884b26d180c67948212f050511bdad419",
+      "subject": "Assert positive size and in-bounds position for area",
+      "gold_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Texture.cpp",
+          "scope": "Texture",
+          "name": "loadFromImage"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 0.9455
+        }
+      }
+    },
+    {
+      "sha": "9d00f70104c9af1c8731ac92ae16d8efc8657e5a",
+      "parent": "b3d3b4fd793a02aa43057fb2388beac4b0b0dbc0",
+      "subject": "Fixed audio engine attempting to read data from previously destroyed objects. Fixes #3503",
+      "gold_files": [
+        "src/SFML/Audio/AudioDevice.cpp",
+        "src/SFML/Audio/Sound.cpp",
+        "src/SFML/Audio/SoundStream.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/AudioDevice.cpp",
+        "src/SFML/Audio/Sound.cpp",
+        "src/SFML/Audio/SoundStream.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "unregisterResource"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "initialize"
+        },
+        {
+          "file": "src/SFML/Audio/Sound.cpp",
+          "scope": "Sound",
+          "name": "stop"
+        },
+        {
+          "file": "src/SFML/Audio/SoundStream.cpp",
+          "scope": "SoundStream",
+          "name": "stop"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": null,
+          "wall": 0.9609
+        }
+      }
+    },
+    {
+      "sha": "ed5d81291dcfa46d505d25ab6284feec27305648",
+      "parent": "2ebf005591c470b55b6022f6aa54d8629f2bd501",
+      "subject": "Prevent copy of shaper by moving the shared_ptr",
+      "gold_files": [
+        "src/SFML/Graphics/Text.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Text.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "",
+          "name": "Text"
+        }
+      ],
+      "n_universe_files": 460,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 1.0547
+        }
+      }
+    },
+    {
+      "sha": "2ebf005591c470b55b6022f6aa54d8629f2bd501",
+      "parent": "12297b04469896fd943b8622a6bddfa6cb083436",
+      "subject": "Prevent copy of message by moving the string",
+      "gold_files": [
+        "src/SFML/Network/Ftp.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/Ftp.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/Ftp.cpp",
+          "scope": "Ftp",
+          "name": "getResponse"
+        }
+      ],
+      "n_universe_files": 460,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 1.1083
+        }
+      }
+    },
+    {
+      "sha": "ff34548fa0468b5efdae905359b24999cc7f3b9a",
+      "parent": "264a38af1b839b724766430a27f9ede8fbfc3fc7",
+      "subject": "Added improved unicode text rendering, text alignment, vertical text and glyph pre-processing support.",
+      "gold_files": [
+        "src/SFML/Graphics/Font.cpp",
+        "src/SFML/Graphics/Text.cpp",
+        "test/Graphics/Text.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Font.cpp",
+        "src/SFML/Graphics/Text.cpp",
+        "test/Graphics/Text.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "",
+          "name": "combine"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "getInfo"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "getGlyph"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "getKerning"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "openFromStreamImpl"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "loadPage"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "loadGlyph"
+        },
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font::Page",
+          "name": "Page"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "",
+          "name": "addGlyphQuad"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "Text",
+          "name": "setOutlineThickness"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "Text",
+          "name": "getOutlineThickness"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "Text",
+          "name": "draw"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "Text",
+          "name": "ensureGeometryUpdate"
+        },
+        {
+          "file": "test/Graphics/Text.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 458,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 48,
+          "wall": 1.0234
+        }
+      }
+    },
+    {
+      "sha": "264a38af1b839b724766430a27f9ede8fbfc3fc7",
+      "parent": "afcb50caa2587aab64023c4830e7b7607c5c1fa2",
+      "subject": "Added methods to get the ascent/descent of a font at a given character size.",
+      "gold_files": [
+        "src/SFML/Graphics/Font.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Font.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "getKerning"
+        }
+      ],
+      "n_universe_files": 458,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 2.7145
+        }
+      }
+    },
+    {
+      "sha": "afcb50caa2587aab64023c4830e7b7607c5c1fa2",
+      "parent": "b13f2ffbd15f1065d1288b63e0f6fb8723f693ce",
+      "subject": "Added sf::String support for checking if a unicode codepoint lies at a text segmentation boundary.",
+      "gold_files": [
+        "src/SFML/System/String.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/String.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "String",
+          "name": "end"
+        }
+      ],
+      "n_universe_files": 456,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.167
+        }
+      }
+    },
+    {
+      "sha": "f33deb2544cc11631b6acc70300946b8c7d8013f",
+      "parent": "76a80ff013339cd504e3cffdc189692a2204d6c7",
+      "subject": "Update CMake's minimum version to 3.28",
+      "gold_files": [
+        "test/Audio/Music.test.cpp",
+        "test/Audio/Sound.test.cpp",
+        "test/Audio/SoundStream.test.cpp",
+        "test/Window/Window.test.cpp"
+      ],
+      "primary_files": [
+        "test/Audio/Music.test.cpp",
+        "test/Audio/Sound.test.cpp",
+        "test/Audio/SoundStream.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Window/Window.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 456,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.9496
+        }
+      }
+    },
+    {
+      "sha": "4636701b757394e08019d75f12618591dc681f8d",
+      "parent": "6c921a55220429a6ec6dc013690baddecdde1c55",
+      "subject": "Assert positive size and in-bounds position for area",
+      "gold_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Texture.cpp",
+          "scope": "Texture",
+          "name": "loadFromImage"
+        }
+      ],
+      "n_universe_files": 456,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 1.3376
+        }
+      }
+    },
+    {
+      "sha": "41be403dc503d399955655fc6fee34b031815c58",
+      "parent": "05e675e5651a633cdab9e69022f5113c86eacad7",
+      "subject": "On iOS the main module must depend on the window module as it's impossible to run an app without it",
+      "gold_files": [
+        "src/SFML/Main/MainiOS.mm",
+        "src/SFML/Window/iOS/SFAppDelegate.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Main/MainiOS.mm",
+        "src/SFML/Window/iOS/SFAppDelegate.mm"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 455,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 23,
+          "wall": 1.1511
+        }
+      }
+    },
+    {
+      "sha": "360c0f146e2f66bf312b08a61e0428b578977b3a",
+      "parent": "75fd75664da6b58b67955a4e2193e3a38331967a",
+      "subject": "Added support for automatic audio stream routing, explicitly requesting the null audio device and audio device state change notifications.",
+      "gold_files": [
+        "src/SFML/Audio/AudioDevice.cpp",
+        "src/SFML/Audio/PlaybackDevice.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/AudioDevice.cpp",
+        "src/SFML/Audio/PlaybackDevice.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "AudioDevice"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "reinitialize"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "getAvailableDevices"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "setDevice"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "getUpVector"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "getSelectedDeviceId"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "initialize"
+        },
+        {
+          "file": "src/SFML/Audio/PlaybackDevice.cpp",
+          "scope": "",
+          "name": "setDevice"
+        },
+        {
+          "file": "src/SFML/Audio/PlaybackDevice.cpp",
+          "scope": "",
+          "name": "getDeviceSampleRate"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 14,
+          "wall": 0.972
+        }
+      }
+    },
+    {
+      "sha": "3651072cc0861eb10d67f342d8146b61e3629134",
+      "parent": "d833977f8ca3110b681fbe1d39e76a84fae1dc62",
+      "subject": "Fix issue with bad re-creation of windows on Android",
+      "gold_files": [
+        "src/SFML/Window/Android/WindowImplAndroid.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Android/WindowImplAndroid.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Android/WindowImplAndroid.cpp",
+          "scope": "",
+          "name": "m_size"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 37,
+          "file_worst": 37,
+          "wall": 1.1945
+        }
+      }
+    },
+    {
+      "sha": "89b99bfef83794738604b5eff460ff83508cacae",
+      "parent": "660ff68cf466113cbb6412ab72d9955397c41578",
+      "subject": "Deprecate `std::uint32_t` overload of `sf::Font::getKerning`",
+      "gold_files": [
+        "src/SFML/Graphics/Font.cpp",
+        "src/SFML/Graphics/Text.cpp",
+        "test/Graphics/Font.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Font.cpp",
+        "src/SFML/Graphics/Text.cpp",
+        "test/Graphics/Font.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Font.cpp",
+          "scope": "Font",
+          "name": "hasGlyph"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "Text",
+          "name": "findCharacterPos"
+        },
+        {
+          "file": "src/SFML/Graphics/Text.cpp",
+          "scope": "Text",
+          "name": "ensureGeometryUpdate"
+        },
+        {
+          "file": "test/Graphics/Font.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.8855
+        }
+      }
+    },
+    {
+      "sha": "660ff68cf466113cbb6412ab72d9955397c41578",
+      "parent": "0e1b3330bd986685d7b93d5ee641d6da2c67076b",
+      "subject": "Fixed audio engine attempting to read data from previously destroyed objects. Fixes #3503",
+      "gold_files": [
+        "src/SFML/Audio/AudioDevice.cpp",
+        "src/SFML/Audio/Sound.cpp",
+        "src/SFML/Audio/SoundStream.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/AudioDevice.cpp",
+        "src/SFML/Audio/Sound.cpp",
+        "src/SFML/Audio/SoundStream.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "unregisterResource"
+        },
+        {
+          "file": "src/SFML/Audio/AudioDevice.cpp",
+          "scope": "AudioDevice",
+          "name": "initialize"
+        },
+        {
+          "file": "src/SFML/Audio/Sound.cpp",
+          "scope": "Sound",
+          "name": "stop"
+        },
+        {
+          "file": "src/SFML/Audio/SoundStream.cpp",
+          "scope": "SoundStream",
+          "name": "stop"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": null,
+          "wall": 1.0022
+        }
+      }
+    },
+    {
+      "sha": "b43c9345b587eed071b80b5b7f595cfe4cf36670",
+      "parent": "a87763becbc4672b38f1021418ed94caa0f6540a",
+      "subject": "Fix shape outline normal computation",
+      "gold_files": [
+        "src/SFML/Graphics/Shape.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Shape.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Shape.cpp",
+          "scope": "Shape",
+          "name": "updateOutline"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.9849
+        }
+      }
+    },
+    {
+      "sha": "801fa6281dde4f798a1350887f0743db7b0fd8f8",
+      "parent": "275cb53429d4d39e9e946d3e399ebc6113256b90",
+      "subject": "Move joystick example code around to support multiple controllers",
+      "gold_files": [
+        "examples/joystick/Joystick.cpp"
+      ],
+      "primary_files": [
+        "examples/joystick/Joystick.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/joystick/Joystick.cpp",
+          "scope": "",
+          "name": "JoystickObject"
+        },
+        {
+          "file": "examples/joystick/Joystick.cpp",
+          "scope": "",
+          "name": "main"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 24,
+          "file_worst": 24,
+          "wall": 1.1932
+        }
+      }
+    },
+    {
+      "sha": "7b3ab1e3f91c7aee96b72493bbb1f86c09d20662",
+      "parent": "6096548016980ac2c1f714901958702d7b3b4e39",
+      "subject": "Prevent removing sRGB in systems without sRGB extension",
+      "gold_files": [
+        "src/SFML/Graphics/RenderTarget.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/RenderTarget.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/RenderTarget.cpp",
+          "scope": "RenderTarget",
+          "name": "setupDraw"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 50,
+          "file_worst": 50,
+          "wall": 0.96
+        }
+      }
+    },
+    {
+      "sha": "2f9ae943d681ef5e535636c43919bdd99fc62aae",
+      "parent": "d6ea654dd31852c1b474349dbcc644de72654273",
+      "subject": "Add portable abstraction for opening files from Unicode filepaths",
+      "gold_files": [
+        "src/SFML/System/FileInputStream.cpp",
+        "src/SFML/System/Utils.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/FileInputStream.cpp",
+        "src/SFML/System/Utils.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/FileInputStream.cpp",
+          "scope": "FileInputStream",
+          "name": "open"
+        },
+        {
+          "file": "src/SFML/System/Utils.cpp",
+          "scope": "",
+          "name": "formatDebugPathInfo"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.0452
+        }
+      }
+    },
+    {
+      "sha": "0cc483eb1edf9b0c59d806cdfc465de77b1fb525",
+      "parent": "2d6320240d42749d4610a4ea33725765de66723c",
+      "subject": "Fixed sf::Window::create(WindowHandle) incorrectly causing WindowBase::initialize() to be called before its OpenGL context is created. Fixes #3369",
+      "gold_files": [
+        "src/SFML/Window/Window.cpp",
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Window.cpp",
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Window.cpp",
+          "scope": "Window",
+          "name": "create"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 38,
+          "wall": 1.3673
+        }
+      }
+    },
+    {
+      "sha": "2d6320240d42749d4610a4ea33725765de66723c",
+      "parent": "6556427b8b850fa5222a2fc788e202e317cb3927",
+      "subject": "Add extra testcases showing that some Win32-window styles are not taken into account",
+      "gold_files": [
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "primary_files": [
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Window/WindowHandleWin32.test.cpp",
+          "scope": "",
+          "name": "wndProc"
+        },
+        {
+          "file": "test/Window/WindowHandleWin32.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.1864
+        }
+      }
+    },
+    {
+      "sha": "6556427b8b850fa5222a2fc788e202e317cb3927",
+      "parent": "47590aa3e14857213db164ef984e7009c175bb48",
+      "subject": "Fix `contentSizeToWindowSize` for windows with a menu or an extended style",
+      "gold_files": [
+        "src/SFML/Window/Win32/WindowImplWin32.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Win32/WindowImplWin32.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Win32/WindowImplWin32.cpp",
+          "scope": "WindowImplWin32",
+          "name": "grabCursor"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 1.2305
+        }
+      }
+    },
+    {
+      "sha": "027b67b4771e818d6b609cc3d62fc93f4cfa434b",
+      "parent": "a5b047180165efede12c6959b647d7a3b1e5ea63",
+      "subject": "Added support for making OpenGL errors fatal and additionally checking if an OpenGL context was active on the current thread at the time of the function call.",
+      "gold_files": [
+        "src/SFML/Graphics/GLCheck.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/GLCheck.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.0855
+        }
+      }
+    },
+    {
+      "sha": "4fc5bfe4d01149425436d6b68c483f1e29d2ef26",
+      "parent": "c3ab6749381658ac27073547f8cd5dc3f45d334b",
+      "subject": "Fixed sf::Window::create(WindowHandle) incorrectly causing WindowBase::initialize() to be called before its OpenGL context is created. Fixes #3369",
+      "gold_files": [
+        "src/SFML/Window/Window.cpp",
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Window.cpp",
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Window.cpp",
+          "scope": "Window",
+          "name": "create"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 38,
+          "wall": 1.3054
+        }
+      }
+    },
+    {
+      "sha": "26671d478be9590f8466261c724ace8087d8c878",
+      "parent": "c98285ed0521238353f18fa799cf663a092a0611",
+      "subject": "Use `!=` instead of `^` when comparing booleans",
+      "gold_files": [
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/WindowImpl.cpp",
+          "scope": "WindowImpl",
+          "name": "processJoystickEvents"
+        }
+      ],
+      "n_universe_files": 453,
+      "arms": {
+        "for": {
+          "file_first": 34,
+          "file_worst": 34,
+          "wall": 1.3271
+        }
+      }
+    },
+    {
+      "sha": "2044018162aba289300c797f0c6819a3e05e27ac",
+      "parent": "b6533607bf16bcaa83cfcb0f2b0d2a235e8b257a",
+      "subject": "Implement support for references to handlers and function pointers",
+      "gold_files": [
+        "test/Window/WindowBase.test.cpp"
+      ],
+      "primary_files": [
+        "test/Window/WindowBase.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Window/WindowBase.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 453,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.3642
+        }
+      }
+    },
+    {
+      "sha": "02481494e0f8b9e6ccf4266f50b18c1d3e8358c3",
+      "parent": "e5127715e64af362e8665500285da1a2c48d71a4",
+      "subject": "Fix unsigned overflow in `sf::Packet` size check",
+      "gold_files": [
+        "src/SFML/Network/Packet.cpp",
+        "test/Network/Packet.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/Packet.cpp",
+        "test/Network/Packet.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Network/Packet.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 25,
+          "wall": 1.3045
+        }
+      }
+    },
+    {
+      "sha": "06bcce53a59e4f5d738b28d21d7f74ba148c874b",
+      "parent": "4605a70b4e5ad068427afa180fa89de17f1af86b",
+      "subject": "Fix comments and address ordering in IpAddress::getLocalAddress",
+      "gold_files": [
+        "src/SFML/Network/IpAddress.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/IpAddress.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "toInteger"
+        },
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "getLocalAddress"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 1.2652
+        }
+      }
+    },
+    {
+      "sha": "2cb5d2eed8b1d27cc54d0e4856876f9ed8b2d436",
+      "parent": "05371130b3d8b3871db40a8efb093073207a9d83",
+      "subject": "Fix conversion warning",
+      "gold_files": [
+        "src/SFML/Window/NetBSD/JoystickImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/NetBSD/JoystickImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/NetBSD/JoystickImpl.cpp",
+          "scope": "JoystickImpl::JoystickImpl",
+          "name": "update"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.2076
+        }
+      }
+    },
+    {
+      "sha": "d0facc63cd4acd58838691e774953e4542c68b8a",
+      "parent": "3c10c2a53ba6952bffce281eba8e9ab15f4d02a8",
+      "subject": "Always print filepaths as UTF-8 to a char stream #3406",
+      "gold_files": [
+        "src/SFML/System/Utils.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/Utils.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/Utils.cpp",
+          "scope": "",
+          "name": "toLower"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 46,
+          "file_worst": 46,
+          "wall": 1.208
+        }
+      }
+    },
+    {
+      "sha": "3c10c2a53ba6952bffce281eba8e9ab15f4d02a8",
+      "parent": "97de33d887401f1ce1d1079f2cd5ba2eb2c0ec13",
+      "subject": "Ensure `sf::Image` remains unchanged after an unsuccessful load",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp",
+        "test/Graphics/Image.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp",
+        "test/Graphics/Image.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "loadFromFile"
+        },
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "loadFromMemory"
+        },
+        {
+          "file": "test/Graphics/Image.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 16,
+          "file_worst": 37,
+          "wall": 1.5032
+        }
+      }
+    },
+    {
+      "sha": "850d5dbb228ef8016c0f387e3a402c405c47ec64",
+      "parent": "619e918d45ffb98ac6933f3e61888b3974098729",
+      "subject": "Use `std::fstream` to support Unicode filenames in `sf::Image` #647",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "loadFromFile"
+        },
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "saveToFile"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 9,
+          "file_worst": 9,
+          "wall": 1.4788
+        }
+      }
+    },
+    {
+      "sha": "c3ab6749381658ac27073547f8cd5dc3f45d334b",
+      "parent": "f34b7d67a84a5016f521de7fc1cc7970ad2006dd",
+      "subject": "Use `!=` instead of `^` when comparing booleans",
+      "gold_files": [
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/WindowImpl.cpp",
+          "scope": "WindowImpl",
+          "name": "processJoystickEvents"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 34,
+          "file_worst": 34,
+          "wall": 1.2619
+        }
+      }
+    },
+    {
+      "sha": "1b95b77ec6a9066c5307d2cf2a0009b6616d0792",
+      "parent": "b1c611b890cc63c1ec70a855fd662dd8e9c3729e",
+      "subject": "Fixed normalized texture coordinates when NPOT textures aren't supported",
+      "gold_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Texture.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Texture.cpp",
+          "scope": "Texture",
+          "name": "bind"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 11,
+          "file_worst": 11,
+          "wall": 1.1219
+        }
+      }
+    },
+    {
+      "sha": "0093224c8c5b4d6a3e9b25542e07ab35a041633f",
+      "parent": "659044dfb78bc50d41a1c619f8614f7f4aebdfa9",
+      "subject": "Fixed RenderTarget tracking not being notified to update its active target when an FBO RenderTexture is display()ed.",
+      "gold_files": [
+        "src/SFML/Graphics/RenderTexture.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/RenderTexture.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/RenderTexture.cpp",
+          "scope": "RenderTexture",
+          "name": "setActive"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.2922
+        }
+      }
+    },
+    {
+      "sha": "7b6b9a0233f3b125c14aa22a35b1cbce2f537289",
+      "parent": "3cf85e6b191b6eabf796cc5ff9593dc13f70977e",
+      "subject": "Add extra testcases showing that some Win32-window styles are not taken into account",
+      "gold_files": [
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "primary_files": [
+        "test/Window/WindowHandleWin32.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Window/WindowHandleWin32.test.cpp",
+          "scope": "",
+          "name": "wndProc"
+        },
+        {
+          "file": "test/Window/WindowHandleWin32.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.9891
+        }
+      }
+    },
+    {
+      "sha": "3cf85e6b191b6eabf796cc5ff9593dc13f70977e",
+      "parent": "3528fcb293e37784f622edbe11a2dcee20814b40",
+      "subject": "Fix `contentSizeToWindowSize` for windows with a menu or an extended style",
+      "gold_files": [
+        "src/SFML/Window/Win32/WindowImplWin32.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Win32/WindowImplWin32.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Win32/WindowImplWin32.cpp",
+          "scope": "WindowImplWin32",
+          "name": "grabCursor"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 1.2035
+        }
+      }
+    },
+    {
+      "sha": "3528fcb293e37784f622edbe11a2dcee20814b40",
+      "parent": "7e82154bdc3922ac2bb647319e3c3ae5cb8a6b9a",
+      "subject": "Include SystemUtil.hpp in Event.test.cpp to fix printing sf::Vector2 in test-sfml-window",
+      "gold_files": [
+        "test/Window/Event.test.cpp"
+      ],
+      "primary_files": [
+        "test/Window/Event.test.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.3579
+        }
+      }
+    },
+    {
+      "sha": "dfac0315d0a96f454dd1a847a6982d5de2008d26",
+      "parent": "6e1eb545545647a4085eb3ff1e51acb4883e2467",
+      "subject": "Fix unsigned overflow in `sf::Packet` size check",
+      "gold_files": [
+        "src/SFML/Network/Packet.cpp",
+        "test/Network/Packet.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/Packet.cpp",
+        "test/Network/Packet.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Network/Packet.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 454,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 24,
+          "wall": 1.2323
+        }
+      }
+    },
+    {
+      "sha": "91327373b09abf5b32cf55b2fe101e118c38cb48",
+      "parent": "f59913e997c9f0eef9ac88f721acd72f5be36c89",
+      "subject": "Fix comments and address ordering in IpAddress::getLocalAddress",
+      "gold_files": [
+        "src/SFML/Network/IpAddress.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/IpAddress.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "toInteger"
+        },
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "getLocalAddress"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 1.2492
+        }
+      }
+    },
+    {
+      "sha": "41dc238981b1b608585482ab6cd0072f4c2dfb17",
+      "parent": "0eb92fc27dc5d3a709a6e2aebf45b8468afb3acf",
+      "subject": "Add portable abstraction for opening files from Unicode filepaths",
+      "gold_files": [
+        "src/SFML/System/FileInputStream.cpp",
+        "src/SFML/System/Utils.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/FileInputStream.cpp",
+        "src/SFML/System/Utils.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/FileInputStream.cpp",
+          "scope": "FileInputStream",
+          "name": "open"
+        },
+        {
+          "file": "src/SFML/System/Utils.cpp",
+          "scope": "",
+          "name": "formatDebugPathInfo"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.0826
+        }
+      }
+    },
+    {
+      "sha": "0a2e9ac340971915250ca72f45cb411cab6b574a",
+      "parent": "355df11d09fd64347a82de5eb7f8297174dbf384",
+      "subject": "Ensure `sf::Image` remains unchanged after an unsuccessful load",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp",
+        "test/Graphics/Image.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp",
+        "test/Graphics/Image.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "loadFromFile"
+        },
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "loadFromMemory"
+        },
+        {
+          "file": "test/Graphics/Image.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 453,
+      "arms": {
+        "for": {
+          "file_first": 16,
+          "file_worst": 37,
+          "wall": 1.3223
+        }
+      }
+    },
+    {
+      "sha": "9132655a3d542a411a22b7f9957280ca20ba8b48",
+      "parent": "f7e904172fcd472e272b592b9f921c14a6711a21",
+      "subject": "Use `std::fstream` to support Unicode filenames in `sf::Image` #647",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "loadFromFile"
+        },
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "saveToFile"
+        }
+      ],
+      "n_universe_files": 453,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 10,
+          "wall": 2.0061
+        }
+      }
+    },
+    {
+      "sha": "7c60447a3982ac820ee0233e72ff6d52e2c62fb9",
+      "parent": "4378a022e5450ab44c391934822f92dbb0e2c7ae",
+      "subject": "Always print filepaths as UTF-8 to a char stream #3406",
+      "gold_files": [
+        "src/SFML/System/Utils.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/Utils.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/Utils.cpp",
+          "scope": "",
+          "name": "toLower"
+        }
+      ],
+      "n_universe_files": 453,
+      "arms": {
+        "for": {
+          "file_first": 45,
+          "file_worst": 45,
+          "wall": 1.5032
+        }
+      }
+    },
+    {
+      "sha": "4c0b5b3df93a01bad45aa6f49cda217cc3203117",
+      "parent": "efb207c849d37f3d9f3395ff20eec35d59e09567",
+      "subject": "Implement support for references to handlers and function pointers",
+      "gold_files": [
+        "test/Window/WindowBase.test.cpp"
+      ],
+      "primary_files": [
+        "test/Window/WindowBase.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Window/WindowBase.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 453,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.424
+        }
+      }
+    },
+    {
+      "sha": "662830e90a4b5f49b28381bd966ec5f4f14adfb7",
+      "parent": "62a2a39650e29c16bb5b3878a133c28584508cf9",
+      "subject": "Fix conversion warning",
+      "gold_files": [
+        "src/SFML/Window/NetBSD/JoystickImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/NetBSD/JoystickImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/NetBSD/JoystickImpl.cpp",
+          "scope": "JoystickImpl::JoystickImpl",
+          "name": "update"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.9303
+        }
+      }
+    },
+    {
+      "sha": "2c7c3dd056e294730e12e123cb1012c46eaa3c4f",
+      "parent": "0d34974a5e4f2f0b341474dd1ae6e0782f1a8b45",
+      "subject": "Make `glCheckError` take a `std::string_view` rather than constructing a `std::filesystem::path` on error checks",
+      "gold_files": [
+        "src/SFML/Graphics/GLCheck.cpp",
+        "src/SFML/Window/EGLCheck.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/GLCheck.cpp",
+        "src/SFML/Window/EGLCheck.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 6,
+          "wall": 1.1949
+        }
+      }
+    },
+    {
+      "sha": "8db4a58ce05775a72b9846155aa66dbc16b9cc46",
+      "parent": "c31b12690af92910b84249008241d4779062b5de",
+      "subject": "Make `glCheckError` take a `std::string_view` rather than constructing a `std::filesystem::path` on error checks",
+      "gold_files": [
+        "src/SFML/Graphics/GLCheck.cpp",
+        "src/SFML/Window/EGLCheck.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/GLCheck.cpp",
+        "src/SFML/Window/EGLCheck.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 6,
+          "wall": 1.2273
+        }
+      }
+    },
+    {
+      "sha": "cb38877a8c1af45da663c8a09c4fe5e7da4818cb",
+      "parent": "71a8ac7e70e5e4018dd51638988cc8bc5e9f8060",
+      "subject": "Ensure current desktop mode is also a fullscreen mode",
+      "gold_files": [
+        "src/SFML/Window/macOS/VideoModeImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/VideoModeImpl.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 1.1316
+        }
+      }
+    },
+    {
+      "sha": "ccda2659d4b077237fd1e37e2d11121f51210524",
+      "parent": "34ec2795a10082656798ee96c6d472c050cd604d",
+      "subject": "Store IpAddress::m_address in host byte order",
+      "gold_files": [
+        "src/SFML/Network/IpAddress.cpp",
+        "test/Network/IpAddress.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Network/IpAddress.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "resolve"
+        },
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "IpAddress"
+        },
+        {
+          "file": "src/SFML/Network/IpAddress.cpp",
+          "scope": "IpAddress",
+          "name": "toString"
+        },
+        {
+          "file": "test/Network/IpAddress.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 1.2758
+        }
+      }
+    },
+    {
+      "sha": "34ec2795a10082656798ee96c6d472c050cd604d",
+      "parent": "f930cbc562a31ebdb09aaf2c37d77a33f8de987d",
+      "subject": "Fix Ogg ov_read call on big-endian systems",
+      "gold_files": [
+        "src/SFML/Audio/SoundFileReaderOgg.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/SoundFileReaderOgg.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/SoundFileReaderOgg.cpp",
+          "scope": "SoundFileReaderOgg",
+          "name": "read"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 5,
+          "file_worst": 5,
+          "wall": 1.4282
+        }
+      }
+    },
+    {
+      "sha": "e1bb69b3b5a7d616f68321313e1264dbbc49fb1d",
+      "parent": "ad70442246fc999e9f5c1d04e791b92ec5021fc9",
+      "subject": "Fix segfault if XOpenIM fails",
+      "gold_files": [
+        "src/SFML/Window/Unix/Display.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Unix/Display.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Unix/Display.cpp",
+          "scope": "",
+          "name": "openXim"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 1.3838
+        }
+      }
+    },
+    {
+      "sha": "ad70442246fc999e9f5c1d04e791b92ec5021fc9",
+      "parent": "f88b768ba67371ca1b82308caee4f85a71fa917a",
+      "subject": "Do not cache atom name if XInternAtom fails",
+      "gold_files": [
+        "src/SFML/Window/Unix/Display.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Unix/Display.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Unix/Display.cpp",
+          "scope": "",
+          "name": "getAtom"
+        }
+      ],
+      "n_universe_files": 452,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 1.3023
+        }
+      }
+    },
+    {
+      "sha": "55ecc6498af5114411c5e0ddeba34bc0036abcea",
+      "parent": "9aca44d7043da629e3c108773bce005178cd52fb",
+      "subject": "Fix DRM mode setting to use SFML window dimensions",
+      "gold_files": [
+        "src/SFML/Window/DRM/DRMContext.cpp",
+        "src/SFML/Window/DRM/VideoModeImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/DRM/DRMContext.cpp",
+        "src/SFML/Window/DRM/VideoModeImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "",
+          "name": "findDrmDevice"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "",
+          "name": "initDrm"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "createContext"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "createSurface"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "destroySurface"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "getBestConfig"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "getFunction"
+        },
+        {
+          "file": "src/SFML/Window/DRM/VideoModeImpl.cpp",
+          "scope": "VideoModeImpl",
+          "name": "getFullscreenModes"
+        }
+      ],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": 72,
+          "file_worst": null,
+          "wall": 1.3487
+        }
+      }
+    },
+    {
+      "sha": "58085efb292e06cac9352548081aff69a68a9250",
+      "parent": "dff83039aaf3c145f509772001be987df8af93c3",
+      "subject": "Close the open window first",
+      "gold_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Window.cpp",
+          "scope": "Window",
+          "name": "create"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "create"
+        }
+      ],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 16,
+          "wall": 1.0266
+        }
+      }
+    },
+    {
+      "sha": "34b6bda23305e1b29e539f671bbc42a4c554f7c4",
+      "parent": "40fc524b8d08ebfb190786c8321e89ee09de069d",
+      "subject": "[drm] Fix DRM mode setting to use SFML window dimensions",
+      "gold_files": [
+        "src/SFML/Window/DRM/DRMContext.cpp",
+        "src/SFML/Window/DRM/VideoModeImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/DRM/DRMContext.cpp",
+        "src/SFML/Window/DRM/VideoModeImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "",
+          "name": "m_config"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "createContext"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "createSurface"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "destroySurface"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "getFunction"
+        },
+        {
+          "file": "src/SFML/Window/DRM/VideoModeImpl.cpp",
+          "scope": "VideoModeImpl",
+          "name": "getDesktopMode"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 27,
+          "file_worst": null,
+          "wall": 0.2583
+        }
+      }
+    },
+    {
+      "sha": "7a8d75b7ace117640745028cf8febcb7bbac7b9b",
+      "parent": "cabc36b8a4674af6e071d881b996440689ff6a65",
+      "subject": "Add support to test the vulkan example on CPU",
+      "gold_files": [
+        "examples/vulkan/Vulkan.cpp"
+      ],
+      "primary_files": [
+        "examples/vulkan/Vulkan.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 1.26
+        }
+      }
+    },
+    {
+      "sha": "04b1808522f3b90e0d4f3c3e5bc972748f12672c",
+      "parent": "da1f652c22c45655080a6438fdb2a297a0aa1323",
+      "subject": "Use `eglCheck` macro as an expression instead of a statement",
+      "gold_files": [
+        "src/SFML/Window/DRM/DRMContext.cpp",
+        "src/SFML/Window/EglContext.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/DRM/DRMContext.cpp",
+        "src/SFML/Window/EglContext.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "",
+          "name": "getInitializedDisplay"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "DRMContext"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "makeCurrent"
+        },
+        {
+          "file": "src/SFML/Window/DRM/DRMContext.cpp",
+          "scope": "DRMContext",
+          "name": "createContext"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "",
+          "name": "getInitializedDisplay"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "EglContext",
+          "name": "EglContext"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "",
+          "name": "~EglContext"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "EglContext",
+          "name": "makeCurrent"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "EglContext",
+          "name": "createContext"
+        },
+        {
+          "file": "src/SFML/Window/EglContext.cpp",
+          "scope": "EglContext",
+          "name": "updateSettings"
+        }
+      ],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": 5,
+          "file_worst": 12,
+          "wall": 1.1082
+        }
+      }
+    },
+    {
+      "sha": "f8d77ea8224b7c017f94fbdb009c4780bd445e28",
+      "parent": "46a1b568a981d7854f498b417a2ab6a0e3f1ae3e",
+      "subject": "Make true and false keywords lowercase and monospaced in docs",
+      "gold_files": [
+        "src/SFML/Audio/Sound.cpp",
+        "src/SFML/Audio/SoundStream.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Audio/Sound.cpp",
+        "src/SFML/Audio/SoundStream.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Audio/Sound.cpp",
+          "scope": "",
+          "name": "Sound"
+        },
+        {
+          "file": "src/SFML/Audio/SoundStream.cpp",
+          "scope": "",
+          "name": "SoundStream"
+        }
+      ],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.8922
+        }
+      }
+    },
+    {
+      "sha": "5ed16195b3fad9c39c3ca16c9300aaf62f06f252",
+      "parent": "d4ee28c441e42483eff0b16583eaec6ecf719056",
+      "subject": "Use correct iterator comparison",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "resize"
+        },
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "createMaskFromColor"
+        }
+      ],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.9149
+        }
+      }
+    },
+    {
+      "sha": "d4ee28c441e42483eff0b16583eaec6ecf719056",
+      "parent": "9af5d87ac872d6afe67f7746632b13e36d2dea48",
+      "subject": "Use initializer list instead of assigning in body",
+      "gold_files": [
+        "src/SFML/System/String.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/String.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "U8StringCharTraits",
+          "name": "not_eof"
+        },
+        {
+          "file": "src/SFML/System/String.cpp",
+          "scope": "String",
+          "name": "String"
+        }
+      ],
+      "n_universe_files": 500,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.7558
+        }
+      }
+    },
+    {
+      "sha": "72207a63ef04be84ec3ff97544d6bd4e72c4f1d4",
+      "parent": "9169e11195da03ba4ad47f465528ccdeb272746b",
+      "subject": "Use inherited constructors instead of constructor delegation",
+      "gold_files": [
+        "src/SFML/System/Exception.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/System/Exception.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 501,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.9037
+        }
+      }
+    },
+    {
+      "sha": "8fd67a0d992761cbae627f6a11af0dfa0ecd3e2b",
+      "parent": "cfc43f50a7a873061b213361cf51135867bfc011",
+      "subject": "Remove wrong comment",
+      "gold_files": [
+        "src/SFML/Graphics/Shader.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Shader.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 501,
+      "arms": {
+        "for": {
+          "file_first": 46,
+          "file_worst": 46,
+          "wall": 0.847
+        }
+      }
+    },
+    {
+      "sha": "de9286c11f8b11b262f07dc47e87fdffdd105d21",
+      "parent": "4e77e3ee953557be24da3fe36607a8e4eb958526",
+      "subject": "Use explicit conversion operator instead of explicit constructor",
+      "gold_files": [
+        "test/Graphics/Glsl.test.cpp",
+        "test/Graphics/Rect.test.cpp",
+        "test/System/Vector2.test.cpp",
+        "test/System/Vector3.test.cpp"
+      ],
+      "primary_files": [
+        "test/Graphics/Glsl.test.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "test/Graphics/Glsl.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        },
+        {
+          "file": "test/Graphics/Rect.test.cpp",
+          "scope": "",
+          "name": "TEMPLATE_TEST_CASE"
+        },
+        {
+          "file": "test/System/Vector2.test.cpp",
+          "scope": "",
+          "name": "TEMPLATE_TEST_CASE"
+        },
+        {
+          "file": "test/System/Vector3.test.cpp",
+          "scope": "",
+          "name": "TEMPLATE_TEST_CASE"
+        }
+      ],
+      "n_universe_files": 501,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.8754
+        }
+      }
+    },
+    {
+      "sha": "a9c56da99ecad924da3875af6bcf990d9bf56589",
+      "parent": "d2ca038e2ac6afd0e01ec7da485092c9c9ed5386",
+      "subject": "Fix `island` example freeze when submitting work too quickly",
+      "gold_files": [
+        "examples/island/Island.cpp"
+      ],
+      "primary_files": [
+        "examples/island/Island.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "generateTerrain"
+        }
+      ],
+      "n_universe_files": 501,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 0.9719
+        }
+      }
+    },
+    {
+      "sha": "9d1e5d9acf1ece3652d4e66973b6e81341cfe2e7",
+      "parent": "0d33ddeccff9e46fe7ed6b04fde782d20d3e6ea3",
+      "subject": "Prevent reading from an uninitialized character buffer",
+      "gold_files": [
+        "src/SFML/Graphics/Shader.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Shader.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Shader.cpp",
+          "scope": "Shader",
+          "name": "compile"
+        }
+      ],
+      "n_universe_files": 501,
+      "arms": {
+        "for": {
+          "file_first": 17,
+          "file_worst": 17,
+          "wall": 1.048
+        }
+      }
+    },
+    {
+      "sha": "0d33ddeccff9e46fe7ed6b04fde782d20d3e6ea3",
+      "parent": "c8cf84511dc1bbc9a6ce35c2df2089364d2eb2ec",
+      "subject": "Change glCheck macro to be usable as an expression",
+      "gold_files": [
+        "src/SFML/Graphics/RenderTextureImplFBO.cpp",
+        "src/SFML/Graphics/Shader.cpp",
+        "src/SFML/Graphics/Texture.cpp",
+        "src/SFML/Graphics/VertexBuffer.cpp",
+        "src/SFML/Window/EGLCheck.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/RenderTextureImplFBO.cpp",
+        "src/SFML/Graphics/Shader.cpp",
+        "src/SFML/Graphics/Texture.cpp",
+        "src/SFML/Graphics/VertexBuffer.cpp",
+        "src/SFML/Window/EGLCheck.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/RenderTextureImplFBO.cpp",
+          "scope": "RenderTextureImplFBO",
+          "name": "createFrameBuffer"
+        },
+        {
+          "file": "src/SFML/Graphics/Shader.cpp",
+          "scope": "",
+          "name": "Shader"
+        },
+        {
+          "file": "src/SFML/Graphics/Shader.cpp",
+          "scope": "Shader",
+          "name": "compile"
+        },
+        {
+          "file": "src/SFML/Graphics/Texture.cpp",
+          "scope": "Texture",
+          "name": "update"
+        },
+        {
+          "file": "src/SFML/Graphics/VertexBuffer.cpp",
+          "scope": "VertexBuffer",
+          "name": "update"
+        },
+        {
+          "file": "src/SFML/Window/EGLCheck.cpp",
+          "scope": "",
+          "name": "eglCheckError"
+        }
+      ],
+      "n_universe_files": 501,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 14,
+          "wall": 1.0274
+        }
+      }
+    },
+    {
+      "sha": "267bbe35b80f946c3b676a2dbd7577a973b99efe",
+      "parent": "6bcc3414fc304344d53ccd39e715038796624df3",
+      "subject": "Simplify island example using vectors and extracting repetitive code",
+      "gold_files": [
+        "examples/island/Island.cpp"
+      ],
+      "primary_files": [
+        "examples/island/Island.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "generateTerrain"
+        },
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "getHighlandsTerrainColor"
+        },
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "getSnowcapTerrainColor"
+        },
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "computeNormal"
+        },
+        {
+          "file": "examples/island/Island.cpp",
+          "scope": "",
+          "name": "processWorkItem"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.0274
+        }
+      }
+    },
+    {
+      "sha": "5545df7290250cbe767a2705c8401d8f3c4f23a0",
+      "parent": "54c7edb2a0f4be537d5e476a4d548b6d26fe0070",
+      "subject": "Use lazy loading for keyboard scancodes on macos (backport)",
+      "gold_files": [
+        "src/SFML/Window/OSX/HIDInputManager.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/OSX/HIDInputManager.mm"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 12,
+          "file_worst": 12,
+          "wall": 0.2322
+        }
+      }
+    },
+    {
+      "sha": "6bcc3414fc304344d53ccd39e715038796624df3",
+      "parent": "20b048fb08d60480b1db0c75ff8a9e92ee6aab21",
+      "subject": "Use lazy loading for keyboard scancodes on macos",
+      "gold_files": [
+        "src/SFML/Window/macOS/HIDInputManager.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/HIDInputManager.mm"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 7,
+          "file_worst": 7,
+          "wall": 0.8489
+        }
+      }
+    },
+    {
+      "sha": "6591c595048db6beecc06fc5f5912eded026b27c",
+      "parent": "e2ea1d8a7c56bd8af8246d3ca4c468ce23afda5e",
+      "subject": "Add window create functions without style specifier",
+      "gold_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp",
+        "test/Window/Window.test.cpp",
+        "test/Window/WindowBase.test.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Window.cpp",
+          "scope": "Window",
+          "name": "create"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "create"
+        },
+        {
+          "file": "test/Window/Window.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        },
+        {
+          "file": "test/Window/WindowBase.test.cpp",
+          "scope": "",
+          "name": "TEST_CASE"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 18,
+          "wall": 0.8568
+        }
+      }
+    },
+    {
+      "sha": "2b4a72ee0653369225d6673f46c538e020c416f3",
+      "parent": "9f52cfec39294cb46259bee10deb452663a66acd",
+      "subject": "Fix more outdated references to Mac OS X",
+      "gold_files": [
+        "src/SFML/Window/macOS/SFContext.mm",
+        "tools/xcode/templates/SFML/SFML App.xctemplate/main.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/SFContext.mm",
+        "tools/xcode/templates/SFML/SFML App.xctemplate/main.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 44,
+          "file_worst": null,
+          "wall": 1.0723
+        }
+      }
+    },
+    {
+      "sha": "c6e0f1ad2bbe3b8ac6831c2d2265c8c25844161a",
+      "parent": "50ced215d06cf8fcdb2bce5cdb5b45a649fe7a46",
+      "subject": "Fix how macOS fullscreen video modes are detected",
+      "gold_files": [
+        "src/SFML/Window/OSX/SFWindowController.mm",
+        "src/SFML/Window/OSX/Scaling.h",
+        "src/SFML/Window/OSX/cg_sf_conversion.mm"
+      ],
+      "primary_files": [
+        "src/SFML/Window/OSX/SFWindowController.mm",
+        "src/SFML/Window/OSX/Scaling.h",
+        "src/SFML/Window/OSX/cg_sf_conversion.mm"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/OSX/SFWindowController.mm",
+          "scope": "",
+          "name": "setupFullscreenViewWithMode:"
+        },
+        {
+          "file": "src/SFML/Window/OSX/SFWindowController.mm",
+          "scope": "",
+          "name": "resizeTo:"
+        },
+        {
+          "file": "src/SFML/Window/OSX/Scaling.h",
+          "scope": "",
+          "name": "scaleIn"
+        },
+        {
+          "file": "src/SFML/Window/OSX/cg_sf_conversion.mm",
+          "scope": "",
+          "name": "convertCGModeToSFMode"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 13,
+          "file_worst": null,
+          "wall": 0.2499
+        }
+      }
+    },
+    {
+      "sha": "fa9f991686b2d90ba8b529b3569dbe9817dad14a",
+      "parent": "6a94997ac9c3590bff803ecb5f590b6309b3553b",
+      "subject": "Mark standard library types as code in doc strings",
+      "gold_files": [
+        "src/SFML/Window/macOS/SFOpenGLView+mouse_priv.h"
+      ],
+      "primary_files": [
+        "src/SFML/Window/macOS/SFOpenGLView+mouse_priv.h"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 494,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 1.2601
+        }
+      }
+    },
+    {
+      "sha": "2a4ca6e0530fb541f6cf9a068e54f6f045e835ce",
+      "parent": "779b96353017c884212b6d54ad20ddc77dc5e25a",
+      "subject": "Prevent crash when setting empty uniform array",
+      "gold_files": [
+        "src/SFML/Graphics/Shader.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Shader.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Shader.cpp",
+          "scope": "Shader",
+          "name": "setUniformArray"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 56,
+          "file_worst": 56,
+          "wall": 0.3783
+        }
+      }
+    },
+    {
+      "sha": "a256c5cdcdedf711285fa28334fcbb318414a698",
+      "parent": "b0b4c7ff3d3296addb90501529846a8309b7cbe8",
+      "subject": "Remove useless attributes from implementation files (#3175)",
+      "gold_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Graphics/Image.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Graphics/Image.cpp",
+          "scope": "Image",
+          "name": "createMaskFromColor"
+        }
+      ],
+      "n_universe_files": 491,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 2.001
+        }
+      }
+    },
+    {
+      "sha": "5eb57ae5f103947ab5ff4ad244d9c3fb640a3422",
+      "parent": "72eb115551a7845b6682dce766c12b3706633a3f",
+      "subject": "Fix white square problem in OpenGL example",
+      "gold_files": [
+        "examples/opengl/OpenGL.cpp"
+      ],
+      "primary_files": [
+        "examples/opengl/OpenGL.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "examples/opengl/OpenGL.cpp",
+          "scope": "",
+          "name": "main"
+        }
+      ],
+      "n_universe_files": 491,
+      "arms": {
+        "for": {
+          "file_first": 14,
+          "file_worst": 14,
+          "wall": 1.1658
+        }
+      }
+    },
+    {
+      "sha": "5873a7a1571de3a6f33711802d9ac8430fb2d9d5",
+      "parent": "dc8b6dbbfa5174d7b758070ba861a529a7c67172",
+      "subject": "Fix null pointer dereference when creating fullscreen window",
+      "gold_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp",
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp",
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Window.cpp",
+          "scope": "Window",
+          "name": "create"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "create"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "onResize"
+        },
+        {
+          "file": "src/SFML/Window/WindowImpl.cpp",
+          "scope": "WindowImpl",
+          "name": "create"
+        },
+        {
+          "file": "src/SFML/Window/WindowImpl.cpp",
+          "scope": "WindowImpl",
+          "name": "createVulkanSurface"
+        }
+      ],
+      "n_universe_files": 488,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": null,
+          "wall": 1.1488
+        }
+      }
+    },
+    {
+      "sha": "7556d1be78113defd4ef69f32d24fe583bf2692d",
+      "parent": "51b8b44e14f1907c3731152ff693c289d3c61844",
+      "subject": "Move fullscreen window bookkeeping to a lower level",
+      "gold_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp",
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "primary_files": [
+        "src/SFML/Window/Window.cpp",
+        "src/SFML/Window/WindowBase.cpp",
+        "src/SFML/Window/WindowImpl.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/SFML/Window/Window.cpp",
+          "scope": "Window",
+          "name": "Window"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "WindowBase"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "close"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "create"
+        },
+        {
+          "file": "src/SFML/Window/WindowBase.cpp",
+          "scope": "WindowBase",
+          "name": "initialize"
+        },
+        {
+          "file": "src/SFML/Window/WindowImpl.cpp",
+          "scope": "WindowImpl",
+          "name": "WindowImpl"
+        },
+        {
+          "file": "src/SFML/Window/WindowImpl.cpp",
+          "scope": "WindowImpl",
+          "name": "createVulkanSurface"
+        }
+      ],
+      "n_universe_files": 488,
+      "arms": {
+        "for": {
+          "file_first": 5,
+          "file_worst": null,
+          "wall": 1.3862
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# zone.arch — deliberately declares NO layers/rules. --arch's per-module Martin metrics + zone
+# classification are computed unconditionally (not gated on any layer/deny/allow rule existing), so an
+# all-comment rules file is enough to exercise them here; this fixture is about the zone math, not
+# layering violations. (D9: a bare unrecognized token like the old "noop" placeholder now gets REJECTED
+# — see src/arch.h's parseArchRules — so this file must be either empty or comment-only.)

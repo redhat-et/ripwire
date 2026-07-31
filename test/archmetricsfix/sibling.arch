@@ -1,0 +1,1 @@
+deny path src/(\w+)/.* -> src/(?!\1/).*

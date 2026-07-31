@@ -1,0 +1,4 @@
+struct Pt { int x; };
+static int leaf(void) { return 1; }
+int root(void) { struct Pt p; p.x = leaf(); return p.x; }
+#define TWICE(v) ((v)+(v))

@@ -1,0 +1,120 @@
+name: Release
+
+# Builds ctxpack for macOS arm64/x64 + Linux x64/arm64 on every `vX.Y.Z` tag push and attaches the four
+# binaries to a GitHub Release. UNTESTED UNTIL THE FIRST REAL TAG PUSH:
+# this file is statically valid (see test/portablebuildcheck.sh's sibling validation note and the workflow
+# README pointer below) but has never actually run — GitHub Actions itself cannot be executed from this
+# dev environment. Review the FIRST run's logs closely before trusting `scripts/install.sh` against it.
+#
+# Every leg configures WITHOUT -DCTXPACK_NATIVE=ON on purpose: a release binary must run on any machine of
+# its target arch, not just the exact CPU that happened to build it (see cmake/PortableFlags.cmake — the
+# portable default auto-applies safe generic Apple Silicon tuning on the two macOS-arm64 builders and
+# emits zero host-specific flags everywhere else).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re-)build and release (workflow_dispatch testing only)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-14 # Apple Silicon (arm64) hosted runner
+            asset_arch: arm64
+            asset_os: macos
+          - name: macos-x64
+            os: macos-13 # Intel (x86-64) hosted runner — GitHub has been retiring Intel macOS runners;
+                         # if `macos-13` is gone by the time this first runs, replace this leg with a
+                         # cross-compile (`-arch x86_64` on a macos-14 runner) or drop the macos-x64 asset.
+            asset_arch: x64
+            asset_os: macos
+          - name: linux-x64
+            os: ubuntu-24.04
+            asset_arch: x64
+            asset_os: linux
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            asset_arch: arm64
+            asset_os: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tooling (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxml2-utils
+
+      - name: Cache FetchContent sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ctxpack-deps
+          key: ctxpack-deps-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ctxpack-deps-${{ matrix.name }}-
+
+      - name: Configure (portable — no CTXPACK_NATIVE, this binary ships to other machines)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j --target ctxpack
+
+      - name: Smoke-test the freshly built binary
+        run: |
+          ./build/ctxpack --version
+          ./build/ctxpack test/fixture --no-cache | xmllint --noout -
+
+      - name: Package
+        id: package
+        run: |
+          version="$( ./build/ctxpack --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 )"
+          asset="ctxpack-${version}-${{ matrix.asset_os }}-${{ matrix.asset_arch }}"
+          mkdir -p "dist/${asset}"
+          cp build/ctxpack "dist/${asset}/ctxpack"
+          cp README.md LICENSE "dist/${asset}/" 2>/dev/null || cp README.md "dist/${asset}/"
+          tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
+          shasum -a 256 "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"
+          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset }}
+          path: |
+            dist/${{ steps.package.outputs.asset }}.tar.gz
+            dist/${{ steps.package.outputs.asset }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List staged release assets
+        run: ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          generate_release_notes: true

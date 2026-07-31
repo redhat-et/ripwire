@@ -1,0 +1,16 @@
+{
+  "name": "widget-app",
+  "version": "1.2.3",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

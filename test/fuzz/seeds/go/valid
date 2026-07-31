@@ -1,0 +1,3 @@
+package seed
+func leaf() int { return 1 }
+func root() int { return leaf() }

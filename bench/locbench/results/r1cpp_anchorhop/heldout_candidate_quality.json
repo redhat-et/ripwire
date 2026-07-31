@@ -1,0 +1,6363 @@
+{
+  "dataset": "ByteDance-Seed/Multi-SWE-bench",
+  "license": "CC0-1.0 dataset compilation (dataset card: \"licensed under CC0, subject to any intellectual property rights in the dataset owned by Bytedance\"); underlying code changes remain under each project's own OSS license \u2014 see bench/multiswe/README.md.",
+  "lang": "cpp",
+  "dataset_lock_sha256": "503acc751a053176fb1b570bf782ab75607206a71e334620cd88cdce98f276f0",
+  "n_selected": 122,
+  "n_scored": 121,
+  "skipped_unindexable": 1,
+  "skipped_checkout": 0,
+  "wall_total": 201.15895641606767,
+  "arms": {
+    "for": {
+      "n": 121,
+      "f1": 14,
+      "f3": 43,
+      "f5": 58,
+      "f10": 67,
+      "any10": 107,
+      "mrr": 59.246139738397815,
+      "wall": 23.918995874759275
+    }
+  },
+  "instances": [
+    {
+      "instance_id": "catchorg__Catch2-1422",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "1faccd601d904a951142d8fba82914a8325b764e",
+      "subject": "unregistered reporter is not considered a command line error",
+      "gold_files": [
+        "include/internal/catch_commandline.cpp",
+        "include/internal/catch_list.cpp",
+        "include/internal/catch_list.h"
+      ],
+      "primary_files": [
+        "include/internal/catch_commandline.cpp",
+        "include/internal/catch_list.cpp",
+        "include/internal/catch_list.h"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 237,
+      "arms": {
+        "for": {
+          "file_first": 11,
+          "file_worst": null,
+          "wall": 0.1194
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-1448",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "62460fafe6b54c3173bc5cbc46d05a5f071017ff",
+      "subject": "Capturer destructor asserts due to bad expression parsing",
+      "gold_files": [
+        "include/internal/catch_message.cpp",
+        "include/internal/catch_message.h"
+      ],
+      "primary_files": [
+        "include/internal/catch_message.cpp",
+        "include/internal/catch_message.h"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 243,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 46,
+          "wall": 0.122
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-1608",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "979bbf03bb00bc55ca09783791b5091a2247df68",
+      "subject": "CAPTURE(\"text, with comma\") fails",
+      "gold_files": [
+        "include/internal/catch_message.cpp"
+      ],
+      "primary_files": [
+        "include/internal/catch_message.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 256,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 0.124
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-1609",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "bd703dd74be7fd2413eb0c01662a491bcebea430",
+      "subject": "Type parametrised test case: support for non-type template parameters",
+      "gold_files": [
+        "include/catch.hpp",
+        "include/internal/catch_compiler_capabilities.h",
+        "include/internal/catch_meta.hpp",
+        "include/internal/catch_preprocessor.hpp"
+      ],
+      "primary_files": [
+        "include/internal/catch_meta.hpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 256,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 0.1236
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-1614",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "9c741fe96073ed620ffc032afbed1f3c789d2b68",
+      "subject": "Allow custom precision in error reports for floating-point numbers",
+      "gold_files": [
+        "include/internal/catch_tostring.cpp",
+        "include/internal/catch_tostring.h"
+      ],
+      "primary_files": [
+        "include/internal/catch_tostring.cpp",
+        "include/internal/catch_tostring.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/internal/catch_tostring.cpp",
+          "scope": "",
+          "name": "convert"
+        }
+      ],
+      "n_universe_files": 256,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 10,
+          "wall": 0.1247
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-1616",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "00347f1e79260e76d5072cca5b3636868397dda5",
+      "subject": "Rename #define BENCHMARK or allow disabling benchmark feature",
+      "gold_files": [
+        "include/catch.hpp",
+        "include/internal/catch_benchmark.cpp",
+        "include/internal/catch_benchmark.h",
+        "include/internal/catch_commandline.cpp",
+        "include/internal/catch_compiler_capabilities.h",
+        "include/internal/catch_config.cpp",
+        "include/internal/catch_config.hpp",
+        "include/internal/catch_interfaces_capture.h",
+        "include/internal/catch_interfaces_config.h",
+        "include/internal/catch_interfaces_reporter.h",
+        "include/internal/catch_meta.hpp",
+        "include/internal/catch_run_context.cpp",
+        "include/internal/catch_run_context.h",
+        "include/internal/catch_stream.cpp",
+        "include/reporters/catch_reporter_console.cpp",
+        "include/reporters/catch_reporter_console.h",
+        "include/reporters/catch_reporter_listening.cpp",
+        "include/reporters/catch_reporter_listening.h",
+        "include/reporters/catch_reporter_xml.cpp",
+        "include/reporters/catch_reporter_xml.h"
+      ],
+      "primary_files": [
+        "include/internal/catch_benchmark.cpp",
+        "include/internal/catch_benchmark.h",
+        "include/internal/catch_commandline.cpp",
+        "include/internal/catch_config.cpp",
+        "include/internal/catch_config.hpp",
+        "include/internal/catch_interfaces_capture.h",
+        "include/internal/catch_interfaces_config.h",
+        "include/internal/catch_interfaces_reporter.h",
+        "include/internal/catch_meta.hpp",
+        "include/internal/catch_run_context.cpp",
+        "include/internal/catch_run_context.h",
+        "include/internal/catch_stream.cpp",
+        "include/reporters/catch_reporter_console.cpp",
+        "include/reporters/catch_reporter_console.h",
+        "include/reporters/catch_reporter_listening.cpp",
+        "include/reporters/catch_reporter_listening.h",
+        "include/reporters/catch_reporter_xml.cpp",
+        "include/reporters/catch_reporter_xml.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/reporters/catch_reporter_console.cpp",
+          "scope": "",
+          "name": "Duration"
+        },
+        {
+          "file": "include/reporters/catch_reporter_console.cpp",
+          "scope": "",
+          "name": "TablePrinter"
+        },
+        {
+          "file": "include/reporters/catch_reporter_console.cpp",
+          "scope": "ConsoleReporter",
+          "name": "ConsoleReporter"
+        },
+        {
+          "file": "include/reporters/catch_reporter_console.cpp",
+          "scope": "ConsoleReporter",
+          "name": "assertionEnded"
+        },
+        {
+          "file": "include/reporters/catch_reporter_console.cpp",
+          "scope": "ConsoleReporter",
+          "name": "sectionEnded"
+        },
+        {
+          "file": "include/reporters/catch_reporter_console.cpp",
+          "scope": "",
+          "name": "CATCH_REGISTER_REPORTER"
+        }
+      ],
+      "n_universe_files": 256,
+      "arms": {
+        "for": {
+          "file_first": 14,
+          "file_worst": null,
+          "wall": 0.1613
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-2128",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "65c9a1d31a338f28ef93cd61c475efc40f6cc42e",
+      "subject": "Problem with user provided operator == (with proposed fix)",
+      "gold_files": [
+        "src/catch2/internal/catch_decomposer.hpp"
+      ],
+      "primary_files": [
+        "src/catch2/internal/catch_decomposer.hpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 308,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1238
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-2187",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "2cb5210caf35bf8fc29ade2e5570cc0f37537951",
+      "subject": "Make CHECKED_IF and CHECKED_ELSE \"ok to fail\"",
+      "gold_files": [
+        "src/catch2/internal/catch_run_context.cpp"
+      ],
+      "primary_files": [
+        "src/catch2/internal/catch_run_context.cpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 309,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 0.1108
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-2288",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "85c9544fa4c9625b9656d9bd765e54f8e639287f",
+      "subject": "Approx::operator() not const-correct",
+      "gold_files": [
+        "include/internal/catch_approx.h"
+      ],
+      "primary_files": [
+        "include/internal/catch_approx.h"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 286,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.1413
+        }
+      }
+    },
+    {
+      "instance_id": "catchorg__Catch2-2849",
+      "org": "catchorg",
+      "repo": "Catch2",
+      "base_sha": "7ce35799767de7b9c6ba836c72e479c5f70219a3",
+      "subject": "Handle ANSI escape sequences during text wrapping",
+      "gold_files": [
+        "src/catch2/internal/catch_textflow.cpp",
+        "src/catch2/internal/catch_textflow.hpp"
+      ],
+      "primary_files": [
+        "src/catch2/internal/catch_textflow.cpp",
+        "src/catch2/internal/catch_textflow.hpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 403,
+      "arms": {
+        "for": {
+          "file_first": 30,
+          "file_worst": null,
+          "wall": 0.1313
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-1171",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "87fbc6f7566e4d3266bd3a2cd69f6c90e1aefa5d",
+      "subject": "fmt::prepare fails to compile formatting to an array of chars",
+      "gold_files": [
+        "include/fmt/prepare.h"
+      ],
+      "primary_files": [
+        "include/fmt/prepare.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/prepare.h",
+          "scope": "",
+          "name": "prepared_format"
+        }
+      ],
+      "n_universe_files": 62,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.235
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-1361",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "a5abe5d95cb8a8015913be9748a9661f3e1fbda8",
+      "subject": "Support single precision floats in grisu formatting",
+      "gold_files": [
+        "include/fmt/format-inl.h",
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format-inl.h",
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format-inl.h",
+          "scope": "",
+          "name": "fp"
+        },
+        {
+          "file": "include/fmt/format-inl.h",
+          "scope": "",
+          "name": "grisu_format"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "grisu_prettify"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "write_fp"
+        }
+      ],
+      "n_universe_files": 72,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 3,
+          "wall": 0.2484
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-1390",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "d6eede9e085f0b36edcf0a2f6dff5f7875181019",
+      "subject": "UTF-8 truncation",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "count_code_points"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "basic_writer"
+        }
+      ],
+      "n_universe_files": 72,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 0.2277
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-1407",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "1f918159edded99c9c0cf005c96ecc12e4cc92b1",
+      "subject": "Detect if type is formattable in SFINAE-friendly way?",
+      "gold_files": [
+        "include/fmt/core.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "FMT_DEPRECATED"
+        }
+      ],
+      "n_universe_files": 72,
+      "arms": {
+        "for": {
+          "file_first": 13,
+          "file_worst": 13,
+          "wall": 0.2843
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-1663",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "8d9d528bf52c60864802844e8acf16db09dae19a",
+      "subject": "Dynamic construction of *named* argument lists?",
+      "gold_files": [
+        "include/fmt/core.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "basic_format_arg"
+        },
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "make_arg"
+        },
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "make_format_args"
+        },
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "dynamic_format_arg_store"
+        },
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "basic_format_args"
+        },
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "vprint_mojibake"
+        }
+      ],
+      "n_universe_files": 71,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.234
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-1837",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "c7e6d8afb06cec7b8244f963dc081daf7e70f7f6",
+      "subject": "Feature Request: Print std::chrono::time_point",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "localtime"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "gmtime"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "strftime"
+        }
+      ],
+      "n_universe_files": 71,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.2299
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2070",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "e737672614dfad3a6df23ffe3f2348fcfa4d3944",
+      "subject": "format_to uses wrong overload when formatting to memory_buffer with a text_style",
+      "gold_files": [
+        "include/fmt/color.h"
+      ],
+      "primary_files": [
+        "include/fmt/color.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "format_to"
+        }
+      ],
+      "n_universe_files": 69,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 0.2345
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2158",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "835b910e7d758efdfdce9f23df1b190deb3373db",
+      "subject": "truncating_iterator is no std::output_iterator",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "truncating_iterator_base"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "truncating_iterator"
+        }
+      ],
+      "n_universe_files": 70,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.2283
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2292",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "0dd91e20d5e8c7c41154acbb4fbe6b9d37688ea3",
+      "subject": "Printed seconds precision does not match C++20 spec",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "strftime"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 73,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1772
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2310",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "bc13c6de390751ecf8daa1b1ce8f775d104fdc65",
+      "subject": "Numeric zero fill is applied to inf/nan",
+      "gold_files": [
+        "include/fmt/core.h",
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h",
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "specs_setter"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "write"
+        }
+      ],
+      "n_universe_files": 72,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 4,
+          "wall": 0.1887
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2317",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "7612f18dc8e0112e64e0845a1ebe9da6cfb8a123",
+      "subject": "Hex float default alignment",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "write_padded"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "write"
+        }
+      ],
+      "n_universe_files": 73,
+      "arms": {
+        "for": {
+          "file_first": 11,
+          "file_worst": 11,
+          "wall": 0.1667
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2394",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "cfc05e05f08dc0b6fe619831c96f00ee27d99613",
+      "subject": "Add more emphases",
+      "gold_files": [
+        "include/fmt/color.h"
+      ],
+      "primary_files": [
+        "include/fmt/color.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "terminal_color"
+        },
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "ansi_color_escape"
+        }
+      ],
+      "n_universe_files": 75,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 0.1791
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2610",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "19cac63fe4b4d8fe6a4ced28de16a68659cf9035",
+      "subject": "Formatting of function pointers should be disallowed",
+      "gold_files": [
+        "include/fmt/core.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "arg_mapper"
+        }
+      ],
+      "n_universe_files": 81,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.1841
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-2940",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "eaa8efb950be5d8f1803a99b06f76cf398c67cb8",
+      "subject": "tuple-formatter doesn't check that the tuple-elements are formattable.",
+      "gold_files": [
+        "include/fmt/ranges.h"
+      ],
+      "primary_files": [
+        "include/fmt/ranges.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/ranges.h",
+          "scope": "",
+          "name": "is_tuple_like"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1658
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3158",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "80f8d34427d40ec5e7ce3b10ededc46bd4bd5759",
+      "subject": "Some ranges of char are misprinted or don't compile",
+      "gold_files": [
+        "include/fmt/ranges.h"
+      ],
+      "primary_files": [
+        "include/fmt/ranges.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/ranges.h",
+          "scope": "",
+          "name": "range_formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 0.2103
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3248",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "275b4b3417e26be3bdb5b45e16fa9af6584973a2",
+      "subject": "Wrong formatting when both alignment and '0' for leading zeroes is given",
+      "gold_files": [
+        "include/fmt/core.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "specs_setter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.1756
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3260",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "2622cd23e69b67316cf678a97c268a874774c0e1",
+      "subject": "formatting chrono with padding",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 0.1692
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3271",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "bfc0924eacaa3c6163eb872c8948098565464192",
+      "subject": "Support strftime `-` extension",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "numeric_system"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "parse_chrono_format"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "tm_format_checker"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "tm_writer"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "chrono_format_checker"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "chrono_formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1786
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3272",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "bfc0924eacaa3c6163eb872c8948098565464192",
+      "subject": "Alignment of floating-point numbers is incorrect if the output is localized and the integer part is zero",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "do_write_float"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 0.1682
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3279",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "f89cd276f7dead38f11cebc73d1e91a1b1b38124",
+      "subject": "Add formatters for STL container adapters",
+      "gold_files": [
+        "include/fmt/ranges.h"
+      ],
+      "primary_files": [
+        "include/fmt/ranges.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/ranges.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.2265
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3537",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "661b23edeb52d400cf5812e7330f14f05c072fab",
+      "subject": "Consider format_string as a string for enable-if",
+      "gold_files": [
+        "include/fmt/core.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "to_string_view"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1756
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3555",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "f4214ae8dd9cdfcbeb5e2db66aee59d066d9cb0c",
+      "subject": "to_string() doesn't work with custom format_as()?",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "write"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1706
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3569",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "8a4bec5cf53387356738a06ba0cf4fdf086241ae",
+      "subject": "Formatting element of std::vector<bool> fails",
+      "gold_files": [
+        "include/fmt/std.h"
+      ],
+      "primary_files": [
+        "include/fmt/std.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/std.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": null,
+          "file_worst": null,
+          "wall": 0.1746
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3713",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "649fe0fc8b9366375eab67639cab404617c527cd",
+      "subject": "formatting a std::optional with format_as function fails to compile using clang",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 0.1716
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3727",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "06f1c0d725855861535e9e65cd4d502aca7c61ed",
+      "subject": "Date overflow with std::chrono::time_point",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "write"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "localtime"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "gmtime"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "write_fractional_seconds"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "make_unsigned_or_unchanged"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "get_milliseconds"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "chrono_formatter"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1715
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3732",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "f5750892436a667fe622e5ecc8a02c15a5d9bc88",
+      "subject": "%j doesn't seem to work with a duration object",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "chrono_format_checker"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "chrono_formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1849
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3734",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "f5750892436a667fe622e5ecc8a02c15a5d9bc88",
+      "subject": "presentation_type `c` accepted in combination with `bool`",
+      "gold_files": [
+        "include/fmt/core.h"
+      ],
+      "primary_files": [
+        "include/fmt/core.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/core.h",
+          "scope": "",
+          "name": "parse_format_specs"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.2046
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3750",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "274ba2645bdae12f6f0c7d7ca24659c4af670548",
+      "subject": "Localized formatting is always decimal",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "digit_grouping"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "write_loc"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "wall": 0.1694
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3819",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "0147e08225db261f5689fc17a986ede7f1db56f0",
+      "subject": "The vformat & vprint functions produce incorrect output when mixing named and positional arguments.",
+      "gold_files": [
+        "include/fmt/base.h",
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/base.h",
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/base.h",
+          "scope": "",
+          "name": "basic_format_parse_context"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "vformat_to"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 9,
+          "wall": 0.2107
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3824",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "2caf1b3b91f6d56f420cec8bf752f9af26aa51af",
+      "subject": "join does not use ADL on begin/end of its ranges",
+      "gold_files": [
+        "include/fmt/ranges.h"
+      ],
+      "primary_files": [
+        "include/fmt/ranges.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/ranges.h",
+          "scope": "",
+          "name": "join"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 0.1689
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3863",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "0166f455f6681144a18553d2ea0cda8946bff019",
+      "subject": "support C++23 character range formatting",
+      "gold_files": [
+        "include/fmt/ranges.h"
+      ],
+      "primary_files": [
+        "include/fmt/ranges.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/ranges.h",
+          "scope": "",
+          "name": "range_formatter"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 13,
+          "file_worst": 13,
+          "wall": 0.1683
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3912",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "3b5f3de3b57505c7f1a60ee40ef3448c623b1326",
+      "subject": "Add support for `std::chrono::year_month_day`",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "year"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.2229
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-3913",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "3b5f3de3b57505c7f1a60ee40ef3448c623b1326",
+      "subject": "Add support for `std::chrono::year_month_day`",
+      "gold_files": [
+        "include/fmt/chrono.h"
+      ],
+      "primary_files": [
+        "include/fmt/chrono.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "year"
+        },
+        {
+          "file": "include/fmt/chrono.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 83,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.1983
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-4055",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "1408f1824d6a23643e178ee6e46478fb550a0963",
+      "subject": "formatter simply inheriting from built-in formatter is not recognised",
+      "gold_files": [
+        "include/fmt/format.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 80,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 10,
+          "wall": 0.1754
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-4057",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "ccea338070c795fd966a4dc08b19268b6fbad5ef",
+      "subject": "trunk doesn't work with `std::generator`",
+      "gold_files": [
+        "include/fmt/ranges.h"
+      ],
+      "primary_files": [
+        "include/fmt/ranges.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/ranges.h",
+          "scope": "",
+          "name": "range_formatter"
+        }
+      ],
+      "n_universe_files": 80,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.1668
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-4286",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "e3ddede6c4ee818825c4e5a6dfa1d384860c27d9",
+      "subject": "std::bitset formatting (nested_formatter) does not work with wchar_t",
+      "gold_files": [
+        "include/fmt/format.h",
+        "include/fmt/std.h"
+      ],
+      "primary_files": [
+        "include/fmt/format.h",
+        "include/fmt/std.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "vformat_to"
+        },
+        {
+          "file": "include/fmt/format.h",
+          "scope": "",
+          "name": "nested_formatter"
+        },
+        {
+          "file": "include/fmt/std.h",
+          "scope": "",
+          "name": "formatter"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 2,
+          "wall": 0.1728
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-4310",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "01914f0389ef6ff151c289670f6910e059d5063f",
+      "subject": "Can't access context args() directly in 11.1.0",
+      "gold_files": [
+        "include/fmt/base.h"
+      ],
+      "primary_files": [
+        "include/fmt/base.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/base.h",
+          "scope": "",
+          "name": "context"
+        }
+      ],
+      "n_universe_files": 82,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.1724
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-967",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "bf1f1c73e39c7ee6581ee0d5bb2471856a14bdb2",
+      "subject": "Colored print improvements",
+      "gold_files": [
+        "include/fmt/color.h"
+      ],
+      "primary_files": [
+        "include/fmt/color.h"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 53,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "wall": 0.2543
+        }
+      }
+    },
+    {
+      "instance_id": "fmtlib__fmt-974",
+      "org": "fmtlib",
+      "repo": "fmt",
+      "base_sha": "7f7504b3f532c6cd7d6de405241f774df6b4b666",
+      "subject": "Support ASCII color escape code numbers",
+      "gold_files": [
+        "include/fmt/color.h"
+      ],
+      "primary_files": [
+        "include/fmt/color.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "color"
+        },
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "rgb"
+        },
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "text_style"
+        },
+        {
+          "file": "include/fmt/color.h",
+          "scope": "",
+          "name": "ansi_color_escape"
+        }
+      ],
+      "n_universe_files": 55,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 0.241
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1138",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "e830bc502fe38852654a1f03f963001fecb54a86",
+      "subject": "std::unordered_map in struct, serialization",
+      "gold_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/output/serializer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/output/serializer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "include/nlohmann/detail/output/serializer.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "input_adapter"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "lexer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "output_adapter"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_writer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        }
+      ],
+      "n_universe_files": 405,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 53,
+          "wall": 0.2138
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1221",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "d713727f2277f2eb919a2dbbfdd534f8988aa493",
+      "subject": "Somewhat unhelpful error message \"cannot use operator[] with object\"",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 409,
+      "arms": {
+        "for": {
+          "file_first": 5,
+          "file_worst": 7,
+          "wall": 0.1918
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1301",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "dd672939a0dcbe50afafb91c430a882aff4bcf20",
+      "subject": "compile error in from_json converting to container with std::pair",
+      "gold_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "void"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "decltype"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_string_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_integer_type"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "decltype"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_string_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_integer_type"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "void"
+        }
+      ],
+      "n_universe_files": 415,
+      "arms": {
+        "for": {
+          "file_first": 5,
+          "file_worst": null,
+          "wall": 0.2068
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1303",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "dd672939a0dcbe50afafb91c430a882aff4bcf20",
+      "subject": "Buffer over/underrun using UBJson?",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/output/binary_writer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/output/binary_writer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "include/nlohmann/detail/output/binary_writer.hpp",
+          "scope": "",
+          "name": "binary_writer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_writer"
+        }
+      ],
+      "n_universe_files": 415,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 58,
+          "wall": 0.1759
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1314",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "9294e25c98f9c09a1874842dbcaae7a91336a57e",
+      "subject": "Soften the landing when dumping non-UTF8 strings (type_error.316 exception)",
+      "gold_files": [
+        "include/nlohmann/detail/output/serializer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/output/serializer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/output/serializer.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 415,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 9,
+          "wall": 0.1953
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1323",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "037e93f5c09805c84460c91abee40d479d1512a6",
+      "subject": "enum to json mapping",
+      "gold_files": [
+        "include/nlohmann/detail/macro_scope.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 417,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 0.171
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1343",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "d2e6e1bf5852d9c8f2470c7c99eb6e600bb79138",
+      "subject": "EOF flag not set on exhausted input streams.",
+      "gold_files": [
+        "include/nlohmann/detail/input/input_adapters.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/input_adapters.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/input_adapters.hpp",
+          "scope": "",
+          "name": "input_stream_adapter"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "input_stream_adapter"
+        }
+      ],
+      "n_universe_files": 419,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 4,
+          "wall": 0.1674
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1446",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "dffae1082f01c083bc762ff21f57d7a8546f8c82",
+      "subject": "If a string has too many invalid UTF-8 characters, json::dump attempts to index an array out of bounds.",
+      "gold_files": [
+        "include/nlohmann/detail/output/serializer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/output/serializer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/output/serializer.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        }
+      ],
+      "n_universe_files": 437,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 8,
+          "wall": 0.1907
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1555",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "b21c04c93893bb8e277eaff9d54cfe28bc6ca131",
+      "subject": "Conversion to user type containing a std::vector not working with documented approach",
+      "gold_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_object_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_array_type_impl"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_object_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_array_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 447,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": null,
+          "wall": 0.1833
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1769",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "99d7518d21cbbfe91d341a5431438bf7559c6974",
+      "subject": "json_pointer<>::back() should be const",
+      "gold_files": [
+        "include/nlohmann/detail/json_pointer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/json_pointer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/json_pointer.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        }
+      ],
+      "n_universe_files": 451,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "wall": 0.1714
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-18",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "46474010307f209ddfb1454844f8b4432ffe6f11",
+      "subject": "Improper parsing of JSON string \"\\\\\"",
+      "gold_files": [
+        "src/json.cc"
+      ],
+      "primary_files": [
+        "src/json.cc"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/json.cc",
+          "scope": "",
+          "name": "quotes"
+        }
+      ],
+      "n_universe_files": 8,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.0934
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-1821",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "3790bd9ae059a8c3700ff90895c487dba19b6092",
+      "subject": "Non-member operator== breaks enum (de)serialization",
+      "gold_files": [
+        "include/nlohmann/detail/macro_scope.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "hash"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 451,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 11,
+          "wall": 0.1712
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2019",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "b7be613b6ec6269c829144ff1cc8a633876d3092",
+      "subject": "json_pointer.contains() exception is incorrectly raised",
+      "gold_files": [
+        "include/nlohmann/detail/json_pointer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/json_pointer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/json_pointer.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        }
+      ],
+      "n_universe_files": 451,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 3,
+          "wall": 0.1785
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2099",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "1de30bc6111a6c063c4aa2e3eccefce8c09e1c62",
+      "subject": "Missing tests for binary values",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/input/json_sax.hpp",
+        "include/nlohmann/detail/output/serializer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/input/json_sax.hpp",
+        "include/nlohmann/detail/output/serializer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "include/nlohmann/detail/input/json_sax.hpp",
+          "scope": "",
+          "name": "json_sax_dom_parser"
+        },
+        {
+          "file": "include/nlohmann/detail/input/json_sax.hpp",
+          "scope": "",
+          "name": "json_sax_dom_callback_parser"
+        },
+        {
+          "file": "include/nlohmann/detail/output/serializer.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_sax_dom_parser"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_sax_dom_callback_parser"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 375,
+      "arms": {
+        "for": {
+          "file_first": 10,
+          "file_worst": 30,
+          "wall": 0.1481
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2212",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "8575fdf9ad41844692b18fb9db4d28fea4e9282a",
+      "subject": "Strip comments / Minify",
+      "gold_files": [
+        "include/nlohmann/detail/input/lexer.hpp",
+        "include/nlohmann/detail/input/parser.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/lexer.hpp",
+        "include/nlohmann/detail/input/parser.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/lexer.hpp",
+          "scope": "",
+          "name": "lexer"
+        },
+        {
+          "file": "include/nlohmann/detail/input/parser.hpp",
+          "scope": "",
+          "name": "parser"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "lexer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "parser"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 409,
+      "arms": {
+        "for": {
+          "file_first": 11,
+          "file_worst": 44,
+          "wall": 0.1459
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2225",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "5ba0f65c34832aa18fb2b582d58a0c1f92c93bfb",
+      "subject": "Custom type registration : instrusive API",
+      "gold_files": [
+        "include/nlohmann/detail/macro_scope.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [],
+      "n_universe_files": 407,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.2277
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2258",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "cbafed349493dd8b072b5c1c5ac7f7c0ef0ed7df",
+      "subject": "maintaining order of keys during iteration",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "include/nlohmann/json_fwd.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "include/nlohmann/json_fwd.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 409,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1501
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2273",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "1a521cbd3657eea6ba90cded2aecca93e3cd78d4",
+      "subject": "CBOR parser doesn't skip tags",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 410,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 13,
+          "wall": 0.1437
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2297",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "40b78d3847fcd2acaeca5d13912ad6ae5dd0702d",
+      "subject": "Add support for high-precision numbers in UBJSON encoding",
+      "gold_files": [
+        "include/nlohmann/detail/exceptions.hpp",
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/output/binary_writer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/exceptions.hpp",
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/output/binary_writer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "include/nlohmann/detail/output/binary_writer.hpp",
+          "scope": "",
+          "name": "binary_writer"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_sax_acceptor"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_writer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 417,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 35,
+          "wall": 0.1914
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2332",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "1da931730a73365a5a817c8571d36c9ef024dd57",
+      "subject": "ignore_comment=true fails on multiple consecutive lines starting with comments",
+      "gold_files": [
+        "include/nlohmann/detail/input/lexer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/lexer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/lexer.hpp",
+          "scope": "",
+          "name": "lexer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "lexer"
+        }
+      ],
+      "n_universe_files": 428,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 17,
+          "wall": 0.1534
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2352",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "b888afe5f45f0ac6381aa5fa93bba7b5fc035354",
+      "subject": "Compilation error due to assuming that private=public",
+      "gold_files": [
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "include/nlohmann/detail/iterators/primitive_iterator.hpp",
+        "include/nlohmann/detail/json_pointer.hpp",
+        "include/nlohmann/detail/macro_scope.hpp",
+        "include/nlohmann/detail/macro_unscope.hpp",
+        "include/nlohmann/detail/output/serializer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "include/nlohmann/detail/iterators/primitive_iterator.hpp",
+        "include/nlohmann/detail/json_pointer.hpp",
+        "include/nlohmann/detail/output/serializer.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/iterators/iter_impl.hpp",
+          "scope": "",
+          "name": "iter_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/primitive_iterator.hpp",
+          "scope": "",
+          "name": "primitive_iterator_t"
+        },
+        {
+          "file": "include/nlohmann/detail/json_pointer.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        },
+        {
+          "file": "include/nlohmann/detail/output/serializer.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "primitive_iterator_t"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "iter_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "_json_pointer"
+        }
+      ],
+      "n_universe_files": 428,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 27,
+          "wall": 0.215
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2576",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "6f551930e5c7ef397056de121c0da82f77573cca",
+      "subject": "Deserialization to std::array with non-default constructable types fails",
+      "gold_files": [
+        "include/nlohmann/adl_serializer.hpp",
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/adl_serializer.hpp",
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/adl_serializer.hpp",
+          "scope": "",
+          "name": "adl_serializer"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "void"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_getable"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "has_to_json"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_object_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_object_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_string_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_string_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_array_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_array_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_integer_type_impl"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_getable"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "has_to_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_object_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_object_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_string_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_string_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_array_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_array_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_integer_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "void"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "adl_serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 486,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1569
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2866",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "9426074ce85da2121c315cae8574d8eaca520cb7",
+      "subject": "Assertion failure when inserting into arrays with JSON_DIAGNOSTICS set",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 488,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "wall": 0.1514
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2963",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "cb053bceb133e819aaaa0e68bc5864a13137cfb0",
+      "subject": "JSON_DIAGNOSTICS assertion for ordered_json",
+      "gold_files": [
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_tuple"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_tuple"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 496,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1976
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-2989",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "bbdb29c6583e9e68f7f2bdce59a7384f061e0e32",
+      "subject": "to_{binary format} does not provide a mechanism for specifying a custom allocator for the returned type.",
+      "gold_files": [
+        "include/nlohmann/detail/output/output_adapters.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/output/output_adapters.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/output/output_adapters.hpp",
+          "scope": "",
+          "name": "output_vector_adapter"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "output_vector_adapter"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1565
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3008",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "bbdb29c6583e9e68f7f2bdce59a7384f061e0e32",
+      "subject": "Parent pointer not properly set when using update()",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "wall": 0.2098
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3037",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "0b345b20c888f7dc8888485768e4bf9a6be29de0",
+      "subject": "Yet another assertion failure when inserting into arrays with JSON_DIAGNOSTICS set",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 2,
+          "wall": 0.1568
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3073",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "4b1cb9eee129632abc4fa684688691568e26c9e9",
+      "subject": "Version 3.10.3 breaks backward-compatibility with 3.10.2",
+      "gold_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/conversions/to_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/conversions/to_json.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/to_json.hpp",
+          "scope": "",
+          "name": "to_json"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_object_type"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_compatible_array_type_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "is_constructible_array_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_object_type"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_array_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_constructible_array_type_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "conditional_static_cast"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "tuple_element"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "to_json"
+        }
+      ],
+      "n_universe_files": 497,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1539
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3109",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "7440786b813534b567f6f6b87afb2aa19f97cc89",
+      "subject": "ordered_json doesn't support range based erase",
+      "gold_files": [
+        "include/nlohmann/ordered_map.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/ordered_map.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/ordered_map.hpp",
+          "scope": "",
+          "name": "Key"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "Key"
+        }
+      ],
+      "n_universe_files": 499,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "wall": 0.2192
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3332",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "d8a63291cbe50411a2c513d06f3ae7c8c1a43c33",
+      "subject": "Iterator doesn't satisfy std::incrementable because post-increment may change constness",
+      "gold_files": [
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "include/nlohmann/detail/iterators/json_reverse_iterator.hpp",
+        "include/nlohmann/detail/iterators/primitive_iterator.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "include/nlohmann/detail/iterators/json_reverse_iterator.hpp",
+        "include/nlohmann/detail/iterators/primitive_iterator.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/iterators/iter_impl.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/json_reverse_iterator.hpp",
+          "scope": "",
+          "name": "json_reverse_iterator"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/primitive_iterator.hpp",
+          "scope": "",
+          "name": "primitive_iterator_t"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "primitive_iterator_t"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_reverse_iterator"
+        }
+      ],
+      "n_universe_files": 556,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 0.1668
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3446",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "ede66678580596028bcd6e18871a35a54bac01d7",
+      "subject": "Comparison of NaN differs between json and float",
+      "gold_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/conversions/to_json.hpp",
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+        "include/nlohmann/detail/macro_scope.hpp",
+        "include/nlohmann/detail/macro_unscope.hpp",
+        "include/nlohmann/detail/value_t.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "include/nlohmann/detail/conversions/to_json.hpp",
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+        "include/nlohmann/detail/value_t.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "get_arithmetic_value"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json_tuple_impl"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json_fn"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/to_json.hpp",
+          "scope": "",
+          "name": "external_constructor"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/to_json.hpp",
+          "scope": "",
+          "name": "to_json"
+        },
+        {
+          "file": "include/nlohmann/detail/conversions/to_json.hpp",
+          "scope": "",
+          "name": "to_json_fn"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/iter_impl.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+          "scope": "",
+          "name": "iteration_proxy_value"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+          "scope": "",
+          "name": "iteration_proxy"
+        },
+        {
+          "file": "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+          "scope": "",
+          "name": "tuple_element"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "less"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "get_arithmetic_value"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json_tuple_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json_fn"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "iteration_proxy_value"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "iteration_proxy"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "tuple_element"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "external_constructor"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "to_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "to_json_fn"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "less"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "_json_pointer"
+        }
+      ],
+      "n_universe_files": 615,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 0.1761
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3463",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "0c698b75ccb81c2218e0b0b3ae8e9e60ba97c6bb",
+      "subject": "json:parse_bjdata_fuzzer reaches assertion",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        }
+      ],
+      "n_universe_files": 595,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 21,
+          "wall": 0.1674
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3514",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "6b97599a274b9b72caffa1332d5384c9aac27590",
+      "subject": "ASSERT error while parsing BJData",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        }
+      ],
+      "n_universe_files": 619,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 8,
+          "wall": 0.2265
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3523",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "b6d00d18974358ab1d55dcc3379d0ee3052deb4e",
+      "subject": "Error when roundtripping BJData",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "conditional_static_cast"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "conditional_static_cast"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        }
+      ],
+      "n_universe_files": 619,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": null,
+          "wall": 0.1827
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3543",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "f6acdbec2c99670cf932d83cd797f08662e0b564",
+      "subject": "json:parse_bjdata_fuzzer: ASSERT: ref_stack.back()->is_array()",
+      "gold_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/input/binary_reader.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/input/binary_reader.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "binary_reader"
+        }
+      ],
+      "n_universe_files": 621,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 5,
+          "wall": 0.1789
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3564",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "954b10ad3baa5d92bb9cd5bb93c7258433cd2bb2",
+      "subject": "ordered_json doesn't accept keys of types other than string_t (e.g., string_view)",
+      "gold_files": [
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "include/nlohmann/ordered_map.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "include/nlohmann/ordered_map.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "decltype"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "include/nlohmann/ordered_map.hpp",
+          "scope": "",
+          "name": "Key"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "decltype"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "serializer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "Key"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 621,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 0.2251
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3601",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "2d48a4d9c5e8f0a5ce914922eb2a45dc0ec93ee3",
+      "subject": "json_pointer__pop_back.cpp example does not compile",
+      "gold_files": [
+        "docs/examples/json_pointer__operator_string.cpp",
+        "docs/examples/operator_serialize.cpp",
+        "include/nlohmann/detail/json_pointer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "docs/examples/json_pointer__operator_string.cpp",
+        "docs/examples/operator_serialize.cpp",
+        "include/nlohmann/detail/json_pointer.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/json_pointer.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_reverse_iterator"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        }
+      ],
+      "n_universe_files": 625,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 0.2183
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3605",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "d3e347bd2d5bdb52f3d376440a760bbef866f2b9",
+      "subject": "Consider putting the user-defined literals in a namespace",
+      "gold_files": [
+        "docs/examples/at__json_pointer.cpp",
+        "docs/examples/at__json_pointer_const.cpp",
+        "docs/examples/contains__json_pointer.cpp",
+        "docs/examples/contains__keytype.c++17.cpp",
+        "docs/examples/contains__object_t_key_type.cpp",
+        "docs/examples/diff.cpp",
+        "docs/examples/merge_patch.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_explicit.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_macro.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_with_default_explicit.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_with_default_macro.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_explicit.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_macro.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_with_default_explicit.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_with_default_macro.cpp",
+        "docs/examples/operator_array__json_pointer.cpp",
+        "docs/examples/operator_array__json_pointer_const.cpp",
+        "docs/examples/operator_literal_json.cpp",
+        "docs/examples/operator_literal_json_pointer.cpp",
+        "docs/examples/other_error.cpp",
+        "docs/examples/patch.cpp",
+        "docs/examples/patch_inplace.cpp",
+        "docs/examples/std_hash.cpp",
+        "docs/examples/to_bjdata.cpp",
+        "docs/examples/to_bson.cpp",
+        "docs/examples/to_cbor.cpp",
+        "docs/examples/to_msgpack.cpp",
+        "docs/examples/to_ubjson.cpp",
+        "docs/examples/update.cpp",
+        "docs/examples/update__range.cpp",
+        "docs/examples/value__json_ptr.cpp",
+        "include/nlohmann/detail/macro_scope.hpp",
+        "include/nlohmann/detail/macro_unscope.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "docs/examples/at__json_pointer.cpp",
+        "docs/examples/at__json_pointer_const.cpp",
+        "docs/examples/contains__json_pointer.cpp",
+        "docs/examples/contains__keytype.c++17.cpp",
+        "docs/examples/contains__object_t_key_type.cpp",
+        "docs/examples/diff.cpp",
+        "docs/examples/merge_patch.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_explicit.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_macro.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_with_default_explicit.cpp",
+        "docs/examples/nlohmann_define_type_intrusive_with_default_macro.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_explicit.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_macro.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_with_default_explicit.cpp",
+        "docs/examples/nlohmann_define_type_non_intrusive_with_default_macro.cpp",
+        "docs/examples/operator_array__json_pointer.cpp",
+        "docs/examples/operator_array__json_pointer_const.cpp",
+        "docs/examples/operator_literal_json.cpp",
+        "docs/examples/operator_literal_json_pointer.cpp",
+        "docs/examples/other_error.cpp",
+        "docs/examples/patch.cpp",
+        "docs/examples/patch_inplace.cpp",
+        "docs/examples/std_hash.cpp",
+        "docs/examples/to_bjdata.cpp",
+        "docs/examples/to_bson.cpp",
+        "docs/examples/to_cbor.cpp",
+        "docs/examples/to_msgpack.cpp",
+        "docs/examples/to_ubjson.cpp",
+        "docs/examples/update.cpp",
+        "docs/examples/update__range.cpp",
+        "docs/examples/value__json_ptr.cpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "to_string"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "swap"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "to_string"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "swap"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "_json_pointer"
+        }
+      ],
+      "n_universe_files": 645,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1952
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3663",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "7b6cf5918bc9a4b85d1e3fb9ff65348d6dce5d10",
+      "subject": "regression: `.value<size_t>` is compilation error.",
+      "gold_files": [
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/meta/type_traits.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/meta/type_traits.hpp",
+          "scope": "",
+          "name": "value_in_range_of"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "value_in_range_of"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 656,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.2481
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-3664",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "e839f58a2ac1bfe966ebf17a1971167e17b6921d",
+      "subject": "Regression: no match for 'operator!=' comparing json_pointer and const char */string_t",
+      "gold_files": [
+        "include/nlohmann/detail/json_pointer.hpp",
+        "include/nlohmann/json_fwd.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/json_pointer.hpp",
+        "include/nlohmann/json_fwd.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/json_pointer.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        },
+        {
+          "file": "include/nlohmann/json_fwd.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "json_pointer"
+        }
+      ],
+      "n_universe_files": 645,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.2014
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-4512",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "ee32bfc1c263900d5c31cf8a8c5429048719e42a",
+      "subject": "Default initialized iterators are not comparable",
+      "gold_files": [
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/iterators/iter_impl.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/iterators/iter_impl.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 677,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "wall": 0.2707
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-4525",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "1b9a9d1f2122e73b69f5d62d0ce3ebda8cd41ff0",
+      "subject": "Invalid union access for get_ref/get_ptr with unsigned integer",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 677,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "wall": 0.2236
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-4536",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "e6cafa573aac6ed9227f752a5371c0b3f436307d",
+      "subject": "patch_inplace assumes StringType is std::string",
+      "gold_files": [
+        "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/iterators/iteration_proxy.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 686,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": null,
+          "wall": 0.2088
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-4537",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "e6cafa573aac6ed9227f752a5371c0b3f436307d",
+      "subject": "JSON_DIAGNOSTICS trigger assertion",
+      "gold_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "NOLINT"
+        }
+      ],
+      "n_universe_files": 686,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 2,
+          "wall": 0.2338
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-508",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "100bf3ef2cb6893c2384bc0114e3b6592636d2d0",
+      "subject": "conversion from/to C array is not supported",
+      "gold_files": [
+        "src/json.hpp"
+      ],
+      "primary_files": [
+        "src/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "to_json"
+        },
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 286,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "wall": 0.2214
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-545",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "d07596a0ea5e66e2677568d4c45b8d9147c9173b",
+      "subject": "why it's not possible to serialize c++11 enums directly",
+      "gold_files": [
+        "src/json.hpp"
+      ],
+      "primary_files": [
+        "src/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "to_json"
+        },
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        }
+      ],
+      "n_universe_files": 286,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.1614
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-609",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "92ef19696a18187112512b8361b822d817d01e95",
+      "subject": "Newbie issue: how does one convert a map in Json back to std::map?",
+      "gold_files": [
+        "src/json.hpp"
+      ],
+      "primary_files": [
+        "src/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "invalid_iterator"
+        },
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "type_error"
+        },
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "out_of_range"
+        },
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "to_json"
+        },
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        }
+      ],
+      "n_universe_files": 290,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "wall": 0.1541
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-708",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "e45eaf6e3085fd5e51907cff1b93d747620ffc00",
+      "subject": "broken from_json implementation for pair and tuple ",
+      "gold_files": [
+        "src/json.hpp"
+      ],
+      "primary_files": [
+        "src/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "from_json"
+        }
+      ],
+      "n_universe_files": 296,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.2076
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-807",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "8e067c0c3c8739912e24035e9656df9aa973bb9d",
+      "subject": "{} uses copy constructor, while = does not",
+      "gold_files": [
+        "src/json.hpp"
+      ],
+      "primary_files": [
+        "src/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/json.hpp",
+          "scope": "",
+          "name": "json_ref"
+        }
+      ],
+      "n_universe_files": 306,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.1592
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-969",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "b02e3bb0b6397b5e5f2c92b163c8fa25c414c635",
+      "subject": "converting json to vector of type with templated constructor",
+      "gold_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/conversions/from_json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/conversions/from_json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "from_json_array_impl"
+        }
+      ],
+      "n_universe_files": 372,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 2,
+          "wall": 0.2017
+        }
+      }
+    },
+    {
+      "instance_id": "nlohmann__json-986",
+      "org": "nlohmann",
+      "repo": "json",
+      "base_sha": "1f3d2a3be7be0235006f9a66b4fb62316d62c31e",
+      "subject": "Assigning between different json types",
+      "gold_files": [
+        "include/nlohmann/detail/meta.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "primary_files": [
+        "include/nlohmann/detail/meta.hpp",
+        "include/nlohmann/json.hpp",
+        "single_include/nlohmann/json.hpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/nlohmann/detail/meta.hpp",
+          "scope": "",
+          "name": "is_compatible_complete_type"
+        },
+        {
+          "file": "include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "is_compatible_complete_type"
+        },
+        {
+          "file": "single_include/nlohmann/json.hpp",
+          "scope": "",
+          "name": "basic_json"
+        }
+      ],
+      "n_universe_files": 372,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 4,
+          "wall": 0.1905
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1615",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "40cba172ed66584cf670c98202ed474a316667e3",
+      "subject": "Implement JSON Pointer on top of On Demand",
+      "gold_files": [
+        "include/simdjson/generic/ondemand/array-inl.h",
+        "include/simdjson/generic/ondemand/array.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/object-inl.h",
+        "include/simdjson/generic/ondemand/object.h",
+        "include/simdjson/generic/ondemand/value-inl.h",
+        "include/simdjson/generic/ondemand/value.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/ondemand/array-inl.h",
+        "include/simdjson/generic/ondemand/array.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/object-inl.h",
+        "include/simdjson/generic/ondemand/object.h",
+        "include/simdjson/generic/ondemand/value-inl.h",
+        "include/simdjson/generic/ondemand/value.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/ondemand/array-inl.h",
+          "scope": "array",
+          "name": "count_elements"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/array.h",
+          "scope": "",
+          "name": "array"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/array.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object-inl.h",
+          "scope": "object",
+          "name": "end"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object.h",
+          "scope": "",
+          "name": "object"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value-inl.h",
+          "scope": "value",
+          "name": "raw_json_token"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value.h",
+          "scope": "",
+          "name": "value"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value.h",
+          "scope": "",
+          "name": "simdjson_result"
+        }
+      ],
+      "n_universe_files": 326,
+      "arms": {
+        "for": {
+          "file_first": 14,
+          "file_worst": null,
+          "wall": 0.2215
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1624",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "6cd04aa858f2d92105c0fbd65cdafb96428db002",
+      "subject": "at_pointer in On Demand should automatically rewind",
+      "gold_files": [
+        "include/simdjson/generic/ondemand/array.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/object.h",
+        "include/simdjson/generic/ondemand/value.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/ondemand/array.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/object.h",
+        "include/simdjson/generic/ondemand/value.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/ondemand/array.h",
+          "scope": "",
+          "name": "array"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object.h",
+          "scope": "",
+          "name": "object"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value.h",
+          "scope": "",
+          "name": "value"
+        }
+      ],
+      "n_universe_files": 329,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 23,
+          "wall": 0.2217
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1667",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "47a62db55936e29e1966a26a9aadb5f28237ae37",
+      "subject": "Provide the ability to decode strings as values (double/uint64 etc)",
+      "gold_files": [
+        "include/simdjson/generic/numberparsing.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/value-inl.h",
+        "include/simdjson/generic/ondemand/value.h",
+        "include/simdjson/generic/ondemand/value_iterator-inl.h",
+        "include/simdjson/generic/ondemand/value_iterator.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/numberparsing.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/value-inl.h",
+        "include/simdjson/generic/ondemand/value.h",
+        "include/simdjson/generic/ondemand/value_iterator-inl.h",
+        "include/simdjson/generic/ondemand/value_iterator.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_number"
+        },
+        {
+          "file": "include/simdjson/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_unsigned"
+        },
+        {
+          "file": "include/simdjson/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_integer"
+        },
+        {
+          "file": "include/simdjson/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_double"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document-inl.h",
+          "scope": "document",
+          "name": "get_object"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value-inl.h",
+          "scope": "value",
+          "name": "get_string"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value.h",
+          "scope": "",
+          "name": "value"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value_iterator.h",
+          "scope": "",
+          "name": "value_iterator"
+        }
+      ],
+      "n_universe_files": 341,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.2595
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1695",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "35158257c6e79d908723f1a7023362a718579c4f",
+      "subject": "Provide an 'location of error' diagnostic when encountering errors in On Demand",
+      "gold_files": [
+        "include/simdjson/error.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/json_iterator-inl.h",
+        "include/simdjson/generic/ondemand/json_iterator.h",
+        "src/internal/error_tables.cpp"
+      ],
+      "primary_files": [
+        "include/simdjson/error.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/json_iterator-inl.h",
+        "include/simdjson/generic/ondemand/json_iterator.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/error.h",
+          "scope": "",
+          "name": "error_code"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document-inl.h",
+          "scope": "document",
+          "name": "rewind"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document_reference"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/json_iterator-inl.h",
+          "scope": "json_iterator",
+          "name": "to_string"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/json_iterator.h",
+          "scope": "",
+          "name": "json_iterator"
+        }
+      ],
+      "n_universe_files": 343,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 18,
+          "wall": 0.2571
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1712",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "cebe3fb299a4ea6787a11d8700a9933cc838bcfb",
+      "subject": "Add count_fields method for objects",
+      "gold_files": [
+        "include/simdjson/generic/ondemand/array-inl.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/object-inl.h",
+        "include/simdjson/generic/ondemand/object.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/ondemand/array-inl.h",
+        "include/simdjson/generic/ondemand/document-inl.h",
+        "include/simdjson/generic/ondemand/document.h",
+        "include/simdjson/generic/ondemand/object-inl.h",
+        "include/simdjson/generic/ondemand/object.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/ondemand/array-inl.h",
+          "scope": "array",
+          "name": "raw_json"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document-inl.h",
+          "scope": "document",
+          "name": "count_elements"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document-inl.h",
+          "scope": "",
+          "name": "bool"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "document_reference"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object-inl.h",
+          "scope": "object",
+          "name": "at_pointer"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object.h",
+          "scope": "",
+          "name": "object"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/object.h",
+          "scope": "",
+          "name": "simdjson_result"
+        }
+      ],
+      "n_universe_files": 344,
+      "arms": {
+        "for": {
+          "file_first": 8,
+          "file_worst": null,
+          "wall": 0.2795
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1896",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "d4ac1b51d0aeb2d4f792136fe7792de709006afa",
+      "subject": "simdjson does not check that the value after high surrogate is in the range of a low surrogate?",
+      "gold_files": [
+        "src/generic/stage2/stringparsing.h"
+      ],
+      "primary_files": [
+        "src/generic/stage2/stringparsing.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "src/generic/stage2/stringparsing.h",
+          "scope": "",
+          "name": "handle_unicode_codepoint"
+        }
+      ],
+      "n_universe_files": 358,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "wall": 0.329
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-1899",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "5809e51ae405d763700ec19083009a2a1cdbfdbc",
+      "subject": "Parse `\"-1e-999\"` and `\"-0e-999\"` as -0.0 instead of 0.0 in dom api(signed zero)?",
+      "gold_files": [
+        "include/simdjson/generic/numberparsing.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/numberparsing.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/numberparsing.h",
+          "scope": "",
+          "name": "compute_float_64"
+        },
+        {
+          "file": "include/simdjson/generic/numberparsing.h",
+          "scope": "",
+          "name": "write_float"
+        }
+      ],
+      "n_universe_files": 358,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.3365
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-2016",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "74bb7b2533af3f063d0794fe3962fb5226c27751",
+      "subject": "Enhance iterate_many to enable parsing of comma separated documents",
+      "gold_files": [
+        "include/simdjson/generic/ondemand/document_stream-inl.h",
+        "include/simdjson/generic/ondemand/document_stream.h",
+        "include/simdjson/generic/ondemand/json_iterator-inl.h",
+        "include/simdjson/generic/ondemand/json_iterator.h",
+        "include/simdjson/generic/ondemand/parser-inl.h",
+        "include/simdjson/generic/ondemand/parser.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/ondemand/document_stream-inl.h",
+        "include/simdjson/generic/ondemand/document_stream.h",
+        "include/simdjson/generic/ondemand/json_iterator-inl.h",
+        "include/simdjson/generic/ondemand/json_iterator.h",
+        "include/simdjson/generic/ondemand/parser-inl.h",
+        "include/simdjson/generic/ondemand/parser.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/ondemand/document_stream-inl.h",
+          "scope": "document_stream",
+          "name": "document_stream"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document_stream-inl.h",
+          "scope": "document_stream",
+          "name": "next_document"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/document_stream.h",
+          "scope": "",
+          "name": "document_stream"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/json_iterator-inl.h",
+          "scope": "json_iterator",
+          "name": "reenter_child"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/json_iterator.h",
+          "scope": "",
+          "name": "json_iterator"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/parser.h",
+          "scope": "",
+          "name": "parser"
+        }
+      ],
+      "n_universe_files": 360,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 23,
+          "wall": 0.3043
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-2026",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "c5c43e9c7ff613bf01ca14b9b9083d38a6efd5fc",
+      "subject": "Pretty print for DOM",
+      "gold_files": [
+        "include/simdjson/dom/serialization-inl.h",
+        "include/simdjson/dom/serialization.h"
+      ],
+      "primary_files": [
+        "include/simdjson/dom/serialization-inl.h",
+        "include/simdjson/dom/serialization.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/dom/serialization-inl.h",
+          "scope": "",
+          "name": "fast_itoa"
+        },
+        {
+          "file": "include/simdjson/dom/serialization-inl.h",
+          "scope": "mini_formatter",
+          "name": "number"
+        },
+        {
+          "file": "include/simdjson/dom/serialization-inl.h",
+          "scope": "mini_formatter",
+          "name": "string"
+        },
+        {
+          "file": "include/simdjson/dom/serialization-inl.h",
+          "scope": "",
+          "name": "append"
+        },
+        {
+          "file": "include/simdjson/dom/serialization.h",
+          "scope": "",
+          "name": "mini_formatter"
+        },
+        {
+          "file": "include/simdjson/dom/serialization.h",
+          "scope": "",
+          "name": "minify"
+        }
+      ],
+      "n_universe_files": 361,
+      "arms": {
+        "for": {
+          "file_first": 24,
+          "file_worst": null,
+          "wall": 0.2891
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-2150",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "e1c6a778f8800787bd6846de3f42485f39f558bb",
+      "subject": "Why we do not have a std::string_view version for the key() of field (not key_raw_json_token)?",
+      "gold_files": [
+        "include/simdjson/generic/ondemand/field-inl.h",
+        "include/simdjson/generic/ondemand/field.h"
+      ],
+      "primary_files": [
+        "include/simdjson/generic/ondemand/field-inl.h",
+        "include/simdjson/generic/ondemand/field.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/generic/ondemand/field-inl.h",
+          "scope": "field",
+          "name": "key_raw_json_token"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/field.h",
+          "scope": "",
+          "name": "field"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/field.h",
+          "scope": "",
+          "name": "simdjson_result"
+        }
+      ],
+      "n_universe_files": 382,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 0.7983
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-2178",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "bf7834179c1f8fc523c9fd73d29b46348ae1d576",
+      "subject": "Better error for JSON Pointer \"overshooting\" the actual JSON structure.",
+      "gold_files": [
+        "include/simdjson/dom/element-inl.h",
+        "include/simdjson/error.h",
+        "include/simdjson/generic/ondemand/value-inl.h"
+      ],
+      "primary_files": [
+        "include/simdjson/dom/element-inl.h",
+        "include/simdjson/error.h",
+        "include/simdjson/generic/ondemand/value-inl.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/dom/element-inl.h",
+          "scope": "element",
+          "name": "at_pointer"
+        },
+        {
+          "file": "include/simdjson/error.h",
+          "scope": "",
+          "name": "error_code"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value-inl.h",
+          "scope": "value",
+          "name": "current_depth"
+        },
+        {
+          "file": "include/simdjson/generic/ondemand/value-inl.h",
+          "scope": "value",
+          "name": "at_pointer"
+        }
+      ],
+      "n_universe_files": 397,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": null,
+          "wall": 0.4099
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-485",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "76c706644a245726d263950065219c45bd156d1a",
+      "subject": "Consider creating a JsonFactory that holds memory necessary for parsing",
+      "gold_files": [
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/parseandstatcompetition.cpp",
+        "benchmark/statisticalmodel.cpp",
+        "fuzz/fuzz_dump_raw_tape.cpp",
+        "include/simdjson/jsonparser.h",
+        "include/simdjson/jsonstream.h",
+        "include/simdjson/parsedjson.h",
+        "include/simdjson/parsedjsoniterator.h",
+        "include/simdjson/simdjson.h",
+        "include/simdjson/simdjson_version.h",
+        "include/simdjson/stage1_find_marks.h",
+        "include/simdjson/stage2_build_tape.h",
+        "src/arm64/stage1_find_marks.h",
+        "src/generic/numberparsing.h",
+        "src/generic/stage1_find_marks.h",
+        "src/generic/stage2_build_tape.h",
+        "src/generic/stage2_streaming_build_tape.h",
+        "src/haswell/stage1_find_marks.h",
+        "src/jsonparser.cpp",
+        "src/parsedjson.cpp",
+        "src/parsedjsoniterator.cpp",
+        "src/westmere/stage1_find_marks.h",
+        "tools/jsonstats.cpp"
+      ],
+      "primary_files": [
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/parseandstatcompetition.cpp",
+        "benchmark/statisticalmodel.cpp",
+        "fuzz/fuzz_dump_raw_tape.cpp",
+        "include/simdjson/jsonparser.h",
+        "include/simdjson/jsonstream.h",
+        "include/simdjson/parsedjson.h",
+        "include/simdjson/parsedjsoniterator.h",
+        "include/simdjson/simdjson.h",
+        "include/simdjson/stage1_find_marks.h",
+        "include/simdjson/stage2_build_tape.h",
+        "src/arm64/stage1_find_marks.h",
+        "src/generic/numberparsing.h",
+        "src/generic/stage1_find_marks.h",
+        "src/generic/stage2_build_tape.h",
+        "src/generic/stage2_streaming_build_tape.h",
+        "src/haswell/stage1_find_marks.h",
+        "src/jsonparser.cpp",
+        "src/parsedjson.cpp",
+        "src/westmere/stage1_find_marks.h",
+        "tools/jsonstats.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "benchmark/benchmarker.h",
+          "scope": "",
+          "name": "json_stats"
+        },
+        {
+          "file": "benchmark/benchmarker.h",
+          "scope": "",
+          "name": "benchmarker"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "print_vec"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "simdjson_scan"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "simdjson_just_dom"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/parseandstatcompetition.cpp",
+          "scope": "",
+          "name": "simdjson_compute_stats"
+        },
+        {
+          "file": "benchmark/statisticalmodel.cpp",
+          "scope": "",
+          "name": "simdjson_compute_stats"
+        },
+        {
+          "file": "fuzz/fuzz_dump_raw_tape.cpp",
+          "scope": "",
+          "name": "LLVMFuzzerTestOneInput"
+        },
+        {
+          "file": "include/simdjson/jsonparser.h",
+          "scope": "",
+          "name": "json_parse_implementation"
+        },
+        {
+          "file": "include/simdjson/jsonparser.h",
+          "scope": "",
+          "name": "json_parse"
+        },
+        {
+          "file": "include/simdjson/jsonparser.h",
+          "scope": "",
+          "name": "build_parsed_json"
+        },
+        {
+          "file": "include/simdjson/jsonstream.h",
+          "scope": "",
+          "name": "string_container"
+        },
+        {
+          "file": "include/simdjson/jsonstream.h",
+          "scope": "",
+          "name": "find_last_json_buf_idx"
+        },
+        {
+          "file": "include/simdjson/jsonstream.h",
+          "scope": "",
+          "name": "~JsonStream"
+        },
+        {
+          "file": "include/simdjson/jsonstream.h",
+          "scope": "",
+          "name": "json_parse"
+        },
+        {
+          "file": "include/simdjson/simdjson.h",
+          "scope": "",
+          "name": "parse_architecture"
+        },
+        {
+          "file": "include/simdjson/simdjson.h",
+          "scope": "",
+          "name": "ErrorValues"
+        },
+        {
+          "file": "include/simdjson/stage2_build_tape.h",
+          "scope": "",
+          "name": "init_state_machine"
+        },
+        {
+          "file": "include/simdjson/stage2_build_tape.h",
+          "scope": "",
+          "name": "unified_machine"
+        },
+        {
+          "file": "src/arm64/stage1_find_marks.h",
+          "scope": "",
+          "name": "must_be_continuation"
+        },
+        {
+          "file": "src/parsedjson.cpp",
+          "scope": "ParsedJson",
+          "name": "print_json"
+        },
+        {
+          "file": "src/parsedjson.cpp",
+          "scope": "ParsedJson",
+          "name": "dump_raw_tape"
+        },
+        {
+          "file": "src/generic/numberparsing.h",
+          "scope": "",
+          "name": "subnormal_power10"
+        },
+        {
+          "file": "src/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_float"
+        },
+        {
+          "file": "src/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_large_integer"
+        },
+        {
+          "file": "src/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_number"
+        },
+        {
+          "file": "src/generic/stage1_find_marks.h",
+          "scope": "json_structural_scanner",
+          "name": "scan"
+        },
+        {
+          "file": "src/generic/stage2_build_tape.h",
+          "scope": "",
+          "name": "unified_machine_addresses"
+        },
+        {
+          "file": "src/generic/stage2_build_tape.h",
+          "scope": "",
+          "name": "structural_parser"
+        },
+        {
+          "file": "src/generic/stage2_build_tape.h",
+          "scope": "",
+          "name": "unified_machine"
+        },
+        {
+          "file": "src/generic/stage2_streaming_build_tape.h",
+          "scope": "",
+          "name": "streaming_structural_parser"
+        },
+        {
+          "file": "src/generic/stage2_streaming_build_tape.h",
+          "scope": "",
+          "name": "unified_machine"
+        },
+        {
+          "file": "src/jsonparser.cpp",
+          "scope": "",
+          "name": "parse_architecture"
+        },
+        {
+          "file": "src/jsonparser.cpp",
+          "scope": "",
+          "name": "json_parse_dispatch"
+        },
+        {
+          "file": "tools/jsonstats.cpp",
+          "scope": "",
+          "name": "simdjson_compute_stats"
+        }
+      ],
+      "n_universe_files": 306,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1484
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-524",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "0b21203141bd31229c77e4b1e8b22f523a4a69e0",
+      "subject": "Make simdjson.h the only way to #include simdjson",
+      "gold_files": [
+        "benchmark/bench_parse_call.cpp",
+        "benchmark/benchfeatures.cpp",
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/event_counter.h",
+        "benchmark/get_corpus_benchmark.cpp",
+        "benchmark/minifiercompetition.cpp",
+        "benchmark/parse.cpp",
+        "benchmark/parse_stream.cpp",
+        "benchmark/parseandstatcompetition.cpp",
+        "benchmark/parsingcompetition.cpp",
+        "benchmark/statisticalmodel.cpp",
+        "fuzz/fuzz_dump.cpp",
+        "fuzz/fuzz_dump_raw_tape.cpp",
+        "fuzz/fuzz_minify.cpp",
+        "fuzz/fuzz_parser.cpp",
+        "fuzz/fuzz_print_json.cpp",
+        "include/simdjson/document.h",
+        "include/simdjson/document_iterator.h",
+        "include/simdjson/implementation.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_iterator.h",
+        "include/simdjson/parsedjsoniterator.h",
+        "include/simdjson/simdjson.h",
+        "singleheader/amalgamation_demo.cpp",
+        "singleheader/simdjson.cpp",
+        "singleheader/simdjson.h",
+        "src/arm64/numberparsing.h",
+        "src/arm64/stringparsing.h",
+        "src/document.cpp",
+        "src/generic/numberparsing.h",
+        "src/haswell/numberparsing.h",
+        "src/haswell/stringparsing.h",
+        "src/westmere/numberparsing.h",
+        "src/westmere/stringparsing.h",
+        "tools/json2json.cpp",
+        "tools/jsonpointer.cpp",
+        "tools/jsonstats.cpp",
+        "tools/minify.cpp"
+      ],
+      "primary_files": [
+        "benchmark/bench_parse_call.cpp",
+        "benchmark/benchfeatures.cpp",
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/event_counter.h",
+        "benchmark/get_corpus_benchmark.cpp",
+        "benchmark/minifiercompetition.cpp",
+        "benchmark/parse.cpp",
+        "benchmark/parse_stream.cpp",
+        "benchmark/parseandstatcompetition.cpp",
+        "benchmark/parsingcompetition.cpp",
+        "benchmark/statisticalmodel.cpp",
+        "fuzz/fuzz_dump.cpp",
+        "fuzz/fuzz_dump_raw_tape.cpp",
+        "fuzz/fuzz_minify.cpp",
+        "fuzz/fuzz_parser.cpp",
+        "fuzz/fuzz_print_json.cpp",
+        "include/simdjson/document.h",
+        "include/simdjson/document_iterator.h",
+        "include/simdjson/implementation.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_iterator.h",
+        "singleheader/amalgamation_demo.cpp",
+        "singleheader/simdjson.cpp",
+        "singleheader/simdjson.h",
+        "src/arm64/numberparsing.h",
+        "src/arm64/stringparsing.h",
+        "src/document.cpp",
+        "src/generic/numberparsing.h",
+        "src/haswell/numberparsing.h",
+        "src/haswell/stringparsing.h",
+        "src/westmere/numberparsing.h",
+        "src/westmere/stringparsing.h",
+        "tools/json2json.cpp",
+        "tools/jsonpointer.cpp",
+        "tools/jsonstats.cpp",
+        "tools/minify.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/document_iterator.h",
+          "scope": "",
+          "name": "document_iterator"
+        },
+        {
+          "file": "singleheader/amalgamation_demo.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "document",
+          "name": "set_capacity"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "document",
+          "name": "print_json"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "",
+          "name": "follows"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "",
+          "name": "parse_large_integer"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "aligned_free_char"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "document_iterator"
+        },
+        {
+          "file": "src/generic/numberparsing.h",
+          "scope": "",
+          "name": "parse_large_integer"
+        }
+      ],
+      "n_universe_files": 312,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "wall": 0.1808
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-543",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "d140bc23f547e7cca43f85bf0ba1004e26e228e3",
+      "subject": "More discoverable API to parse a file",
+      "gold_files": [
+        "benchmark/bench_dom_api.cpp",
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/minifiercompetition.cpp",
+        "benchmark/parse_stream.cpp",
+        "benchmark/parseandstatcompetition.cpp",
+        "benchmark/parsingcompetition.cpp",
+        "benchmark/statisticalmodel.cpp",
+        "include/simdjson.h",
+        "include/simdjson/document.h",
+        "include/simdjson/document_stream.h",
+        "include/simdjson/error.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_stream.h",
+        "include/simdjson/inline/error.h",
+        "include/simdjson/jsonioutil.h",
+        "include/simdjson/padded_string.h",
+        "src/jsonioutil.cpp",
+        "src/simdjson.cpp",
+        "tools/json2json.cpp",
+        "tools/jsonpointer.cpp",
+        "tools/jsonstats.cpp",
+        "tools/minify.cpp"
+      ],
+      "primary_files": [
+        "benchmark/bench_dom_api.cpp",
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/minifiercompetition.cpp",
+        "benchmark/parse_stream.cpp",
+        "benchmark/parseandstatcompetition.cpp",
+        "benchmark/parsingcompetition.cpp",
+        "benchmark/statisticalmodel.cpp",
+        "include/simdjson/document.h",
+        "include/simdjson/document_stream.h",
+        "include/simdjson/error.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_stream.h",
+        "include/simdjson/inline/error.h",
+        "include/simdjson/jsonioutil.h",
+        "include/simdjson/padded_string.h",
+        "src/jsonioutil.cpp",
+        "tools/json2json.cpp",
+        "tools/jsonpointer.cpp",
+        "tools/jsonstats.cpp",
+        "tools/minify.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "benchmark/bench_dom_api.cpp",
+          "scope": "",
+          "name": "EMPTY_ARRAY"
+        },
+        {
+          "file": "benchmark/bench_dom_api.cpp",
+          "scope": "",
+          "name": "BENCHMARK"
+        },
+        {
+          "file": "benchmark/benchmarker.h",
+          "scope": "",
+          "name": "json_stats"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/minifiercompetition.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/parse_stream.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/parseandstatcompetition.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/parsingcompetition.cpp",
+          "scope": "",
+          "name": "sum_line_lengths"
+        },
+        {
+          "file": "benchmark/statisticalmodel.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/document_stream.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/error.h",
+          "scope": "",
+          "name": "error_code"
+        },
+        {
+          "file": "include/simdjson/error.h",
+          "scope": "",
+          "name": "simdjson_error"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document",
+          "name": "dump_raw_tape"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::doc_result",
+          "name": "doc_result"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::parser",
+          "name": "get_document"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::element",
+          "name": "as_int64_t"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document::stream",
+          "name": "stream"
+        },
+        {
+          "file": "include/simdjson/padded_string.h",
+          "scope": "",
+          "name": "padded_string"
+        },
+        {
+          "file": "tools/json2json.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "tools/jsonpointer.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "tools/jsonstats.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "tools/minify.cpp",
+          "scope": "",
+          "name": "main"
+        }
+      ],
+      "n_universe_files": 315,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "wall": 0.1717
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-545",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "e4e89fe27a37a1abf70387d07adfb3b1b9f115ef",
+      "subject": "Support << for parsed JSON DOM",
+      "gold_files": [
+        "benchmark/bench_dom_api.cpp",
+        "include/simdjson/document.h",
+        "include/simdjson/document_parser.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_iterator.h",
+        "include/simdjson/internal/jsonformatutils.h"
+      ],
+      "primary_files": [
+        "benchmark/bench_dom_api.cpp",
+        "include/simdjson/document.h",
+        "include/simdjson/document_parser.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_iterator.h",
+        "include/simdjson/internal/jsonformatutils.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "benchmark/bench_dom_api.cpp",
+          "scope": "",
+          "name": "iterator_twitter_image_sizes"
+        },
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/document_parser.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document",
+          "name": "set_capacity"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document",
+          "name": "dump_raw_tape"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::parser",
+          "name": "is_valid"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::tape_ref",
+          "name": "next_tape_value"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::element",
+          "name": "as_c_str"
+        },
+        {
+          "file": "include/simdjson/inline/document_iterator.h",
+          "scope": "",
+          "name": "print"
+        }
+      ],
+      "n_universe_files": 316,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 37,
+          "wall": 0.159
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-559",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "032936a7b54f3c705af3b60b798045c940a2eb86",
+      "subject": "Allow compilation with -fno-exceptions",
+      "gold_files": [
+        "benchmark/bench_dom_api.cpp",
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/get_corpus_benchmark.cpp",
+        "benchmark/parse_stream.cpp",
+        "dependencies/jsoncppdist/jsoncpp.cpp",
+        "fuzz/fuzz_dump.cpp",
+        "include/simdjson/common_defs.h",
+        "include/simdjson/document.h",
+        "include/simdjson/document_iterator.h",
+        "include/simdjson/document_stream.h",
+        "include/simdjson/error.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_iterator.h",
+        "include/simdjson/inline/document_stream.h",
+        "include/simdjson/inline/padded_string.h",
+        "include/simdjson/jsonioutil.h",
+        "include/simdjson/jsonparser.h",
+        "include/simdjson/padded_string.h",
+        "singleheader/simdjson.h",
+        "src/document_parser_callbacks.h",
+        "tools/json2json.cpp",
+        "tools/jsonpointer.cpp"
+      ],
+      "primary_files": [
+        "benchmark/bench_dom_api.cpp",
+        "benchmark/benchmarker.h",
+        "benchmark/distinctuseridcompetition.cpp",
+        "benchmark/get_corpus_benchmark.cpp",
+        "benchmark/parse_stream.cpp",
+        "dependencies/jsoncppdist/jsoncpp.cpp",
+        "fuzz/fuzz_dump.cpp",
+        "include/simdjson/document.h",
+        "include/simdjson/document_iterator.h",
+        "include/simdjson/document_stream.h",
+        "include/simdjson/error.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/document_iterator.h",
+        "include/simdjson/inline/document_stream.h",
+        "include/simdjson/inline/padded_string.h",
+        "include/simdjson/jsonioutil.h",
+        "include/simdjson/jsonparser.h",
+        "include/simdjson/padded_string.h",
+        "singleheader/simdjson.h",
+        "tools/json2json.cpp",
+        "tools/jsonpointer.cpp"
+      ],
+      "gold_funcs": [
+        {
+          "file": "benchmark/bench_dom_api.cpp",
+          "scope": "",
+          "name": "twitter_count"
+        },
+        {
+          "file": "benchmark/bench_dom_api.cpp",
+          "scope": "",
+          "name": "twitter_default_profile"
+        },
+        {
+          "file": "benchmark/bench_dom_api.cpp",
+          "scope": "",
+          "name": "iterator_twitter_default_profile"
+        },
+        {
+          "file": "benchmark/benchmarker.h",
+          "scope": "",
+          "name": "json_stats"
+        },
+        {
+          "file": "benchmark/benchmarker.h",
+          "scope": "",
+          "name": "benchmark_stage_name"
+        },
+        {
+          "file": "benchmark/benchmarker.h",
+          "scope": "",
+          "name": "benchmarker"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "simdjson_just_dom"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "simdjson_compute_stats"
+        },
+        {
+          "file": "benchmark/distinctuseridcompetition.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/get_corpus_benchmark.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "benchmark/parse_stream.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "dependencies/jsoncppdist/jsoncpp.cpp",
+          "scope": "Exception",
+          "name": "what"
+        },
+        {
+          "file": "fuzz/fuzz_dump.cpp",
+          "scope": "",
+          "name": "LLVMFuzzerTestOneInput"
+        },
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/document_stream.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "include/simdjson/error.h",
+          "scope": "",
+          "name": "simdjson_error"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document",
+          "name": "dump_raw_tape"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::parser",
+          "name": "print_json"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::parser",
+          "name": "get_document"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::parser",
+          "name": "load_many"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::parser",
+          "name": "ensure_capacity"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::tape_ref",
+          "name": "after_element"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::tape_ref",
+          "name": "get_string_view"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::array",
+          "name": "end"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::object::iterator",
+          "name": "value"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "",
+          "name": "int64_t"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::element",
+          "name": "as_c_str"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::element",
+          "name": "as_uint64_t"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::element",
+          "name": "as_int64_t"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "document::element",
+          "name": "as_double"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "",
+          "name": "print"
+        },
+        {
+          "file": "include/simdjson/inline/document_iterator.h",
+          "scope": "",
+          "name": "document_iterator"
+        },
+        {
+          "file": "include/simdjson/inline/document_iterator.h",
+          "scope": "",
+          "name": "move_to"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document::stream::iterator",
+          "name": "iterator"
+        },
+        {
+          "file": "include/simdjson/inline/padded_string.h",
+          "scope": "padded_string",
+          "name": "data"
+        },
+        {
+          "file": "include/simdjson/padded_string.h",
+          "scope": "",
+          "name": "padded_string"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "element_result"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document",
+          "name": "array"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::object",
+          "name": "begin"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "int64_t"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_bool"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_c_str"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_string"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_uint64_t"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_int64_t"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_double"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_array"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document::element",
+          "name": "as_object"
+        },
+        {
+          "file": "src/document_parser_callbacks.h",
+          "scope": "document::parser",
+          "name": "on_success"
+        },
+        {
+          "file": "src/document_parser_callbacks.h",
+          "scope": "document::parser",
+          "name": "on_end_document"
+        },
+        {
+          "file": "src/document_parser_callbacks.h",
+          "scope": "document::parser",
+          "name": "on_end_string"
+        },
+        {
+          "file": "tools/json2json.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "tools/jsonpointer.cpp",
+          "scope": "",
+          "name": "main"
+        }
+      ],
+      "n_universe_files": 317,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": null,
+          "wall": 0.153
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-644",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "d4f4608dab2c70ceed233b818e1563581bc415a7",
+      "subject": "Possible confusion between key access and jsonpointer",
+      "gold_files": [
+        "include/simdjson/document.h",
+        "include/simdjson/inline/document.h"
+      ],
+      "primary_files": [
+        "include/simdjson/document.h",
+        "include/simdjson/inline/document.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "element"
+        },
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "array"
+        },
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "object"
+        },
+        {
+          "file": "include/simdjson/document.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "",
+          "name": "get"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "",
+          "name": "end"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "object",
+          "name": "end"
+        },
+        {
+          "file": "include/simdjson/inline/document.h",
+          "scope": "",
+          "name": "object"
+        }
+      ],
+      "n_universe_files": 325,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 3,
+          "wall": 0.1651
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-949",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "2cc84b6e51df1b71dd08df1f2f3435df2bc47783",
+      "subject": "Add get_string, get_number... methods to the API as well as is_string, is_number...  (don't force templates)",
+      "gold_files": [
+        "include/simdjson/dom/array.h",
+        "include/simdjson/dom/element.h",
+        "include/simdjson/dom/object.h",
+        "include/simdjson/inline/array.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/element.h",
+        "include/simdjson/inline/object.h"
+      ],
+      "primary_files": [
+        "include/simdjson/dom/array.h",
+        "include/simdjson/dom/element.h",
+        "include/simdjson/dom/object.h",
+        "include/simdjson/inline/array.h",
+        "include/simdjson/inline/document.h",
+        "include/simdjson/inline/element.h",
+        "include/simdjson/inline/object.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/dom/array.h",
+          "scope": "",
+          "name": "element"
+        },
+        {
+          "file": "include/simdjson/dom/array.h",
+          "scope": "",
+          "name": "array"
+        },
+        {
+          "file": "include/simdjson/dom/element.h",
+          "scope": "",
+          "name": "element_type"
+        },
+        {
+          "file": "include/simdjson/dom/element.h",
+          "scope": "",
+          "name": "element"
+        },
+        {
+          "file": "include/simdjson/dom/element.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/dom/object.h",
+          "scope": "",
+          "name": "key_value_pair"
+        },
+        {
+          "file": "include/simdjson/dom/object.h",
+          "scope": "",
+          "name": "object"
+        },
+        {
+          "file": "include/simdjson/inline/array.h",
+          "scope": "array",
+          "name": "at"
+        },
+        {
+          "file": "include/simdjson/inline/element.h",
+          "scope": "",
+          "name": "type"
+        },
+        {
+          "file": "include/simdjson/inline/element.h",
+          "scope": "",
+          "name": "get"
+        },
+        {
+          "file": "include/simdjson/inline/element.h",
+          "scope": "element",
+          "name": "at_key_case_insensitive"
+        },
+        {
+          "file": "include/simdjson/inline/element.h",
+          "scope": "",
+          "name": "print"
+        },
+        {
+          "file": "include/simdjson/inline/object.h",
+          "scope": "object",
+          "name": "at_key_case_insensitive"
+        }
+      ],
+      "n_universe_files": 366,
+      "arms": {
+        "for": {
+          "file_first": 9,
+          "file_worst": 38,
+          "wall": 0.2096
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-954",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "c25928e44fb69f5a3b1d0bbbabf75742e15269ee",
+      "subject": "Make parser.load_many() return simdjson_result",
+      "gold_files": [
+        "benchmark/parse_stream.cpp",
+        "include/simdjson/dom/document_stream.h",
+        "include/simdjson/dom/element.h",
+        "include/simdjson/dom/parser.h",
+        "include/simdjson/inline/document_stream.h",
+        "include/simdjson/inline/parser.h",
+        "singleheader/amalgamate_demo.cpp",
+        "singleheader/simdjson.cpp",
+        "singleheader/simdjson.h"
+      ],
+      "primary_files": [
+        "benchmark/parse_stream.cpp",
+        "include/simdjson/dom/document_stream.h",
+        "include/simdjson/dom/element.h",
+        "include/simdjson/dom/parser.h",
+        "include/simdjson/inline/document_stream.h",
+        "include/simdjson/inline/parser.h",
+        "singleheader/amalgamate_demo.cpp",
+        "singleheader/simdjson.cpp",
+        "singleheader/simdjson.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "benchmark/parse_stream.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "include/simdjson/dom/document_stream.h",
+          "scope": "",
+          "name": "stage1_worker"
+        },
+        {
+          "file": "include/simdjson/dom/document_stream.h",
+          "scope": "",
+          "name": "document_stream"
+        },
+        {
+          "file": "include/simdjson/dom/element.h",
+          "scope": "",
+          "name": "element"
+        },
+        {
+          "file": "include/simdjson/dom/parser.h",
+          "scope": "",
+          "name": "parser"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "stage1_worker",
+          "name": "run"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document_stream",
+          "name": "document_stream"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document_stream::iterator",
+          "name": "iterator"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document_stream",
+          "name": "next"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document_stream",
+          "name": "load_from_stage1_thread"
+        },
+        {
+          "file": "include/simdjson/inline/document_stream.h",
+          "scope": "document_stream",
+          "name": "start_stage1_thread"
+        },
+        {
+          "file": "include/simdjson/inline/parser.h",
+          "scope": "parser",
+          "name": "load"
+        },
+        {
+          "file": "include/simdjson/inline/parser.h",
+          "scope": "parser",
+          "name": "parse"
+        },
+        {
+          "file": "singleheader/amalgamate_demo.cpp",
+          "scope": "",
+          "name": "main"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "",
+          "name": "must_be_continuation"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "",
+          "name": "json_string_scanner"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "json_string_scanner",
+          "name": "next"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "json_scanner",
+          "name": "finish"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "",
+          "name": "trim_partial_utf8"
+        },
+        {
+          "file": "singleheader/simdjson.cpp",
+          "scope": "",
+          "name": "parse_number"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "aligned_free"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "simdjson_result_base"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "implementation"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "tape_ref"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "minify"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "element"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "array"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "document"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "parser"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "document_stream"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "element_type"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "key_value_pair"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "object"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "array",
+          "name": "at"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "print"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document_stream::iterator",
+          "name": "iterator"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document_stream",
+          "name": "start"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document_stream",
+          "name": "next"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document_stream",
+          "name": "run_stage1"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "document_stream",
+          "name": "start_stage1_thread"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "type"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "element",
+          "name": "at_key_case_insensitive"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "",
+          "name": "tie"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "object",
+          "name": "at_key_case_insensitive"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "parser",
+          "name": "read_file"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "parser",
+          "name": "parse"
+        },
+        {
+          "file": "singleheader/simdjson.h",
+          "scope": "parser",
+          "name": "allocate"
+        }
+      ],
+      "n_universe_files": 368,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 25,
+          "wall": 0.2206
+        }
+      }
+    },
+    {
+      "instance_id": "simdjson__simdjson-958",
+      "org": "simdjson",
+      "repo": "simdjson",
+      "base_sha": "eef117194478115f842e08682bc769051a0a863f",
+      "subject": "Rationale for is<T> when exceptions are disabled",
+      "gold_files": [
+        "include/simdjson/dom/element.h",
+        "include/simdjson/inline/element.h"
+      ],
+      "primary_files": [
+        "include/simdjson/dom/element.h",
+        "include/simdjson/inline/element.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "include/simdjson/dom/element.h",
+          "scope": "",
+          "name": "simdjson_result"
+        },
+        {
+          "file": "include/simdjson/inline/element.h",
+          "scope": "",
+          "name": "type"
+        },
+        {
+          "file": "include/simdjson/inline/element.h",
+          "scope": "",
+          "name": "get_bool"
+        }
+      ],
+      "n_universe_files": 370,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 9,
+          "wall": 0.1861
+        }
+      }
+    },
+    {
+      "instance_id": "yhirose__cpp-httplib-1765",
+      "org": "yhirose",
+      "repo": "cpp-httplib",
+      "base_sha": "44b3fe6277398f424f1844295b7ae46ba5a1a35f",
+      "subject": "detail::is_valid_path returns true for paths with embedded NULs",
+      "gold_files": [
+        "httplib.h"
+      ],
+      "primary_files": [
+        "httplib.h"
+      ],
+      "gold_funcs": [
+        {
+          "file": "httplib.h",
+          "scope": "",
+          "name": "is_valid_path"
+        }
+      ],
+      "n_universe_files": 26,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "wall": 0.142
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+# labels_recall.tsv — held-out labels for the RECALL lane (PLAN_outputAudit_2026-07-28.md §Sequencing:
+# the measuring instrument that must exist before §P2b — default de-prioritization of generated docs in
+# the recall lens — may be evaluated). One row per query: query<TAB>primary<TAB>acceptable<TAB>class
+#   primary    = comma-separated repo-relative markdown path(s); a hit on ANY of them is primary credit.
+#   acceptable = comma-separated path(s) earning lenient (graded) credit, or `-` for none.
+#   class      = name | concept | task | adversarial
+#                name        — the query names the doc or its title nearly verbatim
+#                concept     — conceptual phrase answered by exactly one design/research doc
+#                task        — an agent's task-shaped question whose answer is a doc
+#                adversarial — a query whose TOP LEXICAL match is expected to be a generated capture
+#                              (docs/captures/COMMANDS_showcase_*.md quotes every verb and flag), while
+#                              the labelled right answer is the real hand-written doc.
+#
+# LABELING PROTOCOL (held-out means held out): every label below was authored by READING the candidate
+# documents' actual content (titles + bodies) and deciding which doc ANSWERS the query — never by running
+# `--recall` and transcribing what the current ranker returns. The ranker was run on these queries only
+# AFTER this file was complete, to produce baseline numbers. The eval is therefore allowed to say the
+# current ranker is wrong.
+#
+# Corpus note: the recall lens is docs-only (markdown). Labels reference docs in THIS working tree,
+# including PLAN_/DESIGN_/RESEARCH_ docs that are not on the public SHIP list; the harness counts a query
+# whose labelled paths are absent on disk as SKIPPED (reported), so a pruned checkout degrades honestly.
+SPEC definitive spec decided choices output schema	SPEC.md	README.md	name
+phase ledger which phase is DONE gate status	PLAN_phases.md	-	name
+PUBLIC_MANIFEST what ships to the public remote	PUBLIC_MANIFEST.md	-	name
+where do I log a change to a vendored infra file	INFRA_IMPROVEMENTS.md	CLAUDE.md,AGENTS.md	task
+changelog what changed in recent releases	CHANGELOG.md	-	name
+locbench gate decision anchor holds	bench/locbench/GATE_DECISION.md	bench/locbench/README.md	name
+session trace mined retrieval eval queries design	DESIGN_traceEvals.md	-	name
+README quick start which flag answers which question	README.md	-	name
+security vulnerability disclosure reporting policy	SECURITY.md	-	concept
+how to contribute pull requests build and test	CONTRIBUTING.md	CODE_OF_CONDUCT.md,CLAUDE.md	task
+multi root workspaces merged into one labeled graph design	DESIGN_multiRoot.md	README.md	concept
+minimal connecting subgraph relating several symbols design	DESIGN_connectSubgraph.md	README.md	concept
+inheritance type edges interface implementors factory lego design	DESIGN_inheritanceEdges.md	-	concept
+path precise include resolution sound SameInclude tier	DESIGN_pathPreciseInclude.md	DESIGN_resolutionCompleteness.md	concept
+resolution completeness honesty unresolved gauge precise imports	DESIGN_resolutionCompleteness.md	DESIGN_pathPreciseInclude.md	concept
+deterministic speculative context prefetch measure first study	DESIGN_specPrefetch.md	-	concept
+committable team index artifact remote MCP transport design	DESIGN_teamIndex.md	-	concept
+labelled eval for skill routing corpus design	RESEARCH_skillEval2026.md	PLAN_skills2026.md	concept
+shrinking what the tool returns to the caller output economy	RESEARCH_outputEconomy.md	-	concept
+2026 code intelligence competitive landscape where ctxpack fits	RESEARCH_competitiveLandscape2026.md	RESEARCH_codeIntelligence.md	concept
+multi resolution retrieval research decisions	RESEARCH_multiResolution.md	-	concept
+code quality signals to steer better agent code	RESEARCH_codeQualitySteering.md	RESEARCH_agentQuality2026.md	concept
+evidence study better code fewer tokens never stale	RESEARCH_agentQuality2026.md	-	name
+orthogonal tools that help an AI agent code brainstorm	RESEARCH_orthogonalTools.md	-	name
+language expansion simdjson coverage plan	PLAN_languages2026.md	-	name
+big dispatch functions refactor leave or ack plan	PLAN_dispatchRefactor_2026-07-27.md	-	name
+go public program audit remediation plan	PLAN_audit5Public2026.md	AUDIT5_fable2026.md	concept
+agent new to this repo golden rules build guide	AGENTS.md	CLAUDE.md,CONTRIBUTING.md	task
+adversarial review of the landed graph correctness levers	PLAN_hardeningFindings.md	-	name
+does the right feature fire at the right moment adoption audit	ADOPTION_AUDIT_fable2026.md	-	name
+C++ performance first priority plan	PLAN_cpp_perf2026.md	-	name
+make agents actually use the features skills plan	PLAN_skills2026.md	-	name
+output audit findings recall budget paging vocabulary	PLAN_outputAudit_2026-07-28.md	NEXT_SESSION_outputAudit.md	name
+quality delta gating exit codes usage	README.md	SPEC.md,skills/ctxpack-quality-bar/SKILL.md	adversarial
+pack task one call orientation under a token budget usage	README.md	SPEC.md,skills/ctxpack-orient/SKILL.md	adversarial
+merge scout pairwise conflict sites landing order usage	README.md	SPEC.md,skills/ctxpack-change-check/SKILL.md	adversarial
+recall memory notes token budget flags usage	README.md	SPEC.md	adversarial
+from trace stack frames mapped to symbols usage	README.md	SPEC.md,skills/ctxpack-find-bug/SKILL.md	adversarial
+edit check did the contract change callers usage	README.md	SPEC.md,skills/ctxpack-change-check/SKILL.md	adversarial

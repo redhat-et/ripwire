@@ -1,0 +1,8 @@
+# A well-formed YAML rule whose tree-sitter QUERY is invalid (unbalanced parens / bogus node).
+# astQuery must fail to compile it, alert once, and skip it — without killing the run.
+- id: broken-query
+  language: cpp
+  severity: error
+  message: this query never compiles
+  query: |
+    (this_is_not_a_real_node @x @@@ ((( )

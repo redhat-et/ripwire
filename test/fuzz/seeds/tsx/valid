@@ -1,0 +1,2 @@
+const Leaf = () => <span>one</span>;
+const Root = () => <div><Leaf /></div>;

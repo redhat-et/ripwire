@@ -1,0 +1,7 @@
+# A malformed rule FILE: an unknown key and a field with no colon — outside the accepted
+# YAML subset. The loader must alert (file+line), SKIP this whole file, and continue.
+- id: bad-shape
+  language: cpp
+  this line has no colon so it is not a key value pair
+  query: |
+    (call_expression) @hit

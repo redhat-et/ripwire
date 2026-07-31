@@ -1,0 +1,21 @@
+# perf_budgets.txt — perfgate.sh budgets (Wave 2 #8: the drift alarm)
+#
+# format: <key> <max_ms>   (one per line; # comments and blank lines ignored)
+#
+# Rationale: each budget = measured median x 1.5 on the machine/date below. The 1.5x
+# headroom absorbs normal machine variance (thermal throttling, background load, P/E core
+# scheduling jitter) WITHOUT masking a real regression — a genuine perf bug is rarely a 10-20%
+# wobble, it's a missing cache hit or an added O(n^2) pass, which blows well past 1.5x.
+# Regenerate one label with: bench/perfgate.sh --write-budgets   (only after a DELIBERATE,
+# verified perf change — don't silently ratchet budgets up to make a regression disappear).
+#
+# updated label: cpp
+# updated corpus: historical, private corpus (not reproducible publicly) — regenerate the cpp label
+# on your own large C++ corpus with CTXPACK_PERF_CORPUS=<path> CTXPACK_PERF_LABEL=cpp bench/perfgate.sh --write-budgets
+# generated: 2026-07-06 21:56 UTC  machine: Darwin arm64
+#
+cold 255
+warm 30
+cold_cpp 270
+warm_cpp 60
+deps_cpp 45

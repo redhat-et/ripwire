@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# testgatecheck.sh — gate for --test-gate[=F1,F2] (A4-R2, the TDAD-parity regression contract). Contract
+# (from --help): names the tests to run for a change + the UNTESTED blast radius, and the EXIT CODE is the
+# gate (exit 4 when either obligation is non-empty, exit 0 when neither). Mirrors --quality-delta's
+# convergence-loop shape; motivated by TDAD (arXiv 2603.17973): a queryable call-graph+test map cut
+# agent-caused regressions -70% (6.08%->1.82%).
+#
+# KEY SEMANTIC (documented here so the test's own shape is honest): this gate NAMES obligations, it cannot
+# OBSERVE a test run. So "run the covering test, does the gate go green?" is the WRONG mental model — re-running
+# the same command yields the same exit 4, because the obligation (this test MUST be run) still EXISTS. The
+# agent loop is: gate → run the named tests → rely on the now-green tests. The exit contract is about the
+# EXISTENCE of test obligations / untested reach, never their satisfaction. Scenario (b) below pins exactly this.
+#
+# Synthetic corpus (no git history needed — --test-gate takes the changed set as an argument, like --situ=FILES):
+#   src/covered.cpp    :  covered()                              (has a covering test)
+#   test/test_covered.cpp : test_covered() -> covered()          (transitively reaches covered)
+#   src/uncovered.cpp  :  uncovered()                            (NO test reaches it or its users)
+#   src/user.cpp       :  user() -> uncovered()                  (non-test symbol in uncovered()'s blast radius)
+#
+# Hand-computed expectations:
+#   --test-gate=src/covered.cpp   → tests={test_covered.cpp}, untested={} → exit 4 (there is a test to run)
+#   --test-gate=src/uncovered.cpp → tests={}, untested={user} → exit 4 (a non-test impacted symbol no test covers)
+#   --test-gate=<no such file>    → changed=0, exit 0 (no change = no obligations)
+#
+# Usage:  CTXPACK_BIN=build/ctxpack bash test/testgatecheck.sh   |   CTXPACK_BIN=asan/ctxpack bash …
+# Exits non-zero on any failure. Does NOT edit regression.sh.
+
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+BIN="${1:-${CTXPACK_BIN:-$ROOT/build/ctxpack}}"   # BOTH seams: positional and CTXPACK_BIN
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+fail=0
+ok(){ printf '  PASS  %s\n' "$*"; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+
+[ -x "$BIN" ] || { echo "no ctxpack binary at $BIN — build first"; exit 2; }
+echo "testgatecheck: BIN=$BIN"
+
+TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+R="$TMP/repo"; mkdir -p "$R/src" "$R/test"
+printf 'int covered() { return 1; }\n'                       > "$R/src/covered.cpp"
+printf 'void test_covered() { covered(); }\n'                > "$R/test/test_covered.cpp"
+printf 'int uncovered() { return 2; }\n'                     > "$R/src/uncovered.cpp"
+printf 'int user() { return uncovered(); }\n'                > "$R/src/user.cpp"
+
+# run + capture exit code separately (the gate's exit IS the contract)
+run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
+rc(){  perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache >/dev/null 2>&1; echo $?; }
+attr(){ printf '%s' "$1" | grep -oE "$2=\"[0-9]+\"" | head -1 | grep -oE '[0-9]+'; }
+# basenames of the emitted <t p="..."/> test rows, sorted
+tset(){ printf '%s' "$1" | grep -oE '<t p="[^"]*"' | grep -oE '[^/"]*"$' | sed 's/"$//' | sort | tr '\n' ','; }
+# names of the emitted <u sym="..."/> untested rows, sorted
+uset(){ printf '%s' "$1" | grep -oE '<u sym="[^"]*"' | sed -E 's/<u sym="([^"]*)"/\1/' | sort | tr '\n' ','; }
+
+# ── (a) change with an existing covering test → exit 4 listing exactly that test file ─────────────────
+A="$( run --test-gate=src/covered.cpp )"; AEC="$( rc --test-gate=src/covered.cpp )"
+{ [ "$AEC" = 4 ] && [ "$( attr "$A" tests )" = 1 ] && [ "$( tset "$A" )" = "test_covered.cpp," ] && [ "$( attr "$A" untested )" = 0 ]; } \
+    && ok "(a) covered change: tests={test_covered.cpp}, untested=0, exit 4" \
+    || no "(a) covered wrong (exit=$AEC tests=$( attr "$A" tests ) set=$( tset "$A" ) untested=$( attr "$A" untested ))"
+
+# ── (b) the gate names, it cannot observe runs: re-running is byte-identical and STILL exit 4 ─────────
+#      ("after 'running' the covering test" = the same command again; the obligation still EXISTS → exit 4)
+B="$( run --test-gate=src/covered.cpp )"; BEC="$( rc --test-gate=src/covered.cpp )"
+{ [ "$B" = "$A" ] && [ "$BEC" = 4 ]; } \
+    && ok "(b) gate names (cannot observe a run): re-run byte-identical, still exit 4" \
+    || no "(b) re-run drifted (identical=$( [ "$B" = "$A" ] && echo y || echo n ) exit=$BEC) — gate must not pretend to see runs"
+
+# ── (c) change reaching symbols no test covers → untested non-empty, exit 4 with them printed ─────────
+C="$( run --test-gate=src/uncovered.cpp )"; CEC="$( rc --test-gate=src/uncovered.cpp )"
+{ [ "$CEC" = 4 ] && [ "$( attr "$C" tests )" = 0 ] && [ "$( attr "$C" untested )" -ge 1 ] && printf '%s' "$( uset "$C" )" | grep -q 'user'; } \
+    && ok "(c) uncovered change: tests=0, untested>=1 (includes user), exit 4, offenders printed" \
+    || no "(c) uncovered wrong (exit=$CEC tests=$( attr "$C" tests ) untested=$( attr "$C" untested ) uset=$( uset "$C" ))"
+
+# ── (c') the (a) and (c) obligations DIFFER — proves the gate distinguishes tests-to-run from untested reach
+{ [ -n "$( tset "$A" )" ] && [ -z "$( tset "$C" )" ] && [ -z "$( uset "$A" )" ] && [ -n "$( uset "$C" )" ]; } \
+    && ok "(c') distinguishes obligations: covered→a test, uncovered→an untested symbol (not a constant)" \
+    || no "(c') the two changes produced indistinguishable obligations"
+
+# ── (d) no changes → exit 0 with <test-gate changed="0" ...> ─────────────────────────────────────────
+D="$( run --test-gate=zz_no_such_file_xyz.zzz )"; DEC="$( rc --test-gate=zz_no_such_file_xyz.zzz )"
+{ [ "$DEC" = 0 ] && [ "$( attr "$D" changed )" = 0 ] && [ "$( attr "$D" tests )" = 0 ] && [ "$( attr "$D" untested )" = 0 ]; } \
+    && ok '(d) no changes: <test-gate changed="0" tests="0" untested="0">, exit 0' \
+    || no "(d) no-change wrong (exit=$DEC changed=$( attr "$D" changed ) tests=$( attr "$D" tests ) untested=$( attr "$D" untested ))"
+
+# ── (e) determinism (two runs byte-identical) ────────────────────────────────────────────────────────
+[ "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )" = "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )" ] \
+    && ok "(e) deterministic (byte-identical run-to-run)" || no "(e) non-deterministic"
+
+# ── (f) xml well-formed (every emitted variant) ──────────────────────────────────────────────────────
+if command -v xmllint >/dev/null 2>&1; then
+    xok=1
+    for X in "$A" "$C" "$D" "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )"; do
+        printf '%s' "$X" | xmllint --noout - 2>/dev/null || xok=0
+    done
+    [ "$xok" = 1 ] && ok "(f) xml well-formed (all variants)" || no "(f) xml malformed"
+else
+    printf '  SKIP  (f) xml well-formed (no xmllint)\n'
+fi
+
+
+# ── (g) §B12.5 — untested= IS THREE DIFFERENT UNITS, and each legend now says which ──────────────────────
+# `untested=` counts cross-directory call EDGES in --seams, impacted SYMBOLS here, and gate-lit HOSTS in
+# --flip. Every one of those legends was locally honest, which is exactly how a reader who compares two of
+# the numbers is misled — the R13 shape lifted one level. Swept over the WHOLE emitting family from source,
+# not from a remembered list: whatever spells untested= must carry the clause.
+UNIT_FAM="$( grep -rlF 'untested=\"' "$ROOT/src" 2>/dev/null | sed 's|.*/||' | sort | tr '\n' ' ' )"
+probe_unit(){ "$BIN" "$ROOT" $1 2>/dev/null | grep -oE '<!--.*?-->' | head -1; }
+u_ok=1
+for spec in "--seams:EDGES" "--test-gate=src/editcheck.h:SYMBOLS" "--flags --flip=CTXPACK_ASAN:HOSTS"; do
+    _v="${spec%:*}"; _unit="${spec##*:}"
+    _leg="$( probe_unit "$_v" )"
+    if [ -z "$_leg" ]; then
+        no "(g) '$_v' emitted no legend to check"; u_ok=0; continue
+    fi
+    printf '%s' "$_leg" | grep -q "UNIT: untested= here counts .*$_unit" \
+        && ok "(g) '$_v' names its own untested= unit ($_unit)" \
+        || { no "(g) '$_v' does not name its untested= unit"; u_ok=0; }
+    # and it must name the OTHER TWO, or a reader still has no way to know the numbers differ.
+    _others=0
+    for w in EDGES SYMBOLS HOSTS; do [ "$w" = "$_unit" ] && continue
+        printf '%s' "$_leg" | grep -qiE "$( [ $w = EDGES ] && echo 'call EDGES' || { [ $w = SYMBOLS ] && echo 'impacted SYMBOLS' || echo 'defs a gate lights'; } )" && _others=$(( _others + 1 ))
+    done
+    [ "$_others" = 2 ] && ok "(g) '$_v' names the other two verbs' units too (the collision is the finding)" \
+                       || { no "(g) '$_v' names $_others of the 2 sibling units"; u_ok=0; }
+done
+[ "$u_ok" = 1 ] && ok "(g) the untested= family ($UNIT_FAM) all disclose their unit" \
+                || no "(g) at least one untested= emitter is silent about its unit"
+
+[ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
+exit $fail

@@ -1,0 +1,2 @@
+fn leaf() -> i32 { 1 }
+fn root() -> i32 { leaf() }

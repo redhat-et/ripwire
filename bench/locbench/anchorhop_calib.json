@@ -1,0 +1,32 @@
+{
+  "what": "R1 anchor-hop expansion α/θ calibration sweep (PLAN_audit5Public2026 'Hard parts — R1'; SPEC.md --for retrieval addendum). TRAIN split ONLY — the frozen repo-disjoint A7 split (dataset.lock, salted SHA-256, byte0<128=train). Held-out was never touched during calibration; the acceptance comparison ran once, after these constants were baked.",
+  "date": "2026-07-22",
+  "dataset": "czlll/Loc-Bench_V1 test split, n=560, train slice n=317 (87 repos)",
+  "harness": "bench/locbench/run_locbench.py --n 560 --split train --arms for (top-k 200, query-chars 1200, history-depth 1)",
+  "baseline": "same binary with CTXPACK_NO_ANCHORHOP=1 (gate-proven byte-identical to the pre-R1 binary on --for/--no-route/name-exact/plain map: test/anchorhopcheck.sh + nr/ne/map diffs vs a main-built binary)",
+  "combination_rule_finding": "hop mass to a candidate = MAX over supporting edges, not SUM. Summing lets a hub shared by many anchors (utility helper, __init__ import target) accumulate several anchors' worth of mass and outrank the true top lexical hits — measured train strict@1 27.1% -> 8.2% with sum at α=0.2. Max bounds any candidate at α·topAnchorScore (α<1 means a hop-only candidate can never displace the #1 hit) and is order-independent.",
+  "metric_note": "deltas are paired per-instance vs baseline (summarize: strict file@k = all primary gold files within top-k; lenient = any gold in top-10; fn-MRR = first-hit reciprocal rank). Wall deltas from these sweep runs are cache-state artifacts (shared index/OS caches across serial+parallel lanes) and were NOT used for any decision; latency evidence comes from the held-out release runs only.",
+  "sweep": [
+    { "alpha": 0.05, "theta": 0.50, "strict1_pp": 0.00,  "strict3_pp": 0.00,  "strict5_pp": 0.32, "strict10_pp": 0.95,  "lenient10_pp": 0.63,  "fn_mrr_pp": 0.05,  "token_p50_delta_pct": 0.43 },
+    { "alpha": 0.10, "theta": 0.50, "strict1_pp": 0.00,  "strict3_pp": 0.32,  "strict5_pp": 0.63, "strict10_pp": 0.95,  "lenient10_pp": 0.63,  "fn_mrr_pp": -0.04, "token_p50_delta_pct": 0.28 },
+    { "alpha": 0.15, "theta": 0.50, "strict1_pp": -0.32, "strict3_pp": 0.00,  "strict5_pp": 1.58, "strict10_pp": 0.95,  "lenient10_pp": 0.63,  "fn_mrr_pp": -0.14, "token_p50_delta_pct": 0.19 },
+    { "alpha": 0.20, "theta": 0.25, "strict1_pp": -0.32, "strict3_pp": 1.58,  "strict5_pp": 1.58, "strict10_pp": 0.63,  "lenient10_pp": 0.32,  "fn_mrr_pp": -0.31, "token_p50_delta_pct": 0.06 },
+    { "alpha": 0.20, "theta": 0.50, "strict1_pp": -0.32, "strict3_pp": 1.58,  "strict5_pp": 1.58, "strict10_pp": 0.63,  "lenient10_pp": 0.32,  "fn_mrr_pp": -0.31, "token_p50_delta_pct": 0.13 },
+    { "alpha": 0.20, "theta": 0.75, "strict1_pp": -0.32, "strict3_pp": 1.58,  "strict5_pp": 1.58, "strict10_pp": 0.63,  "lenient10_pp": 0.32,  "fn_mrr_pp": -0.29, "token_p50_delta_pct": 0.10 },
+    { "alpha": 0.30, "theta": 0.50, "strict1_pp": -1.89, "strict3_pp": 1.58,  "strict5_pp": 1.58, "strict10_pp": 0.00,  "lenient10_pp": 0.63,  "fn_mrr_pp": -2.38, "token_p50_delta_pct": 0.00 },
+    { "alpha": 0.40, "theta": 0.50, "strict1_pp": -5.36, "strict3_pp": -0.32, "strict5_pp": 1.89, "strict10_pp": -1.58, "lenient10_pp": -0.63, "fn_mrr_pp": -5.86, "token_p50_delta_pct": 0.03 }
+  ],
+  "train_baseline_absolute": { "strict1": 27.13, "strict3": 44.16, "strict5": 49.84, "strict10": 61.20, "lenient10": 70.66, "fn_mrr": 0.2464 },
+  "chosen": { "alpha": 0.10, "theta": 0.50 },
+  "rationale": "strict@10 (the gate metric) plateaus at +0.95pp across α∈[0.05,0.15] and declines above; @1/MRR damage grows monotonically with α (−5.36pp @1 by α=0.4). α=0.10 is the mid-plateau point: @10 at the plateau max, @1 exactly flat, MRR −0.04pp (noise), plus small @3/@5 gains. θ is not binding under the max-combination rule (identical metrics at θ=0.25/0.50/0.75, α=0.2); 0.50 kept as the decided default.",
+  "heldout_acceptance": {
+    "date": "2026-07-22",
+    "protocol": "one shot after constants chosen on train — bench/locbench/run_locbench.py --n 560 --split heldout --arms for --latency-samples 5 --measure-cold --measure-index; baseline = same binary CTXPACK_NO_ANCHORHOP=1; candidate = α=0.10/θ=0.50 baked; runs sequential and alone (no concurrent load)",
+    "baseline_absolute": { "strict1": 19.3, "strict3": 44.4, "strict5": 54.3, "strict10": 66.7, "func5": 17.7, "func10": 23.5, "fn_mrr": 0.2328, "lenient10": 79.0, "allpatch10": 58.0, "warm_p50_ms": 145.6, "warm_p95_ms": 772.0, "cold_p50_ms": 341.7, "cold_p95_ms": 1641.7, "token_p50": 3141 },
+    "candidate_absolute": { "strict1": 19.3, "strict3": 44.0, "strict5": 53.9, "strict10": 67.1, "func5": 16.9, "func10": 23.5, "fn_mrr": 0.2316, "lenient10": 79.8, "allpatch10": 58.4, "warm_p50_ms": 145.9, "warm_p95_ms": 761.5, "cold_p50_ms": 339.2, "cold_p95_ms": 1623.8, "token_p50": 3140 },
+    "paired_deltas": "strict file@10 +0.41pp with clustered-bootstrap 95% LOWER BOUND +0.00pp; lenient +0.82pp; MRR −0.0012; multi-file +0.00pp; warm p50 +2.8% p95 +10.2%; token p50 +0.2% p95 +2.7%; cold +1.6%/+11.1%; index +1.8%/+12.7%",
+    "gate": "compare_runs.py --arm=for --gate=two-tier --abs-warm-p95-ms=775 --abs-cold-p95-ms=1650 --min-quality-per-cost=2.5 (the A7 pre-registered ceilings + R)",
+    "verdict": "REJECT — tier-1 PASS (warm p95 761.5≤775 ms, cold 1623.8≤1650 ms); tier-2 FAIL (quality LB +0.00pp / weighted cost +1.50% = ratio 0.000 vs min 2.5). The +0.41pp point estimate is not statistically distinguishable from zero, and the p95 latency tails (+10-13%) are the real price of disabling MaxScore pruning on the conceptual route (the expansion is a full-distribution consumer).",
+    "outcome": "NOT SHIPPED — the ranking change was reverted per the B3 negative-result rule (PLAN_audit5Public2026 R1: 'if it fails the gate, it lands nowhere'). The exact candidate diff, the R1 gate script + fixture, both held-out release JSONs, and the comparator verdict are archived in bench/locbench/results/r1_anchorhop/ for reproduction or a future retry."
+  }
+}

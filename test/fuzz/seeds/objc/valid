@@ -1,0 +1,6 @@
+@interface Seed
+- (int)leaf;
+@end
+@implementation Seed
+- (int)leaf { return 1; }
+@end

@@ -1,0 +1,5 @@
+class Seed
+{
+    int Leaf() { return 1; }
+    int Root() { return Leaf(); }
+}
