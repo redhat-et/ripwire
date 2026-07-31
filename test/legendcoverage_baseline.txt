@@ -192,10 +192,8 @@ scan-skills | skillscan@findings
 scan-skills | skillscan@skipped
 scan-skills | skillscan@verdict
 seams | seams@bridges
-seams | seams@capped
 seams | seams@modules
 seams | seams@seam_pairs
-seams | seams@shown
 seams | seams@test_files
 stray-content | file@head-touched
 stray-content | file@sim

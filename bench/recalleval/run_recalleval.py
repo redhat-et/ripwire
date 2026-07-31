@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""run_recalleval.py — the held-out recall/ranking eval (PLAN_outputAudit_2026-07-28.md §Sequencing).
+"""run_recalleval.py — the held-out recall/ranking eval (the retrieval-evaluation plan).
 
 WHY THIS EXISTS: two deferred ranking changes are blocked on a measuring instrument —
-  §P2b  default de-prioritization of generated docs in the RECALL lens (--recall), and
-  §P4   fixture/present de-prioritization in the RANKING lenses (--for and friends).
+  the generated-doc demotion  default de-prioritization of generated docs in the RECALL lens (--recall), and
+  the fixture demotion   fixture/present de-prioritization in the RANKING lenses (--for and friends).
 This harness is that instrument: it runs the SHIPPING BINARY on two labelled query sets and reports
 recall@1/@5 + MRR per lane plus the POLLUTION rate — the fraction of top-5 slots occupied by
-fixture / present/ / generated-capture paths. That pollution number is the one a future §P4/§P2b fix
+fixture / present/ / generated-capture paths. That pollution number is the one a future the fixture demotion/the generated-doc demotion fix
 must move DOWN without dropping recall.
 
 WHY A bench/ PYTHON HARNESS AND NOT A NEW --eval-recall VERB (the justification the task requires):
@@ -21,7 +21,7 @@ CONVENTIONS REUSED (not a fifth format): TSV label files with '#' comment heads 
 test/skillevalfix/prompts.tsv style; metric names/shapes mirror --eval-retrieval (MRR, recall@k,
 deterministic aggregate rows); exit codes mirror the gate family (0 ok, 1 failure, 2 setup error).
 
-POLLUTION PREDICATE (mirrors src/exemplar.h INVARIANT 2's kFixtureComponents, extended by the two §P4
+POLLUTION PREDICATE (mirrors src/exemplar.h INVARIANT 2's kFixtureComponents, extended by the two the fixture demotion
 path families that are neither test nor source): a path is polluted when any '/'-component equals
 test|tests|fixture|fixtures|testdata, or a component equals `present`, or the path contains the
 `docs/captures/` prefix pair (generated command captures).

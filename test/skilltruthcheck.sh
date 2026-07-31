@@ -14,12 +14,13 @@ SEC="$ROOT/skills/ctxpack-security-scan/SKILL.md"
 EFF="$ROOT/skills/ctxpack-efficient/SKILL.md"
 PERF="$ROOT/skills/ctxpack-perf-target/SKILL.md"
 ROUTER="$ROOT/skills/ctxpack-router/SKILL.md"
-# Aim at the copy Claude Code actually SERVES (.claude/skills), not the interop mirror. These two
-# trees had silently diverged — .claude/ still claimed 14 MCP verbs and 7 quality kinds while this gate
-# validated the current .agents/ copy and passed — i.e. the gate was checking the copy nobody loads.
-# They are now one tree: .claude/skills holds the real files and .agents/skills is a symlink to it, so
-# either path reads the same bytes and this assertion can no longer go green on an unserved copy.
-ARCH="$ROOT/.claude/skills/ctxpack-arch/SKILL.md"
+# The catalog-count assertions used to aim at an architecture skill that lived only in the author's
+# personal agent config and never shipped with the repo. A gate must assert against a file a clone
+# actually has, so they now aim at the two SHIPPED skills that make the same claims: the MCP skill
+# names the verb count and the quality skill names the kind count. Same claim, same teeth, on files
+# every reader can see.
+MCPSKILL="$ROOT/skills/ctxpack-mcp/SKILL.md"
+QUAL="$ROOT/skills/ctxpack-quality-bar/SKILL.md"
 
 # JSON is indexed and literal retrieval works; semantic MCP-config auditing remains a manual review.
 jsonOut="$( "$BIN" "$ROOT/test/jsonfix" --grep=dependencies --no-cache 2>/dev/null )"
@@ -54,12 +55,12 @@ fi
 # Counts in the architecture skill must match the binary-owned catalogs.
 mcpCount="$( "$BIN" wrap codex --force 2>/dev/null | sed -n 's/.*(\([0-9][0-9]*\) total).*/\1/p' | head -1 )"
 [ -n "$mcpCount" ] || mcpCount=0
-grep -q "$mcpCount MCP verbs" "$ARCH" \
-    && ok "architecture skill matches the binary's $mcpCount MCP verbs" \
-    || no "architecture skill does not match the binary's $mcpCount MCP verbs"
-grep -q '10 kinds:' "$ARCH" \
-    && ok "architecture skill documents the current 10 quality kinds" \
-    || no "architecture skill still has a stale quality-kind count"
+grep -q "$mcpCount MCP verbs" "$MCPSKILL" \
+    && ok "MCP skill matches the binary's $mcpCount MCP verbs" \
+    || no "MCP skill does not match the binary's $mcpCount MCP verbs"
+grep -q '10 kinds' "$QUAL" \
+    && ok "quality skill documents the current 10 quality kinds" \
+    || no "quality skill still has a stale quality-kind count"
 grep -q 'all 21 MCP verbs' "$ROOT/src/wrap.h" \
     && no "wrap source retains the stale 21-verb comment" \
     || ok "wrap source does not hardcode a stale MCP verb count"
