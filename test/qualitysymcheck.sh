@@ -14,7 +14,7 @@
 #
 # qrowlocatorcheck.sh and qualitykindscheck.sh pin the row SHAPE (p=/gating=/kind coverage) but always
 # invoke with a relative root ("cd $REPO && $BIN ."), so neither exercises the absolute-root case — this
-# gate is the one that does, per PLAN_outputAudit_2026-07-28.md §P6.6's own instruction to build a scratch
+# gate is the one that does, per §P6.6's own instruction to build a scratch
 # sandbox rather than touch the real repo (a clean tree has no working-tree diff to report).
 #
 # Own temp git repo, own temp build-independent BIN. Needs git.

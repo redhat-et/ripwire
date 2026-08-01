@@ -33,7 +33,7 @@
 #    round's kickoff note read the collapse as a missing reference ("one `Tool` disappears between
 #    extraction and graph") on the strength of a premise this fixture refutes — see the Tool arm below.
 #
-# ── HOW THE EXPECTED NUMBERS WERE CHOSEN (trap §7.1 of PLAN_h4QualifiedCalls_2026-07-30) ──
+# ── HOW THE EXPECTED NUMBERS WERE CHOSEN (trap §7.1 of ) ──
 # Every count below is a LITERAL read off test/csharpcondfix/Cond.cs by hand — counting call sites in the
 # source and collapsing same-(caller,target) pairs on paper — and then confirmed against the binary.
 # NONE is derived from the tags.scm query, so a wrong query cannot make this gate agree with itself.

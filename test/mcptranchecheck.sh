@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mcptranchecheck.sh — §B6 (PLAN_outputAudit3_2026-07-29.md) MCP-surface tranche, one assert per item.
+# mcptranchecheck.sh — §B6 MCP-surface tranche, one assert per item.
 #
 # THE LAW THIS GATE ENCODES: the MCP surface dispatches TWICE — the live stdio server (`--mcp`, mcp.h) and
 # the `batch` verb's sub-query chain (mcpverbs.h) — and every §B6 finding was a CALL-SITE argument or a

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # tornreadcheck.sh — G-C: a torn read (file rewritten mid-parse) never crashes and self-heals.
 #
-# Regression fence (RESEARCH_agentQuality2026.md §3a / §3c): the audit reproduced that ripwire's
+# Regression fence: the audit reproduced that ripwire's
 # ingest is structurally self-healing against concurrent rewrites — the cache keys hash(bytes actually
 # read)->facts(those bytes), so a torn read just produces a parse of SOME transient byte sequence,
 # never a crash, and the NEXT whole read hashes differently and reparses cleanly. The audit's own
 # repro was 77 runs vs 27k rewrites, zero crashes; this gate reproduces the same shape at a smaller,
 # CI-friendly scale (deterministic invariant, not deterministic bytes — see below).
 #
-# Recipe (RESEARCH_agentQuality2026.md §3c "G-C"):
+# Recipe ( "G-C"):
 #   1. in a mktemp dir, background a writer loop that rapidly rewrites a .cpp file with varying
 #      content (bounded iteration count so the gate finishes in well under a minute)
 #   2. concurrently run `ripwire <dir> --no-cache` ~60 times, asserting the exit code is never a

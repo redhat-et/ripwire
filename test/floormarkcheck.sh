@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# floormarkcheck.sh — the gate for PLAN_h4QualifiedCalls_2026-07-30.md §3.4: the FLOOR MARKER on every
+# floormarkcheck.sh — the gate for: the FLOOR MARKER on every
 # GRAPH-COUNT surface, in one vocabulary, on every transport, with the retired absolutism provably gone.
 #
 # THE SURFACE LIST IS THE GATE'S REAL CONTENT, and it grew twice under adversarial review, both times because

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# columnarcheck.sh — PHASE 4 gate (RESEARCH_outputEconomy §3 / lever 1): the opt-in columnar --format for the
+# columnarcheck.sh — PHASE 4 gate (lever 1): the opt-in columnar --format for the
 # FLAT list verbs (--callers/--callees/--uses/--impact).
 #
 # The flat list verbs pay ~69% structural XML overhead: per-row `<s t= n= p= />` markup + the same file PATH
@@ -82,7 +82,7 @@ diff -q "$TMP/c1" "$TMP/c2" >/dev/null \
     || no "columnar NON-deterministic"
 
 # ── #5: the NESTED MAP is never re-encoded by --format=columnar (0% acc on nested data) ─────────────────
-# PLAN_outputAudit2 §A5b STRENGTHENED this arm: the map used to be byte-identical under --format=columnar,
+# STRENGTHENED this arm: the map used to be byte-identical under --format=columnar,
 # i.e. the flag was accepted and silently ignored — indistinguishable from a typo, and the exact class §P15.3
 # declared extinct. The map is still never re-encoded; the combination now REFUSES (exit 1) instead of
 # pretending to have applied, which is the stronger form of the same guarantee.

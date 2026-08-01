@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cochangeboostcheck.sh — B3 (PLAN_researchImprove2026): the co-change prior boost on the --for lens.
+# cochangeboostcheck.sh — B3: the co-change prior boost on the --for lens.
 #
 # The boost is OPT-IN (--cochange-boost / RIPWIRE_COCHANGE=1) and EXPERIMENTAL — the held-out LocBench
 # record (train multi-file +6.4pp, held-out +0.0pp, warm p50 +19%) kept it off by default pending a
@@ -27,7 +27,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-# L5 (AUDIT5): --cochange-boost is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
+# L5: --cochange-boost is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
 # experiment, kept reachable for continued eval work). This gate exercises the flag directly.
 export RIPWIRE_DEV=1
 

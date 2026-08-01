@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# attrvocabcheck.sh — the gate for PLAN_outputAudit_2026-07-28.md §P8 "Vocabulary": the four attribute-name
+# attrvocabcheck.sh — the gate for  "Vocabulary": the four attribute-name
 # defects that a MACHINE consumer trips over, as opposed to the prose-level ones.
 #
 # Why these four and not the whole §P8 list: each one below is a spelling a parser cannot work around.

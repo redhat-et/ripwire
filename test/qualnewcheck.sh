@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # qualnewcheck.sh — H4 (L-NEW lane) gate: qualified `new` call refs for TS/JS/Java.
 #
-# H4_grammarSurvey_2026-07-30.md found that TS/JS/Java's qualified constructor references were
+# The H4 grammar survey found that TS/JS/Java's qualified constructor references were
 # DROPPED — `new ns.Inner()` (TS/JS: constructor is a member_expression, only the bare (identifier)
 # form was matched) and `new Outer.Inner()` (Java: type is a scoped_type_identifier, only the bare
-# type_identifier form was matched). PLAN_h4QualifiedCalls_2026-07-30.md items 6-7 widen:
+# type_identifier form was matched). Items 6-7 widen:
 #   - queries/typescript/tags.scm + queries/javascript/tags.scm:
 #     (new_expression constructor: (member_expression property: (property_identifier) @name))
 #   - queries/java/tags.scm:

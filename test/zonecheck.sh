@@ -5,7 +5,7 @@
 # HONESTY LABEL (do not lose this in a rewrite): Martin I/A/D and the derived zone classification are
 # FOLKLORE — widely implemented (NDepend, Sonargraph, ripwire) but with no independent outcome-based
 # study validating that D (or the pain/useless corners) predicts defects or maintenance cost. See
-# src/arch.h's "EVIDENCE NOTE" above computeModuleMetrics, and RESEARCH_agentQuality2026.md §1a. This
+# src/arch.h's "EVIDENCE NOTE" above computeModuleMetrics, This
 # gate checks the classification is computed CORRECTLY and DETERMINISTICALLY from I/A — it is not, and
 # cannot be, a check that the classification is "right" in any predictive sense.
 #

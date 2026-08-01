@@ -2,7 +2,7 @@
 // Expected counts are literals read off this file. ABSENT rows are asserted at 0 and fence an
 // honest reject.
 //
-// W4 FINDING vs the round record. PLAN_h4QualifiedCalls_2026-07-30.md §Execution V1-L5 says
+// W4 FINDING vs the round record. §Execution V1-L5 says
 // "qualified GENERIC new `new pkg.Outer.Inner<String>()` and bare `new Gen<String>()` DROP
 // (pre-existing) — pin as documented-absent rows". MEASURED, that is TRUE OF JAVA ONLY. In
 // TypeScript both spellings produce a reference: `new GenWidget<string>()` binds on the BASE

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fillordercheck.sh — T3 gate: fill-aware auto important-last ordering.
 #
-# WHAT T3 CHANGED (RESEARCH_agentQuality2026 §2b/§2f/§2g, PLAN_agentQuality2026 §3 Wave-T "T3"):
+# WHAT T3 CHANGED (Wave-T "T3"):
 # --most-important-last already existed as an explicit flag. T3 auto-selects it (no flag needed) once
 # the T1-calibrated est_tokens estimate says the DEFAULT map output is large enough that recency
 # dominates (MEASURED: beyond ~50% fill of a nominal window, position effects favour the END; below
@@ -48,7 +48,7 @@ order_of(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'order="?[a-zA-Z_:().-
 est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
 
 # ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=619) stays important-first, no auto-flip ─────────────
-# RE-PINNED 489 → 619 (§H7, PLAN_outputAudit4_2026-07-30). REASON: est_tokens is no longer the byte MODEL's
+# RE-PINNED 489 → 619 (§H7). REASON: est_tokens is no longer the byte MODEL's
 # output — serialize() now measures the bytes the document actually emits and converts them at the model's
 # language-weighted rate, because the model priced neither --metrics decoration nor an appended payload and
 # therefore reported ONE number for five different documents. On the fixture that correction is +26.6%

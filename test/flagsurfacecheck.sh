@@ -5,7 +5,7 @@
 # Nothing proved the other direction (help -> parser). --help is a hand-maintained string literal in
 # cli.h, and parseArgs was a 146-arm chain in the same file (now 141 arms: 91 tabled + 50 hand-written); a flag can be advertised and never wired,
 # renamed in one place only, or lost in a merge, and no gate would notice. This matters most right
-# before parseArgs is refactored (PLAN_dispatchRefactor_2026-07-27.md §6.4): a table-driven rewrite is
+# before parseArgs is refactored: a table-driven rewrite is
 # only safe if something asserts the ADVERTISED SURFACE still parses afterwards.
 #
 # The assertion is deliberately narrow: a flag must not produce the specific "unknown flag" error.

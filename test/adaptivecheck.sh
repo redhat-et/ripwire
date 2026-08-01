@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# adaptivecheck.sh — PHASE 3 gate (RESEARCH_outputEconomy §2 / lever 2): the --adaptive relevance-cliff cut.
+# adaptivecheck.sh — PHASE 3 gate (lever 2): the --adaptive relevance-cliff cut.
 #
 # --for/--query sort by lens score then DISCARD it, so the "cliff" (a sharp query's few relevant hits vs a
 # long low-score tail) is unobservable — a fixed top-40 is too generous for sharp queries and meaningless for

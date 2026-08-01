@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # baselineportcheck.sh — gate test for S2: the baseline sidecars are ROOT-SPELLING PORTABLE.
 #
-# The bug (RESEARCH_agentQuality2026 §3b.2, reproduced): both `.ripwire_arch_baseline` and
+# The bug (reproduced): both `.ripwire_arch_baseline` and
 # `.ripwire_quality_baseline` used to hash the RAW ingest-root path prefix. A baseline written via
 # `ripwire .` then failed enforcement when the same repo was scanned via an ABSOLUTE root path
 # (`ripwire /abs/repo`) — the hashes embedded `./src/x` vs `/abs/repo/src/x`, so the committed baseline

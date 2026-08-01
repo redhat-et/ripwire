@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aritycheck.sh — AUDIT5 F1 gate (PLAN_audit5Public2026.md X3): the B2.2 arity filter
+# aritycheck.sh — F1 gate (X3): the B2.2 arity filter
 # (src/graph.h provablyWrong, fed by src/ingest.cpp cc_paramArityExact) must not "provably" exclude a
 # candidate def just because the CALL has FEWER args than that def's visible param count. arityExact is
 # computed from the DEFINITION node only, so a C++ out-of-line def whose default argument lives ONLY on a

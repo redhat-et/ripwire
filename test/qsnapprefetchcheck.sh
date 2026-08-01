@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # qsnapprefetchcheck.sh — the Phase-M gate for the qsnap PREFETCH file-cache warmer
-# (DESIGN_specPrefetch.md §5/§8 + DESIGN_teamIndex.md §2b).
+# .
 #
 # WHAT PHASE M IS: a FILE-CACHE WARMER in the long-lived --mcp server, NOT an index mechanism. When a request
 # observes git HEAD has MOVED since the last observation (a commit just landed), a DETACHED background thread
@@ -100,7 +100,7 @@ else: print(r["result"]["content"][0]["text"])
 '
 }
 wait_for_id() { local i; for i in $( seq 1 200 ); do grep -q "\"id\":$2" "$1" 2>/dev/null && return 0; sleep 0.05; done; return 1; }
-# AUDIT5 Y4: shard-aware lookup — a blob may be flat under a cache dir or under <dir>/<xx>/ (2-hex shard).
+# Y4: shard-aware lookup — a blob may be flat under a cache dir or under <dir>/<xx>/ (2-hex shard).
 blob_paths() { find "$1" -maxdepth 2 -type f -name "$2" 2>/dev/null; }
 blob_first() { blob_paths "$1" "$2" | head -1; }
 qsnap_count() { blob_paths "$1" 'ripwire-qsnap-*.bin' | grep -c . ; }
@@ -130,7 +130,7 @@ wait $SAMPLER 2>/dev/null
 FINAL="$( blob_first "$A_C" 'ripwire-qsnap-*.bin' )"
 [ -n "$FINAL" ] && [ "$( validate_qsnap "$FINAL" )" = "VALID" ] && ok "(a) final qsnap blob is checksum-valid" \
                                                                || no "(a) final qsnap blob missing/invalid"
-# AUDIT5 Y4: shard-aware lookup — the atomic-rename tmp file can land in either layout too.
+# Y4: shard-aware lookup — the atomic-rename tmp file can land in either layout too.
 [ -n "$( find "$A_C" -maxdepth 2 -type f -name '*.tmp.*' 2>/dev/null )" ] \
     && no "(a) stale *.tmp.* residue left behind (rename did not consume it)" \
     || ok "(a) no *.tmp.* residue after writes (rename consumed the tmp)"
@@ -184,7 +184,7 @@ esac
 
 # measured warm-vs-cold delta on THIS corpus (report-only; the win is corpus-dependent, §8).
 WARM_MS="$( grep 'verb=quality_delta' "$B_W/err.txt" | tail -1 | sed -E 's/.*wall_ms=([0-9.]+).*/\1/' )"
-rm -f $( blob_paths "$B_C" 'ripwire-qsnap-*.bin' )        # force a COLD control (AUDIT5 Y4: shard-aware)
+rm -f $( blob_paths "$B_C" 'ripwire-qsnap-*.bin' )        # force a COLD control ( Y4: shard-aware)
 printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$B_W\"}}}" >&9
 wait_for_id "$B_W/out.txt" 5
 COLD_MS="$( grep 'verb=quality_delta' "$B_W/err.txt" | tail -1 | sed -E 's/.*wall_ms=([0-9.]+).*/\1/' )"

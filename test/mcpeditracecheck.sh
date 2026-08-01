@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mcpeditracecheck.sh — the F1 / F4 robustness gate for the MCP edit + fetch_body paths (audit AUDIT2 §F1, §F4).
+# mcpeditracecheck.sh — the F1 / F4 robustness gate for the MCP edit + fetch_body paths (audit  §F1, §F4).
 #
 # F1 (MEDIUM): the edit verbs (replace_symbol_body / insert_*) did an UNLOCKED read→freshness-check→splice→
 #   atomic-rename. A concurrent writer committing to the same file in the [read..rename] window had its write

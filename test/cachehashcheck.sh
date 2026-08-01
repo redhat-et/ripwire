@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # cachehashcheck.sh — G-A1: the CLI incremental cache keys on CONTENT HASH, never mtime.
 #
-# Regression fence (RESEARCH_agentQuality2026.md §3a / §3c): the audit reproduced that the CLI
+# Regression fence: the audit reproduced that the CLI
 # `--cache=PATH` path is immune to the classic "mtime-lies" attack — edit a file's content, then
 # `touch -r` its mtime back to the pre-edit value, and a warm re-run must STILL see the new content.
 # This is unlike the MCP staleness hole (§3b #1, fixed separately by S1 in mcp.h) — the CLI path
 # re-crawls and re-hashes bytes every invocation, so an equal mtime never masks a content change.
 #
-# Recipe (RESEARCH_agentQuality2026.md §3c "G-A1"):
+# Recipe ( "G-A1"):
 #   1. write a source file, run ripwire with --cache=<tmp>/c.bin to populate (cold)
 #   2. save a copy of the file's bytes (for touch -r reference)
 #   3. EDIT the file's content (remove the old symbol, add a new one)

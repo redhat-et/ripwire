@@ -2,13 +2,13 @@
 # mergechurncheck.sh — the MERGE-COMMIT history gate: content introduced by a merge commit ITSELF must be
 # mined, and ordinary merged-branch work must NOT be counted twice.
 #
-# THE DEFECT (carried in from capture-audit-4, deferred into PLAN_h4QualifiedCalls_2026-07-30.md's round
+# THE DEFECT (carried in from capture-audit-4, deferred into the H4 round
 # because the fix moves churn counts corpus-wide). Every history miner here runs `git log --name-only`, and
 # with no --diff-merges mode git prints NO paths at all for a merge commit. So a file whose only history is a
 # merge commit — an "evil merge": a conflict resolved by writing content neither parent had, or a file added
 # while resolving — has zero history lines anywhere in the stream. It read churn=0, it was missing from
 # --owners entirely, and nothing disclosed it: a measured-looking zero. Measured on the ripwire repo itself
-# before the fix: 2 of 1028 tracked paths (IDEAS_fieldNotes_2026-07-25.md, NEXT_SESSION_2026-07-26.md) had
+# before the fix: 2 of 1028 tracked paths had
 # no --owners row at all while being ordinary, present, tracked files.
 #
 # THE FIX, and why THIS shape (measured, not chosen by taste — the numbers are this fixture's, re-derivable

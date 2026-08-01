@@ -2,7 +2,7 @@
 # cachesplitcheck.sh — A4-P4 gate: the warm-by-default auto-cache is SPLIT by verb class (lean vs rich),
 # so alternating verb classes never thrashes (full re-parse + full rewrite on every class switch).
 #
-# Background (AUDIT4 §C A4-P4): parserVerFor(captureValueUses) version-gates the cache CONTENT to a
+# Background ( §C A4-P4): parserVerFor(captureValueUses) version-gates the cache CONTENT to a
 # DIFFERENT version for the "rich" class (--for/--metrics/--uses/--exemplar, captureValueUses=true) than
 # for the "lean" class (everything else). When both classes shared ONE per-root cache file, every switch
 # missed the parserVer guard → full reparse + full rewrite (measured: plain-map-after-`--for` 0.81 s vs
@@ -48,7 +48,7 @@ CACHEDIR="$XDG/ripwire"
 
 # portable inode reader (BSD stat -f %i / GNU stat -c %i)
 inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
-# glob helper: echo the single matching class file (or empty). AUDIT5 Y4: shard-aware lookup — a blob may
+# glob helper: echo the single matching class file (or empty). Y4: shard-aware lookup — a blob may
 # live flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex-char shard), so search both via find -maxdepth 2.
 richfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-rich.bin' 2>/dev/null | head -1; }
 leanfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-lean.bin' 2>/dev/null | head -1; }
@@ -66,7 +66,7 @@ LF="$( leanfile )"
 [ -n "$LF" ] && ok "lean verb creates a SEPARATE -lean.bin auto-cache" || no "no -lean.bin created by a lean verb"
 
 # both class files coexist → proves the split (old single-file scheme could only ever have ONE file)
-# AUDIT5 Y4: shard-aware lookup — count matching blobs in either layout. Narrowed to the -rich.bin/-lean.bin
+# Y4: shard-aware lookup — count matching blobs in either layout. Narrowed to the -rich.bin/-lean.bin
 # CLASS files specifically (not the bare 'ripwire-*.bin' wildcard): Y2's qchurn family now also writes a
 # ripwire-qchurn-*.bin blob during the --for pass, which the old broad wildcard would incorrectly count
 # toward "class cache files" — the gate's stated intent here is exactly 2 class files (rich + lean).

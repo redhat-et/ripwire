@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# withgraphcheck.sh — gate for R8 (PLAN_audit5Public2026.md): --with-graph — a compact MERMAID
+# withgraphcheck.sh — gate for R8: --with-graph — a compact MERMAID
 # flowchart of the --for/--pack-task bundle's top-N (<=8) ranked anchors + their 1-hop call edges among
 # themselves, appended as <graph fmt="mermaid"><![CDATA[...]]></graph> right before </ctx>.
 #
@@ -10,7 +10,7 @@
 #     node count <= 8, the CDATA section is properly closed ("]]></graph>" present, exactly one CDATA open
 #     per graph block) — for both --for and --pack-task.
 #   • det-gate x2 on the --with-graph output itself (own determinism, not just the flag-off path).
-#   • §P8 (PLAN_outputAudit_2026-07-28.md): the flag REFUSES on the default map — before this fix it was
+# • §P8: the flag REFUSES on the default map — before this fix it was
 #     silently inert there (accepted, byte-identical, no signal), the same failure mode as the other five
 #     "(with X)" modifiers that plan audited; cli.h's validateConfig now refuses --with-graph without --for/
 #     --pack-task, naming both, exactly like --detail/--adaptive already do for their own companions.

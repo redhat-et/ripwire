@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mcpremotecheck.sh — the gate for the OPTIONAL remote MCP transport (DESIGN_teamIndex.md §2 / §2b):
+# mcpremotecheck.sh — the gate for the OPTIONAL remote MCP transport:
 # Streamable HTTP over a hand-rolled HTTP/1.1 reader, plain request/response, single-threaded serialize.
 # THE SECURITY POSTURE IS THE FEATURE — every rule below is gated:
 #

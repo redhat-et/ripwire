@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cachefuzzcheck.sh — standing loadCache / readQSnapBlob fuzz harness (AUDIT3-era open item).
+# cachefuzzcheck.sh — standing loadCache / readQSnapBlob fuzz harness (-era open item).
 #
 # Contract under test: NO hostile/corrupt/truncated cache blob can crash, hang, over-read, or poison
 # output. loadCache (src/ingest.cpp, --cache=FILE v8 blob) and the qsnap reader (readQSnapBlob +
@@ -376,7 +376,7 @@ git -C "$QREPO" add -A; git -C "$QREPO" commit -qm init >/dev/null
 QXDG="$TMP/qxdg"; mkdir -p "$QXDG"
 QCACHEDIR="$QXDG/ripwire"
 qrun(){ env -u TMPDIR XDG_CACHE_HOME="$QXDG" "$BIN" "$QREPO" --quality-delta "$@"; }
-# AUDIT5 Y4: shard-aware lookup — a blob may be flat under $QCACHEDIR or under $QCACHEDIR/<xx>/ (2-hex shard).
+# Y4: shard-aware lookup — a blob may be flat under $QCACHEDIR or under $QCACHEDIR/<xx>/ (2-hex shard).
 qsnapfiles(){ find "$QCACHEDIR" -maxdepth 2 -type f -name 'ripwire-qsnap-*.bin' 2>/dev/null; }
 
 qrun --no-cache >"$TMP/q_truth" 2>/dev/null

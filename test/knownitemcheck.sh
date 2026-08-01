@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# knownitemcheck.sh — PHASE 2 gate (RESEARCH_outputEconomy note + user ask): the known-item retrieval eval.
+# knownitemcheck.sh — PHASE 2 gate ( note + user ask): the known-item retrieval eval.
 #
 # WHY: the co-change --eval is SEED-based — it validates which ranker recovers a change's OTHER files, but it
 # structurally CANNOT validate query-TIME ranker choice (does name-exact beat subtoken+body on a NAME query?

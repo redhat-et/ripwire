@@ -6,7 +6,7 @@
 #
 # The fixture is BUILT here, not committed (same reasoning as crossrefcheck.sh): the verb reads git refs,
 # so the corpus has to be a real repository with a real ref graph. Fixed author/committer dates keep it
-# byte-reproducible. The motivating bug (IDEAS_fieldNotes_2026-07-24.md §5 / the task this file gates):
+# byte-reproducible. The motivating bug (the task this file gates):
 # a branch adds one field to a dual-compile uniform struct, the merge is textually clean, and `--layout`
 # (one index, the working tree) and `--stray-content` (line-granular) each miss it alone.
 #

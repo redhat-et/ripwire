@@ -126,9 +126,9 @@ if [ "$PY_ADJ_WORKS" = "1" ]; then
                          || no "Python: --callees=call_included_only still returns $PY_CE_N targets (want 1)"
 else
     # LEVER-B UPDATE (2026-07): the narrowing bug is now FIXED, but the $PY_ADJ_WORKS proxy above still
-    # reads 0 — deliberately. The fix (DESIGN_resolutionCompleteness.md §B, resolve.h::resolvePythonImport)
+    # reads 0 — deliberately. The fix (§B, resolve.h::resolvePythonImport)
     # made the RESOLVER's private include-set path-precise, while leaving the SEPARATE `--deps`
-    # resolveIncludeAdj on the basename path (DESIGN_pathPreciseInclude.md §3.5, `--deps` back-compat). So
+    # resolveIncludeAdj on the basename path (§3.5, `--deps` back-compat). So
     # `--deps` still shows a.py afferent=0 (→ $PY_ADJ_WORKS=0) even though the narrow now fires correctly.
     # The two signals DECOUPLED; assert the narrowing behavior DIRECTLY here (2/1 = fixed), independent of
     # the `--deps` proxy. The former "pinned buggy 3/2" state is now itself the failure trigger.

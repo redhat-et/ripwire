@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# traceminecheck.sh — the gate for DESIGN_traceEvals.md's session-trace-mined eval (bench/mine_traces.py
+# traceminecheck.sh — the gate for the session-trace-mined eval (bench/mine_traces.py
 # + --eval-mined). Four checks, per the design's §6:
 #   1) miner determinism on a checked-in synthetic fixture (test/traceminefix/sample_session.jsonl) —
 #      two runs byte-identical; exact pair count / gold set / ripwire_assisted flag asserted by value.

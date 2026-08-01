@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# portablebuildcheck.sh — gate for L1 (AUDIT5 independence MUST-FIX #5): "Non-NATIVE build hardcodes
+# portablebuildcheck.sh — gate for L1 ( independence MUST-FIX #5): "Non-NATIVE build hardcodes
 # -mcpu=apple-m1 -ffast-math — Linux/x86 fails out of the box".
 #
 # Exercises the REAL arch-flag-selection logic in cmake/PortableFlags.cmake — not a reimplementation —

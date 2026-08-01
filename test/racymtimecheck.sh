@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# racymtimecheck.sh — AUDIT5 F3/X5: the racy-git stat-gate guard must compare a cached file's mtime against
+# racymtimecheck.sh — F3/X5: the racy-git stat-gate guard must compare a cached file's mtime against
 # the CACHE BLOB'S OWN on-disk mtime (a fresh stat(), read at load time), not an ns-precision wall-clock
 # reading captured mid-write.
 #
-# Bug (AUDIT5_fable2026.md F3, src/ingest.cpp): the old guard compared a FLOORED (coarse-filesystem) per-file
+# Bug ( F3, src/ingest.cpp): the old guard compared a FLOORED (coarse-filesystem) per-file
 # mtime against an UNFLOORED post-hash wall-clock stamp — a tautology on coarse-mtime filesystems (HFS+,
 # many network mounts, exFAT): a rounded-down timestamp is always < an unrounded LATER one, so a same-granule
 # post-hash edit could serve a stale cached parse forever, undetected.
 #
-# Decided fix (PLAN_audit5Public2026.md "Hard parts — X5 (F3) racy-mtime fix"): stamp cacheWriteNs from the
+# Decided fix ( "Hard parts — X5 (F3) racy-mtime fix"): stamp cacheWriteNs from the
 # cache blob's own post-rename stat() mtime (same clock+granularity domain as the per-file mtimes), and
 # treat `ff.mtimeNs >= cacheWriteNs` as racy => re-hash that file next run.
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qualifiedresolvecheck.sh — gate for AUDIT5 X9(b): --callers/--callees/--impact now accept the qualified
+# qualifiedresolvecheck.sh — gate for X9(b): --callers/--callees/--impact now accept the qualified
 # "file:name" spec syntax that --around/--lego/--edit-check already supported (resolveFocus) — a same-
 # named symbol across files previously had no way to disambiguate on these three verbs.
 #

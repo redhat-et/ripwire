@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mentioncheck.sh — B8 (PLAN_researchImprove2026): the query-mention anchor on the --for lens.
+# mentioncheck.sh — B8: the query-mention anchor on the --for lens.
 #
 # Default-on: a file, dotted module, or Scope.symbol literally NAMED in the task text is lifted to just
 # below the top hit. Pinned promises (each measured in the 4-arm head-to-head as the #1 loss bucket):

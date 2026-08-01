@@ -146,7 +146,7 @@ diff -q "$TMP/det_a.xml" "$TMP/det_b.xml" >/dev/null \
     && ok "determinism: default map byte-identical across two runs" \
     || no "determinism: default map differs across runs"
 
-# ─── AUDIT5 json-data ceiling: a BIG pretty-printed .json is DATA, not config — never indexed ────────────
+# ─── json-data ceiling: a BIG pretty-printed .json is DATA, not config — never indexed ────────────
 #   Found live by the Multi-SWE C++ benchmark: nlohmann/json's historical test/benchmark trees carry
 #   200KB-4MB pretty-printed .json datasets that slip under the 4MB skip + minified-line heuristic; the
 #   config-key extractor turned each into tens of thousands of junk symbols (>2min ingest vs 0.3s without
@@ -183,7 +183,7 @@ printf '%s' "$OHOST" | grep -q 'hostile_nest' \
     || ok "hostile nesting: [[[[-file skipped"
 grep -q 'json nesting' "$TMP/hostile_err.txt" \
     && ok "hostile nesting: skip degrades with the one-line stderr note" \
-    || no "hostile nesting: skip was silent (SPEC degrade-note style violated)"
+    || no "hostile nesting: skip was silent ( degrade-note style violated)"
 printf '%s' "$OHOST" | grep -q 'deep_string\|realkey' \
     && ok "hostile nesting: brackets inside a JSON STRING do not count (quote-aware scan)" \
     || no "hostile nesting: quote-blind scan skipped a legitimate config file"

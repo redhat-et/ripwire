@@ -10,7 +10,7 @@
 #
 # The audit's sharpest case is the question-shaped `--eval-*=` / `--since=`: an agent whose $FILE is unset
 # gets an atlas where it asked a question, at exit 0, with nothing on stderr to read. OWNER RULING
-# (PLAN_outputAudit3_2026-07-29.md §B5, 2026-07-29): refuse-all — all nine rows carry needs=/example=,
+# (2026-07-29): refuse-all — all nine rows carry needs=/example=,
 # including the five config-passthrough flags, and an empty value refuses uniformly.
 #
 # The gate asserts the CONTRACT, not the sentence: exit 1, the flag NAMED, the real problem stated, a

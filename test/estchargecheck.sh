@@ -3,7 +3,7 @@
 # --token-budget gate actually stops it, --max-tokens' ceiling is disclosed in the currency it reports,
 # and the withheld artifact uses the withheld_est_tokens vocabulary.
 #
-# THE BUG (§H7, PLAN_outputAudit4_2026-07-30): serialize()'s est_tokens charged the MAP only. The
+# THE BUG (§H7): serialize's est_tokens charged the MAP only. The
 # --expand payload had been fixed once (serialize.h's own extraBodyTokens comment names the defect), but
 # the un-named siblings — --metrics decoration, <sigs> (--pack-signatures), <src> (--pack-top-n) and
 # <outline> — were never covered, so four different payloads reported the SAME number:

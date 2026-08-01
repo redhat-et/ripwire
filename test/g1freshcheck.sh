@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# g1freshcheck.sh — gate for F-OPS (AUDIT5): detect stale asan binary.
+# g1freshcheck.sh — gate for F-OPS: detect stale asan binary.
 #
 # The G1 (ASan/UBSan) gate can silently run a STALE asan binary: a dead FetchContent
 # source-dir cache var fails the build at *generate* time while the old `asan/ripwire`

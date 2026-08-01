@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # spectimingcheck.sh — the G-determinism gate for the RIPWIRE_MCP_TIMINGS instrumentation
-# (DESIGN_specPrefetch.md, Phase E). The MEASURE-FIRST timing observable must be:
+# (Phase E). The MEASURE-FIRST timing observable must be:
 #   (1) SILENT + byte-identical on stdout when the env var is UNSET (zero-cost-off, house rule — same
 #       contract as ingest.cpp's RIPWIRE_CACHE_STATS and the RIPWIRE_PROFILE markers);
 #   (2) when SET, emit one `ripwire-timing verb=… wall_ms=… rebuilt=…` line PER request to STDERR ONLY,

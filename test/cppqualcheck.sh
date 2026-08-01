@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cppqualcheck.sh — gate for §H4 (PLAN_h4QualifiedCalls_2026-07-30.md): C++ qualified calls extract at ANY
+# cppqualcheck.sh — gate for §H4: C++ qualified calls extract at ANY
 # `::` depth, explicit-template-argument calls extract at all, cast keywords extract NEVER, and the widened
 # edges stay canonically PRECISE — with the one genuinely ambiguous spelling DISCLOSED rather than guessed.
 #
@@ -157,7 +157,7 @@ expect uses    mutexFn 0 "most-vexing-parse: unfixable by any query widening, pi
 expect callers mutexFn 0 "most-vexing-parse: no caller, by construction"
 
 # ── §6 REPO-ROOT RECOVERY — the seams the defect was found on ───────────────────────────────────────────
-# Literals from the W1-MEASURE census (PLAN_h4QualifiedCalls_2026-07-30.md §Execution). These are the
+# Literals from the W1-MEASURE census . These are the
 # flagship "did I break a caller?" sites: selectBaseline's second caller is a hard compile error under an
 # arity change and was never named; writeTally had a def and two call sites and reported ZERO callers.
 US="$( run . --uses=selectBaseline --no-cache )"

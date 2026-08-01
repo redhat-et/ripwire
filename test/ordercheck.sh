@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# ordercheck.sh — L5 (AUDIT5) surface-consolidation gate: --order=stable|important-first|important-last
+# ordercheck.sh — L5 surface-consolidation gate: --order=stable|important-first|important-last
 # is now the canonical emit-order flag; --stable/--most-important-last/--no-auto-order are hidden aliases
 # (still fully functional, dropped from --help, each prints a ONE-LINE stderr deprecation the first time
-# used in a run). Nothing is removed (PLAN_audit5Public2026.md "Hard parts — decided" / "L5 surface
+# used in a run). Nothing is removed ( "Hard parts — decided" / "L5 surface
 # dispositions"). This gate asserts:
 #   (a) ALIAS EQUIVALENCE — --order=stable == --stable, --order=important-last == --most-important-last,
 #       --order=important-first == --no-auto-order, byte-identical stdout on both a small (never-auto-

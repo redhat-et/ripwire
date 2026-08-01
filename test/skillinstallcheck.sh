@@ -95,7 +95,7 @@ UNROUTED="
 --no-cache       # infra cache-control knob
 --version        # meta (version/build info, not an agent moment)
 "
-# L5 (AUDIT5): --anchor / --cochange-boost / --stable / --most-important-last / --no-auto-order dropped
+# L5: --anchor / --cochange-boost / --stable / --most-important-last / --no-auto-order dropped
 # from --help entirely (RIPWIRE_DEV=1-gated experiments, or hidden --order= aliases) — they no longer
 # appear in the --help scan below, so they need neither a skill home nor an UNROUTED entry.
 is_unrouted(){ printf '%s\n' "$UNROUTED" | awk '{print $1}' | grep -qx -- "$1"; }

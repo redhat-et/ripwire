@@ -3,7 +3,7 @@
 # emission seam, exactly like the CLI does by default. The MCP server is the HIGHEST-exposure seam —
 # its output lands in a cloud LLM context by construction — yet pre-fix it served every body verbatim.
 #
-# The four seams (audited in AUDIT3_fable2026.md A3-F3), each planted with a DISTINCT fake AWS key
+# The four seams (audited in A3-F3), each planted with a DISTINCT fake AWS key
 # (AKIA + 16 upper-alnum — the fixed AWS shape kRedactRules[0] matches) so a leak names its seam:
 #   1. `for`            — doc comments   (packSignatures <doc> seam)     AKIADOCCOMMENT2AAAAA
 #   2. `exemplar`       — def body       (packBodies CDATA seam)         AKIABODYSECRET2AAAAA

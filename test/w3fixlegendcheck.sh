@@ -332,7 +332,7 @@ PROBES = [
 ]
 # Internal audit-ID shapes. Two exclusions, both to avoid measuring the environment instead of the text:
 #   * a match inside a filesystem path (a worktree may literally be named ".../wt-r30-w3fixc")
-#   * a § that NAMES its document ("DESIGN_traceEvals.md §3.2") — a resolvable citation, not a leak
+# * a § that NAMES its document ("") — a resolvable citation, not a leak
 # ABS-\d joins the family: the pattern required a DOT between letters and digits, so `ABS-4` — a live plan
 # ID sitting in --arch's emitted legend — was not a leak this sweep could see. Kept narrow and named rather
 # than generalised to [A-Z]{2,4}-\d, which would flag UTF-8, FNV-1a and every other legitimate hyphenated

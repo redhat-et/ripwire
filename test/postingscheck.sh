@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# postingscheck.sh — B0 gate (PLAN_researchImprove2026 Phase B0.1/B0.2): the persisted subtoken-postings
+# postingscheck.sh — B0 gate ( Phase B0.1/B0.2): the persisted subtoken-postings
 # path must be output-EQUIVALENT to the query-time corpus scan, and must actually remove the per-query
 # file re-read/re-tokenize cost on the warm rich-cache path.
 #

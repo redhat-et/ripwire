@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docmentioncheck.sh — AUDIT5 R5 (PLAN_audit5Public2026.md): doc-mention surfacing on the --for lens.
+# docmentioncheck.sh — R5: doc-mention surfacing on the --for lens.
 #
 # Reuses g.mentions (the SAME doc<->code backtick edges the `--mentions=SYM` verb already exposes; built
 # OUT of the call graph so a doc naming a symbol never inflates that symbol's own PageRank/blast-radius —

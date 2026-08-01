@@ -1,6 +1,6 @@
 // H4 W3 Rust qualified-call fixture — file 1 of 3 (src/gadget/mod.rs and src/plainmod.rs are the others).
 //
-// PLAN_h4QualifiedCalls_2026-07-30.md §3.2 / §6. Every call SPELLING Rust offers gets exactly one site, in a
+// §3.2 / §6. Every call SPELLING Rust offers gets exactly one site, in a
 // function that isolates it, so a per-spelling assertion is possible at all. test/rustqualcheck.sh states its
 // expected counts as LITERALS read off these files — never derived the way the query derives them (§7 trap 1).
 

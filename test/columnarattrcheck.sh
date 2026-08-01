@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# columnarattrcheck.sh — §B1.1 gate (PLAN_outputAudit3): the COLUMNAR-CAPABLE FAMILY is exactly four verbs
+# columnarattrcheck.sh — §B1.1 gate: the COLUMNAR-CAPABLE FAMILY is exactly four verbs
 # — --callers, --callees, --uses, --impact — and every one of them composes its wrapper attribute string
 # from a caller-supplied symbol NAME, which is unbounded (a markdown SECTION heading routinely runs
 # 200-600 chars).
@@ -113,7 +113,7 @@ for L in $LENS; do
 done
 
 # ── a short name still behaves exactly as before (no regression in the ordinary case, rows present) ──────
-# RE-PIN (H4 W3-DISC, PLAN_h4QualifiedCalls_2026-07-30.md): the five graph verbs gained the
+# RE-PIN (H4 W3-DISC): the five graph verbs gained the
 # `counts_floor="1"` disclosure attribute (emitted between limit= and format= on the columnar
 # header). The pinned string moves ONCE, deliberately, to carry it; everything else is unchanged.
 short="$( "$BIN" "$SBX" --callers=beta --format=columnar --limit=1 --offset=0 2>/dev/null )"

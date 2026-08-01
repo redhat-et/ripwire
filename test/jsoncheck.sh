@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# jsoncheck.sh — gate for L2 (--json output mode, PLAN_audit5Public2026.md).
+# jsoncheck.sh — gate for L2 (--json output mode).
 #
 # --json mirrors the XML content, machine-parseable, for the CI/scripting core verbs ONLY: the default
 # map, --for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate. Every other verb

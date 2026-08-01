@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# jsonrefusallegendcheck.sh — §B1.4 + §B1.5 gates (PLAN_outputAudit3), two SELF-DESCRIPTION defects that
+# jsonrefusallegendcheck.sh — §B1.4 + §B1.5 gates, two SELF-DESCRIPTION defects that
 # share one fixture set.
 #
 # §B1.4 — the `--json`-unsupported refusal:

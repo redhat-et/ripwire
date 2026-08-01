@@ -5,7 +5,7 @@
 # refactor is behaviour-preserving is not a hand-written assertion — it is running the OLD binary and the
 # NEW binary over a large argv matrix and diffing stdout, stderr AND exit code for every vector.
 #
-# Why this gate exists (PLAN_dispatchRefactor_2026-07-27.md §3.4, §6.1): `--affected=src/cli.h` returns
+# Why this gate exists (§6.1): `--affected=src/cli.h` returns
 # tests="0" — the 200+ gates are shell scripts the call graph cannot see — so the tool cannot tell you what
 # to run when you touch the argument parser. 139 of 146 parse arms are covered only INCIDENTALLY, by gates
 # that happen to pass the flag while testing something else, and the 20 combination guards are pinned by

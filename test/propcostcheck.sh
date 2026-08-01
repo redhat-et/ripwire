@@ -4,7 +4,7 @@
 # propagation_cost = density of the transitive closure of the file→file dependency graph
 #   = ( Σ_i |reachable(i)| ) / N²   (reachable INCLUDES i itself — MacCormack's unit-diagonal visibility
 #     matrix), the fraction of the system reachable from an average file. A VALIDATED coupling form
-#     (RESEARCH_agentQuality2026 §1a). Reported number on --arch, NEVER a gate (the arch exit code is owned
+# . Reported number on --arch, NEVER a gate (the arch exit code is owned
 #     by the layer/path-rule violations, unaffected by this attribute).
 #
 # HAND-COMPUTED on test/archmetricsfix/ (9 files; resolveIncludeAdj resolves includes by unique basename):

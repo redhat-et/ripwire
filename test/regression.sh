@@ -25,10 +25,10 @@ cd "$ROOT"   # so the corpus path (and thus the XML) is repo-relative → golden
 
 echo "regression: BIN=$BIN  CORPUS=$CORPUS"
 
-# 0) G1 fresh-asan-binary check — detect if asan/ripwire is stale (AUDIT5 F-OPS).
+# 0) G1 fresh-asan-binary check — detect if asan/ripwire is stale ( F-OPS).
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" >/dev/null 2>&1; then ok "G1 fresh-asan-binary gate (test/g1freshcheck.sh)"; else no "G1 fresh-asan-binary gate (test/g1freshcheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" 2>&1 | grep -E '(FAIL|stale asan binary)' | head -4; fi
 
-# 1) determinism — same input, byte-identical baseline + three comparisons (SPEC §8).
+# 1) determinism — same input, byte-identical baseline + three comparisons ( §8).
 "$BIN" "$CORPUS" --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --no-cache >"$TMP/b" 2>/dev/null
 "$BIN" "$CORPUS" --no-cache >"$TMP/c" 2>/dev/null

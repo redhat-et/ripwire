@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# versioncheck.sh — gate for --version (P5, AUDIT5 go-public wave 1).
+# versioncheck.sh — gate for --version (P5, go-public wave 1).
 #
 # The version string lives in exactly ONE place: the project(ripwire VERSION ...) call in
 # CMakeLists.txt. --version reads it via the CMake-generated src/version.h (build dir's

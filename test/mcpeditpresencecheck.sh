@@ -2,7 +2,7 @@
 # mcpeditpresencecheck.sh — §H2 gate: an edit verb whose PAYLOAD field was never sent must REFUSE,
 # and must leave the target file byte-identical.
 #
-# THE BUG THIS GATE PINS (PLAN_outputAudit4_2026-07-30.md §H2, destructive class). The three edit-verb
+# THE BUG THIS GATE PINS (destructive class). The three edit-verb
 # dispatch arms in src/mcp.h guarded only `!path.empty() && !symbol.empty()` and never tested the payload
 # field, so an OMITTED new_body / text reached runEditVerb as an EMPTY STRING and was applied:
 #

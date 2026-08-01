@@ -5,7 +5,7 @@
 #   test/legobundlecheck.sh                         # uses build/ripwire on this repo + test/legofix
 #   RIPWIRE_BIN=asan/ripwire test/legobundlecheck.sh
 #
-# Two defects, one block (PLAN_outputAudit_2026-07-28.md §P3):
+# Two defects, one block:
 #
 #   1) IDENTITY LOSS. `--lego=Shape` prints p= on <iface> and every <impl>; the same rows embedded in
 #      `--for`'s bundle printed n= alone. The repo has two genuinely different `Circle`s (one in

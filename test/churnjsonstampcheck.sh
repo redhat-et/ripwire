@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# churnjsonstampcheck.sh — §B1.2 gate (PLAN_outputAudit3): a churn-ranked map must be DISTINGUISHABLE from
+# churnjsonstampcheck.sh — §B1.2 gate: a churn-ranked map must be DISTINGUISHABLE from
 # the structural one on the JSON surface, not just the XML one.
 #
 # --help promises of --rank-by=churn: "stamps its own map with rank_by/window/at so it cannot pass for the

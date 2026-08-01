@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # connectcheck.sh — gate for the --connect=A,B,C CLI verb + the `connect` MCP verb
-# (DESIGN_connectSubgraph.md §7; the core algorithm is gated separately by connectcorecheck.sh).
+# (; the core algorithm is gated separately by connectcorecheck.sh).
 #
 # Scratch corpus (OUTSIDE test/, so test/golden.xml is untouched): orch() calls a() and b();
 # b() calls c(); island() calls nothing and is uncalled. Assertions (design §7):

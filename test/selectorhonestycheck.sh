@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# selectorhonestycheck.sh — PLAN_outputAudit2 §A6/§A7: the three places a SELECTOR or a LABEL claimed more
+# selectorhonestycheck.sh —: the three places a SELECTOR or a LABEL claimed more
 # than it measured.
 #
 # §A6a  --edit-check on an ambiguous name silently picked ONE of N definitions. `--edit-check=empty` reported
@@ -183,7 +183,7 @@ U_RC=0; "$BIN" "$R" --uses=core.h:helper --no-cache >"$TMP/uout" 2>"$TMP/uerr" |
 [ "$U_RC" -eq 1 ] \
     && ok "§A6b: --uses on a NON-defining file:name refuses (exit 1), as --callers/--impact/--edit-check do" \
     || { no "§A6b: --uses=core.h:helper exited $U_RC (want 1)"; head -c 300 "$TMP/uout"; }
-# §B4.2 PIN UPDATE (PLAN_outputAudit3_2026-07-29.md). These two arms used to run on --uses ALONE, and the
+# §B4.2 PIN UPDATE . These two arms used to run on --uses ALONE, and the
 # first of them pinned the bare "symbol not found" wording as the shared house form — which is exactly the
 # asymmetry the audit found: --uses had grown the honest message (the real problem + the files that DO
 # define the name + a runnable retry) while --edit-check/--callers/--callees/--impact/--around/--lego said

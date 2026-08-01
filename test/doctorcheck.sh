@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# doctorcheck.sh — gate for --doctor (AUDIT3 standing item): self-diagnosis verb.
+# doctorcheck.sh — gate for --doctor ( standing item): self-diagnosis verb.
 #
 # --doctor is a DIAGNOSTIC verb (environment-dependent output is its whole point), so unlike every
 # other absorb gate this one does NOT assert byte-identical / golden output. Instead it asserts:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# a9disclosurecheck.sh — PLAN_outputAudit2_2026-07-28.md §A9, lane G: the five disclosure gaps whose owning
+# a9disclosurecheck.sh —, lane G: the five disclosure gaps whose owning
 # gates could not hold them, plus the Wave-1 verifier's V1-4 empty-value class.
 #
 # Every arm here pins an ABSENCE that used to read as an ANSWER. That is the class §A9 collects: a bare

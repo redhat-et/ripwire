@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# expandrangecheck.sh — gate for --expand=SYM:START-END (octocode partial-fetch, RESEARCH_agentQuality2026
+# expandrangecheck.sh — gate for --expand=SYM:START-END (octocode partial-fetch
 # §2f): slice a symbol's body to 1-based lines START..END, relative to the symbol's own first line, instead
 # of emitting the whole def. --expand=SYM (no range) MUST stay byte-identical to the pre-existing whole-body
 # path.

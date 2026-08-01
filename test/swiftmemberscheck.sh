@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# swiftmemberscheck.sh — AUDIT2 F2 + F5 gate: Swift init / subscript / deinit capture, and Swift
+# swiftmemberscheck.sh — F2 + F5 gate: Swift init / subscript / deinit capture, and Swift
 # local-binding call-edge attribution.
 #
 # F2 (init/subscript/deinit silently dropped): tree-sitter-swift models an initializer, a subscript,

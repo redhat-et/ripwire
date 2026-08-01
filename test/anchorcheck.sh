@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# anchorcheck.sh — the AUDIT3 steal-#1 gate: LARGER-style lexically-anchored graph expansion (--for --anchor).
+# anchorcheck.sh — the steal-#1 gate: LARGER-style lexically-anchored graph expansion (--for --anchor).
 #
 #   test/anchorcheck.sh                       # uses build/ripwire on test/anchorfix
 #   RIPWIRE_BIN=asan/ripwire test/anchorcheck.sh
@@ -28,7 +28,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-# L5 (AUDIT5): --anchor is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
+# L5: --anchor is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
 # experiment, kept reachable for continued eval work). This gate exercises the flag directly, so it
 # needs the gate itself set.
 export RIPWIRE_DEV=1

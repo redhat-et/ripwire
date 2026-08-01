@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# grepseamcheck.sh — gate for PLAN_outputAudit2_2026-07-28.md §A0 + §A1 + §A10.2: --grep/--regex paging
+# grepseamcheck.sh — gate for: --grep/--regex paging
 # must be a pure WINDOW over one fully-collected, fully-sorted hit list.
 #
 # THE TWO BUGS THIS PINS (both live-reproduced against the pre-fix binary):

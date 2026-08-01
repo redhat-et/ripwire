@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # genrecallcheck.sh — gate for the GENERATED-DOCUMENT de-prioritization in the --recall lens
-# (PLAN_outputAudit_2026-07-28.md §P2b). A generated artifact — a command capture, an API dump, a doxygen
+# . A generated artifact — a command capture, an API dump, a doxygen
 # export — QUOTES the whole system it documents, so BM25 hands it every query's terms and it out-scores the
 # design doc that EXPLAINS them. This repo solved its own case by relocating docs/captures/ under a
 # crawl-skipped name; every OTHER repo with large generated documentation still hit it, because the tool had

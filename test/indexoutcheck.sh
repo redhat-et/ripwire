@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# indexoutcheck.sh — the --index-out committable-index WIRING gate (DESIGN_teamIndex.md §1.4, both-families).
+# indexoutcheck.sh — the --index-out committable-index WIRING gate (both-families).
 #
 # The ingest CORE (cache v8, kArtifactArch self-heal, drift observable) is proven by artifactcheck.sh. This
 # gate proves the CLI SURFACE that turns that core into the team artifact:

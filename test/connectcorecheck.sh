@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # connectcorecheck.sh — gate for connectSubgraph() (src/graph.h), the graph core of --connect
-# (DESIGN_connectSubgraph.md §2/§3: metric-closure 2-approx Steiner, undirected search, true call
+# metric-closure 2-approx Steiner, undirected search, true call
 # direction reported, honest unconnected partitions, pure-integer determinism).
 #
 # graph.h is header-only, so this gate compiles a standalone harness (test/connectcore_harness.cpp) that

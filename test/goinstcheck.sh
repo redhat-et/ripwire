@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # goinstcheck.sh — H4 (L-NEW lane) REJECT-fence: Go explicit generic instantiation.
 #
-# PLAN_h4QualifiedCalls_2026-07-30.md item 5 asked for `Generic[int](1)` (explicit generic
+# item 5 asked for `Generic[int](1)` (explicit generic
 # instantiation, parses as type_conversion_expression, not call_expression) to be widened UNLESS
 # the pattern cannot avoid matching something that is NOT a generic call — in which case an honest
 # REJECT is an acceptable deliverable for Go only. It was rejected: verified with --match that

@@ -2,7 +2,7 @@
 # headsnapcachecheck.sh — gate for A4-P1: --quality-delta's git-HEAD snapshot ingest is CACHED, keyed so it
 # can NEVER serve stale/mismatched facts, and the cache is portable across the per-run tmp root.
 #
-# Background (AUDIT4 §C A4-P1): computeHeadSnapshot cold-ingests a materialized `git archive HEAD` tree on
+# Background ( §C A4-P1): computeHeadSnapshot cold-ingests a materialized `git archive HEAD` tree on
 # EVERY run (~12.5 s on the 1498-file corpus). The HEAD tree is IMMUTABLE for a given HEAD sha, so its ingest
 # is perfectly cacheable: computeHeadSnapshot now hands the archived-tree ingest() an incremental content-hash
 # cache file under cacheDirLadder(), keyed on (realpath repo-root, HEAD sha, excludes, scheme tag). The blob
@@ -43,7 +43,7 @@ CACHEDIR="$XDG/ripwire"
 
 # portable inode reader (BSD stat -f %i / GNU stat -c %i)
 inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
-# AUDIT5 Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
+# Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
 snapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qheadsnap-*.bin' 2>/dev/null; }
 nsnap(){ snapfiles | wc -l | tr -d ' '; }
 # run against $REPO with the private cache dir and a HEAD-snapshot cache enabled (auto path is internal to
@@ -138,7 +138,7 @@ for i in 1 2 3 4 5; do
     run --no-cache >/dev/null 2>/dev/null
 done
 # no-exclude runs share one key group; count only those (exclude=tests group adds its own capped set).
-# AUDIT5 Y4: shard-aware lookup
+# Y4: shard-aware lookup
 NOEXC="$( find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qheadsnap-*.bin' 2>/dev/null | wc -l | tr -d ' ' )"
 [ "$NOEXC" -le 4 ] && ok "cache dir bounded after HEAD churn ($NOEXC files, per-repo cap 2 per key group)" \
     || no "cache dir grew unbounded after churn ($NOEXC files) — eviction not working"

@@ -132,7 +132,7 @@ SRCCCX="$( printf '%s' "$SRCHDR" | grep -o 'ccx="[0-9]*"' | head -1 | grep -o '[
 # (4) weak task→kind: a non-code task with no real name match falls back to kind=fn + low_confidence=1
 #     (must NOT confidently return a fixture class, the original Failure 2).
 # NOTE: the probe phrase must contain NO repo vocabulary or it stops being weak — the original
-#     "test gate ... CLI flag" phrase rotted when --test-gate/testgatecheck.sh shipped (AUDIT4).
+# "test gate ... CLI flag" phrase rotted when --test-gate/testgatecheck.sh shipped.
 WEAK="$( "$BIN" "$SELF" --no-cache --exemplar="quarterly payroll tax withholding reconciler" 2>/dev/null )"
 WHDR="$( exemhdr "$WEAK" )"
 { printf '%s' "$WHDR" | grep -q 'kind="fn"' && printf '%s' "$WHDR" | grep -q 'low_confidence="1"'; } \

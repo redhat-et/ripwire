@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# jsonparitycheck.sh — gate for PLAN_outputAudit2_2026-07-28.md §A4 + §A5: the XML honesty ladder must
+# jsonparitycheck.sh — gate for: the XML honesty ladder must
 # reach every MACHINE mode, not just the XML one. Nine arms, each one a defect the audit found:
 #
 #   §A4a  --for --json honors --token-budget (it was byte-identical at 1000 and 20000 while the XML

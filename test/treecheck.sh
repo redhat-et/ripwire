@@ -95,7 +95,7 @@ done
 #
 # The finding: --tree is the session-start ORIENTATION map, and it emitted files in path order — the one
 # order an orientation map must not use. On this repo a cold agent's first 40 lines were audit-document
-# section titles (`ADOPTION_AUDIT_…`, `AGENTS.md`, `AUDIT2_…` — every one of them sorts above `src/`)
+# section titles (long process-doc names, `AGENTS.md` among them — every one of them sorts above `src/`)
 # and the code it had landed to read was pages down.
 #
 # Files are now keyed on their best symbol's PageRank, path breaking ties, so the FILE order and the

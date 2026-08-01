@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gointerfacecheck.sh — AUDIT2 F3 gate: Go interface method requirements are captured.
+# gointerfacecheck.sh — F3 gate: Go interface method requirements are captured.
 #
 # For a Go `interface`, ripwire emitted the interface TYPE but NONE of its method requirements — the
 # interface's entire contract was invisible with no honesty signal (ambiguous=0 unresolved=0),

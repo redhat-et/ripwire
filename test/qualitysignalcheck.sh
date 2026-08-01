@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qualitysignalcheck.sh — gate for the 2026-07-13 --quality-delta SIGNAL-TO-NOISE round (SPEC §5 quality-delta
+# qualitysignalcheck.sh — gate for the 2026-07-13 --quality-delta SIGNAL-TO-NOISE round ( §5 quality-delta
 # noise rules). Four decided behaviors, each measured on this repo's own dogfood evidence (intentional findings
 # drowning real ones):
 #   1. short-horizon-churn needs COMMITTED thrash evidence — a symbol flags only when its body already changed
@@ -317,7 +317,7 @@ if command -v xmllint >/dev/null 2>&1; then
         && ok "api-surface tiering: xml well-formed (new-symbol + contract-change outputs)" || no "api-surface tiering: xml malformed"
 fi
 
-# ── 9) D1 (AUDIT5, HIGH): sidecars must resolve against the ANALYZED ROOT, not the process CWD ────────────
+# ── 9) D1 (HIGH): sidecars must resolve against the ANALYZED ROOT, not the process CWD ────────────
 #   `ripwire <rootB> --quality-ack` invoked from a FOREIGN cwd (its own separate, unrelated ripwire
 #   project — with its own committed baseline) must read/write ONLY rootB's sidecars. Before the fix, the
 #   bare relative filenames resolved against CWD: a foreign cwd's `.ripwire_quality_acks` could get silently
@@ -395,7 +395,7 @@ printf '%s' "$ODEL2" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
 [ -f "$FCWD/.ripwire_quality_baseline" ] && [ "$( cat "$FCWD/.ripwire_quality_baseline" )" = "$FCWD_BASELINE_SNAPSHOT" ] \
     && ok "D1 foreign-cwd: foreign cwd's baseline SURVIVED rootB's self-heal (the HIGH-severity bug, fixed)" \
     || no "D1 foreign-cwd: foreign cwd's baseline was deleted or mutated by rootB's self-heal — D1 regression"
-# ── 10) DUPLICATE ACK LINES: MAX-WINS, NOT LAST-WINS (D2, AUDIT5) ───────────────────────────────────────────
+# ── 10) DUPLICATE ACK LINES: MAX-WINS, NOT LAST-WINS (D2) ───────────────────────────────────────────
 #   A hand-edited or badly-merged .ripwire_quality_acks can contain two lines for the SAME (kind,key) with
 #   different ackNow. The reader must keep the HIGHEST ackNow (the ratchet floor can only ever go UP via a
 #   duplicate) — never whichever line happens to be LAST in the file (last-wins would let a lower duplicate

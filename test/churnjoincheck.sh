@@ -248,7 +248,7 @@ fi
 # walk, same tally is the only comparison that is a fact about the join rather than about git's log options.)
 # Checked on the basenames that occur more than once in the tree — the population §H6 corrupts.
 #
-# THE `-c` IN EVERY ORACLE HERE (2026-07-31, PLAN_h4QualifiedCalls_2026-07-30.md §Execution, the L-OWN lane —
+# THE `-c` IN EVERY ORACLE HERE (2026-07-31, the L-OWN lane —
 # NOT a re-pin to make a red gate green). The miners now spell `git log -c` (gitmine.h::kMergeDiffArgs) so that
 # a merge commit names the files IT introduced; without the same `-c` here the oracle asks a DIFFERENT question
 # than the code and 19 of 209 live rows "disagreed" while both sides were right about their own command — trap

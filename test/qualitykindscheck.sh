@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qualitykindscheck.sh — gate for the THREE GitClear-2026-backed --quality-delta kinds (AUDIT3 §D#4 / §E-17):
+# qualitykindscheck.sh — gate for the THREE GitClear-2026-backed --quality-delta kinds ( §D#4 / §E-17):
 #   error-masking            — a NEW error-masking construct (empty catch / bare-pass except / swallowed .catch)
 #   short-horizon-churn      — a symbol whose FILE had ≥2 commits in the last 14 days (from git commit
 #                              TIMESTAMPS vs HEAD's epoch, NOT wall-clock) that this diff rewrites again

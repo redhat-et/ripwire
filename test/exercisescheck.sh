@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# exercisescheck.sh — gate for --exercises=TESTFILE (PLAN_outputAudit_2026-07-28.md §P11.2b).
+# exercisescheck.sh — gate for --exercises=TESTFILE .
 #
 # THE GAP: the test<->code map ran one way only. --affected/--situ/--test-gate answer "which tests reach
 # this code"; NOTHING answered the inverse, "what does this test exercise?" — which is the FIRST question

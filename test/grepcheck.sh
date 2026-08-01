@@ -110,7 +110,7 @@ diff -q "$TMP/det1" "$TMP/det2" >/dev/null \
 #
 # The finding: --grep emitted hits in plain path-alphabetical order and then cut at 100 rows. On this
 # repo that is a systematic bias against code — `--grep=DEGRADED_PATH_ALERT` filled 66 of its 100 shown
-# rows with markdown and left no `test/` row at all, because `AGENTS.md`/`AUDIT*.md` sort above `src/`
+# rows with markdown and left no `test/` row at all, because `AGENTS.md` and other long-named docs sort above `src/`
 # and the cap always cuts the tail.
 #
 # The fix is ORDERING ONLY: grepHits() (src/search.h pass 2) stable-sorts into three path tiers —

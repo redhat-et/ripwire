@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# didyoumeancheck.sh — gate for AUDIT3 A3-F16a/b:
+# didyoumeancheck.sh — gate for A3-F16a/b:
 #
 #   (a) every SYM-taking verb's "not found" stderr message ("ripwire: --X symbol not found: Y") now
 #       appends a nearest-name suggestion ("(did you mean 'Z'?)") when a plausible near-miss exists in
