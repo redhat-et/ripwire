@@ -1,5 +1,4 @@
-<!-- TODO: replace OWNER on repo creation -->
-[![CI](https://github.com/OWNER/ripwire/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/ripwire/actions/workflows/ci.yml)
+[![CI](https://github.com/redhat-et/ripwire/actions/workflows/ci.yml/badge.svg)](https://github.com/redhat-et/ripwire/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-Apache%202.0-blue.svg)](LICENSE)
 [![Standard](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](CONTRIBUTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
@@ -60,7 +59,7 @@ package manager to satisfy. Prove that with the network off: add
 `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
 ```bash
-git clone https://github.com/OWNER/ripwire.git    # TODO: replace OWNER on repo creation
+git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
 cmake -S . -B build && cmake --build build -j
 ./build/ripwire --help
