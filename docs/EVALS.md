@@ -221,17 +221,25 @@ verb elides* — count it and the headline becomes a function of how deep your c
 on disk. On one corpus, three spellings of the same root read **18.6 points apart** before the
 subtraction and agreed exactly after it.
 
-**Root-neutralised on this repository (re-derived 2026-07-31):**
+**Root-neutralised on this repository (re-derived 2026-08-01):**
 
 | Result size | Byte reduction |
 | --- | --- |
-| top-10 | 59.1% |
-| **top-50** | **68.4%** |
-| top-100 | 66.5% |
+| top-10 | 46.7% |
+| **top-50** | **67.0%** |
+| top-100 | 66.2% |
 
 **Quote the top-50 figure.** The signature payload is top-50 regardless of `--top-k`, so it is what
 the command actually emits. A "~70%" headline is reachable at larger N but overstates the smaller
 shapes people actually run.
+
+**And do not quote top-10.** It is the noisiest of the three by construction: ten symbols is a small
+enough sample that one trivial body — a one-line `size()` accessor whose signature and doc-comment
+are nearly as large as the body they replace — moves it several points on its own. The 2026-08-01
+re-derivation dropped it from 59.1% to 46.7% with no change to the verb: deleting ~1500 lines of
+unused vendored math shifted the ranking, a different pair of one-line accessors entered the top-10,
+and the ratio followed. top-50 moved 1.4 points over the same edit and top-100 moved 0.3. The
+sample-size sensitivity is the finding; it is why the headline is the top-50 number.
 
 **This is gated, not asserted.** `test/showcasecapturecheck.sh` re-derives all three figures from
 this repository on every run, in the same quantity as the caption, and fails if the caption and the
