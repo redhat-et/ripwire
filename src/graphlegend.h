@@ -1,7 +1,7 @@
 #pragma once
 
 // graphlegend.h — the ONE floor marker and the ONE shared legend wording for the five GRAPH-COUNT verbs
-// (--uses, --callers, --callees, --impact, --edit-check), per PLAN_h4QualifiedCalls_2026-07-30.md §3.4.
+// (--uses, --callers, --callees, --impact, --edit-check).
 //
 // WHY A HEADER AND NOT FIVE STRING LITERALS. Each of these verbs answers with a NUMBER a reader treats as
 // exhaustive ("count=1 caller, so one call site to fix"). §H4 proved the number can be silently short: a

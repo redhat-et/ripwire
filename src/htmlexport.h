@@ -1,6 +1,6 @@
 #pragma once
 
-// htmlexport.h — self-contained HTML wiki export (P2-A + Wave-4 #13, SPEC §5).
+// htmlexport.h — self-contained HTML wiki export (P2-A + Wave-4 #13).
 //
 // Emits a complete <!DOCTYPE html> document, ONE file, hash-routed into three VIEWS rendered by the
 // same embedded JS (no server, no multi-file site — "multi-page" here means multiple in-file views):
@@ -45,7 +45,7 @@ namespace rw
 // JSON-in-script hardening; < parses identically in JS.
 //
 // A4-F27: thin wrapper over the canonical core in jsonesc.h (jsonesc::escapeHtml) — same <>&
-// hardening this function has always had. AUDIT4 follow-up: now also validates UTF-8 (invalid
+// hardening this function has always had. Follow-up: now also validates UTF-8 (invalid
 // sequences scrub to raw U+FFFD bytes instead of passing bytes ≥0x80 through raw) — see jsonesc.h's
 // header comment. This changes emitted bytes only for invalid-UTF-8 source files; a valid-UTF-8
 // file's --html output is unchanged.

@@ -1,6 +1,6 @@
 // ingest.cpp — Phase 2 INGEST. Deterministic crawl + tree-sitter tags-query extraction.
 //
-// Pipeline (SPEC §1):
+// Pipeline:
 //   crawl -> skip-filter -> SORT paths (byte order) -> per-file parse + ONE tags query ->
 //   collect raw defs/refs -> assign Symbol ids in (file,line,name) order ->
 //   attribute each Reference to its enclosing definition by byte-span containment.
@@ -72,7 +72,7 @@ namespace rw
 namespace
 {
 
-// ---- limits / skip config (SPEC §1, all in one place) ----
+// ---- limits / skip config (all in one place) ----
 // The per-file byte ceiling is now a RUNTIME value (default kDefaultMaxFileBytes = 4 MB, ingest.h),
 // threaded through collectSources so --max-file-size can override it. Kept here as the last-resort
 // fallback for any caller that somehow crawls with a zero ceiling.
@@ -122,7 +122,7 @@ constexpr std::array<LangEntry, 30> kLangTable = {{
     { ".h",    Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".hpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".hh",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
-    { ".c",    Lang::C,          &tree_sitter_c,          "c"          },   // plain C (L3) — was entirely invisible (AUDIT5 D-verb-surface)
+    { ".c",    Lang::C,          &tree_sitter_c,          "c"          },   // plain C (L3) — was entirely invisible before this table gained its own row
     { ".py",   Lang::Python,     &tree_sitter_python,     "python"     },
     { ".go",   Lang::Go,         &tree_sitter_go,         "go"         },
     { ".rs",   Lang::Rust,       &tree_sitter_rust,       "rust"       },
@@ -172,7 +172,7 @@ std::string lowerExtensionOf( std::string_view path )
     return ext;
 }
 
-// ---- capture-name prefix -> role. SPEC §1: @definition.* -> DEF, @reference.* -> REF. ----
+// ---- capture-name prefix -> role. @definition.* -> DEF, @reference.* -> REF. ----
 enum class CapRole : std::uint8_t { Ignore, NameOnly, Def, Ref };
 
 // Map the part AFTER "definition."/"reference." to a SymKind. Falls back to Other.
@@ -254,7 +254,7 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
     return std::string( raw );
 }
 
-// ---- skip rules (SPEC §1) ----
+// ---- skip rules ----
 bool isDenylistedName( std::string_view name ) noexcept
 {
     auto endsWith = [ name ]( std::string_view suf ) noexcept
@@ -270,7 +270,7 @@ bool isDenylistedName( std::string_view name ) noexcept
     return false;
 }
 
-// True if the first kBinarySniffCap bytes contain a NUL (binary heuristic, SPEC §1).
+// True if the first kBinarySniffCap bytes contain a NUL (binary heuristic).
 bool looksBinary( std::string_view bytes ) noexcept
 {
     const std::size_t n = bytes.size() < kBinarySniffCap ? bytes.size() : kBinarySniffCap;
@@ -313,7 +313,7 @@ bool looksObjC( std::string_view bytes ) noexcept
         || head.find( "@implementation" ) != std::string_view::npos;
 }
 
-// ---- deterministic crawl: collect candidate source paths, then SORT (SPEC §1) ----
+// ---- deterministic crawl: collect candidate source paths, then SORT ----
 // excludeLabel (multi-root A12): non-empty ⇒ --exclude substrings match `<label>/<root-relative>` instead
 // of the crawled spelling (one excludes namespace across roots). Empty ⇒ byte-identical to today.
 // §P0.5d: the crawl also reports how many otherwise-indexable files it dropped for exceeding A SIZE CEILING,
@@ -811,17 +811,17 @@ constexpr std::uint32_t kParserVer    = 36;           // bump on any grammar/.sc
 // consumable on a machine with the same integer byte order AND pointer width that WROTE it. This one byte
 // lets loadCache's existing header guard reject a foreign-arch blob exactly like a version mismatch → the
 // blob is ignored → full cold reparse → correct output, just not fast. Encodes precisely the two properties
-// that make a native-endian blob same-arch-consumable (DESIGN_teamIndex §1.2): bit 0 = byte order
+// that make a native-endian blob same-arch-consumable: bit 0 = byte order
 // (0 little / 1 big), bits 1.. = sizeof(void*) (pointer width in bytes, the ABI word size the raw-int
 // widths are keyed to). "Correctness never depends on the artifact" is preserved without paying for a
 // portable encoding on the hot (de)serialize path that fe47139/PERF.md P2 optimized; a future big-endian
-// target that actually needs a portable re-encode is a separate gated decision (DESIGN §Open-questions 6),
+// target that actually needs a portable re-encode is a separate gated decision,
 // not pre-paid here — the guard already makes such a target CORRECT (self-heal), just not fast.
 constexpr std::uint8_t kArtifactArch =
       static_cast<std::uint8_t>( ( __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__ ) ? 1u : 0u )   // bit 0: endianness
     | static_cast<std::uint8_t>( sizeof( void* ) << 1 );                                   // bits 1..: pointer width (bytes)
 
-// The lean/rich cache FAMILY split (documented against reality per the DESIGN_teamIndex §1.1 reviewer note).
+// The lean/rich cache FAMILY split (documented against reality per a reviewer note).
 // captureValueUses gets its OWN parserVer so a lean blob and a value-uses ("rich") blob can never cross-hit;
 // the caller (main.cpp:587) sets it via `needsValueUses = !usesSym.empty() || metrics || !forTask.empty() ||
 // !exemplar.empty()`. So which verbs each committed artifact accelerates, precisely:
@@ -944,7 +944,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
 }
 inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); }
 
-// AUDIT5 F8: loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
+// loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
 // they sit next to the writer functions whose field list they must match. A LEAN def record is 9 u32 +
@@ -961,7 +961,7 @@ inline std::size_t minDefRecordBytes( bool captureValueUses ) noexcept
     return kMinDefRecordBytesLean + ( captureValueUses ? kMinDefRecordBytesRichExtra : 0 );
 }
 
-// runtime tripwire (AUDIT5 F8): serialize a DEFAULT-CONSTRUCTED (all-empty) RawDef/RawRef through the real
+// runtime tripwire: serialize a DEFAULT-CONSTRUCTED (all-empty) RawDef/RawRef through the real
 // writer functions and VERIFY the byte count matches the hand-pinned constants above. This is the runtime
 // equivalent of the house `static_assert( sizeof(X) == N )` layout tripwire — ByteW's size is only known at
 // runtime (strings, not a POD struct), so it can't be a compile-time static_assert. VERIFY is a no-op
@@ -1061,7 +1061,7 @@ inline std::string reAbsolutize( std::string_view rel, std::string_view root )
 // load cache → map<path, FileFacts>, keyed by the ABSOLUTE-AS-CRAWLED path under `rootDir` (matching
 // result.files' spelling) even though the on-disk record key is root-relative (T5 portability — see
 // kCacheVersion=3 above). Empty on missing / corrupt / version-or-parserVer mismatch.
-// blobWriteNsOut (AUDIT5 F3/X5, supersedes A4-P7): the racy-rule reference a warm run's stat-gate compares
+// blobWriteNsOut (supersedes A4-P7): the racy-rule reference a warm run's stat-gate compares
 // every cached file's mtime against. STAMPED FROM A FRESH stat() OF THE CACHE FILE ITSELF (this file's own
 // `path`, taken right here — necessarily "post-rename", since by the time a later run's loadCache opens it
 // the writer's saveCache has long since renamed tmp -> path), NOT from the ns-precision wall-clock the
@@ -1215,7 +1215,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     for( std::uint32_t i = 0; i < routeDefs.size(); ++i ) if( routeDefs[i].fileId < F ) rdIdx[ routeDefs[i].fileId ].push_back( i );   // B6.3
     for( std::uint32_t i = 0; i < routeUses.size(); ++i ) if( routeUses[i].fileId < F ) ruIdx[ routeUses[i].fileId ].push_back( i );   // B6.3
 
-    // AUDIT5 F3/X5: this header field is no longer the racy-rule reference — loadCache now derives that from
+    // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
     // compared against; see loadCache's blobWriteNsOut comment for why the wall-clock-vs-stat comparison
     // this used to feed was a tautology on coarse-mtime filesystems). Kept written, at the same wire offset,
@@ -1402,7 +1402,7 @@ inline bool isDecisionType( const char* t ) noexcept
 // (cyclomatic is now counted inside the fused cc_walk / complexityOf below — one DFS computes cx AND ccx.)
 
 // ---- cognitive complexity (SonarSource-style, AST-approximate across our 7 grammars) ----
-// Differs from cyclomatic in the two ways that matter (RESEARCH_codeIntelligence §3): (1) NESTING is
+// Differs from cyclomatic in the two ways that matter: (1) NESTING is
 // penalised — a control structure costs 1 + current-nesting, so deep code scores higher; (2) a flat
 // switch costs 1 (not 1-per-case), rewarding dispatch tables over deep if/else (the house style).
 // else-if chains are flattened (a C-family else-if = +1, not +1+nesting). Boolean runs collapse:
@@ -1620,7 +1620,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
 // relies on a header-only default. Whenever the default IS on the definition (the common case) the arity is
 // correctly treated as elastic and the candidate is never filtered.
 //
-// AUDIT5 F1 (PLAN_audit5Public2026.md X3): graph.h's arity filter only excludes on `argCount > params`, so
+// Decided: graph.h's arity filter only excludes on `argCount > params`, so
 // this residual gap can no longer drop the correct edge for an (params-1)-arg call — the header-default def
 // stays a candidate and correctly re-enters amb= when a sibling overload survives too. The gap is now
 // strictly a precision (not honesty) limit: a too-many-args call still provably excludes on the def's
@@ -1741,7 +1741,7 @@ struct ParserGuard
     ~ParserGuard() { if( p ) ts_parser_delete( p ); }
 };
 
-// Verify the grammar's ABI is in range for the linked core (SPEC §7). v0.26.9 renamed the
+// Verify the grammar's ABI is in range for the linked core. v0.26.9 renamed the
 // accessor to ts_language_abi_version; the [MIN_COMPATIBLE, LANGUAGE_VERSION] band is unchanged.
 bool grammarAbiOk( const TSLanguage* lang ) noexcept
 {
@@ -2363,7 +2363,7 @@ inline std::string immediateScope( std::string_view full )
     return std::string( cc == std::string_view::npos ? full : full.substr( cc + 2 ) );
 }
 
-// ── H4 qualified-call re-split helpers (PLAN_h4QualifiedCalls_2026-07-30.md) ─────────────────────────────
+// ── H4 qualified-call re-split helpers ───────────────────────────────────────────────────────────────────
 // The widened C++ call pattern (`qualified_identifier name: (_)`) binds the INNER node at every depth, so
 // the captured text of a 3+-segment call still carries scope (`inner::targetFn`,
 // `numeric_limits<std::size_t>::max`). These two helpers turn that text back into the (name, immediate
@@ -2487,7 +2487,7 @@ inline std::string qualifierOf( TSNode nameNode, std::string_view src )
     const std::uint32_t a = ts_node_start_byte( scope ), b = ts_node_end_byte( scope );
     return ( a <= b && b <= src.size() ) ? immediateScope( src.substr( a, b - a ) ) : std::string{};
 }
-// ── H4 RUST qualified-call helpers (PLAN_h4QualifiedCalls_2026-07-30.md §3.2, W1-MEASURE verdict) ─────────
+// ── H4 RUST qualified-call helpers (W1-MEASURE verdict) ─────────────────────────────────────────────────
 // W1 measured that the Rust PATTERN ALONE under-delivers: Rust defs carried scope="" (canonByName was fed
 // only by the C++/Python arms) and Rust refs carried qualifier="", so every widened `Widget::new()` fell to
 // the BARE-NAME spray — and two types defining `new` in DIFFERENT directories then hit the tier-3
@@ -3475,7 +3475,7 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
 
     if( !ts_parser_set_language( parser, lang ) || !grammarAbiOk( lang ) )
     {
-        // never emit a silently-empty tree — say which language we dropped (SPEC §7).
+        // never emit a silently-empty tree — say which language we dropped.
         std::fprintf( stderr, "[ripwire] grammar ABI mismatch or set_language failed for %s — skipping language\n",
                       std::string( le.querySub ).c_str() );
         return false;
@@ -3857,7 +3857,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                      std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: total (crawl + parse + model)" );
-    // AUDIT5 F8: cheap (a handful of bytes serialized twice) and runs once per invocation — catches a
+    // Cheap (a handful of bytes serialized twice) and runs once per invocation — catches a
     // writeDef/writeRef field added without updating kMinDefRecordBytesLean/kMinRefRecordBytes immediately
     // in any debug/ASan run, before it can silently weaken the cache record-count bounds check.
     verifyCacheRecordMinimaTripwire();
@@ -4469,7 +4469,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         }
 
                         // hostile/degenerate JSON guard — must run BEFORE the parse (that is the whole point);
-                        // the skip is a degrade with a one-line stderr note, matching the SPEC §1 skip style.
+                        // the skip is a degrade with a one-line stderr note, matching the house skip style.
                         if( le->lang == Lang::Json && jsonNestsTooDeep( bytes ) )
                         {
                             std::fprintf( stderr, "[ripwire] %s: json nesting > %u levels — treated as data, not config (skipped)\n",
@@ -4812,7 +4812,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/build-model: assign symbols" );
 
-        // 3b) assign Symbol ids in (fileId, line, name) order — deterministic (SPEC §1 / model.h)
+        // 3b) assign Symbol ids in (fileId, line, name) order — deterministic (model.h)
         std::sort( rawDefs.begin(), rawDefs.end(),
                    []( const RawDef& a, const RawDef& b ) noexcept
                    {
