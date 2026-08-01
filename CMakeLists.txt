@@ -302,12 +302,21 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_c>
 )
 
+# ---- threading: std::thread / std::mutex need an explicit link on most Unixes ----
+# The parallel ingest and the MCP qsnap-prefetch worker are std::thread; on Apple platforms the pthread
+# runtime is inside libSystem and nothing extra is needed, which is why this was never noticed here. On
+# Linux it depends on the glibc version — merged into libc from 2.34 (so ubuntu-24.04 happens to link
+# without it), a separate -lpthread before that, and -pthread also changes CODEGEN, not just the link
+# line. Threads::Threads asks CMake for whatever this platform actually requires; on macOS it resolves
+# to nothing, so the dev build is untouched.
+find_package(Threads REQUIRED)
+
 # ---- probe target: the Phase-1/2 proof binary ----
 add_executable(ripwire_probe
   src/tsprobe.cpp
   ${RIPWIRE_SRCS}
   ${RIPWIRE_TS_OBJECTS})
-target_link_libraries(ripwire_probe PRIVATE tree-sitter)
+target_link_libraries(ripwire_probe PRIVATE tree-sitter Threads::Threads)
 target_include_directories(ripwire_probe PRIVATE
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${_ripwire_generated_dir}
@@ -321,7 +330,7 @@ add_executable(ripwire
   src/main.cpp
   ${RIPWIRE_SRCS}
   ${RIPWIRE_TS_OBJECTS})
-target_link_libraries(ripwire PRIVATE tree-sitter)
+target_link_libraries(ripwire PRIVATE tree-sitter Threads::Threads)
 target_include_directories(ripwire PRIVATE
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${_ripwire_generated_dir}
