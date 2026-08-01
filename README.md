@@ -136,7 +136,7 @@ nonzero even then):
 
 ```
 $ ripwire . --test-gate          # exit code: 4
-<test-gate changed="1" impacted="80" tests="2" untested="76" shown_tests="2"
+<test-gate changed="1" impacted="80" tests="2" untested="76" shown_tests="2" tests_capped="0"
            shown_untested="25" untested_capped="1" script_gates_unmodelled="332" at="9cf0b16f3+dirty">
 <t p="./test/adaptivecutshapefix/adaptive_cut_shape_test.cpp" run="bash test/adaptivecutshapecheck.sh"/>
 <t p="./test/verify_radix.cpp"/>
