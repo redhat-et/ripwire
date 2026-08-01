@@ -1,9 +1,9 @@
 # ripwire — every verb, run for real
 
 - **Date:** 2026-07-31 (regenerated capture; supersedes any older `docs/captures/COMMANDS_showcase_*.md`)
-- **Lives in `docs/captures/`** — a directory the crawl/retrieval lenses SKIP (`kCrawlSkipDirs`, src/ingest.h): a generated doc that quotes every verb's output out-scores the source for any query about the tool and was 77% of `--recall` on this repo when it sat at the root (PLAN_outputAudit_2026-07-28.md §P2). `test/argvdiffcheck.sh` harvests its `## `-heading command lines as differential vectors — keep that format.
+- **Lives in `docs/captures/`** — a directory the crawl/retrieval lenses SKIP (`kCrawlSkipDirs`, src/ingest.h): a generated doc that quotes every verb's output out-scores the source for any query about the tool and was measured at 77% of `--recall` on this repo when it sat at the root. `test/argvdiffcheck.sh` harvests its `## `-heading command lines as differential vectors — keep that format.
 - **Version:** `ripwire 0.1.0 (dev, AppleClang 21.0.0.21000101)`
-- **Repo:** the ripwire repo @ `1dc07e2` — **dirty: ['M src/cli.h', ' M test/docscommandscheck.sh', ' M test/showcase_capture.py', '?? docs/captures/']**. That is the one structural difference from the previous capture, which ran against a deliberately dirty tree. A clean tree is the honest default for a showcase, so the diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`) appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.
+- **Repo:** the ripwire repo @ `f67d2a4` — **dirty: ['M docs/COMMANDS.md', ' M docs/captures/COMMANDS_showcase_2026-07-31.md']**. That is the one structural difference from the previous capture, which ran against a deliberately dirty tree. A clean tree is the honest default for a showcase, so the diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`) appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.
 - **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`
 - **Sandbox diff** (the last section only): `src/sortutil.h | 67 +++++++++++++++++++++++++++++++++++++++++++++++++++++++---
  1 file changed, 64 insertions(+), 3 deletions(-)` — one preexisting function made deeply nested, one function's arity changed 1 -> 2, one copy-paste duplicate helper, one new 8-parameter public function.
@@ -188,26 +188,26 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 
 `````
 <ctx task="incremental cache invalidation when a file content hash changes" route=" [routed: subtoken+body BM25 (--for&apos;s default) — no strong name hit, multi-word conceptual query]">
-<!-- ripwire lens for "incremental cache invalidation when a file content hash changes" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2908" -->
+<!-- ripwire lens for "incremental cache invalidation when a file content hash changes" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2916" -->
 <sigs capped="1">
 <f p="./src/ingest.h">
 <d l="85" n="ingest" id="./src/ingest.h::rw::ingest" cx="1" ccx="0" in="0" churn="2" tested="1">
 <doc>for vendored/generated trees not caught by the built-in dir denylist (--exclude=SUBSTR). cacheFi…</doc>IngestResult ingest( const char* rootDir, const std::vector&lt;std::string&gt;&amp; excludeSubstr =</d>
 </f>
 <f p="./src/mcpindex.h">
-<d l="80" n="collectDirMtimes" id="./src/mcpindex.h::mcpdetail::collectDirMtimes" cx="13" ccx="21" in="1" churn="3" amp="1">inline void collectDirMtimes( const std::string&amp; root, HashMap&lt;std::string, long long&gt;&amp; dirMtime…</d>
-<d l="253" n="byteHash" id="./src/mcpindex.h::mcpdetail::byteHash" cx="2" ccx="1" in="4" churn="3" amp="4">inline std::uint64_t byteHash( const char* data, std::size_t n ) noexcept</d>
-<d l="285" n="stableHandleId" id="./src/mcpindex.h::mcpdetail::stableHandleId" cx="2" ccx="1" in="2" churn="3" amp="2">inline std::string stableHandleId( const std::string&amp; canonId, const std::string&amp; path, const std::string&amp; name )</d>
-<d l="296" n="makeHandle" id="./src/mcpindex.h::mcpdetail::makeHandle" cx="1" ccx="0" in="1" churn="3" amp="1">inline std::string makeHandle( const std::string&amp; canonId, const std::string&amp; path, const std::string&amp; name, std::uint64_t contentHash )</d>
-<d l="309" n="parseHandle" id="./src/mcpindex.h::mcpdetail::parseHandle" cx="10" ccx="13" in="1" churn="3" amp="1">inline bool parseHandle( const std::string&amp; h, std::uint64_t&amp; idHash, std::uint64_t&amp; contentHash )</d>
-<d l="341" n="indexContentHash" id="./src/mcpindex.h::mcpdetail::indexContentHash" cx="5" ccx="7" in="1" churn="3" amp="1">inline std::uint64_t indexContentHash( const std::vector&lt;std::string&gt;&amp; files, const std::vector&lt;long long&gt;&amp; fileMtime, const std::vector&lt;std::uint64_t&gt; … [line truncated: 20 more bytes on this line]
-<d l="372" n="McpIndex" id="./src/mcpindex.h::McpIndex::McpIndex" cx="0" ccx="0" in="0" churn="3">
+<d l="80" n="collectDirMtimes" id="./src/mcpindex.h::mcpdetail::collectDirMtimes" cx="13" ccx="21" in="1" churn="4" amp="13">inline void collectDirMtimes( const std::string&amp; root, HashMap&lt;std::string, long long&gt;&amp; dirMtime…</d>
+<d l="253" n="byteHash" id="./src/mcpindex.h::mcpdetail::byteHash" cx="2" ccx="1" in="4" churn="4" amp="16">inline std::uint64_t byteHash( const char* data, std::size_t n ) noexcept</d>
+<d l="285" n="stableHandleId" id="./src/mcpindex.h::mcpdetail::stableHandleId" cx="2" ccx="1" in="2" churn="4" amp="14">inline std::string stableHandleId( const std::string&amp; canonId, const std::string&amp; path, const std::string&amp; name )</d>
+<d l="296" n="makeHandle" id="./src/mcpindex.h::mcpdetail::makeHandle" cx="1" ccx="0" in="1" churn="4" amp="13">inline std::string makeHandle( const std::string&amp; canonId, const std::string&amp; path, const std::string&amp; name, std::uint64_t contentHash )</d>
+<d l="309" n="parseHandle" id="./src/mcpindex.h::mcpdetail::parseHandle" cx="10" ccx="13" in="1" churn="4" amp="13">inline bool parseHandle( const std::string&amp; h, std::uint64_t&amp; idHash, std::uint64_t&amp; contentHash )</d>
+<d l="341" n="indexContentHash" id="./src/mcpindex.h::mcpdetail::indexContentHash" cx="5" ccx="7" in="1" churn="4" amp="13">inline std::uint64_t indexContentHash( const std::vector&lt;std::string&gt;&amp; files, const std::vector&lt;long long&gt;&amp; fileMtime, const std::vector&lt;std::uint64_t&gt … [line truncated: 21 more bytes on this line]
+<d l="372" n="McpIndex" id="./src/mcpindex.h::McpIndex::McpIndex" cx="0" ccx="0" in="0" churn="4" amp="12">
 <doc>persistent in-memory index (parse once, reuse across MCP calls) ---- The MCP server is long-live…</doc>struct McpIndex</d>
-<d l="516" n="mcpStale" id="./src/mcpindex.h::rw::mcpStale" cx="9" ccx="13" in="1" churn="3" amp="1">inline bool mcpStale( const McpIndex&amp; ix, bool skipDirSweep = false )</d>
-<d l="734" n="getIndex" id="./src/mcpindex.h::rw::getIndex" cx="20" ccx="38" in="25" churn="3" amp="25">
+<d l="515" n="mcpStale" id="./src/mcpindex.h::rw::mcpStale" cx="9" ccx="13" in="1" churn="4" amp="13">inline bool mcpStale( const McpIndex&amp; ix, bool skipDirSweep = false )</d>
+<d l="733" n="getIndex" id="./src/mcpindex.h::rw::getIndex" cx="20" ccx="38" in="25" churn="4" amp="37">
 <doc>the cached index for `root`, rebuilt only when stale (otherwise returned as-is, no parse, no gra…</doc>inline const McpIndex&amp; getIndex( const std::string&amp; root )</d>
-<d l="852" n="handleFor" id="./src/mcpindex.h::rw::handleFor" cx="4" ccx="3" in="1" churn="3" amp="1">inline std::string handleFor( const McpIndex&amp; ix, NodeId id )</d>
-<d l="869" n="resolveHandleAll" id="./src/mcpindex.h::rw::resolveHandleAll" cx="5" ccx="8" in="2" churn="3" amp="2">inline NodeId resolveHandleAll( const McpIndex&amp; ix, std::uint64_t idHash, std::vector&lt; NodeId &gt;&amp; matches )</d>
+<d l="851" n="handleFor" id="./src/mcpindex.h::rw::handleFor" cx="4" ccx="3" in="1" churn="4" amp="13">inline std::string handleFor( const McpIndex&amp; ix, NodeId id )</d>
+<d l="868" n="resolveHandleAll" id="./src/mcpindex.h::rw::resolveHandleAll" cx="5" ccx="8" in="2" churn="4" amp="14">inline NodeId resolveHandleAll( const McpIndex&amp; ix, std::uint64_t idHash, std::vector&lt; NodeId &gt;&amp; matches )</d>
 </f>
 <f p="./src/ingest.cpp">
 <d l="526" n="StatInfo" id="./src/ingest.cpp::StatInfo::StatInfo" cx="0" ccx="0" in="0" churn="3">struct StatInfo</d>
@@ -217,7 +217,7 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 <doc>T5: renamed from fnv1a64 to contentHash64 to avoid an ODR clash now that this file also includes…</doc>inline std::uint64_t contentHash64( std::string_view s ) noexcept</d>
 <d l="859" n="blobChecksum" cx="5" ccx="5" in="2" churn="3" amp="2">inline std::uint64_t blobChecksum( std::string_view s ) noexcept</d>
 <d l="878" n="FileFacts" id="./src/ingest.cpp::FileFacts::FileFacts" cx="0" ccx="0" in="0" churn="3">struct FileFacts</d>
-… [28 more display lines; full output is 7269 bytes on 1 raw line(s)]
+… [28 more display lines; full output is 7290 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --for="rankGraphTeleport"`
@@ -226,11 +226,11 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 
 `````
 <ctx task="rankGraphTeleport" route=" [routed: name-exact BM25 — query names a symbol (rankGraphTeleport)]">
-<!-- ripwire lens for "rankGraphTeleport" [routed: name-exact BM25 — query names a symbol (rankGraphTeleport)]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2236" -->
+<!-- ripwire lens for "rankGraphTeleport" [routed: name-exact BM25 — query names a symbol (rankGraphTeleport)]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2237" -->
 <sigs>
 <f p="./src/graph.h">
-<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="3" amp="6">
-<doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased (W4-#1) here so all rank modes share one weighting seam; the transition matrix (edges) is unto</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector& … [line truncated: 46 more bytes on this line]
+<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="4" amp="18">
+<doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased () here so all rank modes share one weighting seam; the transition matrix (edges) is untouched</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector& … [line truncated: 46 more bytes on this line]
 </f>
 <f p="./AGENTS.md">
 <d l="1" n="AGENTS" cx="0" ccx="0" in="0" churn="1" amp="2"># ripwire — agent instructions This repository follows the `AGENTS.md` convention. The full agent guide is **`CLAUDE.md`**</d>
@@ -255,7 +255,7 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 <d l="220" n="Added — output shaping, honesty and paging" cx="0" ccx="0" in="0" churn="1">### Added — output shaping, honesty and paging</d>
 <d l="263" n="Added — architecture, quality and structure" cx="0" ccx="0" in="0" churn="1">### Added — architecture, quality and structure</d>
 <d l="285" n="Added — MCP server and agent wiring" cx="0" ccx="0" in="0" churn="1">### Added — MCP server and agent wiring</d>
-… [26 more display lines; full output is 5591 bytes on 1 raw line(s)]
+… [26 more display lines; full output is 5592 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --for="rankGraphTeleport" --no-route`
@@ -264,36 +264,36 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 
 `````
 <ctx task="rankGraphTeleport">
-<!-- ripwire lens for "rankGraphTeleport" [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2976" -->
+<!-- ripwire lens for "rankGraphTeleport" [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2989" -->
 <sigs capped="1">
 <f p="./src/graph.h">
-<d l="32" n="Graph" id="./src/graph.h::Graph::Graph" cx="0" ccx="0" in="0" churn="3">struct Graph</d>
-<d l="1263" n="biasPrior" id="./src/graph.h::rw::biasPrior" cx="5" ccx="4" in="1" churn="3" amp="1">inline std::vector&lt;float&gt; biasPrior( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p )</d>
-<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="3" amp="6">
+<d l="32" n="Graph" id="./src/graph.h::Graph::Graph" cx="0" ccx="0" in="0" churn="4" amp="12">struct Graph</d>
+<d l="1263" n="biasPrior" id="./src/graph.h::rw::biasPrior" cx="5" ccx="4" in="1" churn="4" amp="13">inline std::vector&lt;float&gt; biasPrior( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p )</d>
+<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="4" amp="18">
 <doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quali…</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )</d>
-<d l="1304" n="rankGraph" id="./src/graph.h::rw::rankGraph" cx="2" ccx="1" in="9" churn="3" amp="9">
+<d l="1304" n="rankGraph" id="./src/graph.h::rw::rankGraph" cx="2" ccx="1" in="9" churn="4" amp="21">
 <doc>uniform-teleport PageRank (the default</doc>inline std::vector&lt;float&gt; rankGraph( const Graph&amp; g, float alpha = 0.85f )</d>
-<d l="1553" n="anchoredLexicalRank" id="./src/graph.h::rw::anchoredLexicalRank" cx="10" ccx="10" in="4" churn="3" amp="4">
+<d l="1553" n="anchoredLexicalRank" id="./src/graph.h::rw::anchoredLexicalRank" cx="10" ccx="10" in="4" churn="4" amp="16">
 <doc>anchored rank: pick the top-kAnchorCount symbols by lexical score (score desc, id asc — determ…</doc>inline std::vector&lt;float&gt; anchoredLexicalRank( const Graph&amp; g, const std::vector&lt;float&gt;&amp; lex )</d>
-<d l="2012" n="diffTeleport" id="./src/graph.h::rw::diffTeleport" cx="8" ccx="9" in="3" churn="3" amp="3">inline std::vector&lt;float&gt; diffTeleport( const IngestResult&amp; ing, const std::vector&lt;char&gt;&amp; fileChanged, float beta = 0.7f )</d>
+<d l="2012" n="diffTeleport" id="./src/graph.h::rw::diffTeleport" cx="8" ccx="9" in="3" churn="4" amp="15">inline std::vector&lt;float&gt; diffTeleport( const IngestResult&amp; ing, const std::vector&lt;char&gt;&amp; fileChanged, float beta = 0.7f )</d>
 </f>
 <f p="./src/main.cpp">
-<d l="1242" n="computeLensRanking" cx="37" ccx="67" in="3" churn="4" amp="7">rw::LensRanking computeLensRanking( const MainDispatch&amp; d, std::string_view task )</d>
-<d l="3887" n="runGraphQuery" cx="7" ccx="12" in="1" churn="4" amp="5">std::optional&lt;int&gt; runGraphQuery( const MainDispatch&amp; d )</d>
-<d l="4430" n="runImpact" cx="8" ccx="14" in="1" churn="4" amp="5">std::optional&lt;int&gt; runImpact( const MainDispatch&amp; d )</d>
-<d l="4678" n="runExercises" cx="8" ccx="8" in="1" churn="4" amp="5">std::optional&lt;int&gt; runExercises( const MainDispatch&amp; d )</d>
-<d l="6239" n="runStructureText" cx="84" ccx="213" in="1" churn="4" amp="5">std::optional&lt;int&gt; runStructureText( const MainDispatch&amp; d )</d>
-<d l="7094" n="runAround" cx="12" ccx="21" in="1" churn="4" amp="5">std::optional&lt;int&gt; runAround( const MainDispatch&amp; d )</d>
-<d l="7244" n="ChurnRanking" id="./src/main.cpp::ChurnRanking::ChurnRanking" cx="0" ccx="0" in="0" churn="4" amp="4">struct ChurnRanking</d>
-<d l="7246" n="churnRankedGraph" cx="7" ccx="8" in="1" churn="4" amp="5">inline ChurnRanking churnRankedGraph( const MainDispatch&amp; d )</d>
-<d l="7276" n="runDefaultMap" cx="100" ccx="170" in="1" churn="4" amp="5">int runDefaultMap( const MainDispatch&amp; d )</d>
+<d l="1242" n="computeLensRanking" cx="37" ccx="67" in="3" churn="5" amp="19">rw::LensRanking computeLensRanking( const MainDispatch&amp; d, std::string_view task )</d>
+<d l="3887" n="runGraphQuery" cx="7" ccx="12" in="1" churn="5" amp="17">std::optional&lt;int&gt; runGraphQuery( const MainDispatch&amp; d )</d>
+<d l="4430" n="runImpact" cx="8" ccx="14" in="1" churn="5" amp="17">std::optional&lt;int&gt; runImpact( const MainDispatch&amp; d )</d>
+<d l="4678" n="runExercises" cx="8" ccx="8" in="1" churn="5" amp="17">std::optional&lt;int&gt; runExercises( const MainDispatch&amp; d )</d>
+<d l="6239" n="runStructureText" cx="84" ccx="213" in="1" churn="5" amp="17">std::optional&lt;int&gt; runStructureText( const MainDispatch&amp; d )</d>
+<d l="7094" n="runAround" cx="12" ccx="21" in="1" churn="5" amp="17">std::optional&lt;int&gt; runAround( const MainDispatch&amp; d )</d>
+<d l="7244" n="ChurnRanking" id="./src/main.cpp::ChurnRanking::ChurnRanking" cx="0" ccx="0" in="0" churn="5" amp="16">struct ChurnRanking</d>
+<d l="7246" n="churnRankedGraph" cx="7" ccx="8" in="1" churn="5" amp="17">inline ChurnRanking churnRankedGraph( const MainDispatch&amp; d )</d>
+<d l="7276" n="runDefaultMap" cx="100" ccx="170" in="1" churn="5" amp="17">int runDefaultMap( const MainDispatch&amp; d )</d>
 </f>
 <f p="./src/gitmine.h">
 <d l="1182" n="churnPriorFromFreq" id="./src/gitmine.h::rw::churnPriorFromFreq" cx="8" ccx="8" in="2" churn="3" amp="2">inline std::vector&lt;float&gt; churnPriorFromFreq( const IngestResult&amp; ing, const std::vector&lt;std::uint32_t&gt;&amp; freq, bool anyHistory )</d>
 <d l="1202" n="churnTeleport" id="./src/gitmine.h::rw::churnTeleport" cx="4" ccx="4" in="1" churn="3" amp="1">inline std::vector&lt;float&gt; churnTeleport( const std::string&amp; root, const IngestResult&amp; ing, const char* since = &quot;18 months ago&quot;, const SinceScope* scope = nullpt…</d … [line truncated: 1 more bytes on this line]
 <d l="1218" n="churnTeleportWorkspace" id="./src/gitmine.h::rw::churnTeleportWorkspace" cx="6" ccx="9" in="1" churn="3" amp="1">inline std::vector&lt;float&gt; churnTeleportWorkspace( const std::vector&lt;std::string&gt;&amp; rootDirs, const IngestResult&amp; ing, const char* since = &quot;18 months … [line truncated: 25 more bytes on this line]
 </f>
-… [40 more display lines; full output is 7440 bytes on 1 raw line(s)]
+… [40 more display lines; full output is 7472 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --for="tree-sitter parse of a source file" --adaptive`
@@ -302,7 +302,7 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 
 `````
 <ctx task="tree-sitter parse of a source file" route=" [routed: subtoken+body BM25 (--for&apos;s default) — no strong name hit, multi-word conceptual query]">
-<!-- ripwire lens for "tree-sitter parse of a source file" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [adaptive: kept 5 of 40 - sharp cliff at rank 1 (23% drop), clamped up to the floor of 5]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="854" -->
+<!-- ripwire lens for "tree-sitter parse of a source file" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [adaptive: kept 5 of 40 - sharp cliff at rank 1 (23% drop), clamped up to the floor of 5]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="857" -->
 <sigs>
 <f p="./src/ingest.cpp">
 <d l="66" n="tree_sitter_c" cx="1" ccx="0" in="0" churn="3">const TSLanguage* tree_sitter_c( void )</d>
@@ -311,7 +311,7 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 <d l="3486" n="parseTree" cx="1" ccx="0" in="1" churn="3" amp="1">TSTree* parseTree( TSParser* parser, std::string_view src )</d>
 </f>
 <f p="./src/mcpindex.h">
-<d l="372" n="McpIndex" id="./src/mcpindex.h::McpIndex::McpIndex" cx="0" ccx="0" in="0" churn="3">
+<d l="372" n="McpIndex" id="./src/mcpindex.h::McpIndex::McpIndex" cx="0" ccx="0" in="0" churn="4" amp="12">
 <doc>persistent in-memory index (parse once, reuse across MCP calls) ---- The MCP server is long-lived; previously every verb re-parsed the whole tree (~6.5 s each). This caches the assembled {ingest</doc>struct McpIndex</d>
 </f>
 <f p="./src/lintrules.h">
@@ -334,7 +334,7 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 
 `````
 <ctx task="why does src/lexical.h chooseForRanker pick name-exact BM25" route=" [routed: subtoken+body BM25 (--for&apos;s default) — no strong name hit, multi-word conceptual query]">
-<!-- ripwire lens for "why does src/lexical.h chooseForRanker pick name-exact BM25" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [mention anchor: 1 file + 3 symbols named in the task lifted near the top] [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2934" -->
+<!-- ripwire lens for "why does src/lexical.h chooseForRanker pick name-exact BM25" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [mention anchor: 1 file + 3 symbols named in the task lifted near the top] [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2946" -->
 <sigs capped="1">
 <f p="./src/eval.h">
 <d l="120" n="printEvalRankerNote" id="./src/eval.h::rw::printEvalRankerNote" cx="1" ccx="0" in="1" churn="3" amp="1">
@@ -358,12 +358,12 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 <d l="39" n="LensRanking" id="./src/packtask.h::LensRanking::LensRanking" cx="0" ccx="0" in="0" churn="3">struct LensRanking</d>
 </f>
 <f p="./src/main.cpp">
-<d l="466" n="ExpandToken" id="./src/main.cpp::ExpandToken::ExpandToken" cx="0" ccx="0" in="0" churn="4" amp="4">struct ExpandToken</d>
-<d l="1242" n="computeLensRanking" cx="37" ccx="67" in="3" churn="4" amp="7">rw::LensRanking computeLensRanking( const MainDispatch&amp; d, std::string_view task )</d>
-<d l="2129" n="runTargetedViews" cx="16" ccx="32" in="1" churn="4" amp="5">std::optional&lt;int&gt; runTargetedViews( const MainDispatch&amp; d )</d>
-<d l="3725" n="runEvalViews" cx="5" ccx="4" in="1" churn="4" amp="5">std::optional&lt;int&gt; runEvalViews( const MainDispatch&amp; d )</d>
-<d l="4294" n="runPath" cx="14" ccx="25" in="1" churn="4" amp="5">std::optional&lt;int&gt; runPath( const MainDispatch&amp; d )</d>
-… [27 more display lines; full output is 7335 bytes on 1 raw line(s)]
+<d l="466" n="ExpandToken" id="./src/main.cpp::ExpandToken::ExpandToken" cx="0" ccx="0" in="0" churn="5" amp="16">struct ExpandToken</d>
+<d l="1242" n="computeLensRanking" cx="37" ccx="67" in="3" churn="5" amp="19">rw::LensRanking computeLensRanking( const MainDispatch&amp; d, std::string_view task )</d>
+<d l="2129" n="runTargetedViews" cx="16" ccx="32" in="1" churn="5" amp="17">std::optional&lt;int&gt; runTargetedViews( const MainDispatch&amp; d )</d>
+<d l="3725" n="runEvalViews" cx="5" ccx="4" in="1" churn="5" amp="17">std::optional&lt;int&gt; runEvalViews( const MainDispatch&amp; d )</d>
+<d l="4294" n="runPath" cx="14" ccx="25" in="1" churn="5" amp="17">std::optional&lt;int&gt; runPath( const MainDispatch&amp; d )</d>
+… [27 more display lines; full output is 7364 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost`
@@ -372,7 +372,7 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 
 `````
 <ctx task="why does src/lexical.h chooseForRanker pick name-exact BM25" route=" [routed: subtoken+body BM25 (--for&apos;s default) — no strong name hit, multi-word conceptual query]">
-<!-- ripwire lens for "why does src/lexical.h chooseForRanker pick name-exact BM25" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2980" -->
+<!-- ripwire lens for "why does src/lexical.h chooseForRanker pick name-exact BM25" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query] [doc mentions: 1 doc discussing 1 top-ranked symbol surfaced]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="2992" -->
 <sigs capped="1">
 <f p="./src/eval.h">
 <d l="120" n="printEvalRankerNote" id="./src/eval.h::rw::printEvalRankerNote" cx="1" ccx="0" in="1" churn="3" amp="1">
@@ -395,13 +395,13 @@ ripwire: --token-budget exceeded: withheld_est_tokens=9677 > budget=100
 <doc>per-symbol lens rank + the routing/mention/co-change header note fragments — populated identic…</doc>struct LensRanking</d>
 </f>
 <f p="./src/main.cpp">
-<d l="466" n="ExpandToken" id="./src/main.cpp::ExpandToken::ExpandToken" cx="0" ccx="0" in="0" churn="4" amp="4">struct ExpandToken</d>
-<d l="1242" n="computeLensRanking" cx="37" ccx="67" in="3" churn="4" amp="7">rw::LensRanking computeLensRanking( const MainDispatch&amp; d, std::string_view task )</d>
-<d l="2129" n="runTargetedViews" cx="16" ccx="32" in="1" churn="4" amp="5">std::optional&lt;int&gt; runTargetedViews( const MainDispatch&amp; d )</d>
-<d l="3725" n="runEvalViews" cx="5" ccx="4" in="1" churn="4" amp="5">std::optional&lt;int&gt; runEvalViews( const MainDispatch&amp; d )</d>
-<d l="4294" n="runPath" cx="14" ccx="25" in="1" churn="4" amp="5">std::optional&lt;int&gt; runPath( const MainDispatch&amp; d )</d>
-<d l="7276" n="runDefaultMap" cx="100" ccx="170" in="1" churn="4" amp="5">int runDefaultMap( const MainDispatch&amp; d )</d>
-… [29 more display lines; full output is 7450 bytes on 1 raw line(s)]
+<d l="466" n="ExpandToken" id="./src/main.cpp::ExpandToken::ExpandToken" cx="0" ccx="0" in="0" churn="5" amp="16">struct ExpandToken</d>
+<d l="1242" n="computeLensRanking" cx="37" ccx="67" in="3" churn="5" amp="19">rw::LensRanking computeLensRanking( const MainDispatch&amp; d, std::string_view task )</d>
+<d l="2129" n="runTargetedViews" cx="16" ccx="32" in="1" churn="5" amp="17">std::optional&lt;int&gt; runTargetedViews( const MainDispatch&amp; d )</d>
+<d l="3725" n="runEvalViews" cx="5" ccx="4" in="1" churn="5" amp="17">std::optional&lt;int&gt; runEvalViews( const MainDispatch&amp; d )</d>
+<d l="4294" n="runPath" cx="14" ccx="25" in="1" churn="5" amp="17">std::optional&lt;int&gt; runPath( const MainDispatch&amp; d )</d>
+<d l="7276" n="runDefaultMap" cx="100" ccx="170" in="1" churn="5" amp="17">int runDefaultMap( const MainDispatch&amp; d )</d>
+… [29 more display lines; full output is 7479 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --lego=Vehicle`
@@ -503,7 +503,7 @@ bounded loop. A file that was already complex is not your regression.
 … [3642 more display lines; full output is 100674 bytes on 1 raw line(s)]
 `````
 
-## `./build/ripwire . --html=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/map2.html`
+## `./build/ripwire . --html=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/map2.html`
 
 *Self-contained HTML force-directed call graph.*
 
@@ -514,7 +514,7 @@ bounded loop. A file that was already complex is not your regression.
 Artifact written:
 
 `````
--rw-r--r--@ 1 qgames  staff  52090 Jul 31 20:15 /var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/map2.html
+   52090 /var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/map2.html
 `````
 
 ## `./build/ripwire . --order=stable --top-k=5`
@@ -598,7 +598,7 @@ Artifact written:
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1553"/>
 <s t="fn" n="churnRankedGraph" p="./src/main.cpp:7246"/>
 <s t="fn" n="runDefaultMap" p="./src/main.cpp:7276"/>
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:733"/>
 </callers>
 `````
 
@@ -648,7 +648,7 @@ ripwire: --callers symbol not found: DoesNotExist
 <u role="call" p="./src/main.cpp:7262" in_id="churnRankedGraph"/>
 <u role="call" p="./src/main.cpp:7270" in_id="churnRankedGraph"/>
 <u role="call" p="./src/main.cpp:7348" in_id="runDefaultMap"/>
-<u role="call" p="./src/mcpindex.h:807" in_id="./src/mcpindex.h::rw::getIndex"/>
+<u role="call" p="./src/mcpindex.h:806" in_id="./src/mcpindex.h::rw::getIndex"/>
 </uses>
 `````
 
@@ -659,7 +659,7 @@ ripwire: --callers symbol not found: DoesNotExist
 `````
 <!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources name/all; filters kind/cx/fanin/file; bounded closure callers/callees; joins and/or/not), ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
 <query expr="and(callers(name(&quot;rankGraphTeleport&quot;),2),kind(all,fn))" count="44" shown="44" capped="0" counts_floor="1">
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:733"/>
 <s t="fn" n="emitCommunitiesReport" p="./src/main.cpp:5794"/>
 <s t="fn" n="emitCommunityDrill" p="./src/main.cpp:5916"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1553"/>
@@ -697,7 +697,7 @@ ripwire: --callers symbol not found: DoesNotExist
 `````
 <!-- ripwire external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls) -->
 <external-surface names="940" shown="940" capped="0">
-<x n="grep" lang="sh" refs="3973" calls="3973"/>
+<x n="grep" lang="sh" refs="3974" calls="3974"/>
 <x n="printf" lang="sh" refs="3507" calls="3507"/>
 <x n="echo" lang="sh" refs="3245" calls="3245"/>
 <x n="exit" lang="sh" refs="1111" calls="1111"/>
@@ -750,7 +750,7 @@ ripwire: --callers symbol not found: DoesNotExist
 <g terminals="3">
 <t n="runEval" t="fn" p="./src/eval.h:133"/>
 <t n="rankGraphTeleport" t="fn" p="./src/graph.h:1278"/>
-<t n="getIndex" t="fn" p="./src/mcpindex.h:734"/>
+<t n="getIndex" t="fn" p="./src/mcpindex.h:733"/>
 <e f="runEval" t="rankGraphTeleport"/>
 <e f="getIndex" t="rankGraphTeleport"/>
 </g>
@@ -764,7 +764,7 @@ ripwire: --callers symbol not found: DoesNotExist
 `````
 <!-- ripwire impact: transitive blast radius — symbols that reach SYM via calls (review before changing SYM). raise the default cap with limit=N (offset=M pages); on the root, limit="0" means no explicit limit was given and the verb's own default page size shaped the window — never a zero-row page. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
 <impact of="rankGraphTeleport" defs="1" reaches="50" shown="40" capped="1" counts_floor="1">
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:733"/>
 <s t="fn" n="emitCommunitiesReport" p="./src/main.cpp:5794"/>
 <s t="fn" n="emitCommunityDrill" p="./src/main.cpp:5916"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1553"/>
@@ -826,46 +826,21 @@ ripwire: --callers symbol not found: DoesNotExist
 *Mid-task situational report for the current git diff — on a CLEAN tree (contrast with the sandbox run below).*
 
 `````
-ripwire situational-awareness — 3 changed file(s), 96 symbols in them
-  [1] blast radius: 18 symbols across 5 files transitively depend on these changes
-        ./bench/cppbench/run_cppbench.py  (5 dependent symbols)
-        ./bench/multiswe/run_multiswe.py  (5 dependent symbols)
-        ./bench/locbench/run_locbench.py  (3 dependent symbols)
-        ./bench/mine_traces.py  (3 dependent symbols)
-        ./src/main.cpp  (2 dependent symbols)
+ripwire situational-awareness — 1 changed file(s), 112 symbols in them
+  [1] blast radius: 0 symbols across 0 files transitively depend on these changes
   [2] tests to run (0): (none transitively reach these files)
         (331 test/*.sh gates are NOT modelled: script-to-binary edges are not call edges, so they never appear here — a path count, not every one invokes the binary)
-  [3] co-change — usually edited with these but NOT in your diff (0):
-        (none, or no git history)
+  [3] co-change — usually edited with these but NOT in your diff (1):
+        ./test/docscommandscheck.sh  (co-edited in 100% of commits)
 `````
 
 ## `./build/ripwire . --test-gate`
 
 *Pre-PR gate on a CLEAN tree: no obligations, exit 0.*
 
-**exit code: 4**
-
 `````
 <!-- ripwire test-gate (TDAD-parity, arXiv 2603.17973): the tests to run for this change + the UNTESTED blast radius. A queryable call-graph+test map cut agent-caused regressions -70% (6.08%->1.82%); this gate names the obligations, the agent runs the tests then relies on green. exit 4 if tests OR untested is non-empty. TWO INDEPENDENT LISTINGS, each with its own row count: shown_tests= counts the <t> tests-to-run rows and shown_untested= counts the <u> blast-radius rows (a single shown= could only ever have described one of them). The <t> rows are the COMPLETE obligation and are never windowed, so they REPEAT VERBATIM on every page — a walker that concatenates pages must take them from one page only; offset=/limit= window the <u> rows alone. The <u> listing shows 25 rows by default: raise the default cap with limit=N (offset=M pages). script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) - script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=. UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory call EDGES and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. -->
-<test-gate changed="3" impacted="18" tests="0" untested="18" shown_tests="0" tests_capped="0" shown_untested="18" untested_capped="0" script_gates_unmodelled="331" at="1dc07e27a+dirty">
-<u sym="main" p="./src/main.cpp" ccx="376"/>
-<u sym="main" p="./bench/locbench/run_locbench.py" ccx="113"/>
-<u sym="main" p="./bench/multiswe/run_multiswe.py" ccx="65"/>
-<u sym="main" p="./bench/cppbench/run_cppbench.py" ccx="57"/>
-<u sym="mine_session_file" p="./bench/mine_traces.py" ccx="44"/>
-<u sym="runPath" p="./src/main.cpp" ccx="25"/>
-<u sym="parse_ranked" p="./bench/locbench/run_locbench.py" ccx="19"/>
-<u sym="main" p="./bench/mine_traces.py" ccx="17"/>
-<u sym="mine_instances" p="./bench/cppbench/run_cppbench.py" ccx="15"/>
-<u sym="gold_from_fix_patch" p="./bench/multiswe/run_multiswe.py" ccx="14"/>
-<u sym="record_edit" p="./bench/mine_traces.py" ccx="12"/>
-<u sym="classify_row" p="./bench/multiswe/run_multiswe.py" ccx="12"/>
-<u sym="classify_commit" p="./bench/cppbench/run_cppbench.py" ccx="10"/>
-<u sym="load_or_mine_lock" p="./bench/multiswe/run_multiswe.py" ccx="10"/>
-<u sym="mine_lang" p="./bench/multiswe/run_multiswe.py" ccx="10"/>
-<u sym="derive_gold_funcs" p="./bench/cppbench/run_cppbench.py" ccx="9"/>
-<u sym="load_or_mine_lock" p="./bench/cppbench/run_cppbench.py" ccx="7"/>
-<u sym="ranked_files_from_candidates" p="./bench/locbench/run_locbench.py" ccx="3"/>
+<test-gate changed="1" impacted="0" tests="0" untested="0" shown_tests="0" tests_capped="0" shown_untested="0" untested_capped="0" script_gates_unmodelled="331" at="f67d2a4fc+dirty">
 </test-gate>
 `````
 
@@ -951,7 +926,7 @@ ripwire situational-awareness — 3 changed file(s), 96 symbols in them
 
 `````
 <!-- ripwire grep: parallel literal/regex scan; each hit carries its matched line (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar). ORDER: SOURCE files before test/bench files before docs, then path and line. shown=/capped= = rows printed vs found; hits_capped="1" ⇒ hits= is a FLOOR (collection budget reached). raise the default cap with limit=N (offset=M pages); on the root, limit="0" means no explicit limit was given and the verb's own default page size shaped the window — never a zero-row page -->
-<grep pattern="fnv1a\w+" files="24" hits="112" shown="100" capped="1" hits_capped="0">
+<grep pattern="fnv1a\w+" files="24" hits="106" shown="100" capped="1" hits_capped="0">
 <hit p="./src/arch.h:406" in="rw::fnv1a64">
 <m>
 <![CDATA[inline std::uint64_t fnv1a64( std::string_view s ) noexcept]]>
@@ -1069,7 +1044,7 @@ ripwire situational-awareness — 3 changed file(s), 96 symbols in them
 <!-- files=836 symbols=6432 edges=8733 shown=5 est_tokens=587 ambiguous=2631 unresolved=652 precise=3 skipped_oversize=3 order=important-first -->
 <r est_tokens="587">
 <f p="./src/main.cpp">
-<s t="fn" n="churnRankedGraph" amb="2" k="14.8167">
+<s t="fn" n="churnRankedGraph" amb="2" k="14.8164">
 <c n="resolveSinceScope"/>
 <c n="churnTeleport"/>
 <c n="churnTeleportWorkspace"/>
@@ -1081,12 +1056,12 @@ ripwire situational-awareness — 3 changed file(s), 96 symbols in them
 </s>
 </f>
 <f p="./src/gitmine.h">
-<s t="fn" n="churnPriorFromFreq" id="./src/gitmine.h::rw::churnPriorFromFreq" k="12.1279">
+<s t="fn" n="churnPriorFromFreq" id="./src/gitmine.h::rw::churnPriorFromFreq" k="12.1275">
 <c n="size"/>
 </s>
 </f>
 <f p="./src/graph.h">
-<s t="fn" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" amb="5" k="11.7235">
+<s t="fn" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" amb="5" k="11.7353">
 <c n="biasPrior"/>
 <c n="pageRankDouble"/>
 <c n="size"/>
@@ -1099,7 +1074,7 @@ ripwire situational-awareness — 3 changed file(s), 96 symbols in them
 <c n="rankGraphTeleport"/>
 <c n="size"/>
 </s>
-<s t="fn" n="diffTeleport" id="./src/graph.h::rw::diffTeleport" k="11.0576">
+<s t="fn" n="diffTeleport" id="./src/graph.h::rw::diffTeleport" k="11.0575">
 <c n="size"/>
 </s>
 </f>
@@ -1117,7 +1092,7 @@ ripwire situational-awareness — 3 changed file(s), 96 symbols in them
 
 `````
 <ctx task="pagerank power iteration" route=" [routed: subtoken+body BM25 (--for&apos;s default) — no strong name hit, multi-word conceptual query]">
-<!-- ripwire lens for "pagerank power iteration" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="4304" -->
+<!-- ripwire lens for "pagerank power iteration" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="4254" -->
 <sigs capped="1">
 <f p="./src/pagerank.cpp">
 <d l="34" n="pageRankDouble" id="./src/pagerank.cpp::rw::pageRankDouble" cx="18" ccx="33" in="1" churn="2" amp="1" tested="1">unsigned pageRankDouble( const sparseCsr&lt;float&gt;&amp; inEdges, std::span&lt;const double&gt; weightedOutDegree, std::span&lt;const double&gt; teleport, std::span&lt;doub … [line truncated: 21 more bytes on this line]
@@ -1131,22 +1106,22 @@ ripwire situational-awareness — 3 changed file(s), 96 symbols in them
 <doc>iteration helpers</doc>handle_t leftmost_leaf() const</d>
 </f>
 <f p="./src/graph.h">
-<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="3" amp="6">
+<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="4" amp="18">
 <doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quali…</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )</d>
-<d l="1327" n="hits" id="./src/graph.h::rw::hits" cx="9" ccx="16" in="1" churn="3" amp="1">inline std::pair&lt;std::vector&lt;float&gt;, std::vector&lt;float&gt;&gt; hits( const Graph&amp; g, float tol = 1e-6f, unsigned maxIter = 100 )</d>
-<d l="1742" n="computeQMetrics" id="./src/graph.h::rw::computeQMetrics" cx="52" ccx="124" in="2" churn="3" amp="2">inline QMetrics computeQMetrics( const IngestResult&amp; ing, const Graph&amp; g )</d>
-<d l="2414" n="louvainLocalMoving" id="./src/graph.h::rw::louvainLocalMoving" cx="18" ccx="35" in="2" churn="3" amp="2">inline Communities louvainLocalMoving( const std::vector&lt;std::vector&lt;WEdge&gt;&gt;&amp; adj )</d>
+<d l="1327" n="hits" id="./src/graph.h::rw::hits" cx="9" ccx="16" in="1" churn="4" amp="13">inline std::pair&lt;std::vector&lt;float&gt;, std::vector&lt;float&gt;&gt; hits( const Graph&amp; g, float tol = 1e-6f, unsigned maxIter = 100 )</d>
+<d l="1742" n="computeQMetrics" id="./src/graph.h::rw::computeQMetrics" cx="52" ccx="124" in="2" churn="4" amp="14">inline QMetrics computeQMetrics( const IngestResult&amp; ing, const Graph&amp; g )</d>
+<d l="2414" n="louvainLocalMoving" id="./src/graph.h::rw::louvainLocalMoving" cx="18" ccx="35" in="2" churn="4" amp="14">inline Communities louvainLocalMoving( const std::vector&lt;std::vector&lt;WEdge&gt;&gt;&amp; adj )</d>
 </f>
 <f p="./src/serialize.h">
-<d l="918" n="MapAnnotations" id="./src/serialize.h::MapAnnotations::MapAnnotations" cx="0" ccx="0" in="0" churn="3">struct MapAnnotations</d>
-<d l="988" n="rankByLegendFor" id="./src/serialize.h::rw::rankByLegendFor" cx="4" ccx="4" in="1" churn="3" amp="1">
+<d l="918" n="MapAnnotations" id="./src/serialize.h::MapAnnotations::MapAnnotations" cx="0" ccx="0" in="0" churn="4" amp="12">struct MapAnnotations</d>
+<d l="988" n="rankByLegendFor" id="./src/serialize.h::rw::rankByLegendFor" cx="4" ccx="4" in="1" churn="4" amp="13">
 <doc>The label → clause lookup. Returns nullptr for an unstamped map (the default pagerank path) so…</doc>inline const char* rankByLegendFor( const char* label ) noexcept</d>
-<d l="3768" n="writeJsonMapStamp" id="./src/serialize.h::rw::writeJsonMapStamp" cx="10" ccx="12" in="1" churn="3" amp="1">inline void writeJsonMapStamp( JsonWriter&amp; w, std::string&amp; esc, const MapAnnotations* ann )</d>
-<d l="3900" n="serializeJson" id="./src/serialize.h::rw::serializeJson" cx="49" ccx="82" in="1" churn="3" amp="1">inline void serializeJson( std::FILE* out, const IngestResult&amp; ing, const std::vector&lt;float&gt;&amp; ra…</d>
+<d l="3768" n="writeJsonMapStamp" id="./src/serialize.h::rw::writeJsonMapStamp" cx="10" ccx="12" in="1" churn="4" amp="13">inline void writeJsonMapStamp( JsonWriter&amp; w, std::string&amp; esc, const MapAnnotations* ann )</d>
+<d l="3900" n="serializeJson" id="./src/serialize.h::rw::serializeJson" cx="49" ccx="82" in="1" churn="4" amp="13">inline void serializeJson( std::FILE* out, const IngestResult&amp; ing, const std::vector&lt;float&gt;&amp; ra…</d>
 </f>
 <f p="./src/pagerank.h">
 <d l="11" n="PageRankConfig" id="./src/pagerank.h::PageRankConfig::PageRankConfig" cx="0" ccx="0" in="0" churn="2">struct PageRankConfig</d>
-… [136 more display lines; full output is 12559 bytes on 92 raw line(s)]
+… [133 more display lines; full output is 12436 bytes on 92 raw line(s)]
 `````
 
 ## `./build/ripwire . --pack-signatures --top-k=10`
@@ -1500,35 +1475,35 @@ ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchan
 `````
 <!-- ripwire hotspots: maintenance-pain = complexity × recent churn (window=12mo). churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. unranked_no_complexity= is a file with commits but no function or method to score (a pure declaration header, markdown, config). unranked_no_churn= is a file no in-window commit was attributed to — and it CONFLATES two cases this verb cannot tell apart: a genuinely quiet file, and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the join could not match), which scores zero for a reason that is not about the file. Treat it as an upper bound on quietness, not a measure of it. raise the default cap with limit=N (offset=M pages) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
-<hotspots window="12mo" files="836" ranked="221" unranked_no_churn="0" unranked_no_complexity="615" shown="40" capped="1" at="1dc07e27a+dirty">
-<f p="./src/main.cpp" churn="4" ccx="3311" score="13244" top="main" top_ccx="376" top_l="8007"/>
+<hotspots window="12mo" files="836" ranked="221" unranked_no_churn="0" unranked_no_complexity="615" shown="40" capped="1" at="f67d2a4fc+dirty">
+<f p="./src/main.cpp" churn="5" ccx="3311" score="16555" top="main" top_ccx="376" top_l="8007"/>
 <f p="./src/ingest.cpp" churn="3" ccx="2713" score="8139" top="ingest" top_ccx="702" top_l="3856"/>
-<f p="./src/serialize.h" churn="3" ccx="1517" score="4551" top="packSignatures" top_ccx="197" top_l="2035"/>
-<f p="./src/graph.h" churn="3" ccx="1424" score="4272" top="buildGraph" top_ccx="712" top_l="379"/>
+<f p="./src/serialize.h" churn="4" ccx="1517" score="6068" top="packSignatures" top_ccx="197" top_l="2035"/>
+<f p="./src/graph.h" churn="4" ccx="1424" score="5696" top="buildGraph" top_ccx="712" top_l="379"/>
+<f p="./src/mcpverbs.h" churn="4" ccx="685" score="2740" top="runBatchSub" top_ccx="98" top_l="2381"/>
 <f p="./src/quality.h" churn="3" ccx="700" score="2100" top="computeDelta" top_ccx="236" top_l="2204"/>
 <f p="./src/layout.h" churn="3" ccx="694" score="2082" top="writeLayout" top_ccx="31" top_l="1870"/>
-<f p="./src/mcpverbs.h" churn="3" ccx="685" score="2055" top="runBatchSub" top_ccx="98" top_l="2381"/>
+<f p="./src/mcp.h" churn="4" ccx="460" score="1840" top="dispatchMcpLine" top_ccx="428" top_l="304"/>
 <f p="./src/docdrift.h" churn="3" ccx="545" score="1635" top="parseIntLiteral" top_ccx="37" top_l="345"/>
 <f p="./src/gitmine.h" churn="3" ccx="497" score="1491" top="applyCoChangeBoost" top_ccx="93" top_l="1706"/>
-<f p="./src/mcp.h" churn="3" ccx="460" score="1380" top="dispatchMcpLine" top_ccx="428" top_l="304"/>
 <f p="./src/resolve.h" churn="3" ccx="460" score="1380" top="resolveTsImport" top_ccx="56" top_l="331"/>
+<f p="./src/cli.h" churn="4" ccx="344" score="1376" top="parseArgs" top_ccx="156" top_l="2423"/>
 <f p="./src/crossref.h" churn="3" ccx="412" score="1236" top="streamBlobs" top_ccx="39" top_l="362"/>
 <f p="./src/lexical.h" churn="3" ccx="398" score="1194" top="lexicalScoresTiered" top_ccx="256" top_l="95"/>
 <f p="./src/search.h" churn="3" ccx="367" score="1101" top="grepCollect" top_ccx="52" top_l="815"/>
-<f p="./src/cli.h" churn="3" ccx="344" score="1032" top="parseArgs" top_ccx="156" top_l="2423"/>
 <f p="./src/skilleval.h" churn="3" ccx="319" score="957" top="runEvalSkills" top_ccx="108" top_l="484"/>
 <f p="./src/eval.h" churn="3" ccx="302" score="906" top="runEval" top_ccx="66" top_l="133"/>
 <f p="./src/darkflags.h" churn="3" ccx="295" score="885" top="computeFlags" top_ccx="40" top_l="709"/>
 <f p="./src/lintrules.h" churn="3" ccx="280" score="840" top="parseLintRuleFile" top_ccx="102" top_l="212"/>
 <f p="./src/flipimpact.h" churn="3" ccx="276" score="828" top="scanBindingUses" top_ccx="31" top_l="446"/>
 <f p="./src/arch.h" churn="3" ccx="263" score="789" top="computeModuleMetrics" top_ccx="68" top_l="584"/>
+<f p="./src/mcpindex.h" churn="4" ccx="190" score="760" top="getIndex" top_ccx="38" top_l="733"/>
 <f p="./src/lanes.h" churn="3" ccx="240" score="720" top="warnCoincidingClaims" top_ccx="24" top_l="585"/>
 <f p="./src/skillscan.h" churn="3" ccx="235" score="705" top="scanSkillText" top_ccx="150" top_l="365"/>
 <f p="./src/mcpjson.h" churn="3" ccx="212" score="636" top="findRawId" top_ccx="43" top_l="552"/>
 <f p="./src/prcontext.h" churn="3" ccx="205" score="615" top="writePrContext" top_ccx="138" top_l="606"/>
 <f p="./src/clones.h" churn="2" ccx="303" score="606" top="findClonesType3" top_ccx="119" top_l="401"/>
-<f p="./src/mcpserver.h" churn="3" ccx="200" score="600" top="runMcpHttp" top_ccx="86" top_l="332"/>
-… [14 more display lines; full output is 5364 bytes on 1 raw line(s)]
+… [14 more display lines; full output is 5374 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --clones`
@@ -1576,7 +1551,8 @@ ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchan
 `````
 <!-- ripwire cochange: file pairs that change together in git but share no transitive static dependency (surprising=1) = hidden coupling. together= is the number of commits in window= that touched BOTH files (3 or more, or the pair is not reported); deg= is that count over the commit count of the LESS-CHANGED of the two files, so 1.00 means the quieter file never changed without the other. window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. surprising= is only defined where BOTH sides could carry a static dependency at all (the same dependency-capable predicate deps <health dep_files=> uses: source languages yes; sh, md, json, ruby and binary/unknown files no). A pair with a dep-incapable side keeps its row and carries dep_capable=0 instead, because for it "shares no static dependency" is vacuously true. raise the default cap with limit=N (offset=M pages) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
-<cochange pairs="0" window="18mo" shown="0" capped="0" at="1dc07e27a+dirty">
+<cochange pairs="1" window="18mo" shown="1" capped="0" at="f67d2a4fc+dirty">
+<pair a="./docs/COMMANDS.md" b="./test/docscommandscheck.sh" together="3" deg="1.00" dep_capable="0"/>
 </cochange>
 `````
 
@@ -1587,35 +1563,35 @@ ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchan
 `````
 <!-- ripwire hotspots: maintenance-pain = complexity × recent churn (window=2 weeks ago). churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. unranked_no_complexity= is a file with commits but no function or method to score (a pure declaration header, markdown, config). unranked_no_churn= is a file no in-window commit was attributed to — and it CONFLATES two cases this verb cannot tell apart: a genuinely quiet file, and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the join could not match), which scores zero for a reason that is not about the file. Treat it as an upper bound on quietness, not a measure of it. raise the default cap with limit=N (offset=M pages) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
-<hotspots window="2 weeks ago" files="836" ranked="221" unranked_no_churn="0" unranked_no_complexity="615" shown="40" capped="1" at="1dc07e27a+dirty">
-<f p="./src/main.cpp" churn="4" ccx="3311" score="13244" top="main" top_ccx="376" top_l="8007"/>
+<hotspots window="2 weeks ago" files="836" ranked="221" unranked_no_churn="0" unranked_no_complexity="615" shown="40" capped="1" at="f67d2a4fc+dirty">
+<f p="./src/main.cpp" churn="5" ccx="3311" score="16555" top="main" top_ccx="376" top_l="8007"/>
 <f p="./src/ingest.cpp" churn="3" ccx="2713" score="8139" top="ingest" top_ccx="702" top_l="3856"/>
-<f p="./src/serialize.h" churn="3" ccx="1517" score="4551" top="packSignatures" top_ccx="197" top_l="2035"/>
-<f p="./src/graph.h" churn="3" ccx="1424" score="4272" top="buildGraph" top_ccx="712" top_l="379"/>
+<f p="./src/serialize.h" churn="4" ccx="1517" score="6068" top="packSignatures" top_ccx="197" top_l="2035"/>
+<f p="./src/graph.h" churn="4" ccx="1424" score="5696" top="buildGraph" top_ccx="712" top_l="379"/>
+<f p="./src/mcpverbs.h" churn="4" ccx="685" score="2740" top="runBatchSub" top_ccx="98" top_l="2381"/>
 <f p="./src/quality.h" churn="3" ccx="700" score="2100" top="computeDelta" top_ccx="236" top_l="2204"/>
 <f p="./src/layout.h" churn="3" ccx="694" score="2082" top="writeLayout" top_ccx="31" top_l="1870"/>
-<f p="./src/mcpverbs.h" churn="3" ccx="685" score="2055" top="runBatchSub" top_ccx="98" top_l="2381"/>
+<f p="./src/mcp.h" churn="4" ccx="460" score="1840" top="dispatchMcpLine" top_ccx="428" top_l="304"/>
 <f p="./src/docdrift.h" churn="3" ccx="545" score="1635" top="parseIntLiteral" top_ccx="37" top_l="345"/>
 <f p="./src/gitmine.h" churn="3" ccx="497" score="1491" top="applyCoChangeBoost" top_ccx="93" top_l="1706"/>
-<f p="./src/mcp.h" churn="3" ccx="460" score="1380" top="dispatchMcpLine" top_ccx="428" top_l="304"/>
 <f p="./src/resolve.h" churn="3" ccx="460" score="1380" top="resolveTsImport" top_ccx="56" top_l="331"/>
+<f p="./src/cli.h" churn="4" ccx="344" score="1376" top="parseArgs" top_ccx="156" top_l="2423"/>
 <f p="./src/crossref.h" churn="3" ccx="412" score="1236" top="streamBlobs" top_ccx="39" top_l="362"/>
 <f p="./src/lexical.h" churn="3" ccx="398" score="1194" top="lexicalScoresTiered" top_ccx="256" top_l="95"/>
 <f p="./src/search.h" churn="3" ccx="367" score="1101" top="grepCollect" top_ccx="52" top_l="815"/>
-<f p="./src/cli.h" churn="3" ccx="344" score="1032" top="parseArgs" top_ccx="156" top_l="2423"/>
 <f p="./src/skilleval.h" churn="3" ccx="319" score="957" top="runEvalSkills" top_ccx="108" top_l="484"/>
 <f p="./src/eval.h" churn="3" ccx="302" score="906" top="runEval" top_ccx="66" top_l="133"/>
 <f p="./src/darkflags.h" churn="3" ccx="295" score="885" top="computeFlags" top_ccx="40" top_l="709"/>
 <f p="./src/lintrules.h" churn="3" ccx="280" score="840" top="parseLintRuleFile" top_ccx="102" top_l="212"/>
 <f p="./src/flipimpact.h" churn="3" ccx="276" score="828" top="scanBindingUses" top_ccx="31" top_l="446"/>
 <f p="./src/arch.h" churn="3" ccx="263" score="789" top="computeModuleMetrics" top_ccx="68" top_l="584"/>
+<f p="./src/mcpindex.h" churn="4" ccx="190" score="760" top="getIndex" top_ccx="38" top_l="733"/>
 <f p="./src/lanes.h" churn="3" ccx="240" score="720" top="warnCoincidingClaims" top_ccx="24" top_l="585"/>
 <f p="./src/skillscan.h" churn="3" ccx="235" score="705" top="scanSkillText" top_ccx="150" top_l="365"/>
 <f p="./src/mcpjson.h" churn="3" ccx="212" score="636" top="findRawId" top_ccx="43" top_l="552"/>
 <f p="./src/prcontext.h" churn="3" ccx="205" score="615" top="writePrContext" top_ccx="138" top_l="606"/>
 <f p="./src/clones.h" churn="2" ccx="303" score="606" top="findClonesType3" top_ccx="119" top_l="401"/>
-<f p="./src/mcpserver.h" churn="3" ccx="200" score="600" top="runMcpHttp" top_ccx="86" top_l="332"/>
-… [14 more display lines; full output is 5378 bytes on 1 raw line(s)]
+… [14 more display lines; full output is 5388 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --arch=test/archfix/rules.txt`
@@ -1813,12 +1789,12 @@ Call-graph isolate provenance: 675 declaration, 561 header, 1380 source, 763 doc
 - **./src::canonicalId@resolve.h:926:55337** — 264 symbols
 - **./src::str@ingest.cpp:887:55947** — 53 symbols
 - **./src::lexicalNormalize@resolve.h:78:6054** — 46 symbols
-- **./src::escapeXml@serialize.h:112:7123** — 33 symbols
+- **./src::escapeXml@serialize.h:112:7118** — 33 symbols
 - **./src/infra::leaf_at@dynamic_map.hpp:372:18374** — 33 symbols
 - **./src::min@infra/fastmath.h:218:11498** — 27 symbols
-- **./src::cleanSig@serialize.h:1569:110263** — 16 symbols
+- **./src::cleanSig@serialize.h:1569:110232** — 16 symbols
 - **./src/infra::events_shown@profileScope.h:657:22463** — 15 symbols
-- **./src::write@serialize.h:302:19899** — 14 symbols
+- **./src::write@serialize.h:302:19894** — 14 symbols
 - **./src::peek@search.h:430:22425** — 14 symbols
 - **./test/callformfix/csharp::CondChain@Main.cs:11:383** — 14 symbols
 
@@ -1843,7 +1819,7 @@ Call-graph isolate provenance: 675 declaration, 561 header, 1380 source, 763 doc
 <seam from="./src" to="./src/infra" untested="174" shown="5" capped="1">
 <edge caller="ensureFileLoaded" p="./src/layout.h:987" callee="clear" cp="./src/infra/dynamic_map.hpp:1265"/>
 <edge caller="skipInert" p="./src/layout.h:178" callee="min" cp="./src/infra/fastmath.h:218"/>
-<edge caller="getIndex" p="./src/mcpindex.h:734" callee="clear" cp="./src/infra/dynamic_map.hpp:1265"/>
+<edge caller="getIndex" p="./src/mcpindex.h:733" callee="clear" cp="./src/infra/dynamic_map.hpp:1265"/>
 <edge caller="readByteSafeLine" p="./src/stdinline.h:44" callee="clear" cp="./src/infra/dynamic_map.hpp:1265"/>
 <edge caller="selectorFaultClause" p="./src/selectorrefuse.h:81" callee="min" cp="./src/infra/fastmath.h:218"/>
 </seam>
@@ -1916,7 +1892,7 @@ flowchart LR
 `````
 <!-- ripwire owners: recency-weighted author ownership (half-life=6mo). bf=1 = one person holds >80% of weighted commits (bus-factor risk); authors=1 files fold into <uniform/> below; pass detail=1 for the full per-file listing. files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file holding the FIRST of them (lowest node id, the same pick around and lego make), so defs= above 1 means the other definitions' files were NOT analysed. Qualify with file:name to choose one -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
-<owners files="836" at="1dc07e27a+dirty">
+<owners files="836" at="f67d2a4fc+dirty">
 <uniform authors="1" bf="1" share="1.00" files="364"/>
 <f p="./SECURITY.md" authors="2" bf="0" top="quaterniongames@gmail.com" share="0.50"/>
 <f p="./THIRD_PARTY.md" authors="2" bf="0" top="quaterniongames@gmail.com" share="0.67"/>
@@ -1944,7 +1920,7 @@ flowchart LR
 <f p="./bench/headtohead/loss_buckets.json" authors="2" bf="0" top="quaterniongames@gmail.com" share="0.50"/>
 <f p="./bench/locbench/README.md" authors="2" bf="0" top="quaterniongames@gmail.com" share="0.50"/>
 <f p="./bench/locbench/anchorhop_calib.json" authors="2" bf="0" top="quaterniongames@gmail.com" share="0.50"/>
-… [447 more display lines; full output is 46518 bytes on 1 raw line(s)]
+… [447 more display lines; full output is 46524 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --dead-code=src`
@@ -1984,13 +1960,11 @@ flowchart LR
 
 *On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.*
 
-**exit code: 2**
+**wall time: 1.31s**
 
 `````
 <!-- ripwire quality-delta: only what a change made WORSE against the floor named by baseline= below. FOUR floors, and they are not interchangeable: sidecar = the pinned .ripwire_quality_baseline snapshot, honored only because it was pinned at the CURRENT git HEAD; git-HEAD = no sidecar existed, so the working tree was auto-compared against the HEAD tree; git-HEAD (stale sidecar removed) = a sidecar existed, was pinned at a DIFFERENT sha, and this run DELETED it from your working tree before falling back to HEAD (re-pin with quality-baseline); git-HEAD (stale sidecar ignored) = same staleness verdict, but the file was left on disk (the read-only MCP arm, or an unlink that failed). Only the first is a floor YOU chose; the other three compare against HEAD, so anything already committed cannot appear. at= is the git commit (plus a dirty marker when the working tree differs) this list was computed at. Findings: complexity over the ccx bar, verbosity (LOC)/nesting/params regressions, new duplication, newly-dead, new public api-surface (contract drift), error-masking, short-horizon churn, new clone of a reused helper. THREE independent axes, applied in this order: (1) acked findings are suppressed entirely (acked= counts them, honestly); (2) ORIGIN — a finding on a symbol that EXISTED at the baseline is preexisting-worse (no origin= attribute), one that exists only because the code is NEW carries origin="new-symbol"; (3) MATERIALITY — a small numeric delta is sev="minor". EXIT 2 fires only on preexisting-worse AND major, i.e. gating="N" above; new-symbol rows never gate. Clone kinds classify by their member set (a group is new-symbol only if EVERY member is new); short-horizon-churn is preexisting by construction. exit 0 is NOT a verdict on the new-symbol rows — nothing that existed got worse, but the new debt is yours: read them. LIMIT: origin is canonId identity (path::scope::name), so a RENAMED or MOVED symbol reads as new — a regression carried in with a move classifies new-symbol and will not gate. Descriptive: weigh + fix the real ones, do not game the number (a wrong abstraction beats a low score). Each row carries kind= (which of the measured axes regressed) and sym= (the canonical id it regressed on), plus p="path:line" (root-relative; the first-sorting member for the clone kinds; omitted, never faked, when no locator resolves), and every row the header's gating= counter counts also carries a gating attribute set to 1 — those are the rows the exit code fires on, and they are now marked positively rather than by the ABSENCE of sev/origin. (This sentence deliberately spells no attribute=value literal: the header counters are parsed by grep in several gates, and a quoted numeric example here would be matched first.) -->
-<quality-delta baseline="git-HEAD" regressions="2" minor="0" acked="0" preexisting-worse="2" new-symbol="0" gating="2" at="1dc07e27a+dirty">
-<r kind="short-horizon-churn" sym="src/cli.h::Config::Config" was="0" now="3" churn="self" p="src/cli.h:24" gating="1"/>
-<r kind="short-horizon-churn" sym="src/cli.h::rw::printUsage" was="0" now="3" churn="self" p="src/cli.h:504" gating="1"/>
+<quality-delta baseline="git-HEAD" regressions="0" minor="0" acked="0" preexisting-worse="0" new-symbol="0" gating="0" at="f67d2a4fc+dirty">
 </quality-delta>
 `````
 
@@ -1998,7 +1972,6 @@ stderr:
 
 `````
 ripwire: no ./.ripwire_quality_baseline — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)
-ripwire: --quality-delta gating: 2 preexisting-worse major finding(s); first: short-horizon-churn ./src/cli.h::Config::Config at src/cli.h:24 (was=0 now=3)
 `````
 
 ## `./build/ripwire . --edit-check=rankGraphTeleport`
@@ -2007,13 +1980,13 @@ ripwire: --quality-delta gating: 2 preexisting-worse major finding(s); first: sh
 
 `````
 <!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/contract-change — plus its 1-hop callers. A caller is flagged incompatible="1" when its argument count was reliably counted and NO definition in the folded set could accept it: every one has a FIXED arity that disagrees. A variadic, defaulted or implicit-receiver definition (a Python/Ruby method, whose params counts the self/cls the call site never writes) has no fixed arity and is never flagged. That makes the ARITY half one-sided — a call the compared definitions could accept is never flagged — but it is NOT a proof that the call site binds to THIS definition. Call edges are matched by NAME, so a receiver-qualified call to a same-named callee this tool does not index (a standard-library or third-party method) is measured against the one definition it does index; a clean, compiling tree can therefore carry a nonzero incompatible= with nothing edited at all, and on a widely-shared name it can be most of that name's callers. Read incompatible= as a fact about the tree as it stands — call sites worth OPENING, not a verdict — and status= as a fact about the edit. Warm path hits the qheadsnap/qsnap cache — never a full quality-delta style recompute. defs= is how many DEFINITIONS at this site (same file, same scope, same name — the overload set) are folded into this one contract; a selector matching more than one SITE is refused instead, so defs= only ever counts overloads. params_was and params_now are the MAX over that set on each side (the same MAX the baseline snapshot stores), and publicness is the OR. That MAX has TWO consequences, in opposite directions. It can read like a break and not be one: adding a WIDER overload beside an unchanged one raises params_now with no existing definition altered, so it reports status="contract-change" with incompatible="0" and a def row still carrying the old parameter count — no seen caller breaks. And it can read like safety and not be: REMOVING an overload whose parameter count is BELOW the MAX moves neither number, because the MAX survives on both sides, while the call site that used the removed definition no longer binds. defs_was=/defs_now= is what closes that: the count of definitions sharing this symbol's CANONICAL ID on each side. That population is the one the baseline snapshot buckets by, so the two numbers answer the same question and are equal on an unedited tree — it is deliberately NOT the root's defs=, which is the same bucket narrowed to this FILE (a contract is per definition site), so where a scope-less name also exists in another file defs= is the smaller of the two. status is therefore the join of THREE was-vs-now facts — the params MAX, publicness, and the definition COUNT — and change= names which of them carried it. change= adds broken-callers when a seen caller is also flagged, but never on its own — for the reason stated at the top: incompatible= describes the TREE and status= describes the EDIT, so a headline must not turn on it. RESIDUAL: an overload whose arity changes BELOW the MAX while the COUNT stays the same moves none of the three. The root's incompatible= is the COUNT of flagged callers (a c row's incompatible="1" is the per-caller flag). p= is the definition the selector resolved to; when defs is above 1 EVERY folded definition is listed as its own def row (p=, t=, params=), which is what tells a widened single definition apart from an added overload. At defs="1" no def row is emitted: the root's own p=/t= is that definition, and params_now is its parameter count. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
-<edit-check sym="rankGraphTeleport" t="fn" p="./src/graph.h:1278" status="unchanged" defs="1" callers="6" incompatible="0" at="1dc07e27a+dirty" counts_floor="1">
+<edit-check sym="rankGraphTeleport" t="fn" p="./src/graph.h:1278" status="unchanged" defs="1" callers="6" incompatible="0" at="f67d2a4fc+dirty" counts_floor="1">
 <c n="runEval" p="./src/eval.h:133"/>
 <c n="rankGraph" p="./src/graph.h:1304"/>
 <c n="anchoredLexicalRank" p="./src/graph.h:1553"/>
 <c n="churnRankedGraph" p="./src/main.cpp:7246"/>
 <c n="runDefaultMap" p="./src/main.cpp:7276"/>
-<c n="getIndex" p="./src/mcpindex.h:734"/>
+<c n="getIndex" p="./src/mcpindex.h:733"/>
 </edit-check>
 `````
 
@@ -2023,78 +1996,94 @@ ripwire: --quality-delta gating: 2 preexisting-worse major finding(s); first: sh
 
 `````
 <!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. base=working-tree. skipped_mode_only=diffs that changed a file's MODE and nothing else (e.g. chmod) excluded from the changed set; a pure RENAME is content-identical too but is NOT excluded — it is a changed file, listed at its new path. files= means two different things by DEPTH here and is deliberately not renamed (15 consumers read the root one): on the ROOT it is the CHANGED file count; on each <impact/> child it is the distinct files dependents= reaches (changed + non-changed), so dependents="0" implies files="0" and vice versa — never an impossible-looking dependents>0/files=0. files_other= on the same <impact/> is the non-changed subset (a changed file's dependents inside OTHER changed files have no <f> row of their own — they are already shown as their own <file> section); it is NOT the <f> row count — see the row-cap sentence below. Files are ordered by BLAST RADIUS (transitive dependents descending, path breaking ties), not alphabetically. sections= on changed-symbols counts a doc file's headings, collapsed into that number instead of one callers-zero row each; count= still counts every INDEXED symbol, sections included, so count minus sections is the number of rows that follow. Every nested list below is a TOP-N subset of its element's own total, fixed per element (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12, tests <test> at 40, owners <author> at 5 — the L0 defaults; max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM (blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
-<pr-context base="working-tree" direction="worktree-since-head" files="3" skipped_mode_only="0" at="1dc07e27a+dirty" counts_floor="1">
-<file p="./test/showcase_capture.py" symbols="57">
-<impact dependents="16" files="4" files_other="4" shown="4" capped="0">
-<f p="./bench/cppbench/run_cppbench.py" deps="5"/>
-<f p="./bench/multiswe/run_multiswe.py" deps="5"/>
-<f p="./bench/locbench/run_locbench.py" deps="3"/>
-<f p="./bench/mine_traces.py" deps="3"/>
+<pr-context base="working-tree" direction="worktree-since-head" files="1" skipped_mode_only="0" at="f67d2a4fc+dirty" counts_floor="1">
+<file p="./docs/COMMANDS.md" symbols="112">
+<impact dependents="0" files="0" files_other="0" shown="0" capped="0">
 </impact>
 <tests count="0" shown="0" capped="0">
 </tests>
-<changed-symbols count="57">
-<s t="var" n="REPO" p="./test/showcase_capture.py:8" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="SCRATCH" p="./test/showcase_capture.py:9" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="BIN" p="./test/showcase_capture.py:10" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="ABIN" p="./test/showcase_capture.py:11" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="DIRTY" p="./test/showcase_capture.py:12" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="AUX" p="./test/showcase_capture.py:13" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="TRACE" p="./test/showcase_capture.py:19" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="trace_path" p="./test/showcase_capture.py:29" callers="0" shown="0" capped="0">
-</s>
-<s t="var" n="_batchWord1" p="./test/showcase_capture.py:38" callers="0" shown="0" capped="0">
-</s>
-… [255 more display lines; full output is 16629 bytes on 1 raw line(s)]
+<changed-symbols count="112" sections="112">
+</changed-symbols>
+<cochange commits="3" partners="1" shown="1" capped="0">
+<partner p="./test/docscommandscheck.sh" deg="1.00" dep_capable="0"/>
+</cochange>
+<owners authors="1" bf="1" shown="1" capped="0">
+<author email="quaterniongames@gmail.com" share="1.00"/>
+</owners>
+</file>
+</pr-context>
 `````
 
-## `./build/ripwire . --pr-context=r29-planlanes`
+## `./build/ripwire . --pr-context=main~1`
 
-*The BASEREF form: diffed against merge-base(r29-planlanes, HEAD), never the ref tip.*
-
-**exit code: 1**
+*The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous mainline commit.*
 
 `````
-(empty)
+<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. base=main~1. skipped_mode_only=diffs that changed a file's MODE and nothing else (e.g. chmod) excluded from the changed set; a pure RENAME is content-identical too but is NOT excluded — it is a changed file, listed at its new path. files= means two different things by DEPTH here and is deliberately not renamed (15 consumers read the root one): on the ROOT it is the CHANGED file count; on each <impact/> child it is the distinct files dependents= reaches (changed + non-changed), so dependents="0" implies files="0" and vice versa — never an impossible-looking dependents>0/files=0. files_other= on the same <impact/> is the non-changed subset (a changed file's dependents inside OTHER changed files have no <f> row of their own — they are already shown as their own <file> section); it is NOT the <f> row count — see the row-cap sentence below. Files are ordered by BLAST RADIUS (transitive dependents descending, path breaking ties), not alphabetically. sections= on changed-symbols counts a doc file's headings, collapsed into that number instead of one callers-zero row each; count= still counts every INDEXED symbol, sections included, so count minus sections is the number of rows that follow. Every nested list below is a TOP-N subset of its element's own total, fixed per element (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12, tests <test> at 40, owners <author> at 5 — the L0 defaults; max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM (blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
+<!-- anchoring: a base ref was given, so this diff is anchored at merge base(BASEREF, HEAD), NOT at the ref's tip — the bundle is what THIS work changed since it forked, not how the two trees differ today. base_moved= counts paths the BASE REF moved since the fork that this work never touched (excluded here, and the same row class the abi verb names head moved: the other line moved, we did not author it). anchor="ref tip two dot" instead means there was no merge base at all (unrelated history) and the two dot view is what you are reading. -->
+<pr-context base="main~1" anchor="merge-base" base_sha="1dc07e27a" base_moved="0" direction="head-since-fork" files="13" skipped_mode_only="0" at="f67d2a4fc+dirty" counts_floor="1">
+<no-ref-work note="main~1 tip == merge-base, so that ref has no divergent work of its own; this bundle is HEAD's work since the fork. For the ref's OWN diff see merge-scout or stray-content"/>
+<file p="./src/graph.h" symbols="88">
+<impact dependents="422" files="57" files_other="51" shown="20" capped="1">
+<f p="./src/layout.h" deps="34"/>
+<f p="./src/gitmine.h" deps="25"/>
+<f p="./src/docdrift.h" deps="24"/>
+<f p="./src/crossref.h" deps="22"/>
+<f p="./src/quality.h" deps="14"/>
+<f p="./src/flipimpact.h" deps="13"/>
+<f p="./src/resolve.h" deps="12"/>
+<f p="./src/testmap.h" deps="11"/>
+<f p="./src/situ.h" deps="10"/>
+<f p="./src/abicheck.h" deps="9"/>
+<f p="./src/lanes.h" deps="9"/>
+<f p="./src/tracein.h" deps="9"/>
+<f p="./src/eval.h" deps="8"/>
+<f p="./src/skilleval.h" deps="8"/>
+<f p="./src/mergescout.h" deps="7"/>
+<f p="./src/clones.h" deps="6"/>
+<f p="./src/gitoracle.h" deps="6"/>
+<f p="./src/packtask.h" deps="6"/>
+<f p="./src/prcontext.h" deps="6"/>
+<f p="./src/filter.h" deps="5"/>
+</impact>
+<tests count="6" shown="6" capped="0">
+<test p="./test/cloneband_harness.cpp" run="bash test/clonebandcheck.sh"/>
+<test p="./test/clonelex_harness.cpp" run="bash test/clonelexcheck.sh"/>
+… [2208 more display lines; full output is 111932 bytes on 1 raw line(s)]
 `````
 
-stderr:
+## `./build/ripwire . --merge-scout=main~2,main~1`
+
+*Pairwise cross-arm conflict sites + suggested landing order (any committish works as an arm).*
+
+**wall time: 1.35s**
 
 `````
-[math degraded] pr-context: the base ref does not resolve to a commit — refusing rather than handing the raw token to git  (prcontext.h:283, DiffAnchor rw::resolveDiffAnchor(const std::string &, std::string_view) — logged once per site)
-ripwire: --pr-context: unknown base ref 'r29-planlanes'
+<!-- ripwire merge-scout: read-only cross-branch overlap for 3 arm(s) — same-symbol change on two arms = conflict, same-file/different-symbol = textual risk. landing = fewest-conflicts-first greedy (ties: ref name asc). Every tree is a git-archive TEMP COPY (read-only); the real working tree/refs are never touched. ANCHORING: every arm is diffed against its OWN merge base with HEAD (the working tree arm against HEAD itself), never against live HEAD — so a file an arm never opened can never appear here just because the live line moved. head_conflicts= is the one thing that anchor hides, kept as its own row class: symbols this arm changed that the LIVE LINE also changed since the arm forked, a merge fight no pairwise ARM comparison can see because HEAD is not an arm. -->
+<merge-scout arms="3" head="f67d2a4fc">
+<arm ref="main~2" base="0e90a9921" ok="1" changed="0" head_conflicts="0">
+<no-work note="no divergent work vs merge-base — see --stray-content"/>
+</arm>
+<arm ref="main~1" base="1dc07e27a" ok="1" changed="0" head_conflicts="0">
+<no-work note="no divergent work vs merge-base — see --stray-content"/>
+</arm>
+<arm ref="working-tree" base="f67d2a4fc" ok="1" changed="1" head_conflicts="0">
+<sym p="docs/COMMANDS.md" id="COMMANDS"/>
+</arm>
+<pair a="main~2" b="main~1" conflicts="0" risks="0"/>
+<pair a="main~2" b="working-tree" conflicts="0" risks="0"/>
+<pair a="main~1" b="working-tree" conflicts="0" risks="0"/>
+<landing order="working-tree"/>
+</merge-scout>
 `````
 
-## `./build/ripwire . --merge-scout=r28-parseargs,r29-planlanes`
+## `./build/ripwire . --stray-content=lane`
 
-*Pairwise cross-branch conflict sites + suggested landing order.*
-
-**exit code: 1**
-
-`````
-(empty)
-`````
-
-stderr:
-
-`````
-ripwire: --merge-scout: unknown ref 'r28-parseargs'
-`````
-
-## `./build/ripwire . --stray-content=r25`
-
-*Which r25-* refs still hold divergent authored work vs HEAD, with verdicts.*
+*Which lane-* refs still hold divergent authored work vs HEAD, with verdicts.*
 
 `````
 <!-- ripwire stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. v="superseded" means the live line removed the same base code this ref removed (redone/del) — it re-implemented the work, the case `git cherry` cannot see; v="unmerged" means the work is genuinely absent; merged refs are omitted. Read-only: git cat-file/diff/ls-tree only, one batched cat-file for the whole sweep, every blob reduced once per sha. Line-granular, not semantic: see the ripwire help text for the limits. ANCHORING is a deliberate hybrid: the SCOPE is base anchored (only lines the ref itself authored vs its merge base are ever considered, so a file the ref never opened cannot appear because the live line moved), while the ABSENCE test is HEAD anchored on purpose (does the live line have this content TODAY is the question being asked, and it is only answerable against live HEAD). v="unknown" with ok="0" means this ref could NOT be analysed at all because it has no merge base with HEAD, which on a SHALLOW clone (the checkout default in CI) is every ref: it is not a claim that the ref is merged, and the fix is to deepen the clone. The four buckets are exhaustive, so unmerged plus superseded plus merged plus unknown always equals refs. SCOPE: refs/heads only, which is every local branch (worktree branches included). Remote tracking refs are NOT scanned: they mirror local ones in the usual checkout and would double every row. The consequence on a FRESH CLONE, where the branches live under refs/remotes/origin and only the checked out one has a local head, is that there is nothing here to be stray FROM; refs= is that fact as a number. TRUNCATION: a ref row ends with a more element (more files=N) when its own file listing was capped; shown plus that number equals the ref's files= total, always. That inner listing is a SECONDARY listing (it repeats complete and identical on every page) and is capped by detail, not by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. -->
-<stray-content head="1dc07e27a" head_ref="main" refs="0" blobs="0" unmerged="0" superseded="0" merged="0" unknown="0">
+<stray-content head="f67d2a4fc" head_ref="main" refs="0" blobs="0" unmerged="0" superseded="0" merged="0" unknown="0">
 </stray-content>
 `````
 
@@ -2104,7 +2093,7 @@ ripwire: --merge-scout: unknown ref 'r28-parseargs'
 
 `````
 <!-- ripwire stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. v="superseded" means the live line removed the same base code this ref removed (redone/del) — it re-implemented the work, the case `git cherry` cannot see; v="unmerged" means the work is genuinely absent; merged refs are omitted. Read-only: git cat-file/diff/ls-tree only, one batched cat-file for the whole sweep, every blob reduced once per sha. Line-granular, not semantic: see the ripwire help text for the limits. ANCHORING is a deliberate hybrid: the SCOPE is base anchored (only lines the ref itself authored vs its merge base are ever considered, so a file the ref never opened cannot appear because the live line moved), while the ABSENCE test is HEAD anchored on purpose (does the live line have this content TODAY is the question being asked, and it is only answerable against live HEAD). v="unknown" with ok="0" means this ref could NOT be analysed at all because it has no merge base with HEAD, which on a SHALLOW clone (the checkout default in CI) is every ref: it is not a claim that the ref is merged, and the fix is to deepen the clone. The four buckets are exhaustive, so unmerged plus superseded plus merged plus unknown always equals refs. SCOPE: refs/heads only, which is every local branch (worktree branches included). Remote tracking refs are NOT scanned: they mirror local ones in the usual checkout and would double every row. The consequence on a FRESH CLONE, where the branches live under refs/remotes/origin and only the checked out one has a local head, is that there is nothing here to be stray FROM; refs= is that fact as a number. TRUNCATION: a ref row ends with a more element (more files=N) when its own file listing was capped; shown plus that number equals the ref's files= total, always. That inner listing is a SECONDARY listing (it repeats complete and identical on every page) and is capped by detail, not by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. -->
-<stray-content head="1dc07e27a" head_ref="main" refs="0" blobs="0" unmerged="0" superseded="0" merged="0" unknown="0">
+<stray-content head="f67d2a4fc" head_ref="main" refs="0" blobs="0" unmerged="0" superseded="0" merged="0" unknown="0">
 </stray-content>
 `````
 
@@ -2114,17 +2103,17 @@ ripwire: --merge-scout: unknown ref 'r28-parseargs'
 
 `````
 <!-- ripwire landing-plan: stray-content's cheap per-blob sweep composed with merge-scout's per-arm overlap oracle — of every local branch, which still hold REAL work (v="unmerged"), which were already re-implemented on the live line (v="superseded", EXCLUDED below — landing them re-does work that is already done) or are already merged (omitted entirely, counted in merged= on the root element), and the fewest-conflicts-first order to land what remains. scouted="0" on an unmerged ref means it was NOT fed to merge-scout this run (the cost bound, not a verdict) — it is still real, unscouted work; bounded= on the root element counts them and detail lifts the bound. merge-scout is the EXPENSIVE step here (git-archive + full ingest per arm) — stray-content's own sweep is the cheap one. An undetermined row is a ref that could NOT be analysed at all (no merge base with HEAD, which on a SHALLOW clone is every ref): it is neither scouted nor excluded nor merged, because nothing was measured — treat it as unfinished business and deepen the clone, never as a clean branch. Read-only throughout: no checkout, no ref write, no working-tree mutation. The root carries BOTH head= and at= and they are the same commit: head= is the bare 9 hex chars this verb has always printed, at= is the tool wide anchor and is head= plus a "+dirty" suffix when the working tree is not clean. Prefer at= (it is the one spelling every other repo reading verb uses, and the only one that tells you whether uncommitted work was in scope); head= is kept for callers already keyed to it. -->
-<landing-plan head="1dc07e27a" refs="0" unmerged="0" superseded="0" merged="0" undetermined="0" scouted="0" bounded="0" scout-ok="1" at="1dc07e27a+dirty">
+<landing-plan head="f67d2a4fc" refs="0" unmerged="0" superseded="0" merged="0" undetermined="0" scouted="0" bounded="0" scout-ok="1" at="f67d2a4fc+dirty">
 </landing-plan>
 `````
 
-## `./build/ripwire . --stray-content=r25 --abi`
+## `./build/ripwire . --stray-content=lane --abi`
 
 *Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.*
 
 `````
 <!-- ripwire abi: the cross-branch ABI-BREAK gate — layout(STRUCT) crossed with stray-content(BRANCH). Scope is what each ref AUTHORED: the paths `diff base..tip` reports against its own merge base, never `diff HEAD..tip` (a file the branch never opened cannot be a break the branch introduced, and on a long-lived tree that one distinction took 487 drift rows to 4). For each such path the SAME field-offset model layout uses is run LEXICALLY on the ref's git blob (never indexed) and compared against HEAD's computed fields. LISTED kinds: drift = the byte contract differs (the bug this check exists for, the only kind that exits 2); unknown = the ref-side copy could not be modelled (see ref_caveat) and is NEVER reported as unchanged; absent = the ref does not define the struct at that path. COUNTED but not listed (pass detail=N to print them): rename = identical slots and field types under different field NAMES, so every byte stayed where it was (a same-type field REORDER is lexically identical to a rename and lands here too); spelling and stub mirror layout's own harmless cases; head-moved = the ref's copy equals its own merge-base copy, so the LIVE LINE is what changed. head_only= counts candidate sites on paths only the live line touched (outside the authored scope); unmodelable= counts sites skipped because HEAD's own copy carries no baseline; every excluded row is on a counter, nothing is dropped silently. Structs that match are omitted entirely; a ref with no rows at all is counted in quiet=, and a ref whose every row is an excluded kind is counted in excluded_refs= and prints under detail=N. LIMITS: HEAD's own side is the WORKING TREE's layout answer, not a re-fetched git blob at HEAD's commit; a nested field type that ALSO changed on the ref resolves via HEAD's copy, not the ref's; the ref-side locator is index-free and file-scope (one namespace deep) only, so a struct nested in a class or wrapped in an extern C block reads absent rather than compared; the authorship anchor is per PATH, so a branch changing struct S in one file while the live line changes S's mirror in another is a merge hazard only layout(S) on the merged result can see. Single-root; read-only (cat-file/diff/merge-base only). -->
-<abi head="1dc07e27a" head_ref="main" refs="0" candidates="553" compared="0" blobs="0" rows="0" shown="0" capped="0" dropped="0" excluded="0" head_only="0" unmodelable="0" unrelated="0" broken_refs="0" quiet="0" excluded_refs="0">
+<abi head="f67d2a4fc" head_ref="main" refs="0" candidates="553" compared="0" blobs="0" rows="0" shown="0" capped="0" dropped="0" excluded="0" head_only="0" unmodelable="0" unrelated="0" broken_refs="0" quiet="0" excluded_refs="0">
 </abi>
 `````
 
@@ -2140,52 +2129,67 @@ ripwire: --stray-content takes precedence when several verbs are given — IGNOR
 
 `````
 <!-- ripwire whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref SOURCE files before test files before docs, then definitions before references, then path and line. The doc demotion is ORDER ONLY: a doc line that quotes a signature still reads as a definition to the heuristic below and still says kind="def", it is simply printed after the code. kind= is answered by TWO different mechanisms, and head_labels= says which one answered for HEAD: with head_labels="index" a HEAD row is kind="def" iff the PARSED index puts a definition there (one row per index def site), while every NON-HEAD row — and every row when head_labels="lexical" (no index was supplied, the index knows no def of this name, or the working tree has drifted from HEAD) — is a LEXICAL shape heuristic over raw blob text that was never ingested: it reads a quoted signature in a doc as a definition and can miss an unusual declarator. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a count of refs that matched — hits= and the rows are the matched set. on-head="0" alongside ref hits is the case this verb exists for: content that lives only on a branch. A TREE scan can only find content some ref still carries, so hits="0" on its own does not distinguish a name this repo never had from one it deleted; run with the with_history flag and the fate row says which, naming the commit that removed it. ANCHORING: none, by design. This verb runs no diff at all — it scans each ref's FULL tree, which is what lets it find content a branch merely INHERITED (exactly what a merge base anchored diff would exclude), so nothing here can fire merely because HEAD moved. at= is sha-only here (never +dirty): a tree scan reads committed blobs, so the working tree's cleanliness does not enter the answer. SELECTOR: this verb takes a BARE symbol name, not the file:name spelling that callers, uses, impact, around, lego and edit_check accept. A file:name spelling is searched as a LITERAL string, no tree contains it, and the result is a true but useless hits="0" shaped exactly like a name this repo never had. When that is what happened, a selector-note element says so and its retry= is the bare name to re-run with. Its absence beside hits="0" means the zero IS a measurement. SCOPE: refs/heads only, which is every local branch (worktree branches included). Remote tracking refs are NOT scanned: they mirror local ones in the usual checkout and would double every row. The consequence on a FRESH CLONE, where the branches live under refs/remotes/origin and only the checked out one has a local head, is that this verb sees essentially one tree; refs_scanned= is that fact as a number, so read it before reading hits=. TRUNCATION: the trailing more element (more hits=N) is the rows AFTER this page, so shown plus more equals the rows from this page's offset on. It is not a second cap, and not a second vocabulary to page by: it is the SAME fact shown= / capped= / next_offset= carry, restated from the other end (what this page did not print). Page with limit= and offset=; the more element is absent exactly when this page reached the end of the hit list. raise the default cap with limit=N (offset=M pages) -->
-<whereis sym="rankGraphTeleport" on-head="1" refs_scanned="1" blobs="1564" hits="238" head_labels="index" shown="60" capped="1" at="1dc07e27a">
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/graph.h" l="1278" kind="def" t="inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/crossref.h" l="1280" kind="ref" t="// code above the real definition: `--whereis=rankGraphTeleport` opened with three kind=&quot;def&quot; rows into"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/eval.h" l="211" kind="ref" t="const std::vector&lt;float&gt; r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/graph.h" l="88" kind="ref" t="// renormalized to Σ=1 in rankGraphTeleport — so every teleport-based"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/graph.h" l="1243" kind="ref" t="// prior (never the edges) and renormalized in rankGraphTeleport. Every symbol whose name is missing from"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/graph.h" l="1307" kind="ref" t="return rankGraphTeleport( g, std::vector&lt;float&gt;( N, N ? 1.0f / float( N ) : 0.f ), alpha );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/graph.h" l="1549" kind="ref" t="// cliff), run the EXISTING PPR machinery (rankGraphTeleport — the same biasPrior/det-gate seam every"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/graph.h" l="1575" kind="ref" t="const std::vector&lt;float&gt; ppr = rankGraphTeleport( g, p );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/main.cpp" l="7262" kind="ref" t="std::vector&lt;float&gt; rank   = rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, &quot;18 months ago&quot;, &amp;hasChurnEvidence ) );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/main.cpp" l="7270" kind="ref" t="std::vector&lt;float&gt; rank   = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, &quot;18 months ago&quot;, d.cfg.since.empty() ? nullptr : &amp;sinceScope, &amp;hasChurnEvidence ) );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/main.cpp" l="7348" kind="ref" t="rank = rankGraphTeleport( g, diffTeleport( ing, changed ) );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/mcpindex.h" l="785" kind="ref" t="// symbols, the rest uniform, then rankGraphTeleport (which also applies the W4-#1 name-quality biasPrior"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/mcpindex.h" l="807" kind="ref" t="ix.rank = rankGraphTeleport( ix.g, diffTeleport( ix.ing, changed ) );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/selectorrefuse.h" l="7" kind="ref" t="// (&quot;that file defines no &apos;rankGraphTeleport&apos;&quot;), names the files that DO define the name, and hands back a"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="bench/recalleval/labels_ranking.tsv" l="49" kind="ref" t="power iteration rank convergence damping factor&#9;src/pagerank.cpp#pageRankDouble&#9;src/graph.h#rankGraphTeleport,src/pagerank.h#pageRankDouble&#9;concept"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="bench/recalleval/labels_ranking.tsv" l="68" kind="ref" t="pagerank power iteration&#9;src/pagerank.cpp#pageRankDouble&#9;src/pagerank.h#pageRankDouble,src/graph.h#rankGraphTeleport&#9;adversarial"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/crossrefcheck.sh" l="176" kind="ref" t="# source path put doc-QUOTED code on the first screen: on this repo `--whereis=rankGraphTeleport` opened"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/crossrefcheck.sh" l="230" kind="ref" t="&quot;$BIN&quot; &quot;$ROOT&quot; --whereis=rankGraphTeleport &gt;&quot;$TMP/wreal&quot; 2&gt;/dev/null"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/crossrefcheck.sh" l="234" kind="ref" t="&quot;def src/graph.h&quot;) ok &quot;whereis: rankGraphTeleport&apos;s first def row is src/graph.h (was a docs/captures CDATA row)&quot; ;;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/crossrefcheck.sh" l="235" kind="ref" t="&quot;&quot;)                ok &quot;whereis: rankGraphTeleport not found in this checkout — real-repo arm skipped&quot; ;;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/crossrefcheck.sh" l="236" kind="ref" t="*)                 no &quot;whereis: rankGraphTeleport&apos;s first def row is &apos;$firstRealDef&apos;, want src/graph.h&quot; ;;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="11" kind="ref" t="#       `--expand=src/graph.h:rankGraphTeleport` was parsed as a LINE RANGE, warned &quot;malformed range&quot;, and"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="62" kind="ref" t="A_Q=&quot;$( run --top-k=0 --expand=src/graph.h:rankGraphTeleport 2&gt;/dev/null )&quot;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="63" kind="ref" t="A_B=&quot;$( run --top-k=0 --expand=rankGraphTeleport            2&gt;/dev/null )&quot;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="65" kind="ref" t="*&apos;n=&quot;rankGraphTeleport&quot;&apos;*&apos;PROFILE_SCOPE_DESCRIBE&apos;*) ok &quot;(a) --expand=src/graph.h:rankGraphTeleport returns that symbol&apos;s BODY&quot; ;;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="66" kind="ref" t="*) no &quot;(a) --expand=src/graph.h:rankGraphTeleport did not return the body (got ${#A_Q} bytes)&quot; ;;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="75" kind="ref" t="C=&quot;$( run --callers=rankGraphTeleport 2&gt;/dev/null )&quot;"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/selectorchaincheck.sh" l="83" kind="ref" t="&amp;&amp; ok &quot;(b) chain --callers=rankGraphTeleport → --expand=$RP:$RN → exactly that one def&quot; \"/>
-… [34 more display lines; full output is 17057 bytes on 1 raw line(s)]
+<whereis sym="rankGraphTeleport" on-head="1" refs_scanned="1" blobs="1567" hits="331" head_labels="index" shown="60" capped="1" at="f67d2a4fc">
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/graph.h" l="1278" kind="def" t="inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/crossref.h" l="1280" kind="ref" t="// code above the real definition: `--whereis=rankGraphTeleport` opened with three kind=&quot;def&quot; rows into"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/eval.h" l="211" kind="ref" t="const std::vector&lt;float&gt; r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/graph.h" l="88" kind="ref" t="// renormalized to Σ=1 in rankGraphTeleport — so every teleport-based"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/graph.h" l="1243" kind="ref" t="// prior (never the edges) and renormalized in rankGraphTeleport. Every symbol whose name is missing from"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/graph.h" l="1307" kind="ref" t="return rankGraphTeleport( g, std::vector&lt;float&gt;( N, N ? 1.0f / float( N ) : 0.f ), alpha );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/graph.h" l="1549" kind="ref" t="// cliff), run the EXISTING PPR machinery (rankGraphTeleport — the same biasPrior/det-gate seam every"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/graph.h" l="1575" kind="ref" t="const std::vector&lt;float&gt; ppr = rankGraphTeleport( g, p );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/main.cpp" l="7262" kind="ref" t="std::vector&lt;float&gt; rank   = rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, &quot;18 months ago&quot;, &amp;hasChurnEvidence ) );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/main.cpp" l="7270" kind="ref" t="std::vector&lt;float&gt; rank   = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, &quot;18 months ago&quot;, d.cfg.since.empty() ? nullptr : &amp;sinceScope, &amp;hasChurnEvidence ) );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/main.cpp" l="7348" kind="ref" t="rank = rankGraphTeleport( g, diffTeleport( ing, changed ) );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/mcpindex.h" l="784" kind="ref" t="// symbols, the rest uniform, then rankGraphTeleport (which also applies the  name-quality biasPrior"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/mcpindex.h" l="806" kind="ref" t="ix.rank = rankGraphTeleport( ix.g, diffTeleport( ix.ing, changed ) );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/selectorrefuse.h" l="7" kind="ref" t="// (&quot;that file defines no &apos;rankGraphTeleport&apos;&quot;), names the files that DO define the name, and hands back a"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="bench/recalleval/labels_ranking.tsv" l="49" kind="ref" t="power iteration rank convergence damping factor&#9;src/pagerank.cpp#pageRankDouble&#9;src/graph.h#rankGraphTeleport,src/pagerank.h#pageRankDouble&#9;concept"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="bench/recalleval/labels_ranking.tsv" l="68" kind="ref" t="pagerank power iteration&#9;src/pagerank.cpp#pageRankDouble&#9;src/pagerank.h#pageRankDouble,src/graph.h#rankGraphTeleport&#9;adversarial"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/crossrefcheck.sh" l="176" kind="ref" t="# source path put doc-QUOTED code on the first screen: on this repo `--whereis=rankGraphTeleport` opened"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/crossrefcheck.sh" l="230" kind="ref" t="&quot;$BIN&quot; &quot;$ROOT&quot; --whereis=rankGraphTeleport &gt;&quot;$TMP/wreal&quot; 2&gt;/dev/null"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/crossrefcheck.sh" l="234" kind="ref" t="&quot;def src/graph.h&quot;) ok &quot;whereis: rankGraphTeleport&apos;s first def row is src/graph.h (was a docs/captures CDATA row)&quot; ;;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/crossrefcheck.sh" l="235" kind="ref" t="&quot;&quot;)                ok &quot;whereis: rankGraphTeleport not found in this checkout — real-repo arm skipped&quot; ;;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/crossrefcheck.sh" l="236" kind="ref" t="*)                 no &quot;whereis: rankGraphTeleport&apos;s first def row is &apos;$firstRealDef&apos;, want src/graph.h&quot; ;;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="11" kind="ref" t="#       `--expand=src/graph.h:rankGraphTeleport` was parsed as a LINE RANGE, warned &quot;malformed range&quot;, and"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="62" kind="ref" t="A_Q=&quot;$( run --top-k=0 --expand=src/graph.h:rankGraphTeleport 2&gt;/dev/null )&quot;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="63" kind="ref" t="A_B=&quot;$( run --top-k=0 --expand=rankGraphTeleport            2&gt;/dev/null )&quot;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="65" kind="ref" t="*&apos;n=&quot;rankGraphTeleport&quot;&apos;*&apos;PROFILE_SCOPE_DESCRIBE&apos;*) ok &quot;(a) --expand=src/graph.h:rankGraphTeleport returns that symbol&apos;s BODY&quot; ;;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="66" kind="ref" t="*) no &quot;(a) --expand=src/graph.h:rankGraphTeleport did not return the body (got ${#A_Q} bytes)&quot; ;;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="75" kind="ref" t="C=&quot;$( run --callers=rankGraphTeleport 2&gt;/dev/null )&quot;"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/selectorchaincheck.sh" l="83" kind="ref" t="&amp;&amp; ok &quot;(b) chain --callers=rankGraphTeleport → --expand=$RP:$RN → exactly that one def&quot; \"/>
+… [34 more display lines; full output is 17052 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --whereis=computeOnePairOverlap --with-history`
 
 *Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.*
 
+**wall time: 1.20s**
+
 `````
 <!-- ripwire whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref SOURCE files before test files before docs, then definitions before references, then path and line. The doc demotion is ORDER ONLY: a doc line that quotes a signature still reads as a definition to the heuristic below and still says kind="def", it is simply printed after the code. kind= is answered by TWO different mechanisms, and head_labels= says which one answered for HEAD: with head_labels="index" a HEAD row is kind="def" iff the PARSED index puts a definition there (one row per index def site), while every NON-HEAD row — and every row when head_labels="lexical" (no index was supplied, the index knows no def of this name, or the working tree has drifted from HEAD) — is a LEXICAL shape heuristic over raw blob text that was never ingested: it reads a quoted signature in a doc as a definition and can miss an unusual declarator. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a count of refs that matched — hits= and the rows are the matched set. on-head="0" alongside ref hits is the case this verb exists for: content that lives only on a branch. A TREE scan can only find content some ref still carries, so hits="0" on its own does not distinguish a name this repo never had from one it deleted; run with the with_history flag and the fate row says which, naming the commit that removed it. ANCHORING: none, by design. This verb runs no diff at all — it scans each ref's FULL tree, which is what lets it find content a branch merely INHERITED (exactly what a merge base anchored diff would exclude), so nothing here can fire merely because HEAD moved. at= is sha-only here (never +dirty): a tree scan reads committed blobs, so the working tree's cleanliness does not enter the answer. SELECTOR: this verb takes a BARE symbol name, not the file:name spelling that callers, uses, impact, around, lego and edit_check accept. A file:name spelling is searched as a LITERAL string, no tree contains it, and the result is a true but useless hits="0" shaped exactly like a name this repo never had. When that is what happened, a selector-note element says so and its retry= is the bare name to re-run with. Its absence beside hits="0" means the zero IS a measurement. SCOPE: refs/heads only, which is every local branch (worktree branches included). Remote tracking refs are NOT scanned: they mirror local ones in the usual checkout and would double every row. The consequence on a FRESH CLONE, where the branches live under refs/remotes/origin and only the checked out one has a local head, is that this verb sees essentially one tree; refs_scanned= is that fact as a number, so read it before reading hits=. TRUNCATION: the trailing more element (more hits=N) is the rows AFTER this page, so shown plus more equals the rows from this page's offset on. It is not a second cap, and not a second vocabulary to page by: it is the SAME fact shown= / capped= / next_offset= carry, restated from the other end (what this page did not print). Page with limit= and offset=; the more element is absent exactly when this page reached the end of the hit list. raise the default cap with limit=N (offset=M pages) -->
-<whereis sym="computeOnePairOverlap" on-head="1" refs_scanned="1" blobs="1564" hits="10" head_labels="index" shown="10" capped="0" at="1dc07e27a">
-<history probed="1" head="1dc07e27a" commits="18" removed-names="6977"/>
+<whereis sym="computeOnePairOverlap" on-head="1" refs_scanned="1" blobs="1567" hits="23" head_labels="index" shown="23" capped="0" at="f67d2a4fc">
+<history probed="1" head="f67d2a4fc" commits="19" removed-names="7289"/>
 <fate sym="computeOnePairOverlap" v="never" note="no commit reachable from HEAD ever removed a line carrying this name — so for a name HEAD does not have, this repo never had it"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/mergescout.h" l="470" kind="def" t="inline PairOverlap computeOnePairOverlap( std::size_t a, std::size_t b, const Arm&amp; armA, const Arm&amp; armB )"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/lanes.h" l="17" kind="ref" t="// and the landing order are mergescout::computeOnePairOverlap / computeOverlaps / landingOrder, fed SYNTHETIC"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/lanes.h" l="64" kind="ref" t="//   same_file_risk[] — different keys, same file. AGGREGATED PER FILE: computeOnePairOverlap is a nested loop"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="src/mergescout.h" l="487" kind="ref" t="pairs.push_back( computeOnePairOverlap( a, b, arms[a], arms[b] ) );"/>
-<hit ref="HEAD" tip="1dc07e27a" date="2026-07-31" p="test/showcase_capture.py" l="157" kind="ref" t="add(S4, f&quot;{BIN} . --whereis=computeOnePairOverlap --with-history&quot;, &quot;Same, plus a git-history &lt;fate&gt; row (never / removed-by-commit) for names no tree carries.&quot;, timeout=600) … [line truncated: 3 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/mergescout.h" l="470" kind="def" t="inline PairOverlap computeOnePairOverlap( std::size_t a, std::size_t b, const Arm&amp; armA, const Arm&amp; armB )"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/lanes.h" l="17" kind="ref" t="// and the landing order are mergescout::computeOnePairOverlap / computeOverlaps / landingOrder, fed SYNTHETIC"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/lanes.h" l="64" kind="ref" t="//   same_file_risk[] — different keys, same file. AGGREGATED PER FILE: computeOnePairOverlap is a nested loop"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="src/mergescout.h" l="487" kind="ref" t="pairs.push_back( computeOnePairOverlap( a, b, arms[a], arms[b] ) );"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="test/showcase_capture.py" l="157" kind="ref" t="add(S4, f&quot;{BIN} . --whereis=computeOnePairOverlap --with-history&quot;, &quot;Same, plus a git-history &lt;fate&gt; row (never / removed-by-commit) for names no tree carries.&quot;, timeout=600) … [line truncated: 3 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2175" kind="ref" t="## `./build/ripwire . --whereis=computeOnePairOverlap --with-history`"/>
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2181" kind="ref" t="&lt;whereis sym=&quot;computeOnePairOverlap&quot; on-head=&quot;1&quot; refs_scanned=&quot;1&quot; blobs=&quot;1564&quot; hits=&quot;10&quot; head_labels=&quot;index&quot; shown … [line truncated: 68 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2183" kind="ref" t="&lt;fate sym=&quot;computeOnePairOverlap&quot; v=&quot;never&quot; note=&quot;no commit reachable from HEAD ever removed a line carrying this name — so for a name HEAD does no … [line truncated: 44 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2184" kind="ref" t="&lt;hit ref=&quot;HEAD&quot; tip=&quot;1dc07e27a&quot; date=&quot;2026-07-31&quot; p=&quot;src/mergescout.h&quot; l=&quot;470&quot; kind=&quot;def&quot; t=&quot;inline PairOverl … [line truncated: 120 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2185" kind="ref" t="&lt;hit ref=&quot;HEAD&quot; tip=&quot;1dc07e27a&quot; date=&quot;2026-07-31&quot; p=&quot;src/lanes.h&quot; l=&quot;17&quot; kind=&quot;ref&quot; t=&quot;// and the landing ord … [line truncated: 102 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2186" kind="ref" t="&lt;hit ref=&quot;HEAD&quot; tip=&quot;1dc07e27a&quot; date=&quot;2026-07-31&quot; p=&quot;src/lanes.h&quot; l=&quot;64&quot; kind=&quot;ref&quot; t=&quot;//   same_file_risk[]  … [line truncated: 104 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2187" kind="ref" t="&lt;hit ref=&quot;HEAD&quot; tip=&quot;1dc07e27a&quot; date=&quot;2026-07-31&quot; p=&quot;src/mergescout.h&quot; l=&quot;487&quot; kind=&quot;ref&quot; t=&quot;pairs.push_back( … [line truncated: 65 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2188" kind="ref" t="&lt;hit ref=&quot;HEAD&quot; tip=&quot;1dc07e27a&quot; date=&quot;2026-07-31&quot; p=&quot;test/showcase_capture.py&quot; l=&quot;157&quot; kind=&quot;ref&quot; t=&quot;add(S4,  … [line truncated: 266 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2189" kind="ref" t="&lt;hit ref=&quot;docs&quot; tip=&quot;6008ac607&quot; date=&quot;2026-07-31&quot; p=&quot;src/mergescout.h&quot; l=&quot;470&quot; kind=&quot;def&quot; t=&quot;inline PairOverl … [line truncated: 120 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2190" kind="ref" t="&lt;hit ref=&quot;docs&quot; tip=&quot;6008ac607&quot; date=&quot;2026-07-31&quot; p=&quot;src/lanes.h&quot; l=&quot;17&quot; kind=&quot;ref&quot; t=&quot;// and the landing ord … [line truncated: 102 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2191" kind="ref" t="&lt;hit ref=&quot;docs&quot; tip=&quot;6008ac607&quot; date=&quot;2026-07-31&quot; p=&quot;src/lanes.h&quot; l=&quot;64&quot; kind=&quot;ref&quot; t=&quot;//   same_file_risk[]  … [line truncated: 104 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2192" kind="ref" t="&lt;hit ref=&quot;docs&quot; tip=&quot;6008ac607&quot; date=&quot;2026-07-31&quot; p=&quot;src/mergescout.h&quot; l=&quot;487&quot; kind=&quot;ref&quot; t=&quot;pairs.push_back( … [line truncated: 65 more bytes on this line]
+<hit ref="HEAD" tip="f67d2a4fc" date="2026-07-31" p="docs/captures/COMMANDS_showcase_2026-07-31.md" l="2193" kind="ref" t="&lt;hit ref=&quot;docs&quot; tip=&quot;6008ac607&quot; date=&quot;2026-07-31&quot; p=&quot;test/showcase_capture.py&quot; l=&quot;157&quot; kind=&quot;ref&quot; t=&quot;add(S4,  … [line truncated: 266 more bytes on this line]
 <hit ref="docs" tip="6008ac607" date="2026-07-31" p="src/mergescout.h" l="470" kind="def" t="inline PairOverlap computeOnePairOverlap( std::size_t a, std::size_t b, const Arm&amp; armA, const Arm&amp; armB )"/>
 <hit ref="docs" tip="6008ac607" date="2026-07-31" p="src/lanes.h" l="17" kind="ref" t="// and the landing order are mergescout::computeOnePairOverlap / computeOverlaps / landingOrder, fed SYNTHETIC"/>
 <hit ref="docs" tip="6008ac607" date="2026-07-31" p="src/lanes.h" l="64" kind="ref" t="//   same_file_risk[] — different keys, same file. AGGREGATED PER FILE: computeOnePairOverlap is a nested loop"/>
@@ -2281,40 +2285,40 @@ ripwire: run `ripwire . --flags` for the gate table
 *NEW VERB: pre-hoc lane plan — which of 3 parallel worktrees would COLLIDE, before a line is written. JSON on stdout.*
 
 `````
-{"v":1,"verb":"plan-lanes","at":"1dc07e27a+dirty","root":".","task":"add a --since filter to the doc-drift verb and cover it with tests","source":"partition","requested":3,"lane_count":3,"claim_key":"path+scope+name","on_conflict":"producing-lane-rebases","corpus":{"files":836,"symbols":6432,"edges" … [line truncated: 350 more bytes on this line]
+{"v":1,"verb":"plan-lanes","at":"f67d2a4fc+dirty","root":".","task":"add a --since filter to the doc-drift verb and cover it with tests","source":"partition","requested":3,"lane_count":3,"claim_key":"path+scope+name","on_conflict":"producing-lane-rebases","corpus":{"files":836,"symbols":6432,"edges" … [line truncated: 350 more bytes on this line]
 "symbols":[{"p":"./src/docdrift.h","n":"computeDocDrift","scope":"docdrift","l":1736,"id":"./src/docdrift.h::docdrift::computeDocDrift"},
 {"p":"./src/docdrift.h","n":"writeDocDriftPage","scope":"docdrift","l":2003,"id":"./src/docdrift.h::docdrift::writeDocDriftPage"},
 {"p":"./src/docdrift.h","n":"writeGateability","scope":"docdrift","l":1886,"id":"./src/docdrift.h::docdrift::writeGateability"},
 {"p":"./src/main.cpp","n":"runDocDrift","scope":"","l":5719,"id":null},
 {"p":"./src/mcpverbs.h","n":"docDriftText","scope":"rw","l":384,"id":"./src/mcpverbs.h::rw::docDriftText"},
 {"p":"./src/recall.h","n":"docFileMask","scope":"rw","l":93,"id":"./src/recall.h::rw::docFileMask"}]},"lanes":[{"id":"lane-0","task":"add a --since filter to the doc-drift verb and cover it with tests","claims":{"symbols":[{"p":"./src/cli.h","n":"pagingDisablingMode","scope":"rw","key":"1d13d5061cd1 … [line truncated: 169 more bytes on this line]
-{"p":"./src/mcp.h","n":"isMcpEditVerb","scope":"rw","key":"29a5a2524a95d6c2","id":"./src/mcp.h::rw::isMcpEditVerb","id_addressable":true,"id_collides_with":0,"l":264,"ord":0,"overloads":1,"amb":0,"cx":3,"ccx":3,"churn":3,"tested":0},
+{"p":"./src/mcp.h","n":"isMcpEditVerb","scope":"rw","key":"29a5a2524a95d6c2","id":"./src/mcp.h::rw::isMcpEditVerb","id_addressable":true,"id_collides_with":0,"l":264,"ord":0,"overloads":1,"amb":0,"cx":3,"ccx":3,"churn":4,"tested":0},
 {"p":"./src/mcprefusal.h","n":"notFound","scope":"rw::mcprefuse","key":"2f350cb55c4c61ac","id":"./src/mcprefusal.h::rw::mcprefuse::notFound","id_addressable":true,"id_collides_with":0,"l":600,"ord":0,"overloads":1,"amb":2,"cx":4,"ccx":3,"churn":3,"tested":0},
-{"p":"./src/mcpverbs.h","n":"whereisText","scope":"rw","key":"39588f57bd7b46b5","id":"./src/mcpverbs.h::rw::whereisText","id_addressable":true,"id_collides_with":0,"l":344,"ord":0,"overloads":1,"amb":0,"cx":2,"ccx":1,"churn":3,"tested":0},
+{"p":"./src/mcpverbs.h","n":"whereisText","scope":"rw","key":"39588f57bd7b46b5","id":"./src/mcpverbs.h::rw::whereisText","id_addressable":true,"id_collides_with":0,"l":344,"ord":0,"overloads":1,"amb":0,"cx":2,"ccx":1,"churn":4,"tested":0},
 {"p":"./src/mcprefusal.h","n":"singleRootRefusal","scope":"rw::mcprefuse","key":"4cf11960f7360525","id":"./src/mcprefusal.h::rw::mcprefuse::singleRootRefusal","id_addressable":true,"id_collides_with":0,"l":524,"ord":0,"overloads":1,"amb":0,"cx":1,"ccx":0,"churn":3,"tested":0},
-{"p":"./src/main.cpp","n":"jsonUnsupportedVerb","scope":"","key":"6e4dbe9b6d8ebac4","id":null,"id_addressable":false,"id_collides_with":0,"l":7900,"ord":0,"overloads":1,"amb":26,"cx":72,"ccx":72,"churn":4,"tested":0},
+{"p":"./src/main.cpp","n":"jsonUnsupportedVerb","scope":"","key":"6e4dbe9b6d8ebac4","id":null,"id_addressable":false,"id_collides_with":0,"l":7900,"ord":0,"overloads":1,"amb":26,"cx":72,"ccx":72,"churn":5,"tested":0},
 {"p":"./src/lanes.h","n":"buildWarnings","scope":"lanes","key":"6ff5b3de543f7431","id":"./src/lanes.h::lanes::buildWarnings","id_addressable":true,"id_collides_with":0,"l":615,"ord":0,"overloads":1,"amb":2,"cx":17,"ccx":19,"churn":3,"tested":0},
 {"p":"./src/gitmine.h","n":"resolveSinceScope","scope":"rw","key":"9caaa3dbeaa688d0","id":"./src/gitmine.h::rw::resolveSinceScope","id_addressable":true,"id_collides_with":0,"l":116,"ord":0,"overloads":1,"amb":0,"cx":6,"ccx":6,"churn":3,"tested":0},
 {"p":"./src/situ.h","n":"gitDiffChangedMask","scope":"rw","key":"a9243123d6bed37b","id":"./src/situ.h::rw::gitDiffChangedMask","id_addressable":true,"id_collides_with":0,"l":55,"ord":0,"overloads":1,"amb":0,"cx":1,"ccx":0,"churn":3,"tested":0},
-{"p":"./src/cli.h","n":"validateConfig","scope":"rw","key":"c17db5239ed07cf7","id":"./src/cli.h::rw::validateConfig","id_addressable":true,"id_collides_with":0,"l":2234,"ord":0,"overloads":1,"amb":19,"cx":57,"ccx":44,"churn":3,"tested":0},
-{"p":"./src/mcp.h","n":"dispatchMcpLine","scope":"rw","key":"d63db6944aa504a7","id":"./src/mcp.h::rw::dispatchMcpLine","id_addressable":true,"id_collides_with":0,"l":304,"ord":0,"overloads":1,"amb":134,"cx":220,"ccx":428,"churn":3,"tested":0},
-{"p":"./src/main.cpp","n":"gitChurnCounts","scope":"","key":"dce05f27d584683a","id":null,"id_addressable":false,"id_collides_with":0,"l":196,"ord":0,"overloads":1,"amb":1,"cx":5,"ccx":4,"churn":4,"tested":0},
+{"p":"./src/cli.h","n":"validateConfig","scope":"rw","key":"c17db5239ed07cf7","id":"./src/cli.h::rw::validateConfig","id_addressable":true,"id_collides_with":0,"l":2234,"ord":0,"overloads":1,"amb":19,"cx":57,"ccx":44,"churn":4,"tested":0},
+{"p":"./src/mcp.h","n":"dispatchMcpLine","scope":"rw","key":"d63db6944aa504a7","id":"./src/mcp.h::rw::dispatchMcpLine","id_addressable":true,"id_collides_with":0,"l":304,"ord":0,"overloads":1,"amb":134,"cx":220,"ccx":428,"churn":4,"tested":0},
+{"p":"./src/main.cpp","n":"gitChurnCounts","scope":"","key":"dce05f27d584683a","id":null,"id_addressable":false,"id_collides_with":0,"l":196,"ord":0,"overloads":1,"amb":1,"cx":5,"ccx":4,"churn":5,"tested":0},
 {"p":"./src/mcprefusal.h","n":"nearestName","scope":"rw::mcprefuse","key":"ddc57fe52dbd6718","id":"./src/mcprefusal.h::rw::mcprefuse::nearestName","id_addressable":true,"id_collides_with":0,"l":646,"ord":0,"overloads":1,"amb":1,"cx":7,"ccx":8,"churn":3,"tested":0},
-{"p":"./src/mcpverbs.h","n":"packTaskText","scope":"rw","key":"e514a69013d0934c","id":"./src/mcpverbs.h::rw::packTaskText","id_addressable":true,"id_collides_with":0,"l":1856,"ord":0,"overloads":1,"amb":2,"cx":20,"ccx":29,"churn":3,"tested":0},
-{"p":"./src/cli.h","n":"validateModifierGuards","scope":"rw","key":"ec2848a4801493a2","id":"./src/cli.h::rw::validateModifierGuards","id_addressable":true,"id_collides_with":0,"l":2112,"ord":0,"overloads":1,"amb":14,"cx":36,"ccx":27,"churn":3,"tested":0}],
-"files":[{"p":"./src/cli.h","symbols":3,"churn":3,"ccx":77,"hotspot_rank":15},
-{"p":"./src/gitmine.h","symbols":1,"churn":3,"ccx":6,"hotspot_rank":9},
-{"p":"./src/lanes.h","symbols":1,"churn":3,"ccx":19,"hotspot_rank":22},
-{"p":"./src/main.cpp","symbols":2,"churn":4,"ccx":76,"hotspot_rank":1},
-{"p":"./src/mcp.h","symbols":2,"churn":3,"ccx":431,"hotspot_rank":10},
+{"p":"./src/mcpverbs.h","n":"packTaskText","scope":"rw","key":"e514a69013d0934c","id":"./src/mcpverbs.h::rw::packTaskText","id_addressable":true,"id_collides_with":0,"l":1856,"ord":0,"overloads":1,"amb":2,"cx":20,"ccx":29,"churn":4,"tested":0},
+{"p":"./src/cli.h","n":"validateModifierGuards","scope":"rw","key":"ec2848a4801493a2","id":"./src/cli.h::rw::validateModifierGuards","id_addressable":true,"id_collides_with":0,"l":2112,"ord":0,"overloads":1,"amb":14,"cx":36,"ccx":27,"churn":4,"tested":0}],
+"files":[{"p":"./src/cli.h","symbols":3,"churn":4,"ccx":77,"hotspot_rank":12},
+{"p":"./src/gitmine.h","symbols":1,"churn":3,"ccx":6,"hotspot_rank":10},
+{"p":"./src/lanes.h","symbols":1,"churn":3,"ccx":19,"hotspot_rank":23},
+{"p":"./src/main.cpp","symbols":2,"churn":5,"ccx":76,"hotspot_rank":1},
+{"p":"./src/mcp.h","symbols":2,"churn":4,"ccx":431,"hotspot_rank":8},
 {"p":"./src/mcprefusal.h","symbols":3,"churn":3,"ccx":11,"hotspot_rank":31},
-{"p":"./src/mcpverbs.h","symbols":2,"churn":3,"ccx":30,"hotspot_rank":7},
-{"p":"./src/situ.h","symbols":1,"churn":3,"ccx":0,"hotspot_rank":36}]},"blast_radius":{"reaches":42,"files_total":9,"capped":false,"files":["./src/cli.h","./src/lanes.h","./src/main.cpp","./src/mcp.h","./src/mcpedit.h","./src/mcpindex.h","./src/mcprefusal.h","./src/mcpserver.h","./src/mcpverbs.h"]}, … [line truncated: 18 more bytes on this line]
+{"p":"./src/mcpverbs.h","symbols":2,"churn":4,"ccx":30,"hotspot_rank":5},
+{"p":"./src/situ.h","symbols":1,"churn":3,"ccx":0,"hotspot_rank":37}]},"blast_radius":{"reaches":42,"files_total":9,"capped":false,"files":["./src/cli.h","./src/lanes.h","./src/main.cpp","./src/mcp.h","./src/mcpedit.h","./src/mcpindex.h","./src/mcprefusal.h","./src/mcpserver.h","./src/mcpverbs.h"]}, … [line truncated: 18 more bytes on this line]
 "tests_total":0,"tests_capped":false,"tests_granularity":"claimed-symbols","untested":42,"module_span":1,"notes":[]},
 … [75 more display lines; full output is 19437 bytes on 1 raw line(s)]
 `````
 
-## `./build/ripwire . --plan-lanes --brief=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/lanes_brief.txt`
+## `./build/ripwire . --plan-lanes --brief=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/lanes_brief.txt`
 
 *NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode).*
 
@@ -2327,35 +2331,35 @@ write regression tests for the new filter
 `````
 
 `````
-{"v":1,"verb":"plan-lanes","at":"1dc07e27a+dirty","root":".","task":null,"source":"brief","requested":3,"lane_count":3,"claim_key":"path+scope+name","on_conflict":"producing-lane-rebases","corpus":{"files":836,"symbols":6432,"edges":8733,"ambiguous":2631,"unresolved":652},"carve":null,"core":{"files … [line truncated: 5 more bytes on this line]
+{"v":1,"verb":"plan-lanes","at":"f67d2a4fc+dirty","root":".","task":null,"source":"brief","requested":3,"lane_count":3,"claim_key":"path+scope+name","on_conflict":"producing-lane-rebases","corpus":{"files":836,"symbols":6432,"edges":8733,"ambiguous":2631,"unresolved":652},"carve":null,"core":{"files … [line truncated: 5 more bytes on this line]
 "symbols":[]},"lanes":[{"id":"lane-0","task":"add a --since filter to the doc-drift verb","claims":{"symbols":[{"p":"./src/mcpverbs.h","n":"docDriftText","scope":"rw","key":"1fa68e8d93c05a59","id":"./src/mcpverbs.h::rw::docDriftText","id_addressable":true,"id_collides_with":0,"l":384,"ord":0,"overlo … [line truncated: 52 more bytes on this line]
-{"p":"./src/recall.h","n":"docFileMask","scope":"rw","key":"3149a219f599664c","id":"./src/recall.h::rw::docFileMask","id_addressable":true,"id_collides_with":0,"l":93,"ord":0,"overloads":1,"amb":0,"cx":4,"ccx":4,"churn":3,"tested":0},
+{"p":"./src/recall.h","n":"docFileMask","scope":"rw","key":"3149a219f599664c","id":"./src/recall.h::rw::docFileMask","id_addressable":true,"id_collides_with":0,"l":93,"ord":0,"overloads":1,"amb":0,"cx":4,"ccx":4,"churn":4,"tested":0},
 {"p":"./src/docdrift.h","n":"writeDocDriftPage","scope":"docdrift","key":"380b7de5df1cfd73","id":"./src/docdrift.h::docdrift::writeDocDriftPage","id_addressable":true,"id_collides_with":0,"l":2003,"ord":0,"overloads":1,"amb":2,"cx":9,"ccx":10,"churn":3,"tested":0},
 {"p":"./src/docdrift.h","n":"computeDocDrift","scope":"docdrift","key":"3b19cc3d8996c3b2","id":"./src/docdrift.h::docdrift::computeDocDrift","id_addressable":true,"id_collides_with":0,"l":1736,"ord":0,"overloads":1,"amb":3,"cx":20,"ccx":33,"churn":3,"tested":0},
 {"p":"./src/docdrift.h","n":"DriftResult","scope":"DriftResult","key":"422ab39546b6e0bd","id":"./src/docdrift.h::DriftResult::DriftResult","id_addressable":true,"id_collides_with":0,"l":250,"ord":0,"overloads":1,"amb":0,"cx":0,"ccx":0,"churn":3,"tested":0},
 {"p":"./src/docdrift.h","n":"writeGateability","scope":"docdrift","key":"42c456dfb55faee4","id":"./src/docdrift.h::docdrift::writeGateability","id_addressable":true,"id_collides_with":0,"l":1886,"ord":0,"overloads":1,"amb":0,"cx":6,"ccx":6,"churn":3,"tested":0},
 {"p":"./src/docdrift.h","n":"writeDocDrift","scope":"docdrift","key":"7bbf4862e91b5d48","id":"./src/docdrift.h::docdrift::writeDocDrift","id_addressable":true,"id_collides_with":0,"l":2062,"ord":0,"overloads":1,"amb":0,"cx":1,"ccx":0,"churn":3,"tested":0},
-{"p":"./src/main.cpp","n":"warnReportVerbPrecedence","scope":"","key":"8969760b6183631b","id":null,"id_addressable":false,"id_collides_with":0,"l":7852,"ord":0,"overloads":1,"amb":22,"cx":6,"ccx":8,"churn":4,"tested":0},
+{"p":"./src/main.cpp","n":"warnReportVerbPrecedence","scope":"","key":"8969760b6183631b","id":null,"id_addressable":false,"id_collides_with":0,"l":7852,"ord":0,"overloads":1,"amb":22,"cx":6,"ccx":8,"churn":5,"tested":0},
 {"p":"./src/docdrift.h","n":"sortDocsByLiveDrift","scope":"docdrift","key":"d5de682411b9a9a9","id":"./src/docdrift.h::docdrift::sortDocsByLiveDrift","id_addressable":true,"id_collides_with":0,"l":1724,"ord":0,"overloads":1,"amb":2,"cx":2,"ccx":2,"churn":3,"tested":0},
-{"p":"./src/mcpverbs.h","n":"unknownSubVerbRefusal","scope":"rw","key":"e336d39b0a6addea","id":"./src/mcpverbs.h::rw::unknownSubVerbRefusal","id_addressable":true,"id_collides_with":0,"l":2357,"ord":0,"overloads":1,"amb":5,"cx":3,"ccx":2,"churn":3,"tested":0},
-{"p":"./src/main.cpp","n":"runDocDrift","scope":"","key":"ebf80a749e6eca28","id":null,"id_addressable":false,"id_collides_with":0,"l":5719,"ord":0,"overloads":1,"amb":0,"cx":4,"ccx":3,"churn":4,"tested":0},
-{"p":"./src/cli.h","n":"validateModifierGuards","scope":"rw","key":"ec2848a4801493a2","id":"./src/cli.h::rw::validateModifierGuards","id_addressable":true,"id_collides_with":0,"l":2112,"ord":0,"overloads":1,"amb":14,"cx":36,"ccx":27,"churn":3,"tested":0}],
-"files":[{"p":"./src/cli.h","symbols":1,"churn":3,"ccx":27,"hotspot_rank":15},
-{"p":"./src/docdrift.h","symbols":6,"churn":3,"ccx":51,"hotspot_rank":8},
-{"p":"./src/main.cpp","symbols":2,"churn":4,"ccx":11,"hotspot_rank":1},
-{"p":"./src/mcpverbs.h","symbols":2,"churn":3,"ccx":2,"hotspot_rank":7},
-{"p":"./src/recall.h","symbols":1,"churn":3,"ccx":4,"hotspot_rank":38}]},"blast_radius":{"reaches":12,"files_total":6,"capped":false,"files":["./src/cli.h","./src/main.cpp","./src/mcp.h","./src/mcpserver.h","./src/mcpverbs.h","./src/recall.h"]},"tests_to_run":[],
+{"p":"./src/mcpverbs.h","n":"unknownSubVerbRefusal","scope":"rw","key":"e336d39b0a6addea","id":"./src/mcpverbs.h::rw::unknownSubVerbRefusal","id_addressable":true,"id_collides_with":0,"l":2357,"ord":0,"overloads":1,"amb":5,"cx":3,"ccx":2,"churn":4,"tested":0},
+{"p":"./src/main.cpp","n":"runDocDrift","scope":"","key":"ebf80a749e6eca28","id":null,"id_addressable":false,"id_collides_with":0,"l":5719,"ord":0,"overloads":1,"amb":0,"cx":4,"ccx":3,"churn":5,"tested":0},
+{"p":"./src/cli.h","n":"validateModifierGuards","scope":"rw","key":"ec2848a4801493a2","id":"./src/cli.h::rw::validateModifierGuards","id_addressable":true,"id_collides_with":0,"l":2112,"ord":0,"overloads":1,"amb":14,"cx":36,"ccx":27,"churn":4,"tested":0}],
+"files":[{"p":"./src/cli.h","symbols":1,"churn":4,"ccx":27,"hotspot_rank":12},
+{"p":"./src/docdrift.h","symbols":6,"churn":3,"ccx":51,"hotspot_rank":9},
+{"p":"./src/main.cpp","symbols":2,"churn":5,"ccx":11,"hotspot_rank":1},
+{"p":"./src/mcpverbs.h","symbols":2,"churn":4,"ccx":2,"hotspot_rank":5},
+{"p":"./src/recall.h","symbols":1,"churn":4,"ccx":4,"hotspot_rank":34}]},"blast_radius":{"reaches":12,"files_total":6,"capped":false,"files":["./src/cli.h","./src/main.cpp","./src/mcp.h","./src/mcpserver.h","./src/mcpverbs.h","./src/recall.h"]},"tests_to_run":[],
 "tests_total":0,"tests_capped":false,"tests_granularity":"claimed-symbols","untested":12,"module_span":7,"notes":[]},
-{"id":"lane-1","task":"add the CLI parse arm and help text for the new filter","claims":{"symbols":[{"p":"./src/main.cpp","n":"runNotes","scope":"","key":"1f218712fab4409e","id":null,"id_addressable":false,"id_collides_with":0,"l":5061,"ord":0,"overloads":1,"amb":11,"cx":26,"ccx":54,"churn":4,"teste … [line truncated: 6 more bytes on this line]
-{"p":"./src/mcpverbs.h","n":"batchPageRefusal","scope":"rw","key":"37b8ed7e29b141da","id":"./src/mcpverbs.h::rw::batchPageRefusal","id_addressable":true,"id_collides_with":0,"l":2336,"ord":0,"overloads":1,"amb":1,"cx":4,"ccx":3,"churn":3,"tested":0},
+{"id":"lane-1","task":"add the CLI parse arm and help text for the new filter","claims":{"symbols":[{"p":"./src/main.cpp","n":"runNotes","scope":"","key":"1f218712fab4409e","id":null,"id_addressable":false,"id_collides_with":0,"l":5061,"ord":0,"overloads":1,"amb":11,"cx":26,"ccx":54,"churn":5,"teste … [line truncated: 6 more bytes on this line]
+{"p":"./src/mcpverbs.h","n":"batchPageRefusal","scope":"rw","key":"37b8ed7e29b141da","id":"./src/mcpverbs.h::rw::batchPageRefusal","id_addressable":true,"id_collides_with":0,"l":2336,"ord":0,"overloads":1,"amb":1,"cx":4,"ccx":3,"churn":4,"tested":0},
 {"p":"./docs/docs_commands_build.py","n":"assert_scrubbed","scope":"","key":"3f2f96d107d3b9c2","id":null,"id_addressable":false,"id_collides_with":0,"l":426,"ord":0,"overloads":1,"amb":0,"cx":5,"ccx":8,"churn":3,"tested":0},
 {"p":"./docs/docs_commands_build.py","n":"main","scope":"","key":"4015853681ded3bc","id":null,"id_addressable":false,"id_collides_with":42,"l":474,"ord":0,"overloads":1,"amb":0,"cx":18,"ccx":25,"churn":3,"tested":0},
 {"p":"./docs/docs_commands_build.py","n":"scrub_prose","scope":"","key":"6846061c73b4f780","id":null,"id_addressable":false,"id_collides_with":0,"l":229,"ord":0,"overloads":1,"amb":0,"cx":1,"ccx":0,"churn":3,"tested":0},
-{"p":"./src/main.cpp","n":"deadCodeFilterMatchesPath","scope":"","key":"6d33ddb6fcd29699","id":null,"id_addressable":false,"id_collides_with":0,"l":3454,"ord":0,"overloads":1,"amb":1,"cx":11,"ccx":12,"churn":4,"tested":0},
+{"p":"./src/main.cpp","n":"deadCodeFilterMatchesPath","scope":"","key":"6d33ddb6fcd29699","id":null,"id_addressable":false,"id_collides_with":0,"l":3454,"ord":0,"overloads":1,"amb":1,"cx":11,"ccx":12,"churn":5,"tested":0},
 {"p":"./src/docparse.h","n":"classifyGeneratedDoc","scope":"docparse","key":"8d10cf7eab7a73cd","id":"./src/docparse.h::docparse::classifyGeneratedDoc","id_addressable":true,"id_collides_with":0,"l":540,"ord":0,"overloads":1,"amb":0,"cx":7,"ccx":6,"churn":2,"tested":0},
 {"p":"./docs/docs_commands_build.py","n":"parse_capture","scope":"","key":"be71bf499e18d319","id":null,"id_addressable":false,"id_collides_with":0,"l":156,"ord":0,"overloads":1,"amb":0,"cx":18,"ccx":25,"churn":3,"tested":0},
-{"p":"./src/main.cpp","n":"deadCodeStripDotSlash","scope":"","key":"c568137ee172716f","id":null,"id_addressable":false,"id_collides_with":0,"l":3434,"ord":0,"overloads":1,"amb":0,"cx":4,"ccx":2,"churn":4,"tested":0},
-{"p":"./test/showcase_capture.py","n":"BRIEF","scope":"","key":"d75d423bbee0bcc1","id":null,"id_addressable":false,"id_collides_with":0,"l":60,"ord":0,"overloads":1,"amb":0,"cx":0,"ccx":0,"churn":4,"tested":0},
+{"p":"./src/main.cpp","n":"deadCodeStripDotSlash","scope":"","key":"c568137ee172716f","id":null,"id_addressable":false,"id_collides_with":0,"l":3434,"ord":0,"overloads":1,"amb":0,"cx":4,"ccx":2,"churn":5,"tested":0},
+{"p":"./test/showcase_capture.py","n":"BRIEF","scope":"","key":"d75d423bbee0bcc1","id":null,"id_addressable":false,"id_collides_with":0,"l":60,"ord":0,"overloads":1,"amb":0,"cx":0,"ccx":0,"churn":5,"tested":0},
 {"p":"./src/notes.h","n":"addNote","scope":"rw::notes","key":"d9c0d39c0c407b7e","id":"./src/notes.h::rw::notes::addNote","id_addressable":true,"id_collides_with":0,"l":313,"ord":0,"overloads":1,"amb":0,"cx":9,"ccx":6,"churn":3,"tested":0},
 … [54 more display lines; full output is 16361 bytes on 1 raw line(s)]
 `````
@@ -2429,20 +2433,20 @@ ripwire: --layout: 'Lang' is an enum, --layout models structs (a scoped/unscoped
 
 `````
 <!-- ripwire doc drift: the CHECKABLE anchors in this repo's markdown, verified against the live index, reporting only the ones that no longer hold. Four kinds: file:line refs (missing-file / past-eof / line-moved, the last only when the doc names a symbol on that line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents (value/extent vs the declaration). Every lane under reports on purpose: a name is stale only when it occurs NOWHERE in the code as an identifier, and a number is compared only against a declaration shaped literal the corpus binds uniquely. checked + unchecked == anchors: nothing is dropped silently, and the unchecked rows say what was not proved. Read why="undefined" precisely: it says the name is defined NOWHERE in this repo, which is not the same as DELETED — in a plan or design doc naming work not yet built, that is expected rather than rot. Run with the with_history flag to have git history separate the two: the lane then reports why="deleted" with the commit that removed the name, and downgrades a name this repo never had to unchecked r="never in history". A failed anchor the AUTHOR DATED is split out as kind="dated-record" and counted in dated= rather than drift=: an audit finding, a ledger row or an as-of-DATE hedge records what was true then, so drift= is the LIVE rot and drift + dated is every anchor that no longer holds. rec= names the evidence (line / block / title / stamp), and a doc that never writes its own date anywhere a machine can read reports LIVE — the lane reads dating marks, it does not guess genre. Attribute vocabulary, one name one meaning: at= appears ONLY on this root element and is the commit the run was measured against (short sha, plus dirty when the tree had uncommitted changes); ref= is the anchor as the DOC writes it; got= is what the corpus actually says; and tgt= is the corpus SITE backing got= (a path, or path:line). On the <a/> rows k= and kind= are DIFFERENT things and both are kept: k= is the ANCHOR kind (file-line / symbol / const / array), kind= is the record classification (dated-record). k= cannot be renamed to kind= here for the obvious reason that kind= is already taken on the same element; note that in the ranked map the same k= spelling is a PageRank score instead. Docs are ordered by LIVE drift descending (path breaks ties), so the worst rot leads and a fully dated doc, which is drift zero by construction, sinks on the same key. Prose claims, Status lines and dates are NOT checked. FOUR COUNTERS on this element name four DIFFERENT populations, stated here because one of them openly disagrees with a number the map reports elsewhere. docs= is the DOCUMENTS scanned for anchors (markdown by extension, after any filter); it is the denominator of the doc rows below. clean= is how many of those docs came out with NO failed anchor — drift and dated both zero for that doc — so docs minus clean is exactly the number of <doc> rows below, before any paging window is applied. A doc whose anchors were all unchecked, or all prose, is clean here: clean means nothing was found rotten, not that everything was verified. prose= is the anchors dropped as prose, so it is SUBTRACTED from anchors= rather than added to it, and the verb does not claim to have checked them; only the VALUE shapes (`= N` and `[N]`) can be dropped this way, and the drop is itself a corpus lookup — the name was searched for and not found in code — not a pre-check guess. corpus= is the file population the anchors were checked AGAINST, and it is its OWN population rather than a relation to the map's files=: the indexed files this walk could re-read, PLUS a fixed set of config, shader and build-file extensions (CMakeLists.txt, .cmake, .yml/.yaml, .toml, .metal/.glsl/.hlsl and the like — an extension whitelist, never a content sniff), MINUS every file this walk could not open or that exceeded its own 4 MiB read ceiling, which is dropped silently and never counted. So corpus= is USUALLY larger than files= and that is the normal case, but it is not always: a crawl run whose max file size ceiling was raised above 4 MiB indexes files this walk still refuses, and a file the index lists but this run cannot open is counted by one and not the other. Neither number is wrong. corpus="0" means the corpus scan never ran at all, which happens only when the docs raised no anchor SHAPE whatsoever — prose ones included — so anchors="0" beside a non-zero prose= still scanned, and still reports the corpus it scanned. -->
-<doc-drift docs="75" clean="65" anchors="430" checked="102" unchecked="328" drift="26" dated="9" prose="5" corpus="857" at="1dc07e27a+dirty">
-<doc p="docs/COMMANDS.md" anchors="38" checked="13" drift="13" dated="0">
+<doc-drift docs="75" clean="65" anchors="433" checked="102" unchecked="331" drift="26" dated="9" prose="3" corpus="857" at="f67d2a4fc+dirty">
+<doc p="docs/COMMANDS.md" anchors="41" checked="13" drift="13" dated="0">
 <a k="const" l="72" c="48" why="const-value" ref="est_tokens=428" want="428" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="108" c="49" why="const-value" ref="est_tokens=1278" want="1278" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="341" c="136" why="const-value" ref="est_tokens=45391" want="45391" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="455" c="50" why="const-value" ref="est_tokens=17250" want="17250" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="840" c="48" why="const-value" ref="est_tokens=588" want="588" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="901" c="49" why="const-value" ref="est_tokens=4907" want="4907" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="1083" c="49" why="const-value" ref="est_tokens=1027" want="1027" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2111" c="48" why="const-value" ref="est_tokens=615" want="615" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2183" c="48" why="const-value" ref="est_tokens=420" want="420" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2215" c="48" why="const-value" ref="est_tokens=510" want="510" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2248" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2287" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="108" c="49" why="const-value" ref="est_tokens=1255" want="1255" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="341" c="153" why="const-value" ref="est_tokens=52797" want="52797" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="455" c="50" why="const-value" ref="est_tokens=17785" want="17785" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="853" c="48" why="const-value" ref="est_tokens=587" want="587" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="915" c="49" why="const-value" ref="est_tokens=4701" want="4701" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="1097" c="49" why="const-value" ref="est_tokens=1020" want="1020" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2118" c="48" why="const-value" ref="est_tokens=582" want="582" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2190" c="48" why="const-value" ref="est_tokens=420" want="420" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2222" c="48" why="const-value" ref="est_tokens=501" want="501" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2255" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2294" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
 <more drift="1"/>
 </doc>
 <doc p="test/docdriftfix/NOTES.md" anchors="26" checked="15" drift="6" dated="0">
@@ -2467,20 +2471,20 @@ ripwire: --layout: 'Lang' is an enum, --layout models structs (a scoped/unscoped
 
 `````
 <!-- ripwire doc drift: the CHECKABLE anchors in this repo's markdown, verified against the live index, reporting only the ones that no longer hold. Four kinds: file:line refs (missing-file / past-eof / line-moved, the last only when the doc names a symbol on that line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents (value/extent vs the declaration). Every lane under reports on purpose: a name is stale only when it occurs NOWHERE in the code as an identifier, and a number is compared only against a declaration shaped literal the corpus binds uniquely. checked + unchecked == anchors: nothing is dropped silently, and the unchecked rows say what was not proved. Read why="undefined" precisely: it says the name is defined NOWHERE in this repo, which is not the same as DELETED — in a plan or design doc naming work not yet built, that is expected rather than rot. Run with the with_history flag to have git history separate the two: the lane then reports why="deleted" with the commit that removed the name, and downgrades a name this repo never had to unchecked r="never in history". A failed anchor the AUTHOR DATED is split out as kind="dated-record" and counted in dated= rather than drift=: an audit finding, a ledger row or an as-of-DATE hedge records what was true then, so drift= is the LIVE rot and drift + dated is every anchor that no longer holds. rec= names the evidence (line / block / title / stamp), and a doc that never writes its own date anywhere a machine can read reports LIVE — the lane reads dating marks, it does not guess genre. Attribute vocabulary, one name one meaning: at= appears ONLY on this root element and is the commit the run was measured against (short sha, plus dirty when the tree had uncommitted changes); ref= is the anchor as the DOC writes it; got= is what the corpus actually says; and tgt= is the corpus SITE backing got= (a path, or path:line). On the <a/> rows k= and kind= are DIFFERENT things and both are kept: k= is the ANCHOR kind (file-line / symbol / const / array), kind= is the record classification (dated-record). k= cannot be renamed to kind= here for the obvious reason that kind= is already taken on the same element; note that in the ranked map the same k= spelling is a PageRank score instead. Docs are ordered by LIVE drift descending (path breaks ties), so the worst rot leads and a fully dated doc, which is drift zero by construction, sinks on the same key. Prose claims, Status lines and dates are NOT checked. FOUR COUNTERS on this element name four DIFFERENT populations, stated here because one of them openly disagrees with a number the map reports elsewhere. docs= is the DOCUMENTS scanned for anchors (markdown by extension, after any filter); it is the denominator of the doc rows below. clean= is how many of those docs came out with NO failed anchor — drift and dated both zero for that doc — so docs minus clean is exactly the number of <doc> rows below, before any paging window is applied. A doc whose anchors were all unchecked, or all prose, is clean here: clean means nothing was found rotten, not that everything was verified. prose= is the anchors dropped as prose, so it is SUBTRACTED from anchors= rather than added to it, and the verb does not claim to have checked them; only the VALUE shapes (`= N` and `[N]`) can be dropped this way, and the drop is itself a corpus lookup — the name was searched for and not found in code — not a pre-check guess. corpus= is the file population the anchors were checked AGAINST, and it is its OWN population rather than a relation to the map's files=: the indexed files this walk could re-read, PLUS a fixed set of config, shader and build-file extensions (CMakeLists.txt, .cmake, .yml/.yaml, .toml, .metal/.glsl/.hlsl and the like — an extension whitelist, never a content sniff), MINUS every file this walk could not open or that exceeded its own 4 MiB read ceiling, which is dropped silently and never counted. So corpus= is USUALLY larger than files= and that is the normal case, but it is not always: a crawl run whose max file size ceiling was raised above 4 MiB indexes files this walk still refuses, and a file the index lists but this run cannot open is counted by one and not the other. Neither number is wrong. corpus="0" means the corpus scan never ran at all, which happens only when the docs raised no anchor SHAPE whatsoever — prose ones included — so anchors="0" beside a non-zero prose= still scanned, and still reports the corpus it scanned. -->
-<doc-drift docs="75" clean="65" anchors="430" checked="102" unchecked="328" drift="26" dated="9" prose="5" corpus="857" at="1dc07e27a+dirty">
-<doc p="docs/COMMANDS.md" anchors="38" checked="13" drift="13" dated="0">
+<doc-drift docs="75" clean="65" anchors="433" checked="102" unchecked="331" drift="26" dated="9" prose="3" corpus="857" at="f67d2a4fc+dirty">
+<doc p="docs/COMMANDS.md" anchors="41" checked="13" drift="13" dated="0">
 <a k="const" l="72" c="48" why="const-value" ref="est_tokens=428" want="428" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="108" c="49" why="const-value" ref="est_tokens=1278" want="1278" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="341" c="136" why="const-value" ref="est_tokens=45391" want="45391" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="455" c="50" why="const-value" ref="est_tokens=17250" want="17250" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="840" c="48" why="const-value" ref="est_tokens=588" want="588" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="901" c="49" why="const-value" ref="est_tokens=4907" want="4907" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="1083" c="49" why="const-value" ref="est_tokens=1027" want="1027" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2111" c="48" why="const-value" ref="est_tokens=615" want="615" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2183" c="48" why="const-value" ref="est_tokens=420" want="420" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2215" c="48" why="const-value" ref="est_tokens=510" want="510" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2248" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2287" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="108" c="49" why="const-value" ref="est_tokens=1255" want="1255" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="341" c="153" why="const-value" ref="est_tokens=52797" want="52797" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="455" c="50" why="const-value" ref="est_tokens=17785" want="17785" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="853" c="48" why="const-value" ref="est_tokens=587" want="587" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="915" c="49" why="const-value" ref="est_tokens=4701" want="4701" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="1097" c="49" why="const-value" ref="est_tokens=1020" want="1020" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2118" c="48" why="const-value" ref="est_tokens=582" want="582" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2190" c="48" why="const-value" ref="est_tokens=420" want="420" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2222" c="48" why="const-value" ref="est_tokens=501" want="501" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2255" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2294" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
 <more drift="1"/>
 </doc>
 <doc p="test/docdriftfix/NOTES.md" anchors="26" checked="15" drift="6" dated="0">
@@ -2520,21 +2524,21 @@ Tail of the same output — the `<gateability>` section:
 
 `````
 <!-- ripwire doc drift: the CHECKABLE anchors in this repo's markdown, verified against the live index, reporting only the ones that no longer hold. Four kinds: file:line refs (missing-file / past-eof / line-moved, the last only when the doc names a symbol on that line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents (value/extent vs the declaration). Every lane under reports on purpose: a name is stale only when it occurs NOWHERE in the code as an identifier, and a number is compared only against a declaration shaped literal the corpus binds uniquely. checked + unchecked == anchors: nothing is dropped silently, and the unchecked rows say what was not proved. Read why="undefined" precisely: it says the name is defined NOWHERE in this repo, which is not the same as DELETED — in a plan or design doc naming work not yet built, that is expected rather than rot. Run with the with_history flag to have git history separate the two: the lane then reports why="deleted" with the commit that removed the name, and downgrades a name this repo never had to unchecked r="never in history". A failed anchor the AUTHOR DATED is split out as kind="dated-record" and counted in dated= rather than drift=: an audit finding, a ledger row or an as-of-DATE hedge records what was true then, so drift= is the LIVE rot and drift + dated is every anchor that no longer holds. rec= names the evidence (line / block / title / stamp), and a doc that never writes its own date anywhere a machine can read reports LIVE — the lane reads dating marks, it does not guess genre. Attribute vocabulary, one name one meaning: at= appears ONLY on this root element and is the commit the run was measured against (short sha, plus dirty when the tree had uncommitted changes); ref= is the anchor as the DOC writes it; got= is what the corpus actually says; and tgt= is the corpus SITE backing got= (a path, or path:line). On the <a/> rows k= and kind= are DIFFERENT things and both are kept: k= is the ANCHOR kind (file-line / symbol / const / array), kind= is the record classification (dated-record). k= cannot be renamed to kind= here for the obvious reason that kind= is already taken on the same element; note that in the ranked map the same k= spelling is a PageRank score instead. Docs are ordered by LIVE drift descending (path breaks ties), so the worst rot leads and a fully dated doc, which is drift zero by construction, sinks on the same key. Prose claims, Status lines and dates are NOT checked. FOUR COUNTERS on this element name four DIFFERENT populations, stated here because one of them openly disagrees with a number the map reports elsewhere. docs= is the DOCUMENTS scanned for anchors (markdown by extension, after any filter); it is the denominator of the doc rows below. clean= is how many of those docs came out with NO failed anchor — drift and dated both zero for that doc — so docs minus clean is exactly the number of <doc> rows below, before any paging window is applied. A doc whose anchors were all unchecked, or all prose, is clean here: clean means nothing was found rotten, not that everything was verified. prose= is the anchors dropped as prose, so it is SUBTRACTED from anchors= rather than added to it, and the verb does not claim to have checked them; only the VALUE shapes (`= N` and `[N]`) can be dropped this way, and the drop is itself a corpus lookup — the name was searched for and not found in code — not a pre-check guess. corpus= is the file population the anchors were checked AGAINST, and it is its OWN population rather than a relation to the map's files=: the indexed files this walk could re-read, PLUS a fixed set of config, shader and build-file extensions (CMakeLists.txt, .cmake, .yml/.yaml, .toml, .metal/.glsl/.hlsl and the like — an extension whitelist, never a content sniff), MINUS every file this walk could not open or that exceeded its own 4 MiB read ceiling, which is dropped silently and never counted. So corpus= is USUALLY larger than files= and that is the normal case, but it is not always: a crawl run whose max file size ceiling was raised above 4 MiB indexes files this walk still refuses, and a file the index lists but this run cannot open is counted by one and not the other. Neither number is wrong. corpus="0" means the corpus scan never ran at all, which happens only when the docs raised no anchor SHAPE whatsoever — prose ones included — so anchors="0" beside a non-zero prose= still scanned, and still reports the corpus it scanned. -->
-<doc-drift docs="75" clean="69" anchors="430" checked="95" unchecked="335" drift="22" dated="6" prose="5" corpus="857" at="1dc07e27a+dirty">
-<history probed="1" head="1dc07e27a" commits="18" removed-names="6977"/>
-<doc p="docs/COMMANDS.md" anchors="38" checked="13" drift="13" dated="0">
+<doc-drift docs="75" clean="69" anchors="433" checked="95" unchecked="338" drift="22" dated="6" prose="3" corpus="857" at="f67d2a4fc+dirty">
+<history probed="1" head="f67d2a4fc" commits="19" removed-names="7289"/>
+<doc p="docs/COMMANDS.md" anchors="41" checked="13" drift="13" dated="0">
 <a k="const" l="72" c="48" why="const-value" ref="est_tokens=428" want="428" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="108" c="49" why="const-value" ref="est_tokens=1278" want="1278" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="341" c="136" why="const-value" ref="est_tokens=45391" want="45391" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="455" c="50" why="const-value" ref="est_tokens=17250" want="17250" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="840" c="48" why="const-value" ref="est_tokens=588" want="588" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="901" c="49" why="const-value" ref="est_tokens=4907" want="4907" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="1083" c="49" why="const-value" ref="est_tokens=1027" want="1027" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2111" c="48" why="const-value" ref="est_tokens=615" want="615" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2183" c="48" why="const-value" ref="est_tokens=420" want="420" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2215" c="48" why="const-value" ref="est_tokens=510" want="510" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2248" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
-<a k="const" l="2287" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="108" c="49" why="const-value" ref="est_tokens=1255" want="1255" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="341" c="153" why="const-value" ref="est_tokens=52797" want="52797" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="455" c="50" why="const-value" ref="est_tokens=17785" want="17785" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="853" c="48" why="const-value" ref="est_tokens=587" want="587" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="915" c="49" why="const-value" ref="est_tokens=4701" want="4701" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="1097" c="49" why="const-value" ref="est_tokens=1020" want="1020" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2118" c="48" why="const-value" ref="est_tokens=582" want="582" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2190" c="48" why="const-value" ref="est_tokens=420" want="420" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2222" c="48" why="const-value" ref="est_tokens=501" want="501" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2255" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
+<a k="const" l="2294" c="48" why="const-value" ref="est_tokens=393" want="393" got="619" tgt="src/main.cpp:7745"/>
 <more drift="1"/>
 </doc>
 <doc p="test/docdriftfix/NOTES.md" anchors="26" checked="15" drift="6" dated="0">
@@ -2582,7 +2586,7 @@ AddressSanitizer:DEADLYSIGNAL
 <sigs>
 <f p="./src/graph.h">
 <d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6">
-<doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased (W4-#1) here so all rank modes share one weighting seam; the transition matrix (edges) is unto</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector& … [line truncated: 46 more bytes on this line]
+<doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased () here so all rank modes share one weighting seam; the transition matrix (edges) is untouched</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector& … [line truncated: 46 more bytes on this line]
 <d l="1304" n="rankGraph" id="./src/graph.h::rw::rankGraph" cx="2" ccx="1" in="9">
 <doc>uniform-teleport PageRank (the default</doc>inline std::vector&lt;float&gt; rankGraph( const Graph&amp; g, float alpha = 0.85f )</d>
 </f>
@@ -2694,7 +2698,7 @@ AddressSanitizer:DEADLYSIGNAL
 
 `````
 <ctx task="pagerank power iteration" route=" [routed: subtoken+body BM25 (--for&apos;s default) — no strong name hit, multi-word conceptual query]">
-<!-- ripwire lens for "pagerank power iteration" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="3099" -->
+<!-- ripwire lens for "pagerank power iteration" [routed: subtoken+body BM25 (-for's default) — no strong name hit, multi-word conceptual query]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones est_tokens="3050" -->
 <sigs capped="1">
 <f p="./src/pagerank.cpp">
 <d l="34" n="pageRankDouble" id="./src/pagerank.cpp::rw::pageRankDouble" cx="18" ccx="33" in="1" churn="2" amp="1" tested="1">unsigned pageRankDouble( const sparseCsr&lt;float&gt;&amp; inEdges, std::span&lt;const double&gt; weightedOutDegree, std::span&lt;const double&gt; teleport, std::span&lt;doub … [line truncated: 21 more bytes on this line]
@@ -2708,25 +2712,25 @@ AddressSanitizer:DEADLYSIGNAL
 <doc>iteration helpers</doc>handle_t leftmost_leaf() const</d>
 </f>
 <f p="./src/graph.h">
-<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="3" amp="6">
+<d l="1278" n="rankGraphTeleport" id="./src/graph.h::rw::rankGraphTeleport" cx="5" ccx="8" in="6" churn="4" amp="18">
 <doc>PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quali…</doc>inline std::vector&lt;float&gt; rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )</d>
-<d l="1327" n="hits" id="./src/graph.h::rw::hits" cx="9" ccx="16" in="1" churn="3" amp="1">inline std::pair&lt;std::vector&lt;float&gt;, std::vector&lt;float&gt;&gt; hits( const Graph&amp; g, float tol = 1e-6f, unsigned maxIter = 100 )</d>
-<d l="1742" n="computeQMetrics" id="./src/graph.h::rw::computeQMetrics" cx="52" ccx="124" in="2" churn="3" amp="2">inline QMetrics computeQMetrics( const IngestResult&amp; ing, const Graph&amp; g )</d>
-<d l="2414" n="louvainLocalMoving" id="./src/graph.h::rw::louvainLocalMoving" cx="18" ccx="35" in="2" churn="3" amp="2">inline Communities louvainLocalMoving( const std::vector&lt;std::vector&lt;WEdge&gt;&gt;&amp; adj )</d>
+<d l="1327" n="hits" id="./src/graph.h::rw::hits" cx="9" ccx="16" in="1" churn="4" amp="13">inline std::pair&lt;std::vector&lt;float&gt;, std::vector&lt;float&gt;&gt; hits( const Graph&amp; g, float tol = 1e-6f, unsigned maxIter = 100 )</d>
+<d l="1742" n="computeQMetrics" id="./src/graph.h::rw::computeQMetrics" cx="52" ccx="124" in="2" churn="4" amp="14">inline QMetrics computeQMetrics( const IngestResult&amp; ing, const Graph&amp; g )</d>
+<d l="2414" n="louvainLocalMoving" id="./src/graph.h::rw::louvainLocalMoving" cx="18" ccx="35" in="2" churn="4" amp="14">inline Communities louvainLocalMoving( const std::vector&lt;std::vector&lt;WEdge&gt;&gt;&amp; adj )</d>
 </f>
 <f p="./src/serialize.h">
-<d l="918" n="MapAnnotations" id="./src/serialize.h::MapAnnotations::MapAnnotations" cx="0" ccx="0" in="0" churn="3">struct MapAnnotations</d>
-<d l="988" n="rankByLegendFor" id="./src/serialize.h::rw::rankByLegendFor" cx="4" ccx="4" in="1" churn="3" amp="1">
+<d l="918" n="MapAnnotations" id="./src/serialize.h::MapAnnotations::MapAnnotations" cx="0" ccx="0" in="0" churn="4" amp="12">struct MapAnnotations</d>
+<d l="988" n="rankByLegendFor" id="./src/serialize.h::rw::rankByLegendFor" cx="4" ccx="4" in="1" churn="4" amp="13">
 <doc>The label → clause lookup. Returns nullptr for an unstamped map (the default pagerank path) so…</doc>inline const char* rankByLegendFor( const char* label ) noexcept</d>
-<d l="3768" n="writeJsonMapStamp" id="./src/serialize.h::rw::writeJsonMapStamp" cx="10" ccx="12" in="1" churn="3" amp="1">inline void writeJsonMapStamp( JsonWriter&amp; w, std::string&amp; esc, const MapAnnotations* ann )</d>
-<d l="3900" n="serializeJson" id="./src/serialize.h::rw::serializeJson" cx="49" ccx="82" in="1" churn="3" amp="1">inline void serializeJson( std::FILE* out, const IngestResult&amp; ing, const std::vector&lt;float&gt;&amp; ra…</d>
+<d l="3768" n="writeJsonMapStamp" id="./src/serialize.h::rw::writeJsonMapStamp" cx="10" ccx="12" in="1" churn="4" amp="13">inline void writeJsonMapStamp( JsonWriter&amp; w, std::string&amp; esc, const MapAnnotations* ann )</d>
+<d l="3900" n="serializeJson" id="./src/serialize.h::rw::serializeJson" cx="49" ccx="82" in="1" churn="4" amp="13">inline void serializeJson( std::FILE* out, const IngestResult&amp; ing, const std::vector&lt;float&gt;&amp; ra…</d>
 </f>
 <f p="./src/pagerank.h">
 <d l="11" n="PageRankConfig" id="./src/pagerank.h::PageRankConfig::PageRankConfig" cx="0" ccx="0" in="0" churn="2">struct PageRankConfig</d>
-… [55 more display lines; full output is 7747 bytes on 12 raw line(s)]
+… [52 more display lines; full output is 7624 bytes on 12 raw line(s)]
 `````
 
-## `./build/ripwire . --export=cc.json:/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/ripwire2.cc.json`
+## `./build/ripwire . --export=cc.json:/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/ripwire2.cc.json`
 
 *Per-file metrics as CodeCharta cc.json.*
 
@@ -2737,11 +2741,11 @@ AddressSanitizer:DEADLYSIGNAL
 Artifact written:
 
 `````
--rw-r--r--@ 1 qgames  staff  126163 Jul 31 20:15 /var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/ripwire2.cc.json
+  126163 /var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/ripwire2.cc.json
 {"projectName":"project","apiVersion":"1.3","attributeDescriptors":{"loc":{"title":"Lines of Code","description":"Physical line count","direction":-1},"symbols":{"title":"Symbols","description":"Definitions in the file","direction":-1},"cx":{"title":"Cyclomatic Complexity","description":"Sum of per-symbol cyclomatic complexity","direction":-1},"cognitive_cx":{"title":"Cognitive Complexity","descri
 `````
 
-## `./build/ripwire . --batch=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/batch2.txt`
+## `./build/ripwire . --batch=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/batch2.txt`
 
 *One-turn sweep: 4 newline-delimited verb:arg sub-queries answered in ONE deduped <batch>.*
 
@@ -2798,13 +2802,13 @@ lego:Vehicle
 *Environment self-check: binary staleness, grammars, cache dir, git, tracked-binary staleness.*
 
 `````
-<doctor checks="6" passed="6" at="1dc07e27a+dirty">
+<doctor checks="6" passed="6" at="f67d2a4fc+dirty">
 <c n="binary-path" ok="1" self="./build/ripwire" which="" on_path="0"/>
 <c n="grammars" ok="1" loaded="13" expected="13"/>
-<c n="cache-dir" ok="1" dir="/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T" blobs="1794" bytes="26337442" many="1"/>
-<c n="git" ok="1" git="1" repo="1" history="1" head="1dc07e27a"/>
+<c n="cache-dir" ok="1" dir="/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T" blobs="2984" bytes="27053816" many="1"/>
+<c n="git" ok="1" git="1" repo="1" history="1" head="f67d2a4fc"/>
 <c n="tree-sitter" ok="1" core_abi="15" cpp_grammar_abi="14" languages="13"/>
-<c n="tracked-binaries" ok="1" tracked="1077" binaries="2" non_git="0" truncated="0" stale="0"/>
+<c n="tracked-binaries" ok="1" tracked="1078" binaries="2" non_git="0" truncated="0" stale="0"/>
 </doctor>
 `````
 
@@ -2855,20 +2859,20 @@ ripwire scan: 0 finding(s) total (24 skill file(s) scanned, 0 unscannable file(s
 <!-- rank_by=churn: k= is a git CHANGE-FREQUENCY prior over window=, not call-graph importance; the same corpus ranked by pagerank orders differently -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
 <!-- files=836 symbols=6432 edges=8733 shown=5 est_tokens=582 ambiguous=2631 unresolved=652 precise=3 skipped_oversize=3 order=important-first -->
-<r at="1dc07e27a+dirty" rank_by="churn" window="18mo" est_tokens="582">
+<r at="f67d2a4fc+dirty" rank_by="churn" window="18mo" est_tokens="582">
 <f p="./src/svector.h">
-<s t="method" n="size" id="./src/svector.h::svector::size" k="0.0479">
+<s t="method" n="size" id="./src/svector.h::svector::size" k="0.0508">
 </s>
-<s t="method" n="push_back" id="./src/svector.h::svector::push_back" amb="2" k="0.0126">
+<s t="method" n="push_back" id="./src/svector.h::svector::push_back" amb="2" k="0.0129">
 <c n="buf"/>
 <c n="buf"/>
 <c n="grow"/>
 </s>
-<s t="method" n="buf" id="./src/svector.h::svector::buf" overloads="2" k="0.0116">
+<s t="method" n="buf" id="./src/svector.h::svector::buf" overloads="2" k="0.0121">
 </s>
 </f>
 <f p="./src/scipoverlay.h">
-<s t="method" n="empty" id="./src/scipoverlay.h::ScipOverlay::empty" k="0.0122">
+<s t="method" n="empty" id="./src/scipoverlay.h::ScipOverlay::empty" k="0.0132">
 </s>
 </f>
 </r>
@@ -2902,7 +2906,7 @@ ripwire: --rank-by: unknown value 'bogus' (supported: pagerank|authority|hub|rrf
 <cols n="6" fields="path,name,line,kind">
 <path>0,1,1,2,2,3</path>
 <name>runEval,rankGraph,anchoredLexicalRank,churnRankedGraph,runDefaultMap,getIndex</name>
-<line>133,1304,1553,7246,7276,734</line>
+<line>133,1304,1553,7246,7276,733</line>
 <kind>fn,fn,fn,fn,fn,fn</kind>
 </cols>
 </callers>
@@ -2915,19 +2919,19 @@ ripwire: --rank-by: unknown value 'bogus' (supported: pagerank|authority|hub|rrf
 `````
 <!-- ripwire candidates: flat top K export for an external reranker. r=rank(1 based) s=SCORE n=name id=canonical k=KIND-tag p=path l=line. Note k= is the kind here and the PageRank score in the ranked map; on this row the score is s=. Root: count= rows exported of total= RANKED CORPUS symbols (total is the corpus size, never a match count), capped="1" means the top-k cut dropped some; route= names the ranker (s= is comparable only within one route); anchored= counts query-mention lifts (0 = the anchor ran and moved nothing); weak="1" means the top raw lexical score is below the confidence bar, so these rows rest on thin textual evidence. -->
 <candidates count="5" total="6432" capped="1" route="subtoken+body" anchored="0">
-<cand r="1" s="8.05944" n="legoImplementorsOnSurface" id="./src/serialize.h::rw::legoImplementorsOnSurface" k="fn" p="./src/serialize.h" l="3254">
+<cand r="1" s="8.05912" n="legoImplementorsOnSurface" id="./src/serialize.h::rw::legoImplementorsOnSurface" k="fn" p="./src/serialize.h" l="3254">
 <sig>inline std::vector&lt;std::vector&lt;NodeId&gt;&gt; legoImplementorsOnSurface( const IngestResult&amp; ing, const std::vector&lt;std::vector&lt;NodeId&gt;&gt;&amp; implementors, const std::vector&lt;NodeId&gt;&amp; surfaceIds )</sig>
 </cand>
-<cand r="2" s="6.51735" n="sweepStaleCacheBlobsOnce" id="./src/quality.h::quality::sweepStaleCacheBlobsOnce" k="fn" p="./src/quality.h" l="865">
+<cand r="2" s="6.51732" n="sweepStaleCacheBlobsOnce" id="./src/quality.h::quality::sweepStaleCacheBlobsOnce" k="fn" p="./src/quality.h" l="865">
 <sig>inline void sweepStaleCacheBlobsOnce( const std::string&amp; dir, const std::string&amp; keepPath )</sig>
 </cand>
-<cand r="3" s="6.48678" n="msCachePath" id="./src/mergescout.h::mergescout::msCachePath" k="fn" p="./src/mergescout.h" l="147">
+<cand r="3" s="6.48676" n="msCachePath" id="./src/mergescout.h::mergescout::msCachePath" k="fn" p="./src/mergescout.h" l="147">
 <sig>inline std::string msCachePath( const std::string&amp; repoHex, const std::string&amp; exclHex, const std::string&amp; sha )</sig>
 </cand>
-<cand r="4" s="6.48018" n="cacheDirLadder" id="./src/quality.h::quality::cacheDirLadder" k="fn" p="./src/quality.h" l="357">
+<cand r="4" s="6.48014" n="cacheDirLadder" id="./src/quality.h::quality::cacheDirLadder" k="fn" p="./src/quality.h" l="357">
 <sig>inline std::string cacheDirLadder()</sig>
 </cand>
-<cand r="5" s="6.47908" n="qbodyCachePath" id="./src/quality.h::quality::qbodyCachePath" k="fn" p="./src/quality.h" l="977">
+<cand r="5" s="6.47906" n="qbodyCachePath" id="./src/quality.h::quality::qbodyCachePath" k="fn" p="./src/quality.h" l="977">
 <sig>inline std::string qbodyCachePath( const std::string&amp; repoHex, const std::string&amp; exclHex, const std::string&amp; refSha )</sig>
 </cand>
 </candidates>
@@ -2965,7 +2969,7 @@ ripwire: --format: unknown value 'bogus' (supported: xml|columnar|rows|candidate
 {"t":"fn","n":"anchoredLexicalRank","p":"./src/graph.h:1553"},
 {"t":"fn","n":"churnRankedGraph","p":"./src/main.cpp:7246"},
 {"t":"fn","n":"runDefaultMap","p":"./src/main.cpp:7276"},
-{"t":"fn","n":"getIndex","p":"./src/mcpindex.h:734"}]}
+{"t":"fn","n":"getIndex","p":"./src/mcpindex.h:733"}]}
 `````
 
 ## `./build/ripwire . --hotspots --json`
@@ -2991,10 +2995,10 @@ ripwire: --json is not yet supported for --hotspots — supported: the default m
 `````
 <!-- ripwire hotspots: maintenance-pain = complexity × recent churn (window=12mo). churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. unranked_no_complexity= is a file with commits but no function or method to score (a pure declaration header, markdown, config). unranked_no_churn= is a file no in-window commit was attributed to — and it CONFLATES two cases this verb cannot tell apart: a genuinely quiet file, and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the join could not match), which scores zero for a reason that is not about the file. Treat it as an upper bound on quietness, not a measure of it. raise the default cap with limit=N (offset=M pages) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
-<hotspots window="12mo" files="836" ranked="221" unranked_no_churn="0" unranked_no_complexity="615" shown="3" capped="1" total="221" has_more="1" next_offset="6" offset="3" limit="3" at="1dc07e27a+dirty">
-<f p="./src/graph.h" churn="3" ccx="1424" score="4272" top="buildGraph" top_ccx="712" top_l="379"/>
+<hotspots window="12mo" files="836" ranked="221" unranked_no_churn="0" unranked_no_complexity="615" shown="3" capped="1" total="221" has_more="1" next_offset="6" offset="3" limit="3" at="f67d2a4fc+dirty">
+<f p="./src/graph.h" churn="4" ccx="1424" score="5696" top="buildGraph" top_ccx="712" top_l="379"/>
+<f p="./src/mcpverbs.h" churn="4" ccx="685" score="2740" top="runBatchSub" top_ccx="98" top_l="2381"/>
 <f p="./src/quality.h" churn="3" ccx="700" score="2100" top="computeDelta" top_ccx="236" top_l="2204"/>
-<f p="./src/layout.h" churn="3" ccx="694" score="2082" top="writeLayout" top_ccx="31" top_l="1870"/>
 </hotspots>
 `````
 
@@ -3057,26 +3061,20 @@ ripwire: --json is not yet supported for --hotspots — supported: the default m
 `````
 <!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
-<!-- files=836 symbols=6432 edges=8733 shown=5 est_tokens=544 ambiguous=2631 unresolved=652 precise=3 changed=3 skipped_oversize=3 order=important-first -->
-<r at="1dc07e27a+dirty" est_tokens="544">
+<!-- files=836 symbols=6432 edges=8733 shown=5 est_tokens=481 ambiguous=2631 unresolved=652 precise=3 changed=1 skipped_oversize=3 order=important-first -->
+<r at="f67d2a4fc+dirty" est_tokens="481">
 <f p="./src/svector.h">
-<s t="method" n="size" id="./src/svector.h::svector::size" k="0.0492">
+<s t="method" n="size" id="./src/svector.h::svector::size" k="0.0177">
 </s>
 </f>
-<f p="./src/scipoverlay.h">
-<s t="method" n="empty" id="./src/scipoverlay.h::ScipOverlay::empty" k="0.0266">
+<f p="./docs/COMMANDS.md">
+<s t="sec" n="ripwire — every flag, generated from the binary" k="0.0064">
 </s>
-</f>
-<f p="./src/notes.h">
-<s t="method" n="empty" id="./src/notes.h::NoteIndex::empty" k="0.0250">
+<s t="sec" n="How to read a section" k="0.0064">
 </s>
-</f>
-<f p="./test/pargates.py" layer="test">
-<s t="fn" n="run" k="0.0235">
+<s t="sec" n="understand a codebase cold" k="0.0064">
 </s>
-</f>
-<f p="./src/cli.h">
-<s t="fn" n="printPlanLanesUsage" id="./src/cli.h::rw::printPlanLanesUsage" k="0.0161">
+<s t="sec" n="`--top-k=N`" k="0.0064">
 </s>
 </f>
 </r>
@@ -3106,7 +3104,7 @@ ripwire: --json is not yet supported for --hotspots — supported: the default m
 </r>
 `````
 
-## `./build/ripwire . --cache=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/warm2.ripwirecache --top-k=3`
+## `./build/ripwire . --cache=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/warm2.ripwirecache --top-k=3`
 
 *Explicit incremental cache at a path OUTSIDE the repo (first call writes it).*
 
@@ -3133,7 +3131,7 @@ ripwire: --json is not yet supported for --hotspots — supported: the default m
 Artifact written:
 
 `````
--rw-r--r--@ 1 qgames  staff  3726049 Jul 31 20:15 /var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/warm2.ripwirecache
+ 3726185 /var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/warm2.ripwirecache
 `````
 
 ## `./build/ripwire . --max-file-size=8K --top-k=3`
@@ -3169,7 +3167,7 @@ Artifact written:
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1553"/>
 <s t="fn" n="churnRankedGraph" p="./src/main.cpp:7246"/>
 <s t="fn" n="runDefaultMap" p="./src/main.cpp:7276"/>
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:733"/>
 </callers>
 `````
 
@@ -3213,15 +3211,15 @@ ripwire --scip: cannot read index 'does_not_exist.scip' — proceeding name-base
 *Self-eval: co-change recall vs BM25.*
 
 `````
-ripwire --eval  (co-change recovery, averaged over 11 historical commits)
+ripwire --eval  (co-change recovery, averaged over 12 historical commits)
   ranker     recall@5  recall@10  recall@20
-  ripwire        0.0%       0.0%       0.0%
-  BM25           9.1%       9.1%       9.1%
-  BM25sub        9.1%       9.1%       9.1%
-  BM25body      13.6%      27.3%      40.9%
-  fused          0.0%       0.0%       0.0%
-  anchored      13.6%      27.3%      40.9%
-  same-dir      34.8%      34.8%      34.8%
+  ripwire        0.7%       1.4%       1.4%
+  BM25           9.0%      10.4%      11.1%
+  BM25sub       10.4%      10.4%      11.8%
+  BM25body      15.3%      29.2%      43.1%
+  fused          1.4%       2.8%       2.8%
+  anchored      15.3%      29.2%      43.1%
+  same-dir      31.9%      32.6%      32.6%
   random         0.6%       1.2%       2.4%   <- floor (random ranking over F=836 files)
   note: `ripwire` here is the DEFAULT MAP's structural-only PageRank (importance, not
         relatedness) — it is NOT what a --for/--query retrieval call ranks with. BM25 /
@@ -3238,7 +3236,7 @@ ripwire --eval  (co-change recovery, averaged over 11 historical commits)
 
 *Known-item retrieval eval: MRR + recall@k per ranker per query mode.*
 
-**wall time: 2.73s**
+**wall time: 2.75s**
 
 `````
 ripwire --eval-retrieval  (known-item, 150 doc-commented symbols; gold is in-corpus by construction)
@@ -3257,7 +3255,7 @@ ripwire --eval-retrieval  (known-item, 150 doc-commented symbols; gold is in-cor
         the better ranker on BOTH modes (routed==name-exact on name, ~=subtoken+body on doc-phrase).
 `````
 
-## `./build/ripwire . --eval-stray=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/stray_labels2.tsv`
+## `./build/ripwire . --eval-stray=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/stray_labels2.tsv`
 
 *Labelled verdict-accuracy eval for --stray-content (3 hand-labelled refs).*
 
@@ -3267,21 +3265,21 @@ Input file:
 
 `````
 # ref<TAB>verdict labels for --eval-stray
-r25-notes	merged
-r25-abi	merged
-r25-docdrift	unmerged
+lane-notes	merged
+lane-abi	merged
+lane-docdrift	unmerged
 `````
 
 `````
 <!-- ripwire stray-content eval: labelled verdict accuracy. Each row is one branch whose true state was established by hand; want= is the label, got= is what the classifier said. A branch absent from the report scores as merged (merged refs are omitted by design). Use this to MEASURE a threshold change instead of eyeballing it. -->
 <stray-eval cases="3" correct="2" accuracy="66.7">
-<case ref="r25-notes" want="merged" got="merged" hit="1" reported="0"/>
-<case ref="r25-abi" want="merged" got="merged" hit="1" reported="0"/>
-<case ref="r25-docdrift" want="unmerged" got="merged" hit="0" reported="0"/>
+<case ref="lane-notes" want="merged" got="merged" hit="1" reported="0"/>
+<case ref="lane-abi" want="merged" got="merged" hit="1" reported="0"/>
+<case ref="lane-docdrift" want="unmerged" got="merged" hit="0" reported="0"/>
 </stray-eval>
 `````
 
-## `./build/ripwire skills --eval-skills=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/skills_labels2.tsv`
+## `./build/ripwire skills --eval-skills=/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/skills_labels2.tsv`
 
 *Labelled skill-ROUTING eval over the repo's own skills/ directory (4 hand-labelled prompts).*
 
@@ -3295,7 +3293,7 @@ what is the weather in Paris	none	neg
 `````
 
 `````
-ripwire --eval-skills  (skill routing over K=16 candidate skills [ripwire-router excluded]; 3 positive + 1 negative prompts; corpus '/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/aux/skills_labels2.tsv'; split test=4 dev=0)
+ripwire --eval-skills  (skill routing over K=16 candidate skills [ripwire-router excluded]; 3 positive + 1 negative prompts; corpus '/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/aux/skills_labels2.tsv'; split test=4 dev=0)
   arm           hit@1   hit@2     mrr   sep-auc   fire/abstain@ORACLE-th (upper bound)
   overlap       66.7%  100.0%   0.833     0.500    50.0% (th=-1.000)
   name          33.3%   66.7%   0.533     0.667    50.0% (th=0.000)
@@ -3363,7 +3361,7 @@ ripwire 0.1.0 (dev, AppleClang 21.0.0.21000101)
 
 # the dirty-tree verbs (throwaway clone, NOT the read-only repo)
 
-Everything below runs with `cwd` = the throwaway clone at `/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_fxbqqxez/dirty` (`git clone --local` of this repo, then one deliberate regression in `src/sortutil.h`). The read-only repo is never touched. The binary is the same `build/ripwire`, addressed absolutely.
+Everything below runs with `cwd` = the throwaway clone at `/var/folders/_7/1b0h5mxs3vl2jgb9jk3qzw7r0000gn/T/ripwire_showcase_o6h2ey7l/dirty` (`git clone --local` of this repo, then one deliberate regression in `src/sortutil.h`). The read-only repo is never touched. The binary is the same `build/ripwire`, addressed absolutely.
 
 ## `./build/ripwire . --situ`
 
@@ -3396,7 +3394,7 @@ ripwire situational-awareness — 1 changed file(s), 12 symbols in them
 
 `````
 <!-- ripwire test-gate (TDAD-parity, arXiv 2603.17973): the tests to run for this change + the UNTESTED blast radius. A queryable call-graph+test map cut agent-caused regressions -70% (6.08%->1.82%); this gate names the obligations, the agent runs the tests then relies on green. exit 4 if tests OR untested is non-empty. TWO INDEPENDENT LISTINGS, each with its own row count: shown_tests= counts the <t> tests-to-run rows and shown_untested= counts the <u> blast-radius rows (a single shown= could only ever have described one of them). The <t> rows are the COMPLETE obligation and are never windowed, so they REPEAT VERBATIM on every page — a walker that concatenates pages must take them from one page only; offset=/limit= window the <u> rows alone. The <u> listing shows 25 rows by default: raise the default cap with limit=N (offset=M pages). script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) - script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=. UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory call EDGES and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. -->
-<test-gate changed="1" impacted="80" tests="2" untested="76" shown_tests="2" tests_capped="0" shown_untested="25" untested_capped="1" script_gates_unmodelled="331" at="1dc07e27a+dirty">
+<test-gate changed="1" impacted="80" tests="2" untested="76" shown_tests="2" tests_capped="0" shown_untested="25" untested_capped="1" script_gates_unmodelled="331" at="f67d2a4fc+dirty">
 <t p="./test/adaptivecutshapefix/adaptive_cut_shape_test.cpp" run="bash test/adaptivecutshapecheck.sh"/>
 <t p="./test/verify_radix.cpp"/>
 <u sym="buildGraph" p="./src/graph.h" ccx="712"/>
@@ -3435,7 +3433,7 @@ ripwire situational-awareness — 1 changed file(s), 12 symbols in them
 
 `````
 <!-- ripwire quality-delta: only what a change made WORSE against the floor named by baseline= below. FOUR floors, and they are not interchangeable: sidecar = the pinned .ripwire_quality_baseline snapshot, honored only because it was pinned at the CURRENT git HEAD; git-HEAD = no sidecar existed, so the working tree was auto-compared against the HEAD tree; git-HEAD (stale sidecar removed) = a sidecar existed, was pinned at a DIFFERENT sha, and this run DELETED it from your working tree before falling back to HEAD (re-pin with quality-baseline); git-HEAD (stale sidecar ignored) = same staleness verdict, but the file was left on disk (the read-only MCP arm, or an unlink that failed). Only the first is a floor YOU chose; the other three compare against HEAD, so anything already committed cannot appear. at= is the git commit (plus a dirty marker when the working tree differs) this list was computed at. Findings: complexity over the ccx bar, verbosity (LOC)/nesting/params regressions, new duplication, newly-dead, new public api-surface (contract drift), error-masking, short-horizon churn, new clone of a reused helper. THREE independent axes, applied in this order: (1) acked findings are suppressed entirely (acked= counts them, honestly); (2) ORIGIN — a finding on a symbol that EXISTED at the baseline is preexisting-worse (no origin= attribute), one that exists only because the code is NEW carries origin="new-symbol"; (3) MATERIALITY — a small numeric delta is sev="minor". EXIT 2 fires only on preexisting-worse AND major, i.e. gating="N" above; new-symbol rows never gate. Clone kinds classify by their member set (a group is new-symbol only if EVERY member is new); short-horizon-churn is preexisting by construction. exit 0 is NOT a verdict on the new-symbol rows — nothing that existed got worse, but the new debt is yours: read them. LIMIT: origin is canonId identity (path::scope::name), so a RENAMED or MOVED symbol reads as new — a regression carried in with a move classifies new-symbol and will not gate. Descriptive: weigh + fix the real ones, do not game the number (a wrong abstraction beats a low score). Each row carries kind= (which of the measured axes regressed) and sym= (the canonical id it regressed on), plus p="path:line" (root-relative; the first-sorting member for the clone kinds; omitted, never faked, when no locator resolves), and every row the header's gating= counter counts also carries a gating attribute set to 1 — those are the rows the exit code fires on, and they are now marked positively rather than by the ABSENCE of sev/origin. (This sentence deliberately spells no attribute=value literal: the header counters are parsed by grep in several gates, and a quoted numeric example here would be matched first.) -->
-<quality-delta baseline="git-HEAD" regressions="10" minor="2" acked="0" preexisting-worse="7" new-symbol="3" gating="7" at="1dc07e27a+dirty">
+<quality-delta baseline="git-HEAD" regressions="10" minor="2" acked="0" preexisting-worse="7" new-symbol="3" gating="7" at="f67d2a4fc+dirty">
 <r kind="api-surface" sym="src/sortutil.h::rw::sortutil::nonNegativeFloatAscKeyCopy" sev="minor" surface="new-symbol" origin="new-symbol" p="src/sortutil.h:82"/>
 <r kind="api-surface" sym="src/sortutil.h::rw::sortutil::nonNegativeFloatDescKey" was="1" now="2" surface="contract-change" p="src/sortutil.h:72" gating="1"/>
 <r kind="api-surface" sym="src/sortutil.h::rw::sortutil::sortScoredIdsWithOptions" sev="minor" surface="new-symbol" origin="new-symbol" p="src/sortutil.h:92"/>
@@ -3463,7 +3461,7 @@ ripwire: --quality-delta gating: 7 preexisting-worse major finding(s); first: ap
 **exit code: 2**
 
 `````
-{"baseline":"git-HEAD","regressions":10,"minor":2,"acked":0,"preexisting-worse":7,"new-symbol":3,"gating":7,"at":"1dc07e27a+dirty","r":[{"kind":"api-surface","sym":"src/sortutil.h::rw::sortutil::nonNegativeFloatAscKeyCopy","p":"src/sortutil.h:82","sev":"minor","surface":"new-symbol","origin":"new-sy … [line truncated: 7 more bytes on this line]
+{"baseline":"git-HEAD","regressions":10,"minor":2,"acked":0,"preexisting-worse":7,"new-symbol":3,"gating":7,"at":"f67d2a4fc+dirty","r":[{"kind":"api-surface","sym":"src/sortutil.h::rw::sortutil::nonNegativeFloatAscKeyCopy","p":"src/sortutil.h:82","sev":"minor","surface":"new-symbol","origin":"new-sy … [line truncated: 7 more bytes on this line]
 {"kind":"api-surface","sym":"src/sortutil.h::rw::sortutil::nonNegativeFloatDescKey","was":1,"now":2,"p":"src/sortutil.h:72","gating":true,"surface":"contract-change"},
 {"kind":"api-surface","sym":"src/sortutil.h::rw::sortutil::sortScoredIdsWithOptions","p":"src/sortutil.h:92","sev":"minor","surface":"new-symbol","origin":"new-symbol"},
 {"kind":"complexity","sym":"src/sortutil.h::rw::sortutil::lessByScoreDescId","was":1,"now":73,"p":"src/sortutil.h:14","gating":true},
@@ -3522,7 +3520,7 @@ ripwire: acknowledged 3 of 10 finding(s) (7 left UNACKED by --ack-only, 0 alread
 
 `````
 <!-- ripwire quality-delta: only what a change made WORSE against the floor named by baseline= below. FOUR floors, and they are not interchangeable: sidecar = the pinned .ripwire_quality_baseline snapshot, honored only because it was pinned at the CURRENT git HEAD; git-HEAD = no sidecar existed, so the working tree was auto-compared against the HEAD tree; git-HEAD (stale sidecar removed) = a sidecar existed, was pinned at a DIFFERENT sha, and this run DELETED it from your working tree before falling back to HEAD (re-pin with quality-baseline); git-HEAD (stale sidecar ignored) = same staleness verdict, but the file was left on disk (the read-only MCP arm, or an unlink that failed). Only the first is a floor YOU chose; the other three compare against HEAD, so anything already committed cannot appear. at= is the git commit (plus a dirty marker when the working tree differs) this list was computed at. Findings: complexity over the ccx bar, verbosity (LOC)/nesting/params regressions, new duplication, newly-dead, new public api-surface (contract drift), error-masking, short-horizon churn, new clone of a reused helper. THREE independent axes, applied in this order: (1) acked findings are suppressed entirely (acked= counts them, honestly); (2) ORIGIN — a finding on a symbol that EXISTED at the baseline is preexisting-worse (no origin= attribute), one that exists only because the code is NEW carries origin="new-symbol"; (3) MATERIALITY — a small numeric delta is sev="minor". EXIT 2 fires only on preexisting-worse AND major, i.e. gating="N" above; new-symbol rows never gate. Clone kinds classify by their member set (a group is new-symbol only if EVERY member is new); short-horizon-churn is preexisting by construction. exit 0 is NOT a verdict on the new-symbol rows — nothing that existed got worse, but the new debt is yours: read them. LIMIT: origin is canonId identity (path::scope::name), so a RENAMED or MOVED symbol reads as new — a regression carried in with a move classifies new-symbol and will not gate. Descriptive: weigh + fix the real ones, do not game the number (a wrong abstraction beats a low score). Each row carries kind= (which of the measured axes regressed) and sym= (the canonical id it regressed on), plus p="path:line" (root-relative; the first-sorting member for the clone kinds; omitted, never faked, when no locator resolves), and every row the header's gating= counter counts also carries a gating attribute set to 1 — those are the rows the exit code fires on, and they are now marked positively rather than by the ABSENCE of sev/origin. (This sentence deliberately spells no attribute=value literal: the header counters are parsed by grep in several gates, and a quoted numeric example here would be matched first.) -->
-<quality-delta baseline="git-HEAD" regressions="7" minor="0" acked="3" preexisting-worse="6" new-symbol="1" gating="6" at="1dc07e27a+dirty">
+<quality-delta baseline="git-HEAD" regressions="7" minor="0" acked="3" preexisting-worse="6" new-symbol="1" gating="6" at="f67d2a4fc+dirty">
 <r kind="complexity" sym="src/sortutil.h::rw::sortutil::lessByScoreDescId" was="1" now="73" p="src/sortutil.h:14" gating="1"/>
 <r kind="duplication" members="src/sortutil.h::rw::sortutil::nonNegativeFloatAscKeyCopy | src/sortutil.h::rw::sortutil::nonNegativeFloatDescKey" tokens="59" p="src/sortutil.h:82" gating="1"/>
 <r kind="nesting" sym="src/sortutil.h::rw::sortutil::lessByScoreDescId" was="1" now="9" p="src/sortutil.h:14" gating="1"/>
@@ -3562,7 +3560,7 @@ ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <di
 
 `````
 <!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/contract-change — plus its 1-hop callers. A caller is flagged incompatible="1" when its argument count was reliably counted and NO definition in the folded set could accept it: every one has a FIXED arity that disagrees. A variadic, defaulted or implicit-receiver definition (a Python/Ruby method, whose params counts the self/cls the call site never writes) has no fixed arity and is never flagged. That makes the ARITY half one-sided — a call the compared definitions could accept is never flagged — but it is NOT a proof that the call site binds to THIS definition. Call edges are matched by NAME, so a receiver-qualified call to a same-named callee this tool does not index (a standard-library or third-party method) is measured against the one definition it does index; a clean, compiling tree can therefore carry a nonzero incompatible= with nothing edited at all, and on a widely-shared name it can be most of that name's callers. Read incompatible= as a fact about the tree as it stands — call sites worth OPENING, not a verdict — and status= as a fact about the edit. Warm path hits the qheadsnap/qsnap cache — never a full quality-delta style recompute. defs= is how many DEFINITIONS at this site (same file, same scope, same name — the overload set) are folded into this one contract; a selector matching more than one SITE is refused instead, so defs= only ever counts overloads. params_was and params_now are the MAX over that set on each side (the same MAX the baseline snapshot stores), and publicness is the OR. That MAX has TWO consequences, in opposite directions. It can read like a break and not be one: adding a WIDER overload beside an unchanged one raises params_now with no existing definition altered, so it reports status="contract-change" with incompatible="0" and a def row still carrying the old parameter count — no seen caller breaks. And it can read like safety and not be: REMOVING an overload whose parameter count is BELOW the MAX moves neither number, because the MAX survives on both sides, while the call site that used the removed definition no longer binds. defs_was=/defs_now= is what closes that: the count of definitions sharing this symbol's CANONICAL ID on each side. That population is the one the baseline snapshot buckets by, so the two numbers answer the same question and are equal on an unedited tree — it is deliberately NOT the root's defs=, which is the same bucket narrowed to this FILE (a contract is per definition site), so where a scope-less name also exists in another file defs= is the smaller of the two. status is therefore the join of THREE was-vs-now facts — the params MAX, publicness, and the definition COUNT — and change= names which of them carried it. change= adds broken-callers when a seen caller is also flagged, but never on its own — for the reason stated at the top: incompatible= describes the TREE and status= describes the EDIT, so a headline must not turn on it. RESIDUAL: an overload whose arity changes BELOW the MAX while the COUNT stays the same moves none of the three. The root's incompatible= is the COUNT of flagged callers (a c row's incompatible="1" is the per-caller flag). p= is the definition the selector resolved to; when defs is above 1 EVERY folded definition is listed as its own def row (p=, t=, params=), which is what tells a widened single definition apart from an added overload. At defs="1" no def row is emitted: the root's own p=/t= is that definition, and params_now is its parameter count. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
-<edit-check sym="nonNegativeFloatDescKey" t="fn" p="./src/sortutil.h:72" status="contract-change" defs="1" params_was="1" params_now="2" public_was="1" public_now="1" defs_was="1" defs_now="1" change="params,broken-callers" callers="4" incompatible="4" at="1dc07e27a+dirty" counts_floor="1">
+<edit-check sym="nonNegativeFloatDescKey" t="fn" p="./src/sortutil.h:72" status="contract-change" defs="1" params_was="1" params_now="2" public_was="1" public_now="1" defs_was="1" defs_now="1" change="params,broken-callers" callers="4" incompatible="4" at="f67d2a4fc+dirty" counts_floor="1">
 <c n="benchScores" p="./bench/bench_radix_ab.cpp:133" incompatible="1"/>
 <c n="benchAdaptive" p="./bench/bench_radix_ab.cpp:157" incompatible="1"/>
 <c n="radixSortNonNegativeFloatsDesc" p="./src/sortutil.h:101" incompatible="1"/>
@@ -3576,7 +3574,7 @@ ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <di
 
 `````
 <!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. base=working-tree. skipped_mode_only=diffs that changed a file's MODE and nothing else (e.g. chmod) excluded from the changed set; a pure RENAME is content-identical too but is NOT excluded — it is a changed file, listed at its new path. files= means two different things by DEPTH here and is deliberately not renamed (15 consumers read the root one): on the ROOT it is the CHANGED file count; on each <impact/> child it is the distinct files dependents= reaches (changed + non-changed), so dependents="0" implies files="0" and vice versa — never an impossible-looking dependents>0/files=0. files_other= on the same <impact/> is the non-changed subset (a changed file's dependents inside OTHER changed files have no <f> row of their own — they are already shown as their own <file> section); it is NOT the <f> row count — see the row-cap sentence below. Files are ordered by BLAST RADIUS (transitive dependents descending, path breaking ties), not alphabetically. sections= on changed-symbols counts a doc file's headings, collapsed into that number instead of one callers-zero row each; count= still counts every INDEXED symbol, sections included, so count minus sections is the number of rows that follow. Every nested list below is a TOP-N subset of its element's own total, fixed per element (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12, tests <test> at 40, owners <author> at 5 — the L0 defaults; max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM (blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
-<pr-context base="working-tree" direction="worktree-since-head" files="1" skipped_mode_only="0" at="1dc07e27a+dirty" counts_floor="1">
+<pr-context base="working-tree" direction="worktree-since-head" files="1" skipped_mode_only="0" at="f67d2a4fc+dirty" counts_floor="1">
 <file p="./src/sortutil.h" symbols="12">
 <impact dependents="80" files="20" files_other="20" shown="20" capped="0">
 <f p="./src/mcpverbs.h" deps="26"/>
@@ -3616,7 +3614,7 @@ ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <di
 <!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->
 <!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
 <!-- files=836 symbols=6434 edges=8735 shown=5 est_tokens=681 ambiguous=2631 unresolved=652 precise=3 changed=1 skipped_oversize=3 order=important-first -->
-<r at="1dc07e27a+dirty" est_tokens="681">
+<r at="f67d2a4fc+dirty" est_tokens="681">
 <f p="./src/svector.h">
 <s t="method" n="size" id="./src/svector.h::svector::size" k="0.1192">
 </s>
@@ -3694,8 +3692,8 @@ ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <di
 
 `````
 <!-- ripwire stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. v="superseded" means the live line removed the same base code this ref removed (redone/del) — it re-implemented the work, the case `git cherry` cannot see; v="unmerged" means the work is genuinely absent; merged refs are omitted. Read-only: git cat-file/diff/ls-tree only, one batched cat-file for the whole sweep, every blob reduced once per sha. Line-granular, not semantic: see the ripwire help text for the limits. ANCHORING is a deliberate hybrid: the SCOPE is base anchored (only lines the ref itself authored vs its merge base are ever considered, so a file the ref never opened cannot appear because the live line moved), while the ABSENCE test is HEAD anchored on purpose (does the live line have this content TODAY is the question being asked, and it is only answerable against live HEAD). v="unknown" with ok="0" means this ref could NOT be analysed at all because it has no merge base with HEAD, which on a SHALLOW clone (the checkout default in CI) is every ref: it is not a claim that the ref is merged, and the fix is to deepen the clone. The four buckets are exhaustive, so unmerged plus superseded plus merged plus unknown always equals refs. SCOPE: refs/heads only, which is every local branch (worktree branches included). Remote tracking refs are NOT scanned: they mirror local ones in the usual checkout and would double every row. The consequence on a FRESH CLONE, where the branches live under refs/remotes/origin and only the checked out one has a local head, is that there is nothing here to be stray FROM; refs= is that fact as a number. TRUNCATION: a ref row ends with a more element (more files=N) when its own file listing was capped; shown plus that number equals the ref's files= total, always. That inner listing is a SECONDARY listing (it repeats complete and identical on every page) and is capped by detail, not by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. -->
-<stray-content head="1dc07e27a" head_ref="main" refs="1" blobs="0" unmerged="0" superseded="0" merged="0" unknown="1">
-<ref name="zz-orphan-lane" tip="17778a6c1" date="2026-07-31" base="" ok="0" v="unknown" stray="0" files="0" superseded="0">
+<stray-content head="f67d2a4fc" head_ref="main" refs="1" blobs="0" unmerged="0" superseded="0" merged="0" unknown="1">
+<ref name="zz-orphan-lane" tip="e27c0cca9" date="2026-07-31" base="" ok="0" v="unknown" stray="0" files="0" superseded="0">
 </ref>
 </stray-content>
 `````
@@ -3712,7 +3710,7 @@ stderr:
 
 `````
 <!-- ripwire landing-plan: stray-content's cheap per-blob sweep composed with merge-scout's per-arm overlap oracle — of every local branch, which still hold REAL work (v="unmerged"), which were already re-implemented on the live line (v="superseded", EXCLUDED below — landing them re-does work that is already done) or are already merged (omitted entirely, counted in merged= on the root element), and the fewest-conflicts-first order to land what remains. scouted="0" on an unmerged ref means it was NOT fed to merge-scout this run (the cost bound, not a verdict) — it is still real, unscouted work; bounded= on the root element counts them and detail lifts the bound. merge-scout is the EXPENSIVE step here (git-archive + full ingest per arm) — stray-content's own sweep is the cheap one. An undetermined row is a ref that could NOT be analysed at all (no merge base with HEAD, which on a SHALLOW clone is every ref): it is neither scouted nor excluded nor merged, because nothing was measured — treat it as unfinished business and deepen the clone, never as a clean branch. Read-only throughout: no checkout, no ref write, no working-tree mutation. The root carries BOTH head= and at= and they are the same commit: head= is the bare 9 hex chars this verb has always printed, at= is the tool wide anchor and is head= plus a "+dirty" suffix when the working tree is not clean. Prefer at= (it is the one spelling every other repo reading verb uses, and the only one that tells you whether uncommitted work was in scope); head= is kept for callers already keyed to it. -->
-<landing-plan head="1dc07e27a" refs="1" unmerged="0" superseded="0" merged="0" undetermined="1" scouted="0" bounded="0" scout-ok="1" at="1dc07e27a+dirty">
+<landing-plan head="f67d2a4fc" refs="1" unmerged="0" superseded="0" merged="0" undetermined="1" scouted="0" bounded="0" scout-ok="1" at="f67d2a4fc+dirty">
 <undetermined name="zz-orphan-lane" v="unknown" reason="no merge base with HEAD (shallow clone or unrelated history) — this ref could not be analysed, it is NOT known to be merged; deepen the clone and re-run"/>
 </landing-plan>
 `````
