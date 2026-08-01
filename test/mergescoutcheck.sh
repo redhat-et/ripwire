@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mergescoutcheck.sh — gate for L1: --merge-scout=REF[,REF...] (PLAN_agentLeverage2026.md §L1), the
+# mergescoutcheck.sh — gate for L1: --merge-scout=REF[,REF...], the
 # read-only cross-branch overlap oracle.
 #
 # Fixture repo, 3 branches off one init commit:
@@ -247,7 +247,7 @@ git -C "$REPO" status --porcelain | grep -q . \
     && no "read-only: working tree left dirty after runs" \
     || ok "read-only: working tree clean after all runs"
 
-# ── Y1 (AUDIT5 P1) perf gate: warm run reuses the per-sha ingest cache ─────────────────────────────────
+# ── Y1 ( P1) perf gate: warm run reuses the per-sha ingest cache ─────────────────────────────────
 # mergescout.h:115 used to hand ingest() an EMPTY cacheFile, forcing a full cold tree-sitter PARSE of
 # every arm's tree on EVERY invocation (the audited 9.15 s / 967 MB, 6-cold-ingest finding on a large private C++ corpus)
 # despite this module's own header claiming cache reuse. The fix threads a per-sha cache path (the "qms"
@@ -292,7 +292,7 @@ median_ms()
     local n_local=0
     local times=()
     for (( n_local = 0; n_local < PERFRUNS; ++n_local )); do
-        # AUDIT5 Y4: shard-aware lookup — a qms blob may be flat under $clearDir or under $clearDir/<xx>/ (2-hex shard).
+  # Y4: shard-aware lookup — a qms blob may be flat under $clearDir or under $clearDir/<xx>/ (2-hex shard).
         [ -n "$clearDir" ] && { f="$( find "$clearDir" -maxdepth 2 -type f -name 'ripwire-qms-*.bin' 2>/dev/null )"; [ -n "$f" ] && rm -f $f; }
         local elapsed
         elapsed="$( run_once_ms "$@" )" || return 1

@@ -192,9 +192,9 @@ mkdir -p "$TMP/bare"; printf 'int main(){return 0;}\n' > "$TMP/bare/m.cpp"
 # ── 8b) §P11.10: docs are ordered by LIVE drift, worst first ──────────────────────────────────────────
 #
 # The finding: --doc-drift opened with two screens of drift="0" rows before the first actionable doc.
-# Rows were path-ordered, and this repo's alphabetically-early docs (AUDIT2_…, AUDIT3_…, AUDIT5_…) are
+# Rows were path-ordered, and this repo's alphabetically-early docs are
 # audit ledgers whose every failed anchor is a DATED record — so they carry drift="0" and led anyway,
-# while the worst live rot (DESIGN_pathPreciseInclude.md, drift="14") sat far below the fold.
+# while the worst live rot (drift="14") sat far below the fold.
 #
 # Ordering only: live drift DESC, path ASC to break ties. The dated-record rows need no separate demotion
 # rule and get none — a fully dated doc IS drift="0" by construction, so it sinks on the same key that
@@ -240,7 +240,7 @@ livePos="$(  printf '%s\n' "$DRIFTSEQ" | grep -n 'live_notes\.md$'        | cut 
 
 # The finding's own repro. The fixture's worst doc (NOTES.md) also happens to sort first alphabetically,
 # so the "max drift leads" arm above cannot fail there — this repo is where the two orders genuinely
-# disagree, and where the finding was measured (AUDIT2_fable2026.md, drift="0", used to lead).
+# disagree, and where the finding was measured (drift="0", used to lead).
 "$BIN" "$ROOT" --doc-drift >"$TMP/repo" 2>/dev/null
 REPOSEQ="$( tr '<' '\n' <"$TMP/repo" | sed -n 's/^doc p="\([^"]*\)".* drift="\([0-9]*\)".*/\2 \1/p' )"
 if [ -n "$REPOSEQ" ]; then

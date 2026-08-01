@@ -15,7 +15,7 @@
 #       utf8SeqLen / jsonesc::escapeHtml directly with invalid + valid byte sequences (the ccJsonEscape
 #       path is not CLI-reachable on macOS, whose filesystem forbids invalid-UTF-8 filenames, so it is
 #       exercised at the function level).
-#   (C) CLI/fixture, --html — AUDIT4 follow-up: htmlexport.h's jsonEscape (jsonesc::escapeHtml) used to
+# (C) CLI/fixture, --html — follow-up: htmlexport.h's jsonEscape (jsonesc::escapeHtml) used to
 #       pass invalid UTF-8 through raw (the same gap class A4-F20 named for ccjson); now validated. Same
 #       latin1.cpp fixture through `--html`, asserting valid UTF-8 output, no raw 0xE9 byte, and an
 #       xmllint --html-parseable page.
@@ -124,7 +124,7 @@ int main()
     assert( utf8SeqLen( "\xc3\xa9", 0, 2 ) == 2 );
     assert( utf8SeqLen( "\xed\xa0\x80", 0, 3 ) == 0 );
     assert( utf8SeqLen( "\xf0\x9f\x98\x80", 0, 4 ) == 4 );
-    // jsonesc::escapeHtml (AUDIT4 follow-up): NOW validates UTF-8 — a lone 0xE9 scrubs to raw U+FFFD
+  // jsonesc::escapeHtml (follow-up): NOW validates UTF-8 — a lone 0xE9 scrubs to raw U+FFFD
     // bytes (escapeMcp's replacement posture, not ccjson's textual � — see jsonesc.h rationale).
     // Valid multi-byte + the <>& hardening this escaper has always had are both preserved.
     std::string h = jsonesc::escapeHtml( std::string_view( "caf\xe9<x>&" ) );

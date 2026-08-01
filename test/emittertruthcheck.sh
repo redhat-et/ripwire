@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# emittertruthcheck.sh — the gate for the r27-emitters lane (PLAN_orchestrator_2026-07-27 §P2 items 1, 2, 8,
+# emittertruthcheck.sh — the gate for the r27-emitters lane ( items 1, 2, 8,
 # 10, 14). Every check here pins a behavior that USED to lie to the caller: a truncated list with no marker,
 # a refusal that shipped a payload anyway, a "not reachable" that was reachable, and an "unknown flag" that
 # was really an unknown value.
@@ -109,7 +109,7 @@ srch="$( attr "$TMP/impact_small.xml" reaches )"; sshw="$( attr "$TMP/impact_sma
                                            || no "--impact untruncated: reaches='$srch' shown='$sshw' capped='$scap'"
 
 "$BIN" "$SRC" --impact=leaf --json > "$TMP/impact.json" 2>/dev/null
-# PLAN_outputAudit2 §A4c: the JSON page disclosure is pageDisclosure()'s seven-key vocabulary now, so
+#: the JSON page disclosure is pageDisclosure's seven-key vocabulary now, so
 # `capped` is a JSON BOOLEAN (true/false) rather than the 0/1 the hand-rolled pair emitted — the XML attribute
 # keeps "0"/"1", the JSON sibling spells the same fact the way JSON spells booleans, and both are ALWAYS
 # present rather than inferable from a missing key.
@@ -244,7 +244,7 @@ has "$TMP/fm.err" 'columnar'              && ok "--format lists the supported se
 fmsupported="$( grep -oE '\(supported: [^)]+\)' "$TMP/fm.err" | sed -E 's/\(supported: //; s/\)//' )"
 [ -n "$fmsupported" ] && ok "--format error names a supported set to reconcile against" || no "--format error has no (supported: …) list to reconcile"
 IFS='|' read -r -a fmvalues <<< "$fmsupported"
-# Each value is exercised on a verb it is DEFINED for. PLAN_outputAudit2 §A5b: columnar/rows on the bare map
+# Each value is exercised on a verb it is DEFINED for.: columnar/rows on the bare map
 # used to exit 0 by ignoring the flag, so testing them there proved the accept-and-ignore bug rather than the
 # feature; they now refuse there, and the honest probe is the flat-list verb they actually re-serialize —
 # exactly the shape `candidates` (a --for/--query-only value) has always needed.

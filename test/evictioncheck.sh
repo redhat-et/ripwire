@@ -10,7 +10,7 @@
 # dir is still over budget) delete oldest-first until the dir total is under 2 GB. The blob this run just
 # wrote/used is NEVER deleted by either pass.
 #
-# Y4 (AUDIT5) — BLOB-COUNT SHARDING: new blobs are written under a 2-hex-char shard subdir keyed on the
+# Y4  — BLOB-COUNT SHARDING: new blobs are written under a 2-hex-char shard subdir keyed on the
 # blob's own filename hash (`resolveCacheBlobPath`/`blobShardHex`, quality.h); a pre-existing FLAT blob is
 # still found and reused where it already sits (no migration step). evictOldCacheFamily now sweeps BOTH
 # layouts. This gate seeds ONE of each family member in BOTH layouts (flat, the pre-Y4 shape; and inside a

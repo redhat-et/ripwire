@@ -43,7 +43,7 @@
 #     far@total, and the bodies@/callers@ pair the cap was hiding) with one clause in packtask.h; --whereis
 #     closed shown=/capped= the same way. Both are the worked example.
 #   * of= / defs= / count= on the navigate verbs — CLOSED 2026-07-31 by the §H4 disclosure lane
-#     (PLAN_h4QualifiedCalls_2026-07-30.md §3.4). --callers and --callees used to ship NO legend at all
+#     (§3.4). --callers and --callees used to ship NO legend at all
 #     (0 bytes), which is why every one of their root attributes was listed here; they now share ONE legend
 #     (src/graphlegend.h, kCallHierarchyLegendOpen) that defines all three: "of= is the selector you passed,
 #     defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and count=

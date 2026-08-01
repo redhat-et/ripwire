@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # skillevalcheck.sh — gate for --eval-skills, the labelled skill-ROUTING eval (src/skilleval.h,
-# RESEARCH_skillEval2026.md). Two jobs:
+# ). Two jobs:
 #
 #   (a) pin that the harness WORKS: runs clean on the committed corpus (test/skillevalfix/prompts.tsv),
 #       deterministic, counts agree with the corpus, the TRIVIAL keyword-overlap baseline is MEASURED

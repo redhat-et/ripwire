@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# modifierguardcheck.sh — gate for PLAN_outputAudit_2026-07-28.md §P8 "six silently no-op modifiers" +
+# modifierguardcheck.sh — gate for  "six silently no-op modifiers" +
 # §P12.2 (--adaptive under --format=candidates).
 #
 # Before this fix: --with-history, --compress, --grep-context(/-before/-after), --since, --detail=N-beyond-

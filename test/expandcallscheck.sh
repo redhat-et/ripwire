@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# expandcallscheck.sh — §P10.1 gate (PLAN_outputAudit_2026-07-28.md): --expand's <calls> block used to
+# expandcallscheck.sh — §P10.1 gate: --expand's <calls> block used to
 # silently truncate. src/serialize.h's per-body callee-signature loop stops at `shown < 16 && used <
 # budgetBytes` and emitted a bare `<calls>` with no total and no capped= — for a large-fanout symbol
 # (`ingest`, 39 callees) the block showed as few as 1, and an agent reading it concluded the symbol calls

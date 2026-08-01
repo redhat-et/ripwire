@@ -67,14 +67,14 @@ g commit -qm "base: both helpers"
 
 # ── the doc: it names all three, each corroborated by a live name on its own line ─────────────────────
 # (the mention lane requires a name this repo DOES define on the SAME line — docdrift::kCorroborateWin = 0)
-cat > "$R/PLAN_relief.md" <<'EOF'
+cat > "$R" <<'EOF'
 # relief plan
 
 - DELETED — `stableAnchorHelper` used to hand off to `vanishedContourWalker`, which is gone.
 - NEVER BUILT — `stableAnchorHelper` will one day call `neverBuiltPhantomWalker`, which was never written.
 - HOLDS — `stableAnchorHelper` is still the entry point.
 EOF
-g add PLAN_relief.md
+g add
 g commit -qm "the plan doc"
 
 # ── the deletion: vanishedContourWalker leaves the tree ───────────────────────────────────────────────
@@ -222,7 +222,7 @@ nblob="$( find "$C4" -name 'ripwire-qhist-*.bin' | wc -l | tr -d ' ' )"
 
 # ── 6) degrade: a NON-GIT root must fall back, loudly, never answer "never" for everything ────────────
 mkdir -p "$TMP/plainroot"
-cp "$R/relief.h" "$R/PLAN_relief.md" "$TMP/plainroot/" 2>/dev/null
+cp "$R/relief.h" "$R" "$TMP/plainroot/" 2>/dev/null
 C5="$TMP/t5"; mkdir -p "$C5"
 TMPDIR="$C5" "$BIN" "$TMP/plainroot" --doc-drift --with-history --detail=999 >"$TMP/nogit" 2>"$TMP/nogit.err"
 grep -q '<history probed="0" r="not-a-git-repo"/>' "$TMP/nogit" \

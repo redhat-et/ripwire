@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# editcheckcheck.sh — gate for --edit-check=SYM (B11/L5, PLAN_agentLeverage2026.md): the fast per-symbol
+# editcheckcheck.sh — gate for --edit-check=SYM (B11/L5): the fast per-symbol
 # post-edit contract check. "Did MY edit change a contract someone depends on" at edit time (--quality-delta
 # answers the same question per-DIFF at commit time — this is the targeted, single-symbol entry point).
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prbudgetcheck.sh — A4-R4 / RESEARCH_outputEconomy lever 4: --pr-context respects --max-tokens by degrading
+# prbudgetcheck.sh — A4-R4 lever 4: --pr-context respects --max-tokens by degrading
 # gracefully, DEPTH-first, instead of emitting an unbounded payload (26.3K tokens on a 15-file diff was the
 # measured worst case; a 213-file diff far worse).
 #
@@ -29,7 +29,7 @@ echo "prbudgetcheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-# --pr-context needs a git diff. AUDIT5 wave-45 fix: the gate used to diff THIS repo's last commits, which
+# --pr-context needs a git diff. Wave-45 fix: the gate used to diff THIS repo's last commits, which
 # made its "a large budget never truncates" assertion hostage to whatever landed most recently (a 7.6K-line
 # bench-data merge legitimately trips the per-section list caps at any budget). Build a SCRATCH repo with a
 # known, modest diff instead — the assertions below are about the budget machinery, not about this repo.

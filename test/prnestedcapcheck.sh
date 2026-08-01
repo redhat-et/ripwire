@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prnestedcapcheck.sh — §B3 gate (PLAN_outputAudit3_2026-07-29.md): --pr-context silently capped every
+# prnestedcapcheck.sh — §B3 gate: --pr-context silently capped every
 # nested list at the L0 default (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12,
 # tests <test> at 40, owners <author> at 5) with NO shown=/capped= disclosure on any of them, while the
 # legend and a source comment (prcontext.h:717-718, pre-fix) both claimed the row count was "exactly

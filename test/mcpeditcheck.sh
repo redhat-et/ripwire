@@ -251,7 +251,7 @@ echo "=== 5. stale-index refusal (content changed, mtime preserved) — edit REF
 # Drive a LONG-LIVED server over a FIFO: (a) read verb builds the index; (b) rewrite the file with
 # different content but restore its mtime; (c) attempt an edit → must be REFUSED and file unchanged.
 #
-# S1 note (RESEARCH_agentQuality2026 §3b.1): mcpStale() now catches a content-changed-but-mtime-preserved
+# S1 note: mcpStale now catches a content-changed-but-mtime-preserved
 # edit via a per-file content-hash compare (it used to be blind to it). So getIndex() REBUILDS from the new
 # content BEFORE the edit verb runs: the rewritten file ("totally different content …") no longer defines
 # `distance`, so resolveOneForEdit refuses with a "not found" message rather than the edit verb's own later

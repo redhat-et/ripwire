@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # savecachecheck.sh — A3-F9: saveCache must never destroy a GOOD cache on a failed write.
 #
-# Bug (AUDIT3_fable2026.md A3-F9, src/ingest.cpp saveCache): fwrite/fclose results were never
+# Bug ( A3-F9, src/ingest.cpp saveCache): fwrite/fclose results were never
 # checked. On a short write (e.g. ENOSPC) the truncated temp file still got rename()'d over the
 # previous good cache — silently destroying it. The checksum trailer self-heals on next load (full
 # reparse), so this was perf-only, but a good cache should never be clobbered with zero alert, unlike

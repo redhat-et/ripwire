@@ -4,7 +4,7 @@
 # cache could not save). Determinism contract: "faster must never change the answer" — cached and uncached
 # --quality-delta output must be BYTE-IDENTICAL.
 #
-# Background (AUDIT4 §G PARTIAL / A4-P1): computeHeadSnapshot already caches the HEAD *ingest*. The dominant
+# Background ( §G PARTIAL / A4-P1): computeHeadSnapshot already caches the HEAD *ingest*. The dominant
 # remaining cost is everything computeSnapshot then does on the HEAD tree — above all findClones +
 # findClonesType3 — all IMMUTABLE for a given (HEAD sha, excludes, scheme). This round serializes the computed
 # Snapshot to a sidecar blob (ripwire-qsnap-<repoHex>-<exclHex>-<sha>.bin) with a magic+scheme header, an
@@ -42,7 +42,7 @@ XDG="$TMP/xdg"; mkdir -p "$XDG"
 CACHEDIR="$XDG/ripwire"
 
 inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
-# AUDIT5 Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
+# Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
 qsnapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qsnap-*.bin' 2>/dev/null; }
 nqsnap(){ qsnapfiles | wc -l | tr -d ' '; }
 # --no-cache disables only the WORKING-tree auto-cache, never the HEAD-side qsnap cache — so the qsnap path is

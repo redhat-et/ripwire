@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# packtaskcheck.sh — gate for L4 the budget-shared task bundle (B11, PLAN_agentLeverage2026.md §L4):
+# packtaskcheck.sh — gate for L4 the budget-shared task bundle (B11):
 # `--pack-task="TASK"` — ONE call assembling the 3-5 call orientation dance (ranking → bodies → 1-hop callers
 # → field notes → tests_to_run) under ONE deterministic byte budget, in a FIXED section order, with a header
 # that reports EVERY truncation (no silent caps).

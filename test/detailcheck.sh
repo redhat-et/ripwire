@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# detailcheck.sh — A4-R4 / RESEARCH_outputEconomy lever 3: --detail=N importance-weighted detail on --for.
+# detailcheck.sh — A4-R4 lever 3: --detail=N importance-weighted detail on --for.
 # Full BODIES for the top-N ranked symbols + SIGNATURES for the rest, in ONE call (measured +63% tokens for
 # the 3 relevant heads vs +355% for all-bodies — the weighted posture avoids the expensive all-bodies cost).
 #

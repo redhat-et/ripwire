@@ -47,7 +47,7 @@ attr(){ printf '%s' "$1" | tr '<' '\n' | grep -m1 "^$2 " | sed -n "s/.* $3=\"\([
 want(){ # want LABEL GOT EXPECTED
     [ "$2" = "$3" ] && ok "$1 ($3)" || no "$1: got '$2', want '$3'"; }
 
-# ── 1) determinism — two runs byte-identical (SPEC §1) ────────────────────────────────────────────────
+# ── 1) determinism — two runs byte-identical ( §1) ────────────────────────────────────────────────
 flip "$FIX" FIXTURE_VALUE_ALL >"$TMP/a"
 flip "$FIX" FIXTURE_VALUE_ALL >"$TMP/b"
 cmp -s "$TMP/a" "$TMP/b" && ok "determinism (byte-identical)" || no "--flip is non-deterministic"

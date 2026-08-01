@@ -3,7 +3,7 @@
 // Read by test/callformcheck.sh. EVERY callee here has a UNIQUE name, so `--uses=<name>` is a
 // per-spelling assertion: the expected count is the number of call sites written below for that
 // name, read off this file by hand — never derived by running the query the extractor runs
-// (PLAN_h4QualifiedCalls_2026-07-30.md §7 trap 1).
+// (§7 trap 1).
 //
 // Spellings that are DOCUMENTED-ABSENT carry an ABSENT tag in their comment and are asserted at
 // literal 0. Those arms fence the honest rejects: they go red if a naive widening lands.

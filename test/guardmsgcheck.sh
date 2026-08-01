@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # guardmsgcheck.sh — the 20 COMBINATION GUARDS at the tail of parseArgs, pinned by MESSAGE, not exit code.
 #
-# The gap this closes (PLAN_dispatchRefactor_2026-07-27.md §3.3 / §6.1 step 3): parseArgs ends in ~165 lines
+# The gap this closes ( step 3): parseArgs ends in ~165 lines
 # of combination validation ("--gateability needs --doc-drift", "--partition needs --pack-task", …) emitting
 # 19 distinct messages plus one usage() dump. NOT ONE of those strings appeared verbatim anywhere in test/.
 # Coverage was `[ $? -ne 0 ]` plus a fuzzy `grep -qi 'anchor'` — which cannot tell "refused for the right

@@ -120,7 +120,7 @@ printf '%s' "$TB_HEADER" | grep -q ' shown=0 ' \
 printf '%s' "$TB_HEADER" | grep -qE ' total=[0-9]+ ' \
     && ok "--token-budget=2000: withheld header still carries total= (the rejected bundle's honest size)" \
     || no "--token-budget=2000: withheld header lost total="
-# Wave-1-verifier N3 PIN UPDATE (PLAN_outputAudit3): the note's number was spelled `est_tokens=`, the same
+# Wave-1-verifier N3 PIN UPDATE: the note's number was spelled `est_tokens=`, the same
 # name the header uses for a DIFFERENT quantity — the header's est_tokens= is normatively what THIS RUN
 # printed, the note's is the rejected bundle's pre-cut size. One name, two meanings, in adjacent lines. The
 # note now says withheld_est_tokens=; the arm below pins the distinct name, and the two arms after it pin

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rustqualcheck.sh — gate for the RUST half of §H4 (PLAN_h4QualifiedCalls_2026-07-30.md §3.2, W3 lane):
+# rustqualcheck.sh — gate for the RUST half of §H4 (W3 lane):
 # `::`-path calls extract at all, the canonical tier resolves them PRECISELY (including across
 # DIRECTORIES), an EXTERNAL qualified call does not false-edge onto a same-named local def, `Self::`
 # reaches its own impl, and the one genuinely ambiguous spelling is DISCLOSED rather than guessed.

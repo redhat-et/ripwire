@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mentionsverbcheck.sh — §A8.4 gate (PLAN_outputAudit2_2026-07-28.md): --mentions=SYM's docs= counted
+# mentionsverbcheck.sh — §A8.4 gate: --mentions=SYM's docs= counted
 # markdown SECTIONS while the rows printed FILES — a doc with several backtick mentions of SYM under
 # different headings inflated docs= (main.cpp uniques g.mentions' section NodeIds, one per enclosing
 # Section, then prints each one's FILE path) and repeated the same p= across rows, both wrong: the

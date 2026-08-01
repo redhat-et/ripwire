@@ -153,7 +153,7 @@ case "$E" in *symbol*) SE=1 ;; *) SE=0 ;; esac
 # The synthetic corpus above proves the traversal; this proves it against a corpus with 250+ test files
 # and a real C++ call graph, which is the only place a resolver regression (wrong def picked, header/impl
 # split lost) would show. connectSubgraph lives in src/graph.h and is exercised by exactly one harness.
-# NOTE the qualified spelling: bare `connectSubgraph` is a substring of DESIGN_connectSubgraph.md, so the
+# NOTE the qualified spelling: bare `connectSubgraph` is a substring of, so the
 # file-first rule reads it as a PATH — that is the rule working, and the reason file:NAME exists.
 rrun(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$ROOT" "$@" 2>/dev/null; }
 RF="$( rrun --affected=src/graph.h )"

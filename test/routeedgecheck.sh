@@ -18,7 +18,7 @@
 #                       non-detection — dynamic path strings are never guessed).
 #
 # Asserts, in BOTH invocation forms (single-root over test/routeedgefix, and multi-root over
-# server+client as two separate roots — the cross-root evidence case DESIGN_multiRoot.md §3 requires):
+# server+client as two separate roots — the cross-root evidence case requires):
 #   (a) route DEF facts exist (the handler signatures appear in --for's <sigs>)
 #   (b) route USE facts + the synthesized <route> edge, including a TEMPLATE-path match
 #   (c) the deliberately ambiguous case produces NO edge (never a guess)

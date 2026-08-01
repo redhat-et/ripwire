@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# communitydrillcheck.sh — gate for --community=ID (PLAN_outputAudit_2026-07-28.md §P11.6).
+# communitydrillcheck.sh — gate for --community=ID .
 #
 # THE GAP: --communities and --zoom PRINT module ids (id="2006" size="274") and NO verb accepted one. A
 # 274-member module showed five members and there was no next call — the §P8 selector-chain gap at module

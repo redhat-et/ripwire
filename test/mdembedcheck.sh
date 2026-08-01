@@ -11,7 +11,7 @@
 # caught that regression before it shipped. This assertion is that gate, going forward.
 #
 # THIS GATE MAY LEGITIMATELY BE GREEN THE FIRST TIME YOU RUN IT (and stay green for a long time) — pinning
-# an invariant that currently holds is the point (PLAN_outputAudit_2026-07-28.md §P7: "assertions, not
+# an invariant that currently holds is the point "assertions, not
 # bytes" — an INVARIANT, not a stored golden). Today, --report's payload is entirely SYNTHESIZED (counts,
 # sorted names, fixed section labels) so it structurally cannot contain a 4-backtick run, and no doc file
 # currently indexed by --recall happens to contain one either (docs/captures/ — which DOES, from

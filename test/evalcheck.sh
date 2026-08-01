@@ -3,7 +3,7 @@
 # --eval is ripwire's self-benchmark: for each of the last N commits it hides that commit's touched files,
 # ranks the rest by co-change proximity to them under several rankers (ripwire PageRank, BM25 variants,
 # fused, same-dir, random floor), and reports recall@{5,10,20}. It's the oracle the aider-multiplier tuning
-# in AUDIT §"Batch B" leaned on — so an --eval that silently mis-computes recall would quietly corrupt every
+# leaned on — so an --eval that silently mis-computes recall would quietly corrupt every
 # ranking-quality decision. This gate asserts the STRUCTURE and the MATH INVARIANTS of the table, on a
 # synthetic git repo with a KNOWN co-change signal (files change in fixed pairs).
 #

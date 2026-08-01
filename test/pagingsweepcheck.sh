@@ -2,7 +2,7 @@
 # pagingsweepcheck.sh — §P8 contract gate: --limit/--offset must be HONORED, not accepted-and-ignored,
 # and a verb that caps must SAY how many rows it printed.
 #
-# THE TWO BUGS THIS PINS (PLAN_outputAudit_2026-07-28.md §P8 "Contract-level", bullets 1 and 2):
+# THE TWO BUGS THIS PINS ( "Contract-level", bullets 1 and 2):
 #
 #   1. --limit/--offset silently ignored. Before this gate, `--cochange --limit=3` emitted 30 rows, so a
 #      paging loop over --cochange NEVER TERMINATED and never errored — it re-read the same first page
@@ -55,7 +55,7 @@
 #                                             to be capped AGAINST (rule 2 requires a total beside shown=).
 #                                             <health files="785"> is a different number (every indexed
 #                                             file, not just those with includes) and is NOT normalized.
-#   --deps          <health>/<f instab=>      PLAN_outputAudit_2026-07-28.md §P9.2+§P9.4 (a SEPARATE fix
+# --deps  <health>/<f instab=>  (a SEPARATE fix
 #                    content changed too         landing in the same session, unrelated to paging): <f
 #                                             instab=> is now project-only Ce (was counting system/
 #                                             third-party includes too), and <health>'s ccd/acd/nccd/shape
@@ -357,7 +357,7 @@ fi
 "$BIN" "$ROOT" --owners --detail=1 --limit=3 --no-cache >/dev/null 2>"$TMP/k4.err" \
     && ok "--owners --detail=1 --limit=3 stays legal" \
     || no "--owners --detail=1 --limit=3 was refused ($( head -1 "$TMP/k4.err" ))"
-# PLAN_outputAudit2 §A5a INVERTED this arm. --batch used to be exempt from the guard on the reasoning that
+# INVERTED this arm. --batch used to be exempt from the guard on the reasoning that
 # it "answers its own sub-queries", but the exemption did not do what that implies: the outer --limit reached
 # NO sub-query, so `--batch=F --limit=3` exited 0 with the payload unchanged — accept-and-ignore, the exact
 # class this whole gate exists to keep extinct, sitting inside the gate's own exception list. A batch

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# planlanescheck.sh — gate for --plan-lanes (PLAN_planLanes_2026-07-27.md §6), the PRE-HOC lane plan.
+# planlanescheck.sh — gate for --plan-lanes, the PRE-HOC lane plan.
 #
 # Six checks, and the plan is explicit about which one decides the feature:
 #   G-A determinism — two runs of the same invocation are BYTE-IDENTICAL, in both modes, at N=2 and N=16,

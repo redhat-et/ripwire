@@ -7,8 +7,8 @@
 #   util.cpp:   hot() called by BOTH caller_a() and caller_b()  (the known unambiguous multi-caller edge)
 #               rec()  is SELF-recursive and has NO external callers
 #
-# Investigated first, not assumed: SPEC.md §"drop self-loops (src == dst) — in the Google matrix they act
-# as rank sinks" (SPEC.md:130) — buildGraph's comment confirms self/unresolved/file-scope refs are DROPPED
+# Investigated first, not assumed:  §"drop self-loops (src == dst) — in the Google matrix they act
+# as rank sinks" 130) — buildGraph's comment confirms self/unresolved/file-scope refs are DROPPED
 # by design (src/graph.h ~ buildGraph). Verified directly: even a plain `if(n>0) return f(n-1);`
 # self-recursive call produces ZERO edges in the call graph (edges= count in the default map). So rec()
 # correctly has --callers count=0 — this is intentional PageRank hygiene, NOT a caller-resolution bug, and

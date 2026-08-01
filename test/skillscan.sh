@@ -112,7 +112,7 @@ else
 fi
 
 # ── §P6.9 checks: --scan-skill/--scan-skills now emit a deterministic stdout `<skillscan>` artifact ────
-# (PLAN_outputAudit_2026-07-28.md §P6 item 9 — previously the only two verbs with NO stdout artifact at
+# ( item 9 — previously the only two verbs with NO stdout artifact at
 # all on a clean scan). stderr's tally + the 0/1/2/3 exit codes above are UNCHANGED; these checks are
 # purely about the NEW stdout element.
 

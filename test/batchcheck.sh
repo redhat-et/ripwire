@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# batchcheck.sh — gate for AUDIT4_fable2026.md §E A4-R3: the `batch` retrieval verb (MCP + CLI).
+# batchcheck.sh — gate for  §E A4-R3: the `batch` retrieval verb (MCP + CLI).
 # One-turn context sweep: N heterogeneous READ sub-queries answered in ONE call, merged, deduped,
 # capped honestly. Asserts:
 #   (a) a 4-sub-query batch (for + grep + callers + impact) returns all 4 IN ORDER, and each <q>'s

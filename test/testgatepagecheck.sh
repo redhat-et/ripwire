@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testgatepagecheck.sh — §A3a/§A3b/PC-2 gate (PLAN_outputAudit2_2026-07-28.md).
+# testgatepagecheck.sh — §A3a/§A3b/PC-2 gate .
 #
 # §A3a [BROKEN]: --test-gate's <u> untested-row list was a bare 25-row literal cap (situ.h kMaxUntestedRows)
 # with NO shown=/capped= disclosure on the root, in either XML or JSON, and `--test-gate --limit=100`
@@ -64,7 +64,7 @@ R="$TMP/repo"; mkdir -p "$R/src"
     done
 } > "$R/src/caller.cpp"
 
-# §B7.1 PIN UPDATE (PLAN_outputAudit3): the bare shown=/capped= this gate pinned described only the <u>
+# §B7.1 PIN UPDATE: the bare shown=/capped= this gate pinned described only the <u>
 # listing while the report emits <t> rows too (26 rows on a default page under a single shown="25"). Per
 # pageview.h rule 1 the report now spells one pair PER LISTING — shown_tests=/tests_capped= and
 # shown_untested=/untested_capped= — and pageview.h rule 6's paging half attaches to the <u> listing alone.
@@ -129,7 +129,7 @@ fi
 # checkout as the corpus (self.h-heavy files reliably blast-radius past 8 files here) rather than growing a
 # second synthetic fixture just for a file-fanout count.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-# §B3 knock-on GAP (PLAN_outputAudit3): "full list: --pr-context" was FALSE — pr-context's own per-file
+# §B3 knock-on GAP: "full list: --pr-context" was FALSE — pr-context's own per-file
 # <impact> list is capped too (at 20, now disclosed via shown=/capped=), so it never printed a full list
 # either. Reworded to name what pr-context actually gives; this pin follows the new wording — asserting the
 # "(showing 8" cap-disclosure MEANING, not the old false referral text.

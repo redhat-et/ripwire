@@ -2,7 +2,7 @@
 # numericrefusecheck.sh — §B8 gate: the numeric flag arms refuse in the SAME dialect as everything else,
 # and --connect-radius refuses its two out-of-range directions SYMMETRICALLY.
 #
-# §B8.2 (PLAN_outputAudit3_2026-07-29.md): ten hand-written numeric arms answered EVERY bad value with one
+# §B8.2: ten hand-written numeric arms answered EVERY bad value with one
 # fixed sentence — no echo of what was actually passed, no example — while refusePageValue (one function
 # away) and the 24 compliant kViewFlags rows do both:
 #

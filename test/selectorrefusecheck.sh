@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# selectorrefusecheck.sh — §B4 gate (PLAN_outputAudit3_2026-07-29.md): the two selector-refusal defects.
+# selectorrefusecheck.sh — §B4 gate: the two selector-refusal defects.
 #
 # §B4.1 [BROKEN] — `--edit-check`'s ambiguity refusal predicted a SIBLING VERB's output from the wrong
 #   number. `editCheckAmbiguousMessage` printed `groups.size()` (the per-(file,scope) COLLAPSED contract

@@ -1,4 +1,4 @@
-# prompts.tsv — labelled corpus for --eval-skills (skill-ROUTING eval; RESEARCH_skillEval2026.md).
+# prompts.tsv — labelled corpus for --eval-skills (skill-ROUTING eval).
 # One row per line: prompt<TAB>expected<TAB>provenance<TAB>split
 #   expected   = comma-separated skill dir names (a PERMITTED SET — several moments legitimately map to
 #                2 skills), or `none` (no ripwire skill should fire).
@@ -89,7 +89,7 @@ The flame graph blames string splitting - dig into that code.	ripwire-perf-targe
 Which parts of the checkout flow have no safety net at all if I refactor them?	ripwire-write-tests	judged	test
 I fixed the bug; tell me whether my patch made the codebase worse.	ripwire-quality-bar	judged	test
 List every function above complexity twenty that can eventually reach the database layer.	ripwire-graph-query	judged	test
-# ── positives: judged paraphrases, growth pass 2026-07-25 (RESEARCH_skillEval2026.md S5.7.2 follow-up) ─
+# ── positives: judged paraphrases, growth pass 2026-07-25 (S5.7.2 follow-up) ─────────────────────────
 # n=16 judged rows resolves +-6pp; grown past 40 so before/after description-rewrite comparisons stop
 # hiding real movement in noise. Same discipline as the rows above: each label follows the ROUTER's own
 # moment-map row (skills/ripwire-router/SKILL.md), the wording is new, and NOTHING here was checked

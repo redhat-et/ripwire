@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fornotesjsoncheck.sh — §B1.3 gate (PLAN_outputAudit3): `--for --json` must not SILENTLY drop the
+# fornotesjsoncheck.sh — §B1.3 gate: `--for --json` must not SILENTLY drop the
 # auto-surfaced field notes its XML sibling emits.
 #
 # The XML `--for` bundle attaches `<note d="…">…</note>` children to the `<d>` row (and `<f>` wrapper) of any

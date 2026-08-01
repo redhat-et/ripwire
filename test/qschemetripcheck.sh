@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qschemetripcheck.sh — the F2/X4 (AUDIT5) SCHEME-BUMP TRIPWIRE. B10.1a (ffcc618) changed the SEMANTICS of a
+# qschemetripcheck.sh — the F2/X4 SCHEME-BUMP TRIPWIRE. B10.1a (ffcc618) changed the SEMANTICS of a
 # cached quality Snapshot's dead set (added `isTestScriptPath` to `isDeadCandidate`) WITHOUT bumping
 # `kQSnapCacheScheme` — the exact determinism hole that constant's own comment exists to prevent (a pre-fix
 # blob served to a post-fix binary answers with the OLD, narrower dead-set semantics). This gate is a
@@ -34,7 +34,7 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-#   2026-07-31, H4 W2b FIXUP (PLAN_h4QualifiedCalls_2026-07-30.md §Execution): kParserVer 33 -> 34 and the
+# 2026-07-31, H4 W2b FIXUP: kParserVer 33 -> 34 and the
 #   quality.h mirror with it, because a qualified call to a `>`-family OPERATOR now re-splits on the operator
 #   tail — the per-ref qualifier changes, so a v33 blob's edges are provably wrong and must not be re-served.
 #   This is an EXTRACTION change, not a Snapshot-SEMANTICS change: what a cached Snapshot MEANS (dead set,

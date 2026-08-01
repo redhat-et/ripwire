@@ -2,7 +2,7 @@
 # bodydialectcheck.sh — §H5 / §B8.3 / §B10.2 / §C4: the XML and JSON dialects of a --pack-task bundle must
 # describe the SAME document, and the sections that truncate must SAY so in the one truncation vocabulary.
 #
-# WHAT WENT WRONG (all four measured on this repo before the fix, PLAN_outputAudit4_2026-07-30.md):
+# WHAT WENT WRONG (all four measured on this repo before the fix):
 #
 #  §H5  `--pack-task --json` chose its bodies a SECOND time. The XML pass handed every candidate to
 #       packBodies — which groups by FILE and stops on a BYTE budget — and counted the resulting <b> elements

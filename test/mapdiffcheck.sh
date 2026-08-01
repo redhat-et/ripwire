@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # mapdiffcheck.sh — gate for --map-diff, which had ZERO coverage. --map-diff is NOT a filter: it is a
-# PageRank TELEPORT reweighting (SPEC §3 / src/graph.h:1071 "β of the mass on symbols in changed files,
+# PageRank TELEPORT reweighting ( §3 / src/graph.h:1071 "β of the mass on symbols in changed files,
 # (1−β) on the rest"). The map still shows every symbol; symbols in git-changed files get a rank BOOST.
 # The high-value, hand-verifiable contract is therefore a RANK FLIP, which this gate constructs from a
 # synthetic git repo whose natural PageRank order is known:
@@ -62,7 +62,7 @@ a1d="$( k "$DIFF" a1 )"; b1d="$( k "$DIFF" b1 )"
     && ok "--map-diff FLIPS the order: a1 ($a1d) > b1 ($b1d) — teleport boosts the changed file (a.cpp)" \
     || no "--map-diff did NOT boost the changed file: expected a1 > b1, got a1=$a1d b1=$b1d (mode may have fallen through to plain pagerank)"
 
-# ── 1b) D6 (AUDIT5): the header's changed="N" names the teleport-seed file count — here exactly 1
+# ── 1b) D6: the header's changed="N" names the teleport-seed file count — here exactly 1
 #       (a.cpp), so agents can tell a real diff from a degrade/clean-tree run without shelling to git. ──
 changed1="$( printf '%s' "$DIFF" | grep -oE 'changed=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
 [ "$changed1" = 1 ] \

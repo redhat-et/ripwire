@@ -1,6 +1,6 @@
 // C++ CANONICAL-MULTI-MATCH caller — the C++ face of the W3-RUST fixup's `|| canonical` change to
 // graph.h's tier-3 rescue, carried into this round's matrix because cppqualcheck was frozen by
-// other lanes when the fix landed (PLAN_h4QualifiedCalls_2026-07-30.md §V3 fixup wave, "Carry to
+// other lanes when the fix landed (§V3 fixup wave, "Carry to
 // W4").
 //
 // THE CLASS: a qualified call whose canonical key `q::canonFn` matches SEVERAL definitions, none of

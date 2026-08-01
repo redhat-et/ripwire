@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hookcheck.sh — gate for skills/hooks/ripwire-nudge.sh (PLAN_researchImprove2026.md Phase B5.2, the
+# hookcheck.sh — gate for skills/hooks/ripwire-nudge.sh ( Phase B5.2, the
 # opt-in PreToolUse "nudge raw grep toward ripwire" hook, extended by Phase B9 to `git diff`/`git log`/
 # `git show --stat`) and its installer, skills/install.sh --hook.
 #

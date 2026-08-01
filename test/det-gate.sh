@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# det-gate.sh — SPEC §8 byte-determinism gate: one baseline plus three comparisons, plus the WIDTH arm.
+# det-gate.sh —  §8 byte-determinism gate: one baseline plus three comparisons, plus the WIDTH arm.
 #
 # ══ THE PRINCIPLE THIS GATE EXISTS TO STATE (CA4 §B15 — three rounds missed it) ═════════════════════════
 #   A DETERMINISM OR WELL-FORMEDNESS GATE PROVES NOTHING ABOUT A FIXED BUFFER UNLESS ITS CORPUS CAN FILL

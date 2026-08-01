@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# expandtokencheck.sh — PHASE 1 gate (RESEARCH_outputEconomy §6): the --expand est_tokens CORRECTNESS fix.
+# expandtokencheck.sh — PHASE 1 gate: the --expand est_tokens CORRECTNESS fix.
 #
 # THE BUG: --expand appended a <bodies> block AFTER the ranked map, but the header's est_tokens reported
 # ONLY the map (serialize() counted its own emission, the packBodies payload was never added). MEASURED:
@@ -118,14 +118,14 @@ fi
 #    failure contract --callers/--callees/--impact already use on a miss (they `return 1;` right after their
 #    own withDidYouMean stderr line) — a resolvable-but-wrong name must never read as success. Pre-fix this
 #    exited 0 with only a stderr warning while still emitting the 30 KB fallback map. The fallback map itself
-#    is not SPEC-mandated so it stays (this handler is the default-map path), but the exit code no longer lies.
+# is not required to go away so it stays (this handler is the default-map path), but the exit code no longer lies.
 MISS_MSG="$( "$BIN" src --expand=totally_bogus_symbol_zzz --no-cache 2>&1 1>/dev/null )"
 MISS_RC=$( "$BIN" src --expand=totally_bogus_symbol_zzz --no-cache >/dev/null 2>&1; echo $? )
 { [ "$MISS_RC" != 0 ] && printf '%s' "$MISS_MSG" | grep -qi "matched no symbol"; } \
     && ok "--expand of a nonexistent symbol exits non-zero ($MISS_RC) with a 'matched no symbol' message" \
     || no "--expand of nonexistent symbol: expected non-zero exit + 'matched no symbol' message, got exit=$MISS_RC msg='$MISS_MSG'"
 
-# r27-emitters (PLAN_orchestrator_2026-07-27 §P2.8) REVERSED the stdout half of this contract. D7 left the
+# r27-emitters REVERSED the stdout half of this contract. D7 left the
 # ~22 KB fallback map on stdout and changed only the exit code, which made --expand the ONE verb that paired
 # a refusal with a payload: exit 1 plus a full map of UNRELATED symbols reads to a caller as "here is your
 # answer" with a stray non-zero code. The refusal now writes NOTHING, exactly like --callers/--callees/

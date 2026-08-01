@@ -25,7 +25,7 @@
 #
 # Part C — A3-F6: tools/call argument scoping (params.arguments only, envelope keys can't shadow).
 #
-# Part D — AUDIT5 D3/D4 (plan X7): `ripwire <root> --mcp`'s startup root as the stdio default:
+# Part D — D3/D4 (plan X7): `ripwire <root> --mcp`'s startup root as the stdio default:
 #   (D-1) an omitted `path` on a READ verb resolves against the startup root.
 #   (D-2) an EDIT verb given a `path` OUTSIDE the startup root refuses with the named workspace-pin
 #         error, and the startup-root workspace is left byte-identical.
@@ -408,7 +408,7 @@ esac
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
-echo "=== Part D: X7 (AUDIT5 D3/D4) — stdio startup-root default + edit-verb workspace pin ==="
+echo "=== Part D: X7 ( D3/D4) — stdio startup-root default + edit-verb workspace pin ==="
 # ═══════════════════════════════════════════════════════════════════════════
 # `ripwire <root> --mcp` (a startup root on the command line) now behaves like the remote HTTP
 # transport's own pinned-workspace default, but SOFTER: an omitted `path` defaults to that root for

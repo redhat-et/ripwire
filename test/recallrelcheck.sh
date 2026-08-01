@@ -92,7 +92,7 @@ ZN="$( relevant_n "$Z" )"
 # ── 6) §A8.2 + §B9.2: the "K relevant of N document files" denominator is docFileMask()'s population (the
 # DOCUMENT files the verb actually ranks), not ing.files.size() (the whole file corpus, code included).
 #
-# §B9.2 PIN UPDATE (PLAN_outputAudit3): §A8.2 reconciled the two NUMBERS on this fixture but not the
+# §B9.2 PIN UPDATE: §A8.2 reconciled the two NUMBERS on this fixture but not the
 # PREDICATES behind them — docFileMask is "≥1 Markdown-LANG symbol" (so it includes docparse'd notebooks /
 # HTML / CSV) while --doc-drift's docs= is isMarkdownPath, an EXTENSION test. On the live repo they had
 # already drifted 4 apart, and both were narrated as "docs". The fix was naming, not arithmetic: recall now

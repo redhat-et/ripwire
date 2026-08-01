@@ -149,7 +149,7 @@ if [ -d "$XDG4/ripwire" ]; then
         && ok "defaultCachePath: \$XDG_CACHE_HOME/ripwire is mode 0700 ($PERM)" \
         || no "defaultCachePath: \$XDG_CACHE_HOME/ripwire mode is $PERM, expected 700"
     # A4-P4: the auto-cache filename is now split by verb class → ripwire-<hash>-{lean,rich}.bin (a plain
-    # map is the lean class). The <hash> stability + ladder/mode contract is unchanged. AUDIT5 Y4: new blobs
+  # map is the lean class). The <hash> stability + ladder/mode contract is unchanged. Y4: new blobs
     # live in a 2-hex-char shard subdir (legacy flat blobs are still honored in place), so look in BOTH layouts.
     find "$XDG4/ripwire" -maxdepth 2 -type f | grep -q '/\([0-9a-f]\{2\}/\)\{0,1\}ripwire-[0-9a-f]\{16\}-\(lean\|rich\)\.bin$' \
         && ok "defaultCachePath: cache file named ripwire-<hash>-<class>.bin lives under \$XDG_CACHE_HOME/ripwire (flat or shard)" \

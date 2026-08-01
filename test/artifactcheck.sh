@@ -3,7 +3,7 @@
 # RESTORE-EQUIVALENCE + CROSS-ARCH SELF-HEAL + DRIFT-PROPORTIONAL contract survives the kArtifactArch
 # header byte (kCacheVersion 7 -> 8).
 #
-# Background (DESIGN_teamIndex.md §1): the --cache=FILE blob IS the committable index artifact. It is
+# Background: the --cache=FILE blob IS the committable index artifact. It is
 # already checkout-path portable (T5 relForHash keys; portablecachecheck.sh). v8 adds ONE header byte —
 # kArtifactArch = (endianness | pointerWidth<<1) — right after parserVer, so a NATIVE-ENDIAN blob produced
 # on one architecture is REJECTED by loadCache's header guard on a foreign architecture (different byte

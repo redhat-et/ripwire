@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# notescheck.sh — gate for L3 repo field notes (B11, PLAN_agentLeverage2026.md §L3): committed, human-reviewable
+# notescheck.sh — gate for L3 repo field notes (B11): committed, human-reviewable
 # WRITE-side memory keyed to symbols/files, surfaced at retrieval.
 #
 # Covers, per the plan's gate spec:
@@ -196,7 +196,7 @@ else
     printf '  SKIP  MCP parity (no python3)\n'
 fi
 
-# ── D5 (AUDIT5 / plan X8): root-relative field-notes portability ───────────────────────────────────────────
+# ── D5 (plan X8): root-relative field-notes portability ───────────────────────────────────────────
 # The committed .ripwire_notes design is only merge-friendly/portable if targets are ROOT-RELATIVE — an
 # absolute target dies on any other checkout's crawl root. normalizeNoteTarget() is the write+read seam:
 # canonicalize an absolute in-root target to root-relative on write, refuse an outside-root target loudly,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tracecheck.sh — gate for --from-trace=FILE ('-'=stdin) (B11/L2, PLAN_agentLeverage2026.md): the
+# tracecheck.sh — gate for --from-trace=FILE ('-'=stdin) (B11/L2): the
 # trace-to-locus verb. Agents hand-translate stack traces / sanitizer reports / compiler errors into
 # queries many times per session; this maps the frames of such a text artifact directly onto the indexed
 # symbols, ranks the suspects innermost-first, and emits a --for-style bundle (top suspects' signatures +
@@ -161,7 +161,7 @@ this is not a stack trace at all
 just some prose with no frames whatsoever
 EOF
 
-# AUDIT5 F7: a hostile/garbled line number that overflows uint32_t (2^32 + 1 = 4294967297, which the
+# F7: a hostile/garbled line number that overflows uint32_t (2^32 + 1 = 4294967297, which the
 # unchecked `v*10+d` bug used to wrap mod 2^32 down to line 1 = alpha()'s def line) must degrade to
 # <skipped>, never confidently resolve to alpha (or any other real symbol). The second, well-formed frame
 # (line 5, inside beta's 4..6 span) is the sole suspect and must rank 1.
@@ -202,7 +202,7 @@ assert_format clang   compiler badcall  1
 assert_format node    node     inner    2
 assert_format generic generic  beta     1
 
-# ── AUDIT5 F7: overflowed line number degrades to skipped, never a wrapped-to-line-1 false positive ─────
+# ── F7: overflowed line number degrades to skipped, never a wrapped-to-line-1 false positive ─────
 OV_OUT="$( tr_run overflow.txt )"
 printf '%s' "$OV_OUT" | grep -q 'skipped="1"' \
     && ok "(overflow) huge line number (2^32+1) degrades to skipped, never wraps mod 2^32" \
@@ -300,7 +300,7 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════════
-# §A2 (PLAN_outputAudit2_2026-07-28.md) — resolution HONESTY. Three defects, one fixture tree:
+# §A2  — resolution HONESTY. Three defects, one fixture tree:
 #   (a) the verb discarded the symbol NAME each frame carries and rebound by LINE against the current tree,
 #       so a trace from a binary older than the checkout silently reported whatever squats on that line today
 #       (and dumped ITS body). Name binds first now, with resolved_by= and a disclosed line_encloses= on

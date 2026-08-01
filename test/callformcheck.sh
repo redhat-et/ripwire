@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# callformcheck.sh — THE PER-LANGUAGE CALL-FORM MATRIX (PLAN_h4QualifiedCalls_2026-07-30.md §6).
+# callformcheck.sh — THE PER-LANGUAGE CALL-FORM MATRIX .
 #
 # WHY THIS GATE EXISTS. §H4 — "a plainly written, statically resolvable call produces no reference at
 # all" — lived in the tree for the tool's whole life because every per-language gate tested IMPORTS

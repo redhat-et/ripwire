@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# runhintcheck.sh — gate for the run= runner hint on test rows (PLAN_outputAudit_2026-07-28.md §P11.4).
+# runhintcheck.sh — gate for the run= runner hint on test rows .
 #
 # THE GAP: --affected / --situ / --test-gate NAME tests and cannot RUN them. They emit bare `.cpp` harness
 # paths while this repo's runners are `test/*.sh`; --test-gate goes further and EXITS 4 on the obligation.

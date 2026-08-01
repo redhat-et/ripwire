@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# skillscanreadcheck.sh — gate for PLAN_outputAudit_2026-07-28.md §P0.5a.
+# skillscanreadcheck.sh — gate for
 #
 # THE BUG: `--scan-skill=/nonexistent/path` printed "0 finding(s)" on stderr, nothing on stdout, and
 # exited 0 — byte-identical (on every channel that matters to a caller checking $?  or grepping stdout)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# multirootcheck.sh — the DESIGN_multiRoot.md §8 gate set for multi-root workspaces
+# multirootcheck.sh — the §8 gate set for multi-root workspaces
 # (`ripwire <dir1> <dir2>` → ONE merged graph with evidence-gated cross-root edges).
 #
 # Fixture: test/multirootfix/{svc,cli} — two mini-repos, COPIED to a scratch dir and `git init`-ed there
@@ -78,7 +78,7 @@ grep -q 'roots=2' "$TMP/m1.xml" || no "header: roots=2 gauge missing"
 # §P8 (2026-07-28) — SPELLING REPINNED: `<root l=>` became `<root label=>`. The prologue's l= was the ONLY
 # root-LABEL use of that attribute name against 22 sites where l= is a LINE NUMBER — including the <f p=…>
 # rows in this very document — so the one-emission, two-reference minority meaning was renamed and the
-# 15+-consumer line-number meaning left alone. This assertion and DESIGN_multiRoot.md §A13 were the two
+# 15+-consumer line-number meaning left alone. This assertion is one of the two
 # references. A run that emits `<root l=` again is the rename regressing, not a new feature.
 grep -q '<root label="cli"' "$TMP/m1.xml" && grep -q '<root label="svc"' "$TMP/m1.xml" \
   && ok "header: <root label= p=/> prologue for both roots" \
@@ -248,7 +248,7 @@ warm_zero="$( grep -c 'reparsed=0' "$TMP/warm.err" || true )"
 if [ "$warm_lines" = "2" ] && [ "$warm_zero" = "2" ]; then ok "G-cache: warm run reparses nothing in either root"
 else no "G-cache: warm run stats unexpected: $( tr '\n' ';' <"$TMP/warm.err" )"; fi
 # identify svc's blob: only two blobs exist; snapshot both, then dirty ONE cli file.
-# AUDIT5 Y4: shard-aware lookup — blobs may be flat under $GC or under $GC/<xx>/ (2-hex shard).
+# Y4: shard-aware lookup — blobs may be flat under $GC or under $GC/<xx>/ (2-hex shard).
 blobsum(){ find "$GC" -maxdepth 2 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs -I{} md5 -q {} 2>/dev/null || find "$GC" -maxdepth 2 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs md5sum; }
 blobsum >"$TMP/blobs.before"
 printf '\n// dirty\n' >> "$WS/cli/src/cli_helper.cpp"

@@ -1,4 +1,4 @@
-// cppqualfix/qual.cpp — gate fixture for §H4 (PLAN_h4QualifiedCalls_2026-07-30.md): the C++ qualified-call
+// cppqualfix/qual.cpp — gate fixture for §H4: the C++ qualified-call
 // widening. ONE call site per SPELLING, so every count test/cppqualcheck.sh asserts can be read off this
 // file by hand (plan §7 trap 1: a gate that derives its expected number the way the code does cannot catch
 // the derivation).

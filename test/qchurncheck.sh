@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# qchurncheck.sh — gate for Y2 (AUDIT5 P2): quality::gitCoChangeAndChurnCached memoizes gitmine's
+# qchurncheck.sh — gate for Y2 (P2): quality::gitCoChangeAndChurnCached memoizes gitmine's
 # `git log --name-only` walk (431 ms on a large private C++ corpus; every rich verb — --for, --metrics,
 # --exemplar — pays it once per invocation, main.cpp:5392/5404 call it via gitmine::gitCoChangeAndChurn).
 #
-# DECIDED key (PLAN_audit5Public2026.md "Y2 churn-memo key"): (realpath(root), HEAD sha, window-months,
+# DECIDED key ( "Y2 churn-memo key"): (realpath(root), HEAD sha, window-months,
 # gitWindowRefSha) — the qchurn family (quality.h). Committed-history-only: the RAW (epoch, path) stream
 # is cached, but it is resolved against the CALLER's live IngestResult fresh on every call, so dirty
 # working-tree state is never folded into the memo (main.cpp's two callers pass no uncommitted signal in).
@@ -38,7 +38,7 @@ QTMP="$TMP/qtmp"; mkdir -p "$QTMP"   # our private TMPDIR — cacheDirLadder() l
 
 echo "qchurncheck: BIN=$BIN"
 
-# AUDIT5 Y4: shard-aware lookup — a blob may be flat under $QTMP or under $QTMP/<xx>/ (2-hex shard).
+# Y4: shard-aware lookup — a blob may be flat under $QTMP or under $QTMP/<xx>/ (2-hex shard).
 qchurnfiles(){ find "$QTMP" -maxdepth 2 -type f -name 'ripwire-qchurn-*.bin' 2>/dev/null; }
 nqchurn(){ qchurnfiles | wc -l | tr -d ' '; }
 # name_only_count TRACEFILE — how many git child processes in this run's trace invoked --name-only (the

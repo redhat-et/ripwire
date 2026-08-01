@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nulbytecheck.sh — F3 tripwire: no tracked TEXT file may contain an embedded NUL byte.
 #
-# THE BUG THIS GATE PINS (PLAN_outputAudit4_2026-07-30.md, wave-1 verifier F3). Commit 175d5fe committed a
+# THE BUG THIS GATE PINS (wave-1 verifier F3). Commit 175d5fe committed a
 # literal 0x00 byte into src/mcp.h at byte offset 18573 — inside a COMMENT that was talking about NUL payloads.
 # One prose byte, and the largest MCP source in the tree became BINARY to the search tools this project's whole
 # working method is built on:

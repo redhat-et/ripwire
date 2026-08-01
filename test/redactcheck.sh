@@ -96,7 +96,7 @@ for s in "${TRUE_POSITIVES[@]}"; do
 done
 [ "$allback" -eq 1 ] && ok "--no-redact restores every original verbatim" || no "--no-redact did not restore all originals"
 grep -q 'REDACTED:' "$TMP/nr.xml" && no "--no-redact still emitted REDACTED markers" || ok "--no-redact emits no redaction markers"
-# L5 (AUDIT5): --pack-top-n now prints its own (unrelated) deprecation line — filter it out before
+# L5: --pack-top-n now prints its own (unrelated) deprecation line — filter it out before
 # asserting redaction-summary silence, so this check stays about redaction, not the deprecation notice.
 grep -v -- '--pack-top-n is deprecated' "$TMP/nr.err" >"$TMP/nr.err.noise-filtered"
 [ -s "$TMP/nr.err.noise-filtered" ] && { no "--no-redact printed a stderr summary (should be silent)"; cat "$TMP/nr.err.noise-filtered"; } || ok "--no-redact prints no stderr summary"

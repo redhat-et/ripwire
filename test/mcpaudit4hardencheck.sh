@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mcpaudit4hardencheck.sh — gates for AUDIT4_fable2026.md §B findings A4-F6 / A4-F7 / A4-F14 / A4-F26,
+# mcpaudit4hardencheck.sh — gates for  §B findings A4-F6 / A4-F7 / A4-F14 / A4-F26,
 # all fixed in src/mcp.h (MCP server, untrusted-agent-input surface).
 #
 #  A4-F6  — findInt() digit accumulation had no overflow guard: `v = v*10 + d` on a 20+ digit start_line

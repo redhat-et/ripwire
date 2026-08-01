@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # portablecachecheck.sh — T5 gate: the --cache=FILE artifact is COMMITTABLE/PORTABLE across checkout paths.
 #
-# The bug (same class as S2's baseline-portability fix, RESEARCH_agentQuality2026 §2f DeusData): the
+# The bug (same class as S2's baseline-portability fix DeusData): the
 # incremental cache's file-list keys used to be spelled `<ingest-root-ARG>/<relative>` VERBATIM — a cache
 # built via `ripwire /home/a/repo --cache=repo.ripwirecache` embedded `/home/a/repo/src/x.cpp`, so consuming
 # that SAME cache file at `/home/b/repo` (a different checkout/CI path) missed on every lookup (path strings

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # tokenbudgetcheck.sh — T1 gate: the calibrated est_tokens estimate + the --max-tokens headroom fit,
-# PLUS (AUDIT3 §D#7 / §E item 16) the --token-budget=N repomix-style CI exit-code gate.
+# PLUS ( §D#7 / §E item 16) the --token-budget=N repomix-style CI exit-code gate.
 #
-# WHAT T1 CHANGED (RESEARCH_agentQuality2026 §2f): est_tokens used a single chars/4 divisor over a
+# WHAT T1 CHANGED: est_tokens used a single chars/4 divisor over a
 # name-length PROXY — MEASURED ~50-80% under the real token count (the map is majority terse markup, not
 # raw code, and tokenizes at ~2.4-2.6 B/tok, NOT 4). T1 replaces it with a per-language constexpr
 # calibration table (src/serialize.h kTokenCalib) over an accurate envelope+content byte model. We do NOT
@@ -118,7 +118,7 @@ else
     printf '  SKIP  tiktoken MAPE report (tiktoken not installed)\n'
 fi
 
-# ── AUDIT3 §D#7: --token-budget=N — the repomix-style CI EXIT-CODE gate (distinct from --max-tokens,
+# ──  §D#7: --token-budget=N — the repomix-style CI EXIT-CODE gate (distinct from --max-tokens,
 # which SHAPES a map to fit; this one ASSERTS the result and fails). Gates on the SAME est_tokens the
 # header already reports — never a second counter (checked explicitly in #9 below). ──────────────────
 
@@ -158,7 +158,7 @@ grep -q '<s t="' "$TMP_TB_B" \
     || ok "--token-budget=1: stdout carries no map row content"
 
 # ── #8c (§P6.8): a MID-size budget (over the generous run, under the full map) also withholds — not just
-#    the degenerate budget=1 case — and reproduces the exact repro from PLAN_outputAudit_2026-07-28.md §P6.8 ──
+# the degenerate budget=1 case — and reproduces the exact repro from  ──
 "$BIN" . --token-budget=100 --no-cache >"$TMP_TB_DIR/mid.xml" 2>"$TMP_TB_DIR/mid.err"
 rc_mid=$?
 MID_BYTES="$( wc -c < "$TMP_TB_DIR/mid.xml" | tr -d ' ' )"
@@ -204,7 +204,7 @@ rc_bad=$?
     && ok "--token-budget=abc: clean parse-error exit 1" \
     || no "--token-budget=abc: expected exit 1, got $rc_bad"
 
-# ── D10 (AUDIT5): --for/--pack-task/--from-trace SHAPE instead of gate (always exit 0) — only the --for
+# ── D10: --for/--pack-task/--from-trace SHAPE instead of gate (always exit 0) — only the --for
 # carve-out was documented before this round, and the shaped bundle carried no est_tokens at all, so a
 # caller couldn't tell whether the shape actually fit. Checks #14-#16 close that gap for --for. ─────────
 
