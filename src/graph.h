@@ -1,7 +1,7 @@
 #pragma once
 
 // graph.h — resolve references → graph, build the in-edge CSR for PageRank, and the
-// resolved out-edges for serialization (SPEC §2a/§2b). Ranking lives in pagerank.cpp.
+// resolved out-edges for serialization. Ranking lives in pagerank.cpp.
 
 #include "model.h"
 #include "filter.h"             // isTestPath — for the Q2 tested= post-pass
@@ -9,7 +9,7 @@
                                 // restrictDependencyHealth() needs (owns the extension table, kept in sync
                                 // by hand with ingest.cpp's kLangTable per its own header comment)
 #include "sparseCsr.h"          // first-party infra math (src/infra/)
-#include "csrverify.h"          // SPEC §8 structural gate, VERIFY'd after every production CSR build
+#include "csrverify.h"          // structural gate, VERIFY'd after every production CSR build
 #include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
 #include "svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
 #include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before §2a fallback
@@ -58,7 +58,7 @@ struct Graph
                                             // mis-classified / macro-generated def lands here and would otherwise be
                                             // SILENTLY dropped as "external" (measured small+precise, though on a
                                             // polyglot corpus partly coincidental same-name overlaps — never claimed
-                                            // as a definite miss; see DESIGN_resolutionCompleteness.md §A.4).
+                                            // as a definite miss).
                                             // Surfaced as the global `unresolved=N` gauge next
                                             // to `ambiguous=N`. Deliberately CONSERVATIVE — a call to a name with NO
                                             // in-repo def at all (`it == byName.end()`, dominated by genuine
@@ -108,7 +108,7 @@ inline bool langCompatible( Lang a, Lang b ) noexcept
     return aCish && bCish;
 }
 
-// ---- : aider-style name-quality prior weights ----------------------------------------------------
+// ---- aider-style name-quality prior weights --------------------------------------------------------
 // Aider's battle-tuned repomap biases its PageRank *personalization* vector (never the transition matrix)
 // by cheap name-quality signals: a name defined all over the repo is generic and gets damped; a private-
 // convention (`_`-prefixed) name gets damped; a long, multi-word, specific identifier gets boosted. We
@@ -191,8 +191,8 @@ inline std::string decodeJniName( std::string_view mangled )
     return out;
 }
 
-// B6.3 HTTP-route path/method matching — CONSERVATIVE by construction (DESIGN_multiRoot.md's resolver-
-// honesty posture, applied to routes): a DEF's template segment ({id} / :id / <int:id>) matches ANY USE
+// B6.3 HTTP-route path/method matching — CONSERVATIVE by construction (the same resolver-
+// honesty posture applied elsewhere, applied here to routes): a DEF's template segment ({id} / :id / <int:id>) matches ANY USE
 // segment at that position, but the segment COUNT must match exactly and every non-template segment must
 // match byte-for-byte — no partial-prefix / fuzzy matching, so an ambiguous shape never silently "mostly
 // matches". Trailing slashes are normalized away by the split (a run of empty segments collapses).
@@ -266,7 +266,7 @@ inline std::string_view rustFileModuleOf( std::string_view path ) noexcept
     return ( up == std::string_view::npos ) ? dir : dir.substr( up + 1 );
 }
 
-// H4 W3 — the RUST qualified-call scope guard (PLAN_h4QualifiedCalls_2026-07-30.md §3.2).
+// H4 W3 — the RUST qualified-call scope guard.
 //
 // A Rust call written with an explicit `Scope::` path can ONLY mean a member of that scope: the language has
 // no ADL and no using-directive, so `Vec::new()` can never denote `Widget::new()`. When the canonical tier
@@ -367,7 +367,7 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<
 // swallowed. It can never invent an edge: `cand` at that point holds only canonByName's `qualifier::name`
 // definitions.
 //
-// Resolve each reference by the SPEC §2a ladder (same-file > same-dir > global, language-compatible;
+// Resolve each reference by a fixed ladder (same-file > same-dir > global, language-compatible;
 // split weight 1/k on ambiguity; drop unresolved/self/file-scope), dedup+sum, cap at 8.
 //
 // SCIP overlay (optional, `scip`): where the index covers a call-site (from, calleeName), its
@@ -404,7 +404,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         g.bindLabel[ s.id ] = std::move( readable );
     }
 
-    // ── Multi-root workspace (DESIGN_multiRoot.md §3): name-based resolution NEVER crosses roots. Every
+    // ── Multi-root workspace: name-based resolution NEVER crosses roots. Every
     // name-tier candidate below (qualified canonical, Rule 1/2, the §2a byName fill, inheritance, doc
     // mentions, HAS-A) is filtered to the REFERENCE's own root; cross-root edges enter ONLY via evidence
     // (the path-resolved include set feeding Rule 3, and the FFI binding tables — both left unfiltered by
@@ -524,8 +524,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // be path-resolved contributes NOTHING (it is simply absent) → it can never CAUSE a narrow → the
     // resolver degrades to the §2a ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
     // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
-    // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold). See
-    // DESIGN_pathPreciseInclude.md §3.
+    // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
     std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
@@ -825,7 +824,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::uint32_t rdir = fileDir[ r.fileId ];
                 for( NodeId c : cand ) if( fileDir[ ing.symbols[c].fileId ] == rdir ) tier.push_back( c );
             }
-            if( tier.empty() )                                     // tier 3: a UNIQUE global, else DROP (SPEC §2a)
+            if( tier.empty() )                                     // tier 3: a UNIQUE global, else DROP
             {
                 // A Rule-1 narrowed call is already pinned to ONE scope (callerScope::name) — it is resolved, not a
                 // global guess, so it must produce an edge even when the class's method lives cross-dir and is
@@ -901,7 +900,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // variadic / default-argument / implicit-self candidate (arityExact==0) is NEVER dropped, nor is
             // any candidate when the call-site count is unknown. Degrade rather than empty the tier.
             //
-            // AUDIT5 F1 (decided, PLAN_audit5Public2026.md X3): only `argCount > params` is provably wrong.
+            // Decided: only `argCount > params` is provably wrong.
             // arityExact is computed from the DEFINITION node only (cc_paramArityExact); a C++ default argument
             // written ONLY on a separate header PROTOTYPE (`void f( int x = 5 );`) is invisible there, so an
             // out-of-line def whose default lives in the decl reads as a fixed arity==params. An
@@ -1177,7 +1176,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // handler is resolved by NAME, restricted to the DEF's OWN FILE (a route decorator/registration always
     // sits beside its handler in every framework this feature detects — no cross-file guess). Cross-ROOT
     // matching between a USE and a DEF is INTENTIONAL — the (method,path) match itself IS the explicit
-    // evidence DESIGN_multiRoot.md §3 requires, so this never applies the sameRoot() guard the call/HAS-A/
+    // evidence the multi-root design requires, so this never applies the sameRoot() guard the call/HAS-A/
     // extends resolvers above use. Ambiguous USEs (matching ≥2 DISTINCT resolved handlers) and unresolved
     // USEs (matching zero) synthesize NO edge — never a guess (mirrors the amb=/unresolved= honesty posture).
     {
@@ -1253,7 +1252,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     return g;
 }
 
-// : bias a teleport/personalization prior by the per-symbol name-quality weights, then renormalize to
+// Bias a teleport/personalization prior by the per-symbol name-quality weights, then renormalize to
 // Σ=1 (PageRank REQUIRES Σp=1 — it seeds r=p and the dangling/teleport term is (α·D+(1−α))·p[i]). This is
 // the ONE place the aider-style weights meet a rank mode's prior, so EVERY teleport-based rank (the default
 // uniform prior, churn, --map-diff, the eval seed) becomes a weighted prior with no per-call-site change.
@@ -1274,7 +1273,7 @@ inline std::vector<float> biasPrior( const Graph& g, const std::vector<float>& p
 }
 
 // PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased
-// () here so all rank modes share one weighting seam; the transition matrix (edges) is untouched.
+// through biasPrior() so all rank modes share one weighting seam; the transition matrix (edges) is untouched.
 inline std::vector<float> rankGraphTeleport( const Graph& g, const std::vector<float>& p, float alpha = 0.85f )
 {
     PROFILE_SCOPE_DESCRIBE( "rankGraph: PageRank (power iteration)" );
@@ -1505,11 +1504,11 @@ inline std::vector<float> rrfFuse( std::initializer_list<const std::vector<float
     return fused;
 }
 
-// ---- LARGER-style lexically-anchored PPR (--for=TASK --anchor; AUDIT3 §D steal #1) --------------------
+// ---- LARGER-style lexically-anchored PPR (--for=TASK --anchor) -----------------------------------------
 // The published --eval finding stands: IMPORTANCE-flavoured fusion hurts relatedness (RRF of global
 // PageRank into lexical collapsed recall@5 from 40% to 7.7%). This is a DIFFERENT fusion: the PPR
 // personalization vector is seeded FROM the lexical anchor hits (relatedness-seeded, not importance-
-// seeded — SPEC §3: bias enters through `p`), so the random walk expands the LEXICAL neighbourhood to
+// seeded — bias enters through `p`), so the random walk expands the LEXICAL neighbourhood to
 // structurally-adjacent symbols the query's words never touch (a caller's helper, an interface's impl).
 // And the blend is SCORE-space, not RANK-space: RRF hands PPR's near-zero tail a large reciprocal-rank
 // weight (how the failed fusion drowned lexical); max-normalized score blending lets the graph term
@@ -1653,7 +1652,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
 // clearly side-effecting C/C++ intrinsics (I/O, allocation, nondeterminism, process control). A
 // function referencing one of these is impure at the source. Conservative-but-focused (clear cases
 // only) so we DEMOTE, not over-demote — the goal is to strip false "pure" flags off const methods.
-// A4-P8(2): O(1) avg hash-set lookup (was ~38 linear strcmps/Call-ref) — HashMap<> pattern (SPEC
+// A4-P8(2): O(1) avg hash-set lookup (was ~38 linear strcmps/Call-ref) — HashMap<> pattern (house
 // container rule), keyed by string_view so the std::string caller pays no extra allocation (implicit
 // std::string→string_view conversion).
 inline bool isImpureName( const std::string& n ) noexcept
@@ -1954,7 +1953,7 @@ inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std:
 // CCD = Σ, ACD = CCD/N, NCCD = CCD / (balanced-binary-tree CCD). NCCD < 1 = horizontal (flat/good),
 // > 1 = vertical, > 2 ≈ contains cycles. The single number for whole-codebase dependency health.
 // EVIDENCE NOTE: mechanistically plausible for build cost, but no independent outcome-based study
-// validates NCCD as a defect/maintenance predictor — design heuristic, not proof (RESEARCH_agentQuality2026 §1a).
+// validates NCCD as a defect/maintenance predictor — design heuristic, not proof.
 struct DepHealth { std::vector<std::uint32_t> transitive; std::uint64_t ccd = 0; double acd = 0, nccd = 0; };
 inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>& adj )
 {
@@ -2008,7 +2007,7 @@ inline RestrictedDepHealth restrictDependencyHealth( const IngestResult& ing, co
     return r;
 }
 
-// --map-diff teleport: β of the mass on symbols in changed files, (1−β) on the rest (SPEC §3).
+// --map-diff teleport: β of the mass on symbols in changed files, (1−β) on the rest.
 inline std::vector<float> diffTeleport( const IngestResult& ing, const std::vector<char>& fileChanged, float beta = 0.7f )
 {
     const std::size_t N = ing.symbols.size();
@@ -2110,7 +2109,7 @@ inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>
 }
 
 // ---- minimal connecting subgraph (--connect=A,B,C): metric-closure 2-approx Steiner ------------------------
-// DESIGN_connectSubgraph.md §2/§3, implemented verbatim. "My task touches these N symbols — how do they
+// Metric-closure 2-approx Steiner tree, implemented verbatim. "My task touches these N symbols — how do they
 // RELATE, and which intermediaries matter?" Search is UNDIRECTED (the shared-caller join `main → {A,B}` only
 // exists on the undirected view — the whole point vs the directed --path), but every reported edge keeps its
 // TRUE caller→callee direction from the CSR: direction is data on the edge, not a constraint on the search.

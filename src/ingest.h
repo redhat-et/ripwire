@@ -4,13 +4,13 @@
 //
 // ingest( rootDir ):
 //   1. crawl rootDir for candidate source paths (skip .git/, oversized, binary, generated);
-//   2. SORT paths lexicographically (byte order) — load-bearing determinism (SPEC §1);
+//   2. SORT paths lexicographically (byte order) — load-bearing determinism;
 //   3. parse each by extension via a constexpr extension -> {ts_language, tags.scm} table;
 //   4. run ONE ts_query per file, map @definition.* -> Symbol, @reference.* -> Reference;
 //   5. assign Symbol ids in (file, line, name) order so the whole pipeline is reproducible.
 //
 // Returns rw::IngestResult exactly as defined in model.h (the GRAPH/RANK/SERIALIZE contract).
-// Single-threaded for v1 (SPEC: "Single-threaded is fine for v1"); tree-sitter parsers are
+// Single-threaded for v1 ("single-threaded is fine for v1"); tree-sitter parsers are
 // not thread-safe, so multithreading would need one parser per worker (deferred).
 
 #include "model.h"
@@ -21,7 +21,7 @@
 namespace rw
 {
 
-// The crawl's per-file byte ceiling (SPEC §1). A text file larger than this is skipped: at this size
+// The crawl's per-file byte ceiling. A text file larger than this is skipped: at this size
 // it is overwhelmingly generated/vendored/data (bundles, generated parsers, minified blobs, data
 // tables) — noise for an architecture map, and it would dominate the cold-parse budget. The specific
 // value also bounds a WORST CASE: tree-sitter's parse is quadratic on pathological comment-dense input
@@ -29,7 +29,7 @@ namespace rw
 // per run via --max-file-size (CLI) for repos with genuinely-large hand-authored source.
 constexpr std::size_t kDefaultMaxFileBytes = 4u * 1024u * 1024u;   // 4 MB (was 1 MB pre-2026-07)
 
-// The JSON lane's OWN crawl ceiling (AUDIT5, found live by bench/multiswe): .json is indexed for CONFIG
+// The JSON lane's OWN crawl ceiling (found live by bench/multiswe): .json is indexed for CONFIG
 // keys, and real config files (package.json, tsconfig, angular.json…) are tens of KB at most — while
 // 200KB-4MB pretty-printed .json is essentially always DATA (test corpora, benchmark datasets, exports)
 // that slips under both the 4MB skip and the minified-line heuristic and explodes into tens of thousands
@@ -55,7 +55,7 @@ constexpr std::string_view kCrawlSkipDirs[] = {
     "asan", "build_prof", "CMakeFiles",
     // Generated output captures (docs/captures/ here): a doc that quotes every verb's output out-scores
     // the source for almost any query about the tool — 77% of --recall on this repo was capture text
-    // (PLAN_outputAudit_2026-07-28.md §P2, owner decision 1). A "captures" dir is generated evidence,
+    // (owner decision). A "captures" dir is generated evidence,
     // not a design document; skipping beats a ranking de-prioritization no held-out eval can measure.
     "captures" };
 
@@ -78,7 +78,7 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
 // captureValueUses: include read/write use-sites for --uses / metrics-quality lenses. Default true
 // preserves the complete index for library/MCP callers; the CLI default map may pass false because
 // PageRank consumes calls/imports/inheritance/composition only.
-// excludeLabel (multi-root workspaces ONLY, DESIGN_multiRoot.md A12): when non-empty, each --exclude
+// excludeLabel (multi-root workspaces ONLY, A12): when non-empty, each --exclude
 // substring is matched against the LABELED spelling `<excludeLabel>/<root-relative-path>` instead of the
 // crawled path — so ONE excludes list applies uniformly across roots and `--exclude=lib1/` scopes to the
 // root labeled lib1. Empty (the default, every single-root call) ⇒ behavior byte-identical to today.
