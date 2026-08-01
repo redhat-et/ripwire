@@ -160,7 +160,10 @@ jobs:
     env:
       # Darwin's arm64 runtime rejects the standalone leak sanitizer at startup (CMakeLists.txt's own
       # comment on this, `ripwire_asan_fixture`); Linux gets full leak detection.
-      ASAN_OPTIONS: ${{ runner.os == 'macOS' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1' }}
+      # matrix.os, not runner.os: the runner context does not exist at job-level env — GitHub's
+      # parser rejects the whole workflow (found by the first real Actions run; local YAML lint
+      # cannot see it). Step-level `if: runner.os` below is legal and stays.
+      ASAN_OPTIONS: ${{ matrix.os == 'macos-14' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1' }}
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       LSAN_OPTIONS: suppressions=${{ github.workspace }}/lsan_suppressions.txt
     steps:
