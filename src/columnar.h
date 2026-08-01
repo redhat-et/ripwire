@@ -1,6 +1,6 @@
 #pragma once
 
-// columnar.h — RESEARCH_outputEconomy lever 1: an OPT-IN columnar re-serialization for the FLAT list verbs
+// columnar.h — an OPT-IN columnar re-serialization for the FLAT list verbs
 // (--callers / --callees / --uses / --impact). §A5c: this header and --help both used to name the
 // --pr-context changed-symbols rows too; prcontext.h has never contained a line of columnar code, so the
 // claim was struck from both rather than implemented, and cli.h's guard now refuses the combination.

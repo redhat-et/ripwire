@@ -1,6 +1,6 @@
 #pragma once
 
-// arch.h — architectural fitness functions (layering rules) for --arch (RESEARCH_codeIntelligence §2).
+// arch.h — architectural fitness functions (layering rules) for --arch.
 // The rules are the USER's, declared in a small text file; ripwire imposes no architecture of its own —
 // it just enforces the one you declare against the #include graph and reports the crossing edges, with a
 // non-zero exit code for CI. Instrument, not judge.
@@ -517,7 +517,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 //
 // EVIDENCE NOTE: I/A/D ("main sequence" distance) is widely implemented (NDepend, Sonargraph, here) but
 // no independent outcome-based study validates that D predicts defects or maintenance cost — a design
-// heuristic, not proof (RESEARCH_agentQuality2026 §1a). Ca/Ce (raw coupling counts) sit on firmer ground:
+// heuristic, not proof. Ca/Ce (raw coupling counts) sit on firmer ground:
 // coupling itself IS validated; it's the derived I/A/D distance metric that lacks independent validation.
 //
 // APPROXIMATION DISCLAIMER (load-bearing — do not over-claim): a "module" here is a file's immediate
@@ -555,7 +555,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 //   A + I <  kZoneBalancePoint (1.0)  → "pain"    (low-I low-A corner: concrete AND stable → rigid)
 //   A + I >= kZoneBalancePoint (1.0)  → "useless" (high-I high-A corner: abstract AND nothing depends on it)
 // Tie-break: D exactly == kZoneDistanceThreshold is NOT "past" it (strict '>') → falls to "ok", deterministic.
-// FOLKLORE (not independently validated — RESEARCH_agentQuality2026 §1a): these corners are Martin's design
+// FOLKLORE (not independently validated): these corners are Martin's design
 // heuristic, descriptive only; ripwire does not claim they predict defects or maintenance cost.
 inline constexpr double kZoneDistanceThreshold = 0.5;   // |A+I-1| past this → classify into pain/useless
 inline constexpr double kZoneBalancePoint      = 1.0;   // the A+I split line between the pain and useless corners

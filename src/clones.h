@@ -1,7 +1,7 @@
 #pragma once
 
 // clones.h — token-normalized duplicate detection (--clones), function/method level. The CCFinder/PMD-CPD
-// idea (RESEARCH_codeIntelligence §3): normalize each body to a token stream (identifiers → $I, literals →
+// idea: normalize each body to a token stream (identifiers → $I, literals →
 // $N/$S, keywords + operators + punctuation kept), then group functions with identical normalized streams.
 // Catches Type-1 (exact) and Type-2 (renamed-variable) clones. Agent value: "this already exists — reuse
 // it, don't reimplement" (and "if you fix this, fix its twins"). Type-3 (gapped) clones are a later upgrade.
