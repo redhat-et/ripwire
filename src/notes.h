@@ -1,6 +1,6 @@
 #pragma once
 
-// notes.h — L3 repo field notes (PLAN_agentLeverage2026 §L3): a committed, human-reviewable write-side
+// notes.h — L3 repo field notes: a committed, human-reviewable write-side
 // MEMORY keyed to symbols/files, surfaced at retrieval. `--recall` reads docs; this is the missing write
 // path keyed to a symbol. The most expensive thing an agent rebuilds across sessions is gotchas (this
 // round pinned four), not structure — a note pins one to the symbol it belongs to.

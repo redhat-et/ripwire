@@ -2,7 +2,7 @@
 
 // namesplit.h — the ONE balanced-trailing-group scanner for qualified/templated NAME strings.
 //
-// WHY THIS EXISTS (H4, PLAN_h4QualifiedCalls_2026-07-30.md §Execution / W1 verdict). Two unrelated surfaces
+// WHY THIS EXISTS (H4, W1 verdict). Two unrelated surfaces
 // need to strip a trailing balanced `<…>` (or `(…)`) group off a name spelling:
 //   * tracelocus.h — a demangled stack frame (`make<Foo,Bar>(int) const` → `make`) before the symbol lookup.
 //   * ingest.cpp   — the C++ qualified-call re-split, where the scope half of `numeric_limits<std::size_t>::max`

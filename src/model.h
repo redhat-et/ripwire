@@ -31,7 +31,7 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
-// symbol kind → the terse XML attribute (SPEC §4: t="fn|method|cls|struct|iface|var|sec").
+// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec").
 enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Other };
 
 inline const char* symTag( SymKind k ) noexcept
@@ -125,7 +125,7 @@ struct Symbol
                                        // args, and NOT an implicit-`self` method) → a same-name candidate whose
                                        // params ≠ the call-site arg count is provably wrong and may be dropped.
                                        // 0 (default, the SAFE state) ⇒ never arity-filter this def. See ingest.cpp.
-    std::string   name;                // final identifier segment (see SPEC §2a)
+    std::string   name;                // final identifier segment
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name resolution; "" if none
 };
 
@@ -234,7 +234,7 @@ struct ComposeEdge
 // BindingAlias above: names/paths are recorded here, resolved to NodeIds later in buildGraph (graph.h),
 // which matches USE→DEF by (method, path) and stores the synthesized result OUTSIDE the call graph
 // (Graph::routeEdges) so PageRank and the default map are byte-identical on any route-free corpus.
-// Cross-root matching is INTENTIONAL (DESIGN_multiRoot.md §3): a (method,path) match between a client
+// Cross-root matching is INTENTIONAL: a (method,path) match between a client
 // root and a server root IS explicit evidence, unlike a bare same-name guess.
 enum class HttpMethod : std::uint8_t { Get, Post, Put, Patch, Delete, Unknown };
 
@@ -248,7 +248,7 @@ inline const char* httpMethodTag( HttpMethod m ) noexcept
     return idx < ( sizeof( kHttpMethodTagTable ) / sizeof( kHttpMethodTagTable[0] ) ) ? kHttpMethodTagTable[ idx ] : "";
 }
 
-// declarative name→method table (SPEC house style: table over switch), shared by every detector: Python
+// declarative name→method table (house style: table over switch), shared by every detector: Python
 // decorator attribute names (`app.get`), JS/TS registrar + axios methods (`app.post`/`axios.post`), and
 // Python `requests.VERB`. httpMethodFromName (graph-independent, pure) lives beside it.
 inline constexpr struct { const char* name; HttpMethod method; } kHttpMethodTable[] = {
@@ -340,7 +340,7 @@ struct IngestResult
     std::vector<std::uint32_t> lexDocBodyDl;         // size symbols.size() — weighted doc+body token count
     std::vector<std::uint64_t> lexFileSig;           // size files.size()×kLexFileSigWords — B0.1 file Bloom
 
-    // ── Multi-root workspace identity (DESIGN_multiRoot.md) — ALL EMPTY on a single-root run (the
+    // ── Multi-root workspace identity — ALL EMPTY on a single-root run (the
     //    byte-identity quarantine: every consumer guards on emptiness). Populated ONLY by
     //    workspace.h::mergeWorkspaceIngests when 2+ roots survive dedupe. When populated, ing.files hold
     //    the LABELED spelling `<label>/<root-relative-path>` (the identity every surface emits) and
@@ -352,7 +352,7 @@ struct IngestResult
     std::vector<std::string>   rootReals;    // root index → realpath (cross-root include probes, git -C)
 };
 
-// multi-root workspace cap (DESIGN_multiRoot.md): a sane bound on N crawl roots — an agent joining a
+// multi-root workspace cap: a sane bound on N crawl roots — an agent joining a
 // handful of checkouts is the use case; hundreds of roots is a mis-glued path list, refused loudly.
 inline constexpr std::size_t kMaxWorkspaceRoots = 16;
 

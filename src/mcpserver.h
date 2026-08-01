@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpserver.h — the OPTIONAL remote MCP transport (DESIGN_teamIndex.md §2): Streamable HTTP per the 2026
+// mcpserver.h — the OPTIONAL remote MCP transport: Streamable HTTP per the 2026
 // MCP spec, plain request/response only (SSE is CUT — §2b). A single hand-rolled HTTP/1.1 reader over
 // POSIX sockets keeps G3 (zero build deps) intact: we parse ONLY what we need (request line, Content-Length,
 // Authorization, Content-Type) and reject the rest politely. The JSON-RPC layer is reused VERBATIM — every

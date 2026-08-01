@@ -1,7 +1,6 @@
 #pragma once
 
-// partition.h — `--pack-task="TASK" --partition=N`, the FAN-OUT form of the task bundle
-// (IDEAS_fieldNotes_2026-07-24.md §6).
+// partition.h — `--pack-task="TASK" --partition=N`, the FAN-OUT form of the task bundle.
 // Evidence: four parallel audit agents each re-derived the SAME orientation context for one shared task.
 // Four agents × one `--pack-task` each = four near-identical bundles: the same top symbols, the same bodies,
 // the same tests — four times the tokens for one map. What the orchestrator actually wanted was ONE map cut

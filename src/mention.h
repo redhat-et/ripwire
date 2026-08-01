@@ -1,6 +1,6 @@
 #pragma once
 
-// mention.h — B8 (query-mention anchoring, PLAN_researchImprove2026 + bench/headtohead/REPORT.md).
+// mention.h — B8 (query-mention anchoring; see bench/headtohead/REPORT.md).
 //
 // The measured #1 loss bucket in the 4-arm competitor head-to-head: when the task text LITERALLY NAMES
 // the place to look — a path (`sklearn/ensemble/_iforest.py`, even inside a GitHub URL), a dotted module
@@ -29,7 +29,7 @@
 #include <vector>
 
 #include "model.h"
-#include "graph.h"   // AUDIT5 R5: applyDocMentionBoost reads g.mentions (the doc->code backtick edges the
+#include "graph.h"   // R5: applyDocMentionBoost reads g.mentions (the doc->code backtick edges the
                       // --mentions=SYM verb already exposes) — same header gitmine.h already pulls in for
                       // an analogous "read one more Graph field" reason.
 
@@ -273,7 +273,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     return true;
 }
 
-// AUDIT5 R5 — doc-mention surfacing: reuse g.mentions (the SAME doc<->code backtick edges the `--mentions=SYM`
+// R5 — doc-mention surfacing: reuse g.mentions (the SAME doc<->code backtick edges the `--mentions=SYM`
 // verb / mentionsJson MCP verb already expose; built OUT of the call graph in buildGraph so a doc naming a
 // symbol never inflates that SYMBOL's own PageRank/blast-radius — that isolation is untouched here) as a
 // --for ranking signal. Where B8 (applyMentionBoost, above) lifts a target the TASK TEXT literally names, this
