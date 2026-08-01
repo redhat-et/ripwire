@@ -164,7 +164,7 @@ inline SkillSet discoverSkills( const std::string& root )
 enum class Prov : std::uint8_t { Router, Desc, Judged, Neg };
 inline constexpr const char* kProvName[] = { "router", "desc", "judged", "neg" };
 
-// split (added round r26, PLAN §P4): test = the FROZEN held-out benchmark (never tune a skill
+// split (added round r26): test = the FROZEN held-out benchmark (never tune a skill
 // description against these SAME rows and re-measure — train-on-test with extra steps); dev = rows
 // meant for iterating on a description change, reported separately so the two numbers can never be
 // silently conflated. A row with no 4th column defaults to Test (back-compat for ad-hoc TSVs other

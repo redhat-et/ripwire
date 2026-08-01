@@ -139,7 +139,7 @@ if [ "$rc_af" -eq 0 ] && diff -q "$TMP/arch_fix.xml" "$TMP/a_cold.xml" >/dev/nul
 else
     no "(b1) foreign-arch blob did not self-heal (exit $rc_af)"; cat "$TMP/arch_fix.err"; diff "$TMP/a_cold.xml" "$TMP/arch_fix.xml" | head -10
 fi
-# per DESIGN §1.2 the arch guard rejects "exactly like a version mismatch" — SILENTLY (no DEGRADED alert;
+# the arch guard rejects "exactly like a version mismatch" — SILENTLY (no DEGRADED alert;
 # the blob is a speed cache, not a correctness input). Confirm no checksum-corruption alert fired here.
 if grep -q 'checksum mismatch' "$TMP/arch_fix.err" 2>/dev/null; then
     no "(b1) arch guard emitted a CHECKSUM alert — the recomputed trailer should have passed; guard not isolated"

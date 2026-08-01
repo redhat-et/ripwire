@@ -5,7 +5,7 @@
 // --exemplar returns the repo's BEST-IN-CLASS instance of the KIND the agent is about to write, as an
 // imitation target ("copy its shape, not its text"). The pick is by ROLE — a DETERMINISTIC composite over
 // tested / fan-in / cognitive-complexity — NEVER by textual similarity to the query (similar-snippet
-// retrieval measurably hurts; RESEARCH §2d). This header holds ONLY the selection (kind resolution + winner
+// retrieval measurably hurts). This header holds ONLY the selection (kind resolution + winner
 // choice); emission (the <exemplar> element + body) stays at the call sites, which differ (stdout vs memstream).
 //
 // A3-F5 CONTRACT REPAIR — the three invariants this selector now guarantees, so the verb cannot teach a

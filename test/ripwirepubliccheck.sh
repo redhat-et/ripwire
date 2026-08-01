@@ -382,11 +382,14 @@ fi
 #                                 checked and carry exactly one internal-pattern name each (SPEC.md);
 #                                 rewriting patch text would falsify the historical record, and the
 #                                 patch is already unappliable in this tree regardless (it patches a
-#                                 file — SPEC.md — that was never exported here).
+#                                 file — SPEC.md — that was never exported here). The SAME patch also
+#                                 carries the BARE "SPEC §" shape (no ".md") that the second pattern
+#                                 below catches, for the same never-rewrite-history reason.
 ARM8_EXEMPT_PAIRS='test/docmentioncheck.sh|DESIGN_widgetTotals.md
 test/historyoraclecheck.sh|PLAN_relief.md
 bench/locbench/results/r1_anchorhop/r1_candidate_implementation.patch|SPEC.md
-bench/locbench/results/r1cpp_anchorhop/r1cpp_candidate_implementation.patch|SPEC.md'
+bench/locbench/results/r1cpp_anchorhop/r1cpp_candidate_implementation.patch|SPEC.md
+bench/locbench/results/r1cpp_anchorhop/r1cpp_candidate_implementation.patch|SPEC §'
 # A QUOTED heredoc delimiter ('PY') is deliberate: an unquoted one lets the shell expand `$vars` AND
 # run backtick/`$()` command substitution over the ENTIRE body, including python source comments —
 # this file's own "mirrors the main sweep's `grep -I`" comment below would otherwise get executed as
@@ -406,7 +409,16 @@ for line in sys.argv[2].splitlines():
         continue
     path, name = line.split('|', 1)
     exempt_pairs.add((path, name))
-pat = re.compile(r'\b(?:PLAN_|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|SPEC)[A-Za-z0-9_.-]*\.md\b')
+# (1) NAMED-FILE shape: a citation of a specific culled .md filename (PLAN_x.md, SPEC.md, ...).
+pat_named = re.compile(r'\b(?:PLAN_|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|SPEC)[A-Za-z0-9_.-]*\.md\b')
+# (2) BARE-NAME shape: no ".md" at all, e.g. "RESEARCH §2d", "PLAN §Execution", "SPEC §6/§8" — the 19
+# residual dangling citations V3 found (pattern_named requires the ".md" suffix, so it silently missed
+# these). Requiring the DOC WORD immediately before "§" is what keeps this narrow: a bare round label
+# like "§P8"/"§A6a"/"§B12" with NO doc name in front is NOT internal-pattern-shaped and stays exempt by
+# construction (nothing in this pattern can match it), and "field-notes" is included because it is the
+# other never-shipped internal doc name this tree used to cite the same way (see git history: the sibling
+# fix that cleared the first wave of these named it explicitly).
+pat_bare = re.compile(r'\b(?:PLAN|SPEC|RESEARCH|DESIGN|AUDIT|IDEAS|HANDOFF|KICKOFF|NEXT_SESSION|field-notes)\s*§')
 for p in paths:
     if p == SELF:
         continue
@@ -418,13 +430,18 @@ for p in paths:
         continue   # binary, skip (mirrors the main sweep's grep -I)
     text = data.decode('utf-8', 'replace')
     for i, line in enumerate(text.split('\n'), 1):
-        for m in pat.finditer(line):
+        for m in pat_named.finditer(line):
             name = m.group(0)
             if os.path.basename(name) in tracked_basenames:
                 continue   # a real shipped file — not a violation
             if (p, name) in exempt_pairs:
                 continue   # this EXACT (file, name) pair is a known-synthetic/archived reference
             print(f'{p}:{i}: references absent doc {name}')
+        for m in pat_bare.finditer(line):
+            name = m.group(0)
+            if (p, name) in exempt_pairs:
+                continue   # this EXACT (file, name) pair is a known-archived reference
+            print(f'{p}:{i}: bare doc-name citation with no shipped doc: {name}')
 PY
 if [ -s "$TMP/arm8" ]; then
     no "arm 8 — dangling reference to a culled internal-pattern .md name:"

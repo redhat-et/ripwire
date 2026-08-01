@@ -5,8 +5,8 @@
 #   RIPWIRE_BIN=asan/ripwire test/forlenscheck.sh
 #
 # Q3 folds the quality FACTS (ccx + churn + clone-membership + tested= + change-amplification amp=) onto
-# the --for bundle's ranked <d> signatures — steering at read time (RESEARCH §1c: facts fed at read time
-# measurably change output). These are DESCRIPTIVE attributes, never gates. This gate asserts:
+# the --for bundle's ranked <d> signatures — steering at read time (facts fed at read time measurably
+# change output). These are DESCRIPTIVE attributes, never gates. This gate asserts:
 #   * the --for bundle carries the quality attrs (ccx/amp on the ranked <d> blocks).
 #   * GOLDEN NEUTRALITY — the plain --pack-signatures output carries NONE of the new lens attrs (churn/
 #     clone/amp/tested), and the DEFAULT map is unaffected (that's regression.sh's golden; re-checked here).
