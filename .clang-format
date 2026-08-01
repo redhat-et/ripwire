@@ -1,0 +1,133 @@
+# ripwire house style for clang-format. The prose statement lives in CONTRIBUTING.md §3 "House style";
+# this file is that statement in the one dialect an editor and a CI job can both read.
+#
+# Produced and verified with clang-format 22. Pin the SAME MAJOR VERSION anywhere this file is enforced:
+# clang-format's output changes across major releases, so an unpinned checker reports "unformatted" on a
+# tree that was formatted correctly by a different release.
+#
+# SCOPE — read this before wiring it as a gate.
+# The house style is deliberately hand-formatted in ways clang-format normalises away: multi-statement
+# one-liners (`{ oc.ok = false; oc.errCode = -32603; }`), `for( ... ) if( ... ) return i;`, several packed
+# initialiser rows or `case` labels per line, and wrap seams chosen by hand at 160-200 columns. Measured
+# over the 98 first-party C++ files at 098fe52: reformatting the whole tree changes 11837 lines that are
+# NOT whitespace — real joins and splits — under the best config found, so a repo-wide `--dry-run --Werror`
+# check cannot be a gate here without first rewriting the code. `scripts/formatcheck.sh` therefore gates
+# only the files that already agree with this config byte for byte, and reports the rest advisorily.
+# Use this file as an editor formatter for NEW code, and expect to hand-repack tables and one-liners after.
+#
+# ColumnLimit is 0 on measurement, not on taste: a finite limit re-breaks the hand-set logical-operator
+# seams at clang-format's own seams instead. 200 -> 18298 non-whitespace changed lines, 160 -> 18375,
+# 0 -> 11837. ReflowComments/BreakStringLiterals are off for the same reason.
+
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: Latest
+
+# Allman braces (CONTRIBUTING.md §3: "`{` and `}` on their own lines, for functions, `if`, `for`, and lambdas")
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterExternBlock: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterObjCDeclaration: true
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: true
+  BeforeWhile: true
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: true
+NamespaceIndentation: None
+IndentPPDirectives: None
+
+# The `f( x )` idiom — spaces inside parens, none before them: `f( x )`, `if( ok )`, `for( std::size_t i = 0; i < n; ++i )`
+SpacesInParens: Custom
+SpacesInParensOptions:
+  InConditionalStatements: true
+  InCStyleCasts: false
+  InEmptyParentheses: false
+  Other: true
+SpaceBeforeParens: Never
+SpaceAfterCStyleCast: false
+SpacesInSquareBrackets: false
+SpacesInAngles: Never
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceAfterTemplateKeyword: false
+Cpp11BracedListStyle: false
+SpaceBeforeCpp11BracedList: true
+
+# Hand-set line seams are load-bearing — never rewrap what the author wrapped
+ColumnLimit: 0
+ReflowComments: Never
+BreakStringLiterals: false
+SortIncludes: Never
+SortUsingDeclarations: Never
+AlwaysBreakTemplateDeclarations: MultiLine
+PackConstructorInitializers: CurrentLine
+
+# Keep the terse one-liner idiom wherever clang-format is able to
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLambdasOnASingleLine: All
+AllowShortLoopsOnASingleLine: true
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackArguments: true
+BinPackParameters: true
+
+# Blank lines are the author's grouping device (CONTRIBUTING.md §3: "Blank-line groups, each led by a `//` comment")
+MaxEmptyLinesToKeep: 3
+KeepEmptyLinesAtTheStartOfBlocks: true
+SeparateDefinitionBlocks: Leave
+EmptyLineBeforeAccessModifier: Leave
+EmptyLineAfterAccessModifier: Leave
+
+# Pointers, references, alignment. AlignConsecutive* stay OFF: the declarative constexpr tables
+# (kBoolFlags / kViewFlags / kIntFlags in src/cli.h, kKindPolicy in src/abicheck.h, ...) are hand-aligned
+# on columns clang-format's aligner cannot reproduce — it aligns around `=` and trailing comments, not
+# around the comma-separated table columns those rows line up. Fence a table with
+# `// clang-format off` / `// clang-format on` rather than asking the aligner to guess.
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: false
+AlignConsecutiveBitFields: false
+AlignEscapedNewlines: Left
+AlignOperands: Align
+AlignTrailingComments:
+  Kind: Never
+  OverEmptyLines: 0
+
+# Never silently edit code under the guise of formatting
+FixNamespaceComments: false
+InsertBraces: false
+InsertNewlineAtEOF: false
+RemoveSemicolon: false
+RemoveParentheses: Leave
+QualifierAlignment: Leave
+IntegerLiteralSeparator:
+  Binary: 0
+  Decimal: 0
+  Hex: 0

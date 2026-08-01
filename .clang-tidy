@@ -1,0 +1,43 @@
+# ripwire clang-tidy — ADVISORY, never a gate.
+#
+# Nothing here is wired to fail a build: `WarningsAsErrors` is empty, and the CI step that runs it is
+# `continue-on-error: true`. The reason is not timidity, it is scope. clang-tidy's default catalogue
+# argues for a different C++ than the one CONTRIBUTING.md §3 asks for — bounds-checked containers,
+# no C arrays, no `(int)x` casts, RAII everywhere — and this codebase is deliberately data-oriented:
+# POD structs, SoA arrays, 32-bit handles, arena allocation, `VERIFY` instead of exceptions. A gate
+# built from those checks would spend its life being suppressed. So the selection below is curated
+# down to the classes that find real defects in code shaped like this one, and even those only report.
+#
+# The `bugprone-*` family earns its place on evidence: the snprintf-truncation class it covers is a
+# HIGH this repo actually shipped and had to fix. `bugprone-integer-division` and
+# `bugprone-sizeof-expression` are called out for the same reason — both are silent-wrong-answer bugs
+# in exactly the arithmetic (rank normalisation, CSR row sizing) this code is made of.
+#
+# Run it locally against the dev build's compile database:
+#   cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake --build build -j
+#   clang-tidy -p build --quiet src/main.cpp src/ingest.cpp src/pagerank.cpp
+# Use clang-tidy 22 to match the pinned clang-format major; older majors carry different check sets.
+
+Checks: >
+  -*,
+  bugprone-*,
+  bugprone-integer-division,
+  bugprone-sizeof-expression,
+  clang-analyzer-*,
+  performance-*,
+  misc-dangling-*,
+  -readability-*,
+  -modernize-avoid-c-arrays,
+  -cppcoreguidelines-pro-bounds-*
+
+# Only our own headers. third_party/ is vendored verbatim (THIRD_PARTY.md) and is not ours to relint;
+# system and tree-sitter headers would drown the report.
+HeaderFilterRegex: '(^|/)src/.*\.(h|inl)$'
+ExcludeHeaderFilterRegex: '(^|/)third_party/'
+
+# Advisory posture. Do not populate WarningsAsErrors without also budgeting the suppression work —
+# see the header note above, and re-read it before deciding a check "should obviously be a gate".
+WarningsAsErrors: ''
+
+# No automatic fixes. `-fix` on a data-oriented tree rewrites layout decisions that were made on purpose.
+FormatStyle: none
