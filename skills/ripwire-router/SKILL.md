@@ -94,4 +94,4 @@ The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--ca
 `ripwire --help` is the full flag catalog; every skill re-verifies its commands against the shipped binary.
 
 **Installing these skills:** `bash skills/install.sh` symlinks every `ripwire-*` skill into the Claude
-skill home (`--codex` targets `CODEX_HOME/skills` instead) and prunes dangling links from removed skills.
+skill home (its codex mode targets `CODEX_HOME/skills` instead) and prunes dangling links from removed skills.
