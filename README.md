@@ -234,11 +234,12 @@ those first if you are here to check whether the tool is oversold. A representat
 - **LocBench held-out, N = 243 across 78 repositories:** strict file@10 **60.9%**, against **27.6%**
   for the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
   **+25.00pp**, bought for +3.4% warm latency and **−39.4%** on the production token ceiling.
-- **`--pack-signatures`: 68.4% fewer element bytes** at top-50 (59.1% at top-10, 66.5% at top-100),
+- **`--pack-signatures`: 67.0% fewer element bytes** at top-50 (46.7% at top-10, 66.2% at top-100),
   root-neutralised — the corpus-root prefix subtracted from both sides, because it repeats inside
   every element, is charged in both forms, and is not what this verb elides. Quote the top-50 figure:
-  the signature payload is top-50 whatever `--top-k` says. `test/showcasecapturecheck.sh` re-derives
-  all three on every run and fails if the documentation drifts more than 1.5 points from the binary.
+  the signature payload is top-50 whatever `--top-k` says, and top-10 is a ten-symbol sample that one
+  one-line accessor can move several points. `test/showcasecapturecheck.sh` re-derives all three on
+  every run and fails if the documentation drifts more than 1.5 points from the binary.
 - **Token cost against a naive agent read: 96.0% fewer tokens (24.9×)** across six realistic
   questions. Carry its caveat, which is not small: measured 2026-06-20 on a large private C++ corpus
   — *historical, private, and not publicly reproducible from this tree*. It proves cheaper and
