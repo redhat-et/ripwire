@@ -10,8 +10,9 @@
 of milliseconds — and labels every answer it cannot prove complete.
 
 [Quickstart](#quickstart) · [What it answers](#what-it-answers) · [Real runs](#real-runs) ·
-[Measured](#measured-against-other-tools) · [Honesty contract](#the-honesty-contract) ·
-[Agents and MCP](#wiring-it-into-a-coding-agent) · [Docs](#documentation)
+[Measured](#measured) · [Tokens saved](#what-it-saves-you-in-tokens) ·
+[Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
+[Prompt loops](#improve-it-with-your-agent) · [Docs](#documentation)
 
 ---
 
@@ -47,7 +48,7 @@ contract, gated on every push and pull request, not a tendency.
 On a 60-instance head-to-head against three other context tools — same instances, same gold, same
 metric code — it puts **all** gold files in the top 10 on **36.7%** of them, against 26.7 / 21.7 /
 13.3%, at a **0.074 s** median (warm, with a pre-built index). [The full table, and the caveats that
-belong with it →](#measured-against-other-tools)
+belong with it →](#against-other-tools)
 
 ---
 
@@ -178,16 +179,18 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 
 ---
 
-## Measured against other tools
+## Measured
 
 Every published number lives in **[`docs/EVALS.md`](docs/EVALS.md)** with the instrument that produced
 it, the corpus it ran on, and the in-tree file that pins it — alongside a counterexample section and a
 list of the claims this project deliberately does *not* publish. Read those first if you are here to
 check whether the tool is oversold.
 
-**Head-to-head, N = 60 paired instances, zero exclusions.** The first 60 scored held-out LocBench
-instances; same gold set and the same metric code, imported unmodified, for every arm. *Strict
-file@10 = **all** gold files inside the top 10.*
+### Against other tools
+
+**N = 60 paired instances, zero exclusions.** The first 60 scored held-out LocBench instances; same
+gold set and the same metric code, imported unmodified, for every arm. *Strict file@10 = **all** gold
+files inside the top 10.*
 
 | Arm | strict file@10 | any@10 | median wall |
 | --- | --- | --- | --- |
@@ -207,17 +210,33 @@ the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95
 **+25.00pp**, bought for +3.4% warm latency and **−39.4%** on the production token ceiling. More
 accurate *and* cheaper, which is why it shipped.
 
-**`--pack-signatures`: 67.0% fewer element bytes** at top-50 (46.7% at top-10, 66.2% at top-100),
-root-neutralised — the corpus-root prefix subtracted from both sides, because it repeats inside every
-element, is charged in both forms, and is not what this verb elides. Quote the top-50 figure: the
-signature payload is top-50 whatever `--top-k` says, and top-10 is a ten-symbol sample that one
-one-line accessor can move several points. `test/showcasecapturecheck.sh` re-derives all three on
-every run and fails if the documentation drifts more than 1.5 points from the binary.
+### What it saves you, in tokens
 
-**Token cost against a naive agent read: 96.0% fewer tokens (24.9×)** across six realistic questions.
-Carry its caveat, which is not small: measured 2026-06-20 on a large private C++ corpus —
-*historical, private, and not publicly reproducible from this tree*. It proves cheaper and faster, not
-better outcomes.
+Context is the budget an agent actually spends. Three measurements, each with the instrument that
+pins it:
+
+| Where the saving comes from | Measured | Pinned by |
+| --- | --- | --- |
+| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **67.0% fewer element bytes** at top-50 (46.7% at top-10, 66.2% at top-100) | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
+| Query-shape routing, on the production token ceiling | **−39.4%** p50, while strict file@10 rose +33.33pp | `bench/locbench/`, [EVALS §3](docs/EVALS.md) |
+| A whole-question bundle against a naive agent read | **96.0% fewer tokens (24.9×)** — 14,758 against 367,192, tiktoken `cl100k_base`, six realistic questions | `bench/BENCHMARK.md` — *historical, private corpus, not reproducible from this tree* |
+
+Read the first row's methodology before quoting it: element bytes are counted **root-neutralised**,
+with the corpus-root prefix subtracted from both sides, because the root repeats inside every element,
+is charged in both forms, and is not what this verb elides. Quote the top-50 figure — the signature
+payload is top-50 whatever `--top-k` says, and top-10 is a ten-symbol sample that one one-line
+accessor can move several points. The gate fails if the documentation drifts more than 1.5 points from
+the binary.
+
+And the third row's caveat is not small: it was measured 2026-06-20 on a large private C++ corpus, it
+is not publicly reproducible from this tree, and it proves *cheaper and faster*, not *better
+outcomes*.
+
+**The losses ship next to the wins.** `--grep` costs more tokens than it saves (**+19.7%** on one
+measure, −11.2% on the other) — it is not a token reducer. `--pack-signatures` inverts on a short
+symbol: 303 bytes of signature-plus-doc-comment against a 158-byte body. The headline is a property of
+large result sets, and [the full counterexample list](#in-the-numbers) is part of the contract, not an
+appendix.
 
 ---
 
@@ -267,50 +286,99 @@ estimate and a call graph all look plausible whether or not they are correct.
 
 ---
 
-## Wiring it into a coding agent
+## Set it up in your coding agent
+
+Two steps, both under a minute: register the MCP server so the agent can call ripwire mid-task, then
+install the skills that tell it *when* to.
+
+### 1. Register the server
 
 `ripwire wrap <agent>` prints the recipe for the agent you name. It **prints**; it never edits your
-config — you review the line and run it.
+config — you read the line, then run it.
 
 ```bash
-ripwire wrap claude      # → claude mcp add ripwire -- ripwire --mcp
-ripwire wrap cursor      # → the mcpServers stanza for .cursor/mcp.json (also: windsurf, gemini)
-ripwire wrap codex       # → the TOML stanza for ~/.codex/config.toml
-ripwire wrap aider       # → no MCP: a map file, and the aider invocation that reads it
-ripwire wrap             # → list the supported agents
+ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
+ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap codex       # MCP:      the [mcp_servers.ripwire] stanza for ~/.codex/config.toml
+ripwire wrap windsurf    # MCP:      that client's stanza
+ripwire wrap gemini      # MCP:      that client's stanza
+ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
+ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
+
+That registers one stdio server — `ripwire --mcp` — exposing **30 verbs**: 15 read verbs, 12
+flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CLI (`analyze`, `for`,
+`grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`,
+`situational_awareness`, `batch`, …); `find_symbol` and `find_referencing_symbols` attach a stable
+`handle` instead of a body, so the agent fetches source only when it actually needs it. The edit verbs
+enforce a safety contract — staleness refusal, ambiguity refusal, atomic writes. Full reference:
+[`skills/ripwire-mcp/`](skills/ripwire-mcp/).
 
 Before printing, `wrap` security-scans `./skills` and `.agents/skills` with the same engine as
 `--scan-skills`: a CRITICAL finding blocks the recipe, warnings print and continue.
 
-The server (`ripwire --mcp` over stdio, or `--listen=HOST:PORT`) exposes **30 verbs**: 15 read verbs,
-12 flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CLI (`analyze`,
-`for`, `grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`,
-`situational_awareness`, `batch`, …); `find_symbol` and `find_referencing_symbols` attach a stable
-`handle` instead of a body, so you fetch source only when you actually need it. The edit verbs enforce
-a safety contract — staleness refusal, ambiguity refusal, atomic writes. Full reference:
-[`skills/ripwire-mcp/`](skills/ripwire-mcp/).
+**If your client is not one of the six**, the server is a plain stdio MCP process and every client
+that speaks MCP can be pointed at it by hand. The whole configuration is:
 
-**Agent skills.** `skills/` ships seventeen task-shaped skills that tell an agent *which* verb answers
-the moment it is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a
-bug, writing tests, reviewing security. Install them as symlinks back into this repo, so edits here
-take effect immediately:
+```json
+{
+  "mcpServers": {
+    "ripwire": { "command": "ripwire", "args": ["--mcp"] }
+  }
+}
+```
+
+Use an absolute path in `command` if `ripwire` is not on the agent's `PATH`. For a client that wants a
+socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
+
+### 2. Install the skills
+
+`skills/` ships **seventeen task-shaped skills** that tell an agent *which* verb answers the moment it
+is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
+tests, reviewing security. Without them an agent has 30 verbs and no reflexes; with them it reaches
+for the right one unprompted. Install as symlinks back into this repo, so edits here take effect
+immediately:
 
 ```bash
 skills/install.sh                 # → ~/.claude/skills
 skills/install.sh /some/path      # → an explicit destination
+ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather
 ```
 
 The script's own header documents its other modes, including Codex and an opt-in advisory PreToolUse
-hook. Run `ripwire --scan-skills=skills` first if you would rather read the scanner's verdict before
-installing anything.
+hook.
 
-**Improve this tool with your agent.** `prompts/` collects ready-to-paste prompts for pointing a
-coding agent at this repository itself — a full severity-ranked audit, a head-to-head comparison
-against a competitor, a real task dogfooded with every grep-fallback logged as a gap, or the
-capture-driven honesty review that every claim here had to survive. They encode the workflow this
-project is built with rather than describing it, so an agent can pick one up and work the same way.
-Each states its own scope, the gates it must leave green, and what it must not touch.
+---
+
+## Improve it with your agent
+
+[`prompts/`](prompts/) holds ten **self-contained orchestrator prompts**: the loops this project is
+built with, written so a coding agent can run them. They encode the workflow rather than describing
+it.
+
+How to run one:
+
+1. Build the tool first — most loops need a binary to measure against:
+   `cmake -S . -B build && cmake --build build -j`
+2. Open your coding agent at the root of a ripwire checkout.
+3. Paste the contents of one prompt file. It needs nothing else from that directory.
+4. **It writes a plan and stops for your go-ahead.** Nothing runs before you approve it — read the
+   plan, cut what you disagree with, then say go.
+5. The loop runs its own gates in the foreground and reports what it left green.
+
+Three worth starting with:
+
+| Prompt | What it produces |
+| --- | --- |
+| [`full-audit.md`](prompts/full-audit.md) | A severity-ranked audit across bugs, measured performance, verb-to-moment matching, token efficiency, and an ecosystem scan of papers and repos with real momentum. |
+| [`dogfood-gaps.md`](prompts/dogfood-gaps.md) | A real task done using only ripwire for navigation, with every fallback to grep or a whole-file read logged as a product gap at the moment it happened. |
+| [`capture-audit.md`](prompts/capture-audit.md) | A fresh showcase capture read by parallel adversarial lenses, and the findings turned into family-wide gates. |
+
+The other seven — a paired head-to-head against a competitor, a ranking-eval loop that mines real
+retrieval misses from your own sessions, a per-language improvement pass, a zero-context onboarding
+study, a sibling sweep, a live command tour, a showcase build — are listed with their audiences in
+[`prompts/README.md`](prompts/README.md). Each states its own scope, the gates it must leave green,
+and what it must not touch.
 
 ---
 
