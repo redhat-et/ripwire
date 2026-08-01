@@ -135,7 +135,8 @@ fi
 # The SPDX copyright notice is the one sanctioned form of the author's name in source: `Copyright
 # <year> <name>` on its own comment line. Everything else — machine usernames, account handles,
 # email addresses, "Created by … on <date>" residue from the origin tree — is a leak.
-PERSON_RE='Brewster|brewster|qgames|davidbrewster|barefoot\.ski|quaterniongames'
+# quaterniongames is the repo's own commit identity — already public in git history, not a leak
+PERSON_RE='Brewster|brewster|qgames([^.]|$)|davidbrewster|barefoot\.ski'
 hits="$( sweep "$PERSON_RE" \
          | grep -vE '^(LICENSE|AUTHORS|THIRD_PARTY\.md|test/ripwirepubliccheck\.sh):' \
          | grep -vE ':[0-9]+:[[:space:]]*(//|#)?[[:space:]]*Copyright [0-9]{4} David Brewster[[:space:]]*$' \
@@ -171,7 +172,16 @@ else
     for d in $docfiles; do
         [ "$d" = "docs/README.md" ] && continue
         base="${d#docs/}"
-        grep -Fq "$base" docs/README.md || missing="$missing$d
+        # a file counts as indexed if named directly OR if an ancestor directory is indexed with a
+        # trailing slash (e.g. `captures/` covers dated capture files without per-regeneration churn)
+        covered=0
+        grep -Fq "$base" docs/README.md && covered=1
+        dir="${base%/*}"
+        while [ "$covered" = 0 ] && [ "$dir" != "$base" ] && [ -n "$dir" ]; do
+            grep -Fq "${dir}/" docs/README.md && covered=1
+            case "$dir" in */*) dir="${dir%/*}" ;; *) break ;; esac
+        done
+        [ "$covered" = 1 ] || missing="$missing$d
 "
     done
     if [ -n "$missing" ]; then

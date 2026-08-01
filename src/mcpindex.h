@@ -383,8 +383,7 @@ struct McpIndex
                                                       //   The EDIT verbs (replace/insert) compare a fresh read against this before
                                                       //   splicing — mtime alone can lie (same mtime, different content on a fast
                                                       //   restore/rewrite), and a byte hash is the only signal that proves the span
-                                                      //   offsets the index computed still address the same source. (W4-#8 edit safety.)
-                                                      //   S1 ALSO folds it into the stamp (indexContentHash) so the `_index` stamp
+                                                      //   offsets the index computed still address the same source. //   S1 ALSO folds it into the stamp (indexContentHash) so the `_index` stamp
                                                       //   moves on ANY content change, even a same-(mtime,size) edit the stat check misses.
     HashMap<std::string, long long>   dirMtime;    // ALL dirs under root (denylist-pruned), root included
     std::string                       cacheFile;   // file --cache backing cheap rebuilds
@@ -429,7 +428,7 @@ inline std::string mcpCachePath( const std::string& root )
     return std::string( "/tmp/" ) + name;
 }
 
-// W4-#12 + working-set (Cody-style): FNV-1a-64 of the SORTED changed-file id list, so the hash is a pure
+// working-set (Cody-style): FNV-1a-64 of the SORTED changed-file id list, so the hash is a pure
 // function of the SET (git's --name-only order is not guaranteed stable) and empty/no-git both hash to the
 // same "no working set" value — this collapses the "clean tree" and "not a git repo" cases into identical
 // rank behavior (both must byte-match the pre-feature uniform-prior output), which is exactly what §GATE(d)
@@ -782,7 +781,7 @@ inline const McpIndex& getIndex( const std::string& root )
 
     // working-set personalization (Cody-style): teleport the PageRank prior toward files with uncommitted
     // changes, mirroring --map-diff's diffTeleport weighting (main.cpp) — β=0.7 of the mass on changed-file
-    // symbols, the rest uniform, then rankGraphTeleport (which also applies the W4-#1 name-quality biasPrior
+    // symbols, the rest uniform, then rankGraphTeleport (which also applies the  name-quality biasPrior
     // automatically, same as every other teleport-based rank mode). A clean tree or a non-git root both
     // degrade to an ALL-ZERO changed mask, and diffTeleport() itself returns the plain uniform prior when
     // changed==0 — so this is byte-identical to the pre-feature rankGraph(g) in both of those cases (§GATE-d).
@@ -808,7 +807,7 @@ inline const McpIndex& getIndex( const std::string& root )
 
     ix.fileMtime.assign( ix.ing.files.size(), 0 );
     ix.fileSize.assign( ix.ing.files.size(), -1 );      // st_size parallel to files — the staleness fast-path discriminator (S1)
-    ix.fileByteHash.assign( ix.ing.files.size(), 0 );   // per-file byte fingerprint for the edit verbs (W4-#8) AND the content-folded stamp (S1)
+    ix.fileByteHash.assign( ix.ing.files.size(), 0 );   // per-file byte fingerprint for the edit verbs AND the content-folded stamp (S1)
     for( std::size_t i = 0; i < ix.ing.files.size(); ++i )
     {
         const auto [ mtime, size ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );
@@ -818,7 +817,7 @@ inline const McpIndex& getIndex( const std::string& root )
         const std::string bytes = mcpdetail::readFileBytes( diskPath( ix.ing, std::uint32_t( i ) ), readOk );
         ix.fileByteHash[i] = readOk ? mcpdetail::byteHash( bytes.data(), bytes.size() ) : 0;   // unreadable → 0 (edit verb refuses; mcpStale sees a mismatch)
     }
-    ix.contentHash = mcpdetail::indexContentHash( ix.ing.files, ix.fileMtime, ix.fileByteHash );   // W4-#12 stamp, now content-folded (S1)
+    ix.contentHash = mcpdetail::indexContentHash( ix.ing.files, ix.fileMtime, ix.fileByteHash );   //  stamp, now content-folded (S1)
 
     // the staleness watch-list: every directory under root (denylist-pruned), so additions in previously
     // file-less dirs are detected too — see collectDirMtimes.

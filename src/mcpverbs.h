@@ -2236,7 +2236,7 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
         clampedStart = 1; clampedEnd = totalLines;
     }
 
-    // W4-#7 / A3-F3: redact credential shapes from the emitted body text. AFTER the range slice (a secret
+    // A3-F3: redact credential shapes from the emitted body text. AFTER the range slice (a secret
     // is single-line and the slice is line-bounded, so no secret straddles the cut) and BEFORE the byte
     // count below, so `bytes` reports exactly what is served; no-op when redact is null (--no-redact).
     redactInPlace( body, redact );

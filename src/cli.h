@@ -85,8 +85,8 @@ struct Config
                                                            // WITHOUT emitting a map. Sugar over --cache (force-rebuild both paths).
     bool             noCache = false;                      // --no-cache: disable the warm-by-default per-root TMPDIR cache
     std::size_t      maxFileBytes = kDefaultMaxFileBytes;  // --max-file-size=N[K|M|G]: crawl size ceiling (default 4 MB)
-    std::string_view scipIndex;                            // --scip=index.scip: SCIP precision overlay (W4-#15) — precise edges REPLACE name-based guesses; prov="scip" tags them
-    bool             packSignatures  = false;              // --pack-signatures: body-elided decl skeletons (~60-71% fewer bytes at top-10/50/100, 63% at the default top-50; root-neutralised, since the repeated path prefix is charged in both forms and is not what this elides)
+    std::string_view scipIndex;                            // --scip=index.scip: SCIP precision overlay — precise edges REPLACE name-based guesses; prov="scip" tags them
+    bool             packSignatures  = false;              // --pack-signatures: body-elided decl skeletons (~59-68% fewer bytes at top-10/50/100, 68% at the default top-50; root-neutralised, since the repeated path prefix is charged in both forms and is not what this elides)
     std::string_view query;                                // --query=TERMS: pure lexical (BM25) retrieval
     std::string_view grep;                                 // --grep=STR: parallel literal scan + enclosing symbol + the matched line
     bool             grepRegex = false;                    // --regex=PAT: like --grep but the pattern is an ECMAScript regex
@@ -304,7 +304,7 @@ struct Config
                                                              // one. Off by default (G5: additive) — omitted, output is byte-identical.
     bool             exportCcJson    = false;              // --export=cc.json[:FILE]: CodeCharta interchange export (Wave-4)
     std::string_view exportFile;                           // --export=cc.json:FILE: write to FILE (else stdout)
-    bool             noRedact        = false;              // --no-redact: emit source/doc bodies VERBATIM (skip the W4-#7 credential redaction; local-only workflows)
+    bool             noRedact        = false;              // --no-redact: emit source/doc bodies VERBATIM (skip the  credential redaction; local-only workflows)
     bool             refetch         = false;              // S3: --refetch: force a fresh git clone of a git-URL root instead of reusing the cached one
     bool             doctor           = false;              // --doctor: self-diagnosis (binary/PATH staleness, grammar load, cache-dir
                                                              // health, git reachability, tree-sitter version) — a DIAGNOSTIC verb, not
@@ -523,7 +523,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --top-k=N                  keep the N highest-ranked symbols (default 200) — applies to the default map,\n"
         "                               plain --query, and --format=candidates (incl. with --for). --for's OWN\n"
         "                               signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is\n"
-        "                               INERT there (X9(d): documented, not fixed — a real fix is a behavior change).\n"
+        "                               INERT there (documented, not fixed — a real fix is a behavior change).\n"
         "                               --pack-task/--from-trace/--situ self-budget via --token-budget, not --top-k.\n"
         "                               --top-k=0 emits NO ranked map at all — ONLY the payload you asked for\n"
         "                               (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the\n"
@@ -544,7 +544,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               BOTTOM of the ranking and the last one may be cut within itself — every cut is\n"
         "                               DISCLOSED (header total=/shown=/capped=/truncated=, a per-doc [truncated: X of Y\n"
         "                               bytes] marker, and a closing (capped: …) note). Selection order never changes.\n"
-        "    --token-budget=N[K|M|G]    two personalities depending on the verb (D10):\n"
+        "    --token-budget=N[K|M|G]    two personalities depending on the verb:\n"
         "                                 - default map / --query / --recall: a CI GATE — exit 3 if the emitted DOCUMENT's\n"
         "                                   est_tokens exceeds N. That is the map PLUS every block appended after it\n"
         "                                   (<sigs>/<src>/<bodies>/<outline>), each charged from the bytes it actually\n"
@@ -695,7 +695,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --detail=N                 (with --for) importance-weighted detail: FULL bodies for the top-N ranked symbols +\n"
         "                               signatures for the rest, in ONE call — spend body tokens only on the head the rank\n"
         "                               identifies. Composes with --max-tokens (bounds the bodies) and --adaptive. 0 = off.\n"
-        "    --pack-signatures          body-elided decl skeletons — ~60-71%% fewer bytes (63%% at the default top-50),\n"
+        "    --pack-signatures          body-elided decl skeletons — ~59-68%% fewer bytes (68%% at the default top-50),\n"
         "                               measured at top-10/50/100 on this repo with the corpus-root prefix subtracted\n"
         "                               from both sides: that prefix repeats inside every element, is charged in both\n"
         "                               forms, and is not what this elides — count it and the figure becomes a function\n"
@@ -1155,7 +1155,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --json                     (L2) machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
+        "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
         "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
         "                               --impact, --quality-delta, --test-gate (the CI/scripting verbs). Every other verb\n"
         "                               (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it)\n"

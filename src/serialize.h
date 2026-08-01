@@ -7,7 +7,7 @@
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
-#include "redact.h"      // W4-#7: deterministic secret redaction of emitted body content (opt-out --no-redact)
+#include "redact.h"      // : deterministic secret redaction of emitted body content (opt-out --no-redact)
 #include "sortutil.h"    // numeric-key radix helpers for rank/file score order
 #include "jsonesc.h"     // F9: jsonesc::utf8SeqLen — the canonical UTF-8-sequence-length core (was duplicated here)
 #include "notes.h"       // L3: field-notes NoteIndex — the retrieval-time surfacing lookup (INERT when null)
@@ -1167,7 +1167,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
 
     std::vector<char> esc;
 
-    // W4-#15: the prov= legend is appended ONLY under --scip (outProv present) so the default header stays
+    // : the prov= legend is appended ONLY under --scip (outProv present) so the default header stays
     // byte-identical to the pre-overlay output (no golden churn); prov="scip" marks a SCIP-pinned precise edge.
     // §A8.7: shown= (in the `stats` comment below) counts overload-MERGED rows individually — rows +
     // Σ(overloads-1) == shown — but overloads= itself (overloadsAttr(), above) was absent from this legend,
@@ -1198,7 +1198,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( ambOut ) for( std::uint32_t v : *ambOut ) ambTotal += v;   // resolver could not pin to one target
     std::size_t unresolvedTotal = 0;                           // honesty lever #2 gauge: how many calls hit an
     if( unresolvedOut ) for( std::uint32_t v : *unresolvedOut ) unresolvedTotal += v;   // in-repo name, all defs lang-filtered
-    std::size_t preciseTotal = 0;                              // W4-#15: how many out-edges the SCIP index pinned
+    std::size_t preciseTotal = 0;                              // : how many out-edges the SCIP index pinned
     if( outProv ) for( std::uint8_t v : *outProv ) preciseTotal += ( v ? 1u : 0u );
     char precAttr[ 40 ];  precAttr[ 0 ] = '\0';                // emitted ONLY under --scip (else absent → no golden churn)
     if( outProv ) std::snprintf( precAttr, sizeof( precAttr ), " precise=%zu", preciseTotal );
@@ -1428,7 +1428,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             {
                 w.write( "<c n=\"" );
                 w.write( escapeXml( ing.symbols[ outTargets[e] ].name, esc ) );
-                // W4-#15 + A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
+                // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
                 // binding-table edge (pybind/extern-C/JNI). Absent = name-based guess (the common case →
                 // zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
                 if( outProv && e < outProv->size() && (*outProv)[e] ) w.write( (*outProv)[e] == 2u ? "\" prov=\"binding" : "\" prov=\"scip" );
@@ -1537,7 +1537,7 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
             truncated = true;
         }
 
-        // W4-#7: redact credential shapes from the raw file body BEFORE CDATA-encoding — this is a
+        // : redact credential shapes from the raw file body BEFORE CDATA-encoding — this is a
         // body-emission seam (whole source files pasted into an LLM). Applied post-truncation (redaction
         // only ever shrinks/relabels, never grows past the budget in a way that matters). No-op under --no-redact.
         redactInPlace( body, redact );
@@ -2344,7 +2344,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
             w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc ) );
             std::string doc = docCommentBefore( src, a );   // L2: the human-written intent, if any
-            redactInPlace( doc, redact );                    // W4-#7: a doc-comment body can hold a pasted secret
+            redactInPlace( doc, redact );                    // : a doc-comment body can hold a pasted secret
             if( rankAdaptivePayload )                        // B0.3: tail entries carry a trimmed excerpt / no doc
             {
                 if( globalRank > kForDocExcerptRankCount )      doc.clear();
@@ -2836,7 +2836,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                 if( compressed.size() < body.size() ) body = std::move( compressed );
             }
 
-            // W4-#7: redact credential shapes from the def body (a full-body emission seam). After compress /
+            // : redact credential shapes from the def body (a full-body emission seam). After compress /
             // truncation so those size-based decisions see the un-redacted bytes; no-op under --no-redact.
             redactInPlace( body, redact );
 
@@ -3046,7 +3046,7 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
             // pure size comparison: compression must never cost tokens.
             if( sk.size() >= ( b - a ) ) sk.assign( src, a, b - a );
 
-            // W4-#7: redact credential shapes from the control-flow skeleton (a body-emission seam — the
+            // : redact credential shapes from the control-flow skeleton (a body-emission seam — the
             // skeleton keeps depth≤1 source lines verbatim, which can include a secret literal). --no-redact = no-op.
             redactInPlace( sk, redact );
             if( sk.empty() ) continue;
@@ -3840,7 +3840,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         std::snprintf( hdr, sizeof( hdr ), "\"skipped_oversize\":%u,", h.ing.skippedOversizeCount );
         w.write( hdr );
     }
-    // §A4d: W4-#15's `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.
+    // §A4d: 's `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.
     // Emitted ONLY when a provenance vector was supplied, exactly like the XML attribute (absent ⇒ nothing
     // was measured, never a fabricated 0 that would read as "no edge is precise").
     if( h.outProv )
@@ -4299,7 +4299,7 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
             const bool pureSig = pureFromSig( sig, s.lang ) && !( lens.impure && id < lens.impure->size() && (*lens.impure)[id] );
 
             std::string doc = docCommentBefore( src, a );
-            redactInPlace( doc, redact );                   // W4-#7 / §B0: same seam, same order as the XML sibling (:1586)
+            redactInPlace( doc, redact );                   // §B0: same seam, same order as the XML sibling (:1586)
             if( lens.rankAdaptivePayload )
             {
                 if( globalRank > kForDocExcerptRankCount )      doc.clear();
@@ -4419,7 +4419,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
 // that decides.
 //
 // §B0 note: there is no `redact` parameter and that is not an opt-out — `record` holds text packBodies ALREADY
-// redacted, at the one seam W4-#7 defined. Adding a second redaction pass here is what created the over-count.
+// redacted, at the one seam  defined. Adding a second redaction pass here is what created the over-count.
 inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const EmittedBodies& record )
 {
     JsonWriter  w( out );

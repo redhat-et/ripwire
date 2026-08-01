@@ -11,7 +11,7 @@
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
                          //       fence scanner — a doc-side property, computed from the file's own bytes
 #include "model.h"
-#include "redact.h"      // W4-#7: redact secrets from recalled doc bodies (incl. extracted docText)
+#include "redact.h"      // : redact secrets from recalled doc bodies (incl. extracted docText)
 #include "serialize.h"   // §P2: kMinBytesPerToken / kBudgetHeadroom / bytesPerTokenFor / truncateUtf8WithEllipsis
                          //      — recall budgets and estimates with the SAME calibration as the map family
 
@@ -282,7 +282,7 @@ inline std::string truncateRecallBody( std::string& body, std::size_t keepBytes 
 
 // One recalled doc's emitted text, redacted. P1-B: for a document file this is its EXTRACTED text (the
 // override), not the raw bytes — a recalled notebook must read as its prose/code, never as raw .ipynb JSON.
-// W4-#7: credential shapes are redacted HERE, before any budget arithmetic, so the budget charges the bytes
+// : credential shapes are redacted HERE, before any budget arithmetic, so the budget charges the bytes
 // that are actually emitted; no-op under --no-redact. An unreadable file yields nullopt (skip, never a stub).
 inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::uint32_t fileId, RedactCounts* redact )
 {
