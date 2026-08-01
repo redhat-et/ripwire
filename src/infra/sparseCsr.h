@@ -19,14 +19,14 @@
 //     fixed-size blocks, partials summed in canonical block order. Bit-stable run-to-run —
 //     load-bearing because PageRank output is a sorted top-K with no tolerance band.
 //
-// Layering: depends ONLY on fastmath.h (VERIFY + cache-line const). NOT infrastucture/
+// Layering: depends ONLY on platform.h (VERIFY + cache-line const). NOT infrastucture/
 // (infra depends on math → a cycle). Parallelism is therefore INJECTED by the caller: the
 // SpMV is embarrassingly parallel by row and the reductions are block-structured for a
 // deterministic parallel reduce (compute partials[block] in parallel, sum them in block
 // order → identical result). math/ stays dependency-free + single-threaded here; ripwire
 // drops DispatchSystem::parallelFor over the row/block ranges.
 
-#include "fastmath.h"   // VERIFY / fastmath::hardware_constructive_interference_size
+#include "platform.h"   // VERIFY / fastmath::hardware_constructive_interference_size
 
 #include <cstddef>
 #include <cstdint>

@@ -150,8 +150,9 @@ uint64_t currentThreadId() noexcept;
 //
 // NOT a VERIFY. Never write VERIFY_TEXT(false, …) on a degrade path: in
 // release that is __builtin_assume(false), which deletes the fallback code
-// and makes reaching the function undefined behavior (this exact bug shipped
-// in safeDivisorNoInLine / safeDeterminantNoInline).
+// and makes reaching the function undefined behavior — a real shipped bug in
+// the math library this tree's infra was seeded from, where two "clamp the
+// tiny divisor" slow paths were written that way and vanished under NDEBUG.
 // --------------------------------------------------------------------------
 #if !defined(NDEBUG)
 #define DEGRADED_PATH_ALERT(msg)                                                \
