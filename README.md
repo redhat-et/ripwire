@@ -262,10 +262,12 @@ The evaluation labels were authored by reading the source and deciding which sym
 answer — never by transcribing the ranker's own output — so the eval is allowed to say the ranker is
 wrong, and it has. These are the results that say so, all in-tree, all published on purpose:
 
-- **`--grep` costs more tokens than it saves** (+19.7% on one measure, −11.2% on the other). It is not
-  a token reducer, and saying so is cheaper than being caught.
-- **`--pack-signatures` can make output bigger.** A signature plus its doc comment measured 303 bytes
-  against a 158-byte body for one short symbol. The headline is a property of large result sets.
+- **`--grep` costs more tokens than it saves**, and **`--pack-signatures` can make output bigger** —
+  both quantified [next to the savings they qualify](#what-it-saves-you-in-tokens), because saying so
+  is cheaper than being caught.
+- **The public C++ number is materially lower than the earlier private one.** SFML: strict file@10
+  31.3%, any@10 45.2%, first-hit MRR 0.22 — against roughly 89% any@10 on a private corpus that is no
+  longer reproducible from this tree. The public number is the baseline going forward.
 - **PageRank is a bad co-change ranker** — 3.8% recall@5 against 40.3% for plain lexical, and fusing
   the two made it worse. Relatedness is lexical; importance is structural; the tool uses different
   machinery for each because the measurement said so.
