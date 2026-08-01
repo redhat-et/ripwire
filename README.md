@@ -79,7 +79,8 @@ recorded output.
 
 Output is minified — one line, no whitespace between tags — so the excerpts below are wrapped for
 reading, and each one's leading legend comment is elided where noted. Nothing else is edited, except
-that corpus-size numbers (file/symbol/edge counts, PageRank `k=` values) drift as this repository
+that corpus-size numbers (file/symbol/edge counts, PageRank `k=` values, and example 3's
+`script_gates_unmodelled=` — a count of `test/*.sh` runners in this corpus) drift as this repository
 grows — example 2 elides those specifically, and says so again at the point of use — and example 3
 additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a trailing `…`.
 
@@ -136,7 +137,7 @@ nonzero even then):
 ```
 $ ripwire . --test-gate          # exit code: 4
 <test-gate changed="1" impacted="80" tests="2" untested="76" shown_tests="2"
-           shown_untested="25" untested_capped="1" script_gates_unmodelled="331" at="9cf0b16f3+dirty">
+           shown_untested="25" untested_capped="1" script_gates_unmodelled="332" at="9cf0b16f3+dirty">
 <t p="./test/adaptivecutshapefix/adaptive_cut_shape_test.cpp" run="bash test/adaptivecutshapecheck.sh"/>
 <t p="./test/verify_radix.cpp"/>
 <u sym="buildGraph" p="./src/graph.h" ccx="712"/>
@@ -147,7 +148,7 @@ $ ripwire . --test-gate          # exit code: 4
 
 A `run=` attribute appears only when a runner is derivable from real evidence — a test-dir script
 whose stem matches the harness, or whose text names it. No `run=` means *not derivable*, never a
-guessed suite command. `script_gates_unmodelled="331"` is the same discipline: script-to-binary is
+guessed suite command. `script_gates_unmodelled="332"` is the same discipline: script-to-binary is
 not a call edge, so those gates are invisible to this walk, and the number says so rather than
 letting `tests="2"` read as complete.
 
