@@ -211,7 +211,7 @@ CapRole roleOf( std::string_view cap, SymKind& kindOut ) noexcept
     return CapRole::Ignore;   // @doc, @local.scope, etc.
 }
 
-// ---- final identifier segment (SPEC §2a: ns::f / pkg.F / mod::f -> last segment) ----
+// ---- final identifier segment (ns::f / pkg.F / mod::f -> last segment) ----
 std::string finalSegment( std::string_view raw )   // allocates a std::string → not noexcept
 {
     // A C++ OPERATOR name (`operator<`, `operator<<`, `operator<=>`, `operator bool`) is the one place a
@@ -278,7 +278,7 @@ bool looksBinary( std::string_view bytes ) noexcept
 }
 
 // True when raw bracket/brace nesting exceeds kMaxJsonNestDepth — degenerate or hostile DATA, never config
-// (AUDIT5, found live by bench/multiswe: tree-sitter-json's error recovery is superlinear on unclosed
+// (found live by bench/multiswe: tree-sitter-json's error recovery is superlinear on unclosed
 // nesting; a 100 KB file of "[[[[…" from nlohmann/json's own parser-torture suite measured 43 s). One O(n)
 // byte scan, quote-aware (a bracket inside a JSON string does not open a level), fully deterministic —
 // never a wall-clock parse timeout, which would break the byte-identical-output contract.

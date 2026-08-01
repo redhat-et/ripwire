@@ -689,7 +689,7 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
 
     const auto printTable = [ & ]( const char* label, MinedAcc& fA, MinedAcc& qA, MinedAcc& aA, std::size_t n )
     {
-        std::printf( "ripwire --eval-mined  (%s, %zu session-mined pair%s; gold = Edit/Write targets, DESIGN_traceEvals.md)\n",
+        std::printf( "ripwire --eval-mined  (%s, %zu session-mined pair%s; gold = files the session Edited/Wrote)\n",
                      label, n, n == 1 ? "" : "s" );
         if( n == 0 ) { std::printf( "  (no %s pairs)\n", label ); return; }
         const double N = double( n );
@@ -712,7 +712,7 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     };
 
     printTable( "unassisted", forA[0], queryA[0], anchorA[0], nPairs[0] );
-    printTable( "assisted (ripwire_assisted=true — NOT independent evidence, see DESIGN_traceEvals.md §3.2)",
+    printTable( "assisted (ripwire_assisted=true — the session had already seen ripwire's own output; NOT independent evidence)",
                forA[1], queryA[1], anchorA[1], nPairs[1] );
     if( skipped || underqualified )
         std::fprintf( stderr, "ripwire --eval-mined: skipped %zu malformed line(s), %zu under-qualified pair(s) (<2 in-corpus gold files)\n",
