@@ -30,7 +30,7 @@
 // stdio-vs-iostream mixing is safe here: nothing in this tree calls
 // `std::ios::sync_with_stdio( false )`, so `std::cin` and `stdin` share one buffer and one position.
 
-#include "Diagnostics.h"   // VERIFY — the null-stream precondition
+#include "Diagnostics.h" // VERIFY — the null-stream precondition
 
 #include <cstdio>
 #include <string>
@@ -52,9 +52,9 @@ inline bool readByteSafeLine( std::FILE* in, std::string& line )
     for( int byteOrEof = std::fgetc( in ); byteOrEof != EOF; byteOrEof = std::fgetc( in ) )
     {
         didReadAnyByte = true;
-        if( byteOrEof == '\n' ) return true;                                        // delimiter consumed, not appended
+        if( byteOrEof == '\n' ) return true; // delimiter consumed, not appended
 
-        line.push_back( static_cast< char >( static_cast< unsigned char >( byteOrEof ) ) );
+        line.push_back( static_cast<char>( static_cast<unsigned char>( byteOrEof ) ) );
     }
 
     // EOF. An unterminated tail line is delivered exactly once (getline's behaviour); the next call
@@ -62,4 +62,4 @@ inline bool readByteSafeLine( std::FILE* in, std::string& line )
     return didReadAnyByte;
 }
 
-}   // namespace rw
+} // namespace rw
