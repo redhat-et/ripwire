@@ -25,11 +25,34 @@
 #include "hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <sys/stat.h>
-#include <sys/event.h>     // kqueue / kevent — the FS-event freshness watcher (macOS/BSD; Feature-1 hot-reload)
 #include <sys/time.h>      // struct timespec for a non-blocking kevent poll
 #include <fcntl.h>         // open() the watched dir fds + O_CREAT for the per-file edit lockfile
 #include <unistd.h>        // close()
-#include <sys/file.h>      // flock(LOCK_EX|LOCK_NB) — the ripwire-vs-ripwire edit serializer (F1)
+#include <sys/file.h>      // flock(LOCK_EX|LOCK_NB) — the ripwire-vs-ripwire edit serializer (F1); POSIX-wide, incl. glibc
+
+// kqueue/kevent is a BSD interface: <sys/event.h> does not exist on Linux at all, which is where the first
+// public CI run stopped ("fatal error: sys/event.h: No such file or directory", both ubuntu legs). It powers
+// ONE optimisation — eliding the directory-mtime sweep on a settled tree — and the watcher already has a
+// fully-specified degrade path for "kqueue unavailable" (see FsWatcher below): stay unhealthy, and getIndex()
+// runs the full stat/mtime sweep on every request, i.e. the exact pre-Feature-1 behaviour. A platform without
+// kqueue takes that same path, so the MCP staleness CONTRACT is unchanged — a stale index is still detected
+// on request, by the per-file mtime+size loop that runs regardless of the watcher. FUTURE UPGRADE: inotify
+// (Linux) / FSEvents would restore the elision; that is new code with its own event-semantics bug surface and
+// is deliberately not attempted here, because the poll fallback is already correct.
+//
+// The `#ifndef` is a deliberate override seam, not decoration: `-DRIPWIRE_HAS_KQUEUE=0` compiles the Linux
+// path on a Mac, so the fallback can be built and RUN here instead of being first discovered by a CI leg
+// nobody can reproduce locally.
+#ifndef RIPWIRE_HAS_KQUEUE
+  #if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ ) || defined( __DragonFly__ )
+    #define RIPWIRE_HAS_KQUEUE 1
+  #else
+    #define RIPWIRE_HAS_KQUEUE 0
+  #endif
+#endif
+#if RIPWIRE_HAS_KQUEUE
+#include <sys/event.h>     // kqueue / kevent — the FS-event freshness watcher (macOS/BSD; Feature-1 hot-reload)
+#endif
 
 #include <atomic>          // RIPWIRE_MCP_TIMINGS rebuild-count observable (env-gated stderr timing; off → untouched)
 #include <cctype>
@@ -52,12 +75,28 @@ namespace rw
 
 namespace mcpdetail
 {
+    // nanosecond mtime out of a filled `struct stat`. The sub-second field is spelled DIFFERENTLY per
+    // platform — st_mtimespec on Darwin/BSD, st_mtim on Linux (POSIX.1-2008) — and neither name exists on
+    // the other, so this is a compile error, not a portability nicety. Same ladder (and same whole-second
+    // last resort) as ingest.cpp's statSizeMtime; kept local rather than shared because that one lives in a
+    // .cpp and hoisting it would move ingest internals into a header for two call sites.
+    inline long long mtimeNsOf( const struct stat& st ) noexcept
+    {
+#if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ )
+        return (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+#elif defined( __linux__ )
+        return (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+#else
+        return (long long)st.st_mtime * 1000000000LL;   // whole-second fallback
+#endif
+    }
+
     // nanosecond mtime of a path, or -1 if it can't be stat'd. The staleness signal for the in-memory index.
     inline long long mtimeOf( const std::string& p )
     {
         struct stat st;
         if( ::stat( p.c_str(), &st ) != 0 ) return -1;
-        return (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+        return mtimeNsOf( st );
     }
 
     // (mtime-ns, size) of a path in ONE stat(), or (-1,-1) if it can't be stat'd. mcpStale() uses BOTH: a
@@ -67,8 +106,7 @@ namespace mcpdetail
     {
         struct stat st;
         if( ::stat( p.c_str(), &st ) != 0 ) return { -1, -1 };
-        const long long m = (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
-        return { m, (long long)st.st_size };
+        return { mtimeNsOf( st ), (long long)st.st_size };
     }
 
     // ALL directories under root (root itself included) → their mtimes, pruning the same noise/vendor/build
@@ -181,6 +219,15 @@ namespace mcpdetail
         void arm( const std::vector<std::string>& dirs )
         {
             reset();
+#if !RIPWIRE_HAS_KQUEUE
+            // No kqueue on this platform (Linux). This is the SAME degrade the kqueue()-failed branch below
+            // takes — kq stays -1, healthy stays false, drainHadEvent() reports "assume changed", and
+            // getIndex() runs the full dir sweep every request. Nothing about the answer changes, only how
+            // much redundant stat()ing precedes it.
+            (void) dirs;
+            DEGRADED_PATH_ALERT( "mcp watcher: no kqueue on this platform — falling back to stat-sweep freshness" );
+            return;
+#else
             kq = ::kqueue();
             if( kq < 0 ) { DEGRADED_PATH_ALERT( "mcp watcher: kqueue() unavailable — falling back to stat-sweep freshness" ); return; }
 
@@ -206,6 +253,7 @@ namespace mcpdetail
                 dirFds.push_back( fd );
             }
             healthy = true;                                             // kq live AND every dir registered → the fast path is available
+#endif
         }
 
         // drain all pending events (EV_CLEAR → edge-triggered, so this both reports AND resets them). Returns
@@ -213,7 +261,10 @@ namespace mcpdetail
         // failure degrades to `true` (assume changed → force a sweep — never skip on uncertainty).
         bool drainHadEvent() noexcept
         {
-            if( kq < 0 ) return true;                                   // unhealthy → force the sweep
+            if( kq < 0 ) return true;                                   // unhealthy (incl. every non-kqueue platform) → force the sweep
+#if !RIPWIRE_HAS_KQUEUE
+            return true;                                                // arm() never opens kq here, so the line above already returned
+#else
             struct kevent out[ 32 ];
             struct timespec zero = { 0, 0 };
             bool any = false;
@@ -226,6 +277,7 @@ namespace mcpdetail
                 if( n < 32 ) break;                                     // fewer than the batch cap → queue drained
             }
             return any;
+#endif
         }
     };
 
