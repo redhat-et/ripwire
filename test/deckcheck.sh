@@ -147,12 +147,14 @@ for f in "$ROOT"/docs/*.md; do
 done
 for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f"; done
 for f in "$ROOT"/skills/*/*.md;             do addSource "$f"; done
+for f in "$ROOT"/prompts/*.md;              do addSource "$f"; done
 
 # A scan of nothing is not a pass. The old refusal threshold was >0, which one surviving file could
 # satisfy while four globs matched nothing — the failure that let this gate go inert. Require a
-# plausible floor: the skills tree alone is 17 SKILL.md files plus companions, and docs/ carries five.
-[ "${#SOURCES[@]}" -ge 20 ] || {
-    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=20 (root docs, docs/*.md, skills/*/*.md)."
+# plausible floor: the skills tree alone is 17 SKILL.md files plus companions, docs/ carries five,
+# and prompts/ carries eleven.
+[ "${#SOURCES[@]}" -ge 30 ] || {
+    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=30 (root docs, docs/*.md, skills/*/*.md, prompts/*.md)."
     printf '        found: %s\n' "${SOURCES[@]#$ROOT/}"
     echo "        A near-empty scan reads as a PASS while checking nothing; refusing to run."
     exit 2; }

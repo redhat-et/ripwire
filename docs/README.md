@@ -19,6 +19,7 @@ Outside this directory:
 - **`CHANGELOG.md`** — user-visible capabilities, behavior changes, and known limits.
 - **`test/README.md`** — why the test tree carries synthetic credential-shaped fixtures, and which files are sanctioned to.
 - **`bench/`** — the evaluation harnesses themselves, each with its own README.
+- **`prompts/`** — copy-paste orchestrator prompts for improving this tool with your own coding agent; see `prompts/README.md` for the index.
 - **`./build/ripwire --help`** — the authoritative flag list. If a document disagrees with it, the document is the bug.
 
 **Regenerating the generated document:**
