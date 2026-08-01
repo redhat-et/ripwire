@@ -186,6 +186,15 @@ fi
 # ".ext", not a synthetic domain) that two test fixtures use in prose to document ripwire's own
 # `symbol@basename.ext:line:col` label format; each is exempted by its exact (path, address) pair,
 # not by file, so nothing else in those files is waved through.
+#
+# V4 MED-1 / LOW-1: two more gaps closed. (a) the scan used to take only the FIRST address per
+# LINE via find_address(line) then `continue` the whole line on a synthetic-domain match — a
+# planted line with a synthetic address FOLLOWED by a real one on the same line
+# (`git config user.email a@x.com  # contact: real.person@corp.io`) passed clean. It now walks
+# every address on the line. (b) the synthetic-domain exemption used to apply tree-wide, but every
+# legitimate synthetic-domain hit in this repo lives under test/ or bench/ (measured: 39 files,
+# zero elsewhere) — it is now conjoined with a path check, so the same synthetic address in
+# README/src/docs is treated as a leak, not a fixture.
 PATH_ALLOW='^(third_party/|bench/cppbench/dataset\.lock$|docs/docs_commands_build\.py$)'
 python3 - "$TMP/tracked.z" "$ROOT" "$PATH_ALLOW" > "$TMP/arm5b" 2> "$TMP/arm5b.err" <<'PY'
 import os, re, sys
@@ -232,16 +241,25 @@ for p in paths:
         continue   # binary, skip
     text = data.decode('utf-8', 'replace')
     for i, line in enumerate(text.split('\n'), 1):
-        m = find_address(line)
-        if not m:
-            continue
-        addr = m.group(0)
-        domain = addr.split('@', 1)[1].lower() if '@' in addr else ''
-        if domain in SYNTHETIC_DOMAINS:
-            continue
-        if (p, addr) in PAIR_ALLOW:
-            continue
-        print(f'{p}:{i}: {addr}')
+        # Walk every address on the line — not just the first — so a synthetic-domain hit early
+        # on the line cannot shield a real address later on the SAME line (e.g. a planted
+        # `git config user.email a@x.com  # contact: real.person@corp.io`).
+        pos = 0
+        while True:
+            m = find_address(line[pos:])
+            if not m:
+                break
+            addr = m.group(0)
+            pos += m.end()
+            domain = addr.split('@', 1)[1].lower() if '@' in addr else ''
+            # The synthetic-domain exemption is scoped to test/ and bench/ — every legitimate
+            # synthetic-domain hit in this tree lives under one of those two dirs; the same
+            # address in README/src/docs is not a fixture, it is a leak.
+            if domain in SYNTHETIC_DOMAINS and p.startswith(('test/', 'bench/')):
+                continue
+            if (p, addr) in PAIR_ALLOW:
+                continue
+            print(f'{p}:{i}: {addr}')
 PY
 py_status=$?
 if grep -q '^REFUSE' "$TMP/arm5b"; then
