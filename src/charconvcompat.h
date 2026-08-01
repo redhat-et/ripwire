@@ -52,6 +52,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <type_traits>
@@ -75,18 +76,19 @@ inline float  callStrtox( const char* text, char** parseEnd, float*  ) noexcept 
 // Is this an IEEE-754 infinity? NOT `std::isinf`: the portable build flags include -ffast-math, whose
 // -ffinite-math-only lets the optimiser fold every isinf/isfinite call to constant false. Reading the
 // exponent field through an opaque asm barrier is the same defence platform.h's isFiniteFast uses.
-[[nodiscard]] inline bool isInfiniteBits( double x ) noexcept
+// The sentinel is bit_cast from numeric_limits rather than a hand-typed hex constant, so the float and
+// double widths are one function and neither pattern can be mistyped.
+template<class T> requires std::is_floating_point_v<T>
+[[nodiscard]] inline bool isInfiniteBits( T x ) noexcept
 {
-    std::uint64_t bits = __builtin_bit_cast( std::uint64_t, x );
-    asm volatile( "" : "+r"( bits ) );
-    return ( bits & 0x7FFFFFFFFFFFFFFFull ) == 0x7FF0000000000000ull;
-}
+    using Bits = std::conditional_t<sizeof( T ) == sizeof( std::uint32_t ), std::uint32_t, std::uint64_t>;
+    static_assert( sizeof( Bits ) == sizeof( T ), "no same-width unsigned type for this floating format" );
+    constexpr Bits kInfinityBits = __builtin_bit_cast( Bits, std::numeric_limits<T>::infinity() );
+    constexpr Bits kExceptSignBit = static_cast<Bits>( ~Bits( 0 ) >> 1 );
 
-[[nodiscard]] inline bool isInfiniteBits( float x ) noexcept
-{
-    std::uint32_t bits = __builtin_bit_cast( std::uint32_t, x );
+    Bits bits = __builtin_bit_cast( Bits, x );
     asm volatile( "" : "+r"( bits ) );
-    return ( bits & 0x7FFFFFFFu ) == 0x7F800000u;
+    return ( bits & kExceptSignBit ) == kInfinityBits;
 }
 
 // The always-compiled strtod/strtof implementation of from_chars( …, chars_format::general ). Kept
