@@ -85,7 +85,7 @@ single-threaded → its counters are accurate.
 ## 2026-07-03 refresh — Wave 2 #8 (perf self-guarding), HEAD `f76fa6d`, Apple Silicon
 
 Closes the audit's "PROFILE.md stale — no gate" risk and the "PROFILE_SCOPE the lexical+gitmine gaps"
-finding (`reviews/AUDIT_2026-07.md` Perf-audit section). Two new instrumented paths, one new drift
+finding. Two new instrumented paths, one new drift
 alarm, and a fresh measurement pass with the current binary.
 
 ### New instrumentation
@@ -135,7 +135,7 @@ Rebuilt from a clean tree in an isolated build dir (`-DRIPWIRE_NATIVE=ON`); medi
 | this repo (ripwire, ~150 files) | 0.16 s | 0.02 s | — | — |
 | private C++ corpus (1849 files / 33k syms) | 1.50–1.63 s (med ~1.54 s) | 0.28–0.29 s | 0.32–0.34 s | 0.38–0.61 s (med ~0.41 s) |
 
-Tracks the `reviews/AUDIT_2026-07.md` perf-audit baseline (repo cold 0.16 s/warm 0.02 s; private corpus
+Tracks the recorded perf-audit baseline (repo cold 0.16 s/warm 0.02 s; private corpus
 cold 1.30 s/warm 0.32 s/`--for` 0.79 s/`--hotspots` 0.43 s) closely — this repo's numbers match
 exactly; the private corpus's cold and `--for` measure somewhat faster here (1.5 s vs 1.3 s is within
 run-to-run variance in the other direction, but `--for` 0.33 s vs 0.79 s is a real gap, consistent with
@@ -185,7 +185,7 @@ then `build_prof/ripwire <repo> --no-cache` (cold) / `build_prof/ripwire <repo> 
 twice (warm). Perf-gate check: `bench/perfgate.sh` (needs `build/ripwire`; see its header for
 `--write-budgets`).
 
-## 2026-07-11 — MEASURE-FIRST: speculative-prefetch experiment (DESIGN_specPrefetch.md, Phase E)
+## 2026-07-11 — MEASURE-FIRST: speculative-prefetch experiment (Phase E)
 
 The design's Phase-E experiment: instrument the MCP server, drive a realistic ~20-call session, and let the
 NUMBERS decide whether the speculative-prefetch mechanism is worth building. **Outcome: build the
@@ -242,7 +242,7 @@ Even where (d) is GO, the prefetch hides only **~43 % of `quality_delta`** (6.2 
 clone pass (~8.2 s) is the larger elephant and no prefetch touches it. (The design's TL;DR "~1.5 s cold ingest"
 and the reviewer's "~3 s" both **understated** the true cost; the whole point of measure-first.)
 
-### GO / NO-GO verdict (thresholds from DESIGN_specPrefetch.md §4)
+### GO / NO-GO verdict (thresholds from the design's §4)
 | candidate | ripwire (~150 files) | private C++ corpus (1849 files) |
 |---|---|---|
 | **(a) edit-rebuild** — DEAD if <500 ms total OR p95<200 ms | **DEAD** (52 ms) | *edit skipped (read-only).* Warm rebuild proxy = for(first) **362/416 ms p95**: a **single** edit is <500 ms total → DEAD; **≥2** edits crosses both thresholds → would SURVIVE. **Marginal, edit-frequency-dependent.** |
@@ -257,7 +257,7 @@ and the reviewer's "~3 s" both **understated** the true cost; the whole point of
   "genuinely small."** The thing it prefetches is the single heaviest op in the tool (a full HEAD Snapshot:
   git archive + ingest + `findClones`), run on a background thread **concurrently with request-serving** — which
   mandates the design's **G-race (TSan)**, **G-non-vacuity**, and **G-monotone-freshness** gates and a
-  reconciliation with `DESIGN_teamIndex.md`'s proposed global request mutex (reviewer note, §5). That is a
+  reconciliation with the team-index design's proposed global request mutex (reviewer note, §5). That is a
   Phase-M change with a real concurrency surface, not a detached one-liner, and its gates cannot be brought to
   green cheaply this round. Per the house phase-gate rule (write the gate before the code) and the design's own
   "measure says don't build it is a first-class outcome," the correct call is **ship the instrumentation, record
@@ -269,14 +269,14 @@ and the reviewer's "~3 s" both **understated** the true cost; the whole point of
 After the computeDelta clone-pass dedup (commit d1ad890: both consumers now share one
 findClones+findClonesType3 result) on top of the per-sha quality-Snapshot cache: warm
 `--quality-delta` = **4.06 s** (4.33/4.05/4.06 measured 2026-07-11 on the live tree; was 7.87 s
-before the dedup, 17.1 s at AUDIT4 time). The remaining cost is the single Type-3 pair-enumeration
-pass (~2.7 s, 60.5 M pair-visits — the PLAN_backlog2026 B1 lever) + ingest/churn.
+before the dedup, 17.1 s before that). The remaining cost is the single Type-3 pair-enumeration
+pass (~2.7 s, 60.5 M pair-visits — the B1 lever) + ingest/churn.
 
 ## 2026-07-11 — JSON token-calibration measurement (A1-backlog, Wave 1)
 
 `kTokenCalib[Lang::Json]` shipped as a **2.50 placeholder** ("mid-band until measured"). Measured with
 real `o200k_base` tiktoken — the same procedure and encoding that produced the rest of the table
-(`RESEARCH_outputEconomy.md`; commit `aece7e5` "MAPE vs o200k"): `bytesPerToken = total UTF-8 bytes /
+(commit `aece7e5` "MAPE vs o200k"): `bytesPerToken = total UTF-8 bytes /
 total tokens` over the concatenated corpus. New value: **3.10 B/tok**.
 
 - **Corpus:** n=108 real `package.json`/`tsconfig.json` files from the LocBench repo cache

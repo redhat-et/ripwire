@@ -69,9 +69,9 @@ build failure or a linker error is the compiler's/linker's question, not ripwire
 **ripwire-mcp** (run ripwire as an MCP server). `--doctor` (setup-health row above) is diagnostic, not a
 moment skill. `--eval` / `--eval-retrieval` / `--eval-mined` are
 maintainer self-eval harnesses (not an agent moment) — `--eval-mined=FILE` scores ranker recall against
-real session-mined (query, gold-files) pairs from `bench/mine_traces.py`; see `DESIGN_traceEvals.md`. The
+real session-mined (query, gold-files) pairs from `bench/mine_traces.py`. The
 detail-ladder / token-squeeze (`--compress`) material
-lives inside **ripwire-efficient**'s companion file (`compress-ladder.md`) now — it's not a standalone
+lives inside **ripwire-efficient**'s companion file (`skills/ripwire-efficient/compress-ladder.md`) now — it's not a standalone
 moment. You don't recognize "the graph-query moment" — reach for these when a moment skill points you at
 them.
 

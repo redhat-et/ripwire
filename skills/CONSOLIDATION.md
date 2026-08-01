@@ -1,6 +1,6 @@
 # Skills consolidation — 30 → 17 (Wave 3, 2026-07)
 
-The skills audit (`reviews/AUDIT_2026-07.md §Skills audit`) found 30 user-facing skills collapsing into
+The skills audit found 30 user-facing skills collapsing into
 ~8 jobs with mutually indistinguishable descriptions — a routing hazard and a token tax. This pass merged
 them into **17 routable skills**, each answerable to "when would an agent pick THIS one over every other".
 
@@ -38,13 +38,13 @@ repo. Absorbed skill directories were deleted — their content lives on in the 
 | ripwire-quality-bar  | **ripwire-quality-bar**      | kept; cross-ref updated pre-pr → change-check |
 | ripwire-reuse-first  | **ripwire-reuse-first**      | kept standalone |
 | ripwire-review       | **ripwire-change-check** + **ripwire-fresh-eyes** | **DELETED** — split by moment (see 2026-07 MOMENT pass below) |
-| ripwire-compress     | **ripwire-compress**         | kept standalone (the detail-ladder rewrite) |
+| ripwire-compress     | **ripwire-compress**         | kept standalone (the detail-ladder rewrite); later merged into ripwire-efficient, see 2026-07-05 below |
 | ripwire-handoff      | **ripwire-handoff**          | kept standalone |
 | ripwire-layers       | **ripwire-layers**           | kept standalone (--arch gate + baseline workflow) |
 | ripwire-mcp          | **ripwire-mcp**              | kept; cross-ref updated mcp-audit → security-scan |
 | ripwire-graph-query  | **ripwire-graph-query**      | kept standalone |
 | ripwire-perf-target  | **ripwire-perf-target**      | kept standalone; description sharpened + routing header added |
-| —                    | **ripwire-write-tests**      | NEW (AUDIT4 S4, 2026-07-10) — no predecessor; untested-code coverage moment had no home until then |
+| —                    | **ripwire-write-tests**      | NEW (S4, 2026-07-10) — no predecessor; untested-code coverage moment had no home until then |
 
 ## Judgment calls beyond the target taxonomy
 
@@ -61,7 +61,7 @@ repo. Absorbed skill directories were deleted — their content lives on in the 
 Net: 17 skills (7 merged homes + 10 kept), each with a discriminating description and a routing header naming
 its nearest neighbours.
 
-## MOMENT pass (2026-07, `PLAN_skills2026.md`) — route by moment, not by feature
+## MOMENT pass (2026-07) — route by moment, not by feature
 
 The 17 were well-written individually but agents **route by MOMENT**, and three moments were co-claimed by
 near-synonym descriptions (router stalls → agent falls back to grep). This pass rewrote DESCRIPTIONS to be
@@ -101,7 +101,7 @@ Directory `skills/ripwire-compress/` deleted.
 
 Net: 16 skills (compress folded into efficient as a companion file, no moment lost).
 
-## 2026-07-10 — ripwire-write-tests added (AUDIT4 S4) (16 → 17)
+## 2026-07-10 — ripwire-write-tests added (S4) (16 → 17)
 
 The untested-code-coverage moment ("this is untested, add coverage") had no home — it's distinct from
 judging your own diff (`ripwire-change-check`) or your own code's quality (`ripwire-quality-bar`). New
