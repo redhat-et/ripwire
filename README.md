@@ -12,10 +12,10 @@ disclosed in the header, and a zero means *none found*, never *none exists*.
 
 `ripwire` is a zero-runtime-dependency C++23 CLI. It crawls a codebase, extracts symbols with
 tree-sitter, resolves references into a call graph, ranks that graph with Personalized PageRank, and
-streams a deterministic minified XML map to stdout. Around that core sit 104 flags across seven
-families — orientation, navigation, detail, quality, self-diagnosis, security, and the knobs that
-shape all of them — plus an MCP server, so a coding agent can call any of them mid-task instead of
-grepping and reading whole files.
+streams a deterministic minified XML map to stdout. Around that core sit 123 long flags advertised
+in `--help`, across seven families — orientation, navigation, detail, quality, self-diagnosis,
+security, and the knobs that shape all of them — plus an MCP server, so a coding agent can call any
+of them mid-task instead of grepping and reading whole files.
 
 Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
 contract, enforced by a gate on every push and pull request, not a tendency.
