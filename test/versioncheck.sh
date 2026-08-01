@@ -71,15 +71,27 @@ BUILD_TYPE_STR="$( printf '%s' "$OUT_LONG" | grep -oE '\([^,]+,' | sed -E 's/^\(
 [ -n "$BUILD_TYPE_STR" ] \
     && ok "--version names a build type ($BUILD_TYPE_STR)" \
     || no "--version has no build-type parenthetical to check: $OUT_LONG"
-CACHE_BUILD_TYPE="$( grep -oE '^CMAKE_BUILD_TYPE:[A-Za-z]*=.*' "$ROOT/build/CMakeCache.txt" 2>/dev/null | cut -d= -f2 )"
-if [ -z "$CACHE_BUILD_TYPE" ]; then
-    [ "$BUILD_TYPE_STR" = "dev" ] \
-        && ok "plain configure (empty CMAKE_BUILD_TYPE) prints the honest label 'dev'" \
-        || no "plain configure (empty CMAKE_BUILD_TYPE) prints '$BUILD_TYPE_STR', expected 'dev'"
+# The cache checked here must be the ONE that configured $BIN, not a hardcoded $ROOT/build guess — a
+# binary built at any other path (asan/ripwire, a scratch copy, a CI out-of-tree build) would silently
+# compare against build/CMakeCache.txt's build type instead of its own, or against nothing at all. And
+# if that cache is simply ABSENT (grep finds no file, empty CACHE_BUILD_TYPE), that used to fall through
+# to the "plain configure, expect dev" branch and pass for the wrong reason — a missing cache is not
+# evidence of a dev configure, it is evidence the check couldn't run. Fail honestly instead.
+BIN_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
+CACHE_FILE="$BIN_DIR/CMakeCache.txt"
+if [ ! -f "$CACHE_FILE" ]; then
+    no "no CMakeCache.txt found next to \$BIN's build dir ($CACHE_FILE) — cannot verify the build-type label; configure the tree that produced $BIN before running this gate"
 else
-    [ "$BUILD_TYPE_STR" = "$CACHE_BUILD_TYPE" ] \
-        && ok "configure with CMAKE_BUILD_TYPE=$CACHE_BUILD_TYPE prints it verbatim" \
-        || no "configure with CMAKE_BUILD_TYPE=$CACHE_BUILD_TYPE prints '$BUILD_TYPE_STR' instead"
+    CACHE_BUILD_TYPE="$( grep -oE '^CMAKE_BUILD_TYPE:[A-Za-z]*=.*' "$CACHE_FILE" | cut -d= -f2 )"
+    if [ -z "$CACHE_BUILD_TYPE" ]; then
+        [ "$BUILD_TYPE_STR" = "dev" ] \
+            && ok "plain configure (empty CMAKE_BUILD_TYPE in $CACHE_FILE) prints the honest label 'dev'" \
+            || no "plain configure (empty CMAKE_BUILD_TYPE in $CACHE_FILE) prints '$BUILD_TYPE_STR', expected 'dev'"
+    else
+        [ "$BUILD_TYPE_STR" = "$CACHE_BUILD_TYPE" ] \
+            && ok "configure with CMAKE_BUILD_TYPE=$CACHE_BUILD_TYPE (from $CACHE_FILE) prints it verbatim" \
+            || no "configure with CMAKE_BUILD_TYPE=$CACHE_BUILD_TYPE (from $CACHE_FILE) prints '$BUILD_TYPE_STR' instead"
+    fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
