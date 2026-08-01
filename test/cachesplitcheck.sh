@@ -2,7 +2,7 @@
 # cachesplitcheck.sh — A4-P4 gate: the warm-by-default auto-cache is SPLIT by verb class (lean vs rich),
 # so alternating verb classes never thrashes (full re-parse + full rewrite on every class switch).
 #
-# Background ( §C A4-P4): parserVerFor(captureValueUses) version-gates the cache CONTENT to a
+# Background (§C A4-P4): parserVerFor(captureValueUses) version-gates the cache CONTENT to a
 # DIFFERENT version for the "rich" class (--for/--metrics/--uses/--exemplar, captureValueUses=true) than
 # for the "lean" class (everything else). When both classes shared ONE per-root cache file, every switch
 # missed the parserVer guard → full reparse + full rewrite (measured: plain-map-after-`--for` 0.81 s vs

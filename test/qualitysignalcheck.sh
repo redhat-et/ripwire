@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qualitysignalcheck.sh — gate for the 2026-07-13 --quality-delta SIGNAL-TO-NOISE round ( §5 quality-delta
+# qualitysignalcheck.sh — gate for the 2026-07-13 --quality-delta SIGNAL-TO-NOISE round (§5 quality-delta
 # noise rules). Four decided behaviors, each measured on this repo's own dogfood evidence (intentional findings
 # drowning real ones):
 #   1. short-horizon-churn needs COMMITTED thrash evidence — a symbol flags only when its body already changed

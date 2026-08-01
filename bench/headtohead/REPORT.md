@@ -1,6 +1,6 @@
 # Head-to-head: ripwire vs Aider repo-map vs codebase-memory-mcp vs graphify (LocBench held-out slice)
 
-**Phase B5.3 of  — 2026-07-13.**
+**Phase B5.3 — 2026-07-13.**
 Primary deliverable: the per-instance win/loss matrix and the **loss-bucket analysis** (what can we
 learn to make ripwire better). The scoreboard is the by-product.
 

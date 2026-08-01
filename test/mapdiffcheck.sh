@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # mapdiffcheck.sh — gate for --map-diff, which had ZERO coverage. --map-diff is NOT a filter: it is a
-# PageRank TELEPORT reweighting ( §3 / src/graph.h:1071 "β of the mass on symbols in changed files,
+# PageRank TELEPORT reweighting (§3 / src/graph.h:1071 "β of the mass on symbols in changed files,
 # (1−β) on the rest"). The map still shows every symbol; symbols in git-changed files get a rank BOOST.
 # The high-value, hand-verifiable contract is therefore a RANK FLIP, which this gate constructs from a
 # synthetic git repo whose natural PageRank order is known:

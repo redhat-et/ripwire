@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testgatepagecheck.sh — §A3a/§A3b/PC-2 gate .
+# testgatepagecheck.sh — §A3a/§A3b/PC-2 gate.
 #
 # §A3a [BROKEN]: --test-gate's <u> untested-row list was a bare 25-row literal cap (situ.h kMaxUntestedRows)
 # with NO shown=/capped= disclosure on the root, in either XML or JSON, and `--test-gate --limit=100`

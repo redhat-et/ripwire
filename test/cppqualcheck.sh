@@ -157,7 +157,7 @@ expect uses    mutexFn 0 "most-vexing-parse: unfixable by any query widening, pi
 expect callers mutexFn 0 "most-vexing-parse: no caller, by construction"
 
 # ── §6 REPO-ROOT RECOVERY — the seams the defect was found on ───────────────────────────────────────────
-# Literals from the W1-MEASURE census . These are the
+# Literals from the W1-MEASURE census. These are the
 # flagship "did I break a caller?" sites: selectBaseline's second caller is a hard compile error under an
 # arity change and was never named; writeTally had a def and two call sites and reported ZERO callers.
 US="$( run . --uses=selectBaseline --no-cache )"

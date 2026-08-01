@@ -109,7 +109,7 @@ srch="$( attr "$TMP/impact_small.xml" reaches )"; sshw="$( attr "$TMP/impact_sma
                                            || no "--impact untruncated: reaches='$srch' shown='$sshw' capped='$scap'"
 
 "$BIN" "$SRC" --impact=leaf --json > "$TMP/impact.json" 2>/dev/null
-#: the JSON page disclosure is pageDisclosure's seven-key vocabulary now, so
+# The JSON page disclosure is pageDisclosure's seven-key vocabulary now, so
 # `capped` is a JSON BOOLEAN (true/false) rather than the 0/1 the hand-rolled pair emitted — the XML attribute
 # keeps "0"/"1", the JSON sibling spells the same fact the way JSON spells booleans, and both are ALWAYS
 # present rather than inferable from a missing key.

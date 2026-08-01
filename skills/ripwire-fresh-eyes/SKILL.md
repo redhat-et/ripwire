@@ -89,7 +89,7 @@ sections your question needs.
 1c. **Can I TRUST this repo's docs?** — `ripwire <dir> --doc-drift` (`=SUBSTR` to narrow to one doc)
    ```
    <doc-drift docs="129" clean="110" anchors="1995" checked="716" unchecked="1279" drift="110">
-     <doc p="" anchors="50" checked="34" drift="9"><a k="file-line" l="186" c="80"
+     <doc p="docs/ARCHITECTURE.md" anchors="50" checked="34" drift="9"><a k="file-line" l="186" c="80"
        why="line-moved" ref="src/main.cpp:317" sym="isGitUrl" got="communityPresentation"/> …
    ```
    Inheriting a repo, the design docs and audits are how you learn it — and the stale ones are how you learn
@@ -110,7 +110,7 @@ sections your question needs.
    what one annotation each would fix:
    ```
    <gateability docs="17" projected_drift="0">
-     <fix p="" live="6"/> …
+     <fix p="docs/ARCHITECTURE.md" live="6"/> …
    ```
    `live=` is that doc's still-failing anchors; `projected_drift=` is the repo-wide drift you'd be left with
    if every listed doc got one ISO date in its H1 or a front-matter self-date line. Treat it as an **upper

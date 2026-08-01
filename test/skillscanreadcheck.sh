@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# skillscanreadcheck.sh — gate for
+# skillscanreadcheck.sh — gate for §P0.5a: an unreadable/nonexistent --scan-skill(s) path must never read as "safe".
 #
 # THE BUG: `--scan-skill=/nonexistent/path` printed "0 finding(s)" on stderr, nothing on stdout, and
 # exited 0 — byte-identical (on every channel that matters to a caller checking $?  or grepping stdout)

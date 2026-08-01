@@ -4,8 +4,7 @@
 #
 # parseArgs used to be one ordered `else if` chain, so precedence was whatever the author wrote. 105 of its
 # arms now live in three constexpr tables scanned AHEAD of the surviving hand-written arms
-# (§6.1 Move B; the numeric table is §B8.2 of
-# ). Hoisting a matcher above the arms it used to sit
+# (§6.1 Move B; the numeric table is §B8.2). Hoisting a matcher above the arms it used to sit
 # below is only safe while NO literal in the surface shadows another — and "safe today" is not a property a
 # table keeps on its own. The next flag someone adds is the one that breaks it:
 #

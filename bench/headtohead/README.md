@@ -1,6 +1,6 @@
 # Head-to-head archive: ripwire vs Aider repo-map vs codebase-memory-mcp vs graphify
 
-Phase B5.3 of ``, run **2026-07-13/14**. A 4-arm paired comparison on a
+Phase B5.3, run **2026-07-13/14**. A 4-arm paired comparison on a
 60-instance held-out LocBench slice (40/60 multi-file gold), with a loss-bucket analysis of every
 ripwire strict-file@10 loss, re-run and verified.
 
