@@ -209,11 +209,11 @@ struct Config
     std::string_view laneBrief;                              // --brief=FILE: one non-blank line per lane, each ranked on its own
     bool             whereisFlag     = false;               // --whereis was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
-    std::string_view whereis;                               // --whereis=SYM (field-notes §1): every ref whose TREE contains SYM,
+    std::string_view whereis;                               // --whereis=SYM: every ref whose TREE contains SYM,
                                                              // HEAD first, with on-head= saying whether the live line has it at all.
                                                              // Scans each ref's FULL tree; each distinct blob is read once (content-
                                                              // addressed), so N refs cost ~one tree. Single-root only.
-    bool             strayContent    = false;               // --stray-content[=SUBSTR] (field-notes §1): per ref, the lines its own
+    bool             strayContent    = false;               // --stray-content[=SUBSTR]: per ref, the lines its own
                                                              // divergent work AUTHORED that HEAD lacks + a merged/superseded/unmerged
                                                              // verdict. SUBSTR filters the ref names. Single-root only.
     std::string_view strayFilter;                           // --stray-content=SUBSTR: only refs whose name contains SUBSTR
@@ -230,11 +230,11 @@ struct Config
                                                              // verbatim) and compare against HEAD's --layout-computed
                                                              // fields; report only DIFFERENCES, exit 2 on a real drift.
                                                              // Single-root only (like --stray-content).
-    std::string_view evalStray;                             // --eval-stray=FILE (field-notes §1): labelled verdict-accuracy
+    std::string_view evalStray;                             // --eval-stray=FILE: labelled verdict-accuracy
                                                              // eval for --stray-content. FILE is TSV `ref<TAB>verdict`.
                                                              // The verdict verbs classify rather than rank, so their eval is
                                                              // a confusion table, not recall@k like --eval-retrieval.
-    bool             darkFlags       = false;               // --flags[=SUBSTR] (field-notes §2): the dark-content dashboard — every
+    bool             darkFlags       = false;               // --flags[=SUBSTR]: the dark-content dashboard — every
                                                              // #ifndef/#define compile gate, CMake option() and getenv() read, with
                                                              // its kind, default, guarded size and read sites.
     std::string_view darkFlagsFilter;                       // --flags=SUBSTR: only gates whose name contains SUBSTR
@@ -244,7 +244,7 @@ struct Config
                                                              // the #if regions AND the constexpr-bool branches it governs, the
                                                              // symbols holding them, what those transitively reach, and the tests
                                                              // that cover them. Traverses the alias chain in both directions.
-    bool             docDrift        = false;               // --doc-drift[=SUBSTR] (field-notes §3): verify the markdown docs'
+    bool             docDrift        = false;               // --doc-drift[=SUBSTR]: verify the markdown docs'
                                                              // CHECKABLE anchors (file:line refs, backticked symbol mentions,
                                                              // `= N` constants, `[N]` array extents) against the live index and
                                                              // report only the ones that no longer hold.
@@ -262,7 +262,7 @@ struct Config
                                                              // question on one commit is a cache load, not a walk.
     bool             layoutFlag      = false;               // --layout was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
-    std::string_view layoutStruct;                          // --layout=STRUCT (field-notes §5): the CPU/GPU contract view for one
+    std::string_view layoutStruct;                          // --layout=STRUCT: the CPU/GPU contract view for one
                                                              // struct/class — COMPUTED field offsets/sizes/padding, every
                                                              // static_assert in the index that mentions it, and every same-name
                                                              // definition compared field-by-field (the mirror/stub drift check).
@@ -291,7 +291,7 @@ struct Config
                                                              // caller signatures, (4) their field notes, (5) tests_to_run for the top
                                                              // files. Allocation order ranking>bodies>callers>notes>tests; each section
                                                              // truncates rank-adaptively and the header reports EVERY truncation.
-    int              partitionCount  = 0;                   // --partition=N (field-notes §6, with --pack-task): fan-out form of the
+    int              partitionCount  = 0;                   // --partition=N (with --pack-task): fan-out form of the
                                                              // bundle — ONE shared common core plus N minimally-overlapping per-agent
                                                              // slices carved along the call graph's own Louvain communities, each
                                                              // through the SAME assembler. --token-budget then means the budget for
@@ -1608,7 +1608,7 @@ inline constexpr IntFlag kIntFlags[] =
     // / --task first) enforced in validateConfig with its own message, not a parse-time domain.
     { "--around-depth=",     &Config::aroundDepth,     false, kIntFlagMax,     "a positive integer",         "--around-depth=3" },
     { "--around-fanout=",    &Config::aroundFanout,    false, kIntFlagMax,     "a positive integer",         "--around-fanout=50" },
-    // field-notes §6: the fan-out form of --pack-task (2..16 agents; range checked in validateConfig)
+    // --partition=N: the fan-out form of --pack-task (2..16 agents; range checked in validateConfig)
     { "--partition=",        &Config::partitionCount,  false, kIntFlagMax,     "a positive integer",         "--partition=4" },
     // sets TWO members: the count here AND the companion bool (the bare `--plan-lanes` --brief form is the
     // kBoolFlags row above); 2..16 is enforced in validateConfig alongside the task-xor-brief contract.
@@ -2322,7 +2322,7 @@ inline void validateConfig( Config& c ) noexcept
     // else below to worry about) — the line it guards is otherwise completely unmodified.
     if( !c.owners )
     // --detail=N (RESEARCH lever 3) folds full bodies onto the --for lens; alone it does nothing — refuse loudly.
-    // The cross-branch verbs (field-notes §1) reuse it for the SAME meaning — "lift the display cap, show the
+    // The cross-branch verbs (--stray-content/--whereis) reuse it for the SAME meaning — "lift the display cap, show the
     // rows the ranked head elided" — so they join --for as a legal companion rather than growing a second
     // spelling of "show me more". --flags/--flip belongs in that list for the same reason and always did:
     // its handler has read cfg.detail since it shipped (the per-gate site cap), but the guard here never
@@ -2333,7 +2333,7 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
-    // --partition=N (field-notes §6) SPLITS a --pack-task bundle; there is nothing else in the tool it could
+    // --partition=N SPLITS a --pack-task bundle; there is nothing else in the tool it could
     // split, so alone it would silently no-op on the default map. Refuse loudly (mirrors --detail/--adaptive),
     // and bound N in the same breath: 1 is just --pack-task, and past kMaxPartitions=16 an orchestrator is
     // doing something other than a fan-out (the same cap --connect and multi-root use).

@@ -9,7 +9,7 @@
 #   (D) non-vacuity without a source mutation: assert the check COUNT in checks="N" equals the number
 #       of emitted <c ...> rows (a doctor that silently dropped a check would still exit 0/1 plausibly,
 #       but the count would betray it).
-#   (G) tracked-binary staleness (field-notes §Smaller): a binary committed, then its same-stem source
+#   (G) tracked-binary staleness: a binary committed, then its same-stem source
 #       edited in a LATER commit with the binary never recommitted, fires stale="1" ok="0" (git-commit-order,
 #       never mtime); a binary + source committed TOGETHER in their most recent touch stays stale="0" ok="1".
 #
@@ -169,7 +169,7 @@ echo "$STALEHINT" | grep -qF "$STALEDIR/ripwire" \
     && ok "hint= correctly names the OLDER (staledir) binary as stale, not the newer one" \
     || no "hint= did not name the older binary: $STALEHINT"
 
-# ── (G) tracked-binary staleness (field-notes §Smaller) ─────────────────────────────────────────
+# ── (G) tracked-binary staleness ─────────────────────────────────────────
 # Two dedicated repos so the fixture is unambiguous: STALEREPO commits a binary, then edits its same-
 # stem source in a LATER commit without ever recommitting the binary (the motivating "sweep committed
 # rebuilt binaries blind" shape, inverted: here the SOURCE moved and the binary was left behind — same

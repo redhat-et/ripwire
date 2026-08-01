@@ -55,6 +55,6 @@
 ; ship. The qualified/selector form (`pkg.Generic[int](x)`) makes this WORSE, not better: it needs a
 ; THIRD shape (`generic_type type: (qualified_type name: (type_identifier))`) layered on top of the
 ; already-indiscriminable base case. Idiomatic Go (type-inferred `Generic(1)`) was never affected —
-; it parses as a plain call_expression and is captured by the pattern above. See
-; the H4 grammar survey's §FP item 5 and item 5's own
-; escape hatch ("REJECT this widening with the evidence instead of shipping it").
+; it parses as a plain call_expression and is captured by the pattern above. This widening was
+; REJECTED on the evidence above rather than shipped, per this project's own rule for false-positive
+; risk: reject with the evidence instead of shipping it.

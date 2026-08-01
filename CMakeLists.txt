@@ -3,13 +3,13 @@ cmake_minimum_required(VERSION 3.24)
 # reads it via the generated version.h below; test/versioncheck.sh asserts the two never drift.
 project(ripwire VERSION 0.1.0 LANGUAGES C CXX)
 
-# ---- language standards (SPEC §7: C++23 / C11) ----
+# ---- language standards (C++23 for our own code / C11 for the vendored C dependencies) ----
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# ---- verification build modes (SPEC §6/§8) ----
+# ---- verification build modes (the sanitizer stacks + gate targets — CONTRIBUTING.md §4) ----
 # Each sanitizer family owns a separate build tree; combining runtimes is unsupported and obscures failures.
 option(RIPWIRE_ASAN "build with the complete fail-fast G1 sanitizer stack" OFF)
 option(RIPWIRE_TSAN "build separately with ThreadSanitizer" OFF)
@@ -101,7 +101,7 @@ macro(ripwire_use_vendored_source NAME SENTINEL)
   set(FETCHCONTENT_SOURCE_DIR_${_ripwire_up} "${_ripwire_vendored_deps}/${NAME}")
 endmacro()
 
-# ---- configure-time query embedding (SPEC §1: one self-contained binary) ----
+# ---- configure-time query embedding (baked into the binary — no data files to ship alongside it) ----
 # queries/<language>/tags.scm remains the editable source of truth. CMake regenerates this constexpr
 # table whenever any query changes; ingest reads only the binary's read-only data at runtime.
 set(_ripwire_query_names
@@ -170,7 +170,7 @@ FetchContent_Declare(tree_sitter
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(tree_sitter)
 
-# ---- grammar OBJECT-lib pattern (SPEC §7) ----
+# ---- grammar OBJECT-lib pattern ----
 # Do NOT add_subdirectory the grammar repos: their CMakeLists find_program(tree-sitter),
 # add a regenerate-parser.c custom command, and a SOVERSION/ABI trap. SOURCE_SUBDIR _none_
 # makes FetchContent skip the grammar's own CMakeLists; we compile only parser.c (+scanner.c).
@@ -272,14 +272,15 @@ add_ts_object(tstsx ${ts_typescript_SOURCE_DIR}/tsx/src)
 
 # ---- explicit, easy-to-extend executable source list ----
 # Later stages (graph/rank/serialize/main) get appended here. ingest.cpp + the vendored
-# fastmath.cpp (VERIFY/DEGRADED handlers link partner, SPEC §9) are the foundation.
+# fastmath.cpp (VERIFY/DEGRADED handlers link partner) are the foundation.
 set(RIPWIRE_SRCS
   src/ingest.cpp
   src/pagerank.cpp
   src/infra/fastmath.cpp
 )
 
-# The global profile uses -ffast-math, but PageRank reductions must not reassociate (SPEC §3/§7).
+# The global profile uses -ffast-math, but PageRank reductions must not reassociate (the determinism
+# contract's no-reassociation rule — docs/ARCHITECTURE.md §3).
 set_source_files_properties(src/pagerank.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
 
 # All grammar OBJECT files, gathered once so every target links the same set.
@@ -334,12 +335,12 @@ target_include_directories(ripwire PRIVATE
 # the same --prefix) even though ripwire links it in statically and needs none of that at runtime.
 install(TARGETS ripwire RUNTIME DESTINATION bin COMPONENT ripwire)
 
-# ---- direct structural/numeric gates (SPEC §8) ----
+# ---- direct structural/numeric gates ----
 option(RIPWIRE_TESTS "build direct CSR and PageRank verification gates" OFF)
 if(RIPWIRE_TESTS)
   enable_testing()
 
-  # SPEC §8: unit/property gates use a SHA-locked Doctest checkout — the exact v2.4.12 release commit,
+  # unit/property gates use a SHA-locked Doctest checkout — the exact v2.4.12 release commit,
   # vendored under third_party/deps/doctest (header + parts + the cmake scripts its CMakeLists reads).
   set(_ripwire_doctest_commit 1da23a3e8119ec5cce4f9388e91b065e20bf06f5)
   # doctest is a test-only dependency: it must contribute no install() rules to this project, and the
@@ -386,7 +387,7 @@ foreach(_pt ripwire ripwire_probe)
   target_compile_definitions(${_pt} PRIVATE PROFILE_ENABLED=$<BOOL:${RIPWIRE_PROFILE}>)
 endforeach()
 
-# ---- G1 sanitizer build (SPEC §6/§8): owned code + tree-sitter core + every grammar ----
+# ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c)
@@ -451,7 +452,7 @@ if(RIPWIRE_ASAN)
     COMMENT "Run the G1 fixture with the platform leak-detection policy")
 endif()
 
-# ---- G-race ThreadSanitizer build (SPEC §6/§8; Phase-M qsnap-prefetch worker vs the request loop) ----
+# ---- G-race ThreadSanitizer build (the qsnap-prefetch worker vs the request loop) ----
 # A SEPARATE target/dir from ASan (TSan and ASan are mutually exclusive). Vets the one concurrent path in the
 # server: the detached HEAD-snapshot prefetch thread against a request-thread ingest, serialized by
 # quality::headSnapshotIngestMutex + the single-flight atomic. Build + run the (b) non-vacuity scenario:
@@ -465,7 +466,7 @@ if(RIPWIRE_TSAN)
   endforeach()
 endif()
 
-# ---- opt-in ingestion fuzzing (SPEC §8): isolated coverage-instrumented parser objects ----
+# ---- opt-in ingestion fuzzing: isolated coverage-instrumented parser objects ----
 # Keep these copies separate from production objects: fuzzer-no-link coverage callbacks must never leak
 # into a normal executable. RIPWIRE_FUZZ is OFF by default and every target is EXCLUDE_FROM_ALL.
 if(RIPWIRE_FUZZ)

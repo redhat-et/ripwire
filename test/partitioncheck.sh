@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# partitioncheck.sh — the field-notes §6 gate for `--pack-task="TASK" --partition=N` (src/partition.h):
+# partitioncheck.sh — the gate for `--pack-task="TASK" --partition=N` (src/partition.h):
 # the FAN-OUT form of the task bundle — ONE shared common core plus N minimally-overlapping per-agent slices
 # carved along the call graph's own Louvain communities, so N parallel agents stop re-deriving one map.
 #

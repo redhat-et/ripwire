@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docdriftcheck.sh — the field-notes §3 gate for --doc-drift, the doc-anchor verifier (src/docdrift.h).
+# docdriftcheck.sh — the gate for --doc-drift, the doc-anchor verifier (src/docdrift.h).
 #
 #   test/docdriftcheck.sh
 #   RIPWIRE_BIN=asan/ripwire test/docdriftcheck.sh

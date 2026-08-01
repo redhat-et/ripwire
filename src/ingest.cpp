@@ -95,7 +95,7 @@ constexpr std::array<LangEntry, 30> kLangTable = {{
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     // `.metal` = Metal Shading Language, a C++14 dialect — so it rides the C++ grammar and the C++
-    // tags.scm, no grammar or query of its own (L4, field-notes §4: an entire shader half was invisible,
+    // tags.scm, no grammar or query of its own (fixes a real bug: an entire shader half was invisible,
     // `--callers=ml_styleFor` returned 0). MEASURED on a real 45-shader Metal application tree (864 KB)
     // before this entry was added, not assumed: 0.81% of bytes land inside an ERROR subtree under the C++ grammar
     // (the C grammar: 12.3% — 15x worse; real C++ in the same repo: 0.00%), and every one of the 249

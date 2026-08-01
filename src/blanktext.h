@@ -2,7 +2,7 @@
 
 // blanktext.h — THE ONE PREDICATE for "this value is PRESENT but carries NOTHING".
 //
-// WHY IT IS ITS OWN HEADER (capture-audit-4 §S3, 2026-07-30). The rule below was born in src/mcp.h, at the
+// WHY IT IS ITS OWN HEADER. The rule below was born in src/mcp.h, at the
 // MCP edit verbs' payload check, because that is where a blank value DELETES a definition. But "does this
 // UTF-8 text occupy any visible column" is not an MCP question — it is a text question, and the same
 // question was being answered a THIRD time, differently, one file over: `--note-add` decided it with

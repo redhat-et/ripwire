@@ -14,14 +14,14 @@
 #include "filter.h"        // §P4: rankTierSymbolMultipliers — the fixture/present tier down-weight the CLI ranking lenses apply
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
-#include "partition.h"     // field-notes §6: the explore verb's `partition` argument (packTaskPartitionText)
+#include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "editcheck.h"     // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "graphlegend.h"   // §H4 §3.4: the ONE counts_floor= marker + shared graph-count legend wording (CLI ≡ MCP)
-#include "crossref.h"      // field-notes §1: the shared cross-branch content index (whereis / stray_content)
-#include "darkflags.h"     // field-notes §2: the shared dark-content gate harvest (flags)
+#include "crossref.h"      // the shared cross-branch content index (whereis / stray_content)
+#include "darkflags.h"     // the shared dark-content gate harvest (flags)
 #include "flipimpact.h"    // the flags verb's `symbol` argument: one gate's flip blast radius
-#include "docdrift.h"      // field-notes §3: the shared doc-anchor verifier (doc_drift)
+#include "docdrift.h"      // the shared doc-anchor verifier (doc_drift)
 #include "exemplar.h"      // §B6 M2: selectExemplar + kExemplarSelectionRule — the ONE selector/wording both surfaces use
 #include "mcprefusal.h"    // §B6 M7/M8/M9: the shared verb+field refusal table both MCP arms speak
 
@@ -320,7 +320,7 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     /*extraBodyTokens=*/0, /*ann=*/{}, /*statsFirstScreen=*/true ); } );
 }
 
-// ─── field-notes §1/§2: the cross-branch + dark-content MCP twins (`whereis`, `stray_content`, `flags`) ───
+// ─── the cross-branch + dark-content MCP twins (`whereis`, `stray_content`, `flags`) ───
 // Each is a thin front door onto the SAME computation + the SAME renderer its CLI sibling calls
 // (crossref.h / darkflags.h), captured with the open_memstream idiom above — one XML shape, two surfaces,
 // no forked logic. Unlike `merge_scout` (CLI-only: it takes a hand-authored ref LIST), these three take no
@@ -379,7 +379,7 @@ inline std::string flipText( const std::string& root, const std::string& gate, s
     return captureXml( [ & ]( std::FILE* f ) { flipimpact::writeFlip( f, res, ix.ing, root, maxRows ); } );
 }
 
-// `doc_drift` verb (field-notes §3): the markdown docs' checkable anchors vs the live index. Index-backed —
+// `doc_drift` verb: the markdown docs' checkable anchors vs the live index. Index-backed —
 // it needs both the crawled file list AND the symbol table, so it goes through getIndex() like `flags`.
 inline std::string docDriftText( const std::string& root, const std::string& filter, std::size_t maxPerDoc )
 {
@@ -1848,7 +1848,7 @@ inline std::string qualityBaselineJson( const std::string& root, std::string& er
 // ⇒ the shared default (6000). No --anchor/--no-route equivalent over MCP (routing is always-on here, as it
 // is by default on the CLI; --anchor is a CLI-only RIPWIRE_DEV-gated experiment).
 //
-// `partitionCount` (field-notes §6) is the CLI's --partition=N over MCP — an ARGUMENT on this verb, not a
+// `partitionCount` is the CLI's --partition=N over MCP — an ARGUMENT on this verb, not a
 // verb of its own, because it changes what `explore` returns (one bundle vs core + N slices) without changing
 // what it is FOR; a separate verb would duplicate the whole task/budget contract for one integer. 0 (or any
 // value outside 2..16, which is silently clamped OFF rather than erroring an otherwise valid explore call)

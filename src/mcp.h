@@ -80,7 +80,7 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     { "explore",                 "ONE-call task orientation: routed ranking + bodies + callers + notes + tests_to_run under a budget", McpVerbGroup::FlagshipReflex },
     { "from_trace",              "map a pasted stack trace / sanitizer report / compiler error onto indexed symbols", McpVerbGroup::FlagshipReflex },
     { "edit_check",              "did MY edit change a contract callers depend on, vs git HEAD",            McpVerbGroup::FlagshipReflex },
-    // field-notes §1/§2 — the cross-branch + dark-content verbs. `stray_content`/`whereis` answer "where
+    // The cross-branch + dark-content verbs. `stray_content`/`whereis` answer "where
     // does this content live?" across every branch (the question `git cherry` cannot); `flags` answers
     // "what is built but dark here?". `merge_scout` stays CLI-only (it takes a hand-authored ref LIST).
     { "whereis",                 "which branch's tree defines or mentions SYM (and does the live line have it?)", McpVerbGroup::FlagshipReflex },
@@ -509,7 +509,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "from_trace", pathIsRequired ) + "},"
                    "{\"name\":\"edit_check\",\"description\":\"Just edited a symbol? Did its CONTRACT (param count + publicness) change vs git HEAD, and which 1-hop callers are now PROVABLY incompatible with the new arity (never a guess — exact-arity evidence only)? status is one of unchanged / new-symbol / contract-change. Fast targeted check (hits the same qheadsnap/qsnap cache quality_delta's auto-baseline uses) — for the same question over a WHOLE diff use quality_delta instead. counts_floor=\\\"1\\\": callers= is a FLOOR (dynamic dispatch, callbacks, macros and most-vexing-parse declarations contribute no edge), so 'no incompatible caller' is never a proof of safety. symbol = the def name (file:name to disambiguate).\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "edit_check", pathIsRequired ) + "},"
-                   // field-notes §1/§2 — the cross-branch + dark-content verbs. Read-only git plumbing, no index
+                   // The cross-branch + dark-content verbs. Read-only git plumbing, no index
                    // coupling for the first two (they read OTHER refs' blobs, which the index never ingested).
                    "{\"name\":\"whereis\",\"description\":\"WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs). Each distinct blob is read once (content-addressed), so N branches cost about one tree. kind=def on a REF row is a LEXICAL heuristic (ref blobs are raw text, never ingested) — for HEAD's parsed answer use find_symbol/fetch_body. symbol = the name; kind = optional ref-name substring filter; the listing shows the first 60 hits unless you raise it with limit=N (offset=M pages the rest, and has_more/next_offset tell a paging loop when to stop). Single-root; read-only.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "whereis", pathIsRequired ) + "},"
@@ -625,7 +625,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const McpIntArg topKArg    = intArg( "top_k", 1, kMcpRecallTopKMax );      // §B6 M15 memory_recall budget knob
             const int       recallTopK = topKArg.isPresent ? int( topKArg.value ) : 8;  // 8 = the historic default
 
-            const McpIntArg     partitionArg   = intArg( "partition", packpartition::kMinPartitions, packpartition::kMaxPartitions );   // field-notes §6
+            const McpIntArg     partitionArg   = intArg( "partition", packpartition::kMinPartitions, packpartition::kMaxPartitions );   // --partition=N over MCP
             const std::uint32_t partitionCount = partitionArg.isPresent ? std::uint32_t( partitionArg.value ) : 0u;   // absent ⇒ one un-split bundle
 
             // Index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
@@ -1239,7 +1239,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // sentence and named neither the verb nor a near-miss — with the whole 30-name registry
                     // in-process one call away. Split: a known verb with an incomplete argument set gets the
                     // table's message (above); an unrecognised name gets its own refusal, WITH the near-miss
-                    // the `flags` verb has offered since field-notes §2.
+                    // the `flags` verb has offered since it shipped.
                     const std::string missing = missingArgMsg();
                     if( !missing.empty() )
                         resp = errResultMsg( -32602, missing );

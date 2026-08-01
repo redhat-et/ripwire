@@ -1,6 +1,6 @@
 ; ripwire Rust tags — vendored from tree-sitter-rust v0.23.2 queries/tags.scm.
 ; Kept verbatim except: (1) the @reference.implementation patterns are dropped (impl blocks are
-; not calls; they'd inflate edges without modeling call flow — SPEC §2a, calls drive edges);
+; not calls; they'd inflate edges without modeling call flow — calls drive edges, not declarations);
 ; (2) H4 W3 adds the two `::`-path / turbofish call patterns below (upstream has neither, so
 ; upstream loses the dominant Rust call form too); (3) H4 W3 moves the @definition.method capture
 ; from the `declaration_list` wrapper onto the `function_item` — see the note at that pattern.
@@ -66,7 +66,7 @@
     function: (field_expression
         field: (field_identifier) @name)) @reference.call
 
-; H4 (§3.2): `::`-path calls — the DOMINANT Rust call form
+; Qualified `::`-path calls — the DOMINANT Rust call form
 ; (`Widget::new()`, `util::deep::deepfn()`, `Self::helper()`, `Widget::bump(&mut w)`), 100% invisible
 ; before this pattern. tree-sitter-rust nests scoped_identifier LEFT — `util::deep::deepfn` is
 ; `scoped_identifier(path: scoped_identifier(path: identifier, name: identifier), name: identifier)` —
