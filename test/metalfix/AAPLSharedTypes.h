@@ -1,6 +1,6 @@
 // AAPLSharedTypes.h — a DUAL-COMPILE header: the same declarations are compiled once by the C++/ObjC++
 // host and once by the Metal shader compiler, guarded by __METAL_VERSION__. This is the shape the
-// field-notes §4 case turns on: the shared symbol is DEFINED here (a C++-grammar file) and CALLED from
+// Metal (.metal) dual-compile-header case turns on: the shared symbol is DEFINED here (a C++-grammar file) and CALLED from
 // both sides, so the call graph must reach it from a .cpp AND from a .metal.
 #ifndef AAPL_SHARED_TYPES_H
 #define AAPL_SHARED_TYPES_H

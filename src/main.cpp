@@ -21,7 +21,7 @@
 #include "situ.h"
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
-#include "partition.h"      // field-notes §6: --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
+#include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
                             //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
 #include "tracelocus.h"     // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "editcheck.h"      // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
@@ -35,13 +35,13 @@
 #include "quality.h"
 #include "gitstamp.h"       // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                              // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
-#include "binstale.h"       // field-notes §Smaller: --doctor's tracked-binary-staleness check (git-order, not mtime)
-#include "crossref.h"       // field-notes §1: --stray-content / --whereis — the cross-branch content index
-#include "darkflags.h"      // field-notes §2: --flags — the dark-content (compile/cmake/env gate) dashboard
+#include "binstale.h"       // --doctor's tracked-binary-staleness check (git-order, not mtime)
+#include "crossref.h"       // --stray-content / --whereis — the cross-branch content index
+#include "darkflags.h"      // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"     // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
-#include "layout.h"         // field-notes §5: --layout=STRUCT — computed field offsets + tripwires + mirror drift
+#include "layout.h"         // --layout=STRUCT — computed field offsets + tripwires + mirror drift
 #include "abicheck.h"       // --stray-content --abi — the cross-branch ABI-BREAK gate (layout x stray-content)
-#include "docdrift.h"       // field-notes §3: --doc-drift — the markdown doc-anchor verifier
+#include "docdrift.h"       // --doc-drift — the markdown doc-anchor verifier
 #include "gitoracle.h"      // --with-history: the shared "was this name ever here" git-history oracle
 #include "mergescout.h"     // L1: --merge-scout=REF[,REF...] — read-only cross-branch overlap + landing order
 #include "landingplan.h"    // --stray-content --plan — composes crossref's sweep with mergescout's overlap oracle
@@ -921,7 +921,7 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         row( "tree-sitter", true, attrs );
     }
 
-    // ---- check 6: tracked-binary staleness (field-notes §Smaller) — a committed binary whose last-touching
+    // ---- check 6: tracked-binary staleness — a committed binary whose last-touching
     // commit is a STRICT ancestor of a same-directory/same-stem source's last-touching commit: someone edited
     // the source and never recommitted the binary. Git-commit-order only (never mtime — see binstale.h's
     // header for why); "dependent source" is a naming heuristic, not a build-graph fact — see the same header
@@ -5266,7 +5266,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     in.redact               = d.redactPtr;
     in.notes                = d.notesPtr;
 
-    // field-notes §6 — --partition=N: the FAN-OUT form. Same lens ranking, same PackTaskInputs, same
+    // --partition=N: the FAN-OUT form. Same lens ranking, same PackTaskInputs, same
     // assembler; partition.h only decides WHICH slice each of the N+1 bundles is masked to and how the
     // per-agent budget divides. Handled before the single-bundle emission below because it replaces the
     // document, not a section of it. cli.h has already bounded N to 2..16 and refused a bare --partition.

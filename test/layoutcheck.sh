@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# layoutcheck.sh — the field-notes §5 gate for --layout=STRUCT, the CPU/GPU contract verb (src/layout.h).
+# layoutcheck.sh — the gate for --layout=STRUCT, the CPU/GPU contract verb (src/layout.h).
 #
 #   test/layoutcheck.sh
 #   RIPWIRE_BIN=asan/ripwire test/layoutcheck.sh

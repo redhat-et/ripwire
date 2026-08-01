@@ -37,8 +37,9 @@
 // stating rather than discovering: (a) only C/C++/ObjC files are considered — a TypeScript or Swift
 // `class Cat {` opens a brace after the word `class` and would otherwise be modelled as a C++ struct and
 // then compared as a "mirror" of an unrelated same-named one; (b) mirrors are found among files ripwire
-// INDEXES, so a `.metal` copy is invisible until the shader-graph coverage of field-notes §4 lands, at
-// which point it joins automatically with no change here; (c) macro type names and array extents resolve
+// INDEXES — `.metal` is one of them (indexed under the C++ grammar, see kLangTable in src/ingest.cpp),
+// so a Metal-side mirror of a struct joins automatically with no special-casing here; (c) macro type
+// names and array extents resolve
 // against the DEFINING FILE's own `#define`s and `constexpr`/`using`/`enum` declarations only. The
 // dual-compile idiom that motivated this — one macro with two
 // definitions behind `#ifdef __METAL_VERSION__` — is handled by resolving EVERY definition and accepting

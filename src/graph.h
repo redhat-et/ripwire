@@ -12,7 +12,7 @@
 #include "csrverify.h"          // structural gate, VERIFY'd after every production CSR build
 #include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
 #include "svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
-#include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before §2a fallback
+#include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"        // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "sortutil.h"           // radix edge sorting for large integer-key graph edge lists
 #include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -52,7 +52,7 @@ struct Graph
                                             // external calls (those are absent, not ambiguous), so it's low-noise.
     std::vector<std::uint32_t> unresolvedOut;  // honesty lever #2: per-symbol # outgoing calls to a name that IS
                                             // defined in-repo but whose EVERY def was dropped by the langCompatible
-                                            // gate (graph.h §2a fallback) — a call the tool couldn't resolve yet a
+                                            // gate (this file's name-based fallback, below) — a call the tool couldn't resolve yet a
                                             // same-name def exists in ANOTHER language. The high-signal "plausibly-
                                             // internal, cross-language-filtered" bucket: a cross-language-filtered /
                                             // mis-classified / macro-generated def lands here and would otherwise be
@@ -405,7 +405,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
 
     // ── Multi-root workspace: name-based resolution NEVER crosses roots. Every
-    // name-tier candidate below (qualified canonical, Rule 1/2, the §2a byName fill, inheritance, doc
+    // name-tier candidate below (qualified canonical, Rule 1/2, the name-based-fallback byName fill, inheritance, doc
     // mentions, HAS-A) is filtered to the REFERENCE's own root; cross-root edges enter ONLY via evidence
     // (the path-resolved include set feeding Rule 3, and the FFI binding tables — both left unfiltered by
     // design). fileRoot is EMPTY on a single-root run, so sameRoot is constant-true and the resolved graph
@@ -496,7 +496,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // types in one scope (reassigned to a different type) is TOMBSTONED (value set to ""), so it never narrows;
     // only an unambiguous single-type binding is usable. A binding's `type` is matched as a SCOPE in canonByName
     // by Rule 2, so a type that names no class (e.g. inferred from a non-constructor `auto x = makeT()`) simply
-    // never produces a `type::method` hit and degrades to §2a — the safety net for constructor-inferred types.
+    // never produces a `type::method` hit and degrades to the name-based fallback — the safety net for constructor-inferred types.
     // Deterministic: ing.bindings is in (file, byte, var) order; first binding wins, a later conflict tombstones.
     HashMap<std::string, std::string> varType;
     varType.reserve( ing.bindings.size() );
@@ -522,7 +522,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // iff its fileId is in the caller's precise transitive set, so a cross-directory basename collision
     // (Diagnostics.h / arch.h / a.h …) can no longer manufacture a wrong narrow. An include that cannot
     // be path-resolved contributes NOTHING (it is simply absent) → it can never CAUSE a narrow → the
-    // resolver degrades to the §2a ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
+    // resolver degrades to the name-based fallback ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
     // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
     // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
     std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );
@@ -647,7 +647,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // SCIP overlay: if the index resolved THIS (fromSymbol, calleeName) call-site, its precise
         // target(s) REPLACE the name-based candidate set. The call is pinned (full confidence, NOT counted
-        // ambiguous) and the whole §2a ladder / narrowing / locality below is skipped for this ref. Name-based
+        // ambiguous) and the whole name-based-fallback ladder / narrowing / locality below is skipped for this ref. Name-based
         // call-sites elsewhere are untouched. Deterministic: coveredFrom is sorted, targetsOf is a bounded scan.
         bool scipPinned = false;
         if( scip )
@@ -656,7 +656,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( std::size_t i = cb; i < ce; ++i )
             {
                 const NodeId to = scip->coveredFrom[ i ].to;
-                if( to != r.fromSymbol && to < N ) tier.push_back( to );   // precise target (self-loops dropped, as §2a)
+                if( to != r.fromSymbol && to < N ) tier.push_back( to );   // precise target (self-loops dropped, as the fallback ladder below does)
             }
             scipPinned = !tier.empty();
             // a covered site whose precise targets are all self / out-of-range yields no edge — treat as pinned
@@ -697,7 +697,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
 
-        // ---- name-based resolution (§2a ladder + P2-D narrowing) — SKIPPED when the SCIP overlay pinned this site.
+        // ---- name-based resolution (the fallback ladder below + P2-D narrowing) — SKIPPED when the SCIP overlay pinned this site.
         bool canonical = false;
         if( !scipPinned && !r.qualifier.empty() )
         {
@@ -712,7 +712,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // P2-D Rule 1 (class membership): a `this->m()` / `self.m()` call resolves to the caller's enclosing
         // class's own `m`, BEFORE the bare-name spray — the deterministic [TYPE] cut to method ambiguity. Only
         // when the receiver is this/self AND the enclosing class actually defines `m` (canonByName, defs only);
-        // otherwise narrowed stays false and we fall through to the unchanged §2a ladder. Skipped when the call
+        // otherwise narrowed stays false and we fall through to the unchanged name-based-fallback ladder. Skipped when the call
         // was already pinned by an explicit `A::` qualifier (canonical) — that is the more specific signal.
         bool narrowed = false;
         if( !scipPinned && !canonical )
@@ -725,7 +725,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // P2-D Rule 2 (receiver-variable type): a named-receiver call `x.m()` / `x->m()` resolves to the method
         // on the VARIABLE's type (`Foo::m` for `Foo x;`), BEFORE the bare-name spray — the other half of the
         // [TYPE] cut. Only when the var has a single unambiguous in-scope binding AND that type defines `m`
-        // (canonByName, defs only); otherwise narrowed stays false and we fall through to §2a. Skipped when the
+        // (canonByName, defs only); otherwise narrowed stays false and we fall through to the name-based fallback. Skipped when the
         // call was already pinned canonically or by Rule 1 (those are the more specific / already-resolved signals).
         if( !scipPinned && !canonical && !narrowed )
             if( const auto* hit = narrower.rule2RecvVarType( r ) )
@@ -738,8 +738,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // caller's file #includes / imports EXACTLY ONE file that defines it, resolve to that file's def(s) and
         // DROP the rest — BEFORE the bare-name spray. Sound with no type info: it consumes only the file→file
         // include graph and keeps a SUBSET of the bare `byName` candidates, so it can never invent an edge. Fires
-        // only on an unambiguous single-included-file match with NO same-file candidate (that is §2a's job);
-        // otherwise degrades to §2a. Skipped when already pinned canonically / by Rule 1 / Rule 2 (more specific).
+        // only on an unambiguous single-included-file match with NO same-file candidate (that is the name-based fallback's job);
+        // otherwise degrades to the name-based fallback. Skipped when already pinned canonically / by Rule 1 / Rule 2 (more specific).
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
             if( narrower.rule3IncludeFile( it->second, r.fileId, rule3Out ) )
             {
@@ -782,7 +782,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !keepRustQualifiedCandidates( ing, chaUp, r, alreadyPinned, cand ) && bindingTier.empty() )
             continue;                                                           // qualified-external → no edge
 
-        // ---- tier ladder (§2a) — SKIPPED when the SCIP overlay pinned this site (tier already holds the
+        // ---- tier ladder (the name-based fallback) — SKIPPED when the SCIP overlay pinned this site (tier already holds the
         // precise target(s) at full confidence; the ladder would only re-derive a guess). -----------------
         if( !scipPinned )
         {
@@ -795,7 +795,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 else
                 {
                     // Honesty lever #2 (the HIGH-signal unresolved bucket): reaching here with an empty candidate set
-                    // means canonical/Rule-1/2/3 all found nothing AND the §2a fallback (above) ran. Since site A
+                    // means canonical/Rule-1/2/3 all found nothing AND the name-based fallback (above) ran. Since site A
                     // (`it == byName.end()`) already `continue`d, `it != byName.end()` here is guaranteed: the name IS
                     // defined in-repo, but EVERY def was filtered by langCompatible — a same-name def in another
                     // language. That is a call the tool would otherwise SILENTLY drop as "external" while a plausibly-
@@ -829,7 +829,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // A Rule-1 narrowed call is already pinned to ONE scope (callerScope::name) — it is resolved, not a
                 // global guess, so it must produce an edge even when the class's method lives cross-dir and is
                 // overloaded (cand.size()>1). Without this, the tier-3 uniqueness gate would silently DROP a
-                // correctly-narrowed edge — a regression. Bare-name (non-narrowed) calls keep the strict §2a gate.
+                // correctly-narrowed edge — a regression. Bare-name (non-narrowed) calls keep the strict name-based-fallback gate.
                 //
                 // H4 V3 M-3: `canonical` belongs in the same rescue, for the same reason — see the note above
                 // buildGraph ("the tier-3 canonical rescue").
@@ -929,7 +929,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // same class/scope > same dir. `sharedLocality` compares on the `/`/`::` SEGMENTS (NOT raw bytes), so a
         // partial overlap *inside* a scope component (`Xenon` caller vs unrelated class `Xtra`) counts as ZERO and
         // can NOT manufacture a win (adversarial HIGH-1). This only re-WEIGHTS among already-resolved, tier-survivor
-        // candidates (it never adds one the §2a ladder didn't reach, and never empties the tier), so it stays
+        // candidates (it never adds one the name-based-fallback ladder didn't reach, and never empties the tier), so it stays
         // conservative and deterministic. Skipped when the caller has no canonical scope (callerCanon == bare name)
         // — no locality to compare — leaving the honest split intact. When every survivor ties at the same locality
         // (e.g. all share only the path, none the scope), NO candidate is strictly more local → the tier is left

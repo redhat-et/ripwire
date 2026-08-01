@@ -63,7 +63,7 @@
 ; H4: qualified `new` — `new ns.Inner()` / `new a.b.C()`. member_expression nests LEFT (property: is
 ; always the final segment at any depth), so this binds the constructed CLASS name regardless of
 ; namespace depth — same ctor-ref-to-class-def precedent as the bare form above. Verified with
-; --match on fixtures/js at 2 AND 3 segments (H4_grammarSurvey_2026-07-30.md §SHAPES).
+; --match on fixtures/js at 2 AND 3 segments, empirically, not just assumed from the grammar shape.
 (new_expression
   constructor: (member_expression
     property: (property_identifier) @name)) @reference.call

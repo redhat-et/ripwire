@@ -46,8 +46,8 @@
 ; own direct type_identifier child is always just the final one, the rest nest inside a child
 ; scoped_type_identifier `scope:`) — either way the trailing anchor `.` binds only the LAST
 ; type_identifier child of the OUTER node, which is always the constructed class name. Verified with
-; --match at 2 and 3 segments (H4_grammarSurvey_2026-07-30.md §SHAPES; anchor semantics confirmed
-; empirically, not just from the survey's candidate).
+; --match at 2 and 3 segments; anchor semantics confirmed empirically, not just assumed from the
+; grammar shape.
 (object_creation_expression
   type: (scoped_type_identifier
     (type_identifier) @name .)) @reference.call

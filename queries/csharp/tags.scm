@@ -84,7 +84,7 @@
     (member_binding_expression
       name: (generic_name (identifier) @name)))) @reference.call
 
-; NOTE (verified, corrects the H4 survey's §SHAPES caveat): `a?.B.C()` — a `?.` link followed by a PLAIN `.`
+; NOTE (verified against the real grammar): `a?.B.C()` — a `?.` link followed by a PLAIN `.`
 ; link — needs NO new pattern. Only the guarded link is a member_binding; the invoked `.C` is an ordinary
 ; member_access_expression, so the `obj.foo( .. )` pattern above has always captured it. The `?.`-chain forms
 ; that DO need the patterns above are exactly those whose FINAL link is `?.`.

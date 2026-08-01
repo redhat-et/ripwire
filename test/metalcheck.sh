@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# metalcheck.sh — the field-notes §4 gate: Metal Shading Language (.metal) + dual-compile-header coverage.
+# metalcheck.sh — the gate for Metal Shading Language (.metal) + dual-compile-header coverage.
 #
 #   test/metalcheck.sh
 #   RIPWIRE_BIN=asan/ripwire test/metalcheck.sh

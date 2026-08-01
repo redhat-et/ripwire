@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# crossrefcheck.sh — the field-notes §1 gate for --stray-content and --whereis (src/crossref.h).
+# crossrefcheck.sh — the gate for --stray-content and --whereis (src/crossref.h).
 #
 #   test/crossrefcheck.sh
 #   RIPWIRE_BIN=asan/ripwire test/crossrefcheck.sh

@@ -1,6 +1,6 @@
-# cmake/PortableFlags.cmake — arch-flag selection for the default (non-NATIVE) optimization profile
-# (SPEC §7; L1 / AUDIT5 independence MUST-FIX #5: "Non-NATIVE build hardcodes -mcpu=apple-m1
-# -ffast-math — Linux/x86 fails out of the box").
+# cmake/PortableFlags.cmake — arch-flag selection for the default (non-NATIVE) optimization profile.
+# Fixes a portability bug found in review: "Non-NATIVE build hardcodes -mcpu=apple-m1 -ffast-math —
+# Linux/x86 fails out of the box".
 #
 # Factored into its own module (rather than inlined in CMakeLists.txt) so test/portablebuildcheck.sh
 # can `include()` it into a tiny standalone project and inspect RIPWIRE_ARCH_FLAGS WITHOUT paying for
@@ -18,8 +18,8 @@
 #
 # -fno-finite-math-only is load-bearing in EVERY branch: it keeps isnan/isinf live for isFiniteFast even
 # under -ffast-math. src/pagerank.cpp overrides all of this with -fno-fast-math regardless of branch
-# (SPEC §3/§7 no-reassoc contract for the PageRank reduction) — that override lives in CMakeLists.txt
-# and is untouched by this module.
+# (the determinism contract's no-reassociation rule for the PageRank reduction — docs/ARCHITECTURE.md
+# §3) — that override lives in CMakeLists.txt and is untouched by this module.
 #
 # RIPWIRE_PRETEND_LINUX is a TEST-ONLY hook: it forces the non-Apple-Silicon branch even when actually
 # configuring ON Apple Silicon hardware (this repo's own dev machines), so the portability contract is

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# flagscheck.sh — the field-notes §2 gate for --flags, the dark-content dashboard (src/darkflags.h).
+# flagscheck.sh — the gate for --flags, the dark-content dashboard (src/darkflags.h).
 #
 #   test/flagscheck.sh
 #   RIPWIRE_BIN=asan/ripwire test/flagscheck.sh
