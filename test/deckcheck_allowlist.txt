@@ -34,3 +34,4 @@
 --no-auto-order	real flag (src/cli.h:2486, deprecatedOrderFlag) — deprecated alias for --order=important-first, still functional; named in the CHANGELOG entry that records its supersession, deliberately absent from --help's catalog like its --stable/--most-important-last siblings
 --advisory	scripts/formatcheck.sh's own mode flag ("scripts/formatcheck.sh --advisory", the always-exit-0 report next to the gate) quoted in CONTRIBUTING.md §1 and .github/workflows/ci.yml, not a ripwire flag
 --output	git's own flag ("git diff -w --output=/tmp/d") quoted in CONTRIBUTING.md §1 where the whitespace-only proof for adding a file to formatcheck's GATED list is spelled out, not a ripwire flag
+--scan-skillsdir	GitHub heading-anchor slug in README.md's deep link to docs/COMMANDS.md's --scan-skills[=DIR] section (github-slugger strips [=]); an anchor, not a flag claim
