@@ -1,13 +1,13 @@
 #pragma once
 
-// serialize.h — minified, escaped XML serialization (SPEC §4). Streamed through a 64 KB
+// serialize.h — minified, escaped XML serialization. Streamed through a 64 KB
 // buffer (no whole-document string), terse schema, every name/path XML-escaped.
 
 #include "model.h"
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
-#include "redact.h"      // : deterministic secret redaction of emitted body content (opt-out --no-redact)
+#include "redact.h"      // deterministic secret redaction of emitted body content (opt-out --no-redact)
 #include "sortutil.h"    // numeric-key radix helpers for rank/file score order
 #include "jsonesc.h"     // F9: jsonesc::utf8SeqLen — the canonical UTF-8-sequence-length core (was duplicated here)
 #include "notes.h"       // L3: field-notes NoteIndex — the retrieval-time surfacing lookup (INERT when null)
@@ -411,7 +411,7 @@ inline std::string symbolNoteTarget( const notes::NoteIndex* ni, const IngestRes
     return ni ? canonicalIdRelTo( ing, s, ni->root ) : std::string{};
 }
 
-// ── T1: per-language token calibration (RESEARCH_agentQuality2026 §2f) ─────────────────────────────
+// ── T1: per-language token calibration ──────────────────────────────────────────────────────────────
 // est_tokens is ONE number over a heterogeneous XML map. A single chars/N divisor is ±20-35% wrong
 // because (a) the map is majority terse MARKUP, not raw code, and (b) the per-language BPE spread
 // still moves the content bytes. We DELIBERATELY do NOT vendor a BPE table — Claude's tokenizer is
@@ -464,7 +464,7 @@ inline constexpr double kBytesPerTokenDefault = 2.50;   // Unknown-language / em
 // Full DEF BODY text (packBodies / --expand) tokenizes far LEANER than the map's signature-dense content:
 // method bodies carry indentation, braces, and repeated whitespace that BPE merges aggressively — MEASURED
 // ~3.8 B/tok on real o200k (vs ~2.46 for C++ SIGNATURE markup). Using the signature rate on body bytes
-// over-reads ~24% (RESEARCH_outputEconomy §6: buildGraph body is ~8.8K real tokens, not ~11K). So the
+// over-reads ~24% (buildGraph body is ~8.8K real tokens, not ~11K). So the
 // --expand body estimate scales body text at THIS rate, keeping markup/callee-sigs at their own (denser) rates.
 inline constexpr double kBytesPerTokenBody = 3.80;
 
@@ -538,7 +538,7 @@ inline std::string climbCeilingLadder( BuildFn&& build, std::string_view builtHe
     return candidate;
 }
 
-// ── B0.3 rank-adaptive --for payload budget (PLAN_researchImprove2026; R1 hypothesis #4) ─────────────
+// ── B0.3 rank-adaptive --for payload budget (R1 hypothesis #4) ────────────────────────────────────────
 // The --for lens spends the same per-result payload on rank 40 as on rank 1, and long conceptual queries
 // (the A7 token blocker: production ceiling p95 +62.9%) surface doc-heavy winners. Downstream-LLM accuracy
 // measurably DEGRADES with context length (R1's context-rot evidence), so the tail is trimmed by a rule
@@ -789,7 +789,7 @@ inline constexpr std::size_t kFileMarkupBytes   = 12;
 inline constexpr std::size_t kSymMarkupBytes    = 19 + 11;   // base tags + the default k="0.XXXX" attr
 inline constexpr std::size_t kEdgeMarkupBytes   = 9;
 
-// ── T3: fill-aware auto-ordering (RESEARCH_agentQuality2026 §2b/§2g) ───────────────────────────────
+// ── T3: fill-aware auto-ordering ────────────────────────────────────────────────────────────────────
 // MEASURED (Anthropic): query/actionable content at the END of a long input = up to +30%. §2f/§2g
 // refine WHEN it matters: the U-curve (primacy+recency both fine) holds while the window is <50%
 // full; beyond ~50% fill, recency dominates monotonically, so --most-important-last is the right
@@ -919,7 +919,7 @@ struct MapAnnotations
 {
     // NOTE — the three fields below are initialized POSITIONALLY at the call site (main.cpp's mapAnn), so any
     // new annotation goes at the END of this struct, never in front of them.
-    const std::size_t* changedCount = nullptr;   // D6 (AUDIT5): --map-diff's teleport-seed file count → `changed=N` in the
+    const std::size_t* changedCount = nullptr;   // D6: --map-diff's teleport-seed file count → `changed=N` in the
                                                  // header comment. Non-null even at 0 (a clean tree), so a caller can tell a
                                                  // clean-tree map-diff — teleport degrades to uniform, i.e. byte-identical to
                                                  // the default map — from a real diff without shelling out to git itself.
@@ -1167,7 +1167,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
 
     std::vector<char> esc;
 
-    // : the prov= legend is appended ONLY under --scip (outProv present) so the default header stays
+    // The prov= legend is appended ONLY under --scip (outProv present) so the default header stays
     // byte-identical to the pre-overlay output (no golden churn); prov="scip" marks a SCIP-pinned precise edge.
     // §A8.7: shown= (in the `stats` comment below) counts overload-MERGED rows individually — rows +
     // Σ(overloads-1) == shown — but overloads= itself (overloadsAttr(), above) was absent from this legend,
@@ -1198,16 +1198,16 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( ambOut ) for( std::uint32_t v : *ambOut ) ambTotal += v;   // resolver could not pin to one target
     std::size_t unresolvedTotal = 0;                           // honesty lever #2 gauge: how many calls hit an
     if( unresolvedOut ) for( std::uint32_t v : *unresolvedOut ) unresolvedTotal += v;   // in-repo name, all defs lang-filtered
-    std::size_t preciseTotal = 0;                              // : how many out-edges the SCIP index pinned
+    std::size_t preciseTotal = 0;                              // how many out-edges the SCIP index pinned
     if( outProv ) for( std::uint8_t v : *outProv ) preciseTotal += ( v ? 1u : 0u );
     char precAttr[ 40 ];  precAttr[ 0 ] = '\0';                // emitted ONLY under --scip (else absent → no golden churn)
     if( outProv ) std::snprintf( precAttr, sizeof( precAttr ), " precise=%zu", preciseTotal );
-    // Multi-root workspace (DESIGN_multiRoot.md A13): `roots=N` joins the header gauges and a
+    // Multi-root workspace (A13): `roots=N` joins the header gauges and a
     // `<root l="LABEL" p="PATH"/>` prologue opens <r> — ONLY when N≥2 (single-root output byte-unchanged).
     char rootsAttr[ 32 ];  rootsAttr[ 0 ] = '\0';
     if( ing.rootLabels.size() >= 2 )
         std::snprintf( rootsAttr, sizeof( rootsAttr ), " roots=%zu", ing.rootLabels.size() );
-    // D6 (AUDIT5): --map-diff's teleport-seed file count, ONLY when the caller passes changedCount
+    // D6: --map-diff's teleport-seed file count, ONLY when the caller passes changedCount
     // (nullptr for every non-map-diff caller ⇒ zero token cost, byte-identical golden map). A clean
     // tree reports "changed=0" so the caller can see the teleport degraded to uniform without shelling
     // out to git a second time — that map is otherwise byte-identical to the plain default map.
@@ -1490,7 +1490,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( !tail.empty() ) std::fwrite( tail.data(), 1, tail.size(), out );
 }
 
-// --pack-top-n (SPEC §5): append raw source of the top-N files (by aggregate symbol rank),
+// --pack-top-n: append raw source of the top-N files (by aggregate symbol rank),
 // as CDATA, capped at budgetBytes; the last file is truncated at a newline with a marker.
 // Emitted AFTER </r> — a hybrid graph+source bundle (intentionally not a single XML doc).
 //
@@ -1537,7 +1537,7 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
             truncated = true;
         }
 
-        // : redact credential shapes from the raw file body BEFORE CDATA-encoding — this is a
+        // Redact credential shapes from the raw file body BEFORE CDATA-encoding — this is a
         // body-emission seam (whole source files pasted into an LLM). Applied post-truncation (redaction
         // only ever shrinks/relabels, never grows past the budget in a way that matters). No-op under --no-redact.
         redactInPlace( body, redact );
@@ -1872,7 +1872,7 @@ inline std::string compressBody( std::string_view src )
     return result;
 }
 
-// --pack-signatures (SPEC §P1.6): emit each top-N ranked definition's SIGNATURE (declaration up to
+// --pack-signatures: emit each top-N ranked definition's SIGNATURE (declaration up to
 // the body), bodies elided — ~70% fewer tokens than raw source while keeping the structural shape.
 // Grouped by file, capped at budgetBytes. Emitted AFTER </r>, like packSource. With L2: a <doc> child.
 // Q3 QUALITY LENS (--for only): the quality facts for the symbols the agent is about to touch, folded
@@ -1967,7 +1967,7 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
 
 // ── §A4a — THE ONE SIGNATURE-PAYLOAD TRIM LADDER (steps A..F, kForPayloadBudgetBytes above) ──────────
 // Extracted from packSignatures so the JSON sibling runs the SAME ladder rather than a second copy of it:
-// PLAN_outputAudit2 §A4a found `--for --json` byte-identical at --token-budget=1000 and 20000 because the
+// §A4a found `--for --json` byte-identical at --token-budget=1000 and 20000 because the
 // JSON emitter had no budget at all, and the honest fix is one ladder with two serializations — a cloned
 // ladder is exactly the "new clone of a reused helper" --quality-delta gates on, and two copies is how the
 // XML and JSON trims would silently diverge one round from now.
@@ -2344,7 +2344,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
             w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc ) );
             std::string doc = docCommentBefore( src, a );   // L2: the human-written intent, if any
-            redactInPlace( doc, redact );                    // : a doc-comment body can hold a pasted secret
+            redactInPlace( doc, redact );                    // a doc-comment body can hold a pasted secret
             if( rankAdaptivePayload )                        // B0.3: tail entries carry a trimmed excerpt / no doc
             {
                 if( globalRank > kForDocExcerptRankCount )      doc.clear();
@@ -2435,7 +2435,7 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
     std::vector<char> esc;
 
     // §P8 collision, documented not renamed: on a <cand> row s= is the SCORE and k= the KIND tag — the exact
-    // inverse of the ranked map. Neither can move (golden.xml + SPEC.md pin one, postingscheck.sh's positional
+    // inverse of the ranked map. Neither can move (golden.xml pins one, postingscheck.sh's positional
     // regex pins the other), so the legend states it. G4: no double hyphen inside an XML comment.
     w.write( "<!-- ripwire candidates: flat top K export for an external reranker. r=rank(1 based) s=SCORE "
              "n=name id=canonical k=KIND-tag p=path l=line. Note k= is the kind here and the PageRank score in "
@@ -2469,7 +2469,7 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
     w.flush();
 }
 
-// --expand=SYM:START-END (octocode's partial-file idea, RESEARCH_agentQuality2026 §2f): pull a SLICE
+// --expand=SYM:START-END (octocode's partial-file idea): pull a SLICE
 // of a large def's body instead of the whole thing. Lines are 1-based, relative to the symbol's OWN
 // first line (Symbol::line), matching what an agent already sees in --outline/--pack-signatures l=
 // output — never a whole-file line number. hasRange=false ⇒ the pre-existing whole-body path (byte-
@@ -2608,7 +2608,7 @@ struct CalleeCallsSink
     std::vector<EmittedBodyCall>* recorded;   // §H5: nullptr ⇒ do not record (every caller that wants XML only)
 };
 
-// §P10.1 (PLAN_outputAudit_2026-07-28.md): the disclosed <calls total=... [shown=... capped="1"]> block
+// §P10.1: the disclosed <calls total=... [shown=... capped="1"]> block
 // for one body's 1-hop callee signatures — extracted out of packBodies so the disclosure logic doesn't
 // inflate packBodies' own complexity/LOC. `total` is outOff[id+1]-outOff[id] — outTargets is deduped-per-
 // source (graph.h:37), so this is exactly what a standalone `--callees=SYM` reports as count= for an
@@ -2836,7 +2836,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                 if( compressed.size() < body.size() ) body = std::move( compressed );
             }
 
-            // : redact credential shapes from the def body (a full-body emission seam). After compress /
+            // Redact credential shapes from the def body (a full-body emission seam). After compress /
             // truncation so those size-based decisions see the un-redacted bytes; no-op under --no-redact.
             redactInPlace( body, redact );
 
@@ -3046,7 +3046,7 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
             // pure size comparison: compression must never cost tokens.
             if( sk.size() >= ( b - a ) ) sk.assign( src, a, b - a );
 
-            // : redact credential shapes from the control-flow skeleton (a body-emission seam — the
+            // Redact credential shapes from the control-flow skeleton (a body-emission seam — the
             // skeleton keeps depth≤1 source lines verbatim, which can include a secret literal). --no-redact = no-op.
             redactInPlace( sk, redact );
             if( sk.empty() ) continue;
@@ -3137,7 +3137,7 @@ inline void packRoutes( std::FILE* out, const IngestResult& ing,
     if( open ) { w.write( "</routes>" );  w.flush(); }
 }
 
-// R8 (PLAN_audit5Public2026.md): --with-graph — a compact MERMAID flowchart of the bundle's anchor
+// R8: --with-graph — a compact MERMAID flowchart of the bundle's anchor
 // neighborhood, appended right before </ctx> when passed alongside --for/--pack-task. Reuses the SAME
 // mermaid syntax the --mermaid module-dependency view emits (flowchart direction, quoted labels, `"`→`'`
 // safety) instead of inventing a second emitter. Nodes = the top-N (N<=kWithGraphNodeCap) ranked symbols,
@@ -3840,7 +3840,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         std::snprintf( hdr, sizeof( hdr ), "\"skipped_oversize\":%u,", h.ing.skippedOversizeCount );
         w.write( hdr );
     }
-    // §A4d: 's `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.
+    // §A4d: `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.
     // Emitted ONLY when a provenance vector was supplied, exactly like the XML attribute (absent ⇒ nothing
     // was measured, never a fabricated 0 that would read as "no edge is precise").
     if( h.outProv )
@@ -3855,7 +3855,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
 
     writeJsonMapStamp( w, esc, h.ann );   // §B1.2 — see its header
 
-    // §A4b: the multi-root prologue (DESIGN_multiRoot A13) — `roots_count` joins the header gauges and a
+    // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
     // Without it every `"p"` in the payload is an unresolvable root-relative fragment.
     if( h.ing.rootLabels.size() < 2 ) return;
@@ -4419,7 +4419,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
 // that decides.
 //
 // §B0 note: there is no `redact` parameter and that is not an opt-out — `record` holds text packBodies ALREADY
-// redacted, at the one seam  defined. Adding a second redaction pass here is what created the over-count.
+// redacted, at the one seam packBodies already defines. Adding a second redaction pass here is what created the over-count.
 inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const EmittedBodies& record )
 {
     JsonWriter  w( out );

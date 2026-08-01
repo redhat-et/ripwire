@@ -5,14 +5,14 @@
 #include "model.h"
 #include "stdinline.h"      // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
 #include "ingest.h"
-#include "workspace.h"      // multi-root workspaces (DESIGN_multiRoot.md): root hygiene + labels + the id-offset merge
+#include "workspace.h"      // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
-#include "scip.h"           //  SCIP precision overlay (--scip=index.scip)
+#include "scip.h"           // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"       // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
 #include "graphlegend.h"    // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
 #include "columnar.h"       // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
-#include "redact.h"         // : RedactCounts + reportRedactions for the emitted-body secret redaction
+#include "redact.h"         // RedactCounts + reportRedactions for the emitted-body secret redaction
 #include "filter.h"
 #include "eval.h"
 #include "skilleval.h"
@@ -26,7 +26,7 @@
 #include "tracelocus.h"     // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "editcheck.h"      // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "mcp.h"
-#include "mcpserver.h"      // DESIGN_teamIndex.md §2: the optional remote MCP transport (--listen), picked below
+#include "mcpserver.h"      // the optional remote MCP transport (--listen), picked below
 #include "wrap.h"
 #include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
@@ -100,7 +100,7 @@ using rw::quality::cacheDirLadder;
 using rw::quality::gitHeadSha;
 using rw::quality::gitRepoHasHistory;
 using rw::quality::computeHeadSnapshot;
-using rw::quality::resolveCacheBlobPath;   // Y4 (AUDIT5): shard-aware blob path — see quality.h
+using rw::quality::resolveCacheBlobPath;   // Y4: shard-aware blob path — see quality.h
 
 // Warm-by-default cache location: a per-root file keyed by the root's ABSOLUTE path (FNV-1a 64), under
 // the hardened cacheDirLadder(), so repeated invocations on the same tree re-parse only changed files.
@@ -117,7 +117,7 @@ using rw::quality::resolveCacheBlobPath;   // Y4 (AUDIT5): shard-aware blob path
 // with the class gives each class its OWN warm cache, so alternating verb classes never thrashes.
 // (MCP has its own separate file, mcpCachePath in mcp.h — unaffected.)
 //
-// Y4 (AUDIT5): resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
+// Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
 std::string defaultCachePath( const std::string& root, bool captureValueUses )
 {
@@ -133,7 +133,7 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
 
 // Mark ing.files that the working-tree diff against git HEAD reports as changed. false ⇒ git unavailable
 // (an EMPTY diff at status 0 is a CLEAN TREE, not a failure, and returns true with nothing marked).
-// onlyRoot (multi-root, DESIGN_multiRoot.md §5): != UINT32_MAX ⇒ mark ONLY files of that root — one repo's
+// onlyRoot (multi-root): != UINT32_MAX ⇒ mark ONLY files of that root — one repo's
 // diff must never suffix-match a same-named file in another root. Default = all files (single-root, unchanged).
 //
 // THE MASK IS NOT BUILT HERE. It comes from situ.h's gitDiffChangedMask — the same call mcpindex.h and
@@ -595,10 +595,10 @@ using rw::didYouMean;
 using rw::withDidYouMean;
 using rw::selectorNotFoundMessage;   // §B4.2: the shared file:name selector refusal (selectorrefuse.h)
 
-// ─── --doctor: self-diagnosis (AUDIT3 standing item) ──────────────────────────────────────────────
+// ─── --doctor: self-diagnosis (standing item) ─────────────────────────────────────────────────────
 // A DIAGNOSTIC verb, not the deterministic map: every check below reports on THIS machine's
 // environment (binary identity, PATH resolution, filesystem, git, tree-sitter grammars) — by
-// construction its output varies run-to-run and machine-to-machine, so the SPEC §1 det-gate
+// construction its output varies run-to-run and machine-to-machine, so the det-gate
 // ("byte-identical run-to-run") does NOT apply to --doctor. Never crashes: every probe degrades to
 // ok="0" (or a "can't tell" attr) on failure, never aborts. Single-root only for v1 — refused
 // earlier in main() alongside --eval/--test-gate/--quality-delta (each check below is per-repo or
@@ -1338,7 +1338,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
     }
 
-    // AUDIT5 R5 — doc-mention surfacing (default-on, route-agnostic; see mention.h applyDocMentionBoost):
+    // R5 — doc-mention surfacing (default-on, route-agnostic; see mention.h applyDocMentionBoost):
     // reuses g.mentions (the same doc<->code backtick edges `--mentions=SYM` already exposes) to lift docs
     // that discuss the query's top-resolved symbols, strictly below those symbols' own scores. Runs LAST
     // (after route/anchor/query-mention/co-change) so it reads the fully-resolved rank.
@@ -1478,7 +1478,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h.append( p.adaptiveNote );
     h.append( p.mentionNote );      // B8: present only when the task named something indexed (else "")
     h.append( p.boostNote );        // B3: present only when the co-change prior actually promoted something
-    h.append( p.docMentionNote );   // AUDIT5 R5: present only when a resolved symbol's mentioning docs surfaced
+    h.append( p.docMentionNote );   // R5: present only when a resolved symbol's mentioning docs surfaced
     if( p.anchor )
         h += " [anchored, EXPERIMENTAL: lexical + graph-expanded rank; honest numbers: on the 80-commit co-change "
              "eval it MATCHES lexical-alone (within 0.3pt) and stays below whole-name BM25 - it adds lexically-"
@@ -1930,7 +1930,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         constexpr std::size_t kWeakAttrBytes        = 9;   // exactly ` weak="1"`
         const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + ( forWeak ? kWeakAttrBytes : 0u );
 
-        // D10 (AUDIT5): --token-budget SHAPES this bundle (exit-0 trim) rather than gating it (exit-3 like the
+        // D10: --token-budget SHAPES this bundle (exit-0 trim) rather than gating it (exit-3 like the
         // default map/--query) — but the shaped result must still be checkable against the budget it shaped
         // against. <sigs> is now buffered too (same open_memstream pattern as lego/compose/routes above) so the
         // TRUE delivered byte count is known before the header is finalized; est_tokens="N" uses the same
@@ -1986,7 +1986,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         std::vector<NodeId> detailIds;
         std::size_t         detailBodyBudget = 0;
 
-        // --detail=N (RESEARCH_outputEconomy lever 3): importance-weighted detail — spend FULL bodies on only
+        // --detail=N (lever 3): importance-weighted detail — spend FULL bodies on only
         // the top-N ranked symbols (the head the rank identifies), leaving the rest as the signatures emitted
         // above. Measured +63% tokens for the 3 relevant heads vs +355% for all-bodies. N is clamped to the
         // emitted head (forTopN, already narrowed by --adaptive) so a body never references a symbol outside
@@ -2397,7 +2397,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
             // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
             // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
             // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
-            // NOTE above computeModuleMetrics in arch.h and RESEARCH_agentQuality2026 §1a); the summary
+            // NOTE above computeModuleMetrics in arch.h); the summary
             // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
             // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
             // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
@@ -2516,7 +2516,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
 // near-miss — highly similar stream, an inserted/changed statement; carries similarity=). Type-1/2
 // groups are emitted first (biggest-first, unchanged shape); Type-3 pairs follow (findClonesType3).
 //
-// Its own function (PLAN_dispatchRefactor_2026-07-27.md §6.3's named-verb-handler shape) rather than a
+// Its own function (the named-verb-handler shape) rather than a
 // fourth arm inside runMaintenanceViews: §P8 gave the row stream a real windowing step, and folding that
 // into an already-340-line dispatch body is how a dispatch chain turns back into a god function.
 
@@ -3100,7 +3100,7 @@ std::string noBaselineFatalMessage( const std::string& baselineFile, const rw::q
                                      : "it has been removed: re-run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n" );
 }
 
-// PLAN_dispatchRefactor_2026-07-27.md §6.3: runQualityViews was NOT a dispatch chain — it held two
+// runQualityViews was NOT a dispatch chain — it held two
 // branches, one of which was 298 lines. That one body is now runQualityDelta below; the residual
 // runQualityViews keeps only --dead-code. ONE extraction, verbatim: the 298-line body is unsplit, because
 // its interior is a sequential pipeline over shared locals, not independent arms.
@@ -3118,7 +3118,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
     // defense against metric-gaming). exit 2 if any new debt, like --arch.
     if( cfg.qualityBaseline || cfg.qualityDelta )
     {
-        // D1 fix (AUDIT5, HIGH): resolve BOTH sidecars against the analyzed ROOT, not the process CWD —
+        // D1 fix (HIGH): resolve BOTH sidecars against the analyzed ROOT, not the process CWD —
         // see quality::rootQualifiedSidecar's comment for why a bare relative filename is unsafe here
         // (a foreign cwd's sidecar could be silently rewritten, or even deleted by the stale-baseline
         // self-heal below). Computed once; every read/write/remove site in this block uses it.
@@ -3634,7 +3634,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
 
 // --edit-check=SYM (B11/L5): "did MY edit change a contract someone depends on", at edit time, for ONE
 // symbol — --quality-delta answers the same question per-DIFF at commit time; this is the fast targeted
-// entry point (evidence: PLAN_agentLeverage2026 §L5). Resolves SYM exactly like --around/--lego
+// entry point. Resolves SYM exactly like --around/--lego
 // (resolveFocus — file:name disambiguates), then compares the WORKING-TREE symbol against the git-HEAD
 // baseline (computeHeadSnapshot — the SAME qheadsnap/qsnap cache family --quality-delta's T0.1 auto-baseline
 // uses, so a warm run is a cache-blob read, never a fresh git-archive/ingest/clone-detection pass — that is
@@ -3745,12 +3745,12 @@ std::optional<int> runEvalViews( const MainDispatch& d )
     if( cfg.evalRetrieval )
         return runEvalRetrieval( ing, g );
 
-    // --eval-mined=FILE: session-trace-mined retrieval eval (DESIGN_traceEvals.md) — consumes a
+    // --eval-mined=FILE: session-trace-mined retrieval eval — consumes a
     // bench/mine_traces.py minedpair.jsonl artifact, file-level gold, reuses recallAtK/rankFiles.
     if( !cfg.evalMined.empty() )
         return runEvalMined( root, ing, g, std::string( cfg.evalMined ) );
 
-    // --eval-skills=FILE: labelled skill-ROUTING eval (RESEARCH_skillEval2026.md) — ROOT is the skills
+    // --eval-skills=FILE: labelled skill-ROUTING eval — ROOT is the skills
     // directory; FILE is the prompt→permitted-skill(s) corpus. Runs the shipping --for computation over
     // the skills ingest as one arm, so it dispatches here where ing+g are already built. Deterministic.
     if( !cfg.evalSkills.empty() )
@@ -4373,7 +4373,7 @@ std::optional<int> runConnect( const MainDispatch& d )
     // --connect=A,B,C: the minimal connecting subgraph over 2..16 task symbols — how do they RELATE, and
     // which intermediaries join them? Search is UNDIRECTED (finds the shared-caller join a directed --path
     // can't), every reported edge keeps its true caller→callee direction. packConnect (mcp.h) is the ONE
-    // shared emitter, so this and the MCP `connect` verb write identical bytes (DESIGN_connectSubgraph.md §5).
+    // shared emitter, so this and the MCP `connect` verb write identical bytes.
     if( !cfg.connectSpec.empty() )
     {
         std::vector<std::string_view> specs;
@@ -4467,7 +4467,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         char              ipab[ kPageDisclosureCap ];
 
         // --format=columnar (RESEARCH lever 1): same page window, path-table + parallel arrays.
-        // V1-1 (PLAN_outputAudit2): a fixed 160-byte buffer truncated mid-attribute on long escaped symbol
+        // V1-1: a fixed 160-byte buffer truncated mid-attribute on long escaped symbol
         // names (invalid XML, the F6 class), and this branch hand-rolled shown=/capped= without the paging
         // half — the one pageDisclosure() sibling the §A4c rollout missed. std::string kills the truncation
         // class outright; the disclosure comes from the same call the XML branch below makes.
@@ -4673,7 +4673,7 @@ std::optional<int> runAffected( const MainDispatch& d )
 // over edges that already exist (graph.h forwardReach, the dual of the transitiveCallers --affected uses),
 // minus the test partition.
 //
-// Its own handler rather than a branch of runChangeViews for the reason PLAN_dispatchRefactor §6.3 states:
+// Its own handler rather than a branch of runChangeViews for the same reason as elsewhere:
 // a verb with a resolve step, two refusals and a windowed emitter is a named handler, not an if-arm.
 std::optional<int> runExercises( const MainDispatch& d )
 {
@@ -4759,7 +4759,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     // in one call. The daily-driver "what should I know after this edit" verb. Default change set = git diff.
     if( cfg.situ )
     {
-        // Multi-root (DESIGN_multiRoot.md §5): the default diff is the UNION of per-root `git diff`s, emitted
+        // Multi-root: the default diff is the UNION of per-root `git diff`s, emitted
         // as PER-ROOT sections — each root's changed files, tests_to_run and co-change partners come from its
         // OWN repo, but the blast radius runs on the ONE merged graph, so a service-repo change correctly
         // lists client-repo impact when an evidence edge exists (per-repo history, joint graph).
@@ -4823,7 +4823,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             if( !gitChangedFiles( root, ing, changed ) )
             { std::fprintf( stderr, "ripwire --test-gate: no files given and no git diff (use --test-gate=F1,F2)\n" ); return 1; }
         }
-        // §A3a (PLAN_outputAudit2_2026-07-28.md): --test-gate joined the pageview.h paging vocabulary — the
+        // §A3a: --test-gate joined the pageview.h paging vocabulary — the
         // <u> untested-row list honors --limit/--offset instead of a silent 25-row cap with no disclosure.
         // The gate decision (computeTestGate) is computed ONCE here and handed to whichever report emitter
         // runs, so the two report shapes can never disagree about tests/untested and never re-pay the
@@ -4844,7 +4844,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     {
         const std::string baseLabel = cfg.prContextBase.empty() ? std::string( "working-tree" ) : std::string( cfg.prContextBase );
 
-        // Multi-root (DESIGN_multiRoot.md §5/§7): per-root diff SECTIONS over the ONE merged graph. Each root's
+        // Multi-root: per-root diff SECTIONS over the ONE merged graph. Each root's
         // changed-file mask is built from its OWN `git diff` (gitDiffChangedMaskNumstat onlyRoot=r), and its
         // owners/co-change come from its own history (writePrContext onlyRoot=r) — git signals are per root,
         // never across (§5). The blast radius / tests / callers deliberately run on the merged graph inside
@@ -4925,7 +4925,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             std::printf( "<pr-context base=\"%s\" files=\"0\"/>", baseLabelEsc.c_str() );
             return 0;
         }
-        // R4 / RESEARCH_outputEconomy lever 4: --max-tokens caps the (previously unbounded) bundle. 0 = no cap
+        // R4 / lever 4: --max-tokens caps the (previously unbounded) bundle. 0 = no cap
         // → byte-identical to the pre-budget output; >0 → degrade DEPTH-first per file, structural counts kept
         // for ALL changed files, est_tokens/truncated= reported on the <pr-context> header (see writePrContext).
         return rw::writePrContext( stdout, root, ing, g, pcm.mask, baseLabel, pcm.skippedModeOnly,
@@ -4976,7 +4976,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     return std::nullopt;
 }
 
-// L2 (PLAN_agentLeverage2026.md §L2) — --from-trace helpers. tracein.h owns the pure frame extraction; the
+// L2 — --from-trace helpers. tracein.h owns the pure frame extraction; the
 // CORPUS resolution (a frame's path → indexed fileId, a frame's line → its enclosing symbol) and the whole
 // bundle assembler now live in tracelocus.h (L4) as fromTraceBundleText() — shared verbatim with the MCP
 // from_trace verb (mcpverbs.h's fromTraceText()). Only readTraceText (stdin/file reading — a CLI-only
@@ -5003,7 +5003,7 @@ bool readTraceText( const std::string& src, std::string& text )
     return true;
 }
 
-// L2 (PLAN_agentLeverage2026.md §L2) — --from-trace=FILE ('-'=stdin): trace-to-locus. Reads a stack trace /
+// L2 — --from-trace=FILE ('-'=stdin): trace-to-locus. Reads a stack trace /
 // sanitizer report / compiler-error text and hands it to fromTraceBundleText() (tracelocus.h) — the ranked
 // enclosing-symbol map, the suspects' signatures, and the innermost in-corpus symbol's full body. Composes
 // with --token-budget. Unparseable input (zero frames) refuses loudly — never an empty map. Read-only,
@@ -5049,7 +5049,7 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     return 0;
 }
 
-// L3 (PLAN_agentLeverage2026.md §L3) — repo field notes: the WRITE side (surfacing at retrieval is wired into
+// L3 — repo field notes: the WRITE side (surfacing at retrieval is wired into
 // packSignatures/packBodies above). Two verbs share this handler:
 //   --note-add="TARGET: text" — append a note to the committed, sorted root/.ripwire_notes and print the exact
 //        written line. The date is git's committer clock (HEAD, %cs), NOT wall time, so the line is a pure
@@ -5213,7 +5213,7 @@ std::optional<int> runNotes( const MainDispatch& d )
     return std::nullopt;
 }
 
-// L4 (PLAN_agentLeverage2026.md §L4) — --pack-task="TASK": the budget-shared task bundle. ONE call assembling
+// L4 — --pack-task="TASK": the budget-shared task bundle. ONE call assembling
 // the whole 3-5 call orientation dance under ONE deterministic byte budget (default 6K tokens; --token-budget
 // overrides), in a FIXED section order with a header that reports EVERY truncation (the overbudgetcheck "no
 // silent caps" precedent). Reuses: the shared lens ranking (computeLensRanking — all --for boosts apply), the
@@ -5342,7 +5342,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     return 0;
 }
 
-// L1 (PLAN_agentLeverage2026.md §L1) — --merge-scout=REF[,REF...]: the read-only cross-branch overlap
+// L1 — --merge-scout=REF[,REF...]: the read-only cross-branch overlap
 // oracle. mergescout.h owns the computation (materialize-and-diff, pairwise conflicts/risks, greedy
 // landing order); this handler just resolves the flag, refuses loudly on a bad REF, and writes the XML.
 // The multi-root refusal for --merge-scout lives with its siblings (--quality-delta/--test-gate/etc.)
@@ -5378,7 +5378,7 @@ std::optional<int> runMergeScout( const MainDispatch& d )
     return std::nullopt;
 }
 
-// ── --plan-lanes (PLAN_planLanes_2026-07-27.md) ──────────────────────────────────────────────────────────
+// ── --plan-lanes ──────────────────────────────────────────────────────────────────────────────────────────
 // lanes.h owns the whole computation — the claim key, the synthetic-arm composition onto merge-scout's own
 // conflict machinery, the three pair classes, the landing order, the JSON emitter. This handler resolves the
 // flags, refuses loudly (writing NOTHING to stdout — a refusal must not ship a payload), and supplies the two
@@ -5585,7 +5585,7 @@ int runAbiCheck( const MainDispatch& d )
     return abicheck::abiContractBroken( result ) ? 2 : 0;   // exit 2 = a real byte-contract drift on some branch
 }
 
-// The CROSS-BRANCH content verbs (IDEAS_fieldNotes_2026-07-24.md §1): --stray-content and --whereis. Both are
+// The CROSS-BRANCH content verbs: --stray-content and --whereis. Both are
 // git-driven rather than index-driven — they read OTHER refs' blobs, which this process never ingested — so
 // neither consumes `d.ing`/`d.g`; they take only the root. Both are single-root by the same reasoning
 // --merge-scout is: "which branch has this" is a question about ONE repository's ref graph, and a merged
@@ -5711,7 +5711,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
     return std::nullopt;
 }
 
-// --doc-drift[=SUBSTR] (IDEAS_fieldNotes_2026-07-24.md §3): the markdown docs' CHECKABLE anchors, verified
+// --doc-drift[=SUBSTR]: the markdown docs' CHECKABLE anchors, verified
 // against the live index. Index-backed (it needs the crawled file list and the symbol table), so unlike the
 // cross-branch verbs above it DOES consume `d.ing` — and unlike them it is multi-root safe: every anchor is
 // resolved through the same labeled file identities the rest of the pipeline uses. Always exits 0; drift is
@@ -5735,7 +5735,7 @@ std::optional<int> runDocDrift( const MainDispatch& d )
     return 0;
 }
 
-// The CPU/GPU CONTRACT verb (IDEAS_fieldNotes_2026-07-24.md §5): --layout=STRUCT. layout.h owns the whole
+// The CPU/GPU CONTRACT verb: --layout=STRUCT. layout.h owns the whole
 // computation (the lexical field walk, the offset arithmetic, the static_assert sweep, the mirror diff);
 // this handler resolves the flag, refuses loudly on a bare/unknown name, and maps the verdict to an exit
 // code. Deliberately MULTI-ROOT capable — "does the service's copy of this struct still match the client's"
@@ -5789,7 +5789,7 @@ std::uint32_t nonIsolatedModuleCount( const std::vector<std::vector<rw::NodeId>>
 }
 
 // --communities: cluster the call graph into cohesive modules (Louvain) + cross-module bridge edges.
-// Its own function (the named-verb-handler shape of PLAN_dispatchRefactor_2026-07-27.md §6.3): §P8 added a
+// Its own function (the named-verb-handler shape): §P8 added a
 // real windowing step to the module row list, and the emitter was already the whole of runCommunities.
 int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g )
 {
@@ -6216,7 +6216,7 @@ std::optional<int> runZoom( const MainDispatch& d )
 
 // §P11.8 — --tree is the session-start ORIENTATION map, and it emitted files in path order: the one order an
 // orientation map must not use. On ripwire's own tree a cold agent's first 40 lines were audit-document
-// section titles (`ADOPTION_AUDIT_…`, `AGENTS.md`, `AUDIT2_…` — every one of them sorts above `src/`) and the
+// section titles (long process-doc names, `AGENTS.md` among them — every one of them sorts above `src/`) and the
 // code it had landed to read was pages down.
 //
 // Order files by their BEST symbol's rank instead — the same PageRank the per-file symbol list is already
@@ -6561,7 +6561,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
 
 // --grep=STR: parallel literal search; each hit annotated with its enclosing symbol (code-aware, not just
 // file:line). Shares grepCollect() with the MCP `grep` verb so they never diverge. Its own function (the
-// named-verb-handler shape of PLAN_dispatchRefactor_2026-07-27.md §6.3): §P8 added a windowing step over the
+// named-verb-handler shape): §P8 added a windowing step over the
 // hit list, and the emitter was all of runGrep.
 // §P11.1: grepCollect() returns TIER-then-path order (source → test/bench → docs), so the row cap and the
 // --limit/--offset window below both walk an order that puts code first. This emitter never re-sorts, which
@@ -6800,7 +6800,7 @@ std::optional<int> runLint( const MainDispatch& d )
         }
 
         // --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
-        // never the [FLOW]/[TYPE] checks ripwire can't see soundly (RESEARCH_codeIntelligence §0/§4).
+        // never the [FLOW]/[TYPE] checks ripwire can't see soundly.
         //
         // S6-A: added 4 new AST-query checks + 3 symbol-level checks (large-function, deep-nesting,
         // inconsistent-return) that require body-text analysis beyond what a single tree-sitter capture gives.
@@ -7816,7 +7816,7 @@ int runDefaultMap( const MainDispatch& d )
 }
 
 // L2: --json is scoped to the CI/scripting core verbs (default map, --for, --pack-task,
-// --callers/--callees/--impact, --quality-delta, --test-gate, --metrics — PLAN_audit5Public2026.md's L2 row).
+// --callers/--callees/--impact, --quality-delta, --test-gate, --metrics).
 // Returns the flag name to name in the refusal, or nullptr when the request is one of the 7 supported
 // shapes. Deliberately enumerates every OTHER verb-selecting flag (the ALLOW list is exactly 7 things;
 // everything else defaults to REFUSED) rather than trying to recognize "is this the plain default map" —
@@ -8070,7 +8070,7 @@ int main( int argc, char** argv )
 
     if( cfg.mcp )
     {
-        // DESIGN_teamIndex.md §2: --listen picks the remote Streamable-HTTP transport; otherwise stdio. Both
+        // --listen picks the remote Streamable-HTTP transport; otherwise stdio. Both
         // route every request through the SAME shared handler (mcp.h dispatchMcpLine) — byte-identical payloads.
         if( !cfg.listen.empty() )
         {
@@ -8095,7 +8095,7 @@ int main( int argc, char** argv )
         return runMcp( cfg.topK, cfg.stable, cfg.noRedact, std::string( cfg.rootPath ), mcpRoots );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
     }
 
-    // ── multi-root workspace refusals (DESIGN_multiRoot.md §7): each cut verb refuses with ONE clear stderr
+    // ── multi-root workspace refusals: each cut verb refuses with ONE clear stderr
     //    line + exit 1 (a refusal, not a regression verdict — never exit 2/3/4). All quarantined behind
     //    roots.size() >= 2 so every single-root invocation is byte-identical to today.
     if( cfg.roots.size() >= 2 )
@@ -8160,7 +8160,7 @@ int main( int argc, char** argv )
     // artifact to stdout (one `<f p="path:line" rule=".." sev=".."/>` per finding, capped) + the existing
     // tally line to stderr. Exit 0/1/2 = a scan VERDICT (clean/WARN/CRITICAL). exit 3 = REFUSAL — the path
     // could not be scanned at all (missing, permission-denied, or a file arg that is a directory) — kept
-    // off 0/1/2 on purpose (PLAN_outputAudit_2026-07-28.md §P0.5a): those three are already all spoken for
+    // off 0/1/2 on purpose (§P0.5a): those three are already all spoken for
     // as verdicts, so a "never scanned it" refusal needs a code a caller cannot mistake for "scanned it and
     // it was clean" (matches this codebase's existing convention of reserving a code beyond a verb's own
     // 0..N verdict range for a distinct non-verdict signal — see --token-budget's exit 3 "not 2, so a
@@ -8469,7 +8469,7 @@ int main( int argc, char** argv )
     const bool        multiRoot = ws.size() >= 2;
     const std::string root( multiRoot ? ws[0].arg : resolvedRoots[0] );   // single-root alias; multi-root sites branch on `ws`
 
-    // --index-out=BASE (DESIGN_teamIndex §1.4, both-families amendment): the CI generate-and-exit path.
+    // --index-out=BASE (both-families amendment): the CI generate-and-exit path.
     // Cold-parse the tree TWICE — once lean, once rich — writing BASE.lean.ripwirecache and
     // BASE.rich.ripwirecache, then exit 0 WITHOUT emitting a map. Both families ship because the flagship
     // orientation verbs (--for/--exemplar/--metrics/--uses) ingest RICH and a lean-only artifact leaves
@@ -8517,7 +8517,7 @@ int main( int argc, char** argv )
     IngestResult ing;
     if( multiRoot )
     {
-        // Multi-root ingest (DESIGN_multiRoot.md §4): ONE existing per-root cache blob per root (the exact
+        // Multi-root ingest: ONE existing per-root cache blob per root (the exact
         // defaultCachePath keying, label-free content), each root crawled + parsed independently in canonical
         // order, then merged by one id-offset pass. Incrementality is structural: an edit in root2 dirties
         // ONLY root2's blob — root1's load is a pure warm hit (RIPWIRE_CACHE_STATS proves it per root).
@@ -8563,7 +8563,7 @@ int main( int argc, char** argv )
             "        includes/targets   = %zu (%zu B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
     }
-    //  SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
+    // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
     // buildGraph as an optional parameter. A missing/corrupt/mismatched index yields an EMPTY overlay
     // (one DEGRADED_PATH_ALERT + stderr note) and the build proceeds name-based, byte-identical to no --scip.
     ScipOverlay scipOverlay;
@@ -8629,7 +8629,7 @@ int main( int argc, char** argv )
                 std::vector<std::uint32_t> rootChurn;
                 for( std::uint32_t r = 0; r < ws.size(); ++r )
                 {
-                    // Y2 (AUDIT5 P2): the memoized form — skips the 431 ms `git log --name-only` walk on a
+                    // Y2: the memoized form — skips the 431 ms `git log --name-only` walk on a
                     // warm (repo, HEAD sha, window, boundary-sha) hit; see quality.h's qchurn family.
                     std::vector<std::vector<std::uint32_t>> part =
                         quality::gitCoChangeAndChurnCached( ws[r].arg, ing, "18 months ago", 30,
@@ -8644,7 +8644,7 @@ int main( int argc, char** argv )
                 }
             }
             else
-                // Y2 (AUDIT5 P2): memoized — see the multi-root branch above.
+                // Y2: memoized — see the multi-root branch above.
                 commits = quality::gitCoChangeAndChurnCached( root, ing, "18 months ago", 30,
                                                cfg.forTask.empty() ? 0u : 12u,
                                                cfg.forTask.empty() ? nullptr : &forChurn );
@@ -8687,7 +8687,7 @@ int main( int argc, char** argv )
         impurePtr = &impure;
     }
 
-    // : one per-run secret-redaction tally, shared across every body-emission seam so a single stderr
+    // RedactCounts: one per-run secret-redaction tally, shared across every body-emission seam so a single stderr
     // summary aggregates them. `redactPtr` is null under --no-redact (redaction disabled at every seam) —
     // then no seam touches the bytes and the output is verbatim. Bodies (CDATA / recalled docs) go through
     // it; symbol names / signatures in the default map never do (identifiers are not secrets, and the

@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpverbs.h — the per-verb text/JSON builders for --mcp (SPEC §5): the pure functions each MCP
+// mcpverbs.h — the per-verb text/JSON builders for --mcp: the pure functions each MCP
 // read/flagship verb dispatches to (analyzeToString / for / lego / owners / exemplar / impact /
 // uses / path_between / connect / quality_delta / fetch_body / batch, …). Each reuses the warm
 // McpIndex via getIndex() and returns the verb's answer body verbatim. Extracted from mcp.h (the
@@ -441,8 +441,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     return out;
 }
 
-// `grep` verb: parallel literal scan, each hit annotated with its enclosing symbol. V1-2
-// (PLAN_outputAudit2): this payload silently served a row cap with no disclosure — and the §A1 collection
+// `grep` verb: parallel literal scan, each hit annotated with its enclosing symbol. V1-2:
+// this payload silently served a row cap with no disclosure — and the §A1 collection
 // split changed the served count (an undisclosed cap means an undisclosable change). Now the two grep
 // halves run separately so the payload can say what the CLI says: total= (all collected hits), shown=,
 // capped=, and hits_capped= (collection ceiling ⇒ total is a floor).
@@ -765,7 +765,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         }
     }
 
-    // AUDIT5 R5 (doc-mention surfacing) — same default-on, route-agnostic contract as the CLI --for: a doc
+    // R5 (doc-mention surfacing) — same default-on, route-agnostic contract as the CLI --for: a doc
     // that names one of the task's top-resolved symbols in a `backtick` (g.mentions, the same edges the
     // `mentions` MCP verb reads) is lifted into the bundle, strictly below that symbol's own score.
     // RIPWIRE_NO_DOC_MENTION=1 disables it here too (the shared ablation env, same as RIPWIRE_NO_MENTION).
@@ -1135,7 +1135,7 @@ inline std::string impactText( const std::string& root, const std::string& symbo
 // heuristic level as call edges). external="1" when SYM has no in-corpus definition. Reuses the identical
 // reference-scan + deterministic sort as the CLI --uses. Always returns a valid <uses> fragment — a name with
 // zero use-sites is a real answer (count="0"), NOT an error, so this verb does not degrade to "".
-// V2-1 (PLAN_outputAudit2): the MCP surface has no file:name selector — a qualified spelling used to fall
+// V2-1: the MCP surface has no file:name selector — a qualified spelling used to fall
 // through as an unresolvable bare name and come back external="1" ("no definition in the indexed tree")
 // for a symbol with real in-tree defs: the false-claim class this round exists to kill. ONE helper (both
 // dispatch sites — the server's tools/call arm and the batch verb — must refuse identically; the first
@@ -1341,7 +1341,7 @@ inline std::string pathEndpointRefusal( const IngestResult& ing, const std::stri
 // ─── `connect` — the SHARED <connect> emitter (CLI --connect and the MCP verb write the SAME bytes) ────────
 //
 // "My task touches these N symbols - how do they RELATE, and which intermediaries matter?" Emits the
-// connectSubgraph() result (DESIGN_connectSubgraph.md §4): per connected group the terminals <t>, the
+// connectSubgraph() result: per connected group the terminals <t>, the
 // Steiner intermediaries <s> (with sig= - the intermediary is the thing the agent did NOT name and most
 // needs to recognise), and the call edges <e f= t=/> in TRUE caller->callee direction; singleton groups
 // land in <unconnected> (honest partitions, never a silent empty). Graph-structured dependency navigation
@@ -1630,8 +1630,8 @@ inline std::string connectText( const std::string& root, const std::vector<std::
 // which would change the baselineCanonId keys and manufacture phantom regressions.
 //
 // SIDECAR LOCATION — D1 fix: this used to be the one deliberate CLI/MCP divergence (the MCP server's CWD is
-// wherever the agent launched it, not `root`, so it root-qualified while the CLI trusted CWD==root). AUDIT5
-// D1 found that trust was unsound — the CLI is not always invoked from inside its own root either (a wrapper
+// wherever the agent launched it, not `root`, so it root-qualified while the CLI trusted CWD==root). D1
+// found that trust was unsound — the CLI is not always invoked from inside its own root either (a wrapper
 // script, an orchestrator batching several roots) — so the CLI now root-qualifies too, via the SAME helper
 // (quality::rootQualifiedSidecar / quality::baselinePath / quality::acksPath in quality.h; see that header's
 // comment for the full rationale). These two are now thin forwarders so every existing call site here keeps
@@ -1683,7 +1683,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
 
     // rebuild ing/graph from disk with root exactly as invoked → baseline keys match the CLI key-for-key.
     // Phase-M: serialize this working-tree ingest against a concurrent qsnap-prefetch worker (ingest() writes
-    // single-writer process-global caches — DESIGN_teamIndex.md §2b). The computeHeadSnapshot call below locks
+    // single-writer process-global caches). The computeHeadSnapshot call below locks
     // the SAME mutex internally, so keep this guard SCOPED to the ingest only (no re-entrant lock → no deadlock).
     IngestResult ing;
     {
@@ -1834,7 +1834,7 @@ inline std::string qualityBaselineJson( const std::string& root, std::string& er
          + "\",\"note\":\"baseline pinned; re-run the quality_delta verb after each edit to see only what got worse\"}";
 }
 
-// ─── L4 (AUDIT5/PLAN_audit5Public2026.md): the B11-verb-parity MCP twins — `explore`/`pack_task`,
+// ─── L4: the B11-verb-parity MCP twins — `explore`/`pack_task`,
 // `from_trace`, `edit_check`. Each is a thin front door onto the SAME shared assembler its CLI sibling calls
 // (packtask.h / tracelocus.h / editcheck.h) — no forked logic, no drifting XML shape between the two
 // surfaces. `merge_scout` and `note-add`/`notes` stay CLI-only (write verbs / multi-ref UX; see
@@ -2297,7 +2297,7 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
 //
 // N heterogeneous READ sub-queries answered in ONE call, so an MCP agent pays a single round-trip for
 // a whole sweep instead of one per question (the deterministic $0 counterpart of Windsurf Fast Context /
-// Cognition SWE-grep — AUDIT4_fable2026.md §E A4-R3). Each sub-query REUSES the exact text-builder its
+// Cognition SWE-grep). Each sub-query REUSES the exact text-builder its
 // standalone verb uses (forTaskText/grepHitsJson/symbolQueryJson/impactText/usesText/mentionsJson/…) —
 // no verb logic is reimplemented, so a batched answer is byte-identical to the same standalone verb call.
 //

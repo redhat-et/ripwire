@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpindex.h — the warm in-memory index for --mcp (SPEC §5): parse-once/reuse-across-calls
+// mcpindex.h — the warm in-memory index for --mcp: parse-once/reuse-across-calls
 // {ingest, graph, rank} keyed by root, its staleness machinery (mtime+size stat sweep, the
 // kqueue FS-event watcher, content-hash stamp), the multi-root workspace registry, getIndex()
 // (the warm-rebuild pipeline), and the stable content-handle system (lazy bodies). Extracted
@@ -19,7 +19,7 @@
 #include "lexical.h"
 #include "recall.h"
 #include "situ.h"
-#include "workspace.h"     // multi-root `paths` array (DESIGN_multiRoot.md A11): root hygiene + labels + merge
+#include "workspace.h"     // multi-root `paths` array (A11): root hygiene + labels + merge
 #include "quality.h"        // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
 #include "Diagnostics.h"   // DEGRADED_PATH_ALERT — no-op in release; the visible line on a watcher-degrade path
 #include "hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
@@ -43,7 +43,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
-#include <thread>          // Phase-M: the DETACHED qsnap-prefetch worker (DESIGN_specPrefetch.md §5 / teamIndex §2b)
+#include <thread>          // Phase-M: the DETACHED qsnap-prefetch worker
 #include <utility>
 #include <vector>
 
@@ -330,7 +330,7 @@ namespace mcpdetail
     }
 
     // FNV-1a 64 over ing.files's (path, mtime, byteHash) tuples, in ing.files order. ingest() guarantees
-    // files are sorted lexicographically (the determinism contract — SPEC), so this is already a stable
+    // files are sorted lexicographically (the determinism contract), so this is already a stable
     // iteration order; no per-call sort needed.
     //
     // We fold the per-file CONTENT hash (fileByteHash, computed at index build in getIndex) — NOT just
@@ -383,8 +383,9 @@ struct McpIndex
                                                       //   The EDIT verbs (replace/insert) compare a fresh read against this before
                                                       //   splicing — mtime alone can lie (same mtime, different content on a fast
                                                       //   restore/rewrite), and a byte hash is the only signal that proves the span
-                                                      //   offsets the index computed still address the same source. //   S1 ALSO folds it into the stamp (indexContentHash) so the `_index` stamp
-                                                      //   moves on ANY content change, even a same-(mtime,size) edit the stat check misses.
+                                                      //   offsets the index computed still address the same source. S1 ALSO folds it into
+                                                      //   the stamp (indexContentHash) so the `_index` stamp moves on ANY content change,
+                                                      //   even a same-(mtime,size) edit the stat check misses.
     HashMap<std::string, long long>   dirMtime;    // ALL dirs under root (denylist-pruned), root included
     std::string                       cacheFile;   // file --cache backing cheap rebuilds
     std::uint64_t                     contentHash = 0;   // FNV-1a of sorted (path,mtime,byteHash) — the stamp payload (S1: content-folded)
@@ -473,7 +474,7 @@ inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 // mtime-triggered rebuild means: unchanged tree → zero popen, pure stat() (no added per-call cost); any real
 // edit → one rebuild that already pays for a fresh ingest, and one more popen is noise next to that.
 //
-// S1 — the mtime-equality staleness hole (RESEARCH_agentQuality2026 §3b.1). mtime EQUALITY alone was serving
+// S1 — the mtime-equality staleness hole. mtime EQUALITY alone was serving
 // STALE answers when a file's content changed but its mtime was preserved (`touch -r` after an edit, or an
 // edit whose mtime was otherwise reset). The fix adds the file SIZE — captured for free from the SAME stat()
 // that already reads mtime — as a second staleness discriminator, plus a content-hash fold into the stamp.
@@ -493,7 +494,7 @@ inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 // to read+hash EVERY same-(mtime,size) file on EVERY verb call. On the common no-change path all files have
 // an unchanged (mtime,size), so that is a whole-tree re-read per call: MEASURED at ~168 ms/call vs ~12.5
 // ms/call on a 1320-file/38 MB tree (~13×), which destroys the ~10.5 ms stat-sweep design the audit measured
-// and the whole point of the warm McpIndex (SPEC §5). A proof-of-clean cache keyed on (mtime,size) can't help
+// and the whole point of the warm McpIndex. A proof-of-clean cache keyed on (mtime,size) can't help
 // either — a `touch -r` reproduces that key exactly, re-opening the same hole. So the hard cost bound (a
 // non-negotiable invariant of the warm-server design) rules out the whole-tree content hash, and we take the
 // audit's explicitly-offered "minimally size+mtime" (§3b.1) instead: it closes the reproduced, realistic case
@@ -559,7 +560,7 @@ inline std::atomic<std::uint64_t>& mcpRebuildCounter()
     return n;
 }
 
-// ── Multi-root workspaces over MCP (DESIGN_multiRoot.md A11/§6): the additive `paths` array. A request
+// ── Multi-root workspaces over MCP (A11): the additive `paths` array. A request
 // carrying 2+ paths resolves to a WORKSPACE KEY (the canonical, deduped, label-ordered realpath join) that
 // stands in for `path` everywhere downstream; getIndex() recognizes a registered key and builds ONE merged
 // index over the root set (per-root mcpCachePath blobs, id-offset merge — the same machinery as the CLI).
@@ -584,7 +585,7 @@ inline std::string mcpWorkspaceKey( const std::vector<std::string>& rootArgs, st
     return key;
 }
 
-// ─── Phase-M: qsnap PREFETCH (DESIGN_specPrefetch.md §5/§8 + DESIGN_teamIndex.md §2b) ───────────────
+// ─── Phase-M: qsnap PREFETCH ──────────────────────────────────────────────────────────────────────────
 //
 // A FILE-CACHE WARMER, NOT an index mechanism — it never touches this McpIndex. When a request observes that
 // git HEAD has MOVED since the last observation (a commit just landed), it kicks a DETACHED background thread
@@ -781,7 +782,7 @@ inline const McpIndex& getIndex( const std::string& root )
 
     // working-set personalization (Cody-style): teleport the PageRank prior toward files with uncommitted
     // changes, mirroring --map-diff's diffTeleport weighting (main.cpp) — β=0.7 of the mass on changed-file
-    // symbols, the rest uniform, then rankGraphTeleport (which also applies the  name-quality biasPrior
+    // symbols, the rest uniform, then rankGraphTeleport (which also applies the name-quality biasPrior
     // automatically, same as every other teleport-based rank mode). A clean tree or a non-git root both
     // degrade to an ALL-ZERO changed mask, and diffTeleport() itself returns the plain uniform prior when
     // changed==0 — so this is byte-identical to the pre-feature rankGraph(g) in both of those cases (§GATE-d).
@@ -817,7 +818,7 @@ inline const McpIndex& getIndex( const std::string& root )
         const std::string bytes = mcpdetail::readFileBytes( diskPath( ix.ing, std::uint32_t( i ) ), readOk );
         ix.fileByteHash[i] = readOk ? mcpdetail::byteHash( bytes.data(), bytes.size() ) : 0;   // unreadable → 0 (edit verb refuses; mcpStale sees a mismatch)
     }
-    ix.contentHash = mcpdetail::indexContentHash( ix.ing.files, ix.fileMtime, ix.fileByteHash );   //  stamp, now content-folded (S1)
+    ix.contentHash = mcpdetail::indexContentHash( ix.ing.files, ix.fileMtime, ix.fileByteHash );   // stamp, now content-folded (S1)
 
     // the staleness watch-list: every directory under root (denylist-pruned), so additions in previously
     // file-less dirs are detected too — see collectDirMtimes.

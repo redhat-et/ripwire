@@ -11,7 +11,7 @@
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
                          //       fence scanner — a doc-side property, computed from the file's own bytes
 #include "model.h"
-#include "redact.h"      // : redact secrets from recalled doc bodies (incl. extracted docText)
+#include "redact.h"      // redact secrets from recalled doc bodies (incl. extracted docText)
 #include "serialize.h"   // §P2: kMinBytesPerToken / kBudgetHeadroom / bytesPerTokenFor / truncateUtf8WithEllipsis
                          //      — recall budgets and estimates with the SAME calibration as the map family
 
@@ -282,7 +282,7 @@ inline std::string truncateRecallBody( std::string& body, std::size_t keepBytes 
 
 // One recalled doc's emitted text, redacted. P1-B: for a document file this is its EXTRACTED text (the
 // override), not the raw bytes — a recalled notebook must read as its prose/code, never as raw .ipynb JSON.
-// : credential shapes are redacted HERE, before any budget arithmetic, so the budget charges the bytes
+// Credential shapes are redacted HERE, before any budget arithmetic, so the budget charges the bytes
 // that are actually emitted; no-op under --no-redact. An unreadable file yields nullopt (skip, never a stub).
 inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::uint32_t fileId, RedactCounts* redact )
 {
@@ -533,7 +533,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         //      calibration is being applied, it does not show a wrong one being applied. Re-measured on three
         //      queries: 2.560, 2.560, 2.560 B/tok (129 495 B / 50 592 tok · 336 406 / 131 416 · 239 397 / 93 521).
         //   2. Moving 2.56 toward a laxer prose rate needs a MEASUREMENT against a real tokenizer, and this
-        //      repo deliberately vendors no BPE table (SPEC: kTokenCalib's rates are calibrated externally and
+        //      repo deliberately vendors no BPE table (kTokenCalib's rates are calibrated externally and
         //      reported in the write-up, never guessed in-tree). A number changed by intuition is worse than a
         //      conservative number changed by nobody.
         //   3. The error DIRECTION is the safe one and is the same bias kMinBytesPerToken encodes for
