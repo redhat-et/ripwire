@@ -126,8 +126,8 @@ done <"$TMP/allow_rows.txt"
 # disappearing) if the remaining families happen to sum to exactly the floor, and — worse — it can
 # stay silent forever if the other families later grow enough to cover for a vanished one. Each
 # addSource call below is tagged with its GLOB FAMILY, and each family is asserted non-empty on its
-# own, in addition to the total floor. That is what the header's ">=30 (root docs, docs/*.md,
-# skills/*/*.md, prompts/*.md)" always claimed to check; now it actually does.
+# own, in addition to the total floor. That is what the total floor below (root docs, docs/*.md,
+# skills/*/*.md, prompts/*.md) always claimed to check; now it actually does.
 SOURCES=()
 seenKeys=""
 rootCount=0; docsCount=0; skillsCount=0; promptsCount=0
