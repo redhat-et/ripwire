@@ -10,8 +10,8 @@ namespace rw
 
 struct PageRankConfig
 {
-    double        alpha = 0.85;
-    double        tolerance = 1e-6;
+    double alpha = 0.85;
+    double tolerance = 1e-6;
     std::uint32_t maxIterationCount = 100;
 };
 

@@ -64,10 +64,10 @@ template<class Key>
 void sortKeyLargeIndexed( const Key* keys, uint32_t* indices, uint32_t* scratch, std::size_t count ) noexcept;
 
 // Packed <sort-word, index> pair used by sortKeyLargePairs.
-struct alignas(8) WordIndex
+struct alignas( 8 ) WordIndex
 {
-    uint32_t word;   // order-preserving sort word (see detail::sortWordOf)
-    uint32_t index;  // original element position
+    uint32_t word; // order-preserving sort word (see detail::sortWordOf)
+    uint32_t index; // original element position
 };
 static_assert( sizeof( WordIndex ) == 8 );
 

@@ -83,7 +83,7 @@ inline std::string graphCountDisclosure()
 // The root-element attribute, one spelling per dialect. Appended LAST (after the page disclosure and after
 // --edit-check's at= stamp) so no existing attribute ADJACENCY assertion in test/ can break on it — the same
 // placement rule gitstamp::atAttr already follows in editcheck.h.
-inline constexpr const char* kGraphCountFloorAttrXml  = " counts_floor=\"1\"";
+inline constexpr const char* kGraphCountFloorAttrXml = " counts_floor=\"1\"";
 inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true";
 
 // ---- the per-verb legend OPENERS that more than one emitter prints -------------------------------------
@@ -114,4 +114,4 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
     "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. ";
 
-}   // namespace rw
+} // namespace rw

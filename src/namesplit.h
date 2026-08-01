@@ -16,7 +16,7 @@
 // using-declarations, so every existing call site and its gates stay BYTE-IDENTICAL — this hoist moved code,
 // it did not change behaviour.
 
-#include "Diagnostics.h"   // VERIFY — the depth invariant below
+#include "Diagnostics.h" // VERIFY — the depth invariant below
 
 #include <cstddef>
 #include <string_view>
@@ -50,7 +50,7 @@ inline std::string_view stripTrailingGroup( std::string_view f, char open, char 
         if( f[i] == close ) ++depth;
         else if( f[i] == open )
         {
-            VERIFY( depth > 0 );                                      // depth is seeded by f.back() == close
+            VERIFY( depth > 0 ); // depth is seeded by f.back() == close
             if( --depth != 0 ) continue;
             const std::string_view head = f.substr( 0, i );
             if( head.empty() || head.back() == '-' ) return f;
@@ -63,5 +63,5 @@ inline std::string_view stripTrailingGroup( std::string_view f, char open, char 
 // drop a trailing balanced `<…>` template-argument group: `make<Foo,Bar>` -> `make`.
 inline std::string_view stripTemplateArgs( std::string_view f ) noexcept { return stripTrailingGroup( f, '<', '>' ); }
 
-}   // namespace namesplit
-}   // namespace rw
+} // namespace namesplit
+} // namespace rw

@@ -5,7 +5,7 @@
 // header (not folded into gitmine.h, which owns the raw git-mining core) so this presentation-layer logic
 // stays a one-file diff away from either caller.
 
-#include "gitmine.h"   // FileOwnership
+#include "gitmine.h" // FileOwnership
 
 #include <cstddef>
 #include <vector>
@@ -37,4 +37,4 @@ inline std::vector<std::size_t> ownershipRowsToPrint( const std::vector<FileOwne
     return rows;
 }
 
-}   // namespace rw
+} // namespace rw
