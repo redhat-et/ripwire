@@ -1,6 +1,6 @@
 # ripwire documentation
 
-Seven entries, each written for one reader. Start with the row that matches why you are here.
+Six entries, each written for one reader. Start with the row that matches why you are here.
 
 | File | Who it is for | What it answers |
 | --- | --- | --- |
