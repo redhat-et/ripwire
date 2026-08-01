@@ -43,6 +43,16 @@
 // The `#ifndef` is a deliberate override seam, not decoration: `-DRIPWIRE_HAS_KQUEUE=0` compiles the Linux
 // path on a Mac, so the fallback can be built and RUN here instead of being first discovered by a CI leg
 // nobody can reproduce locally.
+//
+// L2 (Linux runtime probe) — why FsWatcher::arm's no-kqueue branch is SILENT while its kqueue()-failed
+// branch still emits DEGRADED_PATH_ALERT. An alert marks an UNEXPECTED fallback: something that normally
+// works did not, this run. On a build with no kqueue at all (every Linux build, and any
+// -DRIPWIRE_HAS_KQUEUE=0 build), the stat-sweep is not a fallback — it is the only path the binary has,
+// taken on every arm() call for the life of the process, forever. Alerting on it made every Linux MCP run
+// emit a degrade line nobody can act on, and reddened the stderr-clean gates that correctly read an alert as
+// a signal. The freshness CONTRACT is identical either way, which is precisely why that branch has nothing
+// to report. A RUNTIME kqueue() failure on a kqueue platform is the opposite event — the fast path exists
+// and did not come up — so it keeps its alert.
 #ifndef RIPWIRE_HAS_KQUEUE
   #if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ ) || defined( __DragonFly__ )
     #define RIPWIRE_HAS_KQUEUE 1
@@ -215,12 +225,14 @@ namespace mcpdetail
         // has ITSELF covered". One fd per dir with no cap means fd exhaustion past RLIMIT_NOFILE is the
         // COMMON failure past a few hundred dirs — on the FIRST failure, stop and release every watcher fd
         // (relieving the very pressure we created) and stay unhealthy: getIndex() then always runs the full
-        // dir sweep (the exact pre-Feature-1 path). If kqueue() is unavailable, same degrade.
+        // dir sweep (the exact pre-Feature-1 path). If kqueue() is unavailable, same degrade. L2: the
+        // no-kqueue-at-all arm is SILENT, the runtime-failure arm alerts — see the L2 note in this file's
+        // kqueue preamble for why those are different events.
         void arm( const std::vector<std::string>& dirs )
         {
             reset();
-#if !RIPWIRE_HAS_KQUEUE                                             // exactly the kqueue()-failed degrade below: unhealthy → getIndex() always sweeps
-            (void) dirs; DEGRADED_PATH_ALERT( "mcp watcher: no kqueue on this platform — falling back to stat-sweep freshness" ); return;
+#if !RIPWIRE_HAS_KQUEUE                                             // the DESIGNED path here (no watcher exists) — unhealthy → getIndex() always sweeps, silently
+            (void) dirs; return;
 #else
             kq = ::kqueue();
             if( kq < 0 ) { DEGRADED_PATH_ALERT( "mcp watcher: kqueue() unavailable — falling back to stat-sweep freshness" ); return; }
