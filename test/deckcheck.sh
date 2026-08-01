@@ -121,20 +121,34 @@ done <"$TMP/allow_rows.txt"
 # ── the scanned prose: the root docs, docs/*.md, and the skills tree (see the scope note above) ─────
 # addSource dedupes by RESOLVED path (`cd … && pwd -P` follows symlinks, POSIX, no realpath dep) so a
 # symlinked duplicate is scanned once, not twice, and a FAIL is reported once.
+#
+# V3 MED-1: a TOTAL floor alone has zero margin against `rm -rf prompts/` (or any one whole family
+# disappearing) if the remaining families happen to sum to exactly the floor, and — worse — it can
+# stay silent forever if the other families later grow enough to cover for a vanished one. Each
+# addSource call below is tagged with its GLOB FAMILY, and each family is asserted non-empty on its
+# own, in addition to the total floor. That is what the header's ">=30 (root docs, docs/*.md,
+# skills/*/*.md, prompts/*.md)" always claimed to check; now it actually does.
 SOURCES=()
 seenKeys=""
-addSource() {
+rootCount=0; docsCount=0; skillsCount=0; promptsCount=0
+addSource() {  # addSource <path> <family: root|docs|skills|prompts>
     [ -f "$1" ] || return 0
     key="$( cd "$( dirname "$1" )" && pwd -P )/$( basename "$1" )"
     case "$seenKeys" in *"|$key|"*) return 0 ;; esac
     seenKeys="$seenKeys|$key|"
     SOURCES+=( "$1" )
+    case "$2" in
+        root)    rootCount=$((rootCount + 1)) ;;
+        docs)    docsCount=$((docsCount + 1)) ;;
+        skills)  skillsCount=$((skillsCount + 1)) ;;
+        prompts) promptsCount=$((promptsCount + 1)) ;;
+    esac
 }
-addSource "$ROOT/README.md"          # arrives with the public-README lane; addSource no-ops until then
-addSource "$ROOT/AGENTS.md"
-addSource "$ROOT/CLAUDE.md"
-addSource "$ROOT/CONTRIBUTING.md"
-addSource "$ROOT/CHANGELOG.md"
+addSource "$ROOT/README.md" root      # arrives with the public-README lane; addSource no-ops until then
+addSource "$ROOT/AGENTS.md" root
+addSource "$ROOT/CLAUDE.md" root
+addSource "$ROOT/CONTRIBUTING.md" root
+addSource "$ROOT/CHANGELOG.md" root
 for f in "$ROOT"/docs/*.md; do
     # docs/COMMANDS.md is GENERATED from `--help` plus recorded capture samples, and it has a strictly
     # stronger gate of its own: test/docscommandscheck.sh arm (B) proves its documented flag set EQUALS
@@ -143,18 +157,22 @@ for f in "$ROOT"/docs/*.md; do
     # demos (`--format=bogus`, `--rank-by=bogus`), which the value arm below cannot tell from a claim.
     # Same rule the old header stated for built artifacts: gate the generator, not its output.
     case "$f" in */COMMANDS.md) continue ;; esac
-    addSource "$f"
+    addSource "$f" docs
 done
-for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f"; done
-for f in "$ROOT"/skills/*/*.md;             do addSource "$f"; done
-for f in "$ROOT"/prompts/*.md;              do addSource "$f"; done
+for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f" skills; done
+for f in "$ROOT"/skills/*/*.md;             do addSource "$f" skills; done
+for f in "$ROOT"/prompts/*.md;              do addSource "$f" prompts; done
 
-# A scan of nothing is not a pass. The old refusal threshold was >0, which one surviving file could
-# satisfy while four globs matched nothing — the failure that let this gate go inert. Require a
-# plausible floor: the skills tree alone is 17 SKILL.md files plus companions, docs/ carries five,
-# and prompts/ carries eleven.
-[ "${#SOURCES[@]}" -ge 30 ] || {
-    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=30 (root docs, docs/*.md, skills/*/*.md, prompts/*.md)."
+# A scan of nothing is not a pass. The old refusal threshold was a single TOTAL count, which one
+# surviving family could satisfy while another vanished entirely — the failure that let this gate go
+# inert (mutation-proven: `rm -rf prompts/` left the total at exactly the old floor, still a PASS).
+# Each glob family must contribute at least one source, independent of what the others total.
+[ "$rootCount"    -ge 1 ] || { echo "deckcheck: 0 root-doc prose source(s) found (README.md/AGENTS.md/CLAUDE.md/CONTRIBUTING.md/CHANGELOG.md) — refusing to run"; exit 2; }
+[ "$docsCount"    -ge 1 ] || { echo "deckcheck: 0 docs/*.md prose source(s) found — refusing to run"; exit 2; }
+[ "$skillsCount"  -ge 1 ] || { echo "deckcheck: 0 skills/*/*.md prose source(s) found — refusing to run"; exit 2; }
+[ "$promptsCount" -ge 1 ] || { echo "deckcheck: 0 prompts/*.md prose source(s) found — refusing to run"; exit 2; }
+[ "${#SOURCES[@]}" -ge 38 ] || {
+    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=38 (root docs, docs/*.md, skills/*/*.md, prompts/*.md)."
     printf '        found: %s\n' "${SOURCES[@]#$ROOT/}"
     echo "        A near-empty scan reads as a PASS while checking nothing; refusing to run."
     exit 2; }
