@@ -535,29 +535,49 @@ C8CASE="$( churn_of "$TMP/h8.out" /case.cpp )"
 # class is DISCLOSED, and this arm is what proves the disclosure fires and says the true thing.
 # The fixture is written by python3 with explicit codepoints — never a shell literal, which is exactly how the
 # NFC-only coverage happened.
-R8B="$( mktemp -d )"; TMPDIRS="$TMPDIRS $R8B"
-python3 - "$R8B" <<'PY'
+# mk_nfd_repo DIR [PRECOMPOSE] — the NFD/NFC fixture pair, three commits each. PRECOMPOSE=false forces git to
+# record the on-disk NFD bytes VERBATIM, which is what a Linux/ext4 checkout does natively; left unset, the
+# platform decides (macOS composes via core.precomposeunicode, Linux does not) — so both shapes are reachable
+# from either platform and neither branch below can pass by being inapplicable.
+#
+# L6 (Linux probe): the bodies carry a DECISION POINT, exactly like mkfn above, and that is load-bearing, not
+# decoration. They used to be `int nfdFn( int a ) { return a + 1; }` — cognitive complexity ZERO — and
+# --hotspots ranks on churn x ccx, so a zero-complexity file is never emitted as an <f> row no matter how many
+# commits touch it, and churn_of reads "" for it. On macOS that stayed invisible: git composes, so the arm
+# takes the DISCLOSURE branch, which never calls churn_of. On Linux git records NFD verbatim, the JOIN branch
+# runs, and it read churn="<none>" and failed — a fixture that cannot produce the row it asserts, on the one
+# platform that asserts it. The join itself was never at fault (proved below, on both git shapes).
+mk_nfd_repo(){
+    dir="$1"; precompose="${2:-}"
+    python3 - "$dir" <<'PY'
 import sys, os
 # ESCAPED codepoints, never literal bytes: a heredoc literal is whatever the editor saved (NFC here), which
-# is exactly how the arm above came to cover only the COMPOSED half of "non-ASCII". "he\u0301llo.cpp" is
-# e + COMBINING ACUTE ACCENT (NFD); "w\u00f6rld.cpp" is a PRECOMPOSED o-diaeresis (NFC) — same visual class,
-# no combining mark — the control that must stay silent.
+# is exactly how the arm above came to cover only the COMPOSED half of "non-ASCII". "héllo.cpp" is
+# e + COMBINING ACUTE ACCENT (NFD); "wörld.cpp" is a PRECOMPOSED o-diaeresis (NFC) — same visual class,
+# no combining mark — the control that must stay silent. The body mirrors mkfn's (one `if`) so the file can
+# actually be RANKED by --hotspots; see the L6 note above.
 root = sys.argv[1]
-open( os.path.join( root, "he\u0301llo.cpp" ), "w" ).write( "int nfdFn( int a ) { return a + 1; }\n" )
-open( os.path.join( root, "w\u00f6rld.cpp"  ), "w" ).write( "int nfcFn( int a ) { return a + 2; }\n" )
+body = lambda fn: "int %s( int x )\n{\n    if( x > 1 ) return x + 1;\n    return x - 1;\n}\n" % fn
+open( os.path.join( root, "héllo.cpp" ), "w" ).write( body( "nfdFn" ) )
+open( os.path.join( root, "wörld.cpp"  ), "w" ).write( body( "nfcFn" ) )
 PY
-git -C "$R8B" init -q; git -C "$R8B" config user.email s@x.com; git -C "$R8B" config user.name S
-D 2026-06-01T12:00:00; git -C "$R8B" add -A >/dev/null; git -C "$R8B" commit -qm c1
-for i in 2 3; do
-    python3 - "$R8B" "$i" <<'PY'
+    git -C "$dir" init -q; git -C "$dir" config user.email s@x.com; git -C "$dir" config user.name S
+    [ -n "$precompose" ] && git -C "$dir" config core.precomposeunicode "$precompose"
+    D 2026-06-01T12:00:00; git -C "$dir" add -A >/dev/null; git -C "$dir" commit -qm c1
+    for i in 2 3; do
+        python3 - "$dir" "$i" <<'PY'
 import sys, os
 root, i = sys.argv[1], sys.argv[2]
-for name in ( "he\u0301llo.cpp", "w\u00f6rld.cpp" ):
+for name in ( "héllo.cpp", "wörld.cpp" ):
     open( os.path.join( root, name ), "a" ).write( "// t%s\n" % i )
 PY
-    D "2026-06-0${i}T12:00:00"; git -C "$R8B" add -A >/dev/null; git -C "$R8B" commit -qm "t$i"
-done
-unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+        D "2026-06-0${i}T12:00:00"; git -C "$dir" add -A >/dev/null; git -C "$dir" commit -qm "t$i"
+    done
+    unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+}
+
+R8B="$( mktemp -d )"; TMPDIRS="$TMPDIRS $R8B"
+mk_nfd_repo "$R8B"
 
 # PREMISE: does git on THIS platform record a spelling different from the on-disk one? macOS with
 # core.precomposeunicode (the default) does; a platform that records the NFD bytes verbatim does not, and
@@ -603,6 +623,29 @@ else
         && no "G2: FALSE POSITIVE — the disclosure fired on a platform where the two spellings agree" \
         || ok "G2: no disclosure fired where the spellings agree (the probe confirms before it speaks)"
 fi
+
+# ── 8c. G2 on the OTHER git shape, FORCED — the join half runs on every platform ────────────────────
+# §8b's two branches are selected by what git does on the host, so each platform only ever exercises one of
+# them: macOS always took the DISCLOSURE branch, Linux always took the JOIN branch. That is how the join
+# branch's fixture defect (L6 — see mk_nfd_repo) survived every macOS run of this gate and reddened the very
+# first Linux one. core.precomposeunicode=false makes git record the on-disk NFD bytes verbatim, which is a
+# Linux checkout's native behaviour, so this arm runs the join half HERE too, unconditionally. Nothing
+# platform-specific is asserted: git spells the file exactly as the index does, so its history must bind and
+# there is nothing to disclose.
+R8C="$( mktemp -d )"; TMPDIRS="$TMPDIRS $R8C"
+mk_nfd_repo "$R8C" false
+GITSPELL_C="$( git -C "$R8C" -c core.quotepath=false ls-files --full-name -- "$NFDSPELL" | head -1 )"
+[ "$GITSPELL_C" = "$NFDSPELL" ] \
+    && ok "G2/forced: core.precomposeunicode=false makes git record the on-disk NFD bytes verbatim (the Linux shape, on any host)" \
+    || no "G2/forced: git records '$GITSPELL_C' even with core.precomposeunicode=false — the forced fixture is not the shape it claims"
+"$BIN" "$R8C" --hotspots --limit=50 >"$TMP/h8c.out" 2>"$TMP/h8c.err"
+C8C="$( churn_of "$TMP/h8c.out" "/$NFDSPELL" )"
+[ "${C8C:-0}" -gt 0 ] \
+    && ok "G2/forced: the NFD file's history JOINS byte-exactly (churn=\"$C8C\") — the join was never the defect" \
+    || no "G2/forced: the NFD file reports churn=\"${C8C:-<none>}\" though git spells it exactly as the index does"
+grep -q 'DECOMPOSED (NFD) filename' "$TMP/h8c.err" \
+    && no "G2/forced: FALSE POSITIVE — the disclosure fired where the two spellings agree byte-for-byte" \
+    || ok "G2/forced: no disclosure fired where the spellings agree"
 
 # no false positive on a COMPOSED non-ASCII name: §8's own fixture is NFC and must stay silent
 grep -q 'DECOMPOSED (NFD) filename' "$TMP/h8.err" \
