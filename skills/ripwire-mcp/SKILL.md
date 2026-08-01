@@ -157,7 +157,7 @@ large workspaces). Short version: every edit-verb failure leaves the file byte-f
 atomic (`tmp` + `rename(2)`), and the server never goes stale silently — it rebuilds warm from mtime checks
 before every verb call.
 
-**Workspace pin (stdio, AUDIT5 D3/D4):** when the server was started `ripwire <root> --mcp`, an omitted
+**Workspace pin (stdio, D3/D4):** when the server was started `ripwire <root> --mcp`, an omitted
 `path` on ANY verb (read or edit) defaults to that startup root; the 3 edit verbs above additionally
 REFUSE (file byte-identical, same contract as every other refusal above) if an explicit `path` resolves
 outside it — `path outside workspace; start the server on that root or pass an absolute in-root path`.

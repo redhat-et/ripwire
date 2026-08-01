@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # select_tasks.py — deterministic SWE-bench-Lite task selection for Phase B4 (agent-in-the-loop eval).
 #
-# WHAT THIS DOES. Phase B4 (PLAN_researchImprove2026.md, R4-eval-methodology.md) needs 30-40
+# WHAT THIS DOES. Phase B4 (R4-eval-methodology.md) needs 30-40
 # SWE-bench-Lite instances that are REPOSITORY-DISJOINT from the LocBench train split, so a task the
 # agent solves here was never "seen" by any train-side ablation of the retrieval ranker. This script:
 #   1. fetches SWE-bench-Lite instance METADATA ONLY (repo, instance_id, base_commit) from the public

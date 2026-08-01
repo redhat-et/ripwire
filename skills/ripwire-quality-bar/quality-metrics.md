@@ -4,7 +4,7 @@ Reference for `ripwire-quality-bar` (and `ripwire-reuse-first`). Each metric is 
 *defensible threshold*, and a *concrete fix*. Thresholds are heuristics — weigh them, don't blindly gate.
 
 ## Evidence-tier calibration — trust these unevenly
-Not every metric below carries the same evidence. Full citations: `RESEARCH_agentQuality2026.md §1a`.
+Not every metric below carries the same evidence. Full citations: ``.
 - **VALIDATED — trust hardest.** Coupling (CBO/fan-out/fan-in, cycles, propagation cost) is the best
   single OO defect predictor across multiple studies, even after controlling for size. Churn/co-change/
   hotspots (complexity × churn) is process-metric evidence, rated *at least* as strong as code metrics —
@@ -59,7 +59,7 @@ defect- and vulnerability-prone files in the empirical literature. Push hardest 
 
 ## Why `--quality-delta`'s 10 kinds — the measured agent failure modes
 Not a generic lint list; each targets what the 2025-26 literature found agent-written code actually
-degrades on (large-N studies, `RESEARCH_agentQuality2026.md §1c`):
+degrades on (large-N studies, ``):
 - **Verbosity**: agent code runs **2.3× more verbose** than human code on matched tasks.
 - **Structural erosion** (nesting/complexity creep): present in **77%** of trajectories (SlopCodeBench).
 - **Smells**: **+63%** vs a human baseline; **89.3%** of issues in a 302.6k-commit AI-authored corpus.

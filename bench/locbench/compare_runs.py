@@ -18,9 +18,9 @@ def main():
     ap.add_argument( "--arm", default="anchor" )
     ap.add_argument( "--bootstrap", type=int, default=10000 )
     ap.add_argument( "--enforce", action="store_true" )
-    # Two-tier gate (opt-in, R4/PLAN_researchImprove2026.md Phase B1). Default stays "legacy": with no new
+    # Two-tier gate (opt-in, R4 Phase B1). Default stays "legacy": with no new
     # flags passed, output and exit code are byte-identical to the pre-existing flat-AND predicate. See
-    # bench/locbench/GATE_DECISION.md for the rationale and proposed (not yet SPEC-decided) default numbers.
+    # bench/locbench/GATE_DECISION.md for the rationale and proposed (not yet decided) default numbers.
     ap.add_argument( "--gate", choices=( "legacy", "two-tier" ), default="legacy" )
     ap.add_argument( "--abs-warm-p95-ms", type=float, default=None,
                       help="tier 1: hard ceiling on the candidate's absolute warm p95 latency, in ms" )
@@ -35,7 +35,7 @@ def main():
     a = ap.parse_args()
     if a.gate == "two-tier" and ( a.abs_warm_p95_ms is None or a.abs_cold_p95_ms is None or a.min_quality_per_cost is None ):
         raise SystemExit( "--gate=two-tier requires --abs-warm-p95-ms, --abs-cold-p95-ms, and --min-quality-per-cost "
-                           "(no built-in default: these are a policy choice pending SPEC review, see GATE_DECISION.md)" )
+                           "(no built-in default: these are a policy choice pending policy review, see GATE_DECISION.md)" )
     before, after = json.load( open( a.before ) ), json.load( open( a.after ) )
     for key in ( "dataset", "split", "split_contract" ):
         if before.get(key) != after.get(key): raise SystemExit( f"{key} differs; paired comparison refused" )

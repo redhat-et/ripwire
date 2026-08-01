@@ -101,7 +101,7 @@ Thresholds/definitions are the catalog in [`quality-metrics.md`](quality-metrics
 These 10 kinds aren't a generic lint list — each targets a large-N-validated agent-code degradation mode
 (verbosity, structural erosion, smell rate, contract drift; passing tests ≠ clean design). Numbers + why the
 loop must be continuous, not a one-time prompt → [`quality-metrics.md`](quality-metrics.md) and
-`RESEARCH_agentQuality2026.md §1c`.
+``.
 
 ## The four guardrails (why this loop converges instead of degrading)
 1. **Deterministic oracle, not self-critique.** The delta is *computed* — it cannot hallucinate or reinforce

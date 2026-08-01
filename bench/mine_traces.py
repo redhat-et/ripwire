@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # mine_traces.py — mine (query, gold_files) retrieval-eval pairs from LOCAL Claude Code session
-# transcripts (DESIGN_traceEvals.md). Stdlib-only, house style matching bench/locbench/run_locbench.py
+# transcripts. Stdlib-only, house style matching bench/locbench/run_locbench.py
 # (dependency-light, LLM-free, deterministic).
 #
 # WHAT THIS IS. Claude Code already writes every user prompt and every Edit/Write/Read tool call (with
 # file paths) to ~/.claude/projects/<repo-slug>/*.jsonl for its own resume feature. This is free,
 # already-on-disk ore for a retrieval eval: segment a session into tasks (§2.1), gold = the files that
 # task's Edit/Write calls actually touched (§2.2), tag sessions that used ripwire itself so the consumer
-# never grades ripwire's own homework as independent evidence (§3.2). See DESIGN_traceEvals.md in full —
-# this file implements it verbatim.
+# never grades ripwire's own homework as independent evidence (§3.2). This file's header comments
+# ARE the design record — the rest of it implements exactly what is documented here.
 #
 # PRIVACY (§4, hard rule): local-only, opt-in, explicit invocation only. Reads only
 # ~/.claude/projects/**/*.jsonl and writes only local files. Refuses to write inside the target repo's
 # working tree unless --export-sanitized is passed (a hard repo-root-prefix check, non-zero exit, no
 # file created — see main()). No network client exists in this script. No wall-clock data is ever
-# written to the artifact (mined_at was considered and rejected post-review — see DESIGN_traceEvals.md
+# written to the artifact (mined_at was considered and rejected post-review — see
 # §5.1 — it would break the Gate #1 byte-identical determinism contract).
 #
 # USAGE:
@@ -301,7 +301,7 @@ def pair_id(query: str) -> str:
 
 
 def build_record(p) -> dict:
-    # Field order matches DESIGN_traceEvals.md §5.1's example exactly. NO wall-clock field anywhere
+    # Field order matches §5.1's example exactly. NO wall-clock field anywhere
     # (mined_at was proposed and explicitly rejected — see the file header and §5.1's resolution note).
     return {
         "pair_id": pair_id(p["query"]),
@@ -348,7 +348,7 @@ def _percentile(sorted_vals, p):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Mine (query, gold-files) retrieval-eval pairs from local Claude Code session "
-                    "transcripts (DESIGN_traceEvals.md). Local-only, opt-in, LLM-free."
+                    "transcripts. Local-only, opt-in, LLM-free."
     )
     ap.add_argument("--repo", default=os.getcwd(), help="repo root whose sessions to mine (default: cwd)")
     ap.add_argument("--out", default=None, help="output minedpair.jsonl path (default: ~/.ripwire/traceevals/<hash>.jsonl)")

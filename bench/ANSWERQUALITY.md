@@ -86,7 +86,7 @@ directional, not significant** — but it is a real end-to-end loop with tests-p
 
 ## Appended 2026-07-05 — `--for --anchor` (LARGER-style lexically-anchored PPR): honest result
 
-AUDIT3 steal #1 (LARGER, arXiv 2605.16352) shipped behind the opt-in `--anchor` flag: the top-20
+ steal #1 (LARGER, arXiv 2605.16352) shipped behind the opt-in `--anchor` flag: the top-20
 lexical hits of `--for=TASK` seed the PPR **personalization vector** (weighted by each anchor's
 normalized BM25 score — per-anchor confidence), the existing PPR core expands the walk, and the final
 rank is a **score-space** blend `final = 0.7·lex̂ + 0.3·pprˆ` (max-normalized — deliberately NOT the
@@ -240,7 +240,7 @@ better ranker on each mode).
 
 ---
 
-## Appended 2026-07-10 — LocBench public scoreboard (`bench/locbench/`, AUDIT4 A4-R1)
+## Appended 2026-07-10 — LocBench public scoreboard (`bench/locbench/`, A4-R1)
 
 The retrieval proxy (§1) is on *our own* co-change gold; this puts a number on an **external, published**
 benchmark: **Loc-Bench** (LocAgent, [arXiv 2503.09089](https://arxiv.org/abs/2503.09089), ACL'25) — 560

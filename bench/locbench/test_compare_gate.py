@@ -3,7 +3,7 @@
 Unit tests for bench/locbench/compare_runs.py's acceptance gate — both the legacy flat-AND predicate
 (byte-identity guard) and the new opt-in --gate=two-tier mode (Phase B1, see GATE_DECISION.md).
 
-Pure Python, no network, no pytest dependency (none is vendored in this repo — see PLAN_researchImprove2026.md
+Pure Python, no network, no pytest dependency (none is vendored in this repo — see
 Phase B1 task notes). Runs as a plain script:
 
     python3 bench/locbench/test_compare_gate.py
@@ -196,7 +196,7 @@ def test_mismatched_contract_still_refused():
 
 def test_missing_two_tier_flags_rejected_before_reading_input():
     """--gate=two-tier without the three required flags must fail fast with a clear message (no silent
-    default policy number — those are a proposal pending SPEC review, see GATE_DECISION.md)."""
+    default policy number — those are a proposal pending policy review, see GATE_DECISION.md)."""
     rc, out, err = run_compare( "/nonexistent/before.json", "/nonexistent/after.json",
                                  extra_args=[ "--gate", "two-tier" ] )
     assert rc != 0
