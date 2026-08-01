@@ -73,8 +73,14 @@ rc=$?
     || { no "harness failed (rc=$rc): $( head -3 "$TMP/err1.txt" )"; echo 'FAILURES ABOVE'; exit 1; }
 
 # ── #2: both lanes present with a non-trivial sample and ZERO skipped labels ───────────────────────────
-REC="$( grep -E '^AGG\trecall\t' "$OUT" )"
-RNK="$( grep -E '^AGG\tranking\t' "$OUT" )"
+# The separator is a REAL tab via $'…', not a '\t' inside a plain-quoted -E pattern: BSD/TRE grep (macOS)
+# expands \t to a tab, GNU grep (Linux) does not — it matches a literal 't', so '^AGG\trecall\t' found
+# nothing on Ubuntu and this gate reported "missing an AGG row" while every metric below actually cleared
+# its floor (first public Linux run: recall lenient_r5=85.7 floor 85, mrr 0.651 floor 0.60; ranking
+# lenient_r5=75.0 floor 70, mrr 0.676 floor 0.55, pollution 0.0/8.6). Line 122's CLASS row already used
+# the $'…' form and was unaffected — that is the idiom, everywhere in this file.
+REC="$( grep -E $'^AGG\trecall\t' "$OUT" )"
+RNK="$( grep -E $'^AGG\tranking\t' "$OUT" )"
 field(){ printf '%s' "$1" | tr '\t' '\n' | sed -n "s/^$2=//p"; }
 { [ -n "$REC" ] && [ -n "$RNK" ]; } && ok "both AGG rows present" || no "missing an AGG row"
 RN="$( field "$REC" n )"; KN="$( field "$RNK" n )"
