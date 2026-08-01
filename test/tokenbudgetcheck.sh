@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tokenbudgetcheck.sh — T1 gate: the calibrated est_tokens estimate + the --max-tokens headroom fit,
-# PLUS ( §D#7 / §E item 16) the --token-budget=N repomix-style CI exit-code gate.
+# PLUS (§D#7 / §E item 16) the --token-budget=N repomix-style CI exit-code gate.
 #
 # WHAT T1 CHANGED: est_tokens used a single chars/4 divisor over a
 # name-length PROXY — MEASURED ~50-80% under the real token count (the map is majority terse markup, not

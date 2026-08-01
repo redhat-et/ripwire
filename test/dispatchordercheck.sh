@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dispatchordercheck.sh — DISPATCH-PRECEDENCE gate for the navigate verbs.
 #
-# Why this gate exists . The nine navigate verbs are a flat
+# Why this gate exists. The nine navigate verbs are a flat
 # chain of independent `if( cfg.X ) { ... return; }` blocks. Their RELATIVE ORDER is observable
 # behaviour — when a run passes two verb flags at once, exactly one of them produces output and the
 # other is silently ignored, and WHICH one is decided purely by position in the chain. Nothing pinned

@@ -25,7 +25,7 @@ non-trivial, spend one `ripwire` call (on PATH) to find what already exists.
 
 ## Retrieve by ROLE, never by raw similarity
 This is the load-bearing rule, not a style preference: **similarity-retrieved "here's similar code, paste
-it" measurably HURTS** — up to **−15% Pass@1** (arXiv:2503.20589, ``). What
+it" measurably HURTS** — up to **−15% Pass@1** (arXiv:2503.20589). What
 helps is API/type-signature context (+17-20%) and dependency-graph-structured retrieval (+6 EM; enabled 5/6
 multi-file edits vs 0/6 without a graph). ripwire's shape — signatures + call-graph + role-ranked exemplars —
 is the validated retrieval shape; "find me a similar-looking snippet" is the anti-pattern to avoid, even

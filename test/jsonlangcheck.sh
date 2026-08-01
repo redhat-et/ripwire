@@ -183,7 +183,7 @@ printf '%s' "$OHOST" | grep -q 'hostile_nest' \
     || ok "hostile nesting: [[[[-file skipped"
 grep -q 'json nesting' "$TMP/hostile_err.txt" \
     && ok "hostile nesting: skip degrades with the one-line stderr note" \
-    || no "hostile nesting: skip was silent ( degrade-note style violated)"
+    || no "hostile nesting: skip was silent (degrade-note style violated)"
 printf '%s' "$OHOST" | grep -q 'deep_string\|realkey' \
     && ok "hostile nesting: brackets inside a JSON STRING do not count (quote-aware scan)" \
     || no "hostile nesting: quote-blind scan skipped a legitimate config file"

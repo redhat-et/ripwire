@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # mcpstalecheck.sh — the G-B1 gate: MCP READ verbs must not serve a STALE index after a
-# content-changed-but-mtime-preserved edit .
+# content-changed-but-mtime-preserved edit.
 #
 # The bug (reproduced in the audit): mcpStale() compared file mtime by EQUALITY only. A long-lived
 # --mcp server that has warmed its in-memory index, then sees a file whose CONTENT changed while its

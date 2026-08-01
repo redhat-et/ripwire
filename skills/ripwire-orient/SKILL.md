@@ -33,7 +33,7 @@ you can orient in a dependency before ever cloning it) — or several roots for 
 
 **0. Recall what you already KNOW** — `ripwire <dir> --recall="<the task>"`
 The most relevant DOCS' FULL bodies (docs only, so code never swamps them — markdown memory notes,
-`*`/`*` docs, skills, READMEs, plus `.ipynb`/`.html`/`.csv`/Office/PDF via the optional
+planning/design docs, skills, READMEs, plus `.ipynb`/`.html`/`.csv`/Office/PDF via the optional
 markitdown bridge). Point it at the **memory dir** for what past sessions learned, or the **repo root** for
 plans/designs — ~47× fewer tokens than loading everything. A design doc may already answer the question; if
 so, stop here.
@@ -156,8 +156,8 @@ ripwire . --situ                                          # 2. what the working 
 ripwire . --notes                                         # 3. gotchas already paid for
 ```
 
-1. **`--recall`** returns the *full bodies* of the most relevant markdown only — memory notes, `*`/
-   `*` docs, READMEs — so code can't swamp them. This is the decisions-and-rationale layer that a
+1. **`--recall`** returns the *full bodies* of the most relevant markdown only — memory notes,
+   planning/design docs, READMEs — so code can't swamp them. This is the decisions-and-rationale layer that a
    compaction destroys and that source code never contained in the first place. Point it at your memory dir
    for past-session memory, or the repo root for the project's plans.
 2. **`--situ`** (defaults to `git diff`) tells you what you had already changed, its blast radius, the tests
@@ -167,7 +167,7 @@ ripwire . --notes                                         # 3. gotchas already p
    re-surface on its own once `--for`/`--expand` emit that symbol — see the section above.
 
 Then, and only then, escalate the ladder for whatever is still missing. Two honest cautions: `--recall`
-returns what the docs **claim**, not what is still true — a stale `*` reads exactly as confidently as a
+returns what the docs **claim**, not what is still true — a stale plan doc reads exactly as confidently as a
 current one, so trust `--situ`'s working-tree facts over a doc when they disagree. And `--situ` carries **no
 `at=` commit stamp**, so if you are resuming across a rebase or a moved HEAD, record `git rev-parse --short
 HEAD` yourself before you quote anything from it.

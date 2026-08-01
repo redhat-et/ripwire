@@ -87,7 +87,7 @@ printf 'inline int g() { return 2; }\n'                     > "$F/f4/other/x2.h"
 printf '#include "../inc/x.h"\nint run() { return g(); }\n' > "$F/f4/caller/main.cpp"
 
 # F5 [B] cross-dir spray with NO disambiguator: two g2() in two dirs, caller in a THIRD dir includes
-# neither → tier-3 sees 2, no narrow → the call is DROPPED ( §2a strict global gate). Honest: no
+# neither → tier-3 sees 2, no narrow → the call is DROPPED (§2a strict global gate). Honest: no
 # edge, no amb (it never committed to a guess). Asserted as "0 edges" (a drop, not a silent pick).
 mkdir -p "$F/f5/da" "$F/f5/db" "$F/f5/dc"
 printf 'int g2() { return 1; }\n'          > "$F/f5/da/a.cpp"

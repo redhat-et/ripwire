@@ -4,7 +4,7 @@
 # cache could not save). Determinism contract: "faster must never change the answer" — cached and uncached
 # --quality-delta output must be BYTE-IDENTICAL.
 #
-# Background ( §G PARTIAL / A4-P1): computeHeadSnapshot already caches the HEAD *ingest*. The dominant
+# Background (§G PARTIAL / A4-P1): computeHeadSnapshot already caches the HEAD *ingest*. The dominant
 # remaining cost is everything computeSnapshot then does on the HEAD tree — above all findClones +
 # findClonesType3 — all IMMUTABLE for a given (HEAD sha, excludes, scheme). This round serializes the computed
 # Snapshot to a sidecar blob (ripwire-qsnap-<repoHex>-<exclHex>-<sha>.bin) with a magic+scheme header, an

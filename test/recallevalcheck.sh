@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # recallevalcheck.sh — gate for the held-out recall/ranking eval (bench/recalleval/,
-#: the measuring instrument that must precede §P2b and
+# The measuring instrument that must precede §P2b and
 # §P4's ranking half). Asserts the INSTRUMENT works — labels load clean, both lanes computable with
 # zero skipped queries, two runs byte-identical — and pins only FLOORS/CEILINGS loose enough to
 # survive intentional improvement (§P7 philosophy: never pin exact scores; a ranking fix should move

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # calib_json.py — measures the JSON row of kTokenCalib (src/serialize.h) the same way the rest of the
 # table was calibrated: real o200k_base tiktoken over a real corpus, bytesPerToken = UTF-8 bytes / tokens
-# (see  "Method" + commit aece7e5 "MAPE vs o200k"). Deterministic: fixed corpus
+# (see "Method" + commit aece7e5 "MAPE vs o200k"). Deterministic: fixed corpus
 # directory arg, sorted file list, no sampling/shuffling.
 #
 # Reproduce:

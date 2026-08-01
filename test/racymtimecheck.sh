@@ -8,7 +8,7 @@
 # many network mounts, exFAT): a rounded-down timestamp is always < an unrounded LATER one, so a same-granule
 # post-hash edit could serve a stale cached parse forever, undetected.
 #
-# Decided fix ( "Hard parts — X5 (F3) racy-mtime fix"): stamp cacheWriteNs from the
+# Decided fix ("Hard parts — X5 (F3) racy-mtime fix"): stamp cacheWriteNs from the
 # cache blob's own post-rename stat() mtime (same clock+granularity domain as the per-file mtimes), and
 # treat `ff.mtimeNs >= cacheWriteNs` as racy => re-hash that file next run.
 #

@@ -408,7 +408,7 @@ esac
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
-echo "=== Part D: X7 ( D3/D4) — stdio startup-root default + edit-verb workspace pin ==="
+echo "=== Part D: X7 (D3/D4) — stdio startup-root default + edit-verb workspace pin ==="
 # ═══════════════════════════════════════════════════════════════════════════
 # `ripwire <root> --mcp` (a startup root on the command line) now behaves like the remote HTTP
 # transport's own pinned-workspace default, but SOFTER: an omitted `path` defaults to that root for

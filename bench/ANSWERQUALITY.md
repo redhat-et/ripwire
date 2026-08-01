@@ -86,7 +86,7 @@ directional, not significant** — but it is a real end-to-end loop with tests-p
 
 ## Appended 2026-07-05 — `--for --anchor` (LARGER-style lexically-anchored PPR): honest result
 
- steal #1 (LARGER, arXiv 2605.16352) shipped behind the opt-in `--anchor` flag: the top-20
+The steal #1 idea (LARGER, arXiv 2605.16352) shipped behind the opt-in `--anchor` flag: the top-20
 lexical hits of `--for=TASK` seed the PPR **personalization vector** (weighted by each anchor's
 normalized BM25 score — per-anchor confidence), the existing PPR core expands the walk, and the final
 rank is a **score-space** blend `final = 0.7·lex̂ + 0.3·pprˆ` (max-normalized — deliberately NOT the

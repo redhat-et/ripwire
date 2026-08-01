@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# qsnapprefetchcheck.sh — the Phase-M gate for the qsnap PREFETCH file-cache warmer
-# .
+# qsnapprefetchcheck.sh — the Phase-M gate for the qsnap PREFETCH file-cache warmer.
 #
 # WHAT PHASE M IS: a FILE-CACHE WARMER in the long-lived --mcp server, NOT an index mechanism. When a request
 # observes git HEAD has MOVED since the last observation (a commit just landed), a DETACHED background thread
@@ -184,7 +183,7 @@ esac
 
 # measured warm-vs-cold delta on THIS corpus (report-only; the win is corpus-dependent, §8).
 WARM_MS="$( grep 'verb=quality_delta' "$B_W/err.txt" | tail -1 | sed -E 's/.*wall_ms=([0-9.]+).*/\1/' )"
-rm -f $( blob_paths "$B_C" 'ripwire-qsnap-*.bin' )        # force a COLD control ( Y4: shard-aware)
+rm -f $( blob_paths "$B_C" 'ripwire-qsnap-*.bin' )        # force a COLD control (Y4: shard-aware)
 printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$B_W\"}}}" >&9
 wait_for_id "$B_W/out.txt" 5
 COLD_MS="$( grep 'verb=quality_delta' "$B_W/err.txt" | tail -1 | sed -E 's/.*wall_ms=([0-9.]+).*/\1/' )"

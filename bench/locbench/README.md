@@ -6,7 +6,7 @@ ACL'25), with a **SWE-bench-Lite** fallback. It is the public-benchmark sibling 
 retrieval proxy in [`../ANSWERQUALITY.md`](../ANSWERQUALITY.md) §1 — same deterministic, leave-nothing-out
 posture, but on someone else's benchmark with their metric definitions, so the number is not one we defined.
 
-This closes the  §E credibility gap ("localization is now a benchmarked subfield; *no published
+This closes the §E credibility gap ("localization is now a benchmarked subfield; *no published
 benchmark* is the gap"). The house rule governs it: **publish the losses with the wins.**
 
 ## 2026-07-13 corrected evaluator + accepted router (A7) — CURRENT results

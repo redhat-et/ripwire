@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# spec_trace.py — the MEASURE-FIRST experiment for .
+# spec_trace.py — the MEASURE-FIRST experiment for the speculative-prefetch design.
 #
 # WHAT THIS IS. Drives a live `ripwire --mcp` server over stdin/stdout with a realistic ~20-call agent
 # session and measures the per-request wall time, attributing each request to "warm reuse" vs a full index
