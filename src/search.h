@@ -765,8 +765,48 @@ inline void grepScanText( const std::string& text, const std::string& pat,
 // trigram PREFILTER's parse (RegexAnalyzer, see the note at the top of that section) is allowed to fail and
 // degrade: it only ever widens the candidate set, so its imprecision cannot change a result. Refusing here,
 // ahead of both paths, is also why --no-prefilter refuses identically.
+// L5 (Linux runtime probe) — the ONE place the two standard libraries disagree about what a valid pattern
+// IS, closed here so the binary answers the same question on both.
+//
+// ECMAScript's IdentityEscape forbids `\<letter>` for any letter that is not a recognised escape, and libc++
+// enforces it: `--regex='\Q\E'` is refused on macOS. libstdc++ does not — on Ubuntu the same pattern
+// COMPILES, with `\Q` silently meaning the literal letter Q. That is the worse half of the split: the
+// lenient side does not error, it answers a DIFFERENT question and hands the result back as a measurement.
+//
+// So the pattern is screened before either engine sees it, against the escapes libc++ actually accepts
+// (measured with a probe, not inferred from the grammar): `\b \B \d \D \s \S \w \W \f \n \r \t \v` alone,
+// plus `\c \x \u`, whose TAILS the engine still validates. Everything else after a backslash — digits
+// (back-references), `$`, `_`, punctuation, any non-ASCII byte — is left entirely to the engine, which
+// agrees about all of it. So this rejects EXACTLY the set libc++ already rejected and nothing more: no
+// pattern that searches on macOS today stops searching, and Linux stops silently misreading the Perl-isms.
+inline constexpr std::string_view kPortableRegexLetterEscapes = "bBdDsSwWfnrtv";   // valid on their own
+inline constexpr std::string_view kPortableRegexPrefixEscapes = "cxu";             // valid with a tail the engine checks
+
+inline std::optional<std::string> nonPortableRegexEscape( const std::string& pat )
+{
+    for( std::size_t i = 0; i + 1 < pat.size(); ++i )
+    {
+        if( pat[i] != '\\' ) continue;
+
+        const char escaped = pat[ i + 1 ];
+        ++i;                                                                          // consume it: `\\Q` is an escaped backslash then a plain Q, not an escaped Q
+        const bool isAsciiLetter =    ( escaped >= 'a' && escaped <= 'z' )
+                                   || ( escaped >= 'A' && escaped <= 'Z' );
+        if( !isAsciiLetter )                                                         continue;
+        if( kPortableRegexLetterEscapes.find( escaped ) != std::string_view::npos )   continue;
+        if( kPortableRegexPrefixEscapes.find( escaped ) != std::string_view::npos )   continue;
+
+        return   std::string( "unsupported escape sequence '\\" ) + escaped + "' — the portable ECMAScript escapes are "
+                 "\\b \\B \\d \\D \\s \\S \\w \\W \\f \\n \\r \\t \\v \\cX \\xHH \\uHHHH (some C++ standard libraries accept '\\"
+               + escaped + "' and silently read it as the literal '" + escaped + "', so it is refused rather than answered differently per platform)";
+    }
+    return std::nullopt;
+}
+
 inline std::optional<std::string> regexCompileError( const std::string& pat )
 {
+    if( std::optional<std::string> portability = nonPortableRegexEscape( pat ) ) return portability;   // L5: one verdict on every platform, so it runs first
+
     try                                { const std::regex probe( pat, std::regex::ECMAScript | std::regex::optimize ); (void)probe; }
     catch( const std::regex_error& e ) { return std::string( e.what() ); }
     catch( ... )                       { return std::string( "invalid regular expression" ); }
@@ -821,7 +861,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     // a pattern that doesn't compile is a user error, not a degrade — the CLI seam refuses it before we are
     // called (regexCompileError above). Kept as a belt-and-braces early REJECT for library/MCP callers that
     // did not ask; each worker compiles its own copy so no std::regex object is shared.
-    if( regex ) { try { const std::regex probe( pat, std::regex::ECMAScript | std::regex::optimize ); (void)probe; } catch( ... ) { return {}; } }
+    if( regex && regexCompileError( pat ) ) return {};   // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes
 
     // the sound regex→trigram query, computed once and evaluated per file (read-only across workers)
     const TriQuery prefilterQuery = ( regex && !noPrefilter ) ? RegexAnalyzer( pat ).analyze() : TriQuery::all();
