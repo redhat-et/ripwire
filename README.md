@@ -78,7 +78,9 @@ recorded output.
 ### Four real examples
 
 Output is minified — one line, no whitespace between tags — so the excerpts below are wrapped for
-reading, and each one's leading legend comment is elided where noted. Nothing else is edited.
+reading, and each one's leading legend comment is elided where noted. Nothing else is edited, except
+that corpus-size numbers (file/symbol/edge counts, PageRank `k=` values) drift as this repository
+grows — example 2 elides those specifically, and says so again at the point of use.
 
 **1 — Who calls this?** One hop off the call graph, with the honesty marker attached.
 
@@ -102,25 +104,31 @@ the emitted legend (elided above) says so in full before you read a single row.
 
 ```
 $ ripwire . --top-k=3
-<!-- files=837 symbols=6446 edges=8740 shown=3 est_tokens=393 ambiguous=2631 unresolved=662
+<!-- files=… symbols=… edges=… shown=3 est_tokens=393 ambiguous=2631 unresolved=662
      precise=3 skipped_oversize=3 order=important-first -->
 <r est_tokens="393">
 <f p="./src/svector.h">
-<s t="method" n="size" id="./src/svector.h::svector::size" k="0.0502"></s>
-<s t="method" n="push_back" id="./src/svector.h::svector::push_back" amb="2" k="0.0132">
+<s t="method" n="size" id="./src/svector.h::svector::size" k="…"></s>
+<s t="method" n="push_back" id="./src/svector.h::svector::push_back" amb="2" k="…">
 <c n="buf"/><c n="buf"/><c n="grow"/></s>
 </f>
 <f p="./src/scipoverlay.h">
-<s t="method" n="empty" id="./src/scipoverlay.h::ScipOverlay::empty" k="0.0125"></s>
+<s t="method" n="empty" id="./src/scipoverlay.h::ScipOverlay::empty" k="…"></s>
 </f>
 </r>
 ```
 
-The header is a measurement of the whole corpus, not of the excerpt: `ambiguous=2631` is the
-call-graph completeness gauge, and `amb="2"` on a row says two of that symbol's calls hit a name with
-several definitions and the resolver guessed. Read the source when which-target matters.
+`files=`/`symbols=`/`edges=` and the `k=` rank values are elided above: this repository is the
+corpus in this example, so those numbers move every time README.md itself gains or loses a line —
+they are not part of what the example is demonstrating. The header is otherwise a measurement of the
+whole corpus, not of the excerpt: `ambiguous=2631` is the call-graph completeness gauge, and
+`amb="2"` on a row says two of that symbol's calls hit a name with several definitions and the
+resolver guessed. Read the source when which-target matters.
 
-**3 — Before you commit.** `--test-gate` names the obligations and exits 4 while any remain:
+**3 — Before you commit.** `--test-gate` names the obligations and exits 4 while any remain. The
+output below was captured with an uncommitted change in the tree — `changed="1"` and the rows that
+follow only appear because something was actually pending; a clean clone has nothing changed yet, so
+it exits 0 with every count at zero:
 
 ```
 $ ripwire . --test-gate          # exit code: 4
