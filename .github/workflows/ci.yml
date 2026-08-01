@@ -64,7 +64,13 @@ jobs:
     env:
       CLANG_VERSION: "22"
     steps:
+      # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
+      # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
+      # quality short-horizon-churn kind) mine `git log` for real, so on a shallow checkout they do not
+      # error — they measure zero and fail, or worse, pass while measuring nothing. Full history it is.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
       - name: Install clang-format / clang-tidy (PINNED major — see the job comment)
         run: |
@@ -104,7 +110,13 @@ jobs:
         os: [macos-14, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
+      # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
+      # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
+      # quality short-horizon-churn kind) mine `git log` for real, so on a shallow checkout they do not
+      # error — they measure zero and fail, or worse, pass while measuring nothing. Full history it is.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
@@ -167,7 +179,13 @@ jobs:
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       LSAN_OPTIONS: suppressions=${{ github.workspace }}/lsan_suppressions.txt
     steps:
+      # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
+      # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
+      # quality short-horizon-churn kind) mine `git log` for real, so on a shallow checkout they do not
+      # error — they measure zero and fail, or worse, pass while measuring nothing. Full history it is.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
