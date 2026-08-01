@@ -41,7 +41,16 @@ REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
 XDG="$TMP/xdg"; mkdir -p "$XDG"
 CACHEDIR="$XDG/ripwire"
 
-inode_of(){ stat -f %i "$1" 2>/dev/null || stat -c %i "$1" 2>/dev/null; }
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+if stat --version >/dev/null 2>&1; then inode_of(){ stat -c %i "$1" 2>/dev/null; }   # GNU coreutils
+else                                    inode_of(){ stat -f %i "$1" 2>/dev/null; }   # BSD / macOS
+fi
 # Y4: shard-aware lookup — a blob may be flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex shard).
 qsnapfiles(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-qsnap-*.bin' 2>/dev/null; }
 nqsnap(){ qsnapfiles | wc -l | tr -d ' '; }

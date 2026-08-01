@@ -114,7 +114,19 @@ echo "$OUT_REF" | grep -q 'base="HEAD"[^>]*files="1"' \
 # ── A3-F10: a pure mode flip (chmod, content untouched) must NOT count as a changed file, and the
 #    skipped count must be reported so the information isn't silently lost. Flip src/user.cpp to 755
 #    (content already committed, unmodified) alongside the real core.cpp content edit above.
-ORIG_MODE="$( stat -f '%Lp' "$REPO/src/user.cpp" 2>/dev/null || stat -c '%a' "$REPO/src/user.cpp" )"
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+if stat --version >/dev/null 2>&1; then   # GNU coreutils
+    mode_of(){ stat -c '%a'  "$1" 2>/dev/null; }
+else                                     # BSD / macOS
+    mode_of(){ stat -f '%Lp' "$1" 2>/dev/null; }
+fi
+ORIG_MODE="$( mode_of "$REPO/src/user.cpp" )"
 chmod 755 "$REPO/src/user.cpp"
 MODEOUT="$( "$BIN" "$REPO" --pr-context --no-cache 2>/dev/null )"
 

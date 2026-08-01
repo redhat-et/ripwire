@@ -66,12 +66,27 @@ FIVE_DAYS_AGO=$(( $(date +%s) - 5*86400 ))
 touch -t "$(date -r "$FIVE_DAYS_AGO" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$FIVE_DAYS_AGO" +%Y%m%d%H%M.%S)" "$CACHEDIR" 2>/dev/null \
     || touch -d "@$FIVE_DAYS_AGO" "$CACHEDIR" 2>/dev/null
 
-BEFORE_MTIME="$(stat -f %m "$CACHEDIR" 2>/dev/null || stat -c %Y "$CACHEDIR")"
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+if stat --version >/dev/null 2>&1; then   # GNU coreutils
+    mtime_of(){ stat -c '%Y'  "$1" 2>/dev/null; }
+    mode_of(){  stat -c '%a'  "$1" 2>/dev/null; }
+else                                     # BSD / macOS
+    mtime_of(){ stat -f '%m'  "$1" 2>/dev/null; }
+    mode_of(){  stat -f '%Lp' "$1" 2>/dev/null; }
+fi
+
+BEFORE_MTIME="$( mtime_of "$CACHEDIR" )"
 
 env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$URL" >"$TMP/a_stdout" 2>"$TMP/a_stderr"
 a_exit=$?
 
-AFTER_MTIME="$(stat -f %m "$CACHEDIR" 2>/dev/null || stat -c %Y "$CACHEDIR")"
+AFTER_MTIME="$( mtime_of "$CACHEDIR" )"
 
 [ "$a_exit" -eq 0 ] \
     && ok "reuse: exits 0 (maps the cached clone, does not attempt network)" \
@@ -144,7 +159,7 @@ env -u TMPDIR XDG_CACHE_HOME="$XDG4" "$BIN" "$CORPUS" >/dev/null 2>"$TMP/d_stder
 
 if [ -d "$XDG4/ripwire" ]; then
     ok "defaultCachePath: creates \$XDG_CACHE_HOME/ripwire when TMPDIR is unset"
-    PERM="$(stat -f %Lp "$XDG4/ripwire" 2>/dev/null || stat -c %a "$XDG4/ripwire")"
+    PERM="$( mode_of "$XDG4/ripwire" )"
     [ "$PERM" = "700" ] \
         && ok "defaultCachePath: \$XDG_CACHE_HOME/ripwire is mode 0700 ($PERM)" \
         || no "defaultCachePath: \$XDG_CACHE_HOME/ripwire mode is $PERM, expected 700"
@@ -165,7 +180,7 @@ fi
 XDG5="$TMP/xdg_e"; mkdir -p "$XDG5"
 env -u TMPDIR XDG_CACHE_HOME="$XDG5" "$BIN" "$URL" >/dev/null 2>"$TMP/e_stderr"
 if [ -d "$XDG5/ripwire" ]; then
-    PERM_REMOTE="$(stat -f %Lp "$XDG5/ripwire" 2>/dev/null || stat -c %a "$XDG5/ripwire")"
+    PERM_REMOTE="$( mode_of "$XDG5/ripwire" )"
     [ "$PERM_REMOTE" = "700" ] \
         && ok "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire (binary-created) is mode 0700 for the remote-clone cache too" \
         || no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire mode is $PERM_REMOTE, expected 700"
