@@ -54,6 +54,11 @@ endif()
 # tuning, not a native-host bake-in) on real Apple Silicon. -DRIPWIRE_NATIVE=ON: dev-machine-only opt-in
 # (-march=native bakes in host CPU extensions — never for a binary that ships or runs elsewhere).
 # See cmake/PortableFlags.cmake for the full rationale and the RIPWIRE_PRETEND_LINUX test-only hook.
+# DECLARED here, beside the other five options, rather than left to be conjured by a bare -D on the
+# command line: an undeclared option is absent from `cmake -LH`, from ccmake, and from the IDE panes,
+# so the only way to learn it exists is to read this comment — and `--flags` cannot report a CMake
+# gate that no `option()` call ever names.
+option(RIPWIRE_NATIVE "build with -march=native (DEV MACHINES ONLY — bakes in host CPU extensions)" OFF)
 include(cmake/PortableFlags.cmake)
 add_compile_options(${RIPWIRE_ARCH_FLAGS})
 

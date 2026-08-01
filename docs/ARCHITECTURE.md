@@ -20,31 +20,48 @@ any stage can be tested in isolation and every verb is a different way of readin
 
 ### ingest — crawl and parse
 
-A multithreaded directory crawler that respects `.gitignore`, followed by per-file tree-sitter
-extraction.
+A single-threaded directory crawl (`collectSources`, `src/ingest.cpp`) that produces a sorted file
+list, followed by **parallel** per-file tree-sitter extraction. The crawl is the cheap half and is
+deliberately not parallelized; the parse pool is where the threads are.
 
-**Crawl order is deterministic, and that is load-bearing.** The crawl runs in parallel for I/O, but
-it *collects every candidate path first*, sorts them lexicographically by byte, and only then
-assigns node IDs and parses. Multithreaded directory reads return entries in nondeterministic order;
-if IDs followed that order, node IDs, top-K cutoffs, and every diff-aware verb would churn between
-identical runs.
+**Crawl order is deterministic, and that is load-bearing.** The walk *collects every candidate path
+first*, sorts them lexicographically by byte, and only then assigns node IDs and parses. Node IDs are
+indices into that sorted list, so they are stable across runs of the same tree; if IDs followed
+directory order, node IDs, top-K cutoffs, and every diff-aware verb would churn between identical
+runs. The parse itself runs one tree-sitter parser per worker thread and merges per-thread result
+lists afterwards, which is safe precisely because the definitions and references are re-sorted before
+they are used — collection order never reaches the output.
 
-Skip rules live in one constexpr configuration block and every skip degrades with a one-line stderr
-note rather than failing:
+**`.gitignore` is not consulted.** Skipping is a fixed, committed denylist (`kCrawlSkipDirs[]` in
+`src/ingest.h`, shared with the CMake walk in `darkflags.h` so the two crawlers cannot disagree about
+what counts as source), not a per-repository ignore file. That is a real difference from a
+`.gitignore`-aware tool in both directions: a build directory this repository happens not to ignore is
+still pruned, and a directory a project ignores but that is not on the list is still indexed. What is
+skipped:
 
-- `.git/`, and anything `.gitignore` matches;
+- **directories by NAME:** `.git`, `.claude`, `.hg`, `.svn`, `node_modules`, `vendor`, `third_party`,
+  `.cache`, `build`, `dist`, `out`, `target`, `.venv`, `venv`, `__pycache__`, `.idea`, `.vscode`,
+  `asan`, `build_prof`, `CMakeFiles`, `captures`, and anything matching `cmake-build-*`;
+- **any directory containing a `CMakeCache.txt`** — a build-output tree, whatever it is called;
+- **paths matching a `--exclude=SUBSTR`** (repeatable), which prunes directories and drops files;
 - files over 4 MB (`--max-file-size=N[K|M|G]` overrides);
-- files whose first 4 KB contains a NUL byte, or that fail a quick UTF-8 validity check — the
-  extractor slices names by byte offset, so non-UTF-8 input yields wrong offsets, and decoding is
-  never attempted;
-- files with an average line length over 2 KB (the minified/generated heuristic);
+- files whose first 4 KB contains a NUL byte — the binary sniff. There is no separate UTF-8 validity
+  pass: the extractor slices names by byte offset and truncation backs off UTF-8 continuation bytes,
+  so a codepoint is never split, but a file is not rejected for failing to decode;
 - JSON over 256 KB or nested deeper than 512 levels. The JSON lane indexes *configuration keys*; a
   large or degenerately nested `.json` file is data or a test corpus. The former explodes the symbol
   table; the latter drives tree-sitter's error recovery superlinear — 43 s measured on a 100 KB
   `[[[[…` file. Both cases were found live by benchmarking against real upstream repositories.
-- A denylist of generated artifacts (`*.min.js`, `*.pb.go`, `*_pb2.py`, `package-lock.json`, `*.lock`).
+- **generated artifacts by filename:** `package-lock.json`, `npm-shrinkwrap.json`, `*.min.js`,
+  `*_pb2.py`, `*.pb.go`.
 
-Symlinks are resolved and visited inodes tracked, so cycles terminate.
+Every skip degrades with a one-line stderr note rather than failing, and the size-ceiling drops are
+*counted* into the header's `skipped_oversize` rather than vanishing.
+
+**Directory symlinks are not followed.** The walk is a `std::filesystem::recursive_directory_iterator`
+opened with `skip_permission_denied` only — not `follow_directory_symlink` — so a symlinked directory
+is never descended into and a symlink cycle cannot arise. There is no inode tracking, because with
+symlink-following off there is nothing for it to do.
 
 **Extraction is query-driven, never hand-rolled.** Each language contributes a vendored tree-sitter
 `tags.scm` query plus a small `capture-name → NodeRole` table. One query engine runs over every
@@ -112,9 +129,18 @@ per source) carries the `1/outdeg` normalization, plus a dangling mask for `wOut
 
 Edge rules:
 
-- **weight** = call-site multiplicity, capped at 8, so one hot loop cannot dominate;
-- **dedup** — duplicate `(src → dst)` pairs collapse into one entry with summed weight. Duplicate
-  columns double-count in the product, so the edge list is sorted and merged before the CSR is built;
+- **weight** = **mean per-reference confidence × the square root of the reference count**, capped at
+  8 (`src/graph.h`, `buildGraph`). Each reference contributes a confidence — its resolution tier,
+  deboosted for an over-common name (defined in ≥16 places) or a leading-underscore private one, and
+  split evenly when it resolves ambiguously to *k* targets. Those contributions are accumulated per
+  `(src → dst)` pair as a sum and a count, and the pair's weight is `(confSum / nref) · √nref`. The
+  square root is the point: repeated calls should raise a weight **sublinearly**, so a hot loop
+  strengthens an edge without letting call-site multiplicity alone dominate the ranking. The cap at 8
+  bounds the tail.
+- **dedup is structural, not a merge pass** — the accumulator is keyed by the `(src, dst)` pair, so a
+  duplicate pair was never a second entry to collapse; it is the `nref` in the formula above.
+  Duplicate columns would double-count in the product, and the CSR is built from that one-entry-per-pair
+  list, sorted by `(from, to)`;
 - **self-loops are dropped** — in the Google matrix they act as rank sinks that inflate the recursive
   node and steal mass.
 
@@ -187,9 +213,16 @@ The schema is terse by design — a legend comment once at the top, then `<r>` r
 The argument parser is hand-rolled and table-driven. A flagless run emits the core map; every flag is
 additive and gated by a `Config` field.
 
-The MCP server exposes 30 verbs. Each is a thin front door onto **the same computation and the same
-renderer** as its CLI sibling — one output shape, two surfaces. That is a deliberate constraint: a
-verb that rendered differently over MCP would be a second implementation to keep honest.
+The MCP server exposes 30 verbs. **Twenty-seven of them** are a thin front door onto **the same
+computation and the same renderer** as a CLI sibling — one output shape, two surfaces. That is a
+deliberate constraint: a verb that rendered differently over MCP would be a second implementation to
+keep honest.
+
+**Three have no CLI sibling at all**, and they are the write verbs: `replace_symbol_body`,
+`insert_before_symbol` and `insert_after_symbol` (`src/mcpedit.h`). There is no CLI flag that edits
+your source, so there is nothing for them to mirror — they are the one place where the MCP surface is
+genuinely larger than the command line rather than a second door onto it, and they carry their own
+safety contract instead of a shared renderer.
 
 ---
 
@@ -255,8 +288,12 @@ output, on the verbs where it is true:
 
 - **`counts_floor="1"`** appears on `--callers`, `--callees`, `--uses`, `--impact`, `--edit-check`
   and further surfaces. Read a `0` from those verbs as **"none found"**, never as "none exists".
-- **Counting units are named per verb.** Those five count distinct (caller, callee) pairs; `--uses`
-  counts call *sites*. Two different numbers, two different names, deliberately.
+- **Counting units are named per verb**, and `--uses` is the one that differs. `--callers`,
+  `--callees`, `--impact` and `--edit-check` count **distinct `(caller, callee)` pairs**; `--uses`
+  counts **use SITES** — every read, write, import and inheritance reference with its own
+  `file:line`, so the same pair appearing twice is two rows. Two different numbers, two different
+  names, deliberately: `--uses` is normally the larger, and comparing it against a caller count as
+  though they measured the same thing is the mistake this row exists to prevent.
 - **`amb="K"`** on a symbol means K of its calls hit a name with multiple definitions and the
   resolver split the weight rather than choosing. The header's `ambiguous=N` totals it.
 - **`unresolved=N`** counts call names defined only in a language-incompatible file.

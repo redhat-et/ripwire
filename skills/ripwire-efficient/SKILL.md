@@ -3,7 +3,7 @@ name: ripwire-efficient
 description: >
   A token + accuracy DISCIPLINE for ANY read, not a moment: map before you open files. Reach for it the
   instant you catch yourself about to open more than ~2 files to figure something out — anywhere in a task.
-  File reads are ~76% of an agent's token cost, and less context is measurably MORE accurate, not just
+  File reads dominate an agent's token cost, and less context is measurably MORE accurate, not just
   cheaper; a small ranked map beats a fan-out of whole-file reads on both. The reflex is one line: run the
   cheapest verb that answers the question, then read only the 2-3 files it ranks highest. Fires ALONGSIDE
   the moment skills (orient, navigate, change-check…), never instead of them. Backed by ripwire
@@ -18,7 +18,7 @@ allowed-tools: Bash, Read
 > • Tracing one call graph / locating a literal → **ripwire-navigate**.
 > • Not sure which skill at all → **ripwire-router**.
 
-Reading files is the single biggest token sink in an agent loop (~76% of spend), and exploratory reads
+Reading files is the single biggest token sink in an agent loop, and exploratory reads
 snowball — every verbose read inflates every later step. `ripwire` (on PATH) replaces exploratory reads with
 a deterministic, PageRank-ranked map. The discipline is one line: **map before you read.**
 

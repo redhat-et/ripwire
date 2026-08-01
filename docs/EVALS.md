@@ -20,7 +20,7 @@ section, and it is not an afterthought.
 | **C++ localization benchmarks** | `bench/cppbench/`, `bench/multiswe/` | The same localization metric on C++ corpora, since the public localization datasets are Python-heavy. |
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | ~310 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 311 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -160,16 +160,31 @@ after, with **recall up, not traded away**, and the recall lane byte-identical. 
 single path-tier multiplier in the ranking lenses, published rather than hand-tuned.
 
 **Carry this caveat with that number, as the gate itself does:** *pollution 0 is a **ranking-lane**
-claim only. The recall lane's honest baseline is 2.1%. Never report "pollution 0, every class".*
+claim only — it is not the recall lane's number, and it is not "every class".*
 
-The frozen bars the gate enforces (recalibrated 2026-07-29) for the **ranking lane**: strict recall@1
-59.4, strict recall@5 78.1, lenient recall@1 62.5, lenient recall@5 78.1, strict MRR 0.675, lenient
-MRR 0.700, pollution@5 0.0.
+The bars the gate records, **re-baselined 2026-07-31 on the exported tree** (`test/recallevalcheck.sh`),
+recall = 42 labels / ranking = 32 labels, zero skipped:
 
-**Not published: the recall lane's own scores.** Those labels were authored against a document set
-this public export deliberately does not ship. The labels have been re-authored against the shipped
-documentation, and the harness reports any query whose labelled paths are absent as *skipped* rather
-than scoring it — the checkout degrades honestly instead of inventing a number.
+| Lane | strict r@1 | strict r@5 | lenient r@1 | lenient r@5 | strict MRR | lenient MRR | pollution@5 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **ranking** | 56.2 | 75.0 | 59.4 | 75.0 | 0.642 | 0.676 | **0.0** |
+| **recall** | 52.4 | 88.1 | 57.1 | 92.9 | 0.669 | 0.720 | **10.0** |
+
+**Why these are not the pre-export numbers, and why that is not a ranker regression.** The export
+changed the corpus these lanes measure: the private tree carried roughly **70 real documents** against
+its fixture markdown; this export ships about **27**, and 27 of the recall lane's 39 original labels
+named documents it does not ship — so that lane was scoring almost nothing and its labels were
+re-authored against the shipped documentation. **Zero ranker changes were made.** Two consequences are
+recorded rather than chased: the recall lane's pollution rises to 10.0% because the fixture *share* of
+any top-5 is structurally higher in a smaller document set (the harness now exempts any basename
+`README.md` from the fixture predicate — a rule about READMEs, not a special case), and the ranking
+lane moves slightly on unchanged labels because the export relocated source files, so a ranked set over
+a different tree is a different measurement. The gate's ceilings and floors were widened to match, so
+they measure a regression rather than the corpus.
+
+**The recall lens has no fixture defense at all.** The path-tier de-prioritization was applied to the
+ranking lenses only; the recall lane looked clean on the private corpus because real documents
+outnumbered fixtures there. That gap is left visible on purpose.
 
 ### Query-mention anchoring
 
@@ -253,7 +268,7 @@ and these numbers prove **cheaper and faster, not better outcomes**.
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **310 gate scripts**, all of which exist on disk.
+naming **311 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -377,7 +392,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 310. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 311. The
   loop is the authority; the stale docstrings are a known drift.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
   point-in-time snapshot. Quote the floor, not the snapshot.
