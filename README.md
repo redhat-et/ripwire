@@ -181,7 +181,7 @@ Before printing, `wrap` security-scans `./skills` and `.agents/skills` with the 
 
 The server (`ripwire --mcp` over stdio, or `--listen=HOST:PORT`) exposes 30 verbs: 15 read verbs, 12
 flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CLI (`analyze`, `for`,
-`grep`, `impact`, `uses`, `lego`, `mentions`, `owners`, `memory_recall`, `situational_awareness`,
+`grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`, `situational_awareness`,
 `batch`, …); `find_symbol` and `find_referencing_symbols` attach a stable `handle` instead of a body,
 so you fetch source only when you actually need it. The edit verbs enforce a safety contract —
 staleness refusal, ambiguity refusal, atomic writes. Full reference:
