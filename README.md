@@ -80,7 +80,8 @@ recorded output.
 Output is minified — one line, no whitespace between tags — so the excerpts below are wrapped for
 reading, and each one's leading legend comment is elided where noted. Nothing else is edited, except
 that corpus-size numbers (file/symbol/edge counts, PageRank `k=` values) drift as this repository
-grows — example 2 elides those specifically, and says so again at the point of use.
+grows — example 2 elides those specifically, and says so again at the point of use — and example 3
+additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a trailing `…`.
 
 **1 — Who calls this?** One hop off the call graph, with the honesty marker attached.
 
@@ -128,7 +129,9 @@ resolver guessed. Read the source when which-target matters.
 **3 — Before you commit.** `--test-gate` names the obligations and exits 4 while any remain. The
 output below was captured with an uncommitted change in the tree — `changed="1"` and the rows that
 follow only appear because something was actually pending; a clean clone has nothing changed yet, so
-it exits 0 with every count at zero:
+it exits 0 with every changed/impacted/test count at zero (`script_gates_unmodelled=` is structural —
+it counts script-to-binary test runners the call graph can't see, not git status — so it stays
+nonzero even then):
 
 ```
 $ ripwire . --test-gate          # exit code: 4
@@ -206,8 +209,9 @@ verdict before installing anything.
 ### Improve this tool with your agent
 
 `prompts/` collects ready-to-paste prompts for pointing a coding agent at this repository itself —
-auditing a subsystem, extending a verb, adding a gate, or running the honesty review that every
-claim here had to survive. They encode the workflow the project is built with rather than describing
+a full severity-ranked audit, a head-to-head comparison against a competitor, a real task dogfooded
+with every grep-fallback logged as a gap, or the capture-driven honesty review that every claim here
+had to survive. They encode the workflow the project is built with rather than describing
 it, so an agent can pick one up and work the same way. Start with the one whose title matches the
 change you want; each states its own scope, the gates it must leave green, and what it must not
 touch.
