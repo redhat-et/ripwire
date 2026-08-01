@@ -1,14 +1,14 @@
 #pragma once
 
 // tracelocus.h — the shared trace-to-locus bundle assembler behind --from-trace (CLI, L2) and the MCP
-// from_trace verb (L4, PLAN_audit5Public2026.md). tracein.h owns PURE frame extraction (no corpus
+// from_trace verb (L4). tracein.h owns PURE frame extraction (no corpus
 // knowledge); this header owns the CORPUS resolution (a frame's path → indexed fileId, then the frame's own
 // NAME → a unique def, falling back to the frame's line → its enclosing symbol) and the bundle assembly (the
 // <trace> map + suspects' signatures + the innermost in-corpus symbol's full body) — so main.cpp's
 // runFromTrace() and mcpverbs.h's fromTraceText() share ONE implementation, never two hand-copies of the
 // innermost-first ranking/serialization logic.
 //
-// §A2 (PLAN_outputAudit2_2026-07-28.md) — the two honesty contracts this file now keeps:
+// §A2 — the two honesty contracts this file now keeps:
 //   * NAME-FIRST resolution. A trace comes from a binary that may predate the checkout, so its line numbers
 //     are the stale half of every frame; binding by line alone silently rebound `runDefaultMap` to whatever
 //     squats on that line today. Each frame stamps resolved_by="name"|"line", and a name/line DISAGREEMENT is
