@@ -234,12 +234,16 @@ the command actually emits. A "~70%" headline is reachable at larger N but overs
 shapes people actually run.
 
 **And do not quote top-10.** It is the noisiest of the three by construction: ten symbols is a small
-enough sample that one trivial body — a one-line `size()` accessor whose signature and doc-comment
-are nearly as large as the body they replace — moves it several points on its own. The 2026-08-01
-re-derivation dropped it from 59.1% to 46.7% with no change to the verb: deleting ~1500 lines of
-unused vendored math shifted the ranking, a different pair of one-line accessors entered the top-10,
-and the ratio followed. top-50 moved 1.4 points over the same edit and top-100 moved 0.3. The
-sample-size sensitivity is the finding; it is why the headline is the top-50 number.
+enough sample that a fixed byte change is a large share of the base. The 2026-08-01 re-derivation
+dropped it from 59.1% to 46.7% with no change to the verb — and the mechanism is measured, not
+guessed: the top-10 membership did not change at all (verified by running both binaries); what
+changed is the body denominator. Slimming the game-math header removed four float overloads each of
+`fastmath::min`/`max`, so `--expand`'s body side for the same ten symbols fell from 15 entries /
+2,861 bytes to 11 / 2,170 while the signature side moved 12 bytes. A ~700-byte shift is 24% of a
+2.9 KB top-10 base and noise on a 28 KB top-50 base. Against the previously *published* numbers,
+top-50 moved 1.4 points; top-100's published 66.5 was itself 0.5 stale inside the gate's ±1.5-point
+tolerance (the pre-change binary measured 67.0), so the true binary-to-binary top-100 movement is
+0.8. The sample-size sensitivity is the finding; it is why the headline is the top-50 number.
 
 **This is gated, not asserted.** `test/showcasecapturecheck.sh` re-derives all three figures from
 this repository on every run, in the same quantity as the caption, and fails if the caption and the

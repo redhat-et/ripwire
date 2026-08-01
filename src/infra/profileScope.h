@@ -555,8 +555,7 @@ private:
 // ============================================================================
 // Bench timer — a minimal, standalone A/B timer for micro-benchmarks (e.g. the
 // bench/ radix and container harnesses). Unlike ScopedTimer it registers no Site,
-// never touches the
-// registry, builds no call tree, and does not guard recursion: it just folds wall
+// never touches the registry, builds no call tree, and does not guard recursion: it just folds wall
 // time into a caller-owned Accum read back numerically. Single-thread use.
 // ============================================================================
 struct Accum
