@@ -1,5 +1,5 @@
 // Alternating A/B benchmark for the pre-A6 per-pass radix versus the vendored single-read histogram core.
-// Build: c++ -O3 -march=native -std=c++23 bench/bench_radix_ab.cpp src/infra/fastmath.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_radix_ab
+// Build: c++ -O3 -march=native -std=c++23 bench/bench_radix_ab.cpp src/infra/diagnostics.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_radix_ab
 
 #include "radixSort.h"
 #include "sortutil.h"

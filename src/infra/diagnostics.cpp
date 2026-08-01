@@ -2,16 +2,19 @@
 // Copyright 2026 David Brewster
 
 //
-//  fastmath.cpp
+//  diagnostics.cpp
 //
-//  Out-of-line definitions for the Diagnostics handlers.
+//  The one out-of-line translation unit behind Diagnostics.h: the four ConsoleLog
+//  report handlers (assert / panic / thread-affinity violation / degraded path) and
+//  the thread-id counter. Everything else in the diagnostics system is macros, so
+//  every target and every standalone test harness in test/ links exactly this file
+//  to satisfy VERIFY, PANIC and DEGRADED_PATH_ALERT.
 //
 #include "Diagnostics.h"
 #include <iostream>
 #include <cstdlib>
 #include <atomic>
 
-// Diagnostics
 namespace Diagnostics {
 
 [[gnu::cold, gnu::noinline]]

@@ -18,7 +18,7 @@
 //
 // Keys are FixedStr (32-byte branchless SIMD short string). Profiled with the real PROFILE_SCOPE
 // (src/infra/profileScope.h — CNTVCT, or PMC hardware cycle counts when run with sudo).
-// Build: cc -O3 -march=native -std=c++23 bench/bench_convergence.cpp src/infra/fastmath.cpp \
+// Build: cc -O3 -march=native -std=c++23 bench/bench_convergence.cpp src/infra/diagnostics.cpp \
 //        -Isrc -Isrc/infra -Ithird_party -lc++
 
 #define PROFILE_AUTO_REPORT 0          // we call prof::report() explicitly, in order
