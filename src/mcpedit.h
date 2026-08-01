@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpedit.h — the symbol-addressed EDIT verbs for --mcp : replace_symbol_body /
+// mcpedit.h — the symbol-addressed EDIT verbs for --mcp: replace_symbol_body /
 // insert_before_symbol / insert_after_symbol. The mcpedit namespace (resolve → per-file advisory
 // lock → freshness byte-hash gate → in-memory splice → atomic temp-rename write) plus the
 // runEditVerb() driver. The safety contract IS the feature: every refusal leaves the file
@@ -13,7 +13,7 @@
 namespace rw
 {
 
-// ─── : symbol-addressed EDIT verbs (replace_symbol_body / insert_before_symbol / insert_after_symbol) ───
+// ─── symbol-addressed EDIT verbs (replace_symbol_body / insert_before_symbol / insert_after_symbol) ─────
 //
 // These are the FIRST write verbs — ripwire is otherwise read-only, so the safety contract IS the feature.
 // Every failure path REFUSES with a JSON-RPC error and leaves the file byte-for-byte unchanged; a partial
@@ -318,7 +318,7 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     const Symbol&      s      = ing.symbols[f];
     const std::uint32_t fileId = s.fileId;
     const std::string& path   = ing.files[ fileId ];             // LABELED identity — user-facing messages / candidate lists
-    // A11 (DESIGN_multiRoot.md, decided 2026-07-11): all disk I/O goes to the REAL on-disk path via the
+    // A11 (decided 2026-07-11): all disk I/O goes to the REAL on-disk path via the
     // diskPath seam, NEVER the labeled spelling. Single-root (realPaths empty) → disk == path, byte-identical.
     // Multi-root writes land in the correct root's file even though the index identity is `<label>/<rel>`.
     const std::string& disk   = diskPath( ing, fileId );

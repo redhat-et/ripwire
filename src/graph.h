@@ -1236,7 +1236,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
     }
 
-    // : per-symbol name-quality prior weight (aider-style). REUSES the resolver's byName def-count
+    // Per-symbol name-quality prior weight (aider-style). REUSES the resolver's byName def-count
     // (byName[name].size() = # of same-name definitions across the repo — the "common name" signal) rather
     // than rebuilding it. Pure function of the name + that count ⇒ deterministic. Applied to the teleport
     // prior (never the edges) and renormalized in rankGraphTeleport. Every symbol whose name is missing from

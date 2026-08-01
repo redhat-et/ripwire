@@ -304,7 +304,7 @@ struct Config
                                                              // one. Off by default (G5: additive) — omitted, output is byte-identical.
     bool             exportCcJson    = false;              // --export=cc.json[:FILE]: CodeCharta interchange export (Wave-4)
     std::string_view exportFile;                           // --export=cc.json:FILE: write to FILE (else stdout)
-    bool             noRedact        = false;              // --no-redact: emit source/doc bodies VERBATIM (skip the  credential redaction; local-only workflows)
+    bool             noRedact        = false;              // --no-redact: emit source/doc bodies VERBATIM (skip the credential redaction; local-only workflows)
     bool             refetch         = false;              // S3: --refetch: force a fresh git clone of a git-URL root instead of reusing the cached one
     bool             doctor           = false;              // --doctor: self-diagnosis (binary/PATH staleness, grammar load, cache-dir
                                                              // health, git reachability, tree-sitter version) — a DIAGNOSTIC verb, not

@@ -1,6 +1,6 @@
 #pragma once
 
-// mcp.h — --mcp (SPEC §5): expose ripwire as an MCP tool over stdio. Newline-delimited
+// mcp.h — --mcp: expose ripwire as an MCP tool over stdio. Newline-delimited
 // JSON-RPC 2.0; three methods (initialize / tools/list / tools/call). Hand-rolled minimal
 // JSON (sufficient for these well-formed shapes) — no JSON library dependency.
 //
@@ -73,7 +73,7 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     { "uses",                    "the resolvable use-sites of a symbol (call/read/write/import/extends)",  McpVerbGroup::FlagshipReflex },
     { "path_between",            "shortest directed call path from A to B (does A reach B, and how?)",     McpVerbGroup::FlagshipReflex },
     { "connect",                 "minimal connecting subgraph over N symbols (how do they relate?)",       McpVerbGroup::FlagshipReflex },
-    // L4 (PLAN_audit5Public2026.md): the one-call orientation front door + B11 verb parity. `pack_task` is a
+    // L4: the one-call orientation front door + B11 verb parity. `pack_task` is a
     // DISPATCH-only synonym for `explore` (same handler, same tools/list-less discoverability trade — see
     // the tools/list `explore` description) — it gets no separate row here (kMcpVerbCount stays in lockstep
     // with the number of ADVERTISED tools, not every callable alias).
@@ -141,16 +141,16 @@ inline bool isMcpProtocolVersionSupported( std::string_view version ) noexcept
 // HTTP server (mcpserver.h). The ONLY behavioural difference between the two transports lives in this
 // struct — everything else (verb dispatch, output bytes, staleness, redaction) is transport-agnostic.
 //   • pinnedRoot — empty over stdio (a request may name ANY path). Non-empty over the remote transport:
-//     the listener serves exactly ONE workspace fixed at startup (DESIGN_teamIndex.md §2b "one listener =
+//     the listener serves exactly ONE workspace fixed at startup ("one listener =
 //     ONE workspace"). A tools/call whose `path`/`paths` names a DIFFERENT tree is refused with a clean
 //     error and NO index rebuild; an OMITTED path defaults to the pinned workspace.
-//   • defaultRoot (AUDIT5 D3/D4, X7) — stdio's own, SOFTER counterpart of pinnedRoot: non-empty only when
+//   • defaultRoot (D3/D4, X7) — stdio's own, SOFTER counterpart of pinnedRoot: non-empty only when
 //     `ripwire <root> --mcp` was given a startup root (mutually exclusive with pinnedRoot — stdio never
 //     sets pinnedRoot). An OMITTED path defaults to it for every verb, mirroring the HTTP default-to-pinned
 //     step above; but unlike pinnedRoot, an EXPLICIT path naming a different tree is only refused for the 3
 //     EDIT verbs (a read verb reaching across a sibling checkout is a feature stdio has always offered).
 //   • editsAllowed — true over stdio (a co-located agent). false over the remote transport by default
-//     (DESIGN_teamIndex.md §2.4): a remote agent editing local files is a categorically different trust
+//     (a remote agent editing local files is a categorically different trust
 //     contract, so an edit verb is refused (file byte-identical) unless the operator opted in with
 //     --allow-remote-edits, which also forces the bearer-token requirement.
 struct McpDispatchPolicy
@@ -297,7 +297,7 @@ struct McpDispatchResult
 
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
-// body returns byte-identical bytes regardless of transport (SPEC §5 / DESIGN_teamIndex.md §2.2: "the
+// body returns byte-identical bytes regardless of transport ("the
 // JSON-RPC layer is byte-identical; only the transport wrapper is new"). `policy` carries the only
 // transport-specific behaviour (workspace pinning + edit refusal). Never throws — a bad path / OOM must
 // not std::terminate a long-lived server.
@@ -433,7 +433,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // A4-R7: descriptions trimmed to decision-relevant content (when to use / what it answers /
             // the one non-obvious caveat) — cut repeated boilerplate ("Reach for this...", restated XML
             // shape agents don't need to CHOOSE the verb) that every connected agent paid for at session
-            // start. Parameter schemas and every verb name are unchanged; see AUDIT4_fable2026.md §E A4-R7.
+            // start. Parameter schemas and every verb name are unchanged.
             resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
                    ",\"result\":{\"tools\":["
                    // §B6 M10: the ORDER claim is split into its two true halves. \"ranked by PageRank\" was true of
@@ -469,7 +469,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "lego", pathIsRequired ) + "},"
                    "{\"name\":\"owners\",\"description\":\"Bus-factor: recency-weighted (6-month half-life) author ownership per file. bf=1 means one person holds >80% of weighted commits. symbol optional — restricts to the file that defines it.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "owners", pathIsRequired ) + "},"
-                   //  EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
+                   // EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
                    "{\"name\":\"replace_symbol_body\",\"description\":\"Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition. Refuses (file unchanged) if not found (lists nearest names), ambiguous (lists file:line candidates — retry with 'file'; in a multi-root workspace pass the root-labeled path form, e.g. file:'svc/'), the index is stale (call any read verb first), or the file is a SYMLINK (resolve to the real file first — editing through a link would replace the link entry, not the target). Concurrent ripwire edits serialize; a concurrent external write is detected and refused, never silently overwritten. path = repo dir, or paths = multiple workspace roots (writes land in the correct root's real file); symbol = def name; file = optional disambiguating path substring; new_body = replacement text.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "replace_symbol_body", pathIsRequired ) + "},"
                    "{\"name\":\"insert_before_symbol\",\"description\":\"Insert text immediately BEFORE a symbol's definition (its first byte); a trailing newline is added only if missing. Same refusal contract as replace_symbol_body (not found / ambiguous / stale index → file unchanged). path/paths as replace_symbol_body (multi-root writes land in the real file); text = the text to insert.\","
@@ -500,7 +500,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // --connect: the N-symbols-how-do-they-relate reflex (R7-lean description by design: one sentence, when-to-use + what-it-answers).
                    "{\"name\":\"connect\",\"description\":\"When a task touches 2..16 named symbols, returns the minimal subgraph RELATING them - terminals, the fewest joining intermediaries (with signatures), and call edges in true direction - finding the shared-caller joins a directed path_between cannot; unrelated symbols are reported honestly in <unconnected>. symbols = array or comma-string; radius = undirected hop bound, an integer in 1..12 (default 6) — a value outside that band is refused, never clamped or wrapped.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "connect", pathIsRequired ) + "},"
-                   // L4 (PLAN_audit5Public2026.md) — the one-call orientation front door + B11 verb parity. `explore` is
+                   // L4 — the one-call orientation front door + B11 verb parity. `explore` is
                    // the SAME handler as the CLI --pack-task; the older name `pack_task` still dispatches (tools/call
                    // name=="pack_task" works) but is not separately advertised here — see mcp.h's kMcpVerbTable comment.
                    "{\"name\":\"explore\",\"description\":\"ONE-call task orientation: the routed+anchored ranking, full bodies of the top hits, their 1-hop callers, field notes, and tests_to_run — ALL under one deterministic byte budget, in a fixed section order (ranking > bodies > callers > notes > tests) that degrades gracefully and reports every truncation. Replaces the for -> fetch_body -> find_referencing_symbols -> memory_recall dance with one call when you want the whole orientation at once; for JUST the ranked inventory (no bodies/callers/notes/tests) use 'for' instead. Same handler as the CLI --pack-task. ALIAS: tools/call name='pack_task' answers this exact tool with these exact arguments (a long-standing name kept working; it gets no separate tools/list entry, so the advertised tool count does not count it twice). task = the task in plain words; budget_tokens = optional positive integer (default 6000). partition = optional integer in 2..16 (the CLI --partition=N) — a value outside that band is refused, never wrapped or ignored: FANNING OUT to N parallel agents on ONE task? Ask for it and get ONE shared common core plus N minimally-overlapping per-agent slices carved along the call graph's own community structure, instead of N agents each re-deriving the same orientation — budget_tokens then means ONE AGENT's budget (core + its slice), and each inner <ctx> is handed to one agent verbatim. Read the overlap_max / split attributes before trusting the slices; omit it for the plain single bundle.\","
@@ -584,8 +584,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string type    = strArg( "type" );     // lego verb: the interface/base name
             const std::string files   = strArg( "files" );    // N11: schema-typed STRING (comma-separated paths), never an array
             const std::string diff    = strArg( "diff" );     // H5: same class as `files` — an array here answered about the wrong tree
-            const std::string newBody = strArg( "new_body" ); //  replace_symbol_body
-            const std::string text    = strArg( "text" );     //  insert_before/after
+            const std::string newBody = strArg( "new_body" ); // replace_symbol_body
+            const std::string text    = strArg( "text" );     // insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
             const std::string from    = strArg( "from" );     // path verb: source symbol
@@ -628,7 +628,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const McpIntArg     partitionArg   = intArg( "partition", packpartition::kMinPartitions, packpartition::kMaxPartitions );   // field-notes §6
             const std::uint32_t partitionCount = partitionArg.isPresent ? std::uint32_t( partitionArg.value ) : 0u;   // absent ⇒ one un-split bundle
 
-            //  index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
+            // Index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
             // of the index it was answered from, so a caller holding results from two different calls can
             // detect "these came from different index states" without a side channel. ONE line, deterministic
             // for an unchanged tree, IDENTICAL shape across every verb.
@@ -699,7 +699,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             RedactCounts        redactCounts;
             RedactCounts* const redactPtr = noRedact ? nullptr : &redactCounts;
 
-            // A11 (DESIGN_multiRoot.md §6): the additive `paths` array — 2+ roots resolve to a registered
+            // A11: the additive `paths` array — 2+ roots resolve to a registered
             // workspace key that REPLACES `path` for this request; a 1-element array degrades to that path.
             // `path` and `paths` together is a usage error. Single `path` requests are untouched (back-compat).
             bool pathsUsageError = false;
@@ -727,7 +727,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
             }
 
-            // ── Remote-transport policy gates (DESIGN_teamIndex.md §2b/§2.4) — no-op over stdio ──────────
+            // ── Remote-transport policy gates — no-op over stdio ────────────────────────────────────────
             // These fire ONLY when policy.pinnedRoot is set (the HTTP transport). Both are checked BEFORE
             // the try{} below, so a refusal never calls getIndex() → the workspace-pinning gate can assert
             // mcpRebuildCounter() is unchanged, and a refused remote edit never touches a byte on disk.
@@ -753,7 +753,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
             }
 
-            // ── stdio startup-root default + edit-verb workspace pin (AUDIT5 D3/D4, X7) ────────────────────
+            // ── stdio startup-root default + edit-verb workspace pin (D3/D4, X7) ───────────────────────────
             // Fires only when `ripwire <root> --mcp` was actually given a startup root (policy.defaultRoot
             // non-empty) and only over stdio (policy.pinnedRoot empty — the remote gates above already
             // handled the HTTP case and always set pathsUsageError before falling through if they refused).
@@ -1180,7 +1180,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const EditCheckReply r = editCheckText( path, symbol );
                     resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
                 }
-                //  EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
+                // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
                 else if( name == "replace_symbol_body" && !path.empty() && !symbol.empty() )
                     resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody ) );
