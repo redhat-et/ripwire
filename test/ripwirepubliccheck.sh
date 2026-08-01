@@ -268,13 +268,17 @@ fi
 # EXEMPT (named, not pattern-matched — the same allowlist style as arm 4/5):
 #   test/docmentioncheck.sh    — DESIGN_widgetTotals.md is a SYNTHETIC fixture name the gate creates
 #                                 and scores at runtime (doc-mention surfacing test), never a citation.
+#   test/historyoraclecheck.sh — PLAN_relief.md is a SYNTHETIC fixture doc the gate writes into its own
+#                                 scratch git repo (chosen to look like an internal doc on purpose, to
+#                                 prove doc-drift/whereis behave the same on a PLAN_-shaped filename),
+#                                 never a citation of a real file.
 #   bench/locbench/results/{r1_anchorhop,r1cpp_anchorhop}/*_candidate_implementation.patch —
 #                                 archived historical git diffs of a past experiment. Their "SPEC.md"
 #                                 hunks are the literal patch content at the time it was proposed;
 #                                 rewriting patch text would falsify the historical record, and the
 #                                 patch is already unappliable in this tree regardless (it patches a
 #                                 file — SPEC.md — that was never exported here).
-ARM8_EXEMPT='^(test/docmentioncheck\.sh|bench/locbench/results/(r1_anchorhop|r1cpp_anchorhop)/.*_candidate_implementation\.patch)$'
+ARM8_EXEMPT='^(test/docmentioncheck\.sh|test/historyoraclecheck\.sh|bench/locbench/results/(r1_anchorhop|r1cpp_anchorhop)/.*_candidate_implementation\.patch)$'
 python3 - "$TMP/tracked.z" "$ARM8_EXEMPT" > "$TMP/arm8" <<'PY'
 import os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')
