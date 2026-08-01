@@ -10,7 +10,7 @@ need to decide HOW MUCH of a symbol to pull into context, or want to shrink body
 | Rung | Command | You get | Cost |
 |---|---|---|---|
 | 0. map | `ripwire <dir>` | ranked signatures + call edges | cheapest |
-| 1. skeletons | `--pack-signatures` | body-elided decl skeletons + doc-comments (~70% fewer tokens than source) | cheap |
+| 1. skeletons | `--pack-signatures` | body-elided decl skeletons + doc-comments (~68% fewer element BYTES at the top-50 sigs payload, vs the same symbols' full bodies; see `docs/EVALS.md`) | cheap |
 | 2. control flow | `--outline=A,B` | branch/loop skeletons of named symbols | medium |
 | 3. full body | `--expand=A,B` | full source of named symbols + inline callee signatures | dear |
 | 4. whole files | `--pack-top-n=N [--pack-budget-bytes=B]` | the top-N symbols' source under a byte budget (last one truncated at a newline) | dearest |
