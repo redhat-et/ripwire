@@ -397,7 +397,29 @@ if(RIPWIRE_TESTS)
   list(APPEND RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
   list(APPEND RIPWIRE_RUNTIME_LINK_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
 endif()
-set(RIPWIRE_G1_SANITIZERS "-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast-overflow")
+# G1's `integer` is a CLANG-ONLY UBSan group (unsigned-integer-overflow, implicit-*-truncation,
+# implicit-integer-sign-change — the defined-but-suspicious conversions, not UB). GCC has no such group
+# and rejects the whole option: "cc: error: unrecognized argument to '-fsanitize=' option: 'integer'",
+# which is where the ubuntu asan leg of the first public CI run died (default cc there is gcc). The three
+# `-fno-sanitize=` names and `-fsanitize-ignorelist=` below are members/features of that same Clang-only
+# group, so they are dropped together — under GCC there is nothing for them to switch off.
+#
+# address / undefined / float-divide-by-zero / float-cast-overflow ARE all supported by GCC and stay.
+# The result is a REAL but reduced stack on gcc, announced at configure time so nobody reads a green gcc
+# asan run as full-G1 evidence. Public CI does not rely on this path: ci.yml pins the Linux asan job to
+# clang and keeps the complete stack (see the job comment there). This branch is for a contributor who
+# builds -DRIPWIRE_ASAN=ON with gcc — it must degrade honestly rather than fail to configure.
+set(RIPWIRE_G1_SANITIZER_CHECKS address undefined integer float-divide-by-zero float-cast-overflow)
+set(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER ON)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  list(REMOVE_ITEM RIPWIRE_G1_SANITIZER_CHECKS integer)
+  set(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER OFF)
+  message(STATUS "G1 sanitizers: dropped 'integer' (+ its -fno-sanitize= members and -fsanitize-ignorelist=) "
+                 "— Clang-only, GCC ${CMAKE_CXX_COMPILER_VERSION} rejects the option. Remaining: "
+                 "${RIPWIRE_G1_SANITIZER_CHECKS}. Build with clang for the complete G1 stack.")
+endif()
+list(JOIN RIPWIRE_G1_SANITIZER_CHECKS "," _ripwire_g1_check_list)
+set(RIPWIRE_G1_SANITIZERS "-fsanitize=${_ripwire_g1_check_list}")
 set(_ripwire_tree_sitter_ignorelist "${_ripwire_generated_dir}/tree_sitter_sanitizer_ignorelist.txt")
 set(_ripwire_swift_ignorelist "${_ripwire_generated_dir}/swift_sanitizer_ignorelist.txt")
 set(_ripwire_bash_ignorelist "${_ripwire_generated_dir}/bash_sanitizer_ignorelist.txt")
@@ -426,13 +448,18 @@ if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_LINK_TARGETS)
     target_link_options(${_t} PRIVATE ${RIPWIRE_G1_SANITIZERS})
   endforeach()
-  target_compile_options(tree-sitter PRIVATE
-    -fno-sanitize=unsigned-integer-overflow
-    -fno-sanitize=implicit-signed-integer-truncation
-    -fno-sanitize=implicit-integer-sign-change
-    "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
-  target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
-  target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
+  # Every exemption below names a check inside the Clang-only `integer` group, or uses
+  # -fsanitize-ignorelist=, which GCC does not implement. With `integer` absent there is nothing to
+  # exempt, and passing them anyway is the same "unrecognized argument" failure one level down.
+  if(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER)
+    target_compile_options(tree-sitter PRIVATE
+      -fno-sanitize=unsigned-integer-overflow
+      -fno-sanitize=implicit-signed-integer-truncation
+      -fno-sanitize=implicit-integer-sign-change
+      "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
+    target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
+    target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
+  endif()
 
   # Xcode's arm64 Darwin runtime rejects both the standalone leak sanitizer and detect_leaks=1 at startup.
   # Keep the local ASan/UBSan gate executable and explicit; LeakSanitizer remains a Linux/upstream-runtime
