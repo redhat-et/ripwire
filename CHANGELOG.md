@@ -393,9 +393,10 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ### Security
 
-- **`--redact`** removes credential-shaped literals from emitted bodies and signatures by default; the
-  redaction fixtures that necessarily carry synthetic credentials are enumerated in `test/README.md`
-  and enforced by a gate.
+- **Credential redaction is on by default** — credential-shaped literals are removed from emitted
+  bodies and signatures unless you opt out with **`--no-redact`**. There is no opt-IN spelling,
+  because the behaviour is not opt-in. The redaction fixtures that necessarily carry synthetic
+  credentials are enumerated in `test/README.md` and enforced by a gate.
 
 ### Known limits
 

@@ -23,3 +23,12 @@
 --noout	xmllint's own flag ("xmllint --noout -") quoted in the G4 well-formedness example, not a ripwire flag
 --read	aider's own flag ("aider --read FILE") quoted in the wrap-aider recipe, not a ripwire flag
 --short	git's own flag ("git rev-parse --short HEAD") quoted where a skill tells you to record the commit you measured at, not a ripwire flag
+--build	cmake's own flag ("cmake --build build -j") quoted in every build recipe (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, docs/EVALS.md), not a ripwire flag
+--no-merges	git's own flag ("git log --no-merges -p -U0 --no-renames") quoted in the CHANGELOG's description of the churn-probe walk, not a ripwire flag
+--no-renames	git's own flag, same `git log` invocation as --no-merges above, not a ripwire flag
+--name-only	git's own flag ("git diff --name-only HEAD") quoted in skills/ripwire-mcp/mcp-reference.md where the map-diff teleport source is described, not a ripwire flag
+--prefix	Homebrew's own flag ("brew --prefix") quoted in the CHANGELOG entry for install.sh's Homebrew detection, not a ripwire flag
+--gate	bench/locbench/compare_runs.py's own flag ("compare_runs.py --gate=two-tier") quoted in docs/EVALS.md §3, not a ripwire flag
+--check	docs/docs_commands_build.py's own flag ("docs_commands_build.py --check", the drift comparison test/docscommandscheck.sh runs) quoted in docs/README.md, not a ripwire flag
+--bin	docs/docs_commands_build.py's own flag ("--bin build/ripwire") quoted in docs/README.md's generator row, not a ripwire flag
+--no-auto-order	real flag (src/cli.h:2486, deprecatedOrderFlag) — deprecated alias for --order=important-first, still functional; named in the CHANGELOG entry that records its supersession, deliberately absent from --help's catalog like its --stable/--most-important-last siblings
