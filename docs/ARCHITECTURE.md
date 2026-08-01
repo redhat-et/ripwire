@@ -55,8 +55,11 @@ skipped:
 - **generated artifacts by filename:** `package-lock.json`, `npm-shrinkwrap.json`, `*.min.js`,
   `*_pb2.py`, `*.pb.go`.
 
-Every skip degrades with a one-line stderr note rather than failing, and the size-ceiling drops are
-*counted* into the header's `skipped_oversize` rather than vanishing.
+Ingest never throws — a bad file, a missing grammar or a corrupt cache degrades and prints a one-line
+`DEGRADED_PATH_ALERT` to stderr. **The ordinary denylist prunes above are silent**, deliberately: they
+are the normal state of every crawl and a note per skipped directory would be noise, not evidence. The
+size-ceiling drops sit between the two — silent on stderr, but *counted* into the header's
+`skipped_oversize=N`, so a corpus that shrank says so in the output rather than vanishing quietly.
 
 **Directory symlinks are not followed.** The walk is a `std::filesystem::recursive_directory_iterator`
 opened with `skip_permission_denied` only — not `follow_directory_symlink` — so a symlinked directory
