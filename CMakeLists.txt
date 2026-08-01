@@ -271,12 +271,12 @@ add_ts_object(tsts  ${ts_typescript_SOURCE_DIR}/typescript/src)
 add_ts_object(tstsx ${ts_typescript_SOURCE_DIR}/tsx/src)
 
 # ---- explicit, easy-to-extend executable source list ----
-# Later stages (graph/rank/serialize/main) get appended here. ingest.cpp + the vendored
-# fastmath.cpp (VERIFY/DEGRADED handlers link partner) are the foundation.
+# Later stages (graph/rank/serialize/main) get appended here. ingest.cpp + infra's
+# diagnostics.cpp (VERIFY/DEGRADED handlers link partner) are the foundation.
 set(RIPWIRE_SRCS
   src/ingest.cpp
   src/pagerank.cpp
-  src/infra/fastmath.cpp
+  src/infra/diagnostics.cpp
 )
 
 # The global profile uses -ffast-math, but PageRank reductions must not reassociate (the determinism
@@ -357,7 +357,7 @@ if(RIPWIRE_TESTS)
 
   add_executable(ripwire_test_csr
     test/verify_csr.cpp
-    src/infra/fastmath.cpp)
+    src/infra/diagnostics.cpp)
   target_include_directories(ripwire_test_csr PRIVATE src/infra third_party src)
   target_link_libraries(ripwire_test_csr PRIVATE doctest::doctest)
   add_test(NAME ripwire.csr COMMAND ripwire_test_csr)
@@ -365,14 +365,14 @@ if(RIPWIRE_TESTS)
   add_executable(ripwire_test_pagerank
     test/verify_pagerank.cpp
     src/pagerank.cpp
-    src/infra/fastmath.cpp)
+    src/infra/diagnostics.cpp)
   target_include_directories(ripwire_test_pagerank PRIVATE src/infra third_party src)
   target_link_libraries(ripwire_test_pagerank PRIVATE doctest::doctest)
   add_test(NAME ripwire.pagerank COMMAND ripwire_test_pagerank)
 
   add_executable(ripwire_test_radix
     test/verify_radix.cpp
-    src/infra/fastmath.cpp)
+    src/infra/diagnostics.cpp)
   target_include_directories(ripwire_test_radix PRIVATE src/infra third_party src)
   add_test(NAME ripwire.radix COMMAND ripwire_test_radix)
 endif()

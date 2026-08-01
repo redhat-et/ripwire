@@ -94,7 +94,7 @@ jobs:
         continue-on-error: true
         run: |
           clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet \
-            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/fastmath.cpp
+            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp
 
   release:
     name: release (${{ matrix.os }})

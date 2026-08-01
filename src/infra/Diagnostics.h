@@ -5,7 +5,7 @@
 //  Diagnostics.h
 //
 //  Platform-portable assertion / panic system.
-//  Implementations live in fastmath.cpp — this header is declarations only.
+//  Implementations live in diagnostics.cpp — this header is declarations only.
 //
 //  Debug:   VERIFY fires handleAssert → stderr + location → __builtin_trap
 //  Release: VERIFY → __builtin_assume (zero cost, optimizer hint)
@@ -30,7 +30,7 @@
 #endif
 
 // --------------------------------------------------------------------------
-// 2. Handler declarations — implemented in Diagnostics.cpp
+// 2. Handler declarations — implemented in diagnostics.cpp
 // --------------------------------------------------------------------------
 namespace Diagnostics {
 

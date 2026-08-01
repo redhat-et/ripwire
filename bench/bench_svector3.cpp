@@ -13,7 +13,7 @@
 // D wins by spending 8 bytes (24 vs 16) on an explicit size field. Prefer martinus when compactness wins
 // or the value is iterated more than size()'d (begin()/end() branch in BOTH).
 //
-// Build: cc -O3 -march=native -std=c++23 bench/bench_svector3.cpp src/infra/fastmath.cpp \
+// Build: cc -O3 -march=native -std=c++23 bench/bench_svector3.cpp src/infra/diagnostics.cpp \
 //        -Isrc -Isrc/infra -Ithird_party -lc++
 
 #define PROFILE_AUTO_REPORT 0

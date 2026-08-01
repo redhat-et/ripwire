@@ -25,11 +25,11 @@ FIX="$WORK/fix"; mkdir -p "$FIX"
 echo "type3clonecheck: CXX=$CXX"
 
 # ── compile the harness against clones.h (header-only): infra + src on the include path ───────────────────────
-# fastmath.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) in debug builds —
+# diagnostics.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) in debug builds —
 # link it exactly as the real ripwire target does, so the pair-cap degrade path resolves.
 if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
-        "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$BIN" 2> "$WORK/cc.log"; then
+        "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$BIN" 2> "$WORK/cc.log"; then
     echo "  FAIL  harness failed to compile"; sed 's/^/    /' "$WORK/cc.log"; exit 2
 fi
 echo "  PASS  harness compiled"
@@ -44,13 +44,13 @@ fi
 #    NEW deterministic behaviour — the cap truncates to the FIRST N prefilter-surviving pairs (id-ordered), the
 #    dropped set is fixed by the insertion-ordered bucket walk, and VARYING the cap constant CHANGES the emitted set
 #    (the mutation check: an impl that ignored the cap would emit 6 for every C and fail C=2/C=3). Built via the same
-#    infra+src include path + fastmath.cpp link as the primary harness above. ──────────────────────────────────────
+#    infra+src include path + diagnostics.cpp link as the primary harness above. ──────────────────────────────────────
 cap_run() {   # $1 = cap value ("default" = the shipped 200000); $2 = expected emitted count
     local tag="$1"; local capdef=(); [ "$tag" != "default" ] && capdef=( -DCTX_TYPE3_MAX_PAIRS="$tag" )
     local cbin="$WORK/capharness_$tag"; local cdir="$WORK/cap_$tag"; mkdir -p "$cdir"
     if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra -DCTX_T3_CAP_FIXTURE ${capdef[@]+"${capdef[@]}"} \
             -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
-            "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$cbin" 2> "$WORK/cc_$tag.log"; then
+            "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$cbin" 2> "$WORK/cc_$tag.log"; then
         echo "  FAIL  cap harness (cap=$tag) failed to compile"; sed 's/^/    /' "$WORK/cc_$tag.log"; exit 2
     fi
     local out rc got

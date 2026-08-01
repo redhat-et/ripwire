@@ -27,7 +27,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "adaptivecutshapecheck: SRC=$SRC"
 
 CXX="${CXX:-clang++}"
-"$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$SRC" "$ROOT/src/infra/fastmath.cpp" -o "$TMP/t" 2>"$TMP/build.err"
+"$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$SRC" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/t" 2>"$TMP/build.err"
 if [ -x "$TMP/t" ]; then
     ok "gate binary built"
 else

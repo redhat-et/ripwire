@@ -27,11 +27,11 @@ BIN="$WORK/clonelexharness"
 echo "clonelexcheck: CXX=$CXX"
 
 # ── compile the harness against clones.h (header-only): infra + src on the include path ───────────────────────
-# fastmath.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) — link it exactly
+# diagnostics.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) — link it exactly
 # as the real ripwire target does, so any degrade path resolves at link time.
 if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
-        "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$BIN" 2> "$WORK/cc.log"; then
+        "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$BIN" 2> "$WORK/cc.log"; then
     echo "  FAIL  harness failed to compile"; sed 's/^/    /' "$WORK/cc.log"; exit 2
 fi
 echo "  PASS  harness compiled"

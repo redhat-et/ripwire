@@ -26,13 +26,13 @@ WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 
 echo "clonebandcheck: CXX=$CXX"
 
-# ── compile the harness twice: pre-gate ON (shipped) and OFF (exact baseline). Same include path + fastmath.cpp
+# ── compile the harness twice: pre-gate ON (shipped) and OFF (exact baseline). Same include path + diagnostics.cpp
 #    link as type3clonecheck.sh (Diagnostics' DEGRADED_PATH_ALERT seam). ─────────────────────────────────────────
 build_one() {   # $1 = tag, $2.. = extra flags
     local tag="$1"; shift
     if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra "$@" \
             -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
-            "$HARNESS" "$ROOT/src/infra/fastmath.cpp" -o "$WORK/harness_$tag" 2> "$WORK/cc_$tag.log"; then
+            "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$WORK/harness_$tag" 2> "$WORK/cc_$tag.log"; then
         echo "  FAIL  harness ($tag) failed to compile"; sed 's/^/    /' "$WORK/cc_$tag.log"; exit 2
     fi
     echo "  PASS  harness compiled ($tag)"
