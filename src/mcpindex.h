@@ -264,8 +264,8 @@ namespace mcpdetail
     //
     // A handle lets an agent reference a symbol's body instead of re-receiving it: the READ verbs surface a
     // `handle`, and the `fetch_body` verb returns the full def source ONLY when the agent asks. The contract
-    // is "names/signatures by default, bodies by handle on request" — the kit default-lean posture (RESEARCH
-    // §2f, ~90% token cut) and the MCP-2026 stateless-HANDLE spec (`sym#<stableId>@<contentHash>`).
+    // is "names/signatures by default, bodies by handle on request" — the default-lean posture (~90% token
+    // cut measured when it was adopted) and the MCP-2026 stateless-HANDLE spec (`sym#<stableId>@<contentHash>`).
     //
     // Handle format:  sym#<canonIdHash>@<contentHash>   (both 16 lowercase hex = FNV-1a-64)
     //   • canonIdHash — FNV-1a-64 of the symbol's STABLE canonical id (below). MUST derive from canonId, NEVER
