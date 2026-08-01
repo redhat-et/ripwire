@@ -64,6 +64,45 @@ in the same commit that adds the gate**.
 Run your gates in the foreground. A suite left running in the background at the end of a work
 session is a suite nobody read.
 
+### The formatting gate — and the rule for when it disagrees with you
+
+```bash
+scripts/formatcheck.sh              # GATE — what CI runs
+scripts/formatcheck.sh --advisory   # REPORT over the whole first-party set; always exits 0
+```
+
+`.clang-format` encodes §3's house style as closely as clang-format can express it, and the gate runs
+over a short, explicit `GATED` list inside `scripts/formatcheck.sh` — nine files that already agree
+with `.clang-format` byte for byte. It is short on purpose. §3's style is hand-formatted in ways
+clang-format has no option to preserve: multi-statement one-liners, `for( … ) if( … ) return i;`,
+several initialiser rows or `case` labels packed per line, wrap seams chosen by hand at 160–200
+columns. Reformatting all 98 first-party C++ files changes 11837 lines that survive `git diff -w` —
+real joins and splits — across 89 of them, so a whole-tree check would be red on a *correctly* styled
+tree. The advisory mode prints that gap on every run, so its size stays on the record instead of
+being forgotten.
+
+Two consequences, and the second is the one that matters:
+
+- **Adding a file to `GATED` is the good outcome.** Run `clang-format` in place on it, confirm the
+  change is whitespace only (`git diff -w --output=/tmp/d && [ ! -s /tmp/d ]`), run the suite, then
+  add the path.
+- **If house-style code lands in a gated file and the gate reds, delete the path from `GATED` — never
+  un-write the house style.** A packed table or a `{ a; b; }` one-liner in a gated file will be
+  reported as unformatted, and §3 is the rule that is right. Say so in the commit message. A gate
+  that punishes the documented style is a broken gate, not a broken change.
+
+The checker is **pinned to clang-format major 22**, because clang-format's output moves across major
+releases and an unpinned checker reports drift on a tree that was formatted correctly. Set
+`RIPWIRE_FORMAT_ANY_VERSION=1` to run anyway, and `CLANG_FORMAT=/path/to/clang-format` to point at a
+binary that is not on `PATH` (Homebrew's LLVM is not, on macOS, by default).
+
+**clang-tidy is advisory only, and must stay that way.** `.clang-tidy` carries an empty
+`WarningsAsErrors`, CI runs it with `continue-on-error`, and the config is curated down to
+`bugprone-*` / `clang-analyzer-*` / `performance-*` / `misc-dangling-*`. Its default catalogue argues
+for a different C++ than the data-oriented one §3 and G2 mandate — POD and SoA, C arrays, 32-bit
+handles, `VERIFY` instead of exceptions — so read its output as a to-triage list, never as a queue of
+defects.
+
 ---
 
 ## 2. Gates come first

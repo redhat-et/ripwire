@@ -32,3 +32,5 @@
 --check	docs/docs_commands_build.py's own flag ("docs_commands_build.py --check", the drift comparison test/docscommandscheck.sh runs) quoted in docs/README.md, not a ripwire flag
 --bin	docs/docs_commands_build.py's own flag ("--bin build/ripwire") quoted in docs/README.md's generator row, not a ripwire flag
 --no-auto-order	real flag (src/cli.h:2486, deprecatedOrderFlag) — deprecated alias for --order=important-first, still functional; named in the CHANGELOG entry that records its supersession, deliberately absent from --help's catalog like its --stable/--most-important-last siblings
+--advisory	scripts/formatcheck.sh's own mode flag ("scripts/formatcheck.sh --advisory", the always-exit-0 report next to the gate) quoted in CONTRIBUTING.md §1 and .github/workflows/ci.yml, not a ripwire flag
+--output	git's own flag ("git diff -w --output=/tmp/d") quoted in CONTRIBUTING.md §1 where the whitespace-only proof for adding a file to formatcheck's GATED list is spelled out, not a ripwire flag
