@@ -17,8 +17,26 @@ for mode in ASAN TSAN FUZZ; do
 done
 grep -q 'are mutually exclusive' "$CMAKE" && ok "sanitizer modes are mutually exclusive" || no "mutual-exclusion gate missing"
 
-grep -q -- '-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast-overflow' "$CMAKE" \
+# The G1 set is no longer one literal flag string: `integer` is a Clang-only UBSan group and GCC rejects
+# the whole -fsanitize= option, so CMakeLists.txt declares the five checks as a LIST, filters it by
+# compiler id, and joins it. Assert all four parts — the complete set, that the -fsanitize= string is
+# built from that same list (not a second literal that could drift), that the ONLY subtraction is
+# `integer` and only under GNU, and that the Clang-only exemptions ride the same finding.
+grep -q 'set(RIPWIRE_G1_SANITIZER_CHECKS address undefined integer float-divide-by-zero float-cast-overflow)' "$CMAKE" \
     && ok "complete G1 sanitizer set declared" || no "complete G1 sanitizer set missing"
+grep -q 'list(JOIN RIPWIRE_G1_SANITIZER_CHECKS "," ' "$CMAKE" \
+    && grep -q 'set(RIPWIRE_G1_SANITIZERS "-fsanitize=${_ripwire_g1_check_list}")' "$CMAKE" \
+    && ok "the -fsanitize= string is joined from that one list (no second literal to drift)" \
+    || no "G1 -fsanitize= string is not derived from RIPWIRE_G1_SANITIZER_CHECKS"
+removedCheckCount="$( grep -c 'list(REMOVE_ITEM RIPWIRE_G1_SANITIZER_CHECKS' "$CMAKE" )"
+grep -q 'list(REMOVE_ITEM RIPWIRE_G1_SANITIZER_CHECKS integer)' "$CMAKE" \
+    && [ "$removedCheckCount" -eq 1 ] \
+    && grep -q 'if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")' "$CMAKE" \
+    && ok "the ONLY G1 check dropped, and only under GCC, is the Clang-only 'integer' group" \
+    || no "G1 check subtraction is not exactly {integer, under GNU} ($removedCheckCount REMOVE_ITEM line(s))"
+grep -q 'if(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER)' "$CMAKE" \
+    && ok "the Clang-only -fno-sanitize= exemptions and ignorelists ride the same finding" \
+    || no "Clang-only exemptions/ignorelists are not gated (gcc would reject them one level down)"
 grep -q -- '-fno-sanitize-recover=all -fno-omit-frame-pointer -O2 -g' "$CMAKE" \
     && ok "G1 is fail-fast, framed, and O2" || no "G1 fail-fast/O2 contract missing"
 grep -q 'tree-sitter.*${RIPWIRE_GRAMMAR_TARGETS}' "$CMAKE" \
