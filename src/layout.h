@@ -1,6 +1,6 @@
 #pragma once
 
-// layout.h — `--layout=STRUCT`, the CPU/GPU CONTRACT verb (IDEAS_fieldNotes_2026-07-24.md §5).
+// layout.h — `--layout=STRUCT`, the CPU/GPU CONTRACT verb.
 // Evidence: dual-compile uniform structs (AudioUniforms 24 B, MusicPulseUniforms 192→208 B in one day)
 // are edited WEEKLY, and every edit makes the author hand-collect the same three things — the field
 // offsets, the `static_assert( sizeof(X)==N )` tripwires that pin them, and the stub/mirror copies of the
