@@ -6,7 +6,7 @@
 // selector is an LLM reading each skill's frontmatter `description:`; that cannot be scored
 // deterministically, so this harness scores the ROUTING SURFACE itself — how discriminable the
 // descriptions are under a family of deterministic selectors — against a hand-labelled corpus
-// (test/skillevalfix/prompts.tsv; provenance per row). Design notes + numbers: RESEARCH_skillEval2026.md.
+// (test/skillevalfix/prompts.tsv; provenance per row).
 //
 // Metric posture (the measurement-design decisions, each argued in the research doc):
 //   * permitted SETS, not single labels — several moments legitimately map to 2 skills

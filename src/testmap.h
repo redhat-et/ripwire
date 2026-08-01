@@ -1,6 +1,6 @@
 #pragma once
 
-// testmap.h — the test<->code map, both directions (PLAN_outputAudit_2026-07-28.md §P11.2 and §P11.4).
+// testmap.h — the test<->code map, both directions (§P11.2 and §P11.4).
 //
 // §P11.2 recorded the map as "one-directional and file-granular": the tool could answer "which tests reach
 // this FILE" and nothing else. The two questions an agent actually has were unanswerable —

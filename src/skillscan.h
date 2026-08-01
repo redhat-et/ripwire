@@ -1,6 +1,6 @@
 #pragma once
 
-// skillscan.h — P1-C automatic skill security scanning (PLAN_absorb2026 §P1-C).
+// skillscan.h — P1-C automatic skill security scanning.
 // Scans markdown skill files LINE BY LINE for four vulnerability categories:
 //
 //   INJECTION   — case-insensitive, word-boundary-anchored prompt-injection phrases (CRITICAL;
@@ -685,7 +685,7 @@ inline std::vector<SkillFinding> scanSkillFile( const std::string& path )
 // permission-denied, or a directory). scanSkillFile() above collapses both cases to an empty vector for
 // callers (wrap.h) that treat "cannot scan" the same as "nothing found"; the --scan-skill/--scan-skills
 // CLI entry points need to tell them apart so an unreadable path can refuse instead of reporting a false
-// clean scan (PLAN_outputAudit_2026-07-28.md §P0.5a — a typo'd path must never read as "safe").
+// clean scan (§P0.5a — a typo'd path must never read as "safe").
 struct SkillFileReadResult
 {
     bool                        readable = false;   // false = path could not be scanned at all

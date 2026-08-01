@@ -57,7 +57,7 @@ inline const char*        kBaselineFile  = ".ripwire_quality_baseline";
 constexpr std::uint32_t   kMinCloneTokens = 18;     // matches the --clones default (so both verbs see the same clones)
 constexpr std::uint32_t   kCcxBar         = 15;     // SonarSource cognitive-complexity bar — a regression must end up OVER this
 
-// Q1 — bars for the MEASURED agent-code failure modes (RESEARCH_agentQuality2026 §1c): agent code runs 2.3×
+// Q1 — bars for the MEASURED agent-code failure modes: agent code runs 2.3×
 // verbose, erodes structure in 77% of trajectories, drifts contracts. Each per-symbol kind mirrors ccx's
 // "grew AND now over a bar" discipline (`now > was && now > BAR`) — a bar so a benign +1 line / +1 nest of an
 // already-small function is not spam, and the reported set is genuinely-worse-AND-now-large. HEURISTICS (like
@@ -66,13 +66,13 @@ constexpr std::uint32_t   kLocBar         = 60;     // "large function" LOC bar 
 constexpr std::uint32_t   kNestBar        = 4;      // max-nesting-depth bar — deep nesting (>3-4) is the structural-erosion signal; a regression must end up over it
 constexpr std::uint32_t   kParamBar       = 5;      // param-count bar — a REGRESSION (grew AND now high), NOT the debunked absolute 7±2 rule (§1d kill-list); the growth is the signal, the bar just suppresses tiny-fn noise
 
-// AUDIT3 §D#4 / §E-17 — three GitClear-2026-backed kinds. Each fires ONLY on a regression vs baseline (the
+// §D#4 / §E-17 — three GitClear-2026-backed kinds. Each fires ONLY on a regression vs baseline (the
 // quality-delta contract), never on pre-existing debt. See the per-kind comments in computeSnapshot/computeDelta.
 constexpr std::uint32_t   kShortHorizonDays        = 14;   // "new code rewritten within two weeks" window (+15% in AI code) — from git COMMIT TIMESTAMPS vs HEAD's epoch, not wall-clock (det-gate safe)
 constexpr std::uint32_t   kShortHorizonMinCommits  = 2;    // only flag a symbol whose FILE already had ≥2 commits in the window (a genuine rewrite churn, not a first touch)
 constexpr std::uint32_t   kReusedHelperMinFanin    = 3;    // "cross-file reuse declining": a NEW clone of a helper whose fan-in ≥ this is a reuse-connectivity regression (GitClear)
 
-// Signal-to-noise round (2026-07-13, SPEC §5 quality-delta noise rules) — MATERIALITY TIERS. A numeric
+// Signal-to-noise round (2026-07-13, quality-delta noise rules) — MATERIALITY TIERS. A numeric
 // regression whose DELTA (now − was) is below the kind's tier is reported sev="minor" and does not gate exit 2
 // by itself: a +1-ccx edit to an already-over-the-bar function is a regression by the letter but noise that
 // drowns the material findings a refine loop should chase. 0 = the kind has no minor tier (any delta is major).
@@ -87,7 +87,7 @@ constexpr std::uint32_t   kMinorParamDelta = 2;    // params:     +1 param → m
 // WORSENS past the acked magnitude, at which point it reappears. Committable, like the baseline sidecar.
 inline const char*        kAcksFile = ".ripwire_quality_acks";
 
-// D1 fix (AUDIT5, HIGH): both sidecars above are FILE NAME constants, not paths — every read/write/remove
+// D1 fix (HIGH): both sidecars above are FILE NAME constants, not paths — every read/write/remove
 // site must resolve them against the ANALYZED ROOT, never the process CWD. The CLI is invoked
 // `ripwire <dir> --quality-ack` and may run from ANY cwd (a wrapper script, an orchestrator batching
 // several roots from one launch dir, a Makefile target) — a bare relative filename then reads/writes/
@@ -642,7 +642,7 @@ inline std::string headSnapExclHex( const std::vector<std::string>& excludes, st
     return exclConfigHex( excludes, std::to_string( kHeadSnapCacheScheme ), maxFileBytes );
 }
 
-// Y4 (AUDIT5) — BLOB-COUNT SHARDING. The 2 GiB low-water sweep (kMaxCacheDirBytes below) bounds cache-dir
+// Y4 — BLOB-COUNT SHARDING. The 2 GiB low-water sweep (kMaxCacheDirBytes below) bounds cache-dir
 // BYTES but not blob COUNT: production shows 23,502 ripwire-*.bin blobs (mostly qheadsnap/qsnap/qbody churn —
 // a new blob per commit per repo, across the ~20 parallel agent sessions this machine runs) sitting FLAT in
 // one cache dir, so every sweep's directory listing is O(N) over a single huge readdir(). Shard by a
@@ -716,7 +716,7 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
 //   maxTotalBytes > 0  — if the family's surviving total still exceeds it, delete oldest-first until under.
 // `keepPath` is never deleted by any pass, in every case.
 //
-// Y4 (AUDIT5): covers BOTH blob layouts — the legacy flat one (matching entries directly under `dir`) and the
+// Y4: covers BOTH blob layouts — the legacy flat one (matching entries directly under `dir`) and the
 // sharded one `resolveCacheBlobPath`/blobShardHex now write into (matching entries under `dir`'s 2-hex-char
 // subdirectories, "00".."ff") — so a family's blobs are found and evicted correctly regardless of which
 // layout wrote them, and a mid-migration mix of both is swept as one set. The 256 shard names are an EXACT,
@@ -903,7 +903,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // so v1 blobs must never be served to a v2 binary (two binary versions sharing one cache dir would otherwise
 // answer differently depending on who wrote first — a determinism hole). The scheme is in the filename key,
 // so old blobs are simply never named again (and age out via the A5 sweep).
-// v3 (AUDIT5 F2/X4) — B10.1a (ffcc618) added `isTestScriptPath` to `isDeadCandidate` (shell test-runner
+// v3 (F2/X4) — B10.1a (ffcc618) added `isTestScriptPath` to `isDeadCandidate` (shell test-runner
 // scripts join header-exported symbols and fixture paths as dead-code-exempt) WITHOUT bumping this constant —
 // exactly the determinism hole the v2 comment above exists to prevent: a pre-ffcc618 binary's qsnap blob
 // (dead set computed under the OLD, narrower exemption) served to a current binary yields phantom
@@ -1118,7 +1118,7 @@ inline int readQSnapBlob( const std::string& path, std::string& out )
     return 1;
 }
 
-// ─── Phase-M concurrency seam (DESIGN_teamIndex.md §2b) ────────────────────────────────────────────
+// ─── Phase-M concurrency seam ───────────────────────────────────────────────────────────────────────
 //
 // ingest() writes PROCESS-GLOBAL caches (ingest.cpp: compiledQueryCache / queryFor's static table) that are
 // single-writer BY DESIGN — populated single-threaded, then read lock-free by the parse pool. The long-lived
@@ -1389,9 +1389,9 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     return { std::move( bodyOnly.bodyHashBySym ), true };
 }
 
-// ─── Y2 (AUDIT5 P2) — the qchurn family: memoizes gitmine::gitLogNameOnlyRaw's `git log --name-only` ────
+// ─── Y2 (P2) — the qchurn family: memoizes gitmine::gitLogNameOnlyRaw's `git log --name-only` ──────────
 // walk (431 ms on a large private C++ corpus; every rich verb — --for, --metrics, --exemplar — pays it once
-// per invocation, main.cpp:5392/5404). DECIDED key (PLAN_audit5Public2026.md "Y2 churn-memo key"):
+// per invocation, main.cpp:5392/5404). DECIDED key ("Y2 churn-memo key"):
 // (realpath(root), HEAD sha, window-months, gitWindowRefSha). Concretely: `coSince` stands in for
 // "window-months" — it IS the window (currently always "18 months ago"), kept as the verbatim string
 // rather than an int-parse so any future caller's window text is captured exactly, not just the ones
@@ -1406,7 +1406,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // walk — no working-tree inspection at all — and the cached RAW per-commit (epoch, path) stream is resolved
 // against the CALLER's current `ing` fresh on every call (never itself cached), so a dirty file added/
 // removed since the cache was written still resolves correctly; only the committed-history walk is skipped
-// on a hit. Review point (opus, AUDIT5): no current rich-verb consumer of gitCoChangeAndChurn threads any
+// on a hit. Review point (opus): no current rich-verb consumer of gitCoChangeAndChurn threads any
 // uncommitted/dirty signal INTO it — main.cpp's two call sites (5392/5404) pass only root/ing/coSince/
 // maxFiles/churnMonths/onlyRoot, none of which reflect working-tree diffs; the amp= metric's OTHER half
 // (qmetrics.callerCount) comes from the live in-memory graph, not from this function, so folding uncommitted
@@ -1754,7 +1754,7 @@ struct BaselineSelection
 // the degrade. `staleFileRemoved` carries the same fact to the caller, which needs it to word its own fatal
 // message (a "no <file>" message is false while the file is still on disk). `sidecarPath` must already be
 // ROOT-QUALIFIED by the caller (baselinePath) — this function can DELETE it, and a bare relative name would
-// resolve against the process CWD (AUDIT5 D1).
+// resolve against the process CWD (D1).
 inline BaselineSelection selectBaseline( const std::string& root, const std::string& sidecarPath, bool removeStaleFile )
 {
     VERIFY( !sidecarPath.empty() );
@@ -2113,7 +2113,7 @@ inline std::string normalizeLegacyAckKind( const std::string& kind, std::uint32_
 // file back to canonical sorted order regardless of what shape it arrived in. Grammar (also the header
 // line below): `ack <kind> <16-hex-key> <ackNow> <reason to end of line>`.
 //
-// D2 (AUDIT5) — DUPLICATE (kind,key) LINES MERGE BY max(ackNow), never last-wins. The sorted-write invariant
+// D2 — DUPLICATE (kind,key) LINES MERGE BY max(ackNow), never last-wins. The sorted-write invariant
 // above means a file THIS binary wrote never contains a duplicate key, but the reader must still tolerate one
 // that arrived some other way (a hand-edit, an unlucky 3-way merge of two divergent ack files, an older
 // binary's output) — and a naive `out[key] = ...` overwrite lets whichever duplicate happens to sort LAST in

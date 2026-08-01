@@ -16,7 +16,7 @@
 #include "testmap.h"     // §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
 #include "serialize.h"   // L2: jsonStr() — writeTestGateReportJson's escaping (self-contained: don't rely on
                          // include-order in whichever TU pulls situ.h in first)
-#include "pageview.h"    // §A3a (PLAN_outputAudit2_2026-07-28.md): the ONE paging/truncation vocabulary — the
+#include "pageview.h"    // §A3a: the ONE paging/truncation vocabulary — the
                          // <u> untested-row list migrates onto it instead of a bare kMaxUntestedRows literal
                          // (self-contained: serialize.h already pulls this in, but don't rely on that order)
 
@@ -115,7 +115,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     for( std::uint32_t f = 0; f < F; ++f ) if( fileReachers[f] ) affected.push_back( f );
     std::sort( affected.begin(), affected.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                { return fileReachers[a] != fileReachers[b] ? fileReachers[a] > fileReachers[b] : ing.files[a] < ing.files[b]; } );
-    // §A3b (PLAN_outputAudit2_2026-07-28.md): the row list below stays capped at 8 — --situ is a fixed report,
+    // §A3b: the row list below stays capped at 8 — --situ is a fixed report,
     // not a paging verb (§A3a is the one that migrated) — but the header now SAYS so, the same "showing N of M"
     // convention --report's god-files section already uses three lines of code away, so a reader isn't left
     // to notice on their own that 17 files summed to only 58 of 68 symbols.
@@ -319,7 +319,7 @@ inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Gr
 // `isChangedSym` is the per-node "this is the change, not its radius" mask — the file-mask form below marks
 // every symbol of every changed file, which is exactly what the mask-driven loop did inline before, so that
 // path is byte-identical. A caller with per-SYMBOL claims (--plan-lanes) marks only its claims, so a lane that
-// owns one symbol in a 3000-line file is not charged that whole file's obligations (PLAN_planLanes §7.4a).
+// owns one symbol in a 3000-line file is not charged that whole file's obligations (§7.4a).
 // `testReachIn` is the hoisted testSeedForwardReach result, or nullptr to compute it here.
 inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& g,
                                           const std::vector<NodeId>& changedSyms, const std::vector<char>& isChangedSym,
@@ -379,7 +379,7 @@ inline TestGateResult computeTestGate( const IngestResult& ing, const Graph& g, 
     return computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, nullptr );
 }
 
-// The changed-SYMBOL form (PLAN_planLanes §7.4a). `changedSyms` need not be sorted or unique; the mask is
+// The changed-SYMBOL form (§7.4a). `changedSyms` need not be sorted or unique; the mask is
 // derived from it here so a caller cannot hand in a mask that disagrees with its own symbol list.
 inline TestGateResult computeTestGateForSymbols( const IngestResult& ing, const Graph& g,
                                                  const std::vector<NodeId>& changedSyms, const std::vector<char>* testReachIn = nullptr )
@@ -405,7 +405,7 @@ inline TestGateResult computeTestGateForSymbols( const IngestResult& ing, const 
 // rest with --limit/--offset instead of seeing 25 of N with no disclosure that more exist.
 inline constexpr std::size_t kMaxUntestedRows = 25;
 
-// §A3a (PLAN_outputAudit2_2026-07-28.md): the report emitters below are COMPUTE/EMIT split rather than
+// §A3a: the report emitters below are COMPUTE/EMIT split rather than
 // grown-in-place — `writeTestGate`/`writeTestGateJson`/`forEachUntestedRow` took the (ing, g, changedFile)
 // triple and computed + rendered in one call; the paging window needs `computeTestGate`'s result BEFORE it
 // can be sized, so the emit half now takes the already-computed `TestGateResult` (computeTestGate stays the

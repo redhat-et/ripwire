@@ -1,6 +1,6 @@
 #pragma once
 
-// tracein.h — B11/L2 trace-to-locus (--from-trace=FILE, '-' = stdin, PLAN_agentLeverage2026.md).
+// tracein.h — B11/L2 trace-to-locus (--from-trace=FILE, '-' = stdin).
 //
 // Agents hand-translate stack traces / sanitizer reports / compiler errors into ripwire queries many times
 // per session (this round: a UBSan `mention.h:95:48` turned into a manual file read). This module is the
@@ -69,7 +69,7 @@ struct ParsedFrame
     std::uint32_t line           = 0;
     FrameFormat   format         = FrameFormat::Generic;
     std::uint32_t seq            = 0;      // 0-based appearance index, top-to-bottom in the source text
-    bool          lineOverflowed = false;  // AUDIT5 F7: the raw digit span for `line` would wrap uint32_t —
+    bool          lineOverflowed = false;  // F7: the raw digit span for `line` would wrap uint32_t —
                                             // saturate-and-miss (never wrap mod 2^32 into a real, wrong line)
 };
 
@@ -83,10 +83,10 @@ inline bool isDigits( std::string_view s ) noexcept
     return true;
 }
 
-// AUDIT5 F7: a hostile/garbled frame line number (e.g. a fuzzed or truncated trace) can exceed UINT32_MAX;
+// F7: a hostile/garbled frame line number (e.g. a fuzzed or truncated trace) can exceed UINT32_MAX;
 // unchecked `v*10+d` wraps mod 2^32 (4294967297 -> 1), which then confidently maps to a REAL line in the
 // corpus and emits the wrong symbol's full body as the innermost frame — silently wrong, never refused.
-// Saturate-and-miss instead (the overflow-checked style of every other CLI parser here, AUDIT4 F6 sweep):
+// Saturate-and-miss instead (the overflow-checked style of every other CLI parser here, F6 sweep):
 // on overflow, set `overflowed` and return 0; callers propagate this onto ParsedFrame::lineOverflowed so
 // the frame still parses (format/path/func are honest) but degrades to unmapped — it lands in <skipped>,
 // never <suspects>. `overflowed` is only ever SET here, never cleared, so a caller may share one flag

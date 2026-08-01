@@ -9,7 +9,7 @@
 // on: a CSR matrix, a matrix-free SpMV (apply), and a generic power-iteration
 // dominantEigenvector(). ripwire's mixed-precision PageRank kernel lives in src/pagerank.cpp.
 //
-// Discipline (same as matrixDyn, see SPEC §2b/§3):
+// Discipline (same as matrixDyn):
 //   * DOD storage: three owning, contiguous, 128-B-aligned SoA arrays — rowOffsets[rows+1],
 //     colIndices[nnz], values[nnz]. 32-bit indices (handles, not pointers). Move-only.
 //   * NEON on the SpMV: the gather x[col[k]] is scalarised (Apple Silicon has no cheap

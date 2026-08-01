@@ -1,6 +1,6 @@
 #pragma once
 
-// scip.h — the SCIP precision overlay (Wave 4 #15 / long-planned in SPEC): consume a Sourcegraph
+// scip.h — the SCIP precision overlay (Wave 4 #15): consume a Sourcegraph
 // SCIP index (`--scip=index.scip`) as an OPTIONAL, zero-dependency precision layer over the name-based
 // call graph. Where the index covers a reference site, its resolution REPLACES ripwire's name-based
 // guess and the resulting edge is tagged `prov="scip"` so the honesty gauges (amb= / ambiguous=) report

@@ -3,7 +3,7 @@
 // search.h — literal + regex substring search (--grep / --regex), scanned DIRECTLY and IN PARALLEL.
 //
 // History, and why the index is gone (P3, 2026-07-27): this file used to build a Google-Code-Search /
-// Zoekt style file-level trigram index (RESEARCH_codeIntelligence §1) — a serial `fread` of every file
+// Zoekt style file-level trigram index — a serial `fread` of every file
 // plus a `vector<uint32_t>` holding one trigram PER BYTE POSITION (4 B per source byte), sorted and
 // uniq'd — and then threw the whole thing away after ONE query. Measured on a 2815-file C++ tree:
 // 1860 ms wall / 814 MB peak RSS, of which ~1.6 s was single-threaded, against a 0.3 s read-verb budget
@@ -790,7 +790,7 @@ inline std::optional<std::string> regexCompileError( const std::string& pat )
 // §P11.1 — the returned ORDER is TIER-then-path, not path alone. Plain path-alphabetical order plus the
 // caller's fixed row cap is a systematic bias against code on any doc-bearing repo: on ripwire's own tree
 // `--grep=DEGRADED_PATH_ALERT` filled 66 of its 100 shown rows with markdown and left no `test/` row at all,
-// because `AGENTS.md` and `AUDIT*.md` sort above `src/` and the cap always cuts the tail. Ordering HERE
+// because `AGENTS.md` and other long-named docs sort above `src/` and the cap always cuts the tail. Ordering HERE
 // rather than in the emitter keeps the CLI verb and the MCP `grep` verb on ONE order — they already share
 // this collection precisely so they cannot diverge. Path-alphabetical survives untouched INSIDE a tier, so
 // a file's hits stay contiguous, which pass 4's one-read-per-file caching depends on.

@@ -16,7 +16,7 @@
 //   * Only DEFINITIONS (body present) are narrowing targets — a forward declaration is never a target
 //     (matches buildGraph's decl/def collapse), so a narrow can't route rank into an empty prototype.
 //
-// RULES (see PLAN_absorb2026.md §P2-D):
+// RULES (§P2-D):
 //   Rule 1 — class membership (IMPLEMENTED, the ~60% case): receiver is `this`/`self` → resolve the method
 //            against the caller's enclosing class (fromSymbol.scope). C++ (`this->m()`) + Python (`self.m()`).
 //   Rule 2 — receiver-VARIABLE type, one hop (IMPLEMENTED): `Foo x; x.m()` / `auto x = Foo(); x->m()` →
@@ -125,7 +125,7 @@ inline std::string lexicalNormalize( std::string_view path )
 // resolve to EXACTLY ONE repo fileId or degrade to kNoFile — NEVER basename-match, NEVER guess. Ambiguous
 // or unresolvable → contributes nothing → the name-based §2a ladder + honest amb= still runs.
 //
-// SOUNDNESS VERDICT (DESIGN_resolutionCompleteness.md §B.3): Python ✓, TS/JS ✓, Rust ✓ are v1-sound; Go
+// SOUNDNESS VERDICT (§B.3): Python ✓, TS/JS ✓, Rust ✓ are v1-sound; Go
 // (needs go.mod module-root) and Swift (whole-module, no path) are DEFERRED — their imports stay unresolved.
 
 // The import dialect a file's imports resolve in, keyed off its extension. C-family covers the quote
@@ -170,7 +170,7 @@ inline std::string_view includerDir( std::string_view includerPath ) noexcept
     return ( sl == std::string_view::npos ) ? std::string_view{} : includerPath.substr( 0, sl );
 }
 
-// ── Multi-root workspace include context (DESIGN_multiRoot.md §3.1) ─────────────────────────────────
+// ── Multi-root workspace include context (§3.1) ──────────────────────────────────────────────────────
 // Built by buildPreciseIncludeAdj when the IngestResult is a merged workspace (ing.fileRoot non-empty),
 // nullptr otherwise (single root — every function below is then byte-identical to today). Carries:
 //   * fileRoot     — fileId → root index (same-root soundness gate on labeled-index hits);
@@ -178,7 +178,7 @@ inline std::string_view includerDir( std::string_view includerPath ) noexcept
 //                    include / relative import that lexically ESCAPES its own root (§3.1a). Unique by
 //                    construction (roots are disjoint post-dedupe, nesting is a hard error);
 //   * rootAbs/rootLabels — per-root realpath + label (abs-base reconstruction; angle probes §3.1b).
-// One cross-root import alias mined from a config file (DESIGN_multiRoot.md §3.2, decided 2026-07-11):
+// One cross-root import alias mined from a config file (§3.2, decided 2026-07-11):
 // a tsconfig.json `compilerOptions.paths` alias or a go.mod `replace` directive that points at a SIBLING
 // workspace root. Same evidence-only posture as includes: a config alias only ever resolves to a file that
 // PHYSICALLY EXISTS in the destination root (probed against absIndex, unique-or-degrade) — it can no more
@@ -489,7 +489,7 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
 }
 
-// ── Cross-root config-file import evidence (DESIGN_multiRoot.md §3.2, decided 2026-07-11) ────────────
+// ── Cross-root config-file import evidence (§3.2, decided 2026-07-11) ─────────────────────────────────
 // tsconfig.json `compilerOptions.paths` aliases + go.mod `replace` directives that point at a SIBLING
 // workspace root admit cross-root import resolution — the SAME evidence-only posture as includes
 // (unique-or-degrade, never name-based). Config bytes are read (workspace-only, in canonical root order)

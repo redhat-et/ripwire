@@ -1,8 +1,8 @@
 #pragma once
 
-// workspace.h — multi-root workspaces (DESIGN_multiRoot.md): N crawl roots → ONE merged symbol graph.
+// workspace.h — multi-root workspaces: N crawl roots → ONE merged symbol graph.
 //
-// Responsibilities (all v1-decided in DESIGN_multiRoot.md; do not re-litigate):
+// Responsibilities (all v1-decided; do not re-litigate):
 //   * root set hygiene   — realpath dedupe (stderr note), NESTED roots = hard error (§2.1);
 //   * root identity      — label = shortest unique whole-segment suffix of the root's REAL path
 //                          (basename when unique; leftward whole-segment extension on collision) (§2);
