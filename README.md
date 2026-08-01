@@ -7,7 +7,7 @@
 # ripwire
 
 **The ripgrep of AI context.** Point it at a repository and it answers structural questions in tens
-of milliseconds — and labels every answer it cannot prove complete.
+of milliseconds from a warm index — and labels every count it cannot prove is a total.
 
 [Quickstart](#quickstart) · [What it answers](#what-it-answers) · [Real runs](#real-runs) ·
 [Measured](#measured) · [Tokens saved](#what-it-saves-you-in-tokens) ·
@@ -43,7 +43,7 @@ Trip**wire** for the honesty half: every count it cannot prove is a total ships 
 every truncation is disclosed in the header, and a zero means *none found*, never *none exists*.
 
 Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
-contract, gated on every push and pull request, not a tendency.
+contract, gated on every pull request and every push to main, not a tendency.
 
 On a 60-instance head-to-head against three other context tools — same instances, same gold, same
 metric code — it puts **all** gold files in the top 10 on **36.7%** of them, against 26.7 / 21.7 /
@@ -89,18 +89,18 @@ ripwire . --test-gate                              # before you commit: which te
 Around the core sit 123 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every flag with a real invocation and its recorded
-output. Each family below links there.
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents 101 of the flags with a real invocation and its
+recorded output. Each family below links there.
 
 | Family | The question | Representative flags |
 | --- | --- | --- |
-| [**understand a codebase cold**](docs/COMMANDS.md#understand-a-codebase-cold) | "What is this repo, and what matters in it?" | `--for` · `--tree` · `--lego` · `--exemplar` · `--recall` · `--max-tokens` |
+| [**understand a codebase cold**](docs/COMMANDS.md#understand-a-codebase-cold) | "What is this repo, and what matters in it?" | `--for` · `--tree` · `--lego` · `--exemplar` · `--recall` · `--top-k` · `--token-budget` · `--max-tokens` |
 | [**navigate / answer a question**](docs/COMMANDS.md#navigate--answer-a-question) | "Who calls this? Is it safe to change? Which tests?" | `--callers` · `--callees` · `--uses` · `--impact` · `--path` · `--connect` · `--affected` · `--situ` · `--test-gate` · `--grep` |
 | [**zoom the detail ladder**](docs/COMMANDS.md#zoom-the-detail-ladder) | "Show me more — but only where it pays." | `--detail` · `--pack-signatures` · `--outline` · `--expand` · `--compress` |
 | [**assess quality / structure**](docs/COMMANDS.md#assess-quality--structure) | "Where is the risk, and did I just add some?" | `--hotspots` · `--clones` · `--metrics` · `--deps` · `--lint` · `--quality-delta` · `--edit-check` · `--pr-context` · `--merge-scout` |
 | [**self-diagnosis**](docs/COMMANDS.md#self-diagnosis) | "Is my setup actually working?" | `--doctor` |
-| [**security**](docs/COMMANDS.md#scan-skills-dir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
-| [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--top-k` · `--token-budget` · `--limit` · `--mcp` |
+| [**security**](docs/COMMANDS.md#--scan-skillsdir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
+| [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--mcp` |
 
 Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
 `--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
@@ -113,8 +113,9 @@ ranking, bodies, callers and tests in one budgeted bundle.
 
 Output is minified — one line, no whitespace between tags — so the excerpts below are wrapped for
 reading, and each one's leading legend comment is elided. Nothing else is edited, except that
-corpus-size numbers (file/symbol/edge counts, PageRank `k=` values, and the test-gate example's
-`script_gates_unmodelled=` — a count of `test/*.sh` runners in this corpus) drift as this repository
+corpus-size numbers (file/symbol/edge counts, the ranked-map header's token/ambiguity tallies,
+PageRank `k=` values, and the test-gate example's
+`script_gates_unmodelled=` — a count of the script runners under `test/`, recursively) drift as this repository
 grows: **the ranked map** elides those specifically, and says so again at the point of use, and **the
 test gate** additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a
 trailing `…`.
@@ -123,8 +124,8 @@ trailing `…`.
 
 ```
 $ ripwire . --top-k=3
-<!-- files=… symbols=… edges=… shown=3 est_tokens=393 ambiguous=2631 unresolved=662
-     precise=3 skipped_oversize=3 order=important-first -->
+<!-- files=… symbols=… edges=… shown=3 est_tokens=… ambiguous=… unresolved=…
+     precise=… skipped_oversize=… order=important-first -->
 <r est_tokens="393">
 <f p="./src/svector.h">
 <s t="method" n="size" id="./src/svector.h::svector::size" k="…"></s>
@@ -139,7 +140,7 @@ $ ripwire . --top-k=3
 
 `files=`/`symbols=`/`edges=` and the `k=` rank values are elided: this repository is the corpus here,
 so they move every time README.md itself gains or loses a line, which is not what the example
-demonstrates. The rest of the header measures the whole corpus, not the excerpt — `ambiguous=2631` is
+demonstrates. The rest of the header measures the whole corpus, not the excerpt — the `ambiguous=` tally is
 the call-graph completeness gauge, and `amb="2"` on a row says two of that symbol's calls hit a name
 with several definitions and the resolver guessed. Read the source when which-target matters.
 
@@ -276,7 +277,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **311 gate scripts** and is the authoritative list;
+`test/regression.sh` names **312 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -337,8 +338,8 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 
 `skills/` ships **seventeen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
-tests, reviewing security. Without them an agent has 30 verbs and no reflexes; with them it reaches
-for the right one unprompted. Install as symlinks back into this repo, so edits here take effect
+tests, reviewing security. Without them an agent has 30 verbs and no map of when each applies; the skills name the moment
+each verb is for. Install as symlinks back into this repo, so edits here take effect
 immediately:
 
 ```bash
@@ -379,8 +380,7 @@ Three worth starting with:
 The other seven — a paired head-to-head against a competitor, a ranking-eval loop that mines real
 retrieval misses from your own sessions, a per-language improvement pass, a zero-context onboarding
 study, a sibling sweep, a live command tour, a showcase build — are listed with their audiences in
-[`prompts/README.md`](prompts/README.md). Each states its own scope, the gates it must leave green,
-and what it must not touch.
+[`prompts/README.md`](prompts/README.md). Each states its own scope and its honesty rules, and most name the gates they must leave green.
 
 ---
 
