@@ -45,7 +45,7 @@ grep -q "${posWant} positive + ${negWant} negative prompts" "$TMP/a" \
     && ok "header counts match the corpus (${posWant} pos + ${negWant} neg — nothing silently skipped)" \
     || { no "header counts disagree with the corpus (want ${posWant}+${negWant})"; head -1 "$TMP/a"; }
 
-# ── 3) the JUDGED split stays past the resolution floor (2026-07-25 growth pass, PLAN §P2) ────────────
+# ── 3) the JUDGED split stays past the resolution floor (2026-07-25 growth pass) ────────────────────
 # n=16 judged rows resolves +-6pp per row, coarse enough to hide real movement — grown to 43. Pin the
 # corpus size itself, not just the harness's own row count, so a future edit cannot silently shrink the
 # hard (paraphrase) set back toward noise without this gate objecting.

@@ -1730,7 +1730,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         routeNote = xmlCommentText( routeNote );
         int forTopN = cfg.packTopN > 0 ? cfg.packTopN : 40;
 
-        // --adaptive (RESEARCH §2 / lever 2): cut the returned set at the relevance CLIFF — the largest
+        // --adaptive (lever 2): cut the returned set at the relevance CLIFF — the largest
         // relative score gap in [floor, ceiling] (Adaptive-k). A sharp query keeps few; a flat/broad query
         // (no knee) hits the ceiling and is kept as-is (cap-and-note). floor=5, ceiling=forTopN. The cut
         // narrows forTopN BEFORE packSignatures selects, so the emitted set is exactly the kept head. The
@@ -2164,7 +2164,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
     // --exemplar=KIND|TASK (Q7): return the repo's BEST-IN-CLASS instance of what the agent is about to write
     // — same KIND, high fan-in, low cognitive complexity, tested — as an imitation target (signature + body).
     // Selection is by ROLE (kind + those metrics), a DETERMINISTIC composite sort with an id tie-break; it is
-    // NEVER ranked by textual similarity to the query (similar-snippet retrieval measurably hurts, RESEARCH §2d).
+    // NEVER ranked by textual similarity to the query (similar-snippet retrieval measurably hurts).
     // The argument is either a kind token (fn|method|cls|class|struct|iface|var) or a TASK string whose top
     // lexical match's kind is used — one flag, two natural inputs, both resolving to a target kind by ROLE.
     // A3-F5: selection now enforces a hard ccx ceiling, a fixture-path penalty, and a task→kind confidence
@@ -7529,7 +7529,7 @@ int runDefaultMap( const MainDispatch& d )
     // NOT on the --html path (which returns above with its own document). Under --no-route the note is empty.
     if( !cfg.query.empty() && !cfg.html && !queryRouteNote.empty() ) std::fputs( queryRouteNote.c_str(), stdout );
 
-    // --adaptive on --query (RESEARCH §2 / lever 2): cut the ranked map at the relevance cliff, exactly like
+    // --adaptive on --query (lever 2): cut the ranked map at the relevance cliff, exactly like
     // the --for path. --query's rank IS the lexical score, so the cliff is meaningful; floor=5, ceiling=the
     // current mapTopK (post --max-tokens). We emit the note as a LEADING comment (the map header comes from
     // serialize and is not ours to extend). Only fires with --query (the guard in cli.h requires --for OR
@@ -7583,7 +7583,7 @@ int runDefaultMap( const MainDispatch& d )
     // the golden and all existing callers that parse the bare <r>…</r> are unaffected.
     const bool hasExtension = cfg.packSignatures || cfg.packTopN > 0 || !cfg.expand.empty() || !cfg.outline.empty();
 
-    // RESEARCH §6 (--expand est_tokens bugfix): the <bodies> block that packBodies appends AFTER the map is
+    // --expand est_tokens bugfix: the <bodies> block that packBodies appends AFTER the map is
     // part of the payload the caller receives, so the header's est_tokens must include it (before this fix it
     // reported the map only — a --token-budget gate on a large --expand under-budgeted by ~2×). Resolve the
     // expand nodes HERE (once) so both the header estimate below and the packBodies emission later reuse the

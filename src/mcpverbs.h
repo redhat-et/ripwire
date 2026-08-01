@@ -2001,7 +2001,7 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
 
 // ─── T4: fetch_body — the LAZY-BODY verb. The read verbs return signatures + a stable `handle`; this verb
 // returns the FULL def source ONLY when the agent asks for it by handle. The MCP posture is
-// "names/signatures by default, bodies by handle on request" (RESEARCH §2f kit default-lean, ~90% cut).
+// "names/signatures by default, bodies by handle on request" (the kit default-lean posture, ~90% cut).
 //
 // fetchBody(root, handle) → outcome: either the body JSON payload, or a JSON-RPC-shaped refusal message. The
 // refusals mirror the edit-verbs' staleness discipline — a body is NEVER served against bytes the handle

@@ -38,7 +38,7 @@ inline constexpr const char* kGraphCountFloorLegend =
     "that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. "
     "Read a zero as \"none found\", never as \"none exists\". ";
 
-// The COUNTING-UNIT clause (PLAN §Execution, the L-CS routing item).
+// The COUNTING-UNIT clause (the L-CS routing item).
 //
 // V3 H-1 REWRITE, and the reason it is worth reading before touching this string. The first version said all
 // four non-uses verbs "count DISTINCT (caller,callee) PAIRS". That was FALSE for three of them and it

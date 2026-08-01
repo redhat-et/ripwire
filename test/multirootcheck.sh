@@ -16,7 +16,7 @@
 #   G-seam    the churn-backed verbs on roots that are SUBDIRS of ONE repo (a second fixture) — git's
 #             repo-relative paths must join across the `<label>/./<rel>` seam: --hotspots ranked>0 with a
 #             row from BOTH roots, --cochange exit 0 with pairs>0, --rank-by=churn != the plain map
-#   G-pr      --pr-context multi-root (DESIGN §5/§7): one <pr-context root=> section per root inside a
+#   G-pr      --pr-context multi-root: one <pr-context root=> section per root inside a
 #             <pr-context-workspace> wrapper, labeled changed-file paths, the svc change's blast radius
 #             crossing into cli's caller via the evidence edge, determinism + reorder + xmllint, AND the
 #             N=1 byte-identity guard (single-root --pr-context == the committed build/ripwire)

@@ -9,7 +9,7 @@
 // plus the same file PATH repeated on every row. The columnar form emits the path ONCE in a <paths> table
 // (integer refs) and the per-field data as PARALLEL ARRAYS, so the markup is amortized across all rows.
 //
-// SCOPE GUARD (from the literature, RESEARCH §1): columnar/TOON collapses to 0% accuracy on NESTED data, so
+// SCOPE GUARD (from the literature): columnar/TOON collapses to 0% accuracy on NESTED data, so
 // this is applied ONLY to the genuinely TABULAR list verbs — NEVER the nested symbol/edge map. The default
 // stays minified XML (byte-identical, G4 gate intact); columnar is reached only under --format=columnar.
 //

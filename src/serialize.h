@@ -1081,7 +1081,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        bool autoOrder = false,                               // T3: fill-aware auto important-last (see above)
                        std::size_t* outEstTokens = nullptr,                  // --token-budget: hand back the SAME est_tokens the
                                                                               // header prints (no second counter) — nullptr ⇒ unused
-                       std::size_t extraPayloadTokens = 0,                   // §H7 (was extraBodyTokens, RESEARCH §6): tokens of
+                       std::size_t extraPayloadTokens = 0,                   // §H7 (was extraBodyTokens): tokens of
                                                                               // EVERY block the caller appends after this map —
                                                                               // <sigs>, <src>, <bodies>, <outline> — each MEASURED
                                                                               // from its rendered bytes by the caller (main.cpp's
@@ -1876,8 +1876,8 @@ inline std::string compressBody( std::string_view src )
 // the body), bodies elided — ~70% fewer tokens than raw source while keeping the structural shape.
 // Grouped by file, capped at budgetBytes. Emitted AFTER </r>, like packSource. With L2: a <doc> child.
 // Q3 QUALITY LENS (--for only): the quality facts for the symbols the agent is about to touch, folded
-// onto the <d> blocks so a single read-time bundle carries steering signal (RESEARCH §1c: facts fed at
-// read time measurably change output). ALL optional (nullptr ⇒ that attribute is omitted) so the plain
+// onto the <d> blocks so a single read-time bundle carries steering signal (facts fed at read time
+// measurably change output). ALL optional (nullptr ⇒ that attribute is omitted) so the plain
 // --pack-signatures call-site — which passes none of them — stays byte-identical to its golden/gates.
 // churn is PER-FILE (indexed by fileId); clone/tested/amp are PER-SYMBOL (indexed by symbol id). ccx is
 // already emitted under metrics=true, so the lens = ccx (there) + churn/clone/tested/amp (here).
@@ -2897,7 +2897,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     w.flush();
 }
 
-// RESEARCH §6 (--expand est_tokens bugfix): estimate the token cost of the <bodies> block packBodies
+// --expand est_tokens bugfix: estimate the token cost of the <bodies> block packBodies
 // will emit for `nodes`, so serialize()'s header can report header+body (not map-only). Mirrors the
 // packBodies byte accounting closely enough for an honest ±15% estimate: per node it reads the def span
 // [sigStartByte,endByte), applies the same range slice + optional compress, and adds the 1-hop callee
@@ -3219,7 +3219,7 @@ inline void packGraphBlock( std::FILE* out, const IngestResult& ing, const std::
 // interface's OWN members are NOT captured as method symbols the same way — scanning the iface span there
 // grabs the interface's own declaration line and emits garbage (`<m>interface Animal</m>`). Declarative
 // allow-list (not a scattered if): emit <m> only for langs where the surface is correct; suppress it (emit
-// the <impl> list alone) elsewhere. A correct empty contract beats a broad wrong one (DESIGN §2.7 option a).
+// the <impl> list alone) elsewhere. A correct empty contract beats a broad wrong one.
 inline bool legoMethodContractSound( Lang lang ) noexcept
 {
     return lang == Lang::Cpp || lang == Lang::ObjC;

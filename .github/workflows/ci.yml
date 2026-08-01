@@ -1,6 +1,6 @@
 name: CI
 
-# Guardrails as automated gates (CLAUDE.md "The guardrails as automated gates", SPEC §6/§8):
+# Guardrails as automated gates (CLAUDE.md "The guardrails as automated gates"):
 #   - release job:  configure (portable default, no RIPWIRE_NATIVE — CI hardware is not "this dev machine")
 #                    + build + full test/regression.sh (170+ gates incl. determinism/G4/quality) per OS.
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64

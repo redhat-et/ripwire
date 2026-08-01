@@ -805,7 +805,7 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
     }
 
     // require a MATERIAL cliff to cut below the ceiling (avoid cutting on trivial float noise). ~20% relative
-    // drop is a conservative "conceptual query" knee (RESEARCH §2); below that the tail is flat → keep ceiling.
+    // drop is a conservative "conceptual query" knee; below that the tail is flat → keep ceiling.
     constexpr double kMinCliffDrop = 0.20;
     if( bestCapDrop >= kMinCliffDrop )
     {
