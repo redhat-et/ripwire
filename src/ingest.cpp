@@ -539,6 +539,41 @@ inline StatInfo statSizeMtime( const std::string& path ) noexcept
     return { m, (long long)st.st_size };
 }
 
+// L1 (Linux runtime probe) — what KIND of thing is at `path`? The cache seams need all three answers, so
+// this is a tri-state and not a bool: absent is a silent miss, regular is the only usable shape, and
+// anything else (directory, fifo, socket, device) is an unexpected shape worth disclosing once.
+//
+// The platform split it exists for: `fopen( "<a directory>", "rb" )` FAILS on macOS and SUCCEEDS on
+// Linux/glibc. readFile above then fseek/ftell's that directory handle, gets a nonsense length, and
+// `out.resize()`s to it — the Ubuntu probe measured `--cache=<existing directory>` dying with
+// std::bad_alloc → SIGABRT (exit 134) where the same argument on macOS took the quiet cold-parse path.
+// A cache blob is a REGULAR file by construction (saveCache renames one into place), so every other shape
+// is the same self-healing "corrupt cache" state, on every platform.
+//
+// Checked BEFORE the open, never after: a FIFO at the path would BLOCK inside fopen( "rb" ) until a writer
+// appeared, which no post-open fstat can undo. Race-wise it is advisory only — a path that changes shape
+// between this stat and the open still lands in a degrade path, because a degrade path is all a cache miss
+// has. ::stat, not ::lstat: a symlink TO a regular file is a legitimate cache blob.
+enum class PathShape : std::uint8_t { Absent, RegularFile, Other };
+
+inline PathShape shapeOfPath( const std::string& path ) noexcept
+{
+    struct stat st;
+    const bool  isStatable = ::stat( path.c_str(), &st ) == 0;
+    return !isStatable ? PathShape::Absent : ( S_ISREG( st.st_mode ) ? PathShape::RegularFile : PathShape::Other );
+}
+
+// The READ seam's use of it, named so loadCache reads as one decision instead of three lines of shape
+// analysis. Absent stays silent (the ordinary cold-start miss); an odd shape is disclosed here, once, from
+// the one site that knows the read is what got refused.
+inline bool isReadableCacheBlob( const std::string& path ) noexcept
+{
+    const PathShape shape = shapeOfPath( path );
+    if( shape == PathShape::Other )
+        DEGRADED_PATH_ALERT( "ingest: cache path is not a regular file (directory/device/fifo) — cache treated as corrupt (full reparse)" );
+    return shape == PathShape::RegularFile;
+}
+
 // Wall-clock now in ns since the Unix epoch — the SAME clock domain as st_mtime, so the racy-rule
 // comparison (cached file mtime >= cache-blob write time ⇒ re-hash) is meaningful across the two.
 inline long long wallClockNs() noexcept
@@ -1077,6 +1112,12 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     PROFILE_SCOPE_DESCRIBE( "ingest: loadCache (read + deserialize)" );
     HashMap<std::string, FileFacts> out;
     blobWriteNsOut = -1;
+
+    // L1: only a REGULAR file may reach readFile below — on Linux a directory opens cleanly and takes its
+    // resize() down with it. Any other shape self-heals into a full reparse, exactly like a checksum
+    // mismatch (see isReadableCacheBlob); blobWriteNsOut stays -1 ⇒ the caller cold-parses.
+    if( !isReadableCacheBlob( path ) ) return out;
+
     std::string blob;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: read cache blob" );
@@ -1205,6 +1246,15 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
+
+    // L1 (write half): never publish over a non-regular file, and decide it BEFORE the serialize so a
+    // directory at `path` costs no wasted pass and temp write before rename(tmp,dir) fails EISDIR.
+    if( shapeOfPath( path ) == PathShape::Other )
+    {
+        DEGRADED_PATH_ALERT( "ingest: cache path is not a regular file (directory/device/fifo) — cache not written" );
+        return;
+    }
+
     const std::size_t F = files.size();
     std::vector<std::vector<std::uint32_t>> dIdx( F ), rIdx( F ), iIdx( F ), bIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
     for( std::uint32_t i = 0; i < defs.size();  ++i ) if( defs[i].fileId  < F ) dIdx[ defs[i].fileId  ].push_back( i );
