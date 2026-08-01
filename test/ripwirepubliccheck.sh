@@ -437,6 +437,18 @@ pat_named = re.compile(r'\b(?:PLAN_|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF
 # other never-shipped internal doc name this tree used to cite the same way (see git history: the sibling
 # fix that cleared the first wave of these named it explicitly).
 pat_bare = re.compile(r'\b(?:PLAN|SPEC|RESEARCH|DESIGN|AUDIT|IDEAS|HANDOFF|KICKOFF|NEXT_SESSION|field-notes)\s*§')
+# V4 LOW-2: pat_bare is matched per LINE, so a citation split across a comment-continuation —
+# "// see RESEARCH" then "// §4 for the rationale" — never appears in either single line and is
+# invisible. pat_named cannot have the same gap: its charclass ([A-Za-z0-9_.-]*) contains no
+# whitespace, so a real ".md" filename can never itself span a line break.
+#
+# Fix: for each line, ALSO build a 2-line joined copy with the next line's comment leader (//, #,
+# *) stripped and a single space substituted for the join, then scan that copy too — but only
+# report a match whose span actually CROSSES the join point (starts before the boundary, ends at
+# or after it). Matches entirely inside line i are already caught by the single-line pass above;
+# without this filter they would be reported twice. Reported at the FIRST line of the pair, since
+# that is where a reader would look to find the citation.
+comment_cont_re = re.compile(r'^[ \t]*(?://|#|\*)[ \t]*')
 for p in paths:
     if p == SELF:
         continue
@@ -447,7 +459,10 @@ for p in paths:
     if b'\0' in data:
         continue   # binary, skip (mirrors the main sweep's grep -I)
     text = data.decode('utf-8', 'replace')
-    for i, line in enumerate(text.split('\n'), 1):
+    lines = text.split('\n')
+    lineCount = len(lines)
+    for lineIndex, line in enumerate(lines):
+        i = lineIndex + 1
         for m in pat_named.finditer(line):
             name = m.group(0)
             if os.path.basename(name) in tracked_basenames:
@@ -460,6 +475,18 @@ for p in paths:
             if (p, name) in exempt_pairs:
                 continue   # this EXACT (file, name) pair is a known-archived reference
             print(f'{p}:{i}: bare doc-name citation with no shipped doc: {name}')
+        if lineIndex + 1 < lineCount:
+            boundary = len(line)
+            joined = line + ' ' + comment_cont_re.sub('', lines[lineIndex + 1])
+            for m in pat_bare.finditer(joined):
+                if not (m.start() < boundary and m.end() > boundary):
+                    continue   # not a genuine cross-line span — either fully in line i (already
+                               # reported above) or fully in the next line (that line's own pass
+                               # will find it when lineIndex advances)
+                name = m.group(0)
+                if (p, name) in exempt_pairs:
+                    continue   # this EXACT (file, name) pair is a known-archived reference
+                print(f'{p}:{i}: bare doc-name citation split across two comment lines: {name}')
 PY
 if [ -s "$TMP/arm8" ]; then
     no "arm 8 — dangling reference to a culled internal-pattern .md name:"
