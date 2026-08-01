@@ -35,6 +35,67 @@ concurrency:
 # expose that week, defeating the entire point of testing the portable default.
 
 jobs:
+  # ─── style: one gating clang-format check, one advisory clang-format report, one advisory clang-tidy ───
+  #
+  # CLANG_VERSION is a PIN, not a floor. clang-format's output changes across major releases, so an
+  # unpinned checker reports "unformatted" on a tree that was formatted correctly by a different release.
+  # .clang-format was authored and verified against clang-format 22 on the dev machine; scripts/formatcheck.sh
+  # refuses to run under any other major, so bumping this number without re-running `clang-format -i` over the
+  # gated file set fails loudly instead of silently re-styling the repo.
+  #
+  # The clang-format GATE covers only the files listed in scripts/formatcheck.sh, which are the ones that
+  # already match .clang-format byte for byte. It cannot cover the tree: the house style in CONTRIBUTING.md §3
+  # is hand-formatted in ways clang-format has no option to preserve (multi-statement one-liners,
+  # `for( … ) if( … ) return i;`, packed initialiser rows and `case` labels, hand-chosen 160-200 column wrap
+  # seams), and reformatting all 98 first-party C++ files changes 11837 lines that survive `git diff -w` —
+  # real joins and splits — across 89 of them. A whole-tree --Werror check would therefore be red on a
+  # correctly-styled tree, which is a gate that punishes the documented style. The --advisory step below
+  # prints that gap on every run so it stays visible rather than forgotten.
+  #
+  # clang-tidy is ADVISORY and must stay that way: continue-on-error, and .clang-tidy's WarningsAsErrors is
+  # empty. Its default catalogue argues for a different C++ than the data-oriented one G2 mandates (POD/SoA,
+  # C arrays, 32-bit handles, VERIFY instead of exceptions), so the config is curated down to bugprone-* /
+  # clang-analyzer-* / performance-* / misc-dangling-* and even those only report. Baseline at the commit
+  # that added it: 312 unique sites, of which 126 are bugprone-easily-swappable-parameters and 85 are
+  # bugprone-exception-escape. Read it as a to-triage list, not a queue of defects.
+  style:
+    name: style (clang-format gate + advisory clang-tidy)
+    runs-on: ubuntu-24.04
+    env:
+      CLANG_VERSION: "22"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format / clang-tidy (PINNED major — see the job comment)
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh "$CLANG_VERSION" all
+          clang-format-"$CLANG_VERSION" --version
+          clang-tidy-"$CLANG_VERSION" --version
+
+      # GATING. Runs clang-format --dry-run --Werror over scripts/formatcheck.sh's file list.
+      # Local equivalent, proven on the dev machine before this step was written:
+      #   CLANG_FORMAT=/opt/homebrew/opt/llvm/bin/clang-format scripts/formatcheck.sh
+      - name: clang-format — gate (scripts/formatcheck.sh)
+        run: CLANG_FORMAT=clang-format-"$CLANG_VERSION" bash scripts/formatcheck.sh
+
+      # NON-GATING by construction: --advisory always exits 0. It names every first-party C++ file
+      # clang-format would rewrite, so the size of the ungated remainder is on the record every run.
+      - name: clang-format — advisory report over the whole first-party set (non-gating)
+        run: CLANG_FORMAT=clang-format-"$CLANG_VERSION" bash scripts/formatcheck.sh --advisory
+
+      # embedded_queries.h and version.h are written at CONFIGURE time, not build time, so a configure
+      # is the whole provisioning story for a compile database — no compile needed to lint.
+      - name: Configure a compile database for clang-tidy
+        run: cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: clang-tidy — ADVISORY, never gates
+        continue-on-error: true
+        run: |
+          clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet \
+            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/fastmath.cpp
+
   release:
     name: release (${{ matrix.os }})
     strategy:
