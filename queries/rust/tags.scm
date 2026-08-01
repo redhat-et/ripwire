@@ -66,7 +66,7 @@
     function: (field_expression
         field: (field_identifier) @name)) @reference.call
 
-; H4 (PLAN_h4QualifiedCalls_2026-07-30.md §3.2): `::`-path calls — the DOMINANT Rust call form
+; H4 (§3.2): `::`-path calls — the DOMINANT Rust call form
 ; (`Widget::new()`, `util::deep::deepfn()`, `Self::helper()`, `Widget::bump(&mut w)`), 100% invisible
 ; before this pattern. tree-sitter-rust nests scoped_identifier LEFT — `util::deep::deepfn` is
 ; `scoped_identifier(path: scoped_identifier(path: identifier, name: identifier), name: identifier)` —

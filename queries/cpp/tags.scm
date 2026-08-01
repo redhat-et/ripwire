@@ -51,7 +51,7 @@
   function: (field_expression
     field: (field_identifier) @name)) @reference.call
 
-; QUALIFIED CALLS AT ANY DEPTH (§H4, PLAN_h4QualifiedCalls_2026-07-30.md). tree-sitter-cpp nests
+; QUALIFIED CALLS AT ANY DEPTH (§H4). tree-sitter-cpp nests
 ; qualified_identifier RIGHT-recursively — `rw::inner::targetFn` is
 ; qualified_identifier(scope: ctx, name: qualified_identifier(scope: inner, name: targetFn)) — so the
 ; 2-segment pattern this REPLACES (`name: (identifier)`) bound nothing past the second `::`: 31 in-repo

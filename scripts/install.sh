@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/<owner>/ripwire/main/scripts/install.sh | bash
 #
-# UNTESTED UNTIL THE FIRST GITHUB RELEASE EXISTS (P3/L1, PLAN_audit5Public2026.md): this script is written
+# UNTESTED UNTIL THE FIRST GITHUB RELEASE EXISTS (P3/L1): this script is written
 # against .github/workflows/release.yml's asset naming and the GitHub Releases API contract, but neither
 # has ever actually run — there is no release to download yet. Do not point users at this script until a
 # `vX.Y.Z` tag has produced release assets and the happy path below has been exercised for real.
