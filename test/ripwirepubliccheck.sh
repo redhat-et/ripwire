@@ -159,38 +159,70 @@ fi
 # this does not re-spell the symbol@file.ext-vs-real-address rule by hand — ripwire's own community
 # labels (`str@ingest.cpp:887`, `AGENTS@AGENTS.md:1:0`) are that exact shape and must not trip this.
 #
-# ALLOWLIST, enumerated by scanning the whole committed tree first (see the commit message for the
+# V3 MED-4: the exemption used to be `test/[^/]+\.(sh|py)$` — wholesale, by FILE. That was both too
+# WIDE (any address in a top-level test/*.sh|py file was waved through, real or planted) and too
+# NARROW (a fixture under test/sub/foo.sh was not exempt at all). It is replaced below by an
+# allowlist keyed on the ADDRESS itself: a hit is exempt only if its domain is one of the synthetic
+# domains this repo's fixtures actually construct, wherever in the tree it appears. Anything that
+# is not a synthetic-domain hit gets its own explicit (path, address) exemption instead — see PAIR
+# below — so nothing is waved through just for living in test/.
+#
+# PATH_ALLOW, enumerated by scanning the whole committed tree first (see the commit message for the
 # full list this was built from):
 #   third_party/**                    — vendored upstream code; its own authors' real copyright/
 #                                        LICENSE emails are correct and required, not a leak of ours.
 #   bench/cppbench/dataset.lock       — a benchmark dataset of real historical public open-source
 #                                        commit messages (external corpus, not this repo's identity).
-#   test/*.sh, test/*.py              — test fixtures that legitimately construct synthetic git
-#                                        identities (`git config user.email …@x.com`/`example.invalid`/
-#                                        `example.com`) to test --owners/--pr-context/churn/merge-scout
-#                                        etc., or that document the symbol@file.ext / EMAIL-regex shape
-#                                        in prose (docscommandscheck.sh, showcase_capture.py).
-#                                        test/README.md documents the same synthetic-fixture carve-out
-#                                        for arm 4's credential literals.
 #   docs/docs_commands_build.py       — the generator's OWN source, describing its `symbol@basename.ext`
 #                                        placeholder shape in comments (a literal ".ext", not a real TLD,
 #                                        so find_address()'s TLD check does not itself filter it out).
-EMAIL_ALLOW='^(third_party/|bench/cppbench/dataset\.lock$|test/[^/]+\.(sh|py)$|docs/docs_commands_build\.py$)'
-python3 - "$TMP/tracked.z" "$ROOT" "$EMAIL_ALLOW" > "$TMP/arm5b" <<'PY'
+#
+# SYNTHETIC_DOMAINS — the exact set of throwaway domains found in test fixtures across the whole
+# committed tree (`git config user.email …@x.com`/`@t.com`/`@test.com`/`example.com`/
+# `example.invalid`) to exercise --owners/--pr-context/churn/merge-scout etc. test/README.md
+# documents the same synthetic-fixture carve-out for arm 4's credential literals.
+#
+# PAIR_ALLOW — the `symbol@file.ext` / `sym@file.ext` community-label placeholder shape (a literal
+# ".ext", not a synthetic domain) that two test fixtures use in prose to document ripwire's own
+# `symbol@basename.ext:line:col` label format; each is exempted by its exact (path, address) pair,
+# not by file, so nothing else in those files is waved through.
+PATH_ALLOW='^(third_party/|bench/cppbench/dataset\.lock$|docs/docs_commands_build\.py$)'
+python3 - "$TMP/tracked.z" "$ROOT" "$PATH_ALLOW" > "$TMP/arm5b" 2> "$TMP/arm5b.err" <<'PY'
 import os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')
          for p in open(sys.argv[1], 'rb').read().split(b'\0') if p]
 ROOT = sys.argv[2]
-allow = re.compile(sys.argv[3])
+path_allow = re.compile(sys.argv[3])
+SYNTHETIC_DOMAINS = frozenset( ( 'x.com', 'example.com', 'example.invalid', 't.com', 'test.com' ) )
+PAIR_ALLOW = frozenset( (
+    ( 'test/docscommandscheck.sh', 'sym@file.ext' ),
+    ( 'test/docscommandscheck.sh', 'symbol@file.ext' ),
+    ( 'test/showcase_capture.py', 'symbol@file.ext' ),
+) )
+
 sys.path.insert(0, os.path.join(ROOT, 'docs'))
 try:
     import docs_commands_build as gen
 except ImportError as exc:
-    print(f'IMPORT_FAIL {exc}')
-    sys.exit(0)
+    print(f'REFUSE import error: {exc}')
+    sys.exit(1)
+if not hasattr(gen, 'find_address'):
+    print('REFUSE docs_commands_build has no find_address attribute')
+    sys.exit(1)
+find_address = gen.find_address
+
+# Live positive control — not merely a callable-presence check: PROVES the returned function still
+# recognises an email-shaped address, so an empty scan result below can only mean "genuinely clean",
+# never "the scanner silently stopped matching anything" (a crash — or a renamed/no-op function —
+# previously made this arm pass while a planted address in the committed tree went undetected).
+CONTROL = 'definitely-not-a-real-person@example-control-domain.test'
+if not find_address(f'contact: {CONTROL}'):
+    print(f'REFUSE positive control failed: find_address() did not match a known-good address ({CONTROL})')
+    sys.exit(1)
+
 SELF = 'test/ripwirepubliccheck.sh'
 for p in paths:
-    if p == SELF or allow.match(p):
+    if p == SELF or path_allow.match(p):
         continue
     try:
         data = open(p, 'rb').read()
@@ -200,17 +232,27 @@ for p in paths:
         continue   # binary, skip
     text = data.decode('utf-8', 'replace')
     for i, line in enumerate(text.split('\n'), 1):
-        m = gen.find_address(line)
-        if m:
-            print(f'{p}:{i}: {m.group(0)}')
+        m = find_address(line)
+        if not m:
+            continue
+        addr = m.group(0)
+        domain = addr.split('@', 1)[1].lower() if '@' in addr else ''
+        if domain in SYNTHETIC_DOMAINS:
+            continue
+        if (p, addr) in PAIR_ALLOW:
+            continue
+        print(f'{p}:{i}: {addr}')
 PY
-if grep -q '^IMPORT_FAIL' "$TMP/arm5b"; then
-    no "arm 5b — could not import find_address from docs/docs_commands_build.py: $( cat "$TMP/arm5b" )"
+py_status=$?
+if grep -q '^REFUSE' "$TMP/arm5b"; then
+    no "arm 5b — $( grep '^REFUSE' "$TMP/arm5b" )"
+elif [ "$py_status" -ne 0 ]; then
+    no "arm 5b — scanner crashed (python exit $py_status): $( tail -5 "$TMP/arm5b.err" | tr '\n' ' ' )"
 elif [ -s "$TMP/arm5b" ]; then
-    no "arm 5b — email-shaped address outside the allowlisted vendored/benchmark/test-fixture paths:"
+    no "arm 5b — email-shaped address outside the allowlisted vendored/benchmark paths and synthetic test domains:"
     sed 's/^/          /' "$TMP/arm5b"
 else
-    ok "arm 5b — no email-shaped addresses outside vendored code, benchmark data and test fixtures"
+    ok "arm 5b — no email-shaped addresses outside vendored code, benchmark data and synthetic test domains"
 fi
 
 # ── arm 6: internal-pattern filenames, and docs/ index coverage ───────────────────────────────────
