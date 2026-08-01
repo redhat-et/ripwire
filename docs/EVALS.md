@@ -382,10 +382,10 @@ more than a feature shipped on a hunch.
 
 Listed because the reason is more useful than the silence.
 
-- **"~76% of an agent's token cost is file reads."** This figure appears in a skill description in
-  this repository with **no citation**, while every neighbouring claim in the same paragraph carries
-  one. The research note it referenced does not ship here. Until a source can be named, it is not a
-  published number.
+- **"~76% of an agent's token cost is file reads."** This figure appeared in a skill description in
+  this repository, with **no citation** while every neighbouring claim in the same paragraph carried
+  one, and it has since been removed — it has no in-tree provenance today. The research note it
+  referenced does not ship here. Until a source can be named, it is not a published number.
 - **"+66.7% held-out strict@10" for the mention anchor.** The 66.7% figure that circulates is an
   *absolute* strict file@10 belonging to the *baseline* arm of a *different* experiment
   (anchor-hop expansion, train slice), and that experiment's candidate was **rejected and never
