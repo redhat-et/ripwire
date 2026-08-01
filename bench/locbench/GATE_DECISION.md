@@ -1,12 +1,12 @@
 # GATE_DECISION — acceptance-gate modernization (Phase B1)
 
-**Status: PROPOSAL for a reviewed SPEC decision. Not a policy change.** `compare_runs.py --gate=two-tier`
+**Status: PROPOSAL for a reviewed policy decision. Not a policy change.** `compare_runs.py --gate=two-tier`
 is opt-in code — it changes nothing about the legacy `--enforce` predicate the A7 acceptance run is currently
 blocked on. The numbers below (absolute ceilings, cost weights, the minimum quality-per-cost ratio `R`) are
 proposals grounded in measured evidence, not decided defaults; the flags have no built-in default and the
 tool refuses to run in `two-tier` mode until a human supplies them explicitly. See
-`PLAN_researchImprove2026.md` Phase B1 and `research/2026-07/R4-eval-methodology.md` for the research this
-implements, and `PLAN_systemAudit2026.md` §"A7 execution detail and pickup state" for why this matters right
+the Phase B1 research and R4 eval-methodology notes for the research this
+implements, and the A7 execution history for why this matters right
 now: the A7 router candidate is a real, measured +33.3pp strict file@10 win that the legacy flat-relative-cap
 predicate rejects outright because of a warm/cold/token cost increase, with no way to express "is this
 tradeoff worth it" — only "did every cost dimension individually stay under a fixed relative cap."
@@ -93,7 +93,7 @@ gold_funcs mismatch) run unconditionally before either gate, in both modes — u
 | `--cost-weight-token` | `0.5` | weight of token p50 delta in the cost scalar |
 
 The three policy numbers have **no default on purpose**: baking in a specific SLA ceiling or acceptance
-ratio as a silent default would itself be the SPEC decision this memo is asking for, not a code change. If
+ratio as a silent default would itself be the policy decision this memo is asking for, not a code change. If
 `--gate=two-tier` is passed without all three, the tool refuses before reading any input files.
 
 ## Legacy byte-identity proof
@@ -114,15 +114,14 @@ produces byte-identical output to `--gate` omitted.
 Two very different absolute-latency reference points exist in the record, and they disagree by roughly an
 order of magnitude, which is itself the finding this memo surfaces for review:
 
-**A6 canonical representative-budget numbers** (`PLAN_systemAudit2026.md` A6 closeout, `Mac17,8`,
+**A6 canonical representative-budget numbers** (A6 closeout, `Mac17,8`,
 `bench/representative_perfgate.sh`): a fixed, content-and-path-hash-pinned **480-file / 1,120-symbol /
 320-edge / 183,040-byte synthetic fixture**. Independent five-sample closeout: warm rich-index `--for`
 **21.866 ms** (budget 30 ms), cold **54.979 ms** (budget 100 ms). This is a controlled, small, CI-friendly
 regression gate — it is not representative of LocBench's real-world repo sizes.
 
-**A7 real-corpus absolute numbers**, computed directly from the actual release artifacts referenced in
-`PLAN_systemAudit2026.md` (`/tmp/a7-v2-baseline-heldout243-release-all.json`,
-`/tmp/a7-v2-router-heldout243-release-all.json`, arm=`for`, N=243 held-out real GitHub repos):
+**A7 real-corpus absolute numbers**, computed directly from the actual A7 release artifacts
+(baseline and router-candidate held-out result JSONs, arm=`for`, N=243 held-out real GitHub repos):
 
 | | warm p50 | warm p95 | cold p50 | cold p95 | token p50 | token p95 |
 |---|---|---|---|---|---|---|
@@ -171,7 +170,7 @@ unopinionated starting point per the task's instruction to give the weights (not
 ceilings) a default.
 
 ## Appendix — file@3 / function@3 k-sweep (NOT applied; belongs in `run_locbench.py`, which is SHA-pinned
-mid-A7 per `PLAN_systemAudit2026.md`)
+mid-A7)
 
 Two different situations, worth separating:
 
@@ -186,7 +185,7 @@ Two different situations, worth separating:
   computes `fn5`/`fn10` (`acc_all_at(nranks, 5|10)`) but only as a corpus-level sum, not per-instance, so it
   cannot feed the paired bootstrap comparator at an arbitrary k. This needs a `func_worst` field mirroring
   the existing `file_worst`/`all_file_worst` pattern. Proposed patch (NOT applied — `run_locbench.py` is
-  SHA-pinned mid-A7; PLAN_researchImprove2026.md Phase B1 explicitly defers this):
+  SHA-pinned mid-A7; Phase B1 explicitly defers this):
 
 ```diff
 --- a/bench/locbench/run_locbench.py

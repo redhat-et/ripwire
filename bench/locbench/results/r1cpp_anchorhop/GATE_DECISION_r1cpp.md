@@ -1,6 +1,6 @@
 # GATE_DECISION — R1-cpp anchor-hop retry (pre-registered 2026-07-22, BEFORE any candidate C++ run)
 
-**Task:** PLAN_audit5Public2026 R1-cpp — retry the R1 anchor-hop expansion with the **C++ metric primary**
+**Task:** R1-cpp — retry the R1 anchor-hop expansion with the **C++ metric primary**
 (the owner is C++-first; the recorded R1 positive signal was C++: SFML strict@10 31.3% → 33.9%, +2.6pp at
 α=0.10 while Python LocBench held-out gave +0.41pp / LB +0.00pp → honest REJECT). This document is written
 and committed in spirit **before** the calibration sweep and before any held-out candidate run; nothing
@@ -95,7 +95,7 @@ No re-runs after seeing numbers.
 ## Shipping-surface decision tree (decided now, before numbers)
 
 1. C++ gate PASS + both Python guards HOLD → **ship always-on** (the same default-on surface R1 specified;
-   SPEC retrieval addendum updated with the R1-cpp gate record + pruning-restoration contract).
+   the retrieval design record updated with the R1-cpp gate record + pruning-restoration contract).
 2. C++ gate PASS + Python quality guard FAILS → **opt-in flag, default off** (`RIPWIRE_ANCHORHOP=1` stays
    an env/eval surface; no language-conditional ranking — a ranker that behaves differently per corpus
    language is rejected here as a determinism/simplicity product smell).

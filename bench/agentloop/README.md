@@ -5,8 +5,7 @@ Everything ripwire has measured so far (`bench/locbench/`, `bench/ANSWERQUALITY.
 measured the thing that actually matters: **does giving a coding agent ripwire change whether it
 solves the task.** This directory is that harness.
 
-Design source: `PLAN_researchImprove2026.md` Phase B4 and
-`research/2026-07/R4-eval-methodology.md` ("Minimal agent-in-the-loop eval design").
+Design source: the Phase B4 research and R4 eval-methodology notes ("Minimal agent-in-the-loop eval design").
 
 **Status: EXEC STEP WIRED, NOT YET RUN.** `select_tasks.py` and `analyze.py` are complete and runnable
 today. `run_agentloop.py`'s run-matrix/schema/`--dry-run` machinery is complete and runnable, and
@@ -35,7 +34,7 @@ https://arxiv.org/html/2601.11868v1):
 (https://arxiv.org/pdf/2605.12925) — always report across seeds, never a single run.
 
 **Tasks:** SWE-bench-Lite instances (`princeton-nlp/SWE-bench_Lite`, test split), **repository-disjoint
-from the LocBench train split** — see "Task selection" below. `PLAN_researchImprove2026.md` targets
+from the LocBench train split** — see "Task selection" below. The design targets
 30-40; SWE-bench-Lite's small repo universe (12 repos total) means the actual achievable count under a
 fair per-repo cap is smaller — see the honest count in `tasks.lock` and the note below.
 
@@ -57,7 +56,7 @@ comment for the exact attribution; `compare_runs.py` itself is not imported or m
 
 ### Decision rule (draft — confirm before spending money)
 
-Mirrors the two-tier gate `PLAN_researchImprove2026.md` Phase B1 proposes for LocBench, adapted here:
+Mirrors the two-tier gate the Phase B1 design proposes for LocBench, adapted here:
 
 1. **Hard floor:** resolved-rate delta bootstrap 95% lower bound must be `> 0` (ripwire_mcp beats
    baseline with high confidence, not just on the point estimate).
