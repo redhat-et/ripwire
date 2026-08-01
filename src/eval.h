@@ -9,7 +9,7 @@
 //   BM25    = file docs of WHOLE symbol+callee names               (lexical baseline)
 //   BM25sub = file docs of camelCase/snake SUBTOKENS               (deterministic-relatedness candidate, E#2)
 //   fused   = RRF(ripwire, BM25sub)                                 (does structure ADD on top of lexical?)
-//   anchored= anchoredLexicalRank over BM25body                     (--for --anchor's LARGER-style fusion, AUDIT3 steal #1)
+//   anchored= anchoredLexicalRank over BM25body                     (--for --anchor's LARGER-style fusion)
 // Falls back to the current git diff (n=1) when no history is available. NOT a golden: on a live repo the
 // numbers move as commits land — it's a benchmark you re-run, not a byte-stable snapshot.
 
@@ -83,7 +83,7 @@ inline std::vector<float> bm25Seeded( const std::vector<HashMap<std::string, int
     return sc;
 }
 
-// anchored (--for --anchor's fusion, file-granularity mirror; AUDIT3 steal #1): lift the SHIPPING lexical
+// anchored (--for --anchor's fusion, file-granularity mirror): lift the SHIPPING lexical
 // base (BM25body — what --for's lexicalScores indexes) to per-symbol anchor confidences, run the REAL
 // anchoredLexicalRank (top-N symbol anchors → PPR personalization → λ score-blend), then score a file by
 // its BEST symbol (a max — a sum would multiply the file-constant lexical term by symbol count and distort
@@ -422,7 +422,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
 }
 
 // ── SESSION-TRACE-MINED RETRIEVAL EVAL (--eval-mined) ─────────────────────────────────────────────────
-// DESIGN_traceEvals.md. Consumes a `minedpair.jsonl` artifact (bench/mine_traces.py) — one mined
+// Consumes a `minedpair.jsonl` artifact (bench/mine_traces.py) — one mined
 // (query, gold_files) pair per line, mined from THIS developer's own local Claude Code session
 // transcripts. File-granularity sibling of the two evals above: gold is a SET of files (§2.2: no seed
 // file — the query text is the probe, same posture as --eval-retrieval, not --eval's seed-based one).

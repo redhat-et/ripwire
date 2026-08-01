@@ -193,7 +193,7 @@ inline std::string sinceLogArgs( const SinceScope& scope, const char* fallbackSi
 // added while resolving) — has zero history lines anywhere in the stream. It read churn=0, it was missing from
 // --owners entirely, and NOTHING disclosed it: a measured-looking zero, which is the one shape this file's
 // whole disclosure apparatus exists to prevent. Measured on the ripwire repo before this fix: 2 of 1028
-// tracked paths (IDEAS_fieldNotes_2026-07-25.md, NEXT_SESSION_2026-07-26.md) had no --owners row at all while
+// tracked paths had no --owners row at all while
 // being ordinary, present, tracked files.
 //
 // `-c` (combined diff) lists, for a merge, exactly the files that differ from EVERY parent — precisely "what
@@ -674,8 +674,8 @@ inline std::string gitSpellingOfPath( const std::string& repoToplevel, const std
 }
 
 // Build THE index the join reads: the git path each ingested file WOULD be spelled as → its fileId. One
-// offset per root, because a workspace merges N checkouts and each has its own repo toplevel
-// (DESIGN_multiRoot.md §5). `onlyRoot` != UINT32_MAX ⇒ index ONLY that root's files — one repo's history must
+// offset per root, because a workspace merges N checkouts and each has its own repo toplevel.
+// `onlyRoot` != UINT32_MAX ⇒ index ONLY that root's files — one repo's history must
 // never bind to a same-named file in another root. UINT32_MAX over a MERGED ingest covers every root, and the
 // one thing that can then go wrong — two roots deriving the identical repo-relative path — is refused rather
 // than arbitrated (UINT32_MAX stored in the map ⇒ bindGitPathToFile reports it ambiguous).
@@ -871,7 +871,7 @@ inline void mapChurnCountsOntoFiles( const HashMap<std::string, std::uint32_t>& 
 
 // Per-commit sets of changed files (resolved to ingested file ids), for co-change mining. Commits larger
 // than maxFiles are dropped — bulk renames / reformats / license sweeps destroy the coupling signal.
-// onlyRoot (multi-root, DESIGN_multiRoot.md §5): != UINT32_MAX ⇒ resolve this repo's paths ONLY against
+// onlyRoot (multi-root): != UINT32_MAX ⇒ resolve this repo's paths ONLY against
 // files of that root (ing.fileRoot) — one repo's history must never suffix-match a same-named file in
 // another root. Default = all files (single-root behavior, byte-identical).
 //
@@ -957,7 +957,7 @@ inline std::int64_t approxMonthsAgoEpoch( unsigned months )
     return std::int64_t( std::mktime( &tmv ) );    // mktime normalizes the month/year underflow, like git
 }
 
-// Y2 (AUDIT5 P2) — the RAW, per-commit (epoch, changed-paths) stream from ONE `git log --name-only` walk
+// The RAW, per-commit (epoch, changed-paths) stream from ONE `git log --name-only` walk
 // over `coSince`: the parsed-but-UNRESOLVED form gitCoChangeAndChurn needs. Split out of that function so
 // it can be MEMOIZED (quality::gitCoChangeAndChurnCached) independent of any particular ingest's fileId
 // space — paths stay raw repo-relative strings here; resolveCommitStream (below) resolves them against a
@@ -1076,7 +1076,7 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
 // for identity). Degrades cleanly: no git → empty sets + all-zero churn. Determinism note: `churnMonths`
 // resolves through approxMonthsAgoEpoch (wall-clock-relative, same as the gitChurnCounts it replaces).
 //
-// Y2 (AUDIT5 P2): this UNCACHED form is now a thin raw-walk + resolve composition (below) — kept as-is for
+// This UNCACHED form is now a thin raw-walk + resolve composition (below) — kept as-is for
 // any caller that doesn't want the memoized path. The two rich-verb call sites (main.cpp's --metrics/--for
 // amp=/churn= computation) go through quality::gitCoChangeAndChurnCached instead, which memoizes exactly
 // the expensive part (gitLogNameOnlyRaw) this function also calls.
@@ -1210,7 +1210,7 @@ inline std::vector<float> churnTeleport( const std::string& root, const IngestRe
     return churnPriorFromFreq( ing, freq, !sets.empty() );
 }
 
-// Multi-root --rank-by=churn (DESIGN_multiRoot.md §5): mine each root's history AGAINST ITS OWN files
+// Multi-root --rank-by=churn: mine each root's history AGAINST ITS OWN files
 // (per-root isolation), accumulate ONE per-file frequency table, then apply the same Laplace-smoothed
 // symbol weighting once — a joint prior over the merged graph without ever mixing repo histories.
 // Caveat (documented at the emit site): commit-count scales are per-repo; the joint prior treats a
@@ -1665,7 +1665,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
     return false;
 }
 
-// ── co-change prior boost on the --for lens rank (B3, PLAN_researchImprove2026) ───────────────────
+// ── co-change prior boost on the --for lens rank (B3) ───────────────────────────────────────────────
 //
 // Multi-file localization is the weakest eval stratum, and the literature's fix is history priors: files
 // that historically change WITH the files the ranker already believes in are likely part of the same

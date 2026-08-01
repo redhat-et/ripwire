@@ -1,6 +1,6 @@
 #pragma once
 
-// docdrift.h — `--doc-drift`, the DOC-ANCHOR VERIFIER (IDEAS_fieldNotes_2026-07-24.md §3).
+// docdrift.h — `--doc-drift`, the DOC-ANCHOR VERIFIER.
 // Evidence: four parallel audit agents burned tokens re-verifying stale doc claims — a §Status six weeks
 // wrong, dead `file:line` anchors, `[16]` arrays that are now 18, "= 10" constants now 15. A doc's PROSE is
 // not checkable, but a doc's ANCHORS are: they name a file, a line, a symbol, or a number that the index
@@ -1713,9 +1713,9 @@ inline HashMap<std::string, std::uint32_t> buildPathMemo( const IngestResult& in
 }
 
 // §P11.10 — the report opened with two screens of drift="0" rows before the first actionable doc: rows were
-// in path order, and ripwire's own alphabetically-early docs (AUDIT2_…, AUDIT3_…, AUDIT5_…) happen to be
+// in path order, and ripwire's own alphabetically-early docs happen to be
 // audit ledgers whose every failed anchor is a DATED record, so they carry drift="0" and led anyway, while
-// the worst live rot (DESIGN_pathPreciseInclude.md, drift="14") sat far below the fold.
+// the worst live rot (drift="14") sat far below the fold.
 //
 // Order by LIVE drift descending, path ascending to break ties. The dated-record rows need no separate
 // demotion rule and get none: a fully-dated doc IS drift="0" by construction, so it sinks on the same key

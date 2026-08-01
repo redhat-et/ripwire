@@ -1,7 +1,7 @@
 #pragma once
 
 // editcheck.h — the shared contract-comparison core behind --edit-check=SYM (CLI, B11/L5) and the MCP
-// edit_check verb (L4, PLAN_audit5Public2026.md). "Did MY edit change a contract someone depends on", at
+// edit_check verb (L4). "Did MY edit change a contract someone depends on", at
 // edit time, for ONE symbol — compares the WORKING-TREE symbol against the git-HEAD baseline
 // (computeHeadSnapshot — the SAME qheadsnap/qsnap cache family --quality-delta's auto-baseline uses, so a
 // warm run is a cache-blob read, never a fresh git-archive/ingest/clone-detection pass). main.cpp's
@@ -150,7 +150,7 @@ inline std::string editCheckAmbiguousMessage( std::string_view spec, std::span<c
 // status is exactly one of unchanged / new-symbol / contract-change (see the CLI --edit-check doc comment in
 // main.cpp for the full semantics). `root` MUST be spelled exactly as the caller's `ing`/`g` were built
 // against — baselineCanonId keys are root-relative, so a mismatched root spelling manufactures phantom
-// contract-changes (the same AUDIT5 D1 class of bug quality_delta's MCP verb already guards against).
+// contract-changes (the same class of bug quality_delta's MCP verb already guards against).
 inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const Graph& g, const std::string& root,
                                                   std::size_t maxFileBytes, const std::vector<std::string>& excludes,
                                                   NodeId focus, std::span<const NodeId> overloadNodes )
