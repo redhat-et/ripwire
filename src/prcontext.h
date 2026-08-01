@@ -365,7 +365,7 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
     return result;
 }
 
-// R4 / RESEARCH_outputEconomy lever 4: the per-file DETAIL trim ladder for --pr-context under a token budget.
+// R4 / lever 4: the per-file DETAIL trim ladder for --pr-context under a token budget.
 // The bundle's cost is entirely diff-size-driven and was unbounded (26.3K tokens on a 15-file diff; a 213-file
 // diff is far worse). Under a budget the graceful move is NOT to drop changed files — a reviewer needs to know
 // EVERY file that changed — but to degrade the DEPTH per file, deepest (most nested/expensive) detail first,
@@ -593,7 +593,7 @@ inline std::pair<std::string, std::vector<NodeId>> splitDocSections( const Inges
 // keeping every changed file present structurally. Deterministic: files emitted in path order; per-file
 // symbols in id order; every list independently sorted; the chosen trim level is a pure function of the
 // rendered byte size. Returns 0 always (a review evidence bundle never fails the pipeline).
-// Multi-root (DESIGN_multiRoot.md §5/§7): `onlyRoot` (!= UINT32_MAX) isolates the git signals (co-change, owners)
+// Multi-root: `onlyRoot` (!= UINT32_MAX) isolates the git signals (co-change, owners)
 // to that one repo's files — the changed-file mask is already per-root (built with the same onlyRoot), and the
 // blast radius/tests/callers deliberately run on the WHOLE merged graph so cross-root evidence edges appear.
 // `rootLabel` (non-empty) adds a `root="..."` attribute to the <pr-context> header so a per-root section in a

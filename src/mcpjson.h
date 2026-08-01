@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpjson.h — JSON-RPC 2.0 protocol layer for --mcp (SPEC §5). Hand-rolled minimal JSON
+// mcpjson.h — JSON-RPC 2.0 protocol layer for --mcp. Hand-rolled minimal JSON
 // parse/escape helpers (sufficient for these well-formed shapes) — no JSON library dependency.
 // Extracted from mcp.h (the mcp.h/main.cpp concern-split): the pure protocol layer, no index
 // dependency. Included by mcpindex.h (and thus by mcpverbs.h / mcpedit.h / mcp.h).

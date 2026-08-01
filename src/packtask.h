@@ -1,7 +1,7 @@
 #pragma once
 
 // packtask.h — the shared task-bundle assembler behind --pack-task (CLI) and the MCP explore/pack_task verb
-// (L4, PLAN_audit5Public2026.md). ONE function builds the fixed 5-section budget-shared bundle (routed lens
+// (L4). ONE function builds the fixed 5-section budget-shared bundle (routed lens
 // ranking > full bodies > 1-hop callers > field notes > tests_to_run) so the two front doors can never drift
 // in shape — main.cpp's runPackTask() and mcpverbs.h's packTaskText() both call packTaskBundleText() below
 // with their own already-computed LensRanking. The ranking PRIMITIVES (chooseForRanker / lexicalScores /
@@ -42,7 +42,7 @@ struct LensRanking
     std::string        routeNote;
     std::string        mentionNote;
     std::string        boostNote;
-    std::string        docMentionNote;             // AUDIT5 R5: doc<->code mention-edge surfacing (see mention.h
+    std::string        docMentionNote;             // R5: doc<->code mention-edge surfacing (see mention.h
                                                     // applyDocMentionBoost) — "" unless a resolved symbol's
                                                     // g.mentions docs actually got lifted.
     float              maxLexicalScore = 0.0f;    // R4: top raw BM25 score BEFORE --anchor/mention/cochange

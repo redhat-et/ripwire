@@ -1,6 +1,6 @@
 #pragma once
 
-// pageview.h — §P8 (PLAN_outputAudit_2026-07-28.md, "Contract-level" bullets 1+2): the ONE paging window
+// pageview.h — §P8 ("Contract-level" bullets 1+2): the ONE paging window
 // and the ONE root-element disclosure every high-cardinality verb shares, so the vocabulary cannot drift
 // between them and a single parser reads them all.
 //

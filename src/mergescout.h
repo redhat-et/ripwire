@@ -1,12 +1,12 @@
 #pragma once
 
-// mergescout.h — L1: --merge-scout=REF[,REF...] (PLAN_agentLeverage2026.md §L1), the read-only
+// mergescout.h — L1: --merge-scout=REF[,REF...], the read-only
 // cross-branch overlap oracle. Evidence: a 2026-07-14 round hand-computed a landing order for 5
 // concurrent agent branches by eyeballing which touched the same symbols — pure set intersection over
 // data ripwire already has.
 //
 // For each REF, materialize (git-archive, read-only) BOTH its own tree and its merge-base-with-HEAD
-// tree — reusing quality.h's materializeCommitTree, and (Y1, AUDIT5 P1) ingest()'s own incremental
+// tree — reusing quality.h's materializeCommitTree, and (Y1, P1) ingest()'s own incremental
 // content-hash cache via a per-sha cache path (the SAME convention quality.h:1017-1021 uses for its own
 // HEAD/ref ingest cache: a resolved commit sha is immutable, so the cache can never go stale — own "qms"
 // blob family, see msCachePath below) — then diff per-symbol RAW-BODY hashes between them, keyed exactly
@@ -129,7 +129,7 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
     return out;
 }
 
-// Y1 (AUDIT5 P1) — the per-sha committish INGEST cache family. `committish` is always a fully-resolved
+// Y1 (P1) — the per-sha committish INGEST cache family. `committish` is always a fully-resolved
 // commit sha by the time it reaches here (resolveCommittish / merge-base already peeled any symbolic
 // ref), so its tree is immutable — the SAME per-sha cache convention quality.h uses for its own
 // qheadsnap/qbody families (shaKeyedCachePath + a real cacheFile handed to ingest()), but its OWN "qms"
@@ -237,7 +237,7 @@ struct ScoutResult
 // is two small per-repo maps; copying it once per lookup is cheap next to the git-archive + ingest it
 // amortizes away on a memo hit.
 //
-// Y1 (AUDIT5 P1) — bounded peak memory: a SymTreeIndex shadows the WHOLE tree's symbol set (one entry per
+// Y1 (P1) — bounded peak memory: a SymTreeIndex shadows the WHOLE tree's symbol set (one entry per
 // real-bodied symbol in the repo), so holding every arm's tree alive for the whole call — as the memo did
 // before — means peak RSS scales with arm count on a multi-arm scout. The caller now REGISTERS every
 // planned `get(sha)` up front via `reserve(sha)` (once per occurrence across all arms) before the diff
