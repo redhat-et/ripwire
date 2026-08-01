@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // `git -C root diff HEAD` → a changed-file mask (parallel to ing.files). Returns {mask, ok};
@@ -538,4 +538,4 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     std::fprintf( out, "]}" );
 }
 
-}   // namespace ctx
+}   // namespace rw

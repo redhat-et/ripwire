@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace ctx::sortutil
+namespace rw::sortutil
 {
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
@@ -153,4 +153,4 @@ inline void radixSortByFromTo( std::vector<Edge>& values )
     radixSortByFromTo( values, scratch );
 }
 
-}   // namespace ctx::sortutil
+}   // namespace rw::sortutil

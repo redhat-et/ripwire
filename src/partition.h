@@ -69,7 +69,7 @@
 #include <string>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace packpartition
 {
@@ -502,7 +502,7 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
         // (a fan-out plan hands each agent a budget, and a per-agent size that reads slightly HIGH is the safe
         // direction) and now goes through the same tokensForEmittedBytes seam every other charged emitter uses,
         // with the rate named in kPartitionLegend so a reader can reconcile it against a map's est_tokens.
-        const std::size_t estTokens = ctx::tokensForEmittedBytes( b.xml.size(), ctx::kMinBytesPerToken );
+        const std::size_t estTokens = rw::tokensForEmittedBytes( b.xml.size(), rw::kMinBytesPerToken );
         char h[ 288 ];
         if( index < 0 ) std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" symbols=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
                                        role, b.assigned, b.xml.size(), estTokens, estTokens );
@@ -554,4 +554,4 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
 }
 
 }   // namespace packpartition
-}   // namespace ctx
+}   // namespace rw

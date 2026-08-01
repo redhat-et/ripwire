@@ -21,7 +21,7 @@
 #include <cstddef>
 #include <string_view>
 
-namespace ctx
+namespace rw
 {
 namespace namesplit
 {
@@ -64,4 +64,4 @@ inline std::string_view stripTrailingGroup( std::string_view f, char open, char 
 inline std::string_view stripTemplateArgs( std::string_view f ) noexcept { return stripTrailingGroup( f, '<', '>' ); }
 
 }   // namespace namesplit
-}   // namespace ctx
+}   // namespace rw

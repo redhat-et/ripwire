@@ -25,7 +25,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 struct Recalled { std::uint32_t fileId; float score; docparse::GeneratedDocReason generated; };
@@ -639,4 +639,4 @@ inline void writeRecall( std::FILE* out, const IngestResult& ing, const std::vec
     std::fwrite( bundle.text.data(), 1, bundle.text.size(), out );
 }
 
-}   // namespace ctx
+}   // namespace rw

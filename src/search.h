@@ -21,7 +21,7 @@
 
 #include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade when regex matching throws mid-scan (never terminate)
 #include "docparse.h"      // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
-#include "filter.h"        // §P11.1: ctx::pathTierOf — the shared source/test/doc ORDERING tier
+#include "filter.h"        // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "model.h"
 
 #include <algorithm>
@@ -39,7 +39,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 inline std::uint32_t triAt( const std::string& s, std::size_t i ) noexcept
@@ -994,4 +994,4 @@ inline std::vector<GrepHit> grepHits( const IngestResult& ing, const std::string
     return grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).first( rowCount ), ctxBefore, ctxAfter );
 }
 
-}   // namespace ctx
+}   // namespace rw

@@ -10,7 +10,7 @@
 #include "mcpindex.h"
 #include "hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 
-namespace ctx
+namespace rw
 {
 
 // ─── W4-#8: symbol-addressed EDIT verbs (replace_symbol_body / insert_before_symbol / insert_after_symbol) ───
@@ -431,4 +431,4 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     return oc;
 }
 
-}   // namespace ctx
+}   // namespace rw

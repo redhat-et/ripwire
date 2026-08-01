@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // one call-site the index RESOLVED: the (fromSymbol, calleeName) key + the pinned target `to`. buildGraph
@@ -81,4 +81,4 @@ struct ScipOverlay
     bool empty() const noexcept { return coveredFrom.empty(); }
 };
 
-}   // namespace ctx
+}   // namespace rw

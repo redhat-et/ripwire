@@ -1,6 +1,6 @@
 // jsonwalk_unit.cpp — W2-M0 differential driver for the jsonStringEnd hoist.
 //
-// The hoist claims to be a PURE refactor: ctx::jsonStringEnd (jsonesc.h) is now the one escape-aware JSON
+// The hoist claims to be a PURE refactor: rw::jsonStringEnd (jsonesc.h) is now the one escape-aware JSON
 // string walk, and both former owners forward into it — mcpdetail::stringEnd (mcpjson.h, npos on an
 // unterminated string) and minedjson::skipString (eval.h, one-past-the-close and clamped to size()).
 //
@@ -19,9 +19,9 @@
 //
 // Run by test/jsonwalkcheck.sh. Prints "  PASS/FAIL <name>" lines and a final UNIT ALL PASS.
 
-#include "mcpjson.h"     // ctx::mcpdetail::stringEnd  — the live (forwarding) implementation
-#include "eval.h"        // ctx::minedjson::skipString — the live (forwarding) implementation
-#include "jsonesc.h"     // ctx::jsonStringEnd         — the shared core
+#include "mcpjson.h"     // rw::mcpdetail::stringEnd  — the live (forwarding) implementation
+#include "eval.h"        // rw::minedjson::skipString — the live (forwarding) implementation
+#include "jsonesc.h"     // rw::jsonStringEnd         — the shared core
 
 #include <cstdio>
 #include <string>
@@ -69,7 +69,7 @@ bool probe( const std::string& s, std::size_t pos, std::string& whyOut )
 {
     ++checkCount;
 
-    const std::size_t liveEnd   = ctx::mcpdetail::stringEnd( s, pos );
+    const std::size_t liveEnd   = rw::mcpdetail::stringEnd( s, pos );
     const std::size_t legacyEnd = legacyStringEnd( s, pos );
     if( liveEnd != legacyEnd )
     {
@@ -78,13 +78,13 @@ bool probe( const std::string& s, std::size_t pos, std::string& whyOut )
     }
 
     // the core IS what the mcp wrapper returns — same convention, no adaptation
-    if( ctx::jsonStringEnd( s, pos ) != legacyEnd )
+    if( rw::jsonStringEnd( s, pos ) != legacyEnd )
     {
         whyOut = "jsonStringEnd != legacy stringEnd at " + show( s ) + " pos=" + std::to_string( pos );
         return false;
     }
 
-    const std::size_t liveSkip   = ctx::minedjson::skipString( s, pos );
+    const std::size_t liveSkip   = rw::minedjson::skipString( s, pos );
     const std::size_t legacySkip = legacySkipString( s, pos );
     if( liveSkip != legacySkip )
     {
@@ -174,11 +174,11 @@ int main()
         const std::string unterminated = "\"ab";
 
         bool clean = true;
-        if( ctx::mcpdetail::stringEnd( terminated, 0 ) != 3 )                  { no( "stringEnd: closing-quote INDEX on a terminated string" ); clean = false; }
-        if( ctx::minedjson::skipString( terminated, 0 ) != 4 )                 { no( "skipString: ONE PAST the close on a terminated string" ); clean = false; }
-        if( ctx::mcpdetail::stringEnd( unterminated, 0 ) != std::string::npos ){ no( "stringEnd: npos on an unterminated string (H3 truncation detector)" ); clean = false; }
-        if( ctx::minedjson::skipString( unterminated, 0 ) != unterminated.size() ) { no( "skipString: clamps to size() on an unterminated string" ); clean = false; }
-        if( ctx::minedjson::skipString( "abc", 1 ) != 1 )                      { no( "skipString: not-a-quote precondition returns pos unchanged" ); clean = false; }
+        if( rw::mcpdetail::stringEnd( terminated, 0 ) != 3 )                  { no( "stringEnd: closing-quote INDEX on a terminated string" ); clean = false; }
+        if( rw::minedjson::skipString( terminated, 0 ) != 4 )                 { no( "skipString: ONE PAST the close on a terminated string" ); clean = false; }
+        if( rw::mcpdetail::stringEnd( unterminated, 0 ) != std::string::npos ){ no( "stringEnd: npos on an unterminated string (H3 truncation detector)" ); clean = false; }
+        if( rw::minedjson::skipString( unterminated, 0 ) != unterminated.size() ) { no( "skipString: clamps to size() on an unterminated string" ); clean = false; }
+        if( rw::minedjson::skipString( "abc", 1 ) != 1 )                      { no( "skipString: not-a-quote precondition returns pos unchanged" ); clean = false; }
         if( clean ) ok( "the two return conventions are preserved and distinct (npos vs clamp; index vs one-past)" );
     }
 
@@ -189,7 +189,7 @@ int main()
         {
             const char c        = char( b );
             const bool expected = ( b == ' ' || b == '\t' || b == '\n' || b == '\r' );
-            if( ctx::isJsonWs( c ) != expected )
+            if( rw::isJsonWs( c ) != expected )
             {
                 char msg[ 96 ];
                 std::snprintf( msg, sizeof( msg ), "isJsonWs disagrees on byte 0x%02x", unsigned( b ) );
@@ -199,7 +199,7 @@ int main()
             }
         }
         // the bytes JSON does NOT call whitespace, named explicitly (the std::isspace trap)
-        if( clean && ( ctx::isJsonWs( '\v' ) || ctx::isJsonWs( '\f' ) ) )
+        if( clean && ( rw::isJsonWs( '\v' ) || rw::isJsonWs( '\f' ) ) )
         { no( "isJsonWs must reject VT/FF — std::isspace accepts them, JSON does not" ); clean = false; }
         if( clean ) ok( "isJsonWs == RFC 8259 §2 over all 256 bytes (VT/FF rejected)" );
     }

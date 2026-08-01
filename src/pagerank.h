@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <span>
 
-namespace ctx
+namespace rw
 {
 
 struct PageRankConfig
@@ -20,4 +20,4 @@ struct PageRankConfig
 unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double> weightedOutDegree,
                          std::span<const double> teleport, std::span<double> rank, PageRankConfig config = {} );
 
-} // namespace ctx
+} // namespace rw

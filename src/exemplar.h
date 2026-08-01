@@ -48,7 +48,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ── tunables (HEURISTICS — defensible defaults, documented in the XML header the verb emits) ──────────────

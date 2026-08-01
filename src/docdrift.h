@@ -99,7 +99,7 @@
 #include "ingest.h"       // isSkippedCrawlDir — the SHARED crawl denylist, for the on-disk existence probe
 #include "mention.h"      // mention_detail::pathSuffixMatches — the whole-segment suffix match
 #include "workspace.h"    // wsdetail::segmentsOf
-#include "svector.h"      // ctx::svector — small basename→path lists
+#include "svector.h"      // rw::svector — small basename→path lists
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 #include "gitstamp.h"     // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
 
@@ -116,7 +116,7 @@
 #include <thread>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace docdrift
 {
@@ -290,7 +290,7 @@ inline bool isIndexedDocPath( std::string_view path )
 }
 
 // Split a qualified spelling into its final segment and the scope directly above it:
-// `ctx::docdrift::foo` → { foo, docdrift }, `Type.method` → { method, Type }, `foo` → { foo, "" }.
+// `rw::docdrift::foo` → { foo, docdrift }, `Type.method` → { method, Type }, `foo` → { foo, "" }.
 // The scope is what tells an external API (`infra::DispatchSystem`, `String.toSlug`) from one of ours.
 inline void splitQualified( std::string_view s, std::string_view& leaf, std::string_view& scope )
 {
@@ -473,7 +473,7 @@ inline std::vector<std::pair<std::size_t, std::size_t>> backtickSpans( std::stri
     return spans;
 }
 
-// What a backtick span names, or an empty `name` when it names nothing: `foo()` → foo, `ctx::bar` → bar,
+// What a backtick span names, or an empty `name` when it names nothing: `foo()` → foo, `rw::bar` → bar,
 // `src/x.h` → {} (a path), `--flag` → {} (a flag). `hadParens` records the explicit call spelling, which is
 // strong enough evidence on its own to skip the code-shape bar.
 struct SpanName
@@ -1261,7 +1261,7 @@ struct RepoPaths
 {
     std::vector<std::string>                                 rel;      // root-relative, sorted
     std::vector<std::string>                                 auxFull;  // unparsed-but-textual files, absolute, sorted
-    HashMap<std::string, ctx::svector<std::uint32_t, 2>>     byBase;   // basename → indices into `rel`
+    HashMap<std::string, rw::svector<std::uint32_t, 2>>     byBase;   // basename → indices into `rel`
 };
 
 // The AUXILIARY presence corpus: text files the INDEX does not parse but a doc legitimately names symbols
@@ -2064,4 +2064,4 @@ inline void writeDocDrift( std::FILE* out, const DriftResult& res, std::size_t m
     writeDocDriftPage( out, res, maxPerDoc, gateability, 0, 0 );
 }
 
-}}   // namespace ctx::docdrift
+}}   // namespace rw::docdrift

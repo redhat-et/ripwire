@@ -107,7 +107,7 @@ if command -v "$CXX" >/dev/null 2>&1; then
 #include <cstdio>
 #include <string>
 #include <string_view>
-using namespace ctx;
+using namespace rw;
 int main()
 {
     // ccJsonEscape: a lone 0xE9 (invalid UTF-8) becomes the replacement char �; valid stays valid JSON.

@@ -28,7 +28,7 @@
 #include <vector>
 #include <algorithm>
 
-namespace ctx
+namespace rw
 {
 
 // One workspace root, post-hygiene. `arg` is the path as the user passed it (post git-URL resolution) —
@@ -153,7 +153,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
 
 // Merge per-root IngestResults (parallel to `roots`, canonical order) into ONE IngestResult:
 //   * ing.files[f]     = `<label>/<root-relative-path>` (the §2 labeled identity — what every surface emits)
-//   * ing.realPaths[f] = the per-root crawl spelling (what disk I/O must use; see ctx::diskPath)
+//   * ing.realPaths[f] = the per-root crawl spelling (what disk I/O must use; see rw::diskPath)
 //   * ing.fileRoot[f]  = index into roots (canonical order)
 //   * symbol/reference/include/binding ids re-based by one offset pass (§4)
 // Node ids follow the concatenation order = (label, relPath) — the same global-sort discipline as today.
@@ -300,4 +300,4 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
     return m;
 }
 
-}   // namespace ctx
+}   // namespace rw

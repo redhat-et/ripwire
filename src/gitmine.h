@@ -10,7 +10,7 @@
 #include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "Diagnostics.h"    // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
 #include "stdinline.h"      // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
-#include "jsonesc.h"        // A4-F27 residual: ctx::shSingleQuote lives here (lightest shared header) —
+#include "jsonesc.h"        // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
                              // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
 
 #include <algorithm>
@@ -30,12 +30,12 @@
 #include <limits.h>     // PATH_MAX (hasEnclosingGitRepo realpath buffer)
 #include <sys/stat.h>   // stat() — the zero-popen .git walk-up pre-check
 
-namespace ctx
+namespace rw
 {
 
 // shSingleQuote (shell-escape a single-quoted arg) now lives in jsonesc.h — the canonical, lightest
 // shared home for it (A4-F27 residual dedup with docparse::detail::shellQuote). It is defined directly
-// in `namespace ctx` there, so every existing `shSingleQuote(...)` call site in this file (and in
+// in `namespace rw` there, so every existing `shSingleQuote(...)` call site in this file (and in
 // main.cpp / prcontext.h / quality.h, which reach it transitively via this include) keeps working
 // unqualified — same namespace, no `using` needed.
 
@@ -1825,4 +1825,4 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
     return boostedSymbolCount > 0;
 }
 
-}   // namespace ctx
+}   // namespace rw

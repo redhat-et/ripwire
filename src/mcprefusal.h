@@ -32,7 +32,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx::mcprefuse
+namespace rw::mcprefuse
 {
 
 // ─── M7: the verb → required-field table ─────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
       FieldRule::Optional, "or this tree has no git history (owners is mined from git)" },
     { "for",                     "task",      "the task in plain words",                                           "task=\"add a since filter\"" },
     { "lego",                    "type",      "an interface or base-type name (file:name disambiguates)",           "type=\"Shape\"" },
-    { "fetch_body",              "handle",    "a `handle` string taken from a read verb's result",                  "handle=\"src/cli.h::ctx::parseArgs\"" },
+    { "fetch_body",              "handle",    "a `handle` string taken from a read verb's result",                  "handle=\"src/cli.h::rw::parseArgs\"" },
     { "batch",                   "queries",   "an array of {verb, ...args} sub-query objects",                      "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]" },
 
     // ── flagship-reflex verbs ──
@@ -252,7 +252,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "task",          "a STRING: the task in plain words",                                           "task=\"add a since filter\"" },
     { "type",          "a STRING interface or base-type name (file:name disambiguates)",               "type=\"Shape\"" },
     { "file",          "a STRING file path (a path SUFFIX is enough)",                                "file=\"src/main.cpp\"" },
-    { "handle",        "a STRING handle taken from a read verb's result",                             "handle=\"src/cli.h::ctx::parseArgs\"" },
+    { "handle",        "a STRING handle taken from a read verb's result",                             "handle=\"src/cli.h::rw::parseArgs\"" },
     { "from",          "a STRING: the SOURCE symbol name",                                            "from=\"main\"" },
     { "to",            "a STRING: the DESTINATION symbol name",                                       "to=\"parseArgs\"" },
     { "trace",         "a STRING: the raw trace TEXT, pasted",                                        "trace=\"Traceback (most recent call last): ...\"" },
@@ -970,4 +970,4 @@ inline std::string unknownVerbRefusal( std::span<const std::string_view> known, 
     return msg;
 }
 
-}   // namespace ctx::mcprefuse
+}   // namespace rw::mcprefuse

@@ -79,7 +79,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace flipimpact
 {
@@ -920,4 +920,4 @@ inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult
     std::fprintf( out, "</flip>" );
 }
 
-}}   // namespace ctx::flipimpact
+}}   // namespace rw::flipimpact

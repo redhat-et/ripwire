@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // A4-F15 fix: the ',' field separator mis-zips a whole parallel-array row (and every row after it) when an
@@ -178,4 +178,4 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
     std::fputs( "</cols></uses>", out );
 }
 
-}   // namespace ctx
+}   // namespace rw

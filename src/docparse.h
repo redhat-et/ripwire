@@ -15,7 +15,7 @@
 // Style: Allman braces; spaces inside parens; VERIFY/DEGRADED_PATH_ALERT; ~160–200 col wrap.
 
 #include "Diagnostics.h"
-#include "jsonesc.h"   // A4-F27 residual: ctx::shSingleQuote — canonical shell single-quote, forwarded
+#include "jsonesc.h"   // A4-F27 residual: rw::shSingleQuote — canonical shell single-quote, forwarded
                         // to below instead of carrying a local copy; STL-only, no coupling cost here.
 
 #include <array>
@@ -24,7 +24,7 @@
 #include <string>
 #include <string_view>
 
-namespace ctx
+namespace rw
 {
 namespace docparse
 {
@@ -324,7 +324,7 @@ namespace detail
 
 // Single-quote a path for safe inclusion in a /bin/sh command (paths come from the crawl, not user input,
 // but quote anyway — defence in depth, and paths can contain spaces).
-// NOTE (F13, resolved): was byte-identical to ctx::shSingleQuote in gitmine.h — a local copy was kept
+// NOTE (F13, resolved): was byte-identical to rw::shSingleQuote in gitmine.h — a local copy was kept
 // deliberately at the time because merging would have forced docparse.h (Diagnostics.h + STL only,
 // pulled by ingest.cpp) to include gitmine.h and thus the whole graph.h dependency chain. That's now
 // moot: the canonical implementation moved to jsonesc.h (STL-only, zero project includes), which both
@@ -332,7 +332,7 @@ namespace detail
 // name/call sites below don't need to change.
 inline std::string shellQuote( const std::string& s )
 {
-    return ctx::shSingleQuote( s );
+    return rw::shSingleQuote( s );
 }
 
 }   // namespace detail
@@ -551,4 +551,4 @@ inline GeneratedDocReason classifyGeneratedDoc( std::string_view text, std::size
 }
 
 }   // namespace docparse
-}   // namespace ctx
+}   // namespace rw

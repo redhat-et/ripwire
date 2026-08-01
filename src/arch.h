@@ -45,7 +45,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ── built-in architecture layers (P3): dir-name → layer, so a common repo layout gets a `layer=` tag on its
@@ -799,4 +799,4 @@ inline double dsmPropagationCost( const IngestResult&                           
     return dsmPropagationCostCapable( ing, adj, std::vector<char>( ing.files.size(), 1 ) );
 }
 
-}   // namespace ctx
+}   // namespace rw

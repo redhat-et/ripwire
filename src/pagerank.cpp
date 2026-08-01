@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 namespace
@@ -116,4 +116,4 @@ unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double
     return iterationCount;
 }
 
-} // namespace ctx
+} // namespace rw

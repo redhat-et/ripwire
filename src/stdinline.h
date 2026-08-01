@@ -35,7 +35,7 @@
 #include <cstdio>
 #include <string>
 
-namespace ctx
+namespace rw
 {
 
 // Read one '\n'-terminated line of RAW BYTES from `in` into `line`. See the parity contract above.
@@ -62,4 +62,4 @@ inline bool readByteSafeLine( std::FILE* in, std::string& line )
     return didReadAnyByte;
 }
 
-}   // namespace ctx
+}   // namespace rw

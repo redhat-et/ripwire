@@ -37,7 +37,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ---- minimal protobuf wire reader ------------------------------------------------------------------
@@ -448,4 +448,4 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
     return ov;
 }
 
-}   // namespace ctx
+}   // namespace rw

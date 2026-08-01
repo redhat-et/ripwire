@@ -17,7 +17,7 @@
 #include "graph.h"
 #include "gitmine.h"
 #include "lexical.h"   // subtokens()
-#include "jsonesc.h"   // W2-M0: ctx::jsonStringEnd — the canonical escape-aware JSON string walk
+#include "jsonesc.h"   // W2-M0: rw::jsonStringEnd — the canonical escape-aware JSON string walk
 
 #include <algorithm>
 #include <cmath>
@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // recall@k = (gold files within the top-k of `ranked`) / |gold|
@@ -453,14 +453,14 @@ namespace minedjson
 {
     // index just past the closing (unescaped) quote of the JSON string starting at s[pos]=='"'
     //
-    // W2-M0: the escape-aware walk is ctx::jsonStringEnd (jsonesc.h), shared with mcpdetail::stringEnd —
+    // W2-M0: the escape-aware walk is rw::jsonStringEnd (jsonesc.h), shared with mcpdetail::stringEnd —
     // these were the repo's last two copies of it. The two RETURN CONVENTIONS are deliberately not unified:
     // this one clamps a truncated line to size() so the narrow fixture reader above just runs out of input,
     // where the MCP side needs npos to detect truncation. Same walk, two documented adaptations.
     inline std::size_t skipString( const std::string& s, std::size_t pos )
     {
         if( pos >= s.size() || s[pos] != '"' ) return pos;
-        const std::size_t close = ctx::jsonStringEnd( s, pos );
+        const std::size_t close = rw::jsonStringEnd( s, pos );
         return ( close != std::string::npos ) ? close + 1 : s.size();
     }
 
@@ -720,4 +720,4 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     return 0;
 }
 
-}   // namespace ctx
+}   // namespace rw

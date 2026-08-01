@@ -36,7 +36,7 @@
 
 #include "Diagnostics.h"
 
-namespace ctx
+namespace rw
 {
 
 // ── severity + finding ────────────────────────────────────────────────────────────────────────────
@@ -831,4 +831,4 @@ inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanR
     std::fprintf( out, "</skillscan>\n" );
 }
 
-}   // namespace ctx
+}   // namespace rw

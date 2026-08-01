@@ -1,6 +1,6 @@
 #pragma once
 
-// svector.h — ctx::svector: a small-vector with N INLINE slots that spills to the heap only past N.
+// svector.h — rw::svector: a small-vector with N INLINE slots that spills to the heap only past N.
 //
 // WHY THIS EXISTS ALONGSIDE the vendored martinus/svector (third_party/svector.h, ankerl::svector):
 // it's purpose-built for the ONE shape ripwire leans on hardest — a `Map<K, svector<V,N>>` of many tiny
@@ -23,7 +23,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace ctx
+namespace rw
 {
 
 template <class T, std::uint32_t N>
@@ -82,4 +82,4 @@ public:
     const T*      end()   const noexcept { return buf() + sz_; }
 };
 
-}   // namespace ctx
+}   // namespace rw

@@ -28,7 +28,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // the contract-comparison result (was/now only meaningful when status=="contract-change"). POD, no default
@@ -505,4 +505,4 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     return out;
 }
 
-}   // namespace ctx
+}   // namespace rw

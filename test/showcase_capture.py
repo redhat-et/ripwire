@@ -19,8 +19,8 @@ os.makedirs(AUX, exist_ok=True)
 TRACE = """AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in ctx::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:1148
-    #1 0x102f3e884 in ctx::rankGraph(Graph const&, float) src/graph.h:1174
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:1148
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:1174
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:5155
     #3 0x102e01a44 in main src/main.cpp:5594
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)

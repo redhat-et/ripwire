@@ -76,7 +76,7 @@
 //                           and, IN BAND, in kPageRaiseCapClause below.
 // ============================================================================================================
 
-namespace ctx
+namespace rw
 {
 
 // The "you can page this" sentence a capping verb's own legend prints, so rule 7 above is defined on the
@@ -246,4 +246,4 @@ inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t 
 // Sized for the widest disclosure above: 3 × 20-digit size_t + 2 × 11-char int + the attribute/key names.
 inline constexpr std::size_t kPageDisclosureCap = 192;
 
-}   // namespace ctx
+}   // namespace rw

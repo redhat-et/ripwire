@@ -103,7 +103,7 @@ TEST_CASE( "CSR structural properties and adjacency round-trip" )
     {
         const Adjacency adjacency = generateAdjacency( nodeCount );
         const sparseCsr<float> csr = buildCsr( adjacency );
-        CHECK_MESSAGE( ctx::verifyCsr( csr, nodeCount ), "generated CSR failed structural verification" );
+        CHECK_MESSAGE( rw::verifyCsr( csr, nodeCount ), "generated CSR failed structural verification" );
         CHECK_MESSAGE( roundTrips( csr, adjacency ), "generated CSR failed adjacency round-trip" );
     }
 
@@ -116,7 +116,7 @@ TEST_CASE( "CSR structural properties and adjacency round-trip" )
             adjacency[ 0 ].emplace_back( std::uint32_t( edgeIndex & 1u ), 1.f );
         const sparseCsr<float> csr = buildCsr( adjacency );
         CHECK_MESSAGE( csr.nnz() == kStressEdgeCount, "CSR edge count truncated above uint16 range" );
-        CHECK_MESSAGE( ctx::verifyCsr( csr, adjacency.size() ), "large CSR failed structural verification" );
+        CHECK_MESSAGE( rw::verifyCsr( csr, adjacency.size() ), "large CSR failed structural verification" );
         CHECK_MESSAGE( roundTrips( csr, adjacency ), "large CSR failed adjacency round-trip" );
     }
 
@@ -127,37 +127,37 @@ TEST_CASE( "CSR structural properties and adjacency round-trip" )
         csr.rowOffsets()[1] = 1;
         csr.colIndices()[0] = 0;
         csr.values()[0] = -1.f;
-        CHECK_MESSAGE( !ctx::verifyCsr( csr, 1 ), "negative CSR value was accepted" );
+        CHECK_MESSAGE( !rw::verifyCsr( csr, 1 ), "negative CSR value was accepted" );
         csr.values()[0] = std::numeric_limits<float>::quiet_NaN();
-        CHECK_MESSAGE( !ctx::verifyCsr( csr, 1 ), "non-finite CSR value was accepted" );
+        CHECK_MESSAGE( !rw::verifyCsr( csr, 1 ), "non-finite CSR value was accepted" );
     }
 }
 
 TEST_CASE( "production buildGraph stores caller to callee as target-row source-column" )
 {
-    ctx::IngestResult ingest;
+    rw::IngestResult ingest;
     ingest.files.emplace_back( "orientation.cpp" );
     ingest.symbols.resize( 2 );
     ingest.symbols[ 0 ].id = 0;
     ingest.symbols[ 0 ].fileId = 0;
-    ingest.symbols[ 0 ].lang = ctx::Lang::Cpp;
-    ingest.symbols[ 0 ].kind = ctx::SymKind::Function;
+    ingest.symbols[ 0 ].lang = rw::Lang::Cpp;
+    ingest.symbols[ 0 ].kind = rw::SymKind::Function;
     ingest.symbols[ 0 ].name = "caller";
     ingest.symbols[ 1 ].id = 1;
     ingest.symbols[ 1 ].fileId = 0;
-    ingest.symbols[ 1 ].lang = ctx::Lang::Cpp;
-    ingest.symbols[ 1 ].kind = ctx::SymKind::Function;
+    ingest.symbols[ 1 ].lang = rw::Lang::Cpp;
+    ingest.symbols[ 1 ].kind = rw::SymKind::Function;
     ingest.symbols[ 1 ].name = "callee";
 
-    ctx::Reference reference;
+    rw::Reference reference;
     reference.fromSymbol = 0;
     reference.fileId = 0;
-    reference.lang = ctx::Lang::Cpp;
-    reference.role = ctx::RefRole::Call;
+    reference.lang = rw::Lang::Cpp;
+    reference.role = rw::RefRole::Call;
     reference.calleeName = "callee";
     ingest.references.push_back( std::move( reference ) );
 
-    const ctx::Graph graph = ctx::buildGraph( ingest );
+    const rw::Graph graph = rw::buildGraph( ingest );
     REQUIRE( graph.inEdges.rows() == 2 );
     REQUIRE( graph.inEdges.nnz() == 1 );
     CHECK( graph.inEdges.rowOffsets()[ 0 ] == 0 );

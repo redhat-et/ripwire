@@ -52,7 +52,7 @@
     field: (field_identifier) @name)) @reference.call
 
 ; QUALIFIED CALLS AT ANY DEPTH (§H4, PLAN_h4QualifiedCalls_2026-07-30.md). tree-sitter-cpp nests
-; qualified_identifier RIGHT-recursively — `ctx::inner::targetFn` is
+; qualified_identifier RIGHT-recursively — `rw::inner::targetFn` is
 ; qualified_identifier(scope: ctx, name: qualified_identifier(scope: inner, name: targetFn)) — so the
 ; 2-segment pattern this REPLACES (`name: (identifier)`) bound nothing past the second `::`: 31 in-repo
 ; call sites on the CLI↔MCP seams produced NO reference at all, invisible to --uses/--callers/--edit-check

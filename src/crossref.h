@@ -91,7 +91,7 @@
 #include "serialize.h"    // escapeXml
 #include "pageview.h"     // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "workspace.h"    // wsdetail::segmentsOf
-#include "filter.h"       // §P11.5: ctx::pathTierOf — the shared source/test/doc ORDERING tier
+#include "filter.h"       // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
@@ -109,7 +109,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace crossref
 {
@@ -1696,4 +1696,4 @@ inline void writeWhereis( std::FILE* out, const WhereResult& res, std::size_t ma
     writeWhereisPage( out, res, maxHits, 0, 0 );
 }
 
-}}   // namespace ctx::crossref
+}}   // namespace rw::crossref

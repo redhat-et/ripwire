@@ -45,7 +45,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace darkflags
 {
@@ -840,4 +840,4 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     std::fprintf( out, "</flags>" );
 }
 
-}}   // namespace ctx::darkflags
+}}   // namespace rw::darkflags

@@ -91,16 +91,16 @@
 namespace
 {
 
-using ctx::shSingleQuote;   // defined in gitmine.h, shared with the MCP server
+using rw::shSingleQuote;   // defined in gitmine.h, shared with the MCP server
 
 // The per-user cache-dir ladder + the git-baseline helpers now live in quality.h (the baseline home) so BOTH
 // the CLI --quality-* paths and the MCP quality_delta/quality_baseline verbs call ONE copy — no duplicated
 // git-archive / stale-vs-HEAD logic. Re-exported here so every existing call site below is byte-unchanged.
-using ctx::quality::cacheDirLadder;
-using ctx::quality::gitHeadSha;
-using ctx::quality::gitRepoHasHistory;
-using ctx::quality::computeHeadSnapshot;
-using ctx::quality::resolveCacheBlobPath;   // Y4 (AUDIT5): shard-aware blob path — see quality.h
+using rw::quality::cacheDirLadder;
+using rw::quality::gitHeadSha;
+using rw::quality::gitRepoHasHistory;
+using rw::quality::computeHeadSnapshot;
+using rw::quality::resolveCacheBlobPath;   // Y4 (AUDIT5): shard-aware blob path — see quality.h
 
 // Warm-by-default cache location: a per-root file keyed by the root's ABSOLUTE path (FNV-1a 64), under
 // the hardened cacheDirLadder(), so repeated invocations on the same tree re-parse only changed files.
@@ -124,7 +124,7 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
     char        absbuf[ PATH_MAX ];
     const char* abs = realpath( root.c_str(), absbuf ) ? absbuf : root.c_str();
     std::uint64_t h = 1469598103934665603ull;
-    for( const char* c = abs; *c; ++c ) { h ^= static_cast<unsigned char>( *c ); h = ctx::hashutil::fnv1aMultiply( h ); }
+    for( const char* c = abs; *c; ++c ) { h ^= static_cast<unsigned char>( *c ); h = rw::hashutil::fnv1aMultiply( h ); }
     char tail[ 48 ];
     std::snprintf( tail, sizeof( tail ), "ripwire-%016llx-%s.bin",
                    static_cast<unsigned long long>( h ), captureValueUses ? "rich" : "lean" );
@@ -147,10 +147,10 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
 //
 // Union, never overwrite: --map-diff's multi-root teleport seed calls this once per root with the SAME
 // accumulator, so the per-root masks must OR together (each root's call is already narrowed by onlyRoot).
-bool gitChangedFiles( const std::string& root, const ctx::IngestResult& ing, std::vector<char>& out,
+bool gitChangedFiles( const std::string& root, const rw::IngestResult& ing, std::vector<char>& out,
                       std::uint32_t onlyRoot = UINT32_MAX )
 {
-    const auto [ mask, isGitOk ] = ctx::gitDiffChangedMask( root, ing, onlyRoot );
+    const auto [ mask, isGitOk ] = rw::gitDiffChangedMask( root, ing, onlyRoot );
     if( !isGitOk ) return false;
 
     const std::size_t markCount = std::min( out.size(), mask.size() );
@@ -164,9 +164,9 @@ bool gitChangedFiles( const std::string& root, const ctx::IngestResult& ing, std
 // module = a symbol's immediate parent DIRECTORY (the real subsystem: canyon/, steer/, …). Fills
 // symDir[symbolId] = module id and dirName[id] = directory path. Shared by --seams and --mermaid —
 // one-level Louvain is too fine to be a "module"; the directory is the meaningful boundary.
-void computeDirModules( const ctx::IngestResult& ing, std::vector<std::uint32_t>& symDir, std::vector<std::string>& dirName )
+void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>& symDir, std::vector<std::string>& dirName )
 {
-    ctx::HashMap<std::string, std::uint32_t> dirId;
+    rw::HashMap<std::string, std::uint32_t> dirId;
     const auto idOf = [ & ]( std::string_view d ) -> std::uint32_t
     {
         const auto it = dirId.find( std::string( d ) );
@@ -193,15 +193,15 @@ void computeDirModules( const ctx::IngestResult& ing, std::vector<std::uint32_t>
 // `scope`: nullptr (default) reproduces the pre-flag `--since=<since>` window byte-for-byte; a non-null
 // active scope (CLI --since=REV|DATE, see gitmine.h resolveSinceScope) overrides it with the resolved
 // window — REV form as a deterministic `REV..` range, date form as `--since=DATE` (wall-clock-relative).
-bool gitChurnCounts( const std::string& root, const ctx::IngestResult& ing, std::vector<std::uint32_t>& out, const char* since, const ctx::SinceScope* scope = nullptr,
+bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::vector<std::uint32_t>& out, const char* since, const rw::SinceScope* scope = nullptr,
                      std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
 {
-    const std::string windowArgs = scope ? ctx::sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
-    const ctx::GitCommandLines touched = ctx::gitCommandLines(
-        "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + ctx::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
+    const std::string windowArgs = scope ? rw::sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
+    const rw::GitCommandLines touched = rw::gitCommandLines(
+        "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
     if( !touched.isStarted ) return false;
 
-    ctx::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
+    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
     for( const std::string& p : touched.lines ) ++counts[ p ];
     if( counts.empty() )
         return false;   // no in-window commit touched anything — the caller's "empty churn" case, NOT an error (see --hotspots' two causes)
@@ -212,7 +212,7 @@ bool gitChurnCounts( const std::string& root, const ctx::IngestResult& ing, std:
     // silently overwrote a subdirectory file's with the same basename, on --hotspots and on --for's churn=
     // lens alike. The shared mapper prefers an EXACT repo-relative match, otherwise the least-unexplained
     // prefix, and refuses (disclosing it) on a tie.
-    ctx::mapChurnCountsOntoFiles( counts, ing, out, onlyRoot );
+    rw::mapChurnCountsOntoFiles( counts, ing, out, onlyRoot );
     return true;
 }
 
@@ -239,11 +239,11 @@ bool isGitUrl( std::string_view s ) noexcept
 // T2 pagination window + the §P8 root-element disclosure both live in pageview.h now — three serializers
 // need them (main.cpp's verbs, crossref.h's --whereis, docdrift.h's --doc-drift) and the vocabulary must not
 // drift between them. `using` rather than a re-declaration so there is exactly one definition.
-using ctx::PageWindow;
-using ctx::pageWindow;
-using ctx::pageDisclosure;
-using ctx::pagingDisclosure;
-using ctx::effectiveRowCap;
+using rw::PageWindow;
+using rw::pageWindow;
+using rw::pageDisclosure;
+using rw::pagingDisclosure;
+using rw::effectiveRowCap;
 
 // §P8 G1: the local pageAttr() that used to live here — a bare ` offset="M" limit="N"` for --callers/
 // --callees/--tree — is DELETED, not deprecated. It cut rows correctly but disclosed neither the total nor
@@ -255,14 +255,14 @@ using ctx::effectiveRowCap;
 // L2: the `[{"t":..,"n":..,"p":"file:line"},...]` JSON row array shared by --callers/--callees/--impact's
 // --json branches (identical shape, different surrounding header fields — see each call site). Avoids
 // carrying two copies of the same per-row loop (--quality-delta flagged the pre-extraction duplicate).
-// File-scope (not inside `using namespace ctx;`, unlike its callers) — every ctx:: type/fn spelled out.
-inline void printJsonSymbolRows( const ctx::IngestResult& ing, const std::vector<ctx::NodeId>& ids, std::size_t begin, std::size_t end )
+// File-scope (not inside `using namespace rw;`, unlike its callers) — every rw:: type/fn spelled out.
+inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<rw::NodeId>& ids, std::size_t begin, std::size_t end )
 {
     for( std::size_t i = begin; i < end; ++i )
     {
-        const ctx::Symbol& s = ing.symbols[ ids[i] ];
+        const rw::Symbol& s = ing.symbols[ ids[i] ];
         std::printf( "%s{\"t\":\"%s\",\"n\":\"%s\",\"p\":\"%s:%u\"}", i == begin ? "" : ",",
-                     ctx::symTag( s.kind ), ctx::jsonStr( s.name ).c_str(), ctx::jsonStr( ing.files[ s.fileId ] ).c_str(), s.line );
+                     rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( ing.files[ s.fileId ] ).c_str(), s.line );
     }
 }
 
@@ -296,7 +296,7 @@ struct AnchorKey
     bool          isAccessor;
     std::uint32_t invFanIn;
     float         invRank;
-    ctx::NodeId   nodeId;
+    rw::NodeId   nodeId;
 
     bool operator<( const AnchorKey& other ) const noexcept
     {
@@ -315,27 +315,27 @@ struct CommunityPresentation
     std::vector<std::string> label;
 };
 
-CommunityPresentation communityPresentation( const ctx::IngestResult& ing, const ctx::Graph& g,
-                                             const std::vector<std::vector<ctx::NodeId>>& members,
+CommunityPresentation communityPresentation( const rw::IngestResult& ing, const rw::Graph& g,
+                                             const std::vector<std::vector<rw::NodeId>>& members,
                                              const std::vector<float>& rank )
 {
     CommunityPresentation out;
     out.directory.resize( members.size() );
     out.label.resize( members.size() );
     const auto* inRowOffset = g.inEdges.rowOffsets();   // in-edge CSR row offsets: fanIn(i) = inRowOffset[i+1]-inRowOffset[i]
-    const auto  fanIn       = [ & ]( ctx::NodeId nodeId ) { return inRowOffset[ nodeId + 1 ] - inRowOffset[ nodeId ]; };
+    const auto  fanIn       = [ & ]( rw::NodeId nodeId ) { return inRowOffset[ nodeId + 1 ] - inRowOffset[ nodeId ]; };
 
     for( std::size_t communityIndex = 0; communityIndex < members.size(); ++communityIndex )
     {
-        const std::vector<ctx::NodeId>& communityMembers = members[ communityIndex ];
+        const std::vector<rw::NodeId>& communityMembers = members[ communityIndex ];
         if( communityMembers.empty() ) continue;
 
-        ctx::HashMap<std::string, std::uint32_t> directoryCount;
-        const auto keyOf = [ & ]( ctx::NodeId nodeId ) -> AnchorKey
+        rw::HashMap<std::string, std::uint32_t> directoryCount;
+        const auto keyOf = [ & ]( rw::NodeId nodeId ) -> AnchorKey
             { return { isAccessorName( ing.symbols[nodeId].name ), ~fanIn( nodeId ), -rank[nodeId], nodeId }; };
-        ctx::NodeId lead    = communityMembers.front();
+        rw::NodeId lead    = communityMembers.front();
         AnchorKey   leadKey = keyOf( lead );
-        for( ctx::NodeId nodeId : communityMembers )
+        for( rw::NodeId nodeId : communityMembers )
         {
             std::string_view  path = ing.files[ ing.symbols[nodeId].fileId ];
             const std::size_t slash = path.rfind( '/' );
@@ -353,7 +353,7 @@ CommunityPresentation communityPresentation( const ctx::IngestResult& ing, const
                 out.directory[ communityIndex ] = directory;
         }
 
-        const ctx::Symbol& symbol = ing.symbols[ lead ];
+        const rw::Symbol& symbol = ing.symbols[ lead ];
         std::string_view   anchorPath = ing.files[ symbol.fileId ];
         const std::string  directoryPrefix = out.directory[ communityIndex ] + "/";
         if( anchorPath.rfind( directoryPrefix, 0 ) == 0 ) anchorPath.remove_prefix( directoryPrefix.size() );
@@ -382,29 +382,29 @@ struct IsolateStats
     std::uint32_t connectedSingletons = 0;
 };
 
-IsolateStats isolateStats( const ctx::IngestResult& ing, const ctx::Graph& graph,
-                           const std::vector<std::vector<ctx::NodeId>>& members ) noexcept
+IsolateStats isolateStats( const rw::IngestResult& ing, const rw::Graph& graph,
+                           const std::vector<std::vector<rw::NodeId>>& members ) noexcept
 {
     IsolateStats stats;
     const auto*  inRowOffset = graph.inEdges.rowOffsets();
 
-    for( const std::vector<ctx::NodeId>& communityMembers : members )
+    for( const std::vector<rw::NodeId>& communityMembers : members )
     {
         if( communityMembers.size() != 1 ) continue;
-        const ctx::NodeId nodeId = communityMembers.front();
+        const rw::NodeId nodeId = communityMembers.front();
         const bool isConnected = graph.outOff[nodeId] != graph.outOff[nodeId + 1]
                               || inRowOffset[nodeId] != inRowOffset[nodeId + 1];
         if( isConnected ) ++stats.connectedSingletons;
     }
 
-    for( const ctx::Symbol& symbol : ing.symbols )
+    for( const rw::Symbol& symbol : ing.symbols )
     {
-        const ctx::NodeId nodeId = symbol.id;
+        const rw::NodeId nodeId = symbol.id;
         if( graph.outOff[nodeId] != graph.outOff[nodeId + 1] || inRowOffset[nodeId] != inRowOffset[nodeId + 1] ) continue;
         ++stats.total;
 
         // Mutually-exclusive provenance, ordered from semantic node kind to definition placement.
-        if( symbol.kind == ctx::SymKind::Section )                              ++stats.document;
+        if( symbol.kind == rw::SymKind::Section )                              ++stats.document;
         else if( symbol.sigEndByte >= symbol.endByte )                          ++stats.declaration;
         else if( isHeaderPath( ing.files[ symbol.fileId ] ) )                   ++stats.header;
         else                                                                     ++stats.source;
@@ -463,7 +463,7 @@ bool isUniversalOrAllowlistedNumber( std::string_view spelling ) noexcept
 // input ⇒ degrade + note, not VERIFY/throw). `verb` exists because --outline routes through here too and
 // used to emit a note blaming --expand (§P10 X7). A reversed range (START>END) is NOT rejected here —
 // sliceBodyLines() swaps it defensively — so only truly unparseable text degrades.
-struct ExpandToken { std::string selector; ctx::LineRange range; };
+struct ExpandToken { std::string selector; rw::LineRange range; };
 inline ExpandToken parseExpandToken( const std::string& token, const char* verb = "--expand" ) noexcept
 {
     ExpandToken out;
@@ -540,7 +540,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
     std::uint64_t h = 1469598103934665603ull;
-    for( unsigned char c : urlOrPath ) { h ^= c; h = ctx::hashutil::fnv1aMultiply( h ); }
+    for( unsigned char c : urlOrPath ) { h ^= c; h = rw::hashutil::fnv1aMultiply( h ); }
     char tail[ 48 ];
     std::snprintf( tail, sizeof( tail ), "/ripwire-remote-%016llx", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
@@ -565,8 +565,8 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // own leading-dash guard were ever bypassed or loosened — belt-and-suspenders, not the only gate.
     fs::remove_all( fs::path( cacheDir ), ec );
     const std::string cmd = "git -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
-                             "clone --depth=1 -q -- " + ctx::shSingleQuote( urlOrPath )
-                          + " " + ctx::shSingleQuote( cacheDir ) + " 2>&1";
+                             "clone --depth=1 -q -- " + rw::shSingleQuote( urlOrPath )
+                          + " " + rw::shSingleQuote( cacheDir ) + " 2>&1";
     std::fprintf( stderr, "ripwire: cloning %s → %s\n", urlOrPath.c_str(), cacheDir.c_str() );
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
@@ -590,10 +590,10 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
 // the MCP arms can reach the SAME one — their not-found refusals used to carry no suggestion at all
 // because this code was unreachable from a header. Pulled back in under its original three names, so
 // every call site below (17 of them) is unchanged.
-using ctx::boundedEditDistance;
-using ctx::didYouMean;
-using ctx::withDidYouMean;
-using ctx::selectorNotFoundMessage;   // §B4.2: the shared file:name selector refusal (selectorrefuse.h)
+using rw::boundedEditDistance;
+using rw::didYouMean;
+using rw::withDidYouMean;
+using rw::selectorNotFoundMessage;   // §B4.2: the shared file:name selector refusal (selectorrefuse.h)
 
 // ─── --doctor: self-diagnosis (AUDIT3 standing item) ──────────────────────────────────────────────
 // A DIAGNOSTIC verb, not the deterministic map: every check below reports on THIS machine's
@@ -674,7 +674,7 @@ inline std::string selfExecutablePath( const char* argv0 )
 // (quality.h popenTrimmed) serves this and the quality git one-liners.
 inline std::string doctorPopenTrim( const std::string& cmd )
 {
-    return ctx::quality::popenTrimmed( cmd );
+    return rw::quality::popenTrimmed( cmd );
 }
 
 // §P11 doctor item: --doctor's failing rows used to print raw mtimes/sizes/counts with no conclusion — the
@@ -691,7 +691,7 @@ inline std::string doctorBinaryPathVerdictAttr( bool copied, const std::string& 
     const bool        selfIsOlder = selfSt.st_mtime < whichSt.st_mtime;
     const std::string olderPath   = selfIsOlder ? selfPath : whichPath;
     const std::string newerPath   = selfIsOlder ? whichPath : selfPath;
-    return " hint=\"" + std::string( ctx::escapeXml( std::string_view(
+    return " hint=\"" + std::string( rw::escapeXml( std::string_view(
                   "STALE: " + olderPath + " is older than " + newerPath
                 + " — rebuild/reinstall so PATH points at the newer one, or invoke "
                 + newerPath + " directly" ), esc ) ) + "\"";
@@ -700,7 +700,7 @@ inline std::string doctorBinaryPathVerdictAttr( bool copied, const std::string& 
 inline std::string doctorGrammarsHint( int loaded, int expected, const std::string& failedLabels, std::vector<char>& esc )
 {
     if( loaded == expected ) return "";
-    return " hint=\"" + std::string( ctx::escapeXml( std::string_view(
+    return " hint=\"" + std::string( rw::escapeXml( std::string_view(
                   "failed to compile: " + failedLabels
                 + " — a build/embedded-resource mismatch (rebuild with cmake --build build -j; "
                   "if it persists the embedded tags.scm for that language is stale)" ), esc ) ) + "\"";
@@ -734,7 +734,7 @@ inline DoctorGrammarProbe doctorProbeGrammars()
     out.expected = int( sizeof( kTable ) / sizeof( kTable[0] ) );
     for( const GEntry& g : kTable )
     {
-        const std::string_view scm = ctx::embedded_queries::queryFor( g.querySub );
+        const std::string_view scm = rw::embedded_queries::queryFor( g.querySub );
         bool ok = false;
         if( !scm.empty() )
         {
@@ -752,7 +752,7 @@ inline DoctorGrammarProbe doctorProbeGrammars()
 inline std::string doctorCacheDirHint( bool writable, const std::string& dir, std::vector<char>& esc )
 {
     if( writable ) return "";
-    return " hint=\"" + std::string( ctx::escapeXml( std::string_view(
+    return " hint=\"" + std::string( rw::escapeXml( std::string_view(
                   "cannot write to " + dir + " (from TMPDIR/XDG_CACHE_HOME/tmp fallback) — fix its "
                   "permissions, or point TMPDIR/XDG_CACHE_HOME at a directory you can write to" ), esc ) ) + "\"";
 }
@@ -772,9 +772,9 @@ inline std::string doctorTrackedBinariesHint( bool ok, std::size_t staleCount )
            "rebuild the binary from that newer source and recommit it\"";
 }
 
-int runDoctor( const ctx::Config& cfg, const char* argv0 )
+int runDoctor( const rw::Config& cfg, const char* argv0 )
 {
-    using namespace ctx;
+    using namespace rw;
 
     int                checks = 0;
     int                okCount = 0;
@@ -973,32 +973,32 @@ int runDoctor( const ctx::Config& cfg, const char* argv0 )
 // bodies below are byte-identical to the pre-B7.2 inline dispatch blocks in main().
 struct MainDispatch
 {
-    const ctx::Config&                     cfg;
-    const ctx::IngestResult&               ing;
-    const ctx::Graph&                      g;
+    const rw::Config&                     cfg;
+    const rw::IngestResult&               ing;
+    const rw::Graph&                      g;
     const std::string&                     root;
     bool                                   multiRoot;
-    const std::vector<ctx::WorkspaceRoot>& ws;
+    const std::vector<rw::WorkspaceRoot>& ws;
     const std::vector<std::uint32_t>&      fanIn;
     const std::vector<std::uint32_t>*      fanInPtr;
-    const ctx::QMetrics&                   qmetrics;
+    const rw::QMetrics&                   qmetrics;
     const std::vector<std::uint32_t>*      ampPtr;
     const std::vector<std::uint32_t>*      cboPtr;
     const std::vector<std::uint8_t>*       testedPtr;
     const std::vector<std::uint32_t>*      lcom4Ptr;
     const std::vector<char>*               impurePtr;
     std::vector<std::uint32_t>&            forChurn;
-    ctx::RedactCounts&                     redactCounts;
-    ctx::RedactCounts*                     redactPtr;
-    const ctx::notes::NoteIndex*           notesPtr;   // L3: field-notes surfacing index (nullptr ⇒ inert: no/empty file, or multi-root)
+    rw::RedactCounts&                     redactCounts;
+    rw::RedactCounts*                     redactPtr;
+    const rw::notes::NoteIndex*           notesPtr;   // L3: field-notes surfacing index (nullptr ⇒ inert: no/empty file, or multi-root)
 };
 
 // Symbol-level lint checks (S6-A), lifted verbatim out of the --lint block so runLint stays under the
 // complexity bar. Walks each C-family Function/Method body for large-function / deep-nesting /
 // inconsistent-return; returns the findings the caller merges into the combined lint set.
-std::vector<ctx::AstMatch> lintSymbolLevelChecks( const ctx::IngestResult& ing )
+std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
 {
-    using namespace ctx;
+    using namespace rw;
             // Build per-file byte map (read each file once).
             std::vector<std::string> fileBytes( ing.files.size() );
             HashMap<std::uint32_t, bool> fileRead;
@@ -1196,9 +1196,9 @@ struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, t
 // deterministic sort order. This also keeps findings= and each rule's count= truthful: they
 // count distinct VISIBLE findings, not raw captures. Lifted out of the --lint block (same reason
 // as lintSymbolLevelChecks above) so runLint stays under the complexity/verbosity bar.
-std::vector<LintOut> dedupeLintFindings( const ctx::IngestResult& ing, std::vector<LintOut> outs )
+std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vector<LintOut> outs )
 {
-    using namespace ctx;
+    using namespace rw;
     std::vector<std::vector<NodeId>> fileSyms( ing.files.size() );
     for( const Symbol& s : ing.symbols ) if( s.fileId < fileSyms.size() ) fileSyms[ s.fileId ].push_back( s.id );
     for( auto& v : fileSyms )
@@ -1233,15 +1233,15 @@ std::vector<LintOut> dedupeLintFindings( const ctx::IngestResult& ing, std::vect
 // The routed → anchored → mention-anchored → (opt-in) co-change-boosted lens rank for a task, plus the header
 // note fragments each stage contributes. This is THE ranking the --for lens consumes; extracted so runForLens
 // and runPackTask (L4) share ONE ranking implementation (the plan's "do not reimplement ranking" mandate).
-// ctx::LensRanking itself now lives in packtask.h (L4) — shared with the MCP explore/pack_task verb's own
+// rw::LensRanking itself now lives in packtask.h (L4) — shared with the MCP explore/pack_task verb's own
 // routed-ranking path (mcpverbs.h), which populates the SAME struct via the same low-level ranking calls.
 
 // Compute the lens rank for `task` exactly as the --for path does (all existing boosts: routing, --anchor,
 // the B8 mention anchor, the B3 opt-in co-change prior). Pure function of (d, task): reads d.cfg for the same
 // flags --for reads, so both callers get identical rankings for the same query + flags.
-ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task )
+rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg       = d.cfg;
     const IngestResult&               ing       = d.ing;
     const Graph&                      g         = d.g;
@@ -1367,15 +1367,15 @@ ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
 // 40-row cap can hide the true cliff; false for --query, whose ceiling already covers the full top-k).
 // One function (not inlined at each call site) so the two PRE-EXISTING dispatch functions this composes
 // into (runForLens/runDefaultMap) each gain a single call instead of the whole cut-and-print sequence.
-inline void emitCandidates( std::FILE* out, const ctx::IngestResult& ing, const std::vector<float>& rank,
+inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const std::vector<float>& rank,
                              int topK, bool adaptive, bool scanFullDistribution,
-                             ctx::CandidateProvenance prov,   // §A4f: route/anchored/weak — the caller owns which ranker ran
-                             ctx::RedactCounts* redact )      // §B0/W3-N1: REQUIRED — <sig> is emitted text
+                             rw::CandidateProvenance prov,   // §A4f: route/anchored/weak — the caller owns which ranker ran
+                             rw::RedactCounts* redact )      // §B0/W3-N1: REQUIRED — <sig> is emitted text
 {
     int capN = topK;
     if( adaptive )
     {
-        const ctx::AdaptiveCut ac = ctx::adaptiveCut( rank, 5, std::size_t( topK ), scanFullDistribution );
+        const rw::AdaptiveCut ac = rw::adaptiveCut( rank, 5, std::size_t( topK ), scanFullDistribution );
         char nb[ 208 ];
         if( !ac.hitCeiling && ac.cliffRank < ac.kept )
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu -->",
@@ -1408,7 +1408,7 @@ inline void emitCandidates( std::FILE* out, const ctx::IngestResult& ing, const 
 // XML path harder to read for a reader who only cares about XML.
 struct ForLensJsonInputs
 {
-    const ctx::IngestResult&          ing;
+    const rw::IngestResult&          ing;
     const std::vector<float>&         rank;
     int                               topN;
     const std::vector<std::uint32_t>* fanIn;
@@ -1417,10 +1417,10 @@ struct ForLensJsonInputs
     const std::vector<std::uint8_t>*  cloneMember;
     const std::vector<std::uint8_t>*  tested;
     const std::vector<std::uint32_t>* amp;
-    ctx::RedactCounts*                redact;            // §B0: the run's redaction tally — nullptr under --no-redact
+    rw::RedactCounts*                redact;            // §B0: the run's redaction tally — nullptr under --no-redact
     std::size_t                       packBudgetBytes;   // per-entry streaming budget (--pack-budget-bytes)
     std::size_t                       tokenBudget;       // --token-budget=N, 0 ⇒ the kForPayloadBudgetBytes default
-    const ctx::notes::NoteIndex*      noteIndex;         // §B1.3: L3 field notes, as the XML bundle already
+    const rw::notes::NoteIndex*      noteIndex;         // §B1.3: L3 field notes, as the XML bundle already
                                                          // receives them. nullptr ⇒ no notes keys at all.
     // §B1.4 (capture-audit-4): existence counts for the three sections that stay XML-only under --json —
     // the notes_total convention verbatim: "what the tree matched" BEFORE any display-side cap/dedup, not a
@@ -1470,7 +1470,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     std::string h;
     h.reserve( 640 + p.rootOpenStr.size() + p.taskNote.size() + p.routeNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + extraNotes.size() );
-    h += withRouteAttr ? std::string( p.rootOpenStr ) : ctx::ctxRootOpen( p.task, {} );
+    h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {} );
     h += "<!-- ripwire lens for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else                 h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
@@ -1493,13 +1493,13 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
 
 inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes& notes )
 {
-    using ctx::jsonStr;
+    using rw::jsonStr;
     std::string h = "{\"task\":\"" + jsonStr( task ) + "\"";
     if( !notes.route.empty() )      h += ",\"route\":\""       + jsonStr( notes.route )      + "\"";
     // the XML twin of these two fields carries task_scrubbed=/route_scrubbed= when the scrub lost bytes; this
     // dialect is the faithful one and says so from its own side (serialize.h ctxRootJsonScrubKeys). Absent on
     // clean input, so no ordinary document moves a byte.
-    h += ctx::ctxRootJsonScrubKeys( task, notes.route );
+    h += rw::ctxRootJsonScrubKeys( task, notes.route );
     if( !notes.mention.empty() )    h += ",\"mention\":\""     + jsonStr( notes.mention )    + "\"";
     if( !notes.boost.empty() )      h += ",\"boost\":\""       + jsonStr( notes.boost )      + "\"";
     if( !notes.docMention.empty() ) h += ",\"doc_mention\":\"" + jsonStr( notes.docMention ) + "\"";
@@ -1512,7 +1512,7 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
 // — `notes_total` counts what the tree matched, `notes_kept` what survived the byte ladder, the same pair
 // --pack-task --json reports. Empty unless a NoteIndex exists, so a tree with no .ripwire_notes keeps its
 // pre-feature bytes exactly (the L3 inertness contract).
-inline std::string forLensNotesStanza( const ctx::JsonSigNoteCounts& counts, bool active )
+inline std::string forLensNotesStanza( const rw::JsonSigNoteCounts& counts, bool active )
 {
     if( !active ) return {};
     return ",\"notes_total\":" + std::to_string( counts.total ) + ",\"notes_kept\":" + std::to_string( counts.kept );
@@ -1520,7 +1520,7 @@ inline std::string forLensNotesStanza( const ctx::JsonSigNoteCounts& counts, boo
 
 inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
 {
-    using namespace ctx;
+    using namespace rw;
 
     // the SAME budget arithmetic the XML bundle runs: default kForPayloadBudgetBytes, an explicit
     // --token-budget wins, and the envelope's own bytes are charged before the sigs budget.
@@ -1572,7 +1572,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     {
         char*       jbuf = nullptr;
         std::size_t jsz  = 0;
-        std::FILE*  jm   = ctx::openChargeBuffer( &jbuf, &jsz );
+        std::FILE*  jm   = rw::openChargeBuffer( &jbuf, &jsz );
         if( !jm )
         {
             // ENOMEM-class: emit unbudgeted rather than nothing, and report no est_tokens/capped at all —
@@ -1649,7 +1649,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
 
 std::optional<int> runForLens( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -1663,7 +1663,7 @@ std::optional<int> runForLens( const MainDispatch& d )
     std::vector<std::uint32_t>&       forChurn     = d.forChurn;
     RedactCounts&                     redactCounts = d.redactCounts;
     RedactCounts*                     redactPtr    = d.redactPtr;
-    const ctx::notes::NoteIndex*      notesPtr     = d.notesPtr;   // L3: surfaces <note> children on the emitted symbols/files
+    const rw::notes::NoteIndex*      notesPtr     = d.notesPtr;   // L3: surfaces <note> children on the emitted symbols/files
 
     // --for=TASK: the task lens — a ranked, signatures-only inventory of the building blocks relevant
     // to the task (with descriptive cx/in metrics), framed for reuse. The evidence-optimal bundle
@@ -1802,7 +1802,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             for( NodeId i = 0; i < S; ++i ) lensSurfaceIds[i] = i;
             // A4-F23c: score-only sort left ties straddling the cut stdlib-dependent. Use the (score desc, id
             // asc) total order (same key packSignatures selects with) so the surface set is deterministic.
-            ctx::sortutil::radixSortByScoreDescId( lensSurfaceIds, lensRank );
+            rw::sortutil::radixSortByScoreDescId( lensSurfaceIds, lensRank );
             const std::size_t cap = std::min<std::size_t>( std::size_t( forTopN ), S );
             lensSurfaceIds.resize( cap );
         }
@@ -1868,7 +1868,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             char*       lbuf = nullptr;
             std::size_t lsz  = 0;
-            if( std::FILE* lm = ctx::openChargeBuffer( &lbuf, &lsz ) )
+            if( std::FILE* lm = rw::openChargeBuffer( &lbuf, &lsz ) )
             {
                 packLego( lm, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true );
                 std::fflush( lm );  std::fclose( lm );
@@ -1882,7 +1882,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             char*       cbuf = nullptr;
             std::size_t csz  = 0;
-            if( std::FILE* cm = ctx::openChargeBuffer( &cbuf, &csz ) )
+            if( std::FILE* cm = rw::openChargeBuffer( &cbuf, &csz ) )
             {
                 packCompose( cm, ing, g.composeEdges, lensSurfaceIds );
                 std::fflush( cm );  std::fclose( cm );
@@ -1899,7 +1899,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // B6.3: route view for the same relevant symbol set (top-N by lensRank)
             char*       rbuf = nullptr;
             std::size_t rsz  = 0;
-            if( std::FILE* rm = ctx::openChargeBuffer( &rbuf, &rsz ) )
+            if( std::FILE* rm = rw::openChargeBuffer( &rbuf, &rsz ) )
             {
                 packRoutes( rm, ing, g.routeEdges, lensSurfaceIds );
                 std::fflush( rm );  std::fclose( rm );
@@ -1914,8 +1914,8 @@ std::optional<int> runForLens( const MainDispatch& d )
 
         // the bundle budget: default kForPayloadBudgetBytes; an explicit --token-budget beats it
         const std::size_t bundleBudget = cfg.tokenBudget > 0
-            ? std::size_t( double( cfg.tokenBudget ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom )
-            : ctx::kForPayloadBudgetBytes;
+            ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+            : rw::kForPayloadBudgetBytes;
         const std::size_t fixedBytes = headerStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
 
@@ -1941,7 +1941,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             char*       sbuf = nullptr;
             std::size_t ssz  = 0;
-            if( std::FILE* sm = ctx::openChargeBuffer( &sbuf, &ssz ) )
+            if( std::FILE* sm = rw::openChargeBuffer( &sbuf, &ssz ) )
             {
                 packSignatures( sm, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                                 &forChurn, &forClone, testedPtr, ampPtr,     // Q3: churn/clone/tested/amp folded onto the <d> blocks
@@ -1969,17 +1969,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // `--for --token-budget=2000 --detail=20` streamed 68 035 B against a 4 248 B allowance (16x) with
         // est_tokens="1674" unmoved and stderr empty, while the self-check that concluded "no bypass found"
         // was taken on the BARE --for — the one shape where both sections are absent. Both now go through
-        // ctx::chargeSection for the reason the map's four do: a section that renders through the funnel is
+        // rw::chargeSection for the reason the map's four do: a section that renders through the funnel is
         // charged by construction, not by a second piece of code remembering to add it.
         //
         // ORDER HERE (not the emission order, which is unchanged: detail, then graph): the graph block has no
         // budget knob, so its size is a FIXED cost; the bodies are the one section with a byte budget, so they
         // are the section that absorbs whatever the ceiling has left. Pricing the fixed cost first is what lets
         // the bodies' budget be exact.
-        ctx::ChargedSection graphSection, detailSection;
+        rw::ChargedSection graphSection, detailSection;
         if( cfg.withGraph )
-            graphSection = ctx::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
-                                               ctx::kBytesPerTokenDefault );
+            graphSection = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
+                                               rw::kBytesPerTokenDefault );
 
         // both kept alive past the render so the isRendered=false degrade path below re-emits the SAME set at
         // the SAME budget (the map path's emitSection lambda has the identical contract)
@@ -1996,7 +1996,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             const std::size_t S = ing.symbols.size();
             detailIds.resize( S );
             for( NodeId i = 0; i < S; ++i ) detailIds[i] = i;
-            ctx::sortutil::radixSortByScoreDescId( detailIds, lensRank );   // (score desc, id asc) — same order as the sigs
+            rw::sortutil::radixSortByScoreDescId( detailIds, lensRank );   // (score desc, id asc) — same order as the sigs
             const std::size_t detN = std::min<std::size_t>( { std::size_t( cfg.detail ), std::size_t( forTopN ), S } );
             detailIds.resize( detN );
             // Composes with --max-tokens: when set, it bounds the body byte budget (same conservative rate the
@@ -2007,7 +2007,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // tag and the two header attributes spliced in below — and never MORE than the budget they already
             // had, so a run WITHOUT --token-budget is byte-identical.
             detailBodyBudget = cfg.maxTokens > 0
-                ? std::size_t( double( cfg.maxTokens ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom )
+                ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
                 : cfg.packBudgetBytes;
             if( cfg.tokenBudget > 0 )
             {
@@ -2016,10 +2016,10 @@ std::optional<int> runForLens( const MainDispatch& d )
                 const std::size_t leftBytes  = bundleBudget > spentBytes ? bundleBudget - spentBytes : 1;
                 detailBodyBudget = std::min( detailBodyBudget, leftBytes );
             }
-            detailSection = ctx::chargeSection( [ & ]( std::FILE* f )
+            detailSection = rw::chargeSection( [ & ]( std::FILE* f )
                 { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
                               /*ranges=*/nullptr, notesPtr ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
-                ctx::kBytesPerTokenBody );
+                rw::kBytesPerTokenBody );
         }
         // W3FIX H2 — the ceiling ladder (rungs + rationale: serialize.h climbCeilingLadder), same rungs in the
         // same order --pack-task climbs. The header IS charged to the budget above, but charging is not FITTING: at
@@ -2029,17 +2029,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // BEFORE est_tokens so the estimate covers the disclosure; inert without an explicit --token-budget.
         if( cfg.tokenBudget > 0 && sigsPreRendered )
         {
-            static constexpr ctx::CeilingLadderNotes kNotes{
+            static constexpr rw::CeilingLadderNotes kNotes{
                 " [task_echo: dropped (ceiling)]", " [task_echo + route_attr: dropped (ceiling)]",
                 " [over_ceiling: the header floor (verbatim task echo + fixed legend) exceeds this budget"
                 " - no payload left to trim]" };
             // §F1: the ladder prices what will actually be EMITTED, so the two sections charged above are in
             // this sum. headerSpliceReserve covers the est_tokens (and weak="1") attributes spliced in below —
             // see its definition for why a reserve rather than a measurement.
-            headerStr = ctx::climbCeilingLadder( buildForHeader, headerStr,
+            headerStr = rw::climbCeilingLadder( buildForHeader, headerStr,
                                                  sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size()
                                                      + detailSection.xml.size() + graphSection.xml.size() + 6 + headerSpliceReserve,   // + "</ctx>" + the header splices below
-                                                 ctx::ceilingAllowanceBytes( cfg.tokenBudget ),
+                                                 rw::ceilingAllowanceBytes( cfg.tokenBudget ),
                                                  /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
         }
 
@@ -2081,11 +2081,11 @@ std::optional<int> runForLens( const MainDispatch& d )
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                           + routeStr.size() + graphSection.xml.size() + 6;   // + "</ctx>"
             const std::size_t bodyTokens  = detailSection.tokens;
-            std::size_t estTokens = ctx::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
+            std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             for( int pass = 0; pass < 4; ++pass )
             {
-                const std::size_t next = ctx::tokensForEmittedBytes( markupBytes + attr.size(), kBytesPerTokenDefault ) + bodyTokens;
+                const std::size_t next = rw::tokensForEmittedBytes( markupBytes + attr.size(), kBytesPerTokenDefault ) + bodyTokens;
                 if( next == estTokens ) break;
                 estTokens = next;
                 attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
@@ -2111,13 +2111,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         // bundle keeps signatures-only. A section whose pre-render degraded (isRendered=false) is emitted here
         // directly at the SAME budget — uncharged for that one run, with an alert, never a fabricated number.
         if( cfg.detail > 0 )
-            ctx::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
+            rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
                                                                               cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr ); } );
 
         // R8: --with-graph — a compact mermaid flowchart of the ranked bundle's anchor neighborhood,
         // right before </ctx>. Off by default (G5): omitted, this is a no-op and output is byte-identical.
         if( cfg.withGraph )
-            ctx::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
+            rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
 
         std::printf( "</ctx>" );
         reportRedactions( stderr, redactCounts );
@@ -2128,7 +2128,7 @@ std::optional<int> runForLens( const MainDispatch& d )
 
 std::optional<int> runTargetedViews( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -2209,7 +2209,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
                      "On the root, the three attributes that ARE that ordering's evidence: in=reuse-count "
                      "(callers), ccx=cognitive complexity, tested=1 when a test reaches it (OMITTED, never 0, "
                      "when none does). Copy its shape, not its text. -->",
-                     ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), ctx::kExemplarSelectionRule );
+                     ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), rw::kExemplarSelectionRule );
         std::printf( "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s>",
                      symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
                      ex( ing.files[ wsym.fileId ] ).c_str(), wsym.line,
@@ -2231,7 +2231,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // ceiling at the map family's densest rate × headroom — the old ×4 B/tok overshot ~85×), --token-budget
         // GATES inside emitRecallBudgeted (exit 3, header line only — never the artifact it rejected).
         const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall );
-        const std::size_t        budget = cfg.maxTokens > 0 ? std::size_t( double( cfg.maxTokens ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom ) : 0;
+        const std::size_t        budget = cfg.maxTokens > 0 ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom ) : 0;
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
@@ -2245,7 +2245,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
 
 std::optional<int> runArchViews( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
 
@@ -2378,17 +2378,17 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // never a gate. Computed + documented in arch.h::dsmPropagationCostCapable. §P9.4: N is restricted
         // to the SAME dependency-capable mask --deps <health> uses, so the two verbs' denominator agrees.
         const auto   depCapable = dependencyCapableMask( ing );
-        const double propCost   = ctx::dsmPropagationCostCapable( ing, adj, depCapable );
+        const double propCost   = rw::dsmPropagationCostCapable( ing, adj, depCapable );
 
         // ── shared emitters (one definition → the three return paths can't drift) ──────────────────────
         std::vector<char> ae;   // escapeXml scratch (cleared per call); captured by the lambdas below
         const auto emitViol = [ & ]( const Viol& v, bool showBaselined )
         {
             // escapeXml reuses a single buffer (clears on each call), so capture to strings.
-            const std::string ef  = std::string( ctx::escapeXml( ing.files[ v.from ], ae ) );
-            const std::string efl = std::string( ctx::escapeXml( v.fromLayer, ae ) );
-            const std::string et  = std::string( ctx::escapeXml( ing.files[ v.to ], ae ) );
-            const std::string etl = std::string( ctx::escapeXml( v.toLayer, ae ) );
+            const std::string ef  = std::string( rw::escapeXml( ing.files[ v.from ], ae ) );
+            const std::string efl = std::string( rw::escapeXml( v.fromLayer, ae ) );
+            const std::string et  = std::string( rw::escapeXml( ing.files[ v.to ], ae ) );
+            const std::string etl = std::string( rw::escapeXml( v.toLayer, ae ) );
             std::printf( "<v from=\"%s\" fromLayer=\"%s\" to=\"%s\" toLayer=\"%s\"%s/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
         };
@@ -2418,7 +2418,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
                          mods.size(), mods.size() - zoneNa, zonePain, zoneUseless, zoneOk, zoneNa, propCost );
             for( const ModuleMetric& mm : mods )
             {
-                const std::string ep = std::string( ctx::escapeXml( mm.path, ae ) );
+                const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
                 std::printf( "<m path=\"%s\" ca=\"%u\" ce=\"%u\" types=\"%u\" abstract=\"%u\" I=\"%.2f\" A=\"%.2f\" D=\"%.2f\" zone=\"%s\" reachable=\"%d\"%s%s/>",
                              ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes,
                              mm.instability, mm.abstractness, mm.distance, mm.zone, mm.reachable ? 1 : 0,
@@ -2531,9 +2531,9 @@ std::string cloneUnpagedTotalAttr( bool clonePaging, std::size_t cloneTotal )
     return buf;
 }
 
-int emitClonesReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
+int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 {
-    using namespace ctx;
+    using namespace rw;
     const std::vector<CloneGroup> cg  = findClones( ing, 40 );
     const std::vector<CloneGroup> cg3 = findClonesType3( ing, 40 );   // gapped near-misses (excludes exact = Type-1/2)
     const int                     cap = cfg.packTopN > 0 ? cfg.packTopN : 40;
@@ -2617,10 +2617,10 @@ int emitClonesReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
 // §P11.3: the worst-function lookup for one --hotspots row, isolated so the row-emission loop inside the
 // already-oversized runMaintenanceViews dispatcher gains a function CALL, not another decision point.
 struct HotspotWorstFn { const char* name; std::uint32_t line; };
-inline HotspotWorstFn hotspotWorstFnOf( const ctx::IngestResult& ing, ctx::NodeId worstSym )
+inline HotspotWorstFn hotspotWorstFnOf( const rw::IngestResult& ing, rw::NodeId worstSym )
 {
-    if( worstSym == ctx::kNoNode ) return { "", 0 };
-    const ctx::Symbol& s = ing.symbols[ worstSym ];
+    if( worstSym == rw::kNoNode ) return { "", 0 };
+    const rw::Symbol& s = ing.symbols[ worstSym ];
     return { s.name.c_str(), s.line };
 }
 
@@ -2656,7 +2656,7 @@ inline constexpr const char* kCochangeFileLegend =
 
 std::optional<int> runMaintenanceViews( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const std::string&                root         = d.root;
@@ -2671,7 +2671,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         // --since=REV|DATE: scope the churn window to "what got risky AFTER this point" (the regression
         // lens) instead of the fixed 12-month default. resolveSinceScope degrades an unresolvable value
         // to inactive (nullptr-equivalent), so gitChurnCounts falls back to its unscoped "12 months ago".
-        const ctx::SinceScope sinceScope = ctx::resolveSinceScope( root, cfg.since );
+        const rw::SinceScope sinceScope = rw::resolveSinceScope( root, cfg.since );
 
         // §P0.5c: an unresolvable --since used to degrade to ALL history while stdout still printed
         // window="12mo" — a false NON-zero. The churn numbers are real; the window they are labelled with is
@@ -2694,7 +2694,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             churnOk = false;
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
-                const ctx::SinceScope rootScope = ctx::resolveSinceScope( ws[r].arg, cfg.since );
+                const rw::SinceScope rootScope = rw::resolveSinceScope( ws[r].arg, cfg.since );
                 std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
                 if( !gitChurnCounts( ws[r].arg, ing, rootChurn, "12 months ago", cfg.since.empty() ? nullptr : &rootScope, r ) )
                     continue;
@@ -2785,7 +2785,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "join could not match), which scores zero for a reason that is not about the file. Treat it as an "
                      "upper bound on quietness, not a measure of it. "
                      "raise the default cap with limit=N (offset=M pages) -->%s",
-                     windowLabelInComment.c_str(), ctx::kAtStampLegend );   // sweep: at= was undefined on this screen
+                     windowLabelInComment.c_str(), rw::kAtStampLegend );   // sweep: at= was undefined on this screen
         if( multiRoot )   // §5 comparability caveat: churn scales (commit-count conventions) differ per repo
             std::printf( "<!-- multi-root workspace: churn is mined PER root — hotspot scores are comparable within a root, not across roots -->" );
         // T2: --limit/--offset paginate the sorted `order`. When no --limit, the historic topN cap (40 or
@@ -2836,8 +2836,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
 
         // --since=REV|DATE: scope co-change mining to recent coupling instead of the fixed 18-month
         // default. An unresolvable value degrades to inactive → both branches below fall back unchanged.
-        const ctx::SinceScope sinceScope   = ctx::resolveSinceScope( root, cfg.since );
-        const ctx::SinceScope* sinceScopeP = cfg.since.empty() ? nullptr : &sinceScope;
+        const rw::SinceScope sinceScope   = rw::resolveSinceScope( root, cfg.since );
+        const rw::SinceScope* sinceScopeP = cfg.since.empty() ? nullptr : &sinceScope;
 
         // §B11.5: the effective window label, computed ONCE for all three exits below (per-file, empty,
         // repo-wide) — --hotspots' own rule verbatim: name the --since value when it resolved, else the
@@ -2855,7 +2855,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // per-repo by construction; partners in another root are undefined and never synthesized).
             const std::uint32_t fidRoot  = multiRoot ? ing.fileRoot[ fid ] : UINT32_MAX;
             const std::string&  fidRepo  = multiRoot ? ws[ fidRoot ].arg : root;
-            const ctx::SinceScope fidScope = multiRoot ? ctx::resolveSinceScope( fidRepo, cfg.since ) : sinceScope;
+            const rw::SinceScope fidScope = multiRoot ? rw::resolveSinceScope( fidRepo, cfg.since ) : sinceScope;
             std::uint32_t                commits = 0;
             const std::vector<CoPartner> ps      = cochangePartners( fidRepo, ing, cfg.cochangeFile, commits,
                                                                      cfg.since.empty() ? nullptr : &fidScope, fidRoot );
@@ -2863,7 +2863,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // --limit/--offset window the (already deterministically sorted) partner list.
             const PageWindow  ppw = pageWindow( ps.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
             char              pab[ 192 ];
-            std::printf( "%s%s", kCochangeFileLegend, ctx::kAtStampLegend );   // sweep: at= was undefined on this screen
+            std::printf( "%s%s", kCochangeFileLegend, rw::kAtStampLegend );   // sweep: at= was undefined on this screen
             // §P8 vocabulary: at="<sha>[+dirty]" — cochange is a PURE git-history product (every number in
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
@@ -2888,7 +2888,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         {
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
-                const ctx::SinceScope rs = ctx::resolveSinceScope( ws[r].arg, cfg.since );
+                const rw::SinceScope rs = rw::resolveSinceScope( ws[r].arg, cfg.since );
                 std::vector<std::vector<std::uint32_t>> part = gitCommitFileSets( ws[r].arg, ing, "18 months ago", 30,
                                                                                   cfg.since.empty() ? nullptr : &rs, r );
                 for( std::vector<std::uint32_t>& cs : part ) sets.push_back( std::move( cs ) );
@@ -2950,7 +2950,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         // capped= reconcile pairs= against the rows that follow even with no --limit at all.
         const PageWindow  prpw = pageWindow( prs.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
         char              prab[ 192 ];
-        std::printf( "%s%s", kCochangeRepoLegend, ctx::kAtStampLegend );   // sweep: ditto
+        std::printf( "%s%s", kCochangeRepoLegend, rw::kAtStampLegend );   // sweep: ditto
         std::printf( "<cochange pairs=\"%zu\" window=\"%s\"%s%s>", prs.size(), coWindowLabel.c_str(),
                      pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
@@ -3036,7 +3036,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
                      "holding the FIRST of them (lowest node id, the same pick around and lego make), so defs= above 1 means "
                      "the other definitions' files were NOT analysed. Qualify with file:name to choose one -->%s",
-                     ctx::kAtStampLegend );   // sweep: ditto
+                     rw::kAtStampLegend );   // sweep: ditto
         // §P8: --limit/--offset used to be accepted and ignored here (757 rows whatever you asked for). They
         // window `printRows`, which is already deterministic (files sorted by path). files= keeps meaning the
         // number of files ANALYSED — a different quantity from the <f/> row count, which is why the paging
@@ -3066,10 +3066,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             const FileOwnership& ow  = ownerships[i];
             const AuthorScore&   top = ow.authors[0];
             // path and email are externally-controlled strings — escape both to keep output valid XML.
-            const auto ep = ctx::escapeXml( ing.files[ ow.fileId ], owEsc );
+            const auto ep = rw::escapeXml( ing.files[ ow.fileId ], owEsc );
             std::printf( "<f p=\"%.*s\" authors=\"%u\" bf=\"%d\"",
                          int( ep.size() ), ep.data(), ow.uniqueAuthors, int( ow.busFactor ) );
-            const auto em = ctx::escapeXml( top.email, owEsc );
+            const auto em = rw::escapeXml( top.email, owEsc );
             std::printf( " top=\"%.*s\" share=\"%.2f\"/>", int( em.size() ), em.data(), top.share );
         }
         std::printf( "</owners>" );
@@ -3084,7 +3084,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
 // and `sel.isStaleFileOnDisk()` (the seam's DISK fact, never the removeStaleFile intent) picks which. The
 // stale halves mirror the MCP twin's errMsg in mcpverbs.h::computeQualityDelta, per-arm verbs aside; keeping
 // this out of runQualityDelta keeps three branches out of a body that is already the file's largest.
-std::string noBaselineFatalMessage( const std::string& baselineFile, const ctx::quality::BaselineSelection& sel )
+std::string noBaselineFatalMessage( const std::string& baselineFile, const rw::quality::BaselineSelection& sel )
 {
     // §B12.4 (CA4): the non-stale arm named only the missing sidecar and left out the OTHER half of the
     // condition it is reporting — this message is reached only when the git-HEAD fallback was attempted and
@@ -3106,7 +3106,7 @@ std::string noBaselineFatalMessage( const std::string& baselineFile, const ctx::
 // its interior is a sequential pipeline over shared locals, not independent arms.
 std::optional<int> runQualityDelta( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -3454,7 +3454,7 @@ inline std::string_view deadCodeStripDotSlash( std::string_view p ) noexcept
 inline bool deadCodeFilterMatchesPath( std::string_view path, std::string_view dirFilter, bool anchoredAtRoot,
                                        std::string_view root = {} ) noexcept
 {
-    const std::string_view p = anchoredAtRoot ? ctx::relForHash( path, root ) : deadCodeStripDotSlash( path );
+    const std::string_view p = anchoredAtRoot ? rw::relForHash( path, root ) : deadCodeStripDotSlash( path );
     if( anchoredAtRoot )
     {
         if( dirFilter.size() > p.size() || p.substr( 0, dirFilter.size() ) != dirFilter ) return false;
@@ -3475,7 +3475,7 @@ inline bool deadCodeFilterMatchesPath( std::string_view path, std::string_view d
 // immediately after runQualityDelta, i.e. in the position the old two-branch chain evaluated it.
 std::optional<int> runQualityViews( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -3621,9 +3621,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             const NodeId candidateId = candidates[ candidateIndex ];
             const Symbol& s = ing.symbols[ candidateId ];
             // name and path may contain & < > " — escape both so output is valid XML.
-            const auto en = ctx::escapeXml( s.name, dcEsc );
+            const auto en = rw::escapeXml( s.name, dcEsc );
             std::printf( "<d n=\"%.*s\" t=\"%s\"", int( en.size() ), en.data(), symTag( s.kind ) );
-            const auto ep = ctx::escapeXml( ing.files[ s.fileId ], dcEsc );
+            const auto ep = rw::escapeXml( ing.files[ s.fileId ], dcEsc );
             std::printf( " p=\"%.*s\" l=\"%u\"/>", int( ep.size() ), ep.data(), s.line );
         }
         std::printf( "</dead-code>" );
@@ -3692,7 +3692,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
 // scopes in one file.
 std::optional<int> runEditCheck( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&        cfg = d.cfg;
     const IngestResult&  ing = d.ing;
 
@@ -3724,7 +3724,7 @@ std::optional<int> runEditCheck( const MainDispatch& d )
 
 std::optional<int> runEvalViews( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -3767,7 +3767,7 @@ std::optional<int> runEvalViews( const MainDispatch& d )
 
 std::optional<int> runCallHierarchy( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -3828,7 +3828,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // columnar and default shapes carry the identical disclosure. JSON has no comment-node analogue, so
         // there the marker travels as the counts_floor key on the root object instead.
         if( !cfg.json )
-            std::printf( "%s%s-->", ctx::kCallHierarchyLegendOpen, ctx::graphCountDisclosure().c_str() );
+            std::printf( "%s%s-->", rw::kCallHierarchyLegendOpen, rw::graphCountDisclosure().c_str() );
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
         // arrays (dedups the repeated per-row markup + paths). Default --format=xml is byte-identical below.
@@ -3846,7 +3846,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                    + "\" count=\"" + std::to_string( result.size() ) + "\""
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, false )
-                                   + ctx::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
+                                   + rw::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
             emitColumnarSymbolRows( stdout, ing, tag, attr, page );
             return 0;
         }
@@ -3860,7 +3860,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"count\":%zu%s%s", jsonStr( sym ).c_str(), matches.size(), result.size(),
                          pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                          cfg.pageLimit, cfg.pageOffset, false, kJsonPageSyntax ),
-                         ctx::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
+                         rw::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
             std::printf( ",\"%s\":[", tag );
             printJsonSymbolRows( ing, result, pw.begin, pw.end );
             std::printf( "]}" );
@@ -3872,7 +3872,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         std::printf( "<%s of=\"%s\" defs=\"%zu\" count=\"%zu\"%s%s>", tag, ex( sym ).c_str(), matches.size(), result.size(),
                      pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
-                     ctx::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml );
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
             const Symbol& s = ing.symbols[ result[i] ];
@@ -3886,7 +3886,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
 
 std::optional<int> runGraphQuery( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -3942,7 +3942,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
                      "name/all; filters kind/cx/fanin/file; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
-                     "%s-->", ctx::graphCountDisclosure().c_str() );
+                     "%s-->", rw::graphCountDisclosure().c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
         // shown= the --top-k slice, but capped= was missing — so a caller reading a 200-row answer had to
         // know the default top-k to tell a complete result from a truncated one. Rule 3: the bit is always
@@ -3951,7 +3951,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s>",
                      ex( cfg.graphQuery ).c_str(), total,
                      pageDisclosure( gqAb, sizeof( gqAb ), keep, total, gqPw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                     ctx::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml );
         for( std::size_t ri = gqPw.begin; ri < gqPw.end; ++ri )
         {
             const NodeId  c = result[ ri ];
@@ -3972,15 +3972,15 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
 // "file:" prefix never again poisons the suggester (the constant "srcmut_sigchange" bug). defsOfName is the
 // un-narrowed def count for the disclosure attribute — meaningful only when fileQualified.
 struct UsesSelector { bool fileQualified; std::string_view siteMatchName; std::string_view suggestName; std::size_t defsOfName; };
-inline UsesSelector resolveUsesSelector( const ctx::IngestResult& ing, std::string_view sym, std::size_t defsCount )
+inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::size_t defsCount )
 {
     UsesSelector u;
     u.fileQualified = sym.find( "::" ) == std::string_view::npos && sym.find( ':' ) != std::string_view::npos;
     std::string_view file;
-    if( u.fileQualified ) ctx::splitQualifiedSpec( sym, file, u.siteMatchName );
+    if( u.fileQualified ) rw::splitQualifiedSpec( sym, file, u.siteMatchName );
     else                  u.siteMatchName = sym;
-    ctx::splitQualifiedSpec( sym, file, u.suggestName );
-    u.defsOfName = u.fileQualified ? ctx::resolveAllByName( ing, u.siteMatchName ).size() : defsCount;
+    rw::splitQualifiedSpec( sym, file, u.suggestName );
+    u.defsOfName = u.fileQualified ? rw::resolveAllByName( ing, u.siteMatchName ).size() : defsCount;
     return u;
 }
 
@@ -3994,9 +3994,9 @@ inline UsesSelector resolveUsesSelector( const ctx::IngestResult& ing, std::stri
 //
 // Returns a per-enclosing-symbol flag array (indexed by NodeId), never a set of sites: the ONE pass over
 // ing.references that collects sites then tests membership in O(1), instead of re-walking the graph per site.
-inline std::vector<char> usesChosenCallers( const ctx::IngestResult& ing, const ctx::Graph& g, std::span<const ctx::NodeId> defs )
+inline std::vector<char> usesChosenCallers( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs )
 {
-    using namespace ctx;
+    using namespace rw;
     std::vector<char> isChosenCaller( ing.symbols.size(), 0 );
     const auto*       ro = g.inEdges.rowOffsets();
     const auto*       ci = g.inEdges.colIndices();
@@ -4010,16 +4010,16 @@ inline std::vector<char> usesChosenCallers( const ctx::IngestResult& ing, const 
 }
 
 // ONE use-site row: (file, line, role, enclosing canonical id). File scope ⇒ `in` empty.
-struct UseSite { std::uint32_t fileId; std::uint32_t line; ctx::RefRole role; std::string in; };
+struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; };
 
 // The use-site scan: references whose NAME matches the selector and that carry a real use-site role. Markdown
 // doc-mentions / wikilinks and HAS-A compose edges are NOT name use-sites (excluded). Returns the rows in the
 // deterministic emission order (file path, line, role, enclosing-id) plus `callSitesOfName` — the call-role
 // total BEFORE the §A6b narrowing, which is what the disclosure attribute reports.
 inline std::pair<std::vector<UseSite>, std::size_t>
-collectUseSites( const ctx::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller )
+collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller )
 {
-    using namespace ctx;
+    using namespace rw;
     std::vector<UseSite> sites;
     std::size_t          callSitesOfName = 0;
     for( const Reference& r : ing.references )
@@ -4061,9 +4061,9 @@ collectUseSites( const ctx::IngestResult& ing, const UsesSelector& sel, std::spa
 // §B4.2: that MESSAGE now lives in selectorrefuse.h and every SYM-taking verb speaks it — this arm is what
 // it was generalized FROM, so what stays here is only the exit code. The wording is unchanged (a file-list
 // cap with an explicit remainder is the one addition, shared by all six arms).
-inline int refuseUsesFileQualifier( const ctx::IngestResult& ing, std::string_view sym, const UsesSelector& )
+inline int refuseUsesFileQualifier( const rw::IngestResult& ing, std::string_view sym, const UsesSelector& )
 {
-    std::fprintf( stderr, "%s\n", ctx::selectorNotFoundMessage( ing, "ripwire: --uses symbol not found: ",
+    std::fprintf( stderr, "%s\n", rw::selectorNotFoundMessage( ing, "ripwire: --uses symbol not found: ",
                                                                 sym, "--uses=" ).c_str() );
     return 1;
 }
@@ -4074,7 +4074,7 @@ inline int refuseUsesFileQualifier( const ctx::IngestResult& ing, std::string_vi
 // printing every site (discloseCap=false, byte-identical un-paginated) and only an explicit --limit windows.
 std::optional<int> runUses( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4147,7 +4147,7 @@ std::optional<int> runUses( const MainDispatch& d )
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
                      "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
-                     "%s-->", ctx::kUsesLegendOpen, ctx::graphCountDisclosure().c_str() );
+                     "%s-->", rw::kUsesLegendOpen, rw::graphCountDisclosure().c_str() );
         // §P8 G1: the page window over the sorted sites; count= stays the un-windowed total (note above
         // runUses) — of the sites the extractor RESOLVED, which counts_floor= is there to say (V3 L-4).
         const PageWindow  upw      = pageWindow( sites.size(), cfg.pageLimit, cfg.pageOffset );
@@ -4169,14 +4169,14 @@ std::optional<int> runUses( const MainDispatch& d )
             // a markdown SECTION heading reaches routinely. Same shape as runImpact / the callers arm.
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( defs.size() )
                                    + "\" external=\"" + ( external ? "1" : "0" ) + "\" count=\"" + std::to_string( sites.size() ) + "\""
-                                   + selectorAttrs + upage + ctx::kGraphCountFloorAttrXml;   // §H4 §3.4
+                                   + selectorAttrs + upage + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins );
             return 0;
         }
 
         std::printf( "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), upage,
-                     ctx::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml );
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
             const UseSite& u = sites[ siteIndex ];
@@ -4200,18 +4200,18 @@ std::optional<int> runUses( const MainDispatch& d )
 // one) lands as a function CALL in the verb body, not another decision point inside it. Slot array indexed
 // by the Lang enum (model.h; 16 values, small and POD) rather than a hashable composite key or nested map.
 struct ExtSurfaceAcc  { std::uint32_t refs = 0; std::uint32_t calls = 0; };
-struct ExtSurfaceName { std::string name; ctx::Lang lang; std::uint32_t refs; std::uint32_t calls; };
-constexpr std::size_t kExtSurfaceLangSlots = 16;   // cardinality of enum class ctx::Lang (model.h)
+struct ExtSurfaceName { std::string name; rw::Lang lang; std::uint32_t refs; std::uint32_t calls; };
+constexpr std::size_t kExtSurfaceLangSlots = 16;   // cardinality of enum class rw::Lang (model.h)
 
-inline ctx::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>>
-accumulateExternalSurface( const ctx::IngestResult& ing, const ctx::HashMap<std::string, char>& defined )
+inline rw::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>>
+accumulateExternalSurface( const rw::IngestResult& ing, const rw::HashMap<std::string, char>& defined )
 {
-    using namespace ctx;
+    using namespace rw;
     // count references to names that have NO in-corpus def. We count only CALL / IMPORT / EXTENDS sites: an
     // undefined name we INVOKE / #include / derive-from is a genuine external dependency, whereas a bare
     // read/write of an undefined identifier is overwhelmingly a LOCAL variable (no symbol node), which would
     // otherwise swamp the surface with single-letter noise. `calls` is the call subset of `refs`.
-    ctx::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>> ext;
+    rw::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>> ext;
     for( const Reference& r : ing.references )
     {
         if( r.isCompose || r.isDocLink ) continue;       // type edge / doc mention — not a code reference
@@ -4228,14 +4228,14 @@ accumulateExternalSurface( const ctx::IngestResult& ing, const ctx::HashMap<std:
 }
 
 inline std::vector<ExtSurfaceName>
-buildExternalSurfaceRows( const ctx::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>>& ext )
+buildExternalSurfaceRows( const rw::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>>& ext )
 {
     std::vector<ExtSurfaceName> names;
     names.reserve( ext.size() );
     for( const auto& [ nm, slots ] : ext )
         for( std::size_t li = 0; li < kExtSurfaceLangSlots; ++li )
             if( slots[li].refs )
-                names.push_back( { nm, ctx::Lang( li ), slots[li].refs, slots[li].calls } );
+                names.push_back( { nm, rw::Lang( li ), slots[li].refs, slots[li].calls } );
     std::sort( names.begin(), names.end(), []( const ExtSurfaceName& a, const ExtSurfaceName& b )
     {
         if( a.refs != b.refs ) return a.refs > b.refs;   // most-leaned-on first
@@ -4247,7 +4247,7 @@ buildExternalSurfaceRows( const ctx::HashMap<std::string, std::array<ExtSurfaceA
 
 std::optional<int> runExternalSurface( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
 
@@ -4293,7 +4293,7 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
 
 std::optional<int> runPath( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4307,7 +4307,7 @@ std::optional<int> runPath( const MainDispatch& d )
         // it used to answer `--path=zzq` with a bare "needs SRC,DST", naming neither what it got nor what
         // to type, while the flag's own kViewFlags row already carries both for the EMPTY case.
         if( comma == std::string_view::npos )
-        { ctx::refuseFlagValue( "--path", "two symbol names, FROM,TO", spec, "--path=main,rankGraph" );  return 1; }
+        { rw::refuseFlagValue( "--path", "two symbol names, FROM,TO", spec, "--path=main,rankGraph" );  return 1; }
         const std::string_view srcN = spec.substr( 0, comma ), dstN = spec.substr( comma + 1 );
 
         // r27-emitters T4: resolve EVERY def of each endpoint, not just the lowest-id one. `--path=main,X` used
@@ -4330,7 +4330,7 @@ std::optional<int> runPath( const MainDispatch& d )
             return 1;
         }
 
-        const std::vector<NodeId> path    = ctx::shortestPathAny( g, srcDefs, dstDefs );   // ONE BFS over every def pair
+        const std::vector<NodeId> path    = rw::shortestPathAny( g, srcDefs, dstDefs );   // ONE BFS over every def pair
         const NodeId              srcUsed = path.empty() ? srcDefs.front() : path.front();
         const NodeId              dstUsed = path.empty() ? dstDefs.front() : path.back();
 
@@ -4365,7 +4365,7 @@ std::optional<int> runPath( const MainDispatch& d )
 
 std::optional<int> runConnect( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4388,10 +4388,10 @@ std::optional<int> runConnect( const MainDispatch& d )
                 s.remove_prefix( comma + 1 );
             }
         }
-        if( specs.size() < 2 || specs.size() > ctx::connectcfg::kMaxTerminals )
+        if( specs.size() < 2 || specs.size() > rw::connectcfg::kMaxTerminals )
         {
             std::fprintf( stderr, "ripwire: --connect needs 2..%zu comma-separated symbols (got %zu) — for a broader ranked set use --for\n",
-                          ctx::connectcfg::kMaxTerminals, specs.size() );
+                          rw::connectcfg::kMaxTerminals, specs.size() );
             return 1;
         }
         std::vector<NodeId> terminals;
@@ -4413,10 +4413,10 @@ std::optional<int> runConnect( const MainDispatch& d )
         // the one seam where both headers are visible — the core keeps clamping (the MCP `connect` verb and
         // any other caller still hand it an unvalidated radius; a core that VERIFYs on hostile input is a
         // crash, not a guard).
-        static_assert( ctx::kConnectRadiusMax == int( ctx::connectcfg::kMaxRadius ),
+        static_assert( rw::kConnectRadiusMax == int( rw::connectcfg::kMaxRadius ),
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
-        const ctx::ConnectResult res = ctx::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) );
-        ctx::packConnect( stdout, ing, res, d.redactPtr, cfg.maxTokens );
+        const rw::ConnectResult res = rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) );
+        rw::packConnect( stdout, ing, res, d.redactPtr, cfg.maxTokens );
         return 0;
     }
     return std::nullopt;
@@ -4429,7 +4429,7 @@ std::optional<int> runConnect( const MainDispatch& d )
 // the no-flag output byte-identical and makes --limit=200 finally emit up to 200 of reaches=.
 std::optional<int> runImpact( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4445,7 +4445,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                                                    cfg.impactSym, "--impact=" ).c_str() );   // §B4.2
             return 1;
         }
-        const std::vector<NodeId> reach = ctx::transitiveCallers( g, seeds );
+        const std::vector<NodeId> reach = rw::transitiveCallers( g, seeds );
         const std::vector<float>  rank  = rankGraph( g );
         std::vector<NodeId>       show  = reach;
         std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
@@ -4456,8 +4456,8 @@ std::optional<int> runImpact( const MainDispatch& d )
             // carries the limit="0" definition too — rule 7 existed only in --help and that header before.
             // §H4 §3.4: opener + the shared floor/counting-unit tail, both from src/graphlegend.h so the MCP
             // twin cannot drift from this wording (the §B4 echo-site class).
-            std::printf( "%s%s. %s-->", ctx::kImpactLegendOpen, ctx::kPageRaiseCapClause,
-                         ctx::graphCountDisclosure().c_str() );
+            std::printf( "%s%s. %s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+                         rw::graphCountDisclosure().c_str() );
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact. reaches= stays the un-windowed reach-set size — the blast radius the INDEXED graph
         // can see, which counts_floor= discloses is a floor (V3 L-4); pageDisclosure emits the same ` shown=
@@ -4478,7 +4478,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                    + "\" reaches=\"" + std::to_string( reach.size() ) + "\""
                                    + pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                                      cfg.pageLimit, cfg.pageOffset, true )
-                                   + ctx::kGraphCountFloorAttrXml;   // §H4 §3.4
+                                   + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
             emitColumnarSymbolRows( stdout, ing, "impact", attr.c_str(), page );
             return 0;
         }
@@ -4494,7 +4494,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                          jsonStr( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
                          pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                          cfg.pageLimit, cfg.pageOffset, true, kJsonPageSyntax ),
-                         ctx::kGraphCountFloorAttrJson );   // §H4 §3.4
+                         rw::kGraphCountFloorAttrJson );   // §H4 §3.4
             printJsonSymbolRows( ing, show, ipw.begin, ipw.end );
             std::printf( "]}" );
             return 0;
@@ -4504,7 +4504,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                      ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
                      pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                     ctx::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml );
         for( std::size_t i = ipw.begin; i < ipw.end; ++i ) { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
         std::printf( "</impact>" );
         return 0;
@@ -4517,7 +4517,7 @@ std::optional<int> runImpact( const MainDispatch& d )
 
 std::optional<int> runMentions( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4575,8 +4575,8 @@ std::optional<int> runMentions( const MainDispatch& d )
 // §P9 N5 / §B7.3: --affected walks the CALL graph to find tests that reach a change; test/*.sh gates that
 // invoke the compiled BINARY as a subprocess are invisible to that walk. The counter used to live here, one
 // verb wide; --test-gate and --situ inherit the SAME blindness from the SAME traversal and had no such
-// tell, so it moved down to testmap.h (ctx::scriptGatesUnmodelledCount) where all three read one number.
-using ctx::scriptGatesUnmodelledCount;
+// tell, so it moved down to testmap.h (rw::scriptGatesUnmodelledCount) where all three read one number.
+using rw::scriptGatesUnmodelledCount;
 
 // §A9.1 — the INVERSE blindness, disclosed on the inverse verb. --affected discloses the script gates its
 // call-graph walk cannot see (script_gates_unmodelled= above); --exercises walks the SAME edges in the
@@ -4588,7 +4588,7 @@ using ctx::scriptGatesUnmodelledCount;
 // Returns the harness class of the matched SEED files: "script" (every seed is a shell script — the whole
 // answer comes from subprocess harnesses), "mixed" (some are), or nullptr (none — a .cpp/.py harness, whose
 // calls ARE modelled, so the count needs no caveat and that output stays byte-identical).
-inline const char* exercisesHarnessKind( const ctx::IngestResult& ing, const std::vector<std::uint32_t>& seedFiles )
+inline const char* exercisesHarnessKind( const rw::IngestResult& ing, const std::vector<std::uint32_t>& seedFiles )
 {
     std::size_t scriptSeedCount = 0;
     for( const std::uint32_t f : seedFiles )
@@ -4602,7 +4602,7 @@ inline const char* exercisesHarnessKind( const ctx::IngestResult& ing, const std
 
 // The disclosure itself: ` harness="script|mixed" note="…"`, or "" when every seed's calls ARE modelled —
 // so a .cpp/.py harness's output keeps the pre-§A9 bytes exactly.
-inline std::string exercisesHarnessAttr( const ctx::IngestResult& ing, const std::vector<std::uint32_t>& seedFiles )
+inline std::string exercisesHarnessAttr( const rw::IngestResult& ing, const std::vector<std::uint32_t>& seedFiles )
 {
     const char* kind = exercisesHarnessKind( ing, seedFiles );
     if( kind == nullptr ) return {};
@@ -4613,7 +4613,7 @@ inline std::string exercisesHarnessAttr( const ctx::IngestResult& ing, const std
 
 std::optional<int> runAffected( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4627,7 +4627,7 @@ std::optional<int> runAffected( const MainDispatch& d )
         // here: everything below (transitiveCallers → isTestPath → path-sorted rows) is the same traversal
         // --affected always ran. The file-first argument rule and its per-item refusal live in
         // testmap.h::resolveAffectedSeeds; only the did-you-mean wording is main's (withDidYouMean is).
-        const ctx::AffectedSeeds sel = ctx::resolveAffectedSeeds( ing, cfg.affectedFiles );
+        const rw::AffectedSeeds sel = rw::resolveAffectedSeeds( ing, cfg.affectedFiles );
         if( !sel.ok )
         {
             // §M7 (W3FIX): resolveAffectedSeeds accepts file:name and path::scope::name too, so a bad item gets
@@ -4635,15 +4635,15 @@ std::optional<int> runAffected( const MainDispatch& d )
             // WHY the item was tried twice, and therefore has to come first).
             std::fprintf( stderr, "ripwire: --affected: '%s' matches no indexed file path (as a path pattern) and no indexed "
                                   "symbol (as a symbol name; file:name and path::scope::name also accepted)%s\n",
-                          sel.badItem.c_str(), ctx::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() );
+                          sel.badItem.c_str(), rw::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() );
             return 1;
         }
         const std::vector<NodeId>& seeds = sel.seeds;
         if( seeds.empty() ) { std::fprintf( stderr, "ripwire: --affected matched no symbols: %.*s\n", int( cfg.affectedFiles.size() ), cfg.affectedFiles.data() ); return 1; }
-        const std::vector<NodeId>  reach = ctx::transitiveCallers( g, seeds );
+        const std::vector<NodeId>  reach = rw::transitiveCallers( g, seeds );
         std::vector<char>          fseen( ing.files.size(), 0 );
         std::vector<std::uint32_t> testFiles;
-        for( NodeId n : reach ) { const std::uint32_t f = ing.symbols[n].fileId; if( !fseen[f] && ctx::isTestPath( ing.files[f] ) ) { fseen[f] = 1; testFiles.push_back( f ); } }
+        for( NodeId n : reach ) { const std::uint32_t f = ing.symbols[n].fileId; if( !fseen[f] && rw::isTestPath( ing.files[f] ) ) { fseen[f] = 1; testFiles.push_back( f ); } }
         std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -4655,12 +4655,12 @@ std::optional<int> runAffected( const MainDispatch& d )
                      "script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) — "
                      "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached= -->" );
         std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\">",
-                     ex( cfg.affectedFiles ).c_str(), ctx::affectedSeededBy( sel ), seeds.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ) );
+                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ) );
         // §P11.4: run= where a REAL runner is derivable, absent where it is not. The index is constructed
         // here (not hoisted into MainDispatch) because it is lazy — a run with no test row reads no script.
-        const ctx::TestRunnerIndex runners( ing );
+        const rw::TestRunnerIndex runners( ing );
         for( std::uint32_t f : testFiles )
-            std::printf( "<test p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), ctx::runAttr( runners, f, ex ).c_str() );
+            std::printf( "<test p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), rw::runAttr( runners, f, ex ).c_str() );
         std::printf( "</affected>" );
         return 0;
     }
@@ -4677,7 +4677,7 @@ std::optional<int> runAffected( const MainDispatch& d )
 // a verb with a resolve step, two refusals and a windowed emitter is a named handler, not an if-arm.
 std::optional<int> runExercises( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&       cfg = d.cfg;
     const IngestResult& ing = d.ing;
     const Graph&        g   = d.g;
@@ -4736,9 +4736,9 @@ std::optional<int> runExercises( const MainDispatch& d )
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,
                  unsigned( shownSeed < sel.testFiles.size() ), sel.seeds.size(), show.size(), harnessAttr.c_str(),
                  pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true ) );
-    const ctx::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
+    const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
     for( std::size_t i = 0; i < shownSeed; ++i )
-        std::printf( "<t p=\"%s\"%s/>", ex( ing.files[ sel.testFiles[i] ] ).c_str(), ctx::runAttr( runners, sel.testFiles[i], ex ).c_str() );
+        std::printf( "<t p=\"%s\"%s/>", ex( ing.files[ sel.testFiles[i] ] ).c_str(), rw::runAttr( runners, sel.testFiles[i], ex ).c_str() );
     for( std::size_t i = epw.begin; i < epw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
     std::printf( "</exercises>" );
@@ -4747,7 +4747,7 @@ std::optional<int> runExercises( const MainDispatch& d )
 
 std::optional<int> runChangeViews( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4771,7 +4771,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             {
                 if( !cfg.situFiles.empty() )
                 {
-                    perRootChanged[r] = ctx::changedMaskFromList( ing, cfg.situFiles );
+                    perRootChanged[r] = rw::changedMaskFromList( ing, cfg.situFiles );
                     for( std::size_t f = 0; f < perRootChanged[r].size(); ++f )
                         if( perRootChanged[r][f] && ing.fileRoot[f] != r ) perRootChanged[r][f] = 0;
                     anyGit = true;   // explicit file list — no git needed
@@ -4790,21 +4790,21 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 bool any = false;
                 for( char c : perRootChanged[r] ) if( c ) { any = true; break; }
                 if( !any ) { std::fprintf( stdout, "  (no changed files in this root)\n" ); continue; }
-                ctx::writeSituation( stdout, ws[r].arg, ing, g, perRootChanged[r], r );
+                rw::writeSituation( stdout, ws[r].arg, ing, g, perRootChanged[r], r );
             }
             return 0;
         }
 
         std::vector<char> changed;
         if( !cfg.situFiles.empty() )
-            changed = ctx::changedMaskFromList( ing, cfg.situFiles );
+            changed = rw::changedMaskFromList( ing, cfg.situFiles );
         else
         {
             changed.assign( ing.files.size(), 0 );
             if( !gitChangedFiles( root, ing, changed ) )
             { std::fprintf( stderr, "ripwire --situ: no files given and no git diff (use --situ=F1,F2)\n" ); return 1; }
         }
-        ctx::writeSituation( stdout, root, ing, g, changed );
+        rw::writeSituation( stdout, root, ing, g, changed );
         return 0;
     }
 
@@ -4816,7 +4816,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     {
         std::vector<char> changed;
         if( !cfg.testGateFiles.empty() )
-            changed = ctx::changedMaskFromList( ing, cfg.testGateFiles );
+            changed = rw::changedMaskFromList( ing, cfg.testGateFiles );
         else
         {
             changed.assign( ing.files.size(), 0 );
@@ -4828,9 +4828,9 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // The gate decision (computeTestGate) is computed ONCE here and handed to whichever report emitter
         // runs, so the two report shapes can never disagree about tests/untested and never re-pay the
         // blast-radius traversal.
-        const ctx::TestGateResult tg = ctx::computeTestGate( ing, g, changed );
-        if( cfg.json ) ctx::writeTestGateReportJson( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
-        else            ctx::writeTestGateReport(     stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+        const rw::TestGateResult tg = rw::computeTestGate( ing, g, changed );
+        if( cfg.json ) rw::writeTestGateReportJson( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+        else            rw::writeTestGateReport(     stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
         return tg.hasObligations ? 4 : 0;
     }
 
@@ -4857,12 +4857,12 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // one shared global trim level (which would need writePrContext to expose a forced-level render).
         if( multiRoot )
         {
-            std::vector<ctx::PrContextMask> masks( ws.size() );
+            std::vector<rw::PrContextMask> masks( ws.size() );
             std::vector<std::uint32_t>      changedCount( ws.size(), 0 );
             std::uint32_t                   totalChanged = 0;
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
-                masks[r] = ctx::gitDiffChangedMaskNumstat( ws[r].arg, ing, cfg.prContextBase, r );
+                masks[r] = rw::gitDiffChangedMaskNumstat( ws[r].arg, ing, cfg.prContextBase, r );
                 // P0.1/P2.8: this branch had NO refusal at all, so a typo'd — or option-shaped — base ref
                 // rendered as an empty workspace bundle at exit 0. A root with no git history is not this
                 // case (it still degrades to its own empty section); see prcontext.h §badRef.
@@ -4897,13 +4897,13 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                          "blast radius crossing roots via real evidence edges. base=%s. deterministic. -->", baseLabelEsc.c_str() );
             std::printf( "<pr-context-workspace base=\"%s\" roots=\"%zu\">", baseLabelEsc.c_str(), ws.size() );
             for( std::uint32_t r = 0; r < ws.size(); ++r )
-                ctx::writePrContext( stdout, ws[r].arg, ing, g, masks[r].mask, baseLabel, masks[r].skippedModeOnly,
+                rw::writePrContext( stdout, ws[r].arg, ing, g, masks[r].mask, baseLabel, masks[r].skippedModeOnly,
                                      rootBudget[r], r, ws[r].label, masks[r] );
             std::printf( "</pr-context-workspace>" );
             return 0;
         }
 
-        const ctx::PrContextMask pcm = ctx::gitDiffChangedMaskNumstat( root, ing, cfg.prContextBase );
+        const rw::PrContextMask pcm = rw::gitDiffChangedMaskNumstat( root, ing, cfg.prContextBase );
         // P2.8: a base ref this repo does not contain is a REFUSAL, not a clean tree — it used to render
         // `<pr-context base="typo" files="0"/>` at exit 0, indistinguishable in CI from "nothing changed".
         // Kept ahead of the `!pcm.ok` degrade below, whose message would misname this failure.
@@ -4928,7 +4928,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // R4 / RESEARCH_outputEconomy lever 4: --max-tokens caps the (previously unbounded) bundle. 0 = no cap
         // → byte-identical to the pre-budget output; >0 → degrade DEPTH-first per file, structural counts kept
         // for ALL changed files, est_tokens/truncated= reported on the <pr-context> header (see writePrContext).
-        return ctx::writePrContext( stdout, root, ing, g, pcm.mask, baseLabel, pcm.skippedModeOnly,
+        return rw::writePrContext( stdout, root, ing, g, pcm.mask, baseLabel, pcm.skippedModeOnly,
                                     cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0,
                                     UINT32_MAX, std::string_view(), pcm );
     }
@@ -4937,7 +4937,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     // computes → the cc.json folder-tree a CodeCharta 3D city consumes. FILE or stdout, mirroring --html.
     if( cfg.exportCcJson )
     {
-        std::vector<ctx::CcFileMetrics> ccm = ctx::ccComputeMetrics( ing, g );
+        std::vector<rw::CcFileMetrics> ccm = rw::ccComputeMetrics( ing, g );
         // churn: reuse the same git churn pass --hotspots uses (0 everywhere without git — clean degrade).
         // Multi-root §5: per-root mining, accumulated per file.
         std::vector<std::uint32_t> churn( ing.files.size(), 0 );
@@ -4969,7 +4969,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 return 1;
             }
         }
-        ctx::writeCcJson( ccOut, root, ing, ccm );
+        rw::writeCcJson( ccOut, root, ing, ccm );
         if( ccOut != stdout ) std::fclose( ccOut );
         return 0;
     }
@@ -4992,7 +4992,7 @@ bool readTraceText( const std::string& src, std::string& text )
         // non-ASCII routinely (a UTF-8 identifier, a quoted source line), and std::getline( std::cin, ... )
         // aborted the sanitizer build on the first such byte — see stdinline.h. Parity is exact.
         std::string l;
-        while( ctx::readByteSafeLine( stdin, l ) ) { text += l; text += '\n'; }
+        while( rw::readByteSafeLine( stdin, l ) ) { text += l; text += '\n'; }
         return true;
     }
     std::FILE* f = std::fopen( src.c_str(), "rb" );
@@ -5010,7 +5010,7 @@ bool readTraceText( const std::string& src, std::string& text )
 // deterministic, no git.
 std::optional<int> runFromTrace( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&        cfg = d.cfg;
     const IngestResult&  ing = d.ing;
     const Graph&         g   = d.g;
@@ -5023,11 +5023,11 @@ std::optional<int> runFromTrace( const MainDispatch& d )
 
     FromTraceInputs in;
     in.bundleBudgetBytes = cfg.tokenBudget > 0
-        ? std::size_t( double( cfg.tokenBudget ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom )
-        : ctx::kForPayloadBudgetBytes;
+        ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+        : rw::kForPayloadBudgetBytes;
     in.sigLadderBudgetBytes = cfg.packBudgetBytes;
     in.bodyBudgetBytes      = cfg.maxTokens > 0
-        ? std::size_t( double( cfg.maxTokens ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom )
+        ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
         : cfg.packBudgetBytes;
     in.compress = cfg.compress;
     in.fanIn    = d.fanInPtr;
@@ -5060,7 +5060,7 @@ std::optional<int> runFromTrace( const MainDispatch& d )
 //        is flagged dangling="1" (legal — surfaced nowhere, listed here so the human can prune it). Read-only.
 std::optional<int> runNotes( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&       cfg = d.cfg;
     const IngestResult& ing = d.ing;
 
@@ -5078,7 +5078,7 @@ std::optional<int> runNotes( const MainDispatch& d )
         }
         // §S3 — sanitizeNoteField sanitizes AND decides (notes.h's header has the full finding): the old
         // `sanitizeField(...).empty()` pair refused an ASCII-blank note and accepted six other blank classes,
-        // committing an invisible line into `.ripwire_notes`. `hasContent` is ctx::hasVisibleContent, the same
+        // committing an invisible line into `.ripwire_notes`. `hasContent` is rw::hasVisibleContent, the same
         // derived predicate the MCP edit verbs' payload check reads.
         const notes::NoteField targetField = notes::sanitizeNoteField( std::string_view( spec ).substr( 0, sep ) );
         const notes::NoteField textField   = notes::sanitizeNoteField( std::string_view( spec ).substr( sep + 2 ) );
@@ -5100,7 +5100,7 @@ std::optional<int> runNotes( const MainDispatch& d )
             {
                 if( field.hasContent || field.text.empty() ) return "'" + field.text + "'";
 
-                const auto [ blankCodePointCount, blankSpelling ] = ctx::blankPayloadSpelling( field.text );
+                const auto [ blankCodePointCount, blankSpelling ] = rw::blankPayloadSpelling( field.text );
                 return std::to_string( blankCodePointCount )
                      + ( blankCodePointCount == 1 ? " invisible code point: " : " invisible code points: " )
                      + blankSpelling;
@@ -5129,7 +5129,7 @@ std::optional<int> runNotes( const MainDispatch& d )
             std::fprintf( stderr, "ripwire: --note-add: target '%s' resolves outside the root '%s' — refusing (notes must stay root-relative/portable)\n", rawTarget.c_str(), d.root.c_str() );
             return 1;
         }
-        std::string date = ctx::quality::gitCommitterDateIso( d.root );
+        std::string date = rw::quality::gitCommitterDateIso( d.root );
         if( date.empty() )
         {
             DEGRADED_PATH_ALERT( "notes: non-git root — dating the note at the fixed epoch 1970-01-01 for determinism" );
@@ -5140,9 +5140,9 @@ std::optional<int> runNotes( const MainDispatch& d )
         // non-git-root / no-HEAD condition, already alerted above) — no second DEGRADED_PATH_ALERT needed.
         // "no sha shown rather than a wrong one": an empty sha here means addNote writes the plain LEGACY
         // 3-field line, never a hollow or guessed stamp.
-        const std::string sha    = ctx::quality::gitHeadSha( d.root );
+        const std::string sha    = rw::quality::gitHeadSha( d.root );
         const std::string branch = sha.empty() ? std::string()
-                                  : notes::sanitizeField( ctx::quality::gitOneLine( d.root, "rev-parse --abbrev-ref HEAD 2>/dev/null" ) );
+                                  : notes::sanitizeField( rw::quality::gitOneLine( d.root, "rev-parse --abbrev-ref HEAD 2>/dev/null" ) );
         const std::string path = notes::notesPath( d.root );
         const std::string line = notes::addNote( path, target, date, text, sha, branch );
         if( line.empty() )
@@ -5233,7 +5233,7 @@ std::optional<int> runNotes( const MainDispatch& d )
 // (flags, MainDispatch pointers) and hands them to that ONE assembler.
 std::optional<int> runPackTask( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&       cfg = d.cfg;
     const IngestResult& ing = d.ing;
     const Graph&        g   = d.g;
@@ -5321,11 +5321,11 @@ std::optional<int> runPackTask( const MainDispatch& d )
     // at the same budget was conformant. in.trailingSectionBytes hands the assembler the size BEFORE it spends
     // the budget (PackTaskInputs documents both places it lands). The degrade path (isRendered=false) splices
     // nothing and streams the block directly, so the bytes are identical and only the charge is lost.
-    ctx::ChargedSection graphSection;
+    rw::ChargedSection graphSection;
     if( cfg.withGraph )
     {
-        graphSection        = ctx::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lr.rank, g.outOff, g.outTargets ); },
-                                                  ctx::kBytesPerTokenDefault );
+        graphSection        = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lr.rank, g.outOff, g.outTargets ); },
+                                                  rw::kBytesPerTokenDefault );
         in.trailingSectionBytes = graphSection.xml.size();   // 0 on the degrade path — the pre-§F1 accounting for that one run
     }
 
@@ -5333,7 +5333,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     if( cfg.withGraph && bundle.size() >= 6 && bundle.compare( bundle.size() - 6, 6, "</ctx>" ) == 0 )
     {
         std::fwrite( bundle.data(), 1, bundle.size() - 6, stdout );
-        ctx::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lr.rank, g.outOff, g.outTargets ); } );
+        rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lr.rank, g.outOff, g.outTargets ); } );
         std::printf( "</ctx>" );
     }
     else
@@ -5349,7 +5349,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
 // earlier in main(), before the single-root ingest pipeline runs — this handler never sees roots.size()>=2.
 std::optional<int> runMergeScout( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&        cfg = d.cfg;
     const IngestResult&  ing = d.ing;
     const std::string&   root = d.root;
@@ -5411,9 +5411,9 @@ BriefFile readBriefFile( const std::string& path )
 
 // The corpus header's own five numbers, read from the SAME places serialize.h's `<!-- files= symbols= edges=
 // ambiguous= unresolved= -->` preamble reads them, so a plan and the map it describes can never disagree.
-ctx::lanes::CorpusStats laneCorpusStats( const ctx::IngestResult& ing, const ctx::Graph& g )
+rw::lanes::CorpusStats laneCorpusStats( const rw::IngestResult& ing, const rw::Graph& g )
 {
-    ctx::lanes::CorpusStats c;
+    rw::lanes::CorpusStats c;
     c.files   = ing.files.size();
     c.symbols = ing.symbols.size();
     c.edges   = g.outTargets.size();
@@ -5424,7 +5424,7 @@ ctx::lanes::CorpusStats laneCorpusStats( const ctx::IngestResult& ing, const ctx
 
 std::optional<int> runPlanLanes( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&       cfg  = d.cfg;
     const IngestResult& ing  = d.ing;
     const Graph&        g    = d.g;
@@ -5509,11 +5509,11 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
 // including the same stderr note, which is exactly the clone this repo's own --quality-delta flags. The
 // caller OWNS the returned index and must outlive every view of it (both handlers keep it on the stack for
 // the whole compute-then-write sequence). `verbNote` names what degrades, so the message stays specific.
-ctx::gitoracle::HistoryIndex buildHistoryIndex( const ctx::Config& cfg, const std::string& root, const char* verbNote )
+rw::gitoracle::HistoryIndex buildHistoryIndex( const rw::Config& cfg, const std::string& root, const char* verbNote )
 {
     if( !cfg.withHistory ) return {};
 
-    ctx::gitoracle::HistoryIndex idx = ctx::gitoracle::probeNameHistory( root );
+    rw::gitoracle::HistoryIndex idx = rw::gitoracle::probeNameHistory( root );
     if( idx.nonGitRoot )
         std::fprintf( stderr, "ripwire: --with-history: %s has no git history — %s\n", root.c_str(), verbNote );
     return idx;
@@ -5526,7 +5526,7 @@ ctx::gitoracle::HistoryIndex buildHistoryIndex( const ctx::Config& cfg, const st
 // near-misses the compute pass found, never an empty-looking success.
 int runFlip( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const std::string& root = d.root;
 
     // Single-root only, and REFUSED rather than answered wrong: the gate harvest reads each ingested file by
@@ -5566,7 +5566,7 @@ int runFlip( const MainDispatch& d )
 // refuse here is the ref-namespace/root shape --stray-content already refuses for the same reason.
 int runAbiCheck( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const std::string& root = d.root;
 
     const abicheck::AbiResult result = abicheck::computeAbiCheck( root, d.ing, d.cfg.strayFilter );
@@ -5597,18 +5597,18 @@ int runAbiCheck( const MainDispatch& d )
 // — the SAME root-relative join --abi uses to match ing.files against git paths). This is what lets --whereis
 // stop GUESSING on HEAD rows: the tree scan reads committed blobs, the index knows where the definitions are,
 // and the join is a single pass over the symbol table with no extra I/O.
-inline std::vector<ctx::crossref::IndexDefSite> whereisIndexDefSites( const ctx::IngestResult& ing, std::string_view name, const std::string& root )
+inline std::vector<rw::crossref::IndexDefSite> whereisIndexDefSites( const rw::IngestResult& ing, std::string_view name, const std::string& root )
 {
-    std::vector<ctx::crossref::IndexDefSite> sites;
-    for( const ctx::Symbol& s : ing.symbols )
+    std::vector<rw::crossref::IndexDefSite> sites;
+    for( const rw::Symbol& s : ing.symbols )
         if( s.name == name )
-            sites.push_back( ctx::crossref::IndexDefSite{ std::string( ctx::relForHash( ing.files[ s.fileId ], root ) ), s.line } );
+            sites.push_back( rw::crossref::IndexDefSite{ std::string( rw::relForHash( ing.files[ s.fileId ], root ) ), s.line } );
     return sites;
 }
 
 std::optional<int> runCrossRef( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&      cfg  = d.cfg;
     const std::string& root = d.root;
 
@@ -5718,7 +5718,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
 // a report, not a gate (a doc is allowed to be behind while you are mid-change).
 std::optional<int> runDocDrift( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     if( !d.cfg.docDrift ) return std::nullopt;
 
     // --with-history (opt-in): the git-history name oracle that splits the mention lane's why="undefined"
@@ -5742,7 +5742,7 @@ std::optional<int> runDocDrift( const MainDispatch& d )
 // is exactly a merged-graph question, and the mirror check is the reason the field note asked for it.
 std::optional<int> runLayout( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config& cfg = d.cfg;
 
     if( !cfg.layoutFlag ) return std::nullopt;
@@ -5781,20 +5781,20 @@ std::optional<int> runLayout( const MainDispatch& d )
 // §A8.6: "how many communities count as a real module" — size>=2, i.e. NOT an isolated singleton. Shared by
 // emitCommunitiesReport (below) and emitCommunityDrill's `modules=`, so the two verbs' modules= counts use
 // the identical predicate and cannot drift into two different numbers under one attribute name.
-std::uint32_t nonIsolatedModuleCount( const std::vector<std::vector<ctx::NodeId>>& members )
+std::uint32_t nonIsolatedModuleCount( const std::vector<std::vector<rw::NodeId>>& members )
 {
     std::uint32_t modules = 0;
-    for( const std::vector<ctx::NodeId>& mem : members ) if( mem.size() >= 2 ) ++modules;
+    for( const std::vector<rw::NodeId>& mem : members ) if( mem.size() >= 2 ) ++modules;
     return modules;
 }
 
 // --communities: cluster the call graph into cohesive modules (Louvain) + cross-module bridge edges.
 // Its own function (the named-verb-handler shape of PLAN_dispatchRefactor_2026-07-27.md §6.3): §P8 added a
 // real windowing step to the module row list, and the emitter was already the whole of runCommunities.
-int emitCommunitiesReport( const ctx::Config& cfg, const ctx::IngestResult& ing, const ctx::Graph& g )
+int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g )
 {
-    using namespace ctx;
-    const ctx::Communities   cm   = ctx::communities( g );
+    using namespace rw;
+    const rw::Communities   cm   = rw::communities( g );
     const std::vector<float> rank = rankGraph( g );
     const std::uint32_t      K    = cm.count;
     const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
@@ -5913,9 +5913,9 @@ std::optional<int> runCommunities( const MainDispatch& d )
 // The id space is the FULL Louvain partition (0..count-1), not the size>=2 subset --communities LISTS: an
 // id is a fact about the partition, and refusing a legal-but-unlisted singleton would mean the drill-down
 // disagreed with the clustering it drills into. A singleton simply reports size="1".
-int emitCommunityDrill( const ctx::Config& cfg, const ctx::IngestResult& ing, const ctx::Graph& g )
+int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g )
 {
-    using namespace ctx;
+    using namespace rw;
     const Communities   cm = communities( g );
     const std::uint32_t K  = cm.count;
     const std::uint32_t N  = std::uint32_t( ing.symbols.size() );
@@ -6017,7 +6017,7 @@ std::optional<int> runCommunityDrill( const MainDispatch& d )
 
 std::optional<int> runZoom( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -6035,7 +6035,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // depth: --zoom=D caps at D levels (≥1). default (0) = auto: contract until ≤10 top modules.
         const std::uint32_t maxLevels = cfg.zoomDepth > 0 ? std::uint32_t( cfg.zoomDepth ) : 8u;
         const std::uint32_t maxTop    = cfg.zoomDepth > 0 ? 1u : 10u;   // explicit depth ⇒ contract as far as the cap allows
-        const ctx::ZoomHierarchy h    = ctx::multiLevelCommunities( g, maxTop, maxLevels );
+        const rw::ZoomHierarchy h    = rw::multiLevelCommunities( g, maxTop, maxLevels );
         const std::vector<float> rank = rankGraph( g );
         const std::size_t        L    = h.levels.size();                // ≥1 always (level 0 present)
 
@@ -6059,7 +6059,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // dominant directory of a level-l group (most-frequent parent dir of its member files; ties → lexicographically first).
         const auto domDirOf = [ & ]( std::size_t l, std::uint32_t gid ) -> std::string
         {
-            ctx::HashMap<std::string, std::uint32_t> dirCount;
+            rw::HashMap<std::string, std::uint32_t> dirCount;
             for( NodeId n : members[l][gid] )
             {
                 std::string_view  p  = ing.files[ ing.symbols[n].fileId ];
@@ -6082,7 +6082,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // top-level cross-module bridges (between the FINEST communities, summed onto top-module pairs), ranked.
         // We count finest-community→finest-community call edges, then lift each endpoint to its top-level module.
         const std::vector<std::uint32_t>& topOf = h.levels[topL];        // symbol → top module
-        ctx::HashMap<std::uint64_t, std::uint32_t> bridge;               // (min,max) top-module pair → edge count
+        rw::HashMap<std::uint64_t, std::uint32_t> bridge;               // (min,max) top-module pair → edge count
         for( NodeId u = 0; u < N; ++u )
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
             {
@@ -6224,21 +6224,21 @@ std::optional<int> runZoom( const MainDispatch& d )
 // result is still a total, deterministic order (a sort has no tolerance band; the det-gate is what proves it,
 // exactly as for the per-file symbol sort). One O(N) max-reduce, not a per-file sort: the symbol lists are
 // still sorted only for the files the current page actually emits.
-inline void orderFilesByBestSymbolRank( std::vector<std::uint32_t>& ford, const ctx::IngestResult& ing,
+inline void orderFilesByBestSymbolRank( std::vector<std::uint32_t>& ford, const rw::IngestResult& ing,
                                         const std::vector<float>& rank )
 {
     std::vector<float> bestRankByFile( ing.files.size(), -1.0f );
-    for( ctx::NodeId i = 0; i < ing.symbols.size(); ++i )
+    for( rw::NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const std::uint32_t sf = ing.symbols[i].fileId;
         if( rank[i] > bestRankByFile[sf] ) bestRankByFile[sf] = rank[i];
     }
-    ctx::orderIdsByKeyDescPathAsc( ford, bestRankByFile, ing.files );
+    rw::orderIdsByKeyDescPathAsc( ford, bestRankByFile, ing.files );
 }
 
 std::optional<int> runStructureText( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -6260,8 +6260,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
 
         // testReach = everything transitively called from test files → a seam u→v is exercised if testReach[u]
         std::vector<NodeId> testSeeds;
-        for( NodeId i = 0; i < N; ++i ) if( ctx::isTestPath( ing.files[ ing.symbols[i].fileId ] ) ) testSeeds.push_back( i );
-        const std::vector<char> testReach = ctx::forwardReach( g, testSeeds );
+        for( NodeId i = 0; i < N; ++i ) if( rw::isTestPath( ing.files[ ing.symbols[i].fileId ] ) ) testSeeds.push_back( i );
+        const std::vector<char> testReach = rw::forwardReach( g, testSeeds );
         std::vector<char> isTestFile( ing.files.size(), 0 );
         for( NodeId s : testSeeds ) isTestFile[ ing.symbols[s].fileId ] = 1;
         std::uint32_t testFileCount = 0;  for( char c : isTestFile ) testFileCount += c;
@@ -6420,7 +6420,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
     {
         const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
         const std::uint32_t      F    = std::uint32_t( ing.files.size() );
-        const ctx::Communities   cm   = ctx::communities( g );
+        const rw::Communities   cm   = rw::communities( g );
         const std::vector<float> rank = rankGraph( g );
 
         std::vector<std::vector<NodeId>> members( cm.count );
@@ -6542,13 +6542,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
             std::vector<NodeId>& syms = byFile[f];
             std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
             // path and symbol names may contain & < > " — escape them to keep XML well-formed.
-            const auto ep = ctx::escapeXml( ing.files[f], trEsc );
+            const auto ep = rw::escapeXml( ing.files[f], trEsc );
             std::printf( "<file p=\"%.*s\" symbols=\"%zu\">", int( ep.size() ), ep.data(), syms.size() );
             const std::size_t topN = std::min<std::size_t>( 3, syms.size() );
             for( std::size_t i = 0; i < topN; ++i )
             {
                 const Symbol& s = ing.symbols[ syms[i] ];
-                const auto en = ctx::escapeXml( s.name, trEsc );
+                const auto en = rw::escapeXml( s.name, trEsc );
                 std::printf( "<s t=\"%s\" n=\"%.*s\"/>", symTag( s.kind ), int( en.size() ), en.data() );
             }
             std::printf( "</file>" );
@@ -6573,9 +6573,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
 // advanced) and `cfg.pageOffset + rowCap` overflowed `int` at --limit=536870912 into a confident hits="0".
 // Both die with the same rule: the window is a pure slice of the fully-collected, fully-sorted list, and
 // nothing derived from --limit/--offset reaches grepCollect() at all.
-int emitGrepReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
+int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
 {
-    using namespace ctx;
+    using namespace rw;
     const std::string          pat( cfg.grep );
     const int                  histCap = cfg.packTopN > 0 ? cfg.packTopN : 100;
     const int                  rowCap  = effectiveRowCap( cfg.pageLimit, histCap );
@@ -6644,7 +6644,7 @@ int emitGrepReport( const ctx::Config& cfg, const ctx::IngestResult& ing )
                  "a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
                  "ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
-                 "%s -->", ctx::kPageRaiseCapClause );
+                 "%s -->", rw::kPageRaiseCapClause );
     std::printf( "<grep pattern=\"%s\" files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\">",
                  ex( pat ).c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
@@ -6690,7 +6690,7 @@ std::optional<int> runGrep( const MainDispatch& d )
 
 std::optional<int> runLint( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
 
@@ -7093,7 +7093,7 @@ std::optional<int> runLint( const MainDispatch& d )
 
 std::optional<int> runAround( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -7126,20 +7126,20 @@ std::optional<int> runAround( const MainDispatch& d )
         //
         // S5-E HAS-A: compose view for the ego-graph neighbourhood.
         // B6.3: HTTP-route cross-service view for the same neighbourhood.
-        ctx::ChargedSection aroundCompose, aroundRoutes;
+        rw::ChargedSection aroundCompose, aroundRoutes;
         if( !g.composeEdges.empty() )
-            aroundCompose = ctx::chargeSection( [ & ]( std::FILE* f ) { packCompose( f, ing, g.composeEdges, eg.nodes ); },
-                                                ctx::kBytesPerTokenDefault );
+            aroundCompose = rw::chargeSection( [ & ]( std::FILE* f ) { packCompose( f, ing, g.composeEdges, eg.nodes ); },
+                                                rw::kBytesPerTokenDefault );
         if( !g.routeEdges.empty() )
-            aroundRoutes = ctx::chargeSection( [ & ]( std::FILE* f ) { packRoutes( f, ing, g.routeEdges, eg.nodes ); },
-                                               ctx::kBytesPerTokenDefault );
+            aroundRoutes = rw::chargeSection( [ & ]( std::FILE* f ) { packRoutes( f, ing, g.routeEdges, eg.nodes ); },
+                                               rw::kBytesPerTokenDefault );
 
         // §B4b — G4: serialize() owns <r>…</r> and CLOSES it, so these two sibling blocks were a SECOND
         // top-level element (`--around=buildRecall` tailed `…</r><compose>…</compose>`, xmllint rejected it,
-        // ripwire exited 0). See ctx::aroundNeedsCtxWrap above for the full finding and the wrapper rule.
+        // ripwire exited 0). See rw::aroundNeedsCtxWrap above for the full finding and the wrapper rule.
         // Trap #8 ("a disclosure has BYTES"): the 11 wrapper bytes are charged at the markup rate, like the
         // sections they enclose.
-        const ctx::CtxWrap wrap = ctx::ctxWrapFor( aroundCompose, !g.composeEdges.empty(),
+        const rw::CtxWrap wrap = rw::ctxWrapFor( aroundCompose, !g.composeEdges.empty(),
                                                    aroundRoutes,  !g.routeEdges.empty() );
 
         if( wrap.isNeeded ) std::fputs( "<ctx>", stdout );
@@ -7147,9 +7147,9 @@ std::optional<int> runAround( const MainDispatch& d )
         serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens );
 
         if( !g.composeEdges.empty() )
-            ctx::emitChargedSection( stdout, aroundCompose, [ & ]{ packCompose( stdout, ing, g.composeEdges, eg.nodes ); } );
+            rw::emitChargedSection( stdout, aroundCompose, [ & ]{ packCompose( stdout, ing, g.composeEdges, eg.nodes ); } );
         if( !g.routeEdges.empty() )
-            ctx::emitChargedSection( stdout, aroundRoutes, [ & ]{ packRoutes( stdout, ing, g.routeEdges, eg.nodes ); } );
+            rw::emitChargedSection( stdout, aroundRoutes, [ & ]{ packRoutes( stdout, ing, g.routeEdges, eg.nodes ); } );
 
         if( wrap.isNeeded ) std::fputs( "</ctx>", stdout );
         return 0;
@@ -7245,7 +7245,7 @@ struct ChurnRanking { std::vector<float> rank; std::string window; };
 
 inline ChurnRanking churnRankedGraph( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     bool hasChurnEvidence = false;
 
     const auto discloseEmptyChurn = [ & ]( const std::string& windowStamp )
@@ -7275,7 +7275,7 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
 
 int runDefaultMap( const MainDispatch& d )
 {
-    using namespace ctx;
+    using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -7325,7 +7325,7 @@ int runDefaultMap( const MainDispatch& d )
             // every input that carried no control byte and no invalid sequence emits exactly the bytes it did
             // before; the fix is purely what the hand-rolled version could not see. The wrapping <!-- / -->
             // delimiters are still added AFTER, so they stay intact.
-            queryRouteNote = "<!-- routed: " + std::string( ctx::xmlCommentText( rc.reason ) ) + " -->";
+            queryRouteNote = "<!-- routed: " + std::string( rw::xmlCommentText( rc.reason ) ) + " -->";
         }
         else
             rank = lexicalScoresTiered( ing, g.outOff, g.outTargets, cfg.query, 0, nullptr, &tierMul );
@@ -7421,7 +7421,7 @@ int runDefaultMap( const MainDispatch& d )
     const std::vector<std::uint8_t>* mapProvPtr = g.outProv.empty() ? nullptr : &g.outProv;
 
     int                               mapTopK = cfg.topK;
-    ctx::MapAnnotations::MaxTokensFit maxTokensFit;
+    rw::MapAnnotations::MaxTokensFit maxTokensFit;
     // §B1.2: the run-provenance annotations, resolved ONCE for both serializations for the same reason
     // mapProvPtr is — the churn stamp used to be spelled on the XML arm only, so `--rank-by=churn --json`
     // and `--rank-by=pagerank --json` emitted keyset-identical headers over differently-meaning k=.
@@ -7433,7 +7433,7 @@ int runDefaultMap( const MainDispatch& d )
                                   : ( cfg.rankBy == RankBy::Hub )       ? "hub"
                                   : ( cfg.rankBy == RankBy::Rrf )       ? "rrf"
                                                                        : nullptr;
-    const ctx::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
+    const rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
                                       isChurnRanked ? &churnWindowLabel : nullptr,
                                       cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
                                       rankByLabel };                                 // §B2.1
@@ -7457,7 +7457,7 @@ int runDefaultMap( const MainDispatch& d )
     {
         char*       buf = nullptr;
         std::size_t sz  = 0;
-        std::FILE*  m   = ctx::openChargeBuffer( &buf, &sz );
+        std::FILE*  m   = rw::openChargeBuffer( &buf, &sz );
         if( !m )
         {
             DEGRADED_PATH_ALERT( "runDefaultMap: open_memstream failed for the --max-tokens fit probe — the map is emitted unshaped and its ceiling unverified" );
@@ -7491,7 +7491,7 @@ int runDefaultMap( const MainDispatch& d )
         VERIFY( extraPayloadTokens == 0 );          // the payload verbs are all refused under --json
         char*       buf = nullptr;
         std::size_t sz  = 0;
-        std::FILE*  m   = ctx::openChargeBuffer( &buf, &sz );
+        std::FILE*  m   = rw::openChargeBuffer( &buf, &sz );
         if( !m )
         {
             DEGRADED_PATH_ALERT( "runDefaultMap: open_memstream failed for the --max-tokens JSON ceiling probe — the ceiling verdict is unverified" );
@@ -7613,7 +7613,7 @@ int runDefaultMap( const MainDispatch& d )
                 // unindexed); this arm keeps its own flag-first sentence byte-for-byte ahead of it.
                 expandMissed = true;
                 std::fprintf( stderr, "ripwire: --expand=%s matched no symbol%s\n", et.selector.c_str(),
-                              ctx::selectorFaultClause( ing, et.selector, "--expand=" ).c_str() );
+                              rw::selectorFaultClause( ing, et.selector, "--expand=" ).c_str() );
             }
             else if( matches.size() > 8 )   // final-segment names (reset/size/update) collide widely
                 std::fprintf( stderr, "ripwire: --expand=%s matches %zu symbols; emitting all up to --pack-budget-bytes (qualify with file:name to narrow)\n",
@@ -7655,7 +7655,7 @@ int runDefaultMap( const MainDispatch& d )
                 // §M7 (W3FIX): same grammar, same shared refusal as --expand above.
                 outlineMissed = true;
                 std::fprintf( stderr, "ripwire: --outline=%s matched no symbol%s\n", nm.c_str(),
-                              ctx::selectorFaultClause( ing, nm, "--outline=" ).c_str() );
+                              rw::selectorFaultClause( ing, nm, "--outline=" ).c_str() );
             }
             for( NodeId id : matches ) outlineNodes.push_back( id );
         }
@@ -7678,26 +7678,26 @@ int runDefaultMap( const MainDispatch& d )
     // map and let 67 KB through (§H7's own repro). Each section is charged at the rate for what its bytes ARE:
     // <sigs> is markup + signatures (the mid-band rate the --for lens's own bundle estimate uses), while <src>,
     // <bodies> and <outline> are code TEXT, which BPE merges far more aggressively (kBytesPerTokenBody).
-    // ctx::chargeSection degrades to isRendered=false, and the emission below then streams that section
+    // rw::chargeSection degrades to isRendered=false, and the emission below then streams that section
     // directly — uncharged for that one run, with an alert, never a fabricated number.
-    ctx::ChargedSection sigsSection, srcSection, bodiesSection, outlineSection;
+    rw::ChargedSection sigsSection, srcSection, bodiesSection, outlineSection;
     if( cfg.packSignatures )
-        sigsSection = ctx::chargeSection( [ & ]( std::FILE* f )
+        sigsSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packSignatures( f, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr ); },
-            ctx::kBytesPerTokenDefault );
+            rw::kBytesPerTokenDefault );
     else if( cfg.packTopN > 0 )
-        srcSection = ctx::chargeSection( [ & ]( std::FILE* f )
+        srcSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packSource( f, ing, rank, cfg.packTopN, cfg.packBudgetBytes, redactPtr ); },
-            ctx::kBytesPerTokenBody );
+            rw::kBytesPerTokenBody );
     if( !expandNodes.empty() )
-        bodiesSection = ctx::chargeSection( [ & ]( std::FILE* f )
+        bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr ); },
-            ctx::kBytesPerTokenBody );
+            rw::kBytesPerTokenBody );
     if( !outlineNodes.empty() )
-        outlineSection = ctx::chargeSection( [ & ]( std::FILE* f )
+        outlineSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packOutline( f, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr ); },
-            ctx::kBytesPerTokenBody );
+            rw::kBytesPerTokenBody );
 
     // The --expand fallback: estimateExpandBodyTokens is no longer the primary estimate (measured bytes are),
     // but it remains the honest answer on the degrade path — better than dropping the <bodies> block out of the
@@ -7778,11 +7778,11 @@ int runDefaultMap( const MainDispatch& d )
     // the named symbols — the L4 "one definition, not the whole file" rung, plus octocode's partial-fetch rung
     // on top of it. --outline=NAME,...: control-flow skeletons (L3), the ladder's middle rung. Both compose
     // with --pack-signatures (skeleton + bodies).
-    // §F1: this was a local lambda; it is now ctx::emitChargedSection, shared with the four emission points
+    // §F1: this was a local lambda; it is now rw::emitChargedSection, shared with the four emission points
     // the --for / --pack-task / --around lenses gained (serialize.h, beside chargeSection — the two halves of
     // one contract belong together).
-    const auto emitSection = [ & ]( const ctx::ChargedSection& sec, auto&& renderDirect )
-    { ctx::emitChargedSection( out, sec, renderDirect ); };
+    const auto emitSection = [ & ]( const rw::ChargedSection& sec, auto&& renderDirect )
+    { rw::emitChargedSection( out, sec, renderDirect ); };
     if( cfg.packSignatures )
         emitSection( sigsSection, [ & ]{ packSignatures( out, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr ); } );
     else if( cfg.packTopN > 0 )
@@ -7849,7 +7849,7 @@ int runDefaultMap( const MainDispatch& d )
 // by name instead of shipping a confident lie.
 struct ReportVerbSlot { const char* flag; bool isActive; };
 
-void warnReportVerbPrecedence( const ctx::Config& c )
+void warnReportVerbPrecedence( const rw::Config& c )
 {
     const ReportVerbSlot slots[] = {
         { "--lego",             !c.legoType.empty()       }, { "--exemplar",     !c.exemplar.empty()      },
@@ -7897,7 +7897,7 @@ void warnReportVerbPrecedence( const ctx::Config& c )
                           "pass one verb per run.\n", winner, ignored.c_str() );
 }
 
-const char* jsonUnsupportedVerb( const ctx::Config& c )
+const char* jsonUnsupportedVerb( const rw::Config& c )
 {
     if( c.mcp )                     return "--mcp";
     if( c.mapDiff )                 return "--map-diff";
@@ -8006,7 +8006,7 @@ inline bool isJsonShapeModifier( const char* flag ) noexcept
 
 int main( int argc, char** argv )
 {
-    using namespace ctx;
+    using namespace rw;
 
     if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )   // adoption recipe (subcommand, not a flag)
         return runWrap( argc, argv, selfExecutablePath( argv[0] ) );
@@ -8251,7 +8251,7 @@ int main( int argc, char** argv )
         //     is the seam that tells the two apart (it exists for exactly this reason on the single-file
         //     path); such a file is COUNTED as skipped, never scanned-with-zero-findings;
         //   • a denylisted DIRECTORY subtree (.git, node_modules, build, …) is not descended, through the ONE
-        //     shared table both crawlers already use (ctx::isSkippedCrawlDir). Without it, pointing the verb
+        //     shared table both crawlers already use (rw::isSkippedCrawlDir). Without it, pointing the verb
         //     at a cloned skill repo means opening every packed object. The number of pruned subtrees is
         //     named on the stderr tally, so the walk's shape is stated rather than assumed.
         std::sort( dirs.begin(), dirs.end() );
@@ -8301,7 +8301,7 @@ int main( int argc, char** argv )
                 const fs::path& p = it->path();
                 if( it->is_directory( ec ) && !ec )
                 {
-                    if( ctx::isSkippedCrawlDir( p.filename().string() ) || !isFirstVisit( p ) )
+                    if( rw::isSkippedCrawlDir( p.filename().string() ) || !isFirstVisit( p ) )
                     { ++prunedDirs;  it.disable_recursion_pending(); }
                     ec.clear();
                     continue;
@@ -8309,7 +8309,7 @@ int main( int argc, char** argv )
                 ec.clear();
                 if( !it->is_regular_file( ec ) || ec ) { ec.clear(); continue; }
 
-                if( ctx::binstale::looksBinary( p.string() ) ) { ++filesSkipped;  continue; }
+                if( rw::binstale::looksBinary( p.string() ) ) { ++filesSkipped;  continue; }
                 skillPaths.push_back( p.string() );
             }
             std::sort( skillPaths.begin(), skillPaths.end() );
@@ -8356,7 +8356,7 @@ int main( int argc, char** argv )
             // non-ASCII --grep pattern is ordinary input — and std::getline( std::cin, ... ) aborted the
             // sanitizer build on the first high byte. Parity is exact, so batch answers are unchanged.
             std::string l;
-            while( ctx::readByteSafeLine( stdin, l ) ) { content += l; content += '\n'; }
+            while( rw::readByteSafeLine( stdin, l ) ) { content += l; content += '\n'; }
         }
         else
         {
@@ -8373,7 +8373,7 @@ int main( int argc, char** argv )
         // any byte). path_between takes `from,to` (split on the first comma); analyze takes no arg.
         const auto cliBatchObject = []( const std::string& verb, const std::string& arg ) -> std::string
         {
-            const auto j = []( const std::string& s ) { return ctx::mcpdetail::jsonEscape( s ); };
+            const auto j = []( const std::string& s ) { return rw::mcpdetail::jsonEscape( s ); };
             std::string obj = "{\"verb\":\"" + j( verb ) + "\"";
             if( verb == "path_between" )
             {
@@ -8699,8 +8699,8 @@ int main( int argc, char** argv )
     // (a workspace has no single repo root — notes are a per-repo artifact), and nullptr when EMPTY so every
     // surfacing seam (--for/--expand/MCP) stays byte-identical when there is nothing to show — the inertness
     // contract. Retrieval handlers below read notesPtr; --note-add/--notes have their own handler.
-    const ctx::notes::NoteIndex noteIndex = multiRoot ? ctx::notes::NoteIndex{} : ctx::notes::loadNoteIndex( root );
-    const ctx::notes::NoteIndex* const notesPtr = ( !multiRoot && !noteIndex.empty() ) ? &noteIndex : nullptr;
+    const rw::notes::NoteIndex noteIndex = multiRoot ? rw::notes::NoteIndex{} : rw::notes::loadNoteIndex( root );
+    const rw::notes::NoteIndex* const notesPtr = ( !multiRoot && !noteIndex.empty() ) ? &noteIndex : nullptr;
 
     // Phase B7.2: bundle the shared post-graph state; each verb handler below reads what it needs.
     const MainDispatch dsp{ cfg, ing, g, root, multiRoot, ws, fanIn, fanInPtr, qmetrics,

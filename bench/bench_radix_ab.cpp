@@ -138,18 +138,18 @@ void benchScores( std::size_t count, bool hasTies )
     std::mt19937 rng( 0x51D5u );
     std::shuffle( base.begin(), base.end(), rng );
     std::vector<std::uint32_t> expected = base;
-    std::sort( expected.begin(), expected.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ctx::sortutil::lessByScoreDescId( scores, a, b ); } );
+    std::sort( expected.begin(), expected.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return rw::sortutil::lessByScoreDescId( scores, a, b ); } );
     const auto before = [ & ]( std::vector<std::uint32_t>& order )
     {
         std::vector<std::uint32_t> scratch;
         legacySortSmall( order, scratch, []( std::uint32_t id ) { return id; } );
-        legacySortSmall( order, scratch, [ & ]( std::uint32_t id ) { return ctx::sortutil::nonNegativeFloatDescKey( scores[ id ] ); } );
+        legacySortSmall( order, scratch, [ & ]( std::uint32_t id ) { return rw::sortutil::nonNegativeFloatDescKey( scores[ id ] ); } );
     };
     const auto after = [ & ]( std::vector<std::uint32_t>& order )
     {
         std::vector<std::uint32_t> scratch;
         infraSortSmall( order, scratch, []( std::uint32_t id ) { return id; } );
-        infraSortSmall( order, scratch, [ & ]( std::uint32_t id ) { return ctx::sortutil::nonNegativeFloatDescKey( scores[ id ] ); } );
+        infraSortSmall( order, scratch, [ & ]( std::uint32_t id ) { return rw::sortutil::nonNegativeFloatDescKey( scores[ id ] ); } );
     };
     benchAlternating( hasTies ? "score-id tied shuffled" : "score-id random shuffled", base, expected, before, after );
 }
@@ -159,7 +159,7 @@ void benchAdaptive( std::size_t count )
     const std::vector<float> base = makeScores( count, false );
     std::vector<float> expected = base;
     std::stable_sort( expected.begin(), expected.end(), std::greater<float>() );
-    const auto keyOf = []( float value ) { return ctx::sortutil::nonNegativeFloatDescKey( value ); };
+    const auto keyOf = []( float value ) { return rw::sortutil::nonNegativeFloatDescKey( value ); };
     benchAlternating( "adaptive float", base, expected,
                       [ & ]( std::vector<float>& values ) { std::vector<float> scratch; legacySortSmall( values, scratch, keyOf ); },
                       [ & ]( std::vector<float>& values ) { std::vector<float> scratch; infraSortSmall( values, scratch, keyOf ); } );

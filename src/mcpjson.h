@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 namespace mcpdetail
@@ -64,7 +64,7 @@ namespace mcpdetail
     // the framing gate's truncation detector too). A `\"` never ends the string; a trailing backslash with
     // nothing after it steps ONE byte, so the scan can never read past the end.
     //
-    // W2-M0: the walk itself now lives in jsonesc.h as ctx::jsonStringEnd — eval.h's minedjson::skipString was
+    // W2-M0: the walk itself now lives in jsonesc.h as rw::jsonStringEnd — eval.h's minedjson::skipString was
     // the same walk with a different return convention, and this header is not a home a doc/eval reader can
     // pull in. THIS name, signature and npos convention are unchanged; only the body forwards.
     inline std::size_t stringEnd( const std::string& s, std::size_t quotePos ) noexcept
@@ -622,8 +622,8 @@ namespace mcpdetail
     // with their own flags. Byte-identical to the pre-unification body.
     inline std::string jsonEscape( const std::string& in )
     {
-        return ctx::jsonesc::escapeMcp( in );
+        return rw::jsonesc::escapeMcp( in );
     }
 }   // namespace mcpdetail
 
-}   // namespace ctx
+}   // namespace rw

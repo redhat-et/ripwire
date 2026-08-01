@@ -216,7 +216,7 @@ index a624057..38626db 100644
 +    //      Conservative resolution: the use-site name must map to exactly ONE langCompatible in-corpus def.
 +    {
 +        // name → def-ids map, built once per query (the CSR has no read/write/import edges to reuse)
-+        HashMap<std::string_view, ctx::svector<NodeId, 2>> defsByName;
++        HashMap<std::string_view, rw::svector<NodeId, 2>> defsByName;
 +        defsByName.reserve( N );
 +        for( const Symbol& s : ing.symbols ) defsByName[ std::string_view( s.name ) ].push_back( s.id );
 +
@@ -406,7 +406,7 @@ diff --git a/src/main.cpp b/src/main.cpp
 index 7d24d4a..3b8ee34 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
-@@ -1066,15 +1066,33 @@ ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
+@@ -1066,15 +1066,33 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
      const bool                        multiRoot = d.multiRoot;
      const std::vector<WorkspaceRoot>& ws        = d.ws;
  
@@ -441,7 +441,7 @@ index 7d24d4a..3b8ee34 100644
          if( forPruneK > 0 && !cfg.candidates )     // candidates bypasses the lens bundle → no lego set
          {
              ifaceExact.assign( ing.symbols.size(), 0 );
-@@ -1088,10 +1106,27 @@ ctx::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
+@@ -1088,10 +1106,27 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view tas
      std::vector<float>& lensRank = out.rank;
      if( !cfg.noRoute )
      {

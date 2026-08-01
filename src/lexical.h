@@ -25,7 +25,7 @@
 #include <thread>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // split an identifier into lowercase subtokens on camelCase / digit / non-alnum boundaries.
@@ -830,4 +830,4 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
     return cut;
 }
 
-}   // namespace ctx
+}   // namespace rw

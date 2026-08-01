@@ -51,7 +51,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ── Path-precise #include resolution (a SOUND SameInclude tier) ─────────────────────────────────────
@@ -988,7 +988,7 @@ inline std::size_t sharedLocality( std::string_view a, std::string_view b ) noex
 // Holds only const references to maps buildGraph owns — no state, no allocation, no copy of the symbol table.
 struct Narrower
 {
-    const HashMap<std::string, ctx::svector<NodeId, 2>>& canonByName;   // "Scope::name" → def ids (defs only)
+    const HashMap<std::string, rw::svector<NodeId, 2>>& canonByName;   // "Scope::name" → def ids (defs only)
     // P2-D Rule 2 binding table: "<fromSymbolId>#<var>" → the variable's resolved TYPE name (a class/struct in
     // canonByName), or the empty string as a TOMBSTONE marking an AMBIGUOUS var (bound to ≥2 distinct types in
     // one scope) — looked up but never narrowed. buildGraph builds it from IngestResult::bindings. Empty when
@@ -1011,7 +1011,7 @@ struct Narrower
     mutable std::string keyScope;   // "Scope::name" for canonByName lookups (Rule 1 + Rule 2's type::method)
     mutable std::string keyBind;    // "<fromSymbolId>#var" for the varType binding lookup (Rule 2)
 
-    explicit Narrower( const HashMap<std::string, ctx::svector<NodeId, 2>>& canon,
+    explicit Narrower( const HashMap<std::string, rw::svector<NodeId, 2>>& canon,
                        const HashMap<std::string, std::string>&             vt,
                        const std::vector<std::vector<NodeId>>&              incl,
                        const std::vector<std::uint32_t>&                    symFile ) noexcept
@@ -1040,7 +1040,7 @@ struct Narrower
     //     bare Python call is left to §2a. Restricting the bare case to C-family is the conservative cut.
     // In every case the narrow only fires when `callerScope::calleeName` is a real DEFINITION in canonByName,
     // so it can never invent a target the bare ladder couldn't reach — it only PICKS the right one earlier.
-    const ctx::svector<NodeId, 2>* rule1ClassMember( const Reference& r, const std::string& callerScope ) const
+    const rw::svector<NodeId, 2>* rule1ClassMember( const Reference& r, const std::string& callerScope ) const
     {
         if( callerScope.empty() ) return nullptr;             // caller's enclosing class/namespace unknown → no narrow
         if( !r.qualifier.empty() ) return nullptr;            // an explicit `A::m()` is handled by E#4 canonical resolve, not here
@@ -1070,7 +1070,7 @@ struct Narrower
     // returned ids are always real `Foo::m` definitions the bare ladder could also reach — Rule 2 just picks the
     // type-correct one earlier. Any uncertainty (no binding, conflicting bindings, type has no such method) →
     // honest ambiguity via §2a, never a guess. Deterministic: canonByName insertion order = symbol-id order.
-    const ctx::svector<NodeId, 2>* rule2RecvVarType( const Reference& r ) const
+    const rw::svector<NodeId, 2>* rule2RecvVarType( const Reference& r ) const
     {
         if( r.recv != RecvKind::NamedVar || r.recvVar.empty() ) return nullptr;   // not a named-receiver call
         if( !r.qualifier.empty() )                              return nullptr;   // explicit `A::m()` → E#4 canonical, not here
@@ -1134,7 +1134,7 @@ struct Narrower
     //
     // Deterministic: `cands` is in symbol-id order (byName insertion order) and `fileIncludes[callerFileId]` is a
     // sorted id set, so the "which single file" decision and the emitted `out` are a pure function of the inputs.
-    bool rule3IncludeFile( const ctx::svector<NodeId, 2>& cands, std::uint32_t callerFileId,
+    bool rule3IncludeFile( const rw::svector<NodeId, 2>& cands, std::uint32_t callerFileId,
                            std::vector<NodeId>& out ) const
     {
         if( callerFileId >= fileIncludes.size() ) return false;              // no per-file include set → no narrow
@@ -1172,4 +1172,4 @@ struct Narrower
     }
 };
 
-}   // namespace ctx
+}   // namespace rw

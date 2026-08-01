@@ -1,6 +1,6 @@
 #include <mutex>
-namespace ctx { namespace quality { std::mutex& headSnapshotIngestMutex(); } }
+namespace rw { namespace quality { std::mutex& headSnapshotIngestMutex(); } }
 void f()
 {
-    std::lock_guard<std::mutex> ingestLk( ctx::quality::headSnapshotIngestMutex() );
+    std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
 }

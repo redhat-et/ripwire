@@ -379,11 +379,11 @@ printf '%s' "$STALE" | grep -qE '<d l="1"[^>]*n="alpha"' \
 
 # ── (a) a DEMANGLED C++ frame name (spaces inside the parameter list) still yields the name ──────────────
 cat > "$WORK/a2/traces/demangled.txt" <<'EOF'
-    #0 0x1 in ctx::alpha(int const&) src/mod.cpp:8:1
+    #0 0x1 in rw::alpha(int const&) src/mod.cpp:8:1
 EOF
 DEM="$( a2_run demangled.txt )"
 { [ "$( a2_attr n frame "$DEM" )" = "alpha" ] && [ "$( a2_attr resolved_by frame "$DEM" )" = "name" ]; } \
-    && ok "(A2a) a demangled 'ctx::alpha(int const&)' frame resolves by name (param list + namespace stripped)" \
+    && ok "(A2a) a demangled 'rw::alpha(int const&)' frame resolves by name (param list + namespace stripped)" \
     || { no "(A2a) the demangled frame name did not resolve — the ASan split cut it at the first space"; printf '%s' "$DEM" | grep -oE '<frame[^>]*>'; }
 
 # ── (a) ambiguity is NOT a guess: two defs, neither in the frame's file → honest line fallback ───────────

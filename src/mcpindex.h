@@ -47,7 +47,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 namespace mcpdetail
@@ -724,7 +724,7 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
     std::thread( [ root, timingsOn ]()
     {
         struct FlagGuard { ~FlagGuard(){ mcpPrefetchInFlight().store( false, std::memory_order_release ); } } guard;
-        try   { (void)ctx::quality::computeHeadSnapshot( root ); }      // side effect: warm the sha-keyed qsnap (atomic publish)
+        try   { (void)rw::quality::computeHeadSnapshot( root ); }      // side effect: warm the sha-keyed qsnap (atomic publish)
         catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
         if( timingsOn ) { std::fprintf( stderr, "ripwire-prefetch done root=%s\n", root.c_str() ); std::fflush( stderr ); }
     } ).detach();
@@ -761,7 +761,7 @@ inline const McpIndex& getIndex( const std::string& root )
         // single-writer process-global query caches — §2b). Uncontended on the single request thread; only the
         // background warmer can contend, and then one waits. Reached ONLY on a real rebuild (warm reuse returns
         // above), so it never touches the hot path.
-        std::lock_guard<std::mutex> ingestLk( ctx::quality::headSnapshotIngestMutex() );
+        std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
         if( isWorkspace )
         {
             const std::vector<WorkspaceRoot>& roots = wsIt->second;
@@ -891,4 +891,4 @@ inline NodeId resolveHandle( const McpIndex& ix, std::uint64_t idHash )
     return resolveHandleAll( ix, idHash, matches );
 }
 
-}   // namespace ctx
+}   // namespace rw

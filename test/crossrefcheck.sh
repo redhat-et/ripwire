@@ -387,7 +387,7 @@ note_of "$Q" | grep -q 'retry="computeBudget"' \
     || ok "§B11.2 the qualified zero and the genuine zero are no longer the same document"
 
 # the carve-outs, so the guard cannot become a new false claim of its own.
-for spec in "ctx::crossref::writeWhereis" "doThing:withOther:" "computeBudget"; do
+for spec in "rw::crossref::writeWhereis" "doThing:withOther:" "computeBudget"; do
     [ -z "$( note_of "$( qz "$spec" )" )" ] \
         && ok "§B11.2 '$spec' is left alone (:: id / trailing-colon selector / plain name)" \
         || no "§B11.2 the guard misfired on '$spec'"

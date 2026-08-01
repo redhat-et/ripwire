@@ -68,7 +68,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // result of a --numstat-based diff mask build: the mask itself, whether git ran cleanly, and how many
@@ -314,7 +314,7 @@ inline DiffAnchor resolveDiffAnchor( const std::string& root, std::string_view b
 // (`--for` churn="2", `--owners` files="2"). The file IS indexed, as `./util.h`, and it DID change.
 //
 // So the join is DELETED rather than patched (wave 1's lesson: deleting the guess deletes the class).
-// ctx::markChangedFilesFromGitPaths derives the git-root→index-root offset once per root and binds each
+// rw::markChangedFilesFromGitPaths derives the git-root→index-root offset once per root and binds each
 // changed path to the ONE file whose own derived git spelling it is, or to nothing — which also makes this
 // verb inherit gitmine.h's three honest-failure disclosures instead of failing silently. `root` is no longer
 // a parameter of the join at all: the offset comes from the ingest, not from the string the user typed.
@@ -515,7 +515,7 @@ inline void writePrRootOpen( std::FILE* out, const std::string& sharedAttrs, con
     // §H4 §3.4 / V4 MED-3: the marker rides here, on the ONE root emitter all three forms (empty diff /
     // plain / budgeted) share — which is exactly the drift this helper exists to prevent, and the reason it
     // is appended LAST, past every caller-supplied tail attribute (same placement rule as gitstamp::atAttr).
-    std::fprintf( out, "<pr-context%s%s%s>", sharedAttrs.c_str(), tailAttrs.c_str(), ctx::kGraphCountFloorAttrXml );
+    std::fprintf( out, "<pr-context%s%s%s>", sharedAttrs.c_str(), tailAttrs.c_str(), rw::kGraphCountFloorAttrXml );
     if( !anchor.refHasNoWork ) return;
     std::fprintf( out, "<no-ref-work note=\"%s tip == merge-base, so that ref has no divergent work of its own; this "
                        "bundle is HEAD's work since the fork. For the ref's OWN diff see merge-scout or stray-content\"/>",
@@ -649,7 +649,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                  // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
                  // --impact reports, so the same floor applies to hundreds of attributes in this one document.
                  // The shared constants, never a pr-context wording — that is the §B4 echo-site rule.
-                 "%s-->", escBase.c_str(), ctx::graphCountDisclosure().c_str() );
+                 "%s-->", escBase.c_str(), rw::graphCountDisclosure().c_str() );
 
     writeAnchorNote( out, anchorAttr );
 
@@ -865,4 +865,4 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     return 0;
 }
 
-}   // namespace ctx
+}   // namespace rw

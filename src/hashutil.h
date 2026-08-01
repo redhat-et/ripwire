@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace ctx::hashutil
+namespace rw::hashutil
 {
 
 inline constexpr std::uint64_t kFnv1aPrime64 = 1099511628211ull;
@@ -20,4 +20,4 @@ inline constexpr std::uint64_t fnv1aMultiply( std::uint64_t value ) noexcept
     return multiplyModulo64( value, kFnv1aPrime64 );
 }
 
-} // namespace ctx::hashutil
+} // namespace rw::hashutil

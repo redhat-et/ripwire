@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace ctx
+namespace rw
 {
 
 template<class T>
@@ -37,4 +37,4 @@ inline bool verifyCsr( const sparseCsr<T>& csr, std::size_t nodeCount ) noexcept
     return true;
 }
 
-} // namespace ctx
+} // namespace rw

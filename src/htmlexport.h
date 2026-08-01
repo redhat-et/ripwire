@@ -36,7 +36,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // JSON-escape a string: escape \ " control chars, AND < > & as \uXXXX — this JSON is emitted inside an
@@ -848,4 +848,4 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     );
 }
 
-}   // namespace ctx
+}   // namespace rw

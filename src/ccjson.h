@@ -32,7 +32,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ---- per-file metric bundle. SoA-ish: one struct per file, indexed by fileId (parallel arrays are
@@ -249,4 +249,4 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     std::fprintf( out, "]}\n" );
 }
 
-}   // namespace ctx
+}   // namespace rw

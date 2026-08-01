@@ -66,7 +66,7 @@ extern "C"
     const TSLanguage* tree_sitter_c( void );
 }
 
-namespace ctx
+namespace rw
 {
 
 namespace
@@ -3812,7 +3812,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 // This must run INSTEAD OF the finalSegment() above (it overwrites both fields): finalSegment
                 // truncates at the first '<', which would name `numeric_limits<std::size_t>::max` as
                 // `numeric_limits` and mint an edge to the wrong symbol. Inert for every 2-segment call
-                // (`ctx::midFn` binds a bare identifier — no top-level `::` in the text) and for
+                // (`rw::midFn` binds a bare identifier — no top-level `::` in the text) and for
                 // `ns::tmplFn<int>()` (whose `::` sits inside no group but whose captured text is just
                 // `tmplFn<int>`), so those keep their qualifierOf() result untouched.
                 if( le.lang == Lang::Cpp )
@@ -5587,4 +5587,4 @@ std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t max
     return out;
 }
 
-}   // namespace ctx
+}   // namespace rw
