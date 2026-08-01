@@ -1,6 +1,6 @@
 #pragma once
 
-// docparse.h — P1-B document ingest (PLAN_absorb2026 §P1-B). Turns non-code documents that live IN a repo
+// docparse.h — P1-B document ingest. Turns non-code documents that live IN a repo
 // (Jupyter notebooks, HTML, CSV — and, via a bridge, PDF/DOCX/PPTX/XLSX) into plain text so `--recall` /
 // `--for` can see them. The architecture PDF and design notebook beside the code are context an agent wants;
 // `--recall` previously saw only markdown + code. Zero new dependency: the .ipynb/.html/.csv parsers are
@@ -392,12 +392,12 @@ inline std::string parseDocFile( const std::string& path, std::string_view extLo
     }
 }
 
-// ── generated-document signals (PLAN_outputAudit_2026-07-28 §P2b) ───────────────────────────────────
+// ── generated-document signals ───────────────────────────────────────────────────────────────────────
 //
 // A GENERATED document — a command capture, an API dump, a doxygen/openapi export — QUOTES the whole
 // system it documents, so BM25 hands it every query's terms and it out-scores the design document that
 // EXPLAINS them. Measured on this repo before the captures were relocated: a 246 KB capture scored
-// 11.548 against SPEC.md's 2.355 for "quality delta gating exit codes" (4.9x) — on a question the capture
+// 11.548 against a hand-written design document's 2.355 for "quality delta gating exit codes" (4.9x) — on a question the capture
 // does not answer. Any repo with large generated documentation hits this; the tool had no notion that a
 // generated artifact is not a design document. These functions are that notion, and they read the file's
 // own BYTES — never its name (a name blacklist is a guess dressed as evidence).
@@ -419,9 +419,9 @@ inline std::string parseDocFile( const std::string& path, std::string_view extLo
 //     doc                                    xmedian   fenced-lines
 //     docs/captures/…_2026-07-28.md            26.3        0.41      <- generated (raw + fenced output)
 //     docs/captures/…_2026-07-27.md            18.2        0.78      <- generated
-//     PLAN_planLanes_2026-07-27.md              6.5        0.23      hand-written, densest big doc
+//     (hand-written planning doc)                6.5        0.23      hand-written, densest big doc
 //     README.md                                 6.5        0.13      hand-written
-//     PLAN_systemAudit2026.md                   6.1        0.02      hand-written
+//     (hand-written planning doc)               6.1        0.02      hand-written
 //     reviews/PERF.md                           2.2        0.26      hand-written, densest at >=2x median
 //
 // So 5x/0.35 separates the two populations with margin on both sides (0.26 -> 0.35 -> 0.41), and seven

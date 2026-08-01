@@ -1,6 +1,6 @@
 #pragma once
 
-// filter.h — --ignore-tests (SPEC §5): drop symbols/references in test files so the token
+// filter.h — --ignore-tests: drop symbols/references in test files so the token
 // window is packed with production logic. Post-ingest, densifies symbol ids.
 
 #include "model.h"
@@ -47,7 +47,7 @@ inline bool isTestPath( std::string_view p ) noexcept
 
 // ── §P11 first-screen ORDERING tiers ─────────────────────────────────────────────────────────────────────
 // Several LISTING verbs serialized their rows in plain path-alphabetical order, which on a doc-heavy repo is
-// a systematic bias against code: `AGENTS.md`/`AUDIT*.md` sort above `src/`, and a fixed row cap then cuts
+// a systematic bias against code: `AGENTS.md` and other long-named docs sort above `src/`, and a fixed row cap then cuts
 // the deepest paths — usually the code — first (`--grep=DEGRADED_PATH_ALERT` showed 34 src + 66 doc rows and
 // not one `test/` or `third_party/` row, the macro's own definition site included).
 //
