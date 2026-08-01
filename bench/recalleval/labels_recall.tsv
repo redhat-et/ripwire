@@ -1,65 +1,78 @@
-# labels_recall.tsv — held-out labels for the RECALL lane (the retrieval-evaluation plan
-# the measuring instrument that must exist before the generated-doc demotion — default de-prioritization of generated docs in
-# the recall lens — may be evaluated). One row per query: query<TAB>primary<TAB>acceptable<TAB>class
+# labels_recall.tsv — held-out labels for the RECALL lane: does `--recall` return the document that
+# actually ANSWERS a task? One row per query: query<TAB>primary<TAB>acceptable<TAB>class
 #   primary    = comma-separated repo-relative markdown path(s); a hit on ANY of them is primary credit.
 #   acceptable = comma-separated path(s) earning lenient (graded) credit, or `-` for none.
 #   class      = name | concept | task | adversarial
 #                name        — the query names the doc or its title nearly verbatim
-#                concept     — conceptual phrase answered by exactly one design/research doc
-#                task        — an agent's task-shaped question whose answer is a doc
-#                adversarial — a query whose TOP LEXICAL match is expected to be a generated capture
-#                              (docs/captures/COMMANDS_showcase_*.md quotes every verb and flag), while
-#                              the labelled right answer is the real hand-written doc.
+#                concept     — conceptual phrase answered by exactly one document
+#                task        — an agent's task-shaped question whose answer is a document
+#                adversarial — a query whose TOP LEXICAL match is expected to be the GENERATED command
+#                              reference (docs/COMMANDS.md quotes every verb and every flag, so BM25
+#                              hands it any query phrased in flag vocabulary), while the labelled right
+#                              answer is the hand-written document that explains the concept.
 #
 # LABELING PROTOCOL (held-out means held out): every label below was authored by READING the candidate
-# documents' actual content (titles + bodies) and deciding which doc ANSWERS the query — never by running
-# `--recall` and transcribing what the current ranker returns. The ranker was run on these queries only
-# AFTER this file was complete, to produce baseline numbers. The eval is therefore allowed to say the
-# current ranker is wrong.
+# documents' actual content — titles and bodies — and deciding which document ANSWERS the query. NEVER
+# by running `--recall` and transcribing what the current ranker returns. The ranker was run on these
+# queries only AFTER this file was complete. The eval is therefore allowed to say the ranker is wrong,
+# and a label is only ever edited afterwards by RE-READING the documents, with the reason recorded here.
 #
-# Corpus note: the recall lens is docs-only (markdown). These labels were authored against the private
-# development tree's document set, much of which this public export deliberately does not ship. The
-# harness counts a query whose labelled paths are absent on disk as SKIPPED (reported), so the checkout
-# degrades honestly rather than scoring a query it cannot answer -- but the RECALL LANE IS THEREFORE
-# UNDER-SAMPLED HERE AND MUST BE RE-AUTHORED against this repo's own docs/ set before its numbers mean
-# anything. Re-author by READING the shipped docs, never by transcribing --recall output (see the
-# labeling protocol above). The ranking lane, which targets code, is unaffected.
-SPEC definitive spec decided choices output schema	SPEC.md	README.md	name
-phase ledger which phase is DONE gate status	PLAN_phases.md	-	name
-PUBLIC_MANIFEST what ships to the public remote	PUBLIC_MANIFEST.md	-	name
-where do I log a change to a vendored infra file	INFRA_IMPROVEMENTS.md	CLAUDE.md,AGENTS.md	task
-changelog what changed in recent releases	CHANGELOG.md	-	name
-locbench gate decision anchor holds	bench/locbench/GATE_DECISION.md	bench/locbench/README.md	name
-session trace mined retrieval eval queries design	DESIGN_traceEvals.md	-	name
-README quick start which flag answers which question	README.md	-	name
-security vulnerability disclosure reporting policy	SECURITY.md	-	concept
-how to contribute pull requests build and test	CONTRIBUTING.md	CODE_OF_CONDUCT.md,CLAUDE.md	task
-multi root workspaces merged into one labeled graph design	DESIGN_multiRoot.md	README.md	concept
-minimal connecting subgraph relating several symbols design	DESIGN_connectSubgraph.md	README.md	concept
-inheritance type edges interface implementors factory lego design	DESIGN_inheritanceEdges.md	-	concept
-path precise include resolution sound SameInclude tier	DESIGN_pathPreciseInclude.md	DESIGN_resolutionCompleteness.md	concept
-resolution completeness honesty unresolved gauge precise imports	DESIGN_resolutionCompleteness.md	DESIGN_pathPreciseInclude.md	concept
-deterministic speculative context prefetch measure first study	DESIGN_specPrefetch.md	-	concept
-committable team index artifact remote MCP transport design	DESIGN_teamIndex.md	-	concept
-labelled eval for skill routing corpus design	RESEARCH_skillEval2026.md	PLAN_skills2026.md	concept
-shrinking what the tool returns to the caller output economy	RESEARCH_outputEconomy.md	-	concept
-2026 code intelligence competitive landscape where ripwire fits	RESEARCH_competitiveLandscape2026.md	RESEARCH_codeIntelligence.md	concept
-multi resolution retrieval research decisions	RESEARCH_multiResolution.md	-	concept
-code quality signals to steer better agent code	RESEARCH_codeQualitySteering.md	RESEARCH_agentQuality2026.md	concept
-evidence study better code fewer tokens never stale	RESEARCH_agentQuality2026.md	-	name
-orthogonal tools that help an AI agent code brainstorm	RESEARCH_orthogonalTools.md	-	name
-language expansion simdjson coverage plan	PLAN_languages2026.md	-	name
-big dispatch functions refactor leave or ack plan	PLAN_dispatchRefactor_2026-07-27.md	-	name
-go public program audit remediation plan	PLAN_audit5Public2026.md	AUDIT5_fable2026.md	concept
-agent new to this repo golden rules build guide	AGENTS.md	CLAUDE.md,CONTRIBUTING.md	task
-adversarial review of the landed graph correctness levers	PLAN_hardeningFindings.md	-	name
-does the right feature fire at the right moment adoption audit	ADOPTION_AUDIT_fable2026.md	-	name
-C++ performance first priority plan	PLAN_cpp_perf2026.md	-	name
-make agents actually use the features skills plan	PLAN_skills2026.md	-	name
-output audit findings recall budget paging vocabulary	the retrieval-evaluation plan	NEXT_SESSION_outputAudit.md	name
-quality delta gating exit codes usage	README.md	SPEC.md,skills/ripwire-quality-bar/SKILL.md	adversarial
-pack task one call orientation under a token budget usage	README.md	SPEC.md,skills/ripwire-orient/SKILL.md	adversarial
-merge scout pairwise conflict sites landing order usage	README.md	SPEC.md,skills/ripwire-change-check/SKILL.md	adversarial
-recall memory notes token budget flags usage	README.md	SPEC.md	adversarial
-from trace stack frames mapped to symbols usage	README.md	SPEC.md,skills/ripwire-find-bug/SKILL.md	adversarial
-edit check did the contract change callers usage	README.md	SPEC.md,skills/ripwire-change-check/SKILL.md	adversarial
+# RE-AUTHORED 2026-07-31 for the public tree. The previous label set targeted the private development
+# tree's document set — 27 of its 39 labels named plan, design, audit and research documents this
+# repository deliberately does not ship, so the harness skipped them and the lane measured almost
+# nothing. This set is authored against the SHIPPED documentation only, by reading it:
+#   * the conventional root set (CONTRIBUTING, CHANGELOG, CLAUDE/AGENTS, SECURITY, CODE_OF_CONDUCT,
+#     THIRD_PARTY),
+#   * docs/ (ARCHITECTURE, EVALS, COMMANDS, the index),
+#   * bench/ (the evaluation harnesses and their recorded results),
+#   * test/README.md.
+# Deliberately NOT labelled: anything under a skills/<tool>-*/ directory (those directory names carry
+# the tool's own name, and a rename would silently break every label pointing at them), and the
+# repository README, which is authored by a separate lane — a label whose path does not exist yet is
+# counted as skipped, and the gate requires zero skips.
+#
+# Corpus note: the recall lens is docs-only (markdown). The harness counts a query whose labelled
+# paths are absent on disk as SKIPPED and reports it, so a checkout missing a document degrades
+# honestly rather than scoring a query it cannot answer.
+contributing guide pull request build and test	CONTRIBUTING.md	CODE_OF_CONDUCT.md,CLAUDE.md	name
+changelog what capabilities changed recently	CHANGELOG.md	-	name
+security vulnerability disclosure reporting policy	SECURITY.md	-	name
+code of conduct contributor covenant enforcement	CODE_OF_CONDUCT.md	-	name
+third party vendored libraries and their licenses	THIRD_PARTY.md	-	name
+architecture pipeline data model determinism contract	docs/ARCHITECTURE.md	docs/README.md	name
+evaluation instruments and published numbers with provenance	docs/EVALS.md	docs/README.md	name
+documentation index which document is for which reader	docs/README.md	-	name
+self profile where does the time go in the pipeline	bench/PROFILE.md	-	name
+head to head report against other context tools	bench/headtohead/REPORT.md	bench/headtohead/README.md	name
+locbench localization harness readme	bench/locbench/README.md	-	name
+agent in the loop eval harness	bench/agentloop/README.md	-	name
+answer quality co-change recall evaluation	bench/ANSWERQUALITY.md	-	name
+benchmark token reduction and speed measurements	bench/BENCHMARK.md	-	name
+skills consolidation into routable skills	skills/CONSOLIDATION.md	-	name
+the gate suite how the tests are organised	test/README.md	-	name
+per instance paired win loss table	bench/headtohead/paired_table.md	bench/headtohead/REPORT.md	name
+multi swe bench cpp localization scoreboard	bench/multiswe/README.md	bench/multiswe/results/cpp_scoreboard.md	name
+why does continuous integration build twice release and plain	docs/ARCHITECTURE.md	CONTRIBUTING.md	concept
+never use std map which container should I reach for instead	CONTRIBUTING.md	CLAUDE.md,AGENTS.md	concept
+in-edge transpose storage so rank propagates along incoming edges	docs/ARCHITECTURE.md	-	concept
+dangling mass redistributed through the teleport vector	docs/ARCHITECTURE.md	-	concept
+a zero is a measurement absent is not zero	docs/ARCHITECTURE.md	docs/EVALS.md	concept
+strict accuracy at k means every gold file inside the top k	bench/locbench/README.md	bench/headtohead/REPORT.md	concept
+two tier acceptance gate quality per cost ratio proposal	bench/locbench/GATE_DECISION.md	-	concept
+pre-registered retry with the C++ metric as primary	bench/locbench/results/r1cpp_anchorhop/GATE_DECISION_r1cpp.md	-	concept
+terse commit messages are a harder retrieval shape than issue prose	bench/cppbench/README.md	bench/cppbench/results/sfml_scoreboard.md	concept
+relatedness is lexical importance is structural	bench/ANSWERQUALITY.md	docs/EVALS.md	concept
+profiling markers compile to nothing in the normal binary	bench/PROFILE.md	-	concept
+why synthetic credential shaped literals live in the test tree	test/README.md	-	concept
+sanitizer stack no recover memory safety guardrail	CONTRIBUTING.md	CLAUDE.md,AGENTS.md	concept
+I am about to write C++ here which style rules apply	CONTRIBUTING.md	CLAUDE.md,AGENTS.md	task
+new agent landing on this repository what do I build and run	AGENTS.md	CLAUDE.md,CONTRIBUTING.md	task
+I added a gate script where must I register it	CONTRIBUTING.md	test/README.md,AGENTS.md	task
+which numbers may I quote publicly and what pins them	docs/EVALS.md	-	task
+how do I regenerate the generated command reference	docs/README.md	docs/COMMANDS.md	task
+what is deliberately not published and why	docs/EVALS.md	-	task
+counts floor on callers callees uses and impact explained	docs/ARCHITECTURE.md	docs/COMMANDS.md	adversarial
+body elided signature skeletons measured methodology root neutralised	docs/EVALS.md	docs/COMMANDS.md	adversarial
+quality delta ten measured kinds and their exact spellings	docs/EVALS.md	docs/COMMANDS.md	adversarial
+map diff teleports toward changed files it does not filter	CHANGELOG.md	docs/ARCHITECTURE.md	adversarial
+mention anchor ablation held out numbers per corpus	docs/EVALS.md	-	adversarial
