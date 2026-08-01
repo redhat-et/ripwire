@@ -50,9 +50,52 @@ TMP_PATH    = re.compile( r'/(?:var|private)/[A-Za-z0-9_./-]*(?:folders|tmp)[A-Z
 COORD       = re.compile( r'§A|§B[0-9]|§P[0-9]|V[0-9]-[0-9]|W[0-9]|r[0-9][0-9]-' )
 REFNAME     = re.compile( r'\br[0-9][0-9]-[A-Za-z0-9_*-]*' )
 # Personal identifiers a real run leaks: git author emails (--owners `top=`), and any address in
-# body text. Names are not enumerable here, so `top=`/`author=` attribute VALUES are replaced whole.
-EMAIL       = re.compile( r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' )
-AUTHOR_ATTR = re.compile( r'\b(top|author|owner)="[^"]*"' )
+# body text. Names are not enumerable here, so an OWNERSHIP row's identity attribute VALUES are
+# replaced whole.
+#
+# BOTH patterns below are CONTEXT-GATED, and the gating is the load-bearing part. An over-broad scrub
+# does not just fail to help — it CORRUPTS real output, which is a worse failure than the leak,
+# because the corruption ships as if it were the tool's answer:
+#   · `top=` is a SYMBOL NAME on `--hotspots` (`<f p=… churn= ccx= top="main" top_ccx=…/>`) and
+#     `owner=` is a STRUCT NAME on `--layout` (`<field name= type= owner="Symbol" rel=…/>`).
+#     The discriminator is the ownership `share=` fraction, which ONLY the ownership surfaces emit
+#     (`--owners`, and `--pr-context`'s `<owners>` block: main.cpp, mcpverbs.h, prcontext.h). Gating
+#     on the ELEMENT rather than on an enclosing `<owners>…</owners>` span is deliberate: the capture
+#     truncates long blocks, so an open `<owners>` with no closing tag is normal, and a span rule
+#     would then run away down the rest of the document.
+#   · ripwire's community labels are `symbol@basename.ext:line:col` (`str@ingest.cpp:887:55947`,
+#     `AGENTS@AGENTS.md:1:0`) — the address shape exactly. A trailing label that is a source or doc
+#     FILE EXTENSION is a filename, not a TLD; the table below is the whole rule.
+EMAIL       = re.compile( r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.([A-Za-z]{2,})' )
+AUTHOR_ATTR = re.compile( r'\b(top|author|owner|email)="[^"]*"' )
+OWNER_ROW   = re.compile( r'<[A-Za-z][A-Za-z0-9-]*\s[^<>]*\bshare="[^"]*"[^<>]*/?>' )
+FILE_EXT_NOT_TLD = frozenset( (
+    'c', 'cc', 'cpp', 'cs', 'cxx', 'go', 'h', 'hpp', 'inl', 'java', 'js', 'json', 'jsx', 'm', 'md',
+    'mm', 'py', 'rb', 'rs', 'scm', 'sh', 'swift', 'ts', 'tsx', 'txt', 'yaml', 'yml' ) )
+
+
+def is_address( match ):
+    """True when an `x@y.z` match is a real address rather than a `symbol@file.ext` output label."""
+    return match.group( 1 ).lower() not in FILE_EXT_NOT_TLD
+
+
+def scrub_emails( text ):
+    return EMAIL.sub( lambda m: '<author>' if is_address( m ) else m.group( 0 ), text )
+
+
+def find_address( line ):
+    """The leak PREDICATE, shared by the scrub and by `assert_scrubbed` so they cannot disagree."""
+    for m in EMAIL.finditer( line ):
+        if is_address( m ):
+            return m
+    return None
+
+
+def scrub_author_attrs( text ):
+    """Rewrite identity attributes on OWNERSHIP rows only — see the gating note above."""
+    return OWNER_ROW.sub(
+        lambda row: AUTHOR_ATTR.sub( lambda a: '%s="<author>"' % a.group( 1 ), row.group( 0 ) ),
+        text )
 # Internal-only document names from the private development tree, if a sample happens to rank one.
 INTERNAL_DOC = re.compile( r'\b(?:PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)[A-Za-z0-9_.-]*' )
 
@@ -220,8 +263,8 @@ def scrub( text, name ):
     text = HOME_PATH.sub( '<path>', text )
     text = TMP_PATH.sub( '<tmp>', text )
     text = REFNAME.sub( 'topic-branch', text )
-    text = AUTHOR_ATTR.sub( lambda m: '%s="<author>"' % m.group( 1 ), text )
-    text = EMAIL.sub( '<author>', text )
+    text = scrub_author_attrs( text )
+    text = scrub_emails( text )
     text = INTERNAL_DOC.sub( 'NOTES.md', text )
     return text
 
@@ -237,7 +280,7 @@ def scrub_prose( text, name ):
     text = HOME_PATH.sub( '<path>', text )
     text = TMP_PATH.sub( '<tmp>', text )
     text = REFNAME.sub( 'topic-branch', text )
-    text = EMAIL.sub( '<author>', text )
+    text = scrub_emails( text )
     text = INTERNAL_DOC.sub( 'an internal design note', text )
     return text
 
@@ -250,11 +293,14 @@ def rewrite_command( cmd, name ):
 
 
 def trim_sample( body, name ):
+    # Scrub the block as ONE text rather than line by line: the capture re-wraps minified XML at tag
+    # seams, so an element can be the only thing on its line but its ownership context is the block.
+    # No substitution above adds or removes a newline, so the split below is line-for-line with `body`.
+    scrubbedBody = scrub( '\n'.join( body ), name ).split( '\n' )
     kept    = []
     total   = 0
     dropped = 0
-    for raw in body:
-        line = scrub( raw, name )
+    for line in scrubbedBody:
         if COORD.search( line ):
             # A line that still trips the export scrub after substitution is dropped rather than
             # mangled — an omitted line is honest, a silently edited one is not.
@@ -423,20 +469,20 @@ def render( name, preamble, sections, captures, capturePath ):
     return '\n'.join( out )
 
 
-def assert_scrubbed( text ):
-    """The generator must not be able to emit what the public-export gate forbids."""
+def assert_scrubbed( text, what = 'refusing to write' ):
+    """The generator must not be able to emit — or bless — what the public-export gate forbids."""
     bad = []
     for i, line in enumerate( text.split( '\n' ), 1 ):
         if HOME_PATH.search( line ):
             bad.append( '%d: absolute home path' % i )
         elif COORD.search( line ):
             bad.append( '%d: internal coordinate shape: %s' % ( i, line.strip()[ :90 ] ) )
-        elif EMAIL.search( line ):
+        elif find_address( line ):
             bad.append( '%d: email address: %s' % ( i, line.strip()[ :90 ] ) )
         elif INTERNAL_DOC.search( line ):
             bad.append( '%d: internal document name: %s' % ( i, line.strip()[ :90 ] ) )
     if bad:
-        sys.exit( 'docs_commands_build: refusing to write — scrub violations:\n  ' + '\n  '.join( bad[ :20 ] ) )
+        sys.exit( 'docs_commands_build: %s — scrub violations:\n  %s' % ( what, '\n  '.join( bad[ :20 ] ) ) )
 
     # NOT fatal, but reported: help prose that still carries an internal issue label ("(X9(d): …",
     # "(D10)"). Those come from the BINARY's own --help, so the fix belongs there, not here —
@@ -484,11 +530,23 @@ def main():
 
     binPath = args.bin
     if not binPath:
-        found = [ p for p in glob.glob( os.path.join( ROOT, 'build', '*' ) )
-                  if os.path.isfile( p ) and os.access( p, os.X_OK ) ]
-        if len( found ) != 1:
-            sys.exit( 'docs_commands_build: pass --bin (found %d executables under build/)' % len( found ) )
-        binPath = found[ 0 ]
+        buildDir = os.path.join( ROOT, 'build' )
+        found    = sorted( p for p in glob.glob( os.path.join( buildDir, '*' ) )
+                           if os.path.isfile( p ) and os.access( p, os.X_OK ) )
+        # A build tree legitimately holds more than ONE executable — this one holds the tool and the
+        # `*_probe` harness beside it — so "several candidates" is the normal case, not an error, and
+        # the old `!= 1` refusal made the no-argument invocation printed at the top of this file fail
+        # on a complete build. Prefer the target named after the project (build/<repo-dir-name>) and
+        # refuse only when that is absent AND the choice is genuinely ambiguous.
+        preferred = os.path.join( buildDir, os.path.basename( ROOT ) )
+        if preferred in found:
+            binPath = preferred
+        elif len( found ) == 1:
+            binPath = found[ 0 ]
+        else:
+            sys.exit( 'docs_commands_build: pass --bin — %d executable(s) under build/ and no build/%s: %s'
+                      % ( len( found ), os.path.basename( ROOT ),
+                          ' '.join( os.path.basename( p ) for p in found ) or '(none)' ) )
 
     name  = tool_name_of( binPath )
     preamble, sections = parse_help( help_text_of( binPath ) )
@@ -499,7 +557,13 @@ def main():
         if not os.path.exists( args.out ):
             sys.exit( 'docs_commands_build: %s does not exist' % args.out )
 
-        doc     = documented_flags( open( args.out, encoding = 'utf-8' ).read() )
+        docText = open( args.out, encoding = 'utf-8' ).read()
+        # The scrub contract is not only a WRITE-side promise. A document edited by hand, or written
+        # by an older generator with a weaker scrub, would carry a leak that no arm here could see:
+        # `--check` only ever compared flag SETS. Re-run the same assertion against the doc on disk,
+        # so `--check` is a statement about the shipped file and not merely about the next write.
+        assert_scrubbed( docText, 'the document on disk (%s) carries' % os.path.relpath( args.out, ROOT ) )
+        doc     = documented_flags( docText )
         binary  = binary_flags( sections )
         missing = sorted( binary - doc )
         stale   = sorted( doc - binary )
