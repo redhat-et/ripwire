@@ -4,22 +4,12 @@
 //
 //  fastmath.cpp
 //
-//  Out-of-line definitions for fastmath slow-paths and Diagnostics handlers.
-//  Consolidates what was Diagnostics.cpp + fastmath.cpp into one translation unit.
+//  Out-of-line definitions for the Diagnostics handlers.
 //
-#include "fastmath.h"
 #include "Diagnostics.h"
 #include <iostream>
 #include <cstdlib>
 #include <atomic>
-
-// fastmath slow paths
-NO_INLINE float fastmath::safeDivisorNoInLine( float d ) noexcept
-{
-    DEGRADED_PATH_ALERT("small divisor — clamping to ±SMALLEST_DIVISOR");
-    return (d >= 0.f) ? SMALLEST_DIVISOR : -SMALLEST_DIVISOR;
-}
-
 
 // Diagnostics
 namespace Diagnostics {

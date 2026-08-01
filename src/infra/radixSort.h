@@ -36,11 +36,18 @@
 
 #pragma once
 
-#include "fastmath.h"
+#include "platform.h" // ALWAYS_INLINE / memorycopy / VERIFY_TEXT / fastmath::isFiniteFast + cache-line size
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+
+// The byte-histogram fast paths in radixSort.inl are written in NEON intrinsics under
+// this same guard, so this header owns the intrinsics include rather than inheriting it
+// from whatever happened to be included first.
+#if defined( __ARM_NEON ) || defined( __ARM_NEON__ )
+#include <arm_neon.h>
+#endif
 
 namespace radix
 {

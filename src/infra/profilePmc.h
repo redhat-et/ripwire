@@ -35,7 +35,7 @@
 
 #pragma once
 
-#include "fastmath.h"        // ALWAYS_INLINE, fastmath::min
+#include "platform.h"        // ALWAYS_INLINE
 
 #include <cstddef>
 #include <cstdint>
