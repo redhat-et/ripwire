@@ -5,27 +5,26 @@
 # caught only because an orchestrator happened to grep the built binary's --help text by hand.
 # This gate makes that grep automatic and runs it on every prose source that quotes ripwire flags.
 #
-# Scope (what counts as "prose that quotes flags"):
-#   present/*.py, present/*.js — the deck-build SCRIPTS (deck1-3 are Python, deck4 is JS); their string
-#                    literals are what actually ships onto slides. present/*.pptx/.pdf/.html are BUILT
-#                    ARTIFACTS, not sources: the .html export especially is full of `--ink`/`--panel`-
-#                    style CSS custom properties that collide with the flag-token shape and are not
-#                    ripwire flags at all, and the orchestrator's working tree regenerates these —
-#                    scanning generated output would make this gate flap on files this agent doesn't
-#                    own. Scan the scripts that GENERATE the deck, not the deck.
-#   README.md      — the public-facing usage doc; same fabrication risk as a slide.
-#   skills/*/SKILL.md — INCLUDED, deliberately: these are agent-facing prose exactly like README,
-#                    written by the same kind of generation pass, and in THIS tree they already
-#                    carry real examples (`--anchor`, `--cochange-boost`) that would have been
-#                    false positives without the allowlist below — proof the same fabrication risk
-#                    lives here, not just in slide decks.
-#   .claude/skills/*/SKILL.md, .agents/skills/*/SKILL.md — the repo's OWN agent skills. Added after
-#                    these two trees were found silently DIVERGED (.claude/ still claimed 14 MCP verbs
-#                    and 7 quality kinds against the real 30 and 10) while every gate validated only
-#                    the .agents/ copy. They are one tree now (.agents/skills is a symlink to
-#                    .claude/skills), and both globs are scanned so the gate keeps working whether or
-#                    not that stays true; SOURCES is deduplicated by resolved directory so the shared
-#                    files are not scanned — or reported — twice.
+# Scope (what counts as "prose that quotes flags") — EVERY shipped prose surface in this export:
+#   README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, CHANGELOG.md — the public-facing and
+#                    agent-facing docs at the root; same fabrication risk as a slide.
+#   docs/*.md      — ARCHITECTURE / EVALS / METHODOLOGY and the docs index, EXCEPT the generated
+#                    docs/COMMANDS.md (see the skip below it).
+#   skills/*/SKILL.md and their companion pages (skills/*/*.md) — agent-facing prose written by the
+#                    same kind of generation pass, and in THIS tree they already carry real examples
+#                    (`--anchor`, `--cochange-boost`) that would have been false positives without the
+#                    allowlist below — proof the same fabrication risk lives here, not just in decks.
+# NOT scanned: docs/captures/*.md is RECORDED OUTPUT, not prose — every flag in it was actually run,
+#                    and a capture of a refusal legitimately contains a deliberately-bogus flag.
+# HISTORY, and why this list is spelled out rather than globbed loosely: it used to name present/*.py,
+# present/*.js, .claude/skills/*/SKILL.md and .agents/skills/*/SKILL.md. None of those paths exist in
+# this export. Three of the five globs matched nothing, README.md had not landed yet, and the gate was
+# quietly scanning ONE directory while its own header described five — the green-while-inert shape.
+# addSource() no-ops on a missing file, so a glob that matches nothing is silent: keep this list and
+# the tree in agreement by hand, and prefer a path that exists over a glob that might.
+#
+# SOURCES is deduplicated by RESOLVED path, so a symlinked or repeated file is scanned — and reported
+# — once, not twice.
 #
 # Beyond existence, a flag's VALUE is checked where --help states the permitted set (see "enum values"
 # below): `--rank-by=bogus` is as false a claim as `--bogus`, and --help prints those enums verbatim.
@@ -119,9 +118,9 @@ while IFS=$'\t' read -r tok reason; do
     fi
 done <"$TMP/allow_rows.txt"
 
-# ── the scanned prose: present/ scripts, README.md, and all three skill trees ───────────────────────
-# addSource dedupes by RESOLVED directory (`cd … && pwd -P` follows symlinks, POSIX, no realpath dep)
-# so .agents/skills -> .claude/skills is scanned once, not twice, and a FAIL is reported once.
+# ── the scanned prose: the root docs, docs/*.md, and the skills tree (see the scope note above) ─────
+# addSource dedupes by RESOLVED path (`cd … && pwd -P` follows symlinks, POSIX, no realpath dep) so a
+# symlinked duplicate is scanned once, not twice, and a FAIL is reported once.
 SOURCES=()
 seenKeys=""
 addSource() {
@@ -131,13 +130,32 @@ addSource() {
     seenKeys="$seenKeys|$key|"
     SOURCES+=( "$1" )
 }
-for f in "$ROOT"/present/*.py "$ROOT"/present/*.js; do addSource "$f"; done
-addSource "$ROOT/README.md"
+addSource "$ROOT/README.md"          # arrives with the public-README lane; addSource no-ops until then
+addSource "$ROOT/AGENTS.md"
+addSource "$ROOT/CLAUDE.md"
+addSource "$ROOT/CONTRIBUTING.md"
+addSource "$ROOT/CHANGELOG.md"
+for f in "$ROOT"/docs/*.md; do
+    # docs/COMMANDS.md is GENERATED from `--help` plus recorded capture samples, and it has a strictly
+    # stronger gate of its own: test/docscommandscheck.sh arm (B) proves its documented flag set EQUALS
+    # the binary's, in BOTH directions. Scanning it here adds nothing and costs a false positive — its
+    # sample blocks are transcripts of commands that were really run, INCLUDING the deliberate refusal
+    # demos (`--format=bogus`, `--rank-by=bogus`), which the value arm below cannot tell from a claim.
+    # Same rule the old header stated for built artifacts: gate the generator, not its output.
+    case "$f" in */COMMANDS.md) continue ;; esac
+    addSource "$f"
+done
 for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f"; done
-for f in "$ROOT"/.claude/skills/*/SKILL.md; do addSource "$f"; done
-for f in "$ROOT"/.agents/skills/*/SKILL.md; do addSource "$f"; done
+for f in "$ROOT"/skills/*/*.md;             do addSource "$f"; done
 
-[ "${#SOURCES[@]}" -gt 0 ] || { echo "deckcheck: no prose sources found (present/*.py, present/*.js, README.md, */skills/*/SKILL.md all missing?)"; exit 2; }
+# A scan of nothing is not a pass. The old refusal threshold was >0, which one surviving file could
+# satisfy while four globs matched nothing — the failure that let this gate go inert. Require a
+# plausible floor: the skills tree alone is 17 SKILL.md files plus companions, and docs/ carries five.
+[ "${#SOURCES[@]}" -ge 20 ] || {
+    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=20 (root docs, docs/*.md, skills/*/*.md)."
+    printf '        found: %s\n' "${SOURCES[@]#$ROOT/}"
+    echo "        A near-empty scan reads as a PASS while checking nothing; refusing to run."
+    exit 2; }
 
 fail=0
 badValueCount=0

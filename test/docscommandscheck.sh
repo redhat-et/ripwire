@@ -15,8 +15,12 @@
 #       pass forever; the arm proves the check can still see a difference
 #   (D) name agreement — the document's title names the binary it was generated from, so a renamed
 #       binary with a stale document is red rather than quietly wrong
-#   (E) public-export scrub — the generated document carries no absolute home paths and no internal
-#       coordinate shapes (the same patterns test/ripwirepubliccheck.sh enforces)
+#   (E) public-export scrub — EVERY scrub class the generator implements, run over docs/COMMANDS.md
+#       AND every docs/captures/*.md, using the generator's OWN predicates (imported, not restated)
+#   (F) MUTATION CONTROL for (E) — each class must fire on a synthetic offender, and real output that
+#       merely LOOKS like a leak (--hotspots `top=`, community `sym@file.ext` labels, --layout
+#       `owner=`) must survive untouched: an over-broad scrub corrupts output, which is worse than
+#       the leak because the corruption ships as the tool's answer
 #
 # Usage:  bash test/docscommandscheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exit:   0 = clean · 1 = at least one arm failed · 2 = usage / missing prerequisite
@@ -87,23 +91,108 @@ else
     no "(D) docs/COMMANDS.md documents '$docName' but the binary is '$binName' — regenerate: python3 docs/docs_commands_build.py --bin $BIN"
 fi
 
-# ── (E) public-export scrub of the generated document ─────────────────────────────────────────────
-python3 - "$DOC" > "$TMP/scrub" <<'PY'
-import re, sys
+# ── (E) public-export scrub — EVERY class the generator claims to scrub, on BOTH documents ────────
+# The old arm ran two of the generator's six substitution classes (home path, coordinate) and only
+# over COMMANDS.md. That left the two classes that actually leaked a person — EMAIL and the ownership
+# identity attributes — unchecked by anything, and it never looked at the capture at all, even though
+# the capture is a committed document that COMMANDS.md lifts its samples from: a leak there ships
+# twice and was gated zero times.
+#
+# The predicates below are IMPORTED from the generator, not restated here. That is the point: a gate
+# that re-spells its subject's regexes tests its own copy, and a widened scrub with a stale gate reads
+# green. `find_address` in particular carries the discriminator that keeps ripwire's own
+# `symbol@file.ext` community labels from being mistaken for addresses — restating it by hand here
+# would have this arm red on correct output.
+cat > "$TMP/scrubarm.py" <<'PY'
+import glob, os, re, sys
+
+ROOT = sys.argv[1]
+sys.path.insert( 0, os.path.join( ROOT, 'docs' ) )
+try:
+    import docs_commands_build as gen
+except ImportError as exc:
+    print( 'IMPORT_FAIL %s' % exc )
+    sys.exit( 0 )
+
 # spelled with a class so this gate does not itself contain the literal it hunts for
-home  = re.compile( r'/[Uu]sers/' )
-coord = re.compile( r'§A|§B[0-9]|§P[0-9]|V[0-9]-[0-9]|W[0-9]|r[0-9][0-9]-' )
-for i, line in enumerate( open( sys.argv[1], encoding = 'utf-8', errors = 'replace' ), 1 ):
-    if home.search( line ):
-        print( '%d: absolute home path: %s' % ( i, line.strip()[ :100 ] ) )
-    elif coord.search( line ):
-        print( '%d: internal coordinate shape: %s' % ( i, line.strip()[ :100 ] ) )
+HOME = re.compile( r'/[Uu]sers/' )
+CLASSES = (
+    ( 'absolute home path',        lambda ln: HOME.search( ln ) ),
+    ( 'temp/scratch path',         lambda ln: gen.TMP_PATH.search( ln ) ),
+    ( 'internal coordinate shape', lambda ln: gen.COORD.search( ln ) ),
+    ( 'internal document name',    lambda ln: gen.INTERNAL_DOC.search( ln ) ),
+    ( 'email address',             lambda ln: gen.find_address( ln ) ),
+)
+
+targets = [ os.path.join( ROOT, 'docs', 'COMMANDS.md' ) ]
+targets += sorted( glob.glob( os.path.join( ROOT, 'docs', 'captures', '*.md' ) ) )
+print( 'SCANNED %d' % len( targets ) )
+for path in targets:
+    rel = os.path.relpath( path, ROOT )
+    for i, line in enumerate( open( path, encoding = 'utf-8', errors = 'replace' ), 1 ):
+        for label, hit in CLASSES:
+            if hit( line ):
+                print( 'HIT %s:%d: %s: %s' % ( rel, i, label, line.strip()[ :100 ] ) )
+                break
 PY
-if [ -s "$TMP/scrub" ]; then
-    no "(E) generated document trips the public-export scrub in $( wc -l < "$TMP/scrub" | tr -d ' ' ) place(s):"
-    sed 's/^/          /' "$TMP/scrub"
+python3 "$TMP/scrubarm.py" "$ROOT" > "$TMP/scrub" 2>&1
+scannedCount="$( grep '^SCANNED ' "$TMP/scrub" | awk '{print $2}' )"
+if grep -q '^IMPORT_FAIL' "$TMP/scrub"; then
+    no "(E) could not import the scrub predicates from docs/docs_commands_build.py — the arm cannot run: $( grep '^IMPORT_FAIL' "$TMP/scrub" )"
+elif [ "${scannedCount:-0}" -lt 2 ]; then
+    no "(E) scanned only ${scannedCount:-0} document(s) — COMMANDS.md plus at least one docs/captures/*.md is expected; a near-empty scan passes vacuously"
+elif grep -q '^HIT ' "$TMP/scrub"; then
+    no "(E) shipped document(s) trip the public-export scrub in $( grep -c '^HIT ' "$TMP/scrub" ) place(s):"
+    grep '^HIT ' "$TMP/scrub" | sed 's/^HIT /          /'
 else
-    ok "(E) generated document carries no home paths and no internal coordinate shapes"
+    ok "(E) all $scannedCount shipped document(s) clean on every scrub class (home path, temp path, coordinate, internal doc name, address)"
+fi
+
+# ── (F) mutation control for (E) — prove the scrub arm can still see a leak ────────────────────────
+# Same reasoning as (C): a predicate that silently stopped matching would make (E) a permanent PASS.
+# Feed each class a synthetic offender through the SAME imported predicates and require every one to
+# fire. This does not touch the real documents.
+cat > "$TMP/scrubmutate.py" <<'PY'
+import os, re, sys
+
+ROOT = sys.argv[1]
+sys.path.insert( 0, os.path.join( ROOT, 'docs' ) )
+import docs_commands_build as gen
+
+HOME = re.compile( r'/[Uu]sers/' )
+PROBES = (
+    ( 'absolute home path',        '/' + 'Users' + '/someone/checkout/src', lambda ln: HOME.search( ln ) ),
+    ( 'temp/scratch path',         '/private/tmp/ripwire_showcase_ab12/aux', lambda ln: gen.TMP_PATH.search( ln ) ),
+    ( 'internal coordinate shape', 'see ' + '§' + 'B12.9 of the round plan',  lambda ln: gen.COORD.search( ln ) ),
+    ( 'internal document name',    'PLAN' + '_something.md',                lambda ln: gen.INTERNAL_DOC.search( ln ) ),
+    ( 'email address',             'top="someone@example.com"',             lambda ln: gen.find_address( ln ) ),
+)
+# and the NEGATIVE controls: real output the scrub must NOT claim as a leak (the over-scrub failure).
+NEGATIVES = (
+    ( 'hotspots symbol name',  '<f p="./src/main.cpp" churn="5" ccx="3311" top="main" top_ccx="376"/>' ),
+    ( 'community label',       '<community id="952" label="./src::str@ingest.cpp:887:55947"/>' ),
+    ( 'layout field owner',    '<field name="id" type="uint32_t" owner="Symbol" rel="0"/>' ),
+)
+bad = 0
+for label, probe, hit in PROBES:
+    if not hit( probe ):
+        print( 'DEAD %s: predicate did not fire on a synthetic offender' % label ); bad += 1
+for label, line in NEGATIVES:
+    scrubbed = gen.scrub_emails( gen.scrub_author_attrs( line ) )
+    if scrubbed != line:
+        print( 'OVERSCRUB %s: real output was rewritten: %s -> %s' % ( label, line, scrubbed ) ); bad += 1
+# and the one that MUST be rewritten, so the gate is not merely proving the scrub is a no-op
+ownerRow = '<f p="./SECURITY.md" authors="2" bf="0" top="someone@example.com" share="0.50"/>'
+if 'someone@example.com' in gen.scrub_emails( gen.scrub_author_attrs( ownerRow ) ):
+    print( 'DEAD ownership row: an address on a share= row survived the scrub' ); bad += 1
+print( 'MUTATE %d' % bad )
+PY
+mutateOut="$( python3 "$TMP/scrubmutate.py" "$ROOT" 2>&1 )"
+if printf '%s' "$mutateOut" | grep -q '^MUTATE 0$'; then
+    ok "(F) mutation control — every scrub class fires on a synthetic leak, and real output (hotspots top=, community labels, layout owner=) survives untouched"
+else
+    no "(F) mutation control failed — the scrub is inert or over-broad:"
+    printf '%s\n' "$mutateOut" | sed 's/^/          /'
 fi
 
 if [ "$fail" = 0 ]; then printf 'ALL PASS\n'; else printf 'FAILURES ABOVE\n'; fi

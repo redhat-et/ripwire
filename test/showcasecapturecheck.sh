@@ -236,15 +236,25 @@ print( ' '.join( m.groups() ) if m else '' )
         if [ -z "$caption_pcts" ]; then
             no "(C-recount) the caption no longer states its three figures in the gated form 'N% fewer bytes at top-10, N% at top-50, N% at top-100' — the gate cannot pin what it cannot parse"
         else
+            # GUARD BEFORE THE ZIP. `zip` stops at the SHORTEST input, so a recount that parsed only
+            # one or two figures would compare only those and report OK on the rest — a truncating zip
+            # is a vacuous pass, exactly the green-while-inert shape the rest of this file exists to
+            # prevent. Both sides must carry three figures or the arm FAILS naming which parse broke.
             verdict="$( python3 -c "
 import sys
-cap = [float(x) for x in sys.argv[1].split()]
-mea = [float(x) for x in sys.argv[2].split()]
+cap = sys.argv[1].split()
+mea = sys.argv[2].split()
+if len(cap) != 3 or len(mea) != 3:
+    print('PARSEFAIL caption yielded %d of 3 figure(s) %r; recount yielded %d of 3 %r' % (len(cap), cap, len(mea), mea))
+    sys.exit(0)
+cap = [float(x) for x in cap]
+mea = [float(x) for x in mea]
 bad = [ (n,c,m) for n,c,m in zip((10,50,100), cap, mea) if abs(c-m) > 1.5 ]
 print('OK' if not bad else 'DRIFT ' + '; '.join('top-%d caption %.1f%% vs recount %.1f%% (delta %.1f)' % (n,c,m,m-c) for n,c,m in bad))
 " "$caption_pcts" "$measured" 2>/dev/null || echo "ERR" )"
             case "$verdict" in
                 OK)  ok "(C-recount) caption [$caption_pcts] and recount [$measured] are the SAME quantity, agreeing within 1.5 points at top-10/50/100" ;;
+                PARSEFAIL*) no "(C-recount) ${verdict#PARSEFAIL } — three figures are required on BOTH sides; a short list would silently shorten the comparison and pass vacuously" ;;
                 ERR) no "(C-recount) could not compare caption [$caption_pcts] against recount [$measured]" ;;
                 *)   no "(C-recount) $verdict — the caption and its own gate disagree; re-derive with the root-neutralised methodology stated above, and fix BOTH" ;;
             esac
