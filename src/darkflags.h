@@ -1,6 +1,6 @@
 #pragma once
 
-// darkflags.h — `--flags`, the DARK-CONTENT DASHBOARD (IDEAS_fieldNotes_2026-07-24.md §2).
+// darkflags.h — `--flags`, the DARK-CONTENT DASHBOARD.
 // Evidence: twice in one day an owner asked "why don't I see X?" and the answer both times was that X ships
 // COMPILED OUT — a `#ifndef F / #define F 0` header gate, a CMake `option()`, or a `getenv()` read that
 // nothing sets. That question has no verb: `--grep` finds the gate's spelling but not its DEFAULT, not how

@@ -1,7 +1,7 @@
 #pragma once
 
-// crossref.h — the CROSS-BRANCH CONTENT INDEX: --whereis=SYM and --stray-content
-// (IDEAS_fieldNotes_2026-07-24.md §1). Evidence: a completed, soak-verified canyon fix sat UNMERGED on 1 of
+// crossref.h — the CROSS-BRANCH CONTENT INDEX: --whereis=SYM and --stray-content.
+// Evidence: a completed, soak-verified canyon fix sat UNMERGED on 1 of
 // 30 branches for two days while a ledger claim said "ported" — `git cherry` answers commit ANCESTRY, and
 // every other ripwire verb indexes ONE worktree, so nothing could answer "where does this CONTENT live?".
 //
@@ -1582,7 +1582,7 @@ inline std::string_view whereisBareNameOf( std::string_view spec )
     return spec.substr( lastColon + 1 );
 }
 
-// §P8 (PLAN_outputAudit_2026-07-28.md "Contract-level"): this verb said hits="2560" and printed 60, and
+// Contract-level defect: this verb said hits="2560" and printed 60, and
 // --limit/--offset were accepted and ignored, so a paging loop over it never advanced and never ended.
 // `pageLimit`/`pageOffset` (0 = un-paginated) window the hit list, which is already deterministically
 // ordered (HEAD first, then refs). The root gains shown= + capped= UNCONDITIONALLY — disclosing the silent

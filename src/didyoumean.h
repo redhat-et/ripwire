@@ -68,7 +68,7 @@ inline int boundedEditDistance( std::string_view a, std::string_view b, int maxD
 // --expand/--around/--lego/--path/--impact/--mentions/--owners). §P12.1: true bounded edit distance, not
 // the old shared-prefix*4 - |lenDelta| heuristic — that score let an unrelated symbol whose length happened
 // to be close outscore a genuine one-edit typo whenever the typo landed early/mid-prefix (`parsArgs` scored
-// `parseAlt`, 4+ edits away, over `parseArgs`, 1 edit away — see PLAN_outputAudit_2026-07-28.md §P12.1).
+// `parseAlt`, 4+ edits away, over `parseArgs`, 1 edit away).
 // Deterministic tie-break on ties: (a) smaller distance already selects the candidate; (b) longer
 // case-insensitive shared prefix; (c) lexicographic name — same "closest wins, ties resolved reproducibly"
 // contract as before. Empty when nothing in the corpus is within kMaxEditDistance edits (an honest "no

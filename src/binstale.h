@@ -1,6 +1,6 @@
 #pragma once
 
-// binstale.h — tracked-binary staleness (field note, IDEAS_fieldNotes_2026-07-24.md §Smaller): flag a
+// binstale.h — tracked-binary staleness (field note): flag a
 // COMMITTED binary that is older than the tracked source it depends on — the motivating incident was a
 // sweep that committed rebuilt test binaries blind, alongside a source edit the binary no longer reflects.
 //

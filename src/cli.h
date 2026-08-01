@@ -1,6 +1,6 @@
 #pragma once
 
-// cli.h — hand-rolled zero-dependency argument parser (SPEC §5). Linear argv scan into one
+// cli.h — hand-rolled zero-dependency argument parser. Linear argv scan into one
 // POD Config; flags are additive; first non-flag positional is the root path.
 
 #include <cerrno>
@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "ingest.h"   // rw::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
-#include "version.h"  // P5 (AUDIT5): configure-generated kRipwireVersion + short build info (--version)
+#include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
 
 namespace rw
 {
@@ -33,7 +33,7 @@ struct Config
     bool             mapDiff         = false;
     bool             mcp             = false;
     std::string_view listen;                     // --listen=HOST:PORT (or bare PORT ⇒ loopback): serve the MCP
-                                                 // server over Streamable HTTP instead of stdio (DESIGN_teamIndex.md §2).
+                                                 // server over Streamable HTTP instead of stdio.
                                                  // Implies --mcp. Binds 127.0.0.1 by default; a non-loopback host
                                                  // requires --mcp-token (refuses to start otherwise).
     std::string_view mcpToken;                   // --mcp-token=T (or RIPWIRE_MCP_TOKEN env): shared bearer for the HTTP
@@ -71,12 +71,12 @@ struct Config
                                                            // query-TIME ranker choice (name-exact/routing/anchoring)
                                                            // that the seed-based --eval structurally cannot measure
     std::string_view evalMined;                            // --eval-mined=FILE: session-trace-mined retrieval eval —
-                                                           // consumes a bench/mine_traces.py minedpair.jsonl artifact
-                                                           // (DESIGN_traceEvals.md); explicit path required, no silent
+                                                           // consumes a bench/mine_traces.py minedpair.jsonl artifact.
+                                                           // Explicit path required, no silent
                                                            // default lookup into ~/.ripwire/...
     std::string_view evalSkills;                           // --eval-skills=FILE: labelled skill-ROUTING eval — ROOT is a
                                                            // skills directory, FILE is the prompt→permitted-skill(s)
-                                                           // corpus (RESEARCH_skillEval2026.md)
+                                                           // corpus
     std::string_view cacheFile;                            // --cache=PATH: incremental index (re-parse only changed)
     std::string_view indexOut;                             // --index-out=BASE: CI generate-and-exit. Cold-parses the tree
                                                            // TWICE — lean then rich — writing BASE.lean.ripwirecache +
@@ -105,7 +105,7 @@ struct Config
     bool             adaptive = false;                      // --adaptive (with --for/--query): cut the returned set at the largest relative score gap (Adaptive-k) with a floor (~5) + the existing top-k ceiling, so a sharp query returns few and a flat/broad one hits the ceiling; prints the cut in the header
     bool             noMentionBoost = false;                // --no-mention-boost (with --for): disable the B8 query-mention anchor — by default, files / dotted modules / Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1 competitor-win bucket; bench/headtohead). Inert when the text names nothing indexed (byte-identical). Env RIPWIRE_NO_MENTION=1 disables everywhere (incl. the MCP `for` verb).
     bool             cochangeBoost = false;                 // --cochange-boost (with --for): OPT-IN, EXPERIMENTAL (the --anchor precedent) — the B3 co-change prior: files that historically change WITH the top-ranked files (git co-change, last 500 commits, support >= 3) get a small bounded score boost into the lower bundle; the top seeds can never be displaced. Honest numbers (B3 held-out record): train multi-file strict@10 +6.4pp but held-out +0.0pp (n=55) at warm p50 +19% — did NOT confirm on the Python LocBench corpus; default stays OFF pending a large-C++-corpus history eval. Env RIPWIRE_COCHANGE=1 enables everywhere (incl. the MCP `for` verb, which has no per-call flags).
-    bool             noDocMention = false;                  // --no-doc-mention (with --for): disable the AUDIT5 R5 doc-mention surfacing — by default, a doc that names one of the task's top-resolved symbols in a `backtick` (the g.mentions edges `--mentions=SYM` already exposes) is lifted into the bundle, strictly below that symbol's own score. Inert when nothing resolved has a mentioning doc (byte-identical). Route-agnostic (applies under --no-route too). Env RIPWIRE_NO_DOC_MENTION=1 disables everywhere (incl. the MCP `for`/`pack_task` verbs).
+    bool             noDocMention = false;                  // --no-doc-mention (with --for): disable the doc-mention surfacing — by default, a doc that names one of the task's top-resolved symbols in a `backtick` (the g.mentions edges `--mentions=SYM` already exposes) is lifted into the bundle, strictly below that symbol's own score. Inert when nothing resolved has a mentioning doc (byte-identical). Route-agnostic (applies under --no-route too). Env RIPWIRE_NO_DOC_MENTION=1 disables everywhere (incl. the MCP `for`/`pack_task` verbs).
     std::string_view legoType;                             // --lego=TYPE: the interface→impls "Lego" view for ONE named interface/base (signature + method contract + every implementor, own-language only). file:name disambiguates a same-named type across languages.
     std::string_view exemplar;                             // --exemplar=TASK|KIND (Q7): the repo's best-in-class instance of what you're about to write (by ROLE, not text similarity). A plain TASK string infers KIND from the top match; a KIND token selects directly.
     std::string_view recall;                               // --recall=TASK: retrieve the most relevant DOCS (memory/notes) + emit their full bodies
@@ -200,7 +200,7 @@ struct Config
                                                              // changed symbols vs its merge-base with HEAD, pairwise same-symbol conflicts /
                                                              // same-file textual risks, and a fewest-conflicts-first landing order. The dirty
                                                              // working tree joins as an implicit extra arm. Single-root only (like --pr-context).
-    bool             planLanesFlag   = false;               // --plan-lanes[=N] (PLAN_planLanes_2026-07-27.md): the PRE-HOC lane plan —
+    bool             planLanesFlag   = false;               // --plan-lanes[=N]: the PRE-HOC lane plan —
                                                              // split across N worktrees, which lanes would collide and in what order
                                                              // should they land. Tracked apart from the count so a bare --plan-lanes
                                                              // (the --brief form) still routes to the handler. Single-root only.
@@ -1274,7 +1274,7 @@ struct BoolFlag { std::string_view lit;    bool             Config::* member; };
 // or a value whose own arm already refuses) and the argv reaches the member unchanged. A new value-taking
 // flag therefore has to state which it is, in the row, at the point the flag is declared.
 //
-// §B5 (PLAN_outputAudit3_2026-07-29.md, OWNER RULING 2026-07-29 — recorded as reversible): NINE rows were
+// OWNER RULING 2026-07-29 (recorded as reversible): NINE rows were
 // carrying that null by omission rather than by decision — `--since=` `--cache=` `--index-out=` `--scip=`
 // `--lint-rules=` `--mcp-token=` and the three `--eval-*=` — and downstream every one of them is guarded by
 // `!cfg.X.empty()`, so the empty value did not reach a member that means anything: the run emitted the
@@ -1717,7 +1717,7 @@ inline IntFlagMatch applyIntFlag( std::string_view arg, Config& c )
 // the call. A default carried across this boundary would still compile, still exit 0, and quietly change
 // output ordering, which is why the boundary is named rather than assumed (test/guardmsgcheck.sh pins
 // both sides: each guard by its own message, and the --mcp/--stable default by the bytes it changes).
-// --plan-lanes (PLAN_planLanes §2.1) takes its lanes from EXACTLY ONE of two sources. Six guards, split out
+// --plan-lanes takes its lanes from EXACTLY ONE of two sources. Six guards, split out
 // of validateConfig rather than appended to it — that function is already the 20-guard combination contract
 // and one verb owning a third of a seventh of it belongs in its own body. The refusals are the --partition
 // class: a companion flag that alone would silently no-op on the default map. `--task`/`--brief` are inputs
@@ -1765,7 +1765,7 @@ inline void validatePlanLanes( Config& c ) noexcept
     }
 }
 
-// §P8 (PLAN_outputAudit_2026-07-28.md) — the eleven "(with X)" modifiers the sweep found accepted-and-
+// §P8 — the eleven "(with X)" modifiers the sweep found accepted-and-
 // silently-ignored, split out of validateConfig for the SAME reason validatePlanLanes above is split out:
 // one theme owning a chunk of the guard chain belongs in its own body, not appended to the 20-guard
 // combination contract function. Also keeps these new guards from inflating validateConfig's own complexity/
@@ -1792,7 +1792,7 @@ inline void validatePlanLanes( Config& c ) noexcept
 // of which windows anything, so honorsPaging() excludes both the same way it excludes --zoom --mermaid).
 // --metrics stays refusing: it is a DECORATOR on the default map's own top-k/--max-tokens-bounded row set,
 // not an independent row list of its own — the same budget/top-k reasoning that keeps --for/--expand refusing.
-// §A3a (PLAN_outputAudit2_2026-07-28.md): --test-gate joins here too — its <u> untested-row list was a bare
+// §A3a: --test-gate joins here too — its <u> untested-row list was a bare
 // 25-row literal cap (situ.h kMaxUntestedRows) with no shown=/capped= and a refusal on --limit that FALSELY
 // claimed "no page to walk" (there were 41 more rows). It now windows through pageview.h like every verb
 // above, so it belongs in the honoring set, not the refusing one.
@@ -2241,7 +2241,7 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
-    // The remote HTTP transport pins ONE workspace fixed at startup (DESIGN_teamIndex.md §2b), so --listen
+    // The remote HTTP transport pins ONE workspace fixed at startup, so --listen
     // needs a root on the command line (stdio --mcp does not — its clients name a path per request).
     if( !c.listen.empty() && c.rootPath.empty() )
     {
@@ -2251,7 +2251,7 @@ inline void validateConfig( Config& c ) noexcept
 
     validateModifierGuards( c );   // §P8: the eleven new "(with X)" companion guards, split out above (see its header)
 
-    // L5 (AUDIT5): --anchor is a negative-result experiment (dropped from --help) — gated behind
+    // --anchor is a negative-result experiment (dropped from --help) — gated behind
     // RIPWIRE_DEV=1 so it stays reachable for continued eval work without advertising it as supported.
     if( c.anchor && !std::getenv( "RIPWIRE_DEV" ) )
     {
@@ -2280,7 +2280,7 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
-    // L5 (AUDIT5): --cochange-boost is a negative-result experiment (dropped from --help) — same
+    // --cochange-boost is a negative-result experiment (dropped from --help) — same
     // RIPWIRE_DEV=1 gate as --anchor. RIPWIRE_COCHANGE=1 (the separate MCP-facing env activation,
     // main.cpp) is untouched — it is not a --help-advertised flag.
     if( c.cochangeBoost && !std::getenv( "RIPWIRE_DEV" ) )
@@ -2425,7 +2425,7 @@ inline void validateConfig( Config& c ) noexcept
 inline Config parseArgs( int argc, char** argv ) noexcept
 {
     Config c;
-    // L5 (AUDIT5): --stable/--most-important-last/--no-auto-order are hidden aliases of --order= now —
+    // --stable/--most-important-last/--no-auto-order are hidden aliases of --order= now —
     // still work, dropped from --help, warn ONCE per run (not once per flag) pointing at the replacement.
     bool orderDeprecWarned = false;
     auto deprecatedOrderFlag = [&]( const char* oldFlag, const char* newValue ) noexcept
@@ -2440,7 +2440,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
 
         if( a == "--help" || a == "-h" ) { printUsage( stdout ); std::exit( 0 ); }   // self-doc; first instinct must not error
 
-        // P5 (AUDIT5): --version — one line, exit 0. Version + compiler come from the SAME generated
+        // --version — one line, exit 0. Version + compiler come from the SAME generated
         // version.h --help's "determinism" line points at (single source: project(ripwire VERSION ...)
         // in CMakeLists.txt), so this can never drift from the CMake version test/versioncheck.sh checks.
         if( a == "--version" || a == "-v" )
@@ -2580,7 +2580,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
         }
         else
         {
-            // every non-flag positional is a crawl root (DESIGN_multiRoot.md §6): one = today's behavior
+            // every non-flag positional is a crawl root: one = today's behavior
             // verbatim; 2..kMaxWorkspaceRoots = a multi-root workspace merged into ONE graph.
             if( c.roots.size() >= kMaxWorkspaceRoots )
             {
