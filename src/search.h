@@ -803,9 +803,119 @@ inline std::optional<std::string> nonPortableRegexEscape( const std::string& pat
     return std::nullopt;
 }
 
+// M2 (Linux runtime probe) — the SECOND thing the two standard libraries disagree about, and the worse
+// one. `--regex='(a+)+b'` over a long run of 'a' with no 'b' is the textbook catastrophic-backtracking
+// shape: every way of splitting the run between the inner and the outer repetition is a distinct path,
+// so a backtracking engine explores O(2^n) of them before it can report no-match.
+//
+// Apple libc++ has a complexity budget and gives up in well under a second with
+// regex_error(error_complexity), which grepScanText's catch turns into a skipped file — the original
+// A4-F10 "degrade, don't die" contract, and the only behaviour this repo had ever observed. libstdc++ has
+// NO such budget: it never throws, so that catch is never reached and the process simply backtracks. The
+// first real Linux run (Ubuntu 24.04, clang 18 + libstdc++) was still CPU-bound at 560 s on the very
+// fixture the gate uses, i.e. on Linux a pathological --regex does not degrade — it hangs the tool.
+//
+// So the pattern is screened HERE, structurally, before either engine is handed it, for the same reason
+// and in the same shape as the L5 escape screen above: the verdict must be a pure function of the pattern
+// text, not of whose backtracker is linked in and not of what happens to be in the corpus. Refusal is the
+// right outcome rather than a silent skip — a skipped file reads as a measurement, an exit-1 refusal that
+// names the construct cannot.
+//
+// WHAT IS CAUGHT: an unbounded quantifier ('*', '+', '{n,}') applied to a group that already repeats
+// without bound anywhere inside it, at any nesting depth — (X+)+, (X*)*, (X+)*, (X{n,})+, ((X+))+,
+// ((X)+)+, (X+|Y)+. That is the whole exponential family reachable by inspection.
+//
+// WHAT IS DELIBERATELY NOT CAUGHT, so the guard does not quietly eat working patterns: '?' and '{n,m}'
+// are BOUNDED and never drive the blowup, so (a?)+ and (a{1,3})+ pass; a group with no repetition inside
+// passes however it is quantified, so (abc)+ and (a|b)+ pass; '+' inside a character class or behind a
+// backslash is a literal, so [a+]+ and (\+)+ pass; and an unquantified group passes whatever it contains,
+// so (a+)b and (a+)(b)+ pass. The known GAP is overlapping alternation — (a|a)+b is a real bomb whose
+// branches only overlap semantically — which is why grepScanText's mid-match catch is kept as
+// belt-and-braces rather than removed. Every one of these cases is an arm of test/regexbombcheck.sh.
+//
+// Scope: this screens --regex, the one place a user's own pattern meets an unbounded corpus. The --arch
+// path-rule regexes take the same engine but come from a committed rules file, not from the command line.
+struct RegexQuantifier { bool isPresent; bool isUnbounded; std::size_t lengthCount; };
+
+// reads the quantifier at `at`, if there is one. '?' and '{n,m}' are quantifiers but BOUNDED; anything
+// that is not a well-formed '{' interval is not a quantifier at all, just a literal brace.
+inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at )
+{
+    if( at >= pat.size() )                            return { false, false, 0 };
+    if( pat[ at ] == '*' || pat[ at ] == '+' )        return { true,  true,  1 };
+    if( pat[ at ] == '?' )                            return { true,  false, 1 };
+    if( pat[ at ] != '{' )                            return { false, false, 0 };
+
+    std::size_t cursor         = at + 1;
+    std::size_t lowerDigitCount = 0;
+    while( cursor < pat.size() && pat[ cursor ] >= '0' && pat[ cursor ] <= '9' ) { ++cursor; ++lowerDigitCount; }
+    if( lowerDigitCount == 0 )                              return { false, false, 0 };
+    if( cursor < pat.size() && pat[ cursor ] == '}' )       return { true, false, ( cursor + 1 ) - at };   // {n} — exact, bounded
+    if( cursor >= pat.size() || pat[ cursor ] != ',' )      return { false, false, 0 };
+
+    ++cursor;
+    std::size_t upperDigitCount = 0;
+    while( cursor < pat.size() && pat[ cursor ] >= '0' && pat[ cursor ] <= '9' ) { ++cursor; ++upperDigitCount; }
+    if( cursor >= pat.size() || pat[ cursor ] != '}' )      return { false, false, 0 };
+
+    return { true, upperDigitCount == 0, ( cursor + 1 ) - at };                                           // {n,} unbounded, {n,m} bounded
+}
+
+inline std::optional<std::string> catastrophicRegexConstruct( const std::string& pat )
+{
+    // one flag per OPEN group: does anything inside it, at any depth, repeat an unbounded number of times?
+    std::vector<char> hasUnboundedInsideGroup;
+    bool              isInsideClass = false;
+
+    for( std::size_t i = 0; i < pat.size(); ++i )
+    {
+        const char c = pat[ i ];
+
+        // the two contexts where a quantifier character is just a character
+        if( c == '\\' )     { ++i; continue; }                                         // '\+' is a literal plus
+        if( isInsideClass ) { if( c == ']' ) isInsideClass = false; continue; }         // '[a+]' is a literal plus
+        if( c == '[' )      { isInsideClass = true; continue; }
+
+        // group open / close — the close is where the whole verdict is made
+        if( c == '(' ) { hasUnboundedInsideGroup.push_back( 0 ); continue; }
+        if( c == ')' )
+        {
+            if( hasUnboundedInsideGroup.empty() ) continue;                             // unbalanced: the compile probe below owns that error
+
+            const bool isRepeatingInside = hasUnboundedInsideGroup.back() != 0;
+            hasUnboundedInsideGroup.pop_back();
+            const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
+
+            if( quant.isPresent && quant.isUnbounded && isRepeatingInside )
+                return   std::string( "catastrophic backtracking: the unbounded quantifier '" ) + pat[ i + 1 ] + "' is applied to a group that already "
+                         "repeats without bound inside it (the (X+)+ / (X*)* / (X+)* / (X{n,})+ family). Every way of splitting the input between the "
+                         "inner and the outer repetition is a separate path, so matching a non-matching line costs time exponential in its length. "
+                         "std::regex has no backtracking budget you can set, and the standard libraries do not agree about it — libc++ abandons the "
+                         "match in under a second, libstdc++ never gives up at all (measured: still running after 560 s) — so this is refused rather "
+                         "than answered differently per platform. Workaround: collapse the two repetitions into one, since the outer adds no string the "
+                         "inner does not already match ('(a+)+' is the language of 'a+', '([a-z]+\\.)+' of '([a-z]\\.?)+'), or make the outer bounded "
+                         "with an explicit interval ('(\\s*\\w+){1,20}')";
+
+            // the group is now an ATOM of its parent: an unbounded repetition anywhere inside it — or ON it —
+            // is an unbounded repetition inside the parent too, which is what makes ((a+))+ and ((a)+)+ visible
+            if( !hasUnboundedInsideGroup.empty() && ( isRepeatingInside || ( quant.isPresent && quant.isUnbounded ) ) )
+                hasUnboundedInsideGroup.back() = 1;
+            if( quant.isPresent ) i += quant.lengthCount;                               // step over the quantifier we just judged
+            continue;
+        }
+
+        // a plain quantifier: it marks the innermost enclosing group, if any (top-level repetition is fine)
+        const RegexQuantifier quant = regexQuantifierAt( pat, i );
+        if( quant.isPresent && quant.isUnbounded && !hasUnboundedInsideGroup.empty() ) hasUnboundedInsideGroup.back() = 1;
+        if( quant.isPresent ) i += quant.lengthCount - 1;
+    }
+    return std::nullopt;
+}
+
 inline std::optional<std::string> regexCompileError( const std::string& pat )
 {
     if( std::optional<std::string> portability = nonPortableRegexEscape( pat ) ) return portability;   // L5: one verdict on every platform, so it runs first
+    if( std::optional<std::string> bomb        = catastrophicRegexConstruct( pat ) ) return bomb;      // M2: likewise — decided from the text, before any engine sees it
 
     try                                { const std::regex probe( pat, std::regex::ECMAScript | std::regex::optimize ); (void)probe; }
     catch( const std::regex_error& e ) { return std::string( e.what() ); }
