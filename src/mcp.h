@@ -469,7 +469,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "lego", pathIsRequired ) + "},"
                    "{\"name\":\"owners\",\"description\":\"Bus-factor: recency-weighted (6-month half-life) author ownership per file. bf=1 means one person holds >80% of weighted commits. symbol optional — restricts to the file that defines it.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "owners", pathIsRequired ) + "},"
-                   // W4-#8 EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
+                   //  EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
                    "{\"name\":\"replace_symbol_body\",\"description\":\"Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition. Refuses (file unchanged) if not found (lists nearest names), ambiguous (lists file:line candidates — retry with 'file'; in a multi-root workspace pass the root-labeled path form, e.g. file:'svc/'), the index is stale (call any read verb first), or the file is a SYMLINK (resolve to the real file first — editing through a link would replace the link entry, not the target). Concurrent ripwire edits serialize; a concurrent external write is detected and refused, never silently overwritten. path = repo dir, or paths = multiple workspace roots (writes land in the correct root's real file); symbol = def name; file = optional disambiguating path substring; new_body = replacement text.\","
                    "\"inputSchema\":" + mcprefuse::inputSchemaFor( "replace_symbol_body", pathIsRequired ) + "},"
                    "{\"name\":\"insert_before_symbol\",\"description\":\"Insert text immediately BEFORE a symbol's definition (its first byte); a trailing newline is added only if missing. Same refusal contract as replace_symbol_body (not found / ambiguous / stale index → file unchanged). path/paths as replace_symbol_body (multi-root writes land in the real file); text = the text to insert.\","
@@ -584,8 +584,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string type    = strArg( "type" );     // lego verb: the interface/base name
             const std::string files   = strArg( "files" );    // N11: schema-typed STRING (comma-separated paths), never an array
             const std::string diff    = strArg( "diff" );     // H5: same class as `files` — an array here answered about the wrong tree
-            const std::string newBody = strArg( "new_body" ); // W4-#8 replace_symbol_body
-            const std::string text    = strArg( "text" );     // W4-#8 insert_before/after
+            const std::string newBody = strArg( "new_body" ); //  replace_symbol_body
+            const std::string text    = strArg( "text" );     //  insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
             const std::string from    = strArg( "from" );     // path verb: source symbol
@@ -628,7 +628,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const McpIntArg     partitionArg   = intArg( "partition", packpartition::kMinPartitions, packpartition::kMaxPartitions );   // field-notes §6
             const std::uint32_t partitionCount = partitionArg.isPresent ? std::uint32_t( partitionArg.value ) : 0u;   // absent ⇒ one un-split bundle
 
-            // W4-#12 index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
+            //  index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
             // of the index it was answered from, so a caller holding results from two different calls can
             // detect "these came from different index states" without a side channel. ONE line, deterministic
             // for an unchanged tree, IDENTICAL shape across every verb.
@@ -691,7 +691,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 return buildWithPage( pg.page );
             };
 
-            // W4-#7 / A3-F3: per-REQUEST secret-redaction tally, wired into every body/doc-emission verb
+            // A3-F3: per-REQUEST secret-redaction tally, wired into every body/doc-emission verb
             // below (for / exemplar / memory_recall / fetch_body) — the MCP server redacts by default
             // exactly like the CLI (its output lands in a cloud LLM context by construction). Null under
             // `--mcp --no-redact` (every seam then passes source through verbatim). Summarized to stderr
@@ -1180,7 +1180,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const EditCheckReply r = editCheckText( path, symbol );
                     resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
                 }
-                // W4-#8 EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
+                //  EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
                 else if( name == "replace_symbol_body" && !path.empty() && !symbol.empty() )
                     resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody ) );

@@ -18,12 +18,12 @@
 #   (E) public-export scrub — the generated document carries no absolute home paths and no internal
 #       coordinate shapes (the same patterns test/ripwirepubliccheck.sh enforces)
 #
-# Usage:  bash test/docscommandscheck.sh      [CTXPACK_BIN=path/to/binary]
+# Usage:  bash test/docscommandscheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exit:   0 = clean · 1 = at least one arm failed · 2 = usage / missing prerequisite
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${CTXPACK_BIN:-$ROOT/build/ctxpack}"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 GEN="$ROOT/docs/docs_commands_build.py"
 DOC="$ROOT/docs/COMMANDS.md"

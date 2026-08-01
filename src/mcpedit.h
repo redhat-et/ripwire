@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpedit.h — the symbol-addressed EDIT verbs for --mcp (W4-#8): replace_symbol_body /
+// mcpedit.h — the symbol-addressed EDIT verbs for --mcp : replace_symbol_body /
 // insert_before_symbol / insert_after_symbol. The mcpedit namespace (resolve → per-file advisory
 // lock → freshness byte-hash gate → in-memory splice → atomic temp-rename write) plus the
 // runEditVerb() driver. The safety contract IS the feature: every refusal leaves the file
@@ -13,7 +13,7 @@
 namespace rw
 {
 
-// ─── W4-#8: symbol-addressed EDIT verbs (replace_symbol_body / insert_before_symbol / insert_after_symbol) ───
+// ─── : symbol-addressed EDIT verbs (replace_symbol_body / insert_before_symbol / insert_after_symbol) ───
 //
 // These are the FIRST write verbs — ripwire is otherwise read-only, so the safety contract IS the feature.
 // Every failure path REFUSES with a JSON-RPC error and leaves the file byte-for-byte unchanged; a partial

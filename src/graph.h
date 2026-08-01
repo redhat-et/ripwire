@@ -13,7 +13,7 @@
 #include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
 #include "svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
 #include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before §2a fallback
-#include "scipoverlay.h"        // W4-#15 SCIP precision overlay (data struct only; parser lives in scip.h)
+#include "scipoverlay.h"        // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "sortutil.h"           // radix edge sorting for large integer-key graph edge lists
 #include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
@@ -36,7 +36,7 @@ struct Graph
     std::vector<std::uint32_t> outOff;      // N+1 — resolved out-edges (CSR), for <c> children
     std::vector<NodeId>        outTargets;  // callee node ids, deduped, ascending within a source
     std::vector<float>         outVals;     // per-out-edge weight, parallel to outTargets (HITS hub step)
-    std::vector<std::uint8_t>  outProv;     // W4-#15 per-out-edge provenance, parallel to outTargets:
+    std::vector<std::uint8_t>  outProv;     // per-out-edge provenance, parallel to outTargets:
                                             //   0 = name-based guess (the common case, absent from XML),
                                             //   1 = PRECISE (a SCIP index pinned this (from,to)) → serialize
                                             // emits prov="scip". Empty ⇒ no --scip run (all name-based).
@@ -80,7 +80,7 @@ struct Graph
                                                // for every other symbol. Rendered as bind="..." by serialize
                                                // (see serialize.h's `bind` param). Empty vector ⇒ no JNI defs
                                                // (byte-identical to pre-R5 output).
-    std::vector<float>         priorWeight;   // W4-#1 per-symbol name-quality multiplier for the PageRank
+    std::vector<float>         priorWeight;   // per-symbol name-quality multiplier for the PageRank
                                               // personalization/teleport prior (aider-style repomap weights).
                                               // A PURE function of names + def-counts (byName), so it is
                                               // deterministic. Multiplied into WHATEVER teleport vector a rank
@@ -108,7 +108,7 @@ inline bool langCompatible( Lang a, Lang b ) noexcept
     return aCish && bCish;
 }
 
-// ---- W4-#1: aider-style name-quality prior weights ----------------------------------------------------
+// ---- : aider-style name-quality prior weights ----------------------------------------------------
 // Aider's battle-tuned repomap biases its PageRank *personalization* vector (never the transition matrix)
 // by cheap name-quality signals: a name defined all over the repo is generic and gets damped; a private-
 // convention (`_`-prefixed) name gets damped; a long, multi-word, specific identifier gets boosted. We
@@ -370,7 +370,7 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<
 // Resolve each reference by the SPEC §2a ladder (same-file > same-dir > global, language-compatible;
 // split weight 1/k on ambiguity; drop unresolved/self/file-scope), dedup+sum, cap at 8.
 //
-// W4-#15 SCIP overlay (optional, `scip`): where the index covers a call-site (from, calleeName), its
+// SCIP overlay (optional, `scip`): where the index covers a call-site (from, calleeName), its
 // PRECISE target(s) REPLACE the name-based candidate set for THAT site — the tier ladder is skipped (the
 // index already resolved it), the call is NOT counted as ambiguous (it is pinned), and the resulting
 // (from,to) out-edge(s) are stamped prov="scip". Name-based call-sites elsewhere are untouched. Passing
@@ -646,7 +646,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         tier.clear();
         float tierConf = 1.0f;                                 // tier 1: same file (default; overridden below)
 
-        // W4-#15 SCIP overlay: if the index resolved THIS (fromSymbol, calleeName) call-site, its precise
+        // SCIP overlay: if the index resolved THIS (fromSymbol, calleeName) call-site, its precise
         // target(s) REPLACE the name-based candidate set. The call is pinned (full confidence, NOT counted
         // ambiguous) and the whole §2a ladder / narrowing / locality below is skipped for this ref. Name-based
         // call-sites elsewhere are untouched. Deterministic: coveredFrom is sorted, targetsOf is a bounded scan.
@@ -1029,7 +1029,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     for( std::size_t i = 0; i < N; ++i ) g.outOff[ i + 1 ] += g.outOff[ i ];
     g.outTargets.resize( edges.size() );
     g.outVals.resize( edges.size() );
-    // W4-#15 provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists —
+    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists —
     // the common run keeps it EMPTY so serialize emits no prov= (zero token cost, byte-identical to before).
     //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding".
     if( scip || !bindingEdges.empty() ) g.outProv.assign( edges.size(), 0u );
@@ -1237,7 +1237,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
     }
 
-    // W4-#1: per-symbol name-quality prior weight (aider-style). REUSES the resolver's byName def-count
+    // : per-symbol name-quality prior weight (aider-style). REUSES the resolver's byName def-count
     // (byName[name].size() = # of same-name definitions across the repo — the "common name" signal) rather
     // than rebuilding it. Pure function of the name + that count ⇒ deterministic. Applied to the teleport
     // prior (never the edges) and renormalized in rankGraphTeleport. Every symbol whose name is missing from
@@ -1253,7 +1253,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     return g;
 }
 
-// W4-#1: bias a teleport/personalization prior by the per-symbol name-quality weights, then renormalize to
+// : bias a teleport/personalization prior by the per-symbol name-quality weights, then renormalize to
 // Σ=1 (PageRank REQUIRES Σp=1 — it seeds r=p and the dangling/teleport term is (α·D+(1−α))·p[i]). This is
 // the ONE place the aider-style weights meet a rank mode's prior, so EVERY teleport-based rank (the default
 // uniform prior, churn, --map-diff, the eval seed) becomes a weighted prior with no per-call-site change.
@@ -1274,7 +1274,7 @@ inline std::vector<float> biasPrior( const Graph& g, const std::vector<float>& p
 }
 
 // PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased
-// (W4-#1) here so all rank modes share one weighting seam; the transition matrix (edges) is untouched.
+// () here so all rank modes share one weighting seam; the transition matrix (edges) is untouched.
 inline std::vector<float> rankGraphTeleport( const Graph& g, const std::vector<float>& p, float alpha = 0.85f )
 {
     PROFILE_SCOPE_DESCRIBE( "rankGraph: PageRank (power iteration)" );

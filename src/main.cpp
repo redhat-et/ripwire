@@ -7,12 +7,12 @@
 #include "ingest.h"
 #include "workspace.h"      // multi-root workspaces (DESIGN_multiRoot.md): root hygiene + labels + the id-offset merge
 #include "graph.h"
-#include "scip.h"           // W4-#15 SCIP precision overlay (--scip=index.scip)
+#include "scip.h"           //  SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"       // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
 #include "graphlegend.h"    // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
 #include "columnar.h"       // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
-#include "redact.h"         // W4-#7: RedactCounts + reportRedactions for the emitted-body secret redaction
+#include "redact.h"         // : RedactCounts + reportRedactions for the emitted-body secret redaction
 #include "filter.h"
 #include "eval.h"
 #include "skilleval.h"
@@ -8563,7 +8563,7 @@ int main( int argc, char** argv )
             "        includes/targets   = %zu (%zu B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
     }
-    // W4-#15 SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
+    //  SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
     // buildGraph as an optional parameter. A missing/corrupt/mismatched index yields an EMPTY overlay
     // (one DEGRADED_PATH_ALERT + stderr note) and the build proceeds name-based, byte-identical to no --scip.
     ScipOverlay scipOverlay;
@@ -8687,7 +8687,7 @@ int main( int argc, char** argv )
         impurePtr = &impure;
     }
 
-    // W4-#7: one per-run secret-redaction tally, shared across every body-emission seam so a single stderr
+    // : one per-run secret-redaction tally, shared across every body-emission seam so a single stderr
     // summary aggregates them. `redactPtr` is null under --no-redact (redaction disabled at every seam) —
     // then no seam touches the bytes and the output is verbatim. Bodies (CDATA / recalled docs) go through
     // it; symbol names / signatures in the default map never do (identifiers are not secrets, and the

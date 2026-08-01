@@ -46,7 +46,7 @@ lego:Vehicle
 batch_path = os.path.join(AUX, "batch2.txt")
 open(batch_path, "w").write(BATCH)
 
-STRAY_TSV = "# ref<TAB>verdict labels for --eval-stray\nr25-notes\tmerged\nr25-abi\tmerged\nr25-docdrift\tunmerged\n"
+STRAY_TSV = "# ref<TAB>verdict labels for --eval-stray\nlane-notes\tmerged\nlane-abi\tmerged\nlane-docdrift\tunmerged\n"
 stray_tsv_path = os.path.join(AUX, "stray_labels2.tsv")
 open(stray_tsv_path, "w").write(STRAY_TSV)
 
@@ -89,7 +89,7 @@ add(S1, f"{BIN} . --lego=Vehicle", "Interface -> implementors view: method contr
 add(S1, f'{BIN} . --exemplar="format byte sizes for humans"', "The repo's best-in-class instance to imitate before writing new code (picked by ROLE).")
 add(S1, f'{BIN} . --recall="quality delta gating exit codes"', "Most relevant DOCS' full bodies (markdown only) — recall what is already written down.")
 add(S1, f"{BIN} . --tree", "File-by-file orientation map (top symbols per file).")
-add(S1, f"{BIN} . --html={html_out}", "Self-contained HTML force-directed call graph.", post=f"ls -la {html_out}")
+add(S1, f"{BIN} . --html={html_out}", "Self-contained HTML force-directed call graph.", post=f"wc -c {html_out}")
 add(S1, f"{BIN} . --order=stable --top-k=5", "Stable (path/id) emit order — provider KV-cache hits across re-runs.")
 
 S2 = "navigate / answer a question"
@@ -147,12 +147,12 @@ add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id —
 add(S4, f"{BIN} . --quality-delta", "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.")
 add(S4, f"{BIN} . --edit-check=rankGraphTeleport", "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).")
 add(S4, f"{BIN} . --pr-context", "No-LLM review-evidence bundle for the working-tree diff (clean tree = empty).")
-add(S4, f"{BIN} . --pr-context=r29-planlanes", "The BASEREF form: diffed against merge-base(r29-planlanes, HEAD), never the ref tip.")
-add(S4, f"{BIN} . --merge-scout=r28-parseargs,r29-planlanes", "Pairwise cross-branch conflict sites + suggested landing order.", timeout=600)
-add(S4, f"{BIN} . --stray-content=r25", "Which r25-* refs still hold divergent authored work vs HEAD, with verdicts.", timeout=600)
+add(S4, f"{BIN} . --pr-context=main~1", "The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous mainline commit.")
+add(S4, f"{BIN} . --merge-scout=main~2,main~1", "Pairwise cross-arm conflict sites + suggested landing order (any committish works as an arm).", timeout=600)
+add(S4, f"{BIN} . --stray-content=lane", "Which lane-* refs still hold divergent authored work vs HEAD, with verdicts.", timeout=600)
 add(S4, f"{BIN} . --stray-content=worktree-agent-a1", "A ref family that IS fully merged — the omit-merged-refs contract, with the counters still reconciling against refs=.", timeout=600)
 add(S4, f"{BIN} . --stray-content=r27 --plan", "Select the genuinely-unmerged refs and feed them to merge-scout for a landing order.", timeout=900)
-add(S4, f"{BIN} . --stray-content=r25 --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.", timeout=600)
+add(S4, f"{BIN} . --stray-content=lane --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.", timeout=600)
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
@@ -173,7 +173,7 @@ add(S4, f"{BIN} . --notes", "List all field notes (write-side memory). This repo
 add(S4, f'{BIN} . --pack-task="add a new output format flag to the CLI"', "ONE budget-shared bundle: ranking + top bodies + caller sigs + notes + tests_to_run. CHANGED: <d> rows now carry n=/id=.")
 add(S4, f'{BIN} . --pack-task="add a new output format flag to the CLI" --partition=3', "Fan-out form: one shared core + 3 per-agent slices carved along call-graph communities.")
 add(S4, f'{BIN} . --for="pagerank power iteration" --with-graph', "Task lens + a compact Mermaid flowchart of the top anchors' 1-hop edges.")
-add(S4, f"{BIN} . --export=cc.json:{cc_out}", "Per-file metrics as CodeCharta cc.json.", post=f"ls -la {cc_out} && head -c 400 {cc_out}")
+add(S4, f"{BIN} . --export=cc.json:{cc_out}", "Per-file metrics as CodeCharta cc.json.", post=f"wc -c {cc_out} && head -c 400 {cc_out}")
 add(S4, f"{BIN} . --batch={batch_path}", "One-turn sweep: 4 newline-delimited verb:arg sub-queries answered in ONE deduped <batch>.", pre=f"cat {batch_path}")
 
 S5 = "self-diagnosis"
@@ -196,7 +196,7 @@ add(S7, f"{BIN} . --ignore-tests --top-k=5", "Drop test paths from the corpus be
 add(S7, f"{BIN} . --exclude=present --exclude=bench --top-k=5", "Drop matching paths (repeatable) before ranking.")
 add(S7, f"{BIN} . --map-diff --top-k=5", "Full map re-ranked with teleport toward git-changed files — clean tree, so changed=0 and it degrades to the plain map.")
 add(S7, f"{BIN} . --no-cache --top-k=3", "Force a cold parse (bypass the warm TMPDIR cache) — shows the cold-vs-warm cost.", timeout=600)
-add(S7, f"{BIN} . --cache={cache_out} --top-k=3", "Explicit incremental cache at a path OUTSIDE the repo (first call writes it).", post=f"ls -la {cache_out}")
+add(S7, f"{BIN} . --cache={cache_out} --top-k=3", "Explicit incremental cache at a path OUTSIDE the repo (first call writes it).", post=f"wc -c {cache_out}")
 add(S7, f"{BIN} . --max-file-size=8K --top-k=3", "Skip files above a size bound before parsing (note the corpus shrink in the header).")
 add(S7, f"{BIN} . --scip=does_not_exist.scip --callers=rankGraphTeleport", "SCIP overlay with a missing index: degrades to name-based, never fails.")
 add(S7, f"{BIN} src test --top-k=5", "Multi-root workspace: ONE merged graph over two roots, paths labeled <root>/<rel>.")
@@ -435,7 +435,7 @@ FENCE = "`````"  # 5 backticks: some outputs (--recall, --report) contain 3-back
 date = time.strftime("%Y-%m-%d")
 doc.append("# ripwire — every verb, run for real\n")
 doc.append(f"- **Date:** {date} (regenerated capture; supersedes any older `docs/captures/COMMANDS_showcase_*.md`)")
-doc.append(f"- **Lives in `docs/captures/`** — a directory the crawl/retrieval lenses SKIP (`kCrawlSkipDirs`, src/ingest.h): a generated doc that quotes every verb's output out-scores the source for any query about the tool and was 77% of `--recall` on this repo when it sat at the root (PLAN_outputAudit_2026-07-28.md §P2). `test/argvdiffcheck.sh` harvests its `## `-heading command lines as differential vectors — keep that format.")
+doc.append(f"- **Lives in `docs/captures/`** — a directory the crawl/retrieval lenses SKIP (`kCrawlSkipDirs`, src/ingest.h): a generated doc that quotes every verb's output out-scores the source for any query about the tool and was measured at 77% of `--recall` on this repo when it sat at the root. `test/argvdiffcheck.sh` harvests its `## `-heading command lines as differential vectors — keep that format.")
 doc.append(f"- **Version:** `{ver}`")
 doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. That is the one structural difference from the previous capture, which ran against a deliberately dirty tree. A clean tree is the honest default for a showcase, so the diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`) appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.")
 doc.append(f"- **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`")
@@ -486,7 +486,10 @@ for r in results:
 # argvdiffcheck harvests it). The run summary is a scratch artifact, not part of the capture.
 outpath = os.path.join(REPO, "docs", "captures", f"COMMANDS_showcase_{date}.md")
 os.makedirs(os.path.dirname(outpath), exist_ok=True)
-open(outpath, "w").write("\n".join(doc))
+# Root-neutralise the published text: the checkout's absolute path is machine detail, not a claim
+# (same rationale as the --pack-signatures methodology), and the public scrub gate bans home paths.
+# Disclosed here rather than silent: every occurrence of the repo root becomes "." in the capture.
+open(outpath, "w").write("\n".join(doc).replace(REPO, "."))
 summ = [{"cmd": r["c"]["cmd"], "cwd": r["c"].get("cwd", REPO), "rc": r["rc"], "dt": round(r["dt"],2),
          "out_bytes": len(r["out"]), "err_bytes": len(r["err"])} for r in results]
 open(os.path.join(SCRATCH, "run_summary_new.json"), "w").write(json.dumps(summ, indent=1))
