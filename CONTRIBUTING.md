@@ -218,6 +218,10 @@ review discipline.
   never free them, which reads as a false leak). ThreadSanitizer is a **separate** build target —
   it is mutually exclusive with ASan. Valgrind is not a gate here; it has no working Apple Silicon
   port, so memcheck belongs in a Linux CI job if it is wanted at all.
+  **Build G1 with Clang.** `integer` is a Clang-only UBSan group and GCC rejects the whole option, so
+  a `-DRIPWIRE_ASAN=ON` configure under GCC drops `integer` (and its ignorelist exemptions) and says
+  so at configure time — a real but reduced stack. CI pins its Linux asan job to clang for that
+  reason; the GCC path exists so a contributor's build degrades honestly instead of failing.
 - **G2 — cache locality over abstraction.** DOD, POD, SoA, 32-bit handles, no generic graph
   library. The no-dynamic-allocation rule is scoped to the code *we* write inside the PageRank
   power-iteration loop: preallocate two rank buffers plus scratch once and ping-pong them.

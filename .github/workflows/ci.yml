@@ -173,14 +173,30 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 
       - name: Install tooling (macOS)
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
 
+      # CLANG, not the default cc. G1's `integer` group is Clang-only and gcc rejects the whole option
+      # ("unrecognized argument to '-fsanitize=' option: 'integer'" — the first public CI run). CMakeLists.txt
+      # now filters the Clang-only members out under GCC, but that is the HONEST-DEGRADE path for a
+      # contributor, not something public CI should be running: pinning clang here keeps the COMPLETE G1
+      # stack on Linux, so the gates below mean the same thing on both matrix legs.
+      #
+      # Deliberately NOT applied to the release job: gcc there is a FEATURE. It is a second front end over
+      # the same tree and it found three real portability bugs on its first run.
+      - name: Configure (G1 sanitizer stack — clang, see the step comment)
+        if: runner.os == 'Linux'
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S . -B asan -DRIPWIRE_ASAN=ON
+
       - name: Configure (G1 sanitizer stack)
+        if: runner.os == 'macOS'
         run: cmake -S . -B asan -DRIPWIRE_ASAN=ON
 
       - name: Build
