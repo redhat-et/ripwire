@@ -5,8 +5,9 @@ touches this repo; it is not a manual for using the tool.
 
 `ripwire` is a zero-runtime-dependency C++23 CLI. It crawls a codebase, extracts symbols with
 tree-sitter, resolves references into a call graph, ranks the graph with Personalized PageRank, and
-streams a deterministic minified XML map to stdout. Around that core sit ~56 verbs — navigation,
-diff-awareness, quality, retrieval — and an MCP server so an agent can call them mid-task.
+streams a deterministic minified XML map to stdout. Around that core sits the verb catalog in
+`docs/COMMANDS.md` — navigation, diff-awareness, quality, retrieval — and an MCP server so an agent
+can call them mid-task.
 
 ## Where to look
 
