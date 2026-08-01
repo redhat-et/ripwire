@@ -153,6 +153,66 @@ else
     ok "arm 5 — personal identifiers confined to LICENSE and SPDX copyright lines"
 fi
 
+# ── arm 5b: generic email-shape check — PERSON_RE above only catches NAMES it already knows; this
+# catches ANY real-looking address, named or not. The discriminator is IMPORTED from
+# docs/docs_commands_build.py's find_address() (same idiom as test/docscommandscheck.sh's arm E) so
+# this does not re-spell the symbol@file.ext-vs-real-address rule by hand — ripwire's own community
+# labels (`str@ingest.cpp:887`, `AGENTS@AGENTS.md:1:0`) are that exact shape and must not trip this.
+#
+# ALLOWLIST, enumerated by scanning the whole committed tree first (see the commit message for the
+# full list this was built from):
+#   third_party/**                    — vendored upstream code; its own authors' real copyright/
+#                                        LICENSE emails are correct and required, not a leak of ours.
+#   bench/cppbench/dataset.lock       — a benchmark dataset of real historical public open-source
+#                                        commit messages (external corpus, not this repo's identity).
+#   test/*.sh, test/*.py              — test fixtures that legitimately construct synthetic git
+#                                        identities (`git config user.email …@x.com`/`example.invalid`/
+#                                        `example.com`) to test --owners/--pr-context/churn/merge-scout
+#                                        etc., or that document the symbol@file.ext / EMAIL-regex shape
+#                                        in prose (docscommandscheck.sh, showcase_capture.py).
+#                                        test/README.md documents the same synthetic-fixture carve-out
+#                                        for arm 4's credential literals.
+#   docs/docs_commands_build.py       — the generator's OWN source, describing its `symbol@basename.ext`
+#                                        placeholder shape in comments (a literal ".ext", not a real TLD,
+#                                        so find_address()'s TLD check does not itself filter it out).
+EMAIL_ALLOW='^(third_party/|bench/cppbench/dataset\.lock$|test/[^/]+\.(sh|py)$|docs/docs_commands_build\.py$)'
+python3 - "$TMP/tracked.z" "$ROOT" "$EMAIL_ALLOW" > "$TMP/arm5b" <<'PY'
+import os, re, sys
+paths = [p.decode('utf-8', 'surrogateescape')
+         for p in open(sys.argv[1], 'rb').read().split(b'\0') if p]
+ROOT = sys.argv[2]
+allow = re.compile(sys.argv[3])
+sys.path.insert(0, os.path.join(ROOT, 'docs'))
+try:
+    import docs_commands_build as gen
+except ImportError as exc:
+    print(f'IMPORT_FAIL {exc}')
+    sys.exit(0)
+SELF = 'test/ripwirepubliccheck.sh'
+for p in paths:
+    if p == SELF or allow.match(p):
+        continue
+    try:
+        data = open(p, 'rb').read()
+    except OSError:
+        continue
+    if b'\0' in data:
+        continue   # binary, skip
+    text = data.decode('utf-8', 'replace')
+    for i, line in enumerate(text.split('\n'), 1):
+        m = gen.find_address(line)
+        if m:
+            print(f'{p}:{i}: {m.group(0)}')
+PY
+if grep -q '^IMPORT_FAIL' "$TMP/arm5b"; then
+    no "arm 5b — could not import find_address from docs/docs_commands_build.py: $( cat "$TMP/arm5b" )"
+elif [ -s "$TMP/arm5b" ]; then
+    no "arm 5b — email-shaped address outside the allowlisted vendored/benchmark/test-fixture paths:"
+    sed 's/^/          /' "$TMP/arm5b"
+else
+    ok "arm 5b — no email-shaped addresses outside vendored code, benchmark data and test fixtures"
+fi
+
 # ── arm 6: internal-pattern filenames, and docs/ index coverage ───────────────────────────────────
 INTERNAL_NAME='(^|/)(PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)'
 badnames="$( tr '\0' '\n' < "$TMP/tracked.z" | grep -E "$INTERNAL_NAME" || true )"
@@ -265,43 +325,63 @@ fi
 # citing "PLAN_x.md" or "SPEC.md" when no such file ships in this tree. A name that resolves to a
 # real shipped file (basename match, anywhere in the tree — docs move) is not a violation.
 #
-# EXEMPT (named, not pattern-matched — the same allowlist style as arm 4/5):
-#   test/docmentioncheck.sh    — DESIGN_widgetTotals.md is a SYNTHETIC fixture name the gate creates
+# EXEMPT (path, NAME) PAIRS — not whole files. A whole-file exemption hides a NEW dangling reference
+# planted anywhere else in an exempted file forever (an unrelated PLAN_/SPEC-shaped name landing in
+# test/docmentioncheck.sh, say, would sail through undetected); pinning the exact name each file is
+# known to legitimately carry keeps that file's OTHER lines covered.
+#   test/docmentioncheck.sh    : DESIGN_widgetTotals.md — a SYNTHETIC fixture name the gate creates
 #                                 and scores at runtime (doc-mention surfacing test), never a citation.
-#   test/historyoraclecheck.sh — PLAN_relief.md is a SYNTHETIC fixture doc the gate writes into its own
+#   test/historyoraclecheck.sh : PLAN_relief.md — a SYNTHETIC fixture doc the gate writes into its own
 #                                 scratch git repo (chosen to look like an internal doc on purpose, to
 #                                 prove doc-drift/whereis behave the same on a PLAN_-shaped filename),
 #                                 never a citation of a real file.
-#   bench/locbench/results/{r1_anchorhop,r1cpp_anchorhop}/*_candidate_implementation.patch —
-#                                 archived historical git diffs of a past experiment. Their "SPEC.md"
-#                                 hunks are the literal patch content at the time it was proposed;
+#   bench/locbench/results/{r1_anchorhop,r1cpp_anchorhop}/*_candidate_implementation.patch : SPEC.md —
+#                                 archived historical git diffs of a past experiment. Their hunks were
+#                                 checked and carry exactly one internal-pattern name each (SPEC.md);
 #                                 rewriting patch text would falsify the historical record, and the
 #                                 patch is already unappliable in this tree regardless (it patches a
 #                                 file — SPEC.md — that was never exported here).
-ARM8_EXEMPT='^(test/docmentioncheck\.sh|test/historyoraclecheck\.sh|bench/locbench/results/(r1_anchorhop|r1cpp_anchorhop)/.*_candidate_implementation\.patch)$'
-python3 - "$TMP/tracked.z" "$ARM8_EXEMPT" > "$TMP/arm8" <<'PY'
+ARM8_EXEMPT_PAIRS='test/docmentioncheck.sh|DESIGN_widgetTotals.md
+test/historyoraclecheck.sh|PLAN_relief.md
+bench/locbench/results/r1_anchorhop/r1_candidate_implementation.patch|SPEC.md
+bench/locbench/results/r1cpp_anchorhop/r1cpp_candidate_implementation.patch|SPEC.md'
+# A QUOTED heredoc delimiter ('PY') is deliberate: an unquoted one lets the shell expand `$vars` AND
+# run backtick/`$()` command substitution over the ENTIRE body, including python source comments —
+# this file's own "mirrors the main sweep's `grep -I`" comment below would otherwise get executed as
+# a shell command mid-heredoc (it was, until this was caught: a bare `grep -I` with no pattern/file
+# prints its usage banner to stderr). The exempt pairs are passed as an argv string instead, so no
+# shell expansion touches the python source at all.
+python3 - "$TMP/tracked.z" "$ARM8_EXEMPT_PAIRS" > "$TMP/arm8" <<'PY'
 import os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')
          for p in open(sys.argv[1], 'rb').read().split(b'\0') if p]
 tracked_basenames = {os.path.basename(p) for p in paths}
 SELF = 'test/ripwirepubliccheck.sh'   # this file's own arm 8 source names the pattern literally
-exempt = re.compile(sys.argv[2])
+exempt_pairs = set()
+for line in sys.argv[2].splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    path, name = line.split('|', 1)
+    exempt_pairs.add((path, name))
 pat = re.compile(r'\b(?:PLAN_|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|SPEC)[A-Za-z0-9_.-]*\.md\b')
 for p in paths:
-    if p == SELF or exempt.match(p):
+    if p == SELF:
         continue
     try:
         data = open(p, 'rb').read()
     except OSError:
         continue
     if b'\0' in data:
-        continue   # binary, skip (mirrors the main sweep's `grep -I`)
+        continue   # binary, skip (mirrors the main sweep's grep -I)
     text = data.decode('utf-8', 'replace')
     for i, line in enumerate(text.split('\n'), 1):
         for m in pat.finditer(line):
             name = m.group(0)
             if os.path.basename(name) in tracked_basenames:
                 continue   # a real shipped file — not a violation
+            if (p, name) in exempt_pairs:
+                continue   # this EXACT (file, name) pair is a known-synthetic/archived reference
             print(f'{p}:{i}: references absent doc {name}')
 PY
 if [ -s "$TMP/arm8" ]; then
