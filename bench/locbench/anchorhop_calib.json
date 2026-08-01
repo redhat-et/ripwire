@@ -1,5 +1,5 @@
 {
-  "what": "R1 anchor-hop expansion α/θ calibration sweep (PLAN_audit5Public2026 'Hard parts — R1'; SPEC.md --for retrieval addendum). TRAIN split ONLY — the frozen repo-disjoint A7 split (dataset.lock, salted SHA-256, byte0<128=train). Held-out was never touched during calibration; the acceptance comparison ran once, after these constants were baked.",
+  "what": "R1 anchor-hop expansion α/θ calibration sweep ('Hard parts — R1' design; --for retrieval addendum). TRAIN split ONLY — the frozen repo-disjoint A7 split (dataset.lock, salted SHA-256, byte0<128=train). Held-out was never touched during calibration; the acceptance comparison ran once, after these constants were baked.",
   "date": "2026-07-22",
   "dataset": "czlll/Loc-Bench_V1 test split, n=560, train slice n=317 (87 repos)",
   "harness": "bench/locbench/run_locbench.py --n 560 --split train --arms for (top-k 200, query-chars 1200, history-depth 1)",
@@ -27,6 +27,6 @@
     "paired_deltas": "strict file@10 +0.41pp with clustered-bootstrap 95% LOWER BOUND +0.00pp; lenient +0.82pp; MRR −0.0012; multi-file +0.00pp; warm p50 +2.8% p95 +10.2%; token p50 +0.2% p95 +2.7%; cold +1.6%/+11.1%; index +1.8%/+12.7%",
     "gate": "compare_runs.py --arm=for --gate=two-tier --abs-warm-p95-ms=775 --abs-cold-p95-ms=1650 --min-quality-per-cost=2.5 (the A7 pre-registered ceilings + R)",
     "verdict": "REJECT — tier-1 PASS (warm p95 761.5≤775 ms, cold 1623.8≤1650 ms); tier-2 FAIL (quality LB +0.00pp / weighted cost +1.50% = ratio 0.000 vs min 2.5). The +0.41pp point estimate is not statistically distinguishable from zero, and the p95 latency tails (+10-13%) are the real price of disabling MaxScore pruning on the conceptual route (the expansion is a full-distribution consumer).",
-    "outcome": "NOT SHIPPED — the ranking change was reverted per the B3 negative-result rule (PLAN_audit5Public2026 R1: 'if it fails the gate, it lands nowhere'). The exact candidate diff, the R1 gate script + fixture, both held-out release JSONs, and the comparator verdict are archived in bench/locbench/results/r1_anchorhop/ for reproduction or a future retry."
+    "outcome": "NOT SHIPPED — the ranking change was reverted per the B3 negative-result rule ('if it fails the gate, it lands nowhere'). The exact candidate diff, the R1 gate script + fixture, both held-out release JSONs, and the comparator verdict are archived in bench/locbench/results/r1_anchorhop/ for reproduction or a future retry."
   }
 }

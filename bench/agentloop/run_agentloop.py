@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # run_agentloop.py — Phase B4 agent-in-the-loop eval RUNNER (SKELETON — no paid LLM calls yet).
 #
-# WHAT THIS IS. PLAN_researchImprove2026.md Phase B4 / research/2026-07/R4-eval-methodology.md: the
+# WHAT THIS IS. The Phase B4 / R4 eval-methodology design: the
 # stack currently measures retrieval quality (LocBench) but never the thing that actually matters —
 # does giving an agent ripwire change whether it SOLVES the task. This script is the run matrix +
 # record schema + orchestration skeleton for that experiment. It does NOT execute any agent or spend

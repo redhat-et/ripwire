@@ -3,10 +3,10 @@
 #
 # Nudges an agent from raw grep/rg, and from raw `git diff`/`git log`/`git show --stat`, toward the
 # matching ripwire verb. Ships INACTIVE — only registered via `skills/install.sh --hook`, never
-# automatically (see PLAN_phases.md Phase B5.2 / research/2026-07/R5-agent-context-science.md: "with
+# automatically (see the Phase B5.2 / R5 agent-context-science design: "with
 # grep available, the agent defaults to it... a PreToolUse hook is the high-leverage lever" — passive
 # skill-description triggering alone is measured ~30-50% reliable). Phase B9
-# (PLAN_researchImprove2026.md Part 3) extends the trigger set to the git-information moments where raw
+# (Part 3) extends the trigger set to the git-information moments where raw
 # output is weakest vs ripwire's structured answers: `git diff` → `--situ`/`--pr-context`, `git log` →
 # `--rank-by=churn`/`--map-diff`, `git show --stat` → `--map-diff`. Deliberately excluded: `git status`
 # and state-changing commands (add/commit/push/pull/checkout/branch) — nudging those is spam.

@@ -32,7 +32,7 @@ bundle under one token budget — reach for it first instead of firing the calls
 the individual calls only when you need a specific section's full output.
 
 - **Recall prior decisions** — `ripwire <dir> --recall="FEATURE"` → full bodies of the most relevant
-  markdown docs (PLAN_*, DESIGN_*, SPEC, READMEs) ranked by relevance. **If a doc already spec's this, read
+  markdown docs (planning/design notes, READMEs) ranked by relevance. **If a doc already covers this, read
   it fully — the decision may be made.** Look for explicit "rejected" / "future work" language.
 - **Reusable building blocks — the one-call write-mode bundle** — `ripwire <dir> --for="FEATURE"` → `<sigs>`
   ranked by task-relevance, each carrying the **quality lens** in the same call: `cx`/`ccx` (complexity),

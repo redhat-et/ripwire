@@ -36,7 +36,7 @@ fast, accurate brief — not a wall of source code.
    verbatim secret (e.g. auditing the credential-handling code itself).
 
 3. **Design rationale** — `ripwire <dir> --recall="SUBSYSTEM"`
-   Output: most relevant markdown docs (PLAN_*, DESIGN_*, READMEs) in full. Read and
+   Output: most relevant markdown docs (planning/design notes, READMEs) in full. Read and
    summarize the key decisions — why this design, not another. That's what the recipient most
    needs and least gets from reading code.
    Also check `ripwire <dir> --notes` for this subsystem's symbols/files — any gotcha a prior agent already

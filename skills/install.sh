@@ -2,7 +2,7 @@
 # Install ripwire's agent skills (symlinks back to this repo's skills/, so they stay version-controlled and
 # edits here take effect immediately). Default: Claude. Codex: skills/install.sh --codex. An explicit path
 # remains supported for CI and other clients: skills/install.sh PATH. OPT-IN PreToolUse hook (advisory
-# grep->ripwire nudge, PLAN_researchImprove2026.md B5.2): skills/install.sh --hook — a SEPARATE action,
+# grep->ripwire nudge B5.2): skills/install.sh --hook — a SEPARATE action,
 # never bundled into the flags above, so it only ever runs on explicit invocation.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"

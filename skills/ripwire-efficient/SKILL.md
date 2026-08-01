@@ -34,7 +34,7 @@ This is the load-bearing fact, not a nice-to-have: **less context is more accura
   for large maps.
 - On the public Loc-Bench benchmark (n=560), `--for`'s focused bundle put the right file in the top-10
   **~4.5×** as often as raw `--query` BM25 — a small ranked map beats a flat lexical dump on someone else's
-  scoreboard too. (Full citations: `RESEARCH_agentQuality2026.md §2a`/§2b.)
+  scoreboard too.
 
 A small ranked map isn't a compromise for speed — it's *more likely to get the right answer* than pasting in
 everything that might be relevant. The "just `cat` three files to be safe" instinct is the one this evidence

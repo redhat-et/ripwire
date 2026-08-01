@@ -6,7 +6,7 @@ ACL'25), with a **SWE-bench-Lite** fallback. It is the public-benchmark sibling 
 retrieval proxy in [`../ANSWERQUALITY.md`](../ANSWERQUALITY.md) §1 — same deterministic, leave-nothing-out
 posture, but on someone else's benchmark with their metric definitions, so the number is not one we defined.
 
-This closes the AUDIT4 §E credibility gap ("localization is now a benchmarked subfield; *no published
+This closes the  §E credibility gap ("localization is now a benchmarked subfield; *no published
 benchmark* is the gap"). The house rule governs it: **publish the losses with the wins.**
 
 ## 2026-07-13 corrected evaluator + accepted router (A7) — CURRENT results
@@ -199,7 +199,7 @@ headline Loc-Bench numbers (for context, **not** a claim of parity):
 The point of running this is not to beat an LLM agent at localization with a $0 ranker — it is to (a) put
 a **published, reproducible** number on ripwire's deterministic floor, (b) show **parse coverage is not the
 bottleneck** (the map sees the code), and (c) frame ripwire honestly as the **fast, free candidate
-generator** that feeds those rerankers (cf. AUDIT4 A4-R6 `--format=candidates`), not their replacement.
+generator** that feeds those rerankers (cf. A4-R6 `--format=candidates`), not their replacement.
 
 ## Caveats / limitations
 

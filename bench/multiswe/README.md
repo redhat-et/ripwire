@@ -160,7 +160,7 @@ and Multi-SWE C++ patches average 200+ lines across many files). Mention-anchor 
   error-recovery blowup on nlohmann/json's parser-torture suite, 43s for one 100KB file) — fixed at
   `kMaxJsonConfigBytes`/`kMaxJsonNestDepth` (parserVer 28) before these numbers were produced.
 
-This is the **pre-R1 baseline** (`PLAN_audit5Public2026.md` R1 = anchor-hop expansion, not yet landed).
+This is the **pre-R1 baseline** (`` R1 = anchor-hop expansion, not yet landed).
 Re-run after R1 lands and append a second dated results block below rather than overwriting this one —
 the whole point of a frozen `dataset.lock` is that the before/after comparison is apples-to-apples.
 
@@ -172,7 +172,7 @@ Reproduce: see the one-command block above. Per-instance rows (including derived
 [**MULocBench**](https://arxiv.org/abs/2509.25242) (arXiv 2509.25242, 2025) is adopted here as the next
 public set — no harness built yet. It measures what this bench, `bench/cppbench`, and `bench/locbench`
 all structurally cannot: **non-code gold** — 1,100 issues (46 Python projects) localized to configs and
-docs, not just functions. R5 (`PLAN_audit5Public2026.md`) has now shipped the mechanism this benchmark
+docs, not just functions. R5 (``) has now shipped the mechanism this benchmark
 would score (doc-mention surfacing on `--for`, `src/mention.h::applyDocMentionBoost` — proved by
 `test/docmentioncheck.sh` and a byte-identical LocBench Python held-out no-regression check), but building
 the full 46-repo/1,100-issue harness itself (mining, a frozen `dataset.lock`, an offline gate — the same
