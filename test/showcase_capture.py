@@ -13,6 +13,17 @@ DIRTY = os.path.join(SCRATCH, "dirty")          # throwaway --local clone with O
 AUX = os.path.join(SCRATCH, "aux")
 os.makedirs(AUX, exist_ok=True)
 
+# The capture is a SHIPPED document, so it goes through the SAME public-export scrub docs/COMMANDS.md
+# is built with — imported, not re-spelled, so the two can never drift apart and a new leak shape has
+# exactly one place to be fixed. A missing scrub must be a hard stop, never a silently unscrubbed
+# write: that failure would ship the leak while looking like a successful regeneration.
+sys.path.insert(0, os.path.join(REPO, "docs"))
+try:
+    import docs_commands_build as exportscrub
+except ImportError as exc:
+    sys.exit(f"showcase_capture: cannot import the export scrub from docs/docs_commands_build.py ({exc}) — "
+             f"refusing to write an unscrubbed capture")
+
 # --- helper input files -------------------------------------------------
 # A realistic fabricated ASan report. Frame line numbers are the CURRENT ones for those
 # symbols, so the locus lane is being asked a fair question.
@@ -67,6 +78,20 @@ html_out = os.path.join(AUX, "map2.html")
 cc_out = os.path.join(AUX, "ripwire2.cc.json")
 cache_out = os.path.join(AUX, "warm2.ripwirecache")
 
+# --- the recorded tree condition ----------------------------------------
+# The diff-aware verbs (--situ / --test-gate / --quality-delta / --pr-context / --map-diff / --edit-check)
+# answer a question ABOUT THE WORKING TREE, so their captions are claims about the tree this run recorded
+# against. Hardcoding "clean tree = empty" made those captions lie the moment a regeneration happened on a
+# dirty tree: the document then asserted an empty bundle directly above a populated one. Read the condition
+# once, up front, and branch every such caption on it — the generator is the only thing that knows.
+REPO_DIRTY_LINES = subprocess.run("git status --porcelain", shell=True, cwd=REPO,
+                                  capture_output=True).stdout.decode().strip()
+REPO_DIRTY = bool(REPO_DIRTY_LINES)
+TREE = "a DIRTY tree" if REPO_DIRTY else "a CLEAN tree"
+def onTree(clean, dirty):
+    """Pick the caption that matches the tree this run is actually recording against."""
+    return dirty if REPO_DIRTY else clean
+
 # --- command table ------------------------------------------------------
 C = []
 def add(section, cmd, what, **opts):
@@ -105,8 +130,10 @@ add(S2, f"{BIN} . --connect=rankGraphTeleport,runEval,getIndex", "Minimal connec
 add(S2, f"{BIN} . --impact=rankGraphTeleport", "Transitive blast radius — everything that reaches SYM. NOW carries shown/capped.")
 add(S2, f"{BIN} . --mentions=rankGraphTeleport", "Markdown docs that name SYM in a backtick (doc<->code edges).")
 add(S2, f"{BIN} . --affected=src/graph.h", "Test files that transitively reach the changed file.")
-add(S2, f"{BIN} . --situ", "Mid-task situational report for the current git diff — on a CLEAN tree (contrast with the sandbox run below).")
-add(S2, f"{BIN} . --test-gate", "Pre-PR gate on a CLEAN tree: no obligations, exit 0.")
+add(S2, f"{BIN} . --situ", f"Mid-task situational report for the current git diff — recorded against {TREE} (contrast with the sandbox run below).")
+add(S2, f"{BIN} . --test-gate", onTree(
+    "Pre-PR gate on a CLEAN tree: no obligations, exit 0.",
+    "Pre-PR gate recorded against a DIRTY tree, so the obligations below are the working copy's real ones — the recorded exit code says which way it went."))
 add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT", "Literal trigram-indexed search. CHANGED: each hit now carries the MATCHED line in <m>, plus shown/capped/hits_capped.")
 add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT --grep-context=1", "Same search with one line of source context either side.")
 add(S2, f"{BIN} . --regex='fnv1a\\w+'", "Regex search + enclosing symbol.")
@@ -144,9 +171,15 @@ add(S4, f"{BIN} . --owners", "Bus-factor: recency-weighted author ownership per 
 add(S4, f"{BIN} . --dead-code=src", "High-confidence internal functions with no caller. NOTE the filter is a path-COMPONENT match: 'src' matches any .../src/... segment; use ./src to pin the root directory.")
 add(S4, f"{BIN} . --exercises=test/regression.sh", "Which symbols a TEST FILE exercises — the reverse direction of --affected.")
 add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id — the drill= the --communities output itself advertises.")
-add(S4, f"{BIN} . --quality-delta", "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.")
-add(S4, f"{BIN} . --edit-check=rankGraphTeleport", "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).")
-add(S4, f"{BIN} . --pr-context", "No-LLM review-evidence bundle for the working-tree diff (clean tree = empty).")
+add(S4, f"{BIN} . --quality-delta", onTree(
+    "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.",
+    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy. The sandbox section below shows the same gating shape on a known, deliberate edit."))
+add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
+    "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).",
+    "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone."))
+add(S4, f"{BIN} . --pr-context", onTree(
+    "No-LLM review-evidence bundle for the working-tree diff (clean tree = empty).",
+    "No-LLM review-evidence bundle for the working-tree diff — recorded against a DIRTY tree, so it is populated rather than empty."))
 add(S4, f"{BIN} . --pr-context=main~1", "The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous mainline commit.")
 add(S4, f"{BIN} . --merge-scout=main~2,main~1", "Pairwise cross-arm conflict sites + suggested landing order (any committish works as an arm).", timeout=600)
 add(S4, f"{BIN} . --stray-content=lane", "Which lane-* refs still hold divergent authored work vs HEAD, with verdicts.", timeout=600)
@@ -194,7 +227,9 @@ add(S7, f"{BIN} . --hotspots --json", "JSON refusal shape: an unsupported verb r
 add(S7, f"{BIN} . --hotspots --limit=3 --offset=3", "Pagination: 3 items, skipping the first 3 (deterministic seams).")
 add(S7, f"{BIN} . --ignore-tests --top-k=5", "Drop test paths from the corpus before ranking.")
 add(S7, f"{BIN} . --exclude=present --exclude=bench --top-k=5", "Drop matching paths (repeatable) before ranking.")
-add(S7, f"{BIN} . --map-diff --top-k=5", "Full map re-ranked with teleport toward git-changed files — clean tree, so changed=0 and it degrades to the plain map.")
+add(S7, f"{BIN} . --map-diff --top-k=5", onTree(
+    "Full map re-ranked with teleport toward git-changed files — clean tree, so changed=0 and it degrades to the plain map.",
+    "Full map re-ranked with teleport toward git-changed files — recorded against a DIRTY tree, so changed= counts the working copy's files and the teleport is live."))
 add(S7, f"{BIN} . --no-cache --top-k=3", "Force a cold parse (bypass the warm TMPDIR cache) — shows the cold-vs-warm cost.", timeout=600)
 add(S7, f"{BIN} . --cache={cache_out} --top-k=3", "Explicit incremental cache at a path OUTSIDE the repo (first call writes it).", post=f"wc -c {cache_out}")
 add(S7, f"{BIN} . --max-file-size=8K --top-k=3", "Skip files above a size bound before parsing (note the corpus shrink in the header).")
@@ -426,8 +461,10 @@ ver = subprocess.run(f"{BIN} --version", shell=True, cwd=REPO, capture_output=Tr
 # (live was 669) and a meta-claim about the binary must come from the binary.
 help_line_count = len(subprocess.run(f"{BIN} --help", shell=True, cwd=REPO, capture_output=True).stdout.decode().splitlines())
 sha = subprocess.run("git rev-parse --short HEAD", shell=True, cwd=REPO, capture_output=True).stdout.decode().strip()
-dirty_state = subprocess.run("git status --porcelain", shell=True, cwd=REPO, capture_output=True).stdout.decode().strip()
-dirty_note = "CLEAN — `git status --porcelain` is empty" if not dirty_state else f"dirty: {dirty_state.splitlines()[:5]}"
+# Same reading the captions branch on (REPO_DIRTY, taken at the top of the run) — one source of truth for
+# the tree condition, so the header and the per-command captions cannot disagree about it.
+dirty_note = ("CLEAN — `git status --porcelain` is empty" if not REPO_DIRTY else
+              f"DIRTY — `git status --porcelain` reports {len(REPO_DIRTY_LINES.splitlines())} entr(ies)")
 sandbox_diffstat = subprocess.run("git diff --stat", shell=True, cwd=DIRTY, capture_output=True).stdout.decode().strip()
 
 doc = []
@@ -437,7 +474,7 @@ doc.append("# ripwire — every verb, run for real\n")
 doc.append(f"- **Date:** {date} (regenerated capture; supersedes any older `docs/captures/COMMANDS_showcase_*.md`)")
 doc.append(f"- **Lives in `docs/captures/`** — a directory the crawl/retrieval lenses SKIP (`kCrawlSkipDirs`, src/ingest.h): a generated doc that quotes every verb's output out-scores the source for any query about the tool and was measured at 77% of `--recall` on this repo when it sat at the root. `test/argvdiffcheck.sh` harvests its `## `-heading command lines as differential vectors — keep that format.")
 doc.append(f"- **Version:** `{ver}`")
-doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. That is the one structural difference from the previous capture, which ran against a deliberately dirty tree. A clean tree is the honest default for a showcase, so the diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`) appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.")
+doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. The diff-aware verbs (`--situ`/`--test-gate`/`--quality-delta`/`--pr-context`/`--map-diff`/`--edit-check`) answer a question about the WORKING TREE, so that condition is part of their answer and every one of their captions below states which tree it recorded against. " + onTree("A clean tree is the honest default for a showcase, so they appear TWICE: once here on the clean tree (their empty/exit-0 shape) and once in the final section against a throwaway `git clone --local` sandbox carrying one deliberate regression, so their real gating shapes are visible without writing a byte into the read-only repo.", "This run recorded against a dirty tree, so their output here reflects uncommitted working-copy edits rather than the empty/exit-0 shape a clean checkout gives. They appear a SECOND time in the final section against a throwaway `git clone --local` sandbox carrying one KNOWN, deliberate regression — that is the reproducible gating demonstration; this one is whatever the tree happened to hold."))
 doc.append(f"- **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`")
 doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` — one preexisting function made deeply nested, one function's arity changed 1 -> 2, one copy-paste duplicate helper, one new 8-parameter public function.")
 doc.append("")
@@ -488,8 +525,38 @@ outpath = os.path.join(REPO, "docs", "captures", f"COMMANDS_showcase_{date}.md")
 os.makedirs(os.path.dirname(outpath), exist_ok=True)
 # Root-neutralise the published text: the checkout's absolute path is machine detail, not a claim
 # (same rationale as the --pack-signatures methodology), and the public scrub gate bans home paths.
-# Disclosed here rather than silent: every occurrence of the repo root becomes "." in the capture.
-open(outpath, "w").write("\n".join(doc).replace(REPO, "."))
+# Disclosed here rather than silent, in the order applied:
+#   1. every occurrence of the repo root becomes "."
+#   2. every occurrence of this run's per-run temp dir becomes "<scratch>" — same mechanism, same
+#      reason: `/var/folders/…/ripwire_showcase_o6h2ey7l/aux/batch2.txt` is one mktemp draw on one
+#      machine, so publishing it dates the document to a directory nobody can reproduce
+#   3. the shared public-export scrub (exportscrub.scrub): home paths, other temp paths, internal
+#      branch/document names, OWNERSHIP-row identity attributes and git author addresses. The last two
+#      matter most here — --owners and --pr-context read real git history, so a capture of a real run
+#      leaks real commit identities unless this runs. It is CONTEXT-GATED (see the long note in
+#      docs/docs_commands_build.py): `top=` on --hotspots is a SYMBOL NAME and survives untouched, as
+#      do ripwire's own `symbol@file.ext` community labels, which have the address shape but are not
+#      addresses. One implementation, shared with docs/COMMANDS.md, so a widened scrub reaches both.
+published = "\n".join(doc).replace(REPO, ".").replace(SCRATCH, "<scratch>")
+published = exportscrub.scrub(published, "ripwire")
+
+# Refuse rather than write what test/docscommandscheck.sh arm (E) would reject. Note which class is
+# checked but NOT substituted: an audit COORDINATE has no honest rewrite in a transcript (the
+# generator DROPS such lines from COMMANDS.md samples, which a recorded run cannot do), so a coordinate
+# reaching the output is a human decision about the source it came from, not something to paper over.
+HOME_RE = re.compile(r"/[Uu]sers/")
+CLASSES = (("absolute home path", HOME_RE.search),
+           ("temp/scratch path", exportscrub.TMP_PATH.search),
+           ("internal coordinate shape", exportscrub.COORD.search),
+           ("internal document name", exportscrub.INTERNAL_DOC.search),
+           ("email address", exportscrub.find_address))
+leaks = [f"{i}: {label}: {line.strip()[:100]}"
+         for i, line in enumerate(published.split("\n"), 1)
+         for label, hit in CLASSES if hit(line)]
+if leaks:
+    sys.exit("showcase_capture: refusing to write — %d scrub violation(s) survived:\n  %s"
+             % (len(leaks), "\n  ".join(leaks[:20])))
+open(outpath, "w").write(published)
 summ = [{"cmd": r["c"]["cmd"], "cwd": r["c"].get("cwd", REPO), "rc": r["rc"], "dt": round(r["dt"],2),
          "out_bytes": len(r["out"]), "err_bytes": len(r["err"])} for r in results]
 open(os.path.join(SCRATCH, "run_summary_new.json"), "w").write(json.dumps(summ, indent=1))

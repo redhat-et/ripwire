@@ -135,8 +135,11 @@ fi
 # The SPDX copyright notice is the one sanctioned form of the author's name in source: `Copyright
 # <year> <name>` on its own comment line. Everything else — machine usernames, account handles,
 # email addresses, "Created by … on <date>" residue from the origin tree — is a leak.
-# quaterniongames is the repo's own commit identity — already public in git history, not a leak
-PERSON_RE='Brewster|brewster|qgames([^.]|$)|davidbrewster|barefoot\.ski'
+# A commit identity being visible in git history is not a licence to bake it into the FILES: a clone's
+# tree is read by people and by agents that never look at `git log`, and `--owners`/`--pr-context` put
+# real author addresses into any recorded output. The generators scrub them (docs/docs_commands_build.py,
+# test/showcase_capture.py); this arm is the statement that the scrub ran.
+PERSON_RE='Brewster|brewster|qgames|davidbrewster|barefoot\.ski|quaterniongames'
 hits="$( sweep "$PERSON_RE" \
          | grep -vE '^(LICENSE|AUTHORS|THIRD_PARTY\.md|test/ripwirepubliccheck\.sh):' \
          | grep -vE ':[0-9]+:[[:space:]]*(//|#)?[[:space:]]*Copyright [0-9]{4} David Brewster[[:space:]]*$' \
