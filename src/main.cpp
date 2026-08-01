@@ -62,6 +62,7 @@
 #include "cli.h"
 #include "embedded_queries.h"   // configure-generated tags.scm table shared with ingest and --doctor
 #include "hashutil.h"           // sanitizer-clean modulo-2^64 FNV multiplication
+#include "charconvcompat.h"     // rw::parseFloating — FP from_chars is `= delete` on older libc++ (macos-14 CI)
 
 #include <algorithm>
 #include <array>
@@ -436,7 +437,7 @@ bool isUniversalOrAllowlistedNumber( std::string_view spelling ) noexcept
     if( normalized.empty() ) return false;
 
     double parsed = 0.0;
-    const auto [ end, error ] = std::from_chars( normalized.data(), normalized.data() + normalized.size(), parsed );
+    const auto [ end, error ] = rw::parseFloating( normalized.data(), normalized.data() + normalized.size(), parsed );
     if( error != std::errc{} || end != normalized.data() + normalized.size() ) return false;
     return parsed == -2.0 || parsed == -1.0 || parsed == 0.0 || parsed == 1.0 || parsed == 2.0;
 }
