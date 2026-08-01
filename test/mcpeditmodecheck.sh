@@ -30,9 +30,16 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 echo "mcpeditmodecheck: BIN=$BIN"
 
-# portable "octal mode of a file" (BSD/macOS stat -f vs GNU stat -c)
+# portable "octal mode of a file" (BSD/macOS stat -f vs GNU stat -c).
+# L3 (Linux probe): the `stat -f FMT ... || stat -c FMT ...` fallback this used is a TRAP. On GNU, `-f` means
+# FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on coreutils
+# 9.11, `stat -f '%Lp' FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1, so the `||`
+# arm appends the right mode under six lines of junk and `[ "$PERM" = "700" ]` can never hold. Detect the
+# flavour ONCE, use one form.
 file_mode(){
-    stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+    if stat --version >/dev/null 2>&1; then stat -c '%a'  "$1" 2>/dev/null   # GNU coreutils
+    else                                   stat -f '%Lp' "$1" 2>/dev/null   # BSD / macOS
+    fi
 }
 
 # drive one replace_symbol_body call through the MCP server (spec-conforming params.arguments form),

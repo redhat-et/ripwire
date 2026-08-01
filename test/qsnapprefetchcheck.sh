@@ -103,7 +103,16 @@ wait_for_id() { local i; for i in $( seq 1 200 ); do grep -q "\"id\":$2" "$1" 2>
 blob_paths() { find "$1" -maxdepth 2 -type f -name "$2" 2>/dev/null; }
 blob_first() { blob_paths "$1" "$2" | head -1; }
 qsnap_count() { blob_paths "$1" 'ripwire-qsnap-*.bin' | grep -c . ; }
-inode_mtime() { stat -f '%i %m' "$1" 2>/dev/null || echo "MISSING"; }
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+if stat --version >/dev/null 2>&1; then inode_mtime(){ stat -c '%i %Y' "$1" 2>/dev/null || echo "MISSING"; }   # GNU coreutils
+else                                    inode_mtime(){ stat -f '%i %m' "$1" 2>/dev/null || echo "MISSING"; }   # BSD / macOS
+fi
 assert_no_tsan() { grep -q "ThreadSanitizer" "$1" 2>/dev/null && no "TSan WARNING in server stderr ($2)" || ok "no ThreadSanitizer warning in server stderr ($2)"; }
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════

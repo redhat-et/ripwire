@@ -53,7 +53,16 @@ REPO="$TMP/repo"; mkdir -p "$REPO"
 
 # apparent (logical) byte size of a file — what fs::file_size measures, NOT `du`'s block-usage view
 # (a sparse file's disk usage is ~0 but its apparent size is what the sweep's byte budget compares against).
-apparentsize(){ stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+if stat --version >/dev/null 2>&1; then apparentsize(){ stat -c %s "$1" 2>/dev/null || echo 0; }   # GNU coreutils
+else                                    apparentsize(){ stat -f %z "$1" 2>/dev/null || echo 0; }   # BSD / macOS
+fi
 # Y4: shard-aware — every blob glob below now looks at both the flat top-level AND any 2-hex-char shard
 # subdir (mindepth/maxdepth bound it to exactly the layouts the sweep itself understands; never an
 # open-ended walk of a shared $TMPDIR).

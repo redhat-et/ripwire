@@ -40,7 +40,17 @@ note(){ printf '  NOTE  %s\n' "$*"; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "statgatecheck: BIN=$BIN  TMP=$TMP"
 
-mtime_ns(){ stat -f '%Fm' "$1" 2>/dev/null || stat -c '%.9Y' "$1" 2>/dev/null; }   # ns where the FS/stat supports it
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+# (ns precision where the FS/stat supports it: BSD %Fm, GNU %.9Y)
+if stat --version >/dev/null 2>&1; then mtime_ns(){ stat -c '%.9Y' "$1" 2>/dev/null; }   # GNU coreutils
+else                                    mtime_ns(){ stat -f '%Fm'  "$1" 2>/dev/null; }   # BSD / macOS
+fi
 
 # ── case (a): warm no-change run is byte-identical ────────────────────────────────────────────────
 WA="$TMP/a"; mkdir -p "$WA"; CA="$TMP/a.bin"
