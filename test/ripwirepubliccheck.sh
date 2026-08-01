@@ -19,6 +19,8 @@
 #   5. personal names / handles / emails outside LICENSE and AUTHORS
 #   6. docs/ index coverage + no internal-pattern FILENAME anywhere in the tree
 #   7. include closure: no quoted #include escapes the repo; no include path names the private tree
+#   8. no reference to an internal-pattern .md name that is ABSENT from this tree (a dangling pointer
+#      at a culled process doc); a reference to a .md that DOES ship is fine
 #
 # Usage:  bash test/ripwirepubliccheck.sh
 # Exit:   0 = clean · 1 = at least one arm failed (offenders listed) · 2 = usage / missing tool.
@@ -255,6 +257,54 @@ if [ -s "$TMP/arm7" ]; then
     sed 's/^/          /' "$TMP/arm7"
 else
     ok "arm 7 — every quoted #include resolves inside the repo"
+fi
+
+# ── arm 8: no dangling reference to a culled internal-pattern .md name ────────────────────────────
+# Arm 6a catches the internal doc ITSELF being committed; this arm catches every OTHER tracked file
+# still POINTING at one after it was culled — a comment, a README line, a data file's prose field
+# citing "PLAN_x.md" or "SPEC.md" when no such file ships in this tree. A name that resolves to a
+# real shipped file (basename match, anywhere in the tree — docs move) is not a violation.
+#
+# EXEMPT (named, not pattern-matched — the same allowlist style as arm 4/5):
+#   test/docmentioncheck.sh    — DESIGN_widgetTotals.md is a SYNTHETIC fixture name the gate creates
+#                                 and scores at runtime (doc-mention surfacing test), never a citation.
+#   bench/locbench/results/{r1_anchorhop,r1cpp_anchorhop}/*_candidate_implementation.patch —
+#                                 archived historical git diffs of a past experiment. Their "SPEC.md"
+#                                 hunks are the literal patch content at the time it was proposed;
+#                                 rewriting patch text would falsify the historical record, and the
+#                                 patch is already unappliable in this tree regardless (it patches a
+#                                 file — SPEC.md — that was never exported here).
+ARM8_EXEMPT='^(test/docmentioncheck\.sh|bench/locbench/results/(r1_anchorhop|r1cpp_anchorhop)/.*_candidate_implementation\.patch)$'
+python3 - "$TMP/tracked.z" "$ARM8_EXEMPT" > "$TMP/arm8" <<'PY'
+import os, re, sys
+paths = [p.decode('utf-8', 'surrogateescape')
+         for p in open(sys.argv[1], 'rb').read().split(b'\0') if p]
+tracked_basenames = {os.path.basename(p) for p in paths}
+SELF = 'test/ripwirepubliccheck.sh'   # this file's own arm 8 source names the pattern literally
+exempt = re.compile(sys.argv[2])
+pat = re.compile(r'\b(?:PLAN_|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|SPEC)[A-Za-z0-9_.-]*\.md\b')
+for p in paths:
+    if p == SELF or exempt.match(p):
+        continue
+    try:
+        data = open(p, 'rb').read()
+    except OSError:
+        continue
+    if b'\0' in data:
+        continue   # binary, skip (mirrors the main sweep's `grep -I`)
+    text = data.decode('utf-8', 'replace')
+    for i, line in enumerate(text.split('\n'), 1):
+        for m in pat.finditer(line):
+            name = m.group(0)
+            if os.path.basename(name) in tracked_basenames:
+                continue   # a real shipped file — not a violation
+            print(f'{p}:{i}: references absent doc {name}')
+PY
+if [ -s "$TMP/arm8" ]; then
+    no "arm 8 — dangling reference to a culled internal-pattern .md name:"
+    sed 's/^/          /' "$TMP/arm8"
+else
+    ok "arm 8 — no dangling references to culled internal-pattern .md names"
 fi
 
 printf 'ripwirepubliccheck: %s tracked file(s) swept\n' "$tracked"
