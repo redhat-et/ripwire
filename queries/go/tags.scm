@@ -56,5 +56,5 @@
 ; THIRD shape (`generic_type type: (qualified_type name: (type_identifier))`) layered on top of the
 ; already-indiscriminable base case. Idiomatic Go (type-inferred `Generic(1)`) was never affected —
 ; it parses as a plain call_expression and is captured by the pattern above. See
-; H4_grammarSurvey_2026-07-30.md §FP item 5 and PLAN_h4QualifiedCalls_2026-07-30.md item 5's own
+; the H4 grammar survey's §FP item 5 and item 5's own
 ; escape hatch ("REJECT this widening with the evidence instead of shipping it").
