@@ -402,9 +402,13 @@ set(RIPWIRE_GRAMMAR_TARGETS
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
+# The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
+# the only ones the libstdc++ header exemption below has anything to say about (the grammars are C).
+set(RIPWIRE_OWNED_CXX_TARGETS ripwire_probe ripwire)
 if(RIPWIRE_TESTS)
   list(APPEND RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
   list(APPEND RIPWIRE_RUNTIME_LINK_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
+  list(APPEND RIPWIRE_OWNED_CXX_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
 endif()
 # G1's `integer` is a CLANG-ONLY UBSan group (unsigned-integer-overflow, implicit-*-truncation,
 # implicit-integer-sign-change — the defined-but-suspicious conversions, not UB). GCC has no such group
@@ -432,6 +436,7 @@ set(RIPWIRE_G1_SANITIZERS "-fsanitize=${_ripwire_g1_check_list}")
 set(_ripwire_tree_sitter_ignorelist "${_ripwire_generated_dir}/tree_sitter_sanitizer_ignorelist.txt")
 set(_ripwire_swift_ignorelist "${_ripwire_generated_dir}/swift_sanitizer_ignorelist.txt")
 set(_ripwire_bash_ignorelist "${_ripwire_generated_dir}/bash_sanitizer_ignorelist.txt")
+set(_ripwire_libstdcxx_ignorelist "${_ripwire_generated_dir}/libstdcxx_sanitizer_ignorelist.txt")
 # Full G1 remains enabled on ripwire and every grammar. Pinned tree-sitter v0.26.9 intentionally uses
 # defined C unsigned wrap throughout reverse loops and erase-at-zero iteration, so only that non-UB check
 # is disabled target-wide for the pinned core. All other integer/undefined/conversion checks remain on.
@@ -448,6 +453,19 @@ file(WRITE "${_ripwire_swift_ignorelist}"
 # Bash's scanner decrements zero-valued nesting depths after marking the scan complete; uint32 wrap is intentional.
 file(WRITE "${_ripwire_bash_ignorelist}"
   "[unsigned-integer-overflow]\nfun:scan\n")
+# libstdc++'s std::basic_string_view::find/rfind scan loops are written `for (++__size; __size-- > 0;)`, so
+# the counter wraps past zero BY DESIGN on the iteration that ends the loop. Under G1's Clang-only
+# `integer` group that is a hard stop, because G1 is -fno-sanitize-recover=all: the first real Linux run
+# (Ubuntu 24.04, clang 18 + libstdc++, full G1) aborted with
+#   string_view.tcc:124:25: runtime error: unsigned integer overflow: 0 - 1
+# reached from rw::lowerExtensionOf (src/ingest.cpp:160) via string_view::rfind, and again at :109 (the
+# find twin) partway through cachefuzzcheck's qsnap ASan sweep. This is library-internal, intentional, and
+# not UB — nothing in ripwire can avoid it short of not calling find/rfind. libc++ has no such wrap, which
+# is why macOS never saw it and why this entry is inert (but must still parse) on the Apple leg.
+# Scoped as narrowly as the mechanism allows: this ONE header's code, this ONE check. Every other integer
+# and conversion check stays on for our own code, including in the same translation units.
+file(WRITE "${_ripwire_libstdcxx_ignorelist}"
+  "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n")
 
 if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
@@ -468,6 +486,9 @@ if(RIPWIRE_ASAN)
       "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
     target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
     target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
+    foreach(_t IN LISTS RIPWIRE_OWNED_CXX_TARGETS)
+      target_compile_options(${_t} PRIVATE "-fsanitize-ignorelist=${_ripwire_libstdcxx_ignorelist}")
+    endforeach()
   endif()
 
   # Xcode's arm64 Darwin runtime rejects both the standalone leak sanitizer and detect_leaks=1 at startup.
