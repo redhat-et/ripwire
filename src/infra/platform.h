@@ -98,13 +98,15 @@ template<class T> requires std::is_integral_v<T>
 [[nodiscard]] ALWAYS_INLINE constexpr T max( T a, T b ) noexcept { return a < b ? b : a; }
 
 // ---- type-mixing guard ---------------------------------------------------
-// The templates above deduce a single T, so a call mixing two DIFFERENT arithmetic
-// types — min( uint64_t, int ), max( size_t, unsigned ), min( int, 1.5f ) — would
-// otherwise fall through to whatever the surrounding namespaces offer, including a
-// float path that rounds BOTH operands (lossy past 2^24). Delete that case outright:
-// callers must pass a matching pair or cast at the call site, where the truncation
-// is visible. Same-type calls still bind above (the constrained template is more
-// specialized than this catch-all).
+// The templates above deduce a single T and are constrained to INTEGRAL types, so this
+// catch-all deletes every 2-arg call that is not a matching integral pair: mixed types
+// ( min( uint64_t, int ), max( size_t, unsigned ) ) which would otherwise fall through
+// to whatever the surrounding namespaces offer — including a float path that rounds
+// BOTH operands (lossy past 2^24) — AND same-type float/double pairs, which this tree
+// does not make (the float overloads left with the game-math header). Cast to a
+// matching integral pair at the call site, where the truncation is visible, or use
+// std::min. Matching integral calls still bind above (the constrained template is
+// more specialized than this catch-all).
 template<class A, class B> auto min( A, B ) noexcept = delete;
 template<class A, class B> auto max( A, B ) noexcept = delete;
 
