@@ -1,6 +1,6 @@
 #pragma once
 
-// lanes.h — `--plan-lanes=N --task="…"` / `--plan-lanes --brief=FILE` (PLAN_planLanes_2026-07-27.md), the
+// lanes.h — `--plan-lanes=N --task="…"` / `--plan-lanes --brief=FILE`, the
 // ORCHESTRATOR surface: *if I split this task across N isolated worktrees, which lanes would collide, and in
 // what order should they land?*
 //

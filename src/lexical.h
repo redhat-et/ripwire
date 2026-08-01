@@ -49,7 +49,7 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 // docCommentStart moved to lexindex.h (B0.2): the index-time stats builder must scan the EXACT spans this
 // header's Pass 2 scans, so the span logic lives beside the shared tokenizer. Still visible here (include).
 
-// R4 (AUDIT5 research lane): weak-result honesty threshold. When the --for lens's TOP-ranked match's raw
+// R4: weak-result honesty threshold. When the --for lens's TOP-ranked match's raw
 // BM25 score falls below this, the lexical evidence behind the whole ranking is too thin to trust — the
 // header says so (weak="1") instead of silently presenting a plausible-looking but ungrounded top-K, so the
 // calling agent knows to reformulate rather than trust the ranking. Calibrated empirically (2026-07-22) by
@@ -76,8 +76,7 @@ inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 // doc length) and tfFlat[i][u] (weighted term frequency of the query's unique tokens). Integer counts are
 // exact so fill order is free, and the per-doc float arithmetic below runs in strict doc order with the
 // SAME expressions as before → byte-identical scores.
-// pruneTopK (B0 round 2, H2 — MaxScore-style SAFE early termination, PLAN_researchImprove2026 B0.4 /
-// research/2026-07/R1-retrieval-cost.md §3): when > 0, the caller only consumes the top-pruneTopK ranked
+// pruneTopK (B0 round 2, H2 — MaxScore-style SAFE early termination): when > 0, the caller only consumes the top-pruneTopK ranked
 // symbols (plus `alwaysExact` — e.g. every interface packLego may surface), so symbols that PROVABLY
 // cannot enter that top-K skip the exact double-precision scoring (their slot stays the same +0.0f the
 // exhaustive loop would produce for a no-match doc — but here even matching docs below the bound are
@@ -730,7 +729,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     return rc;
 }
 
-// ── Adaptive-k relevance-cliff cut (RESEARCH_outputEconomy §2 / lever 2; arXiv 2506.08479) ────────────
+// ── Adaptive-k relevance-cliff cut (lever 2; arXiv 2506.08479) ─────────────────────────────────────────
 // --for/--query sorts by a blended lens score then groups by file and DISCARDS the score, so the "cliff"
 // (where a sharp query's few relevant hits give way to a long low-score tail) is unobservable. A fixed
 // top-k is provably wrong at BOTH ends: too generous for a sharp query (~75% tail), meaningless for a

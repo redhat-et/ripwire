@@ -16,7 +16,7 @@
 //     >U+10FFFF) to U+FFFD instead of passing raw bytes (A4-F20: source files can contain
 //     arbitrary/Latin-1 bytes; one such byte in a non-validating escaper corrupts the whole
 //     JSON-RPC/JSON-export response into invalid UTF-8 for a strict client parser). mcp.h and
-//     ccjson.h already validate; htmlexport.h's escaper now validates too (AUDIT4 follow-up: it
+//     ccjson.h already validate; htmlexport.h's escaper now validates too (follow-up fix: it
 //     used to pass bytes ≥0x80 through raw, byte-for-byte — the same gap class A4-F20 named for
 //     ccjson). Fixed by flipping `validateUtf8=true` for htmlexport's escapeHtml() below; this
 //     CHANGES emitted bytes only for invalid-UTF-8 source files (a deliberate correctness fix,
@@ -32,7 +32,7 @@
 // Every existing call site keeps its original name/signature (mcpdetail::jsonEscape,
 // rw::jsonEscape, rw::ccJsonEscape) — only their bodies now forward into escapeInto() here, so
 // this header is a pure internal refactor: verified byte-identical against the pre-unification
-// implementations (see AUDIT4_fable2026.md §B A4-F27 disposition).
+// implementations.
 
 #include <cstdint>
 #include <cstdio>

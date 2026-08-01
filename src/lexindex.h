@@ -1,6 +1,6 @@
 #pragma once
 
-// lexindex.h — the SHARED subtoken machinery behind B0.1/B0.2 (PLAN_researchImprove2026 Phase B0):
+// lexindex.h — the SHARED subtoken machinery behind B0.1/B0.2:
 // one tokenizer state machine used by BOTH the query-time BM25 scan (lexical.h scanField) and the
 // index-time per-definition statistics builder (ingest.cpp), so the two can never drift — the postings
 // path's byte-identity to the scan path is structural, not coincidental.
