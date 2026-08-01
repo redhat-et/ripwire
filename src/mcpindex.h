@@ -219,14 +219,8 @@ namespace mcpdetail
         void arm( const std::vector<std::string>& dirs )
         {
             reset();
-#if !RIPWIRE_HAS_KQUEUE
-            // No kqueue on this platform (Linux). This is the SAME degrade the kqueue()-failed branch below
-            // takes — kq stays -1, healthy stays false, drainHadEvent() reports "assume changed", and
-            // getIndex() runs the full dir sweep every request. Nothing about the answer changes, only how
-            // much redundant stat()ing precedes it.
-            (void) dirs;
-            DEGRADED_PATH_ALERT( "mcp watcher: no kqueue on this platform — falling back to stat-sweep freshness" );
-            return;
+#if !RIPWIRE_HAS_KQUEUE                                             // exactly the kqueue()-failed degrade below: unhealthy → getIndex() always sweeps
+            (void) dirs; DEGRADED_PATH_ALERT( "mcp watcher: no kqueue on this platform — falling back to stat-sweep freshness" ); return;
 #else
             kq = ::kqueue();
             if( kq < 0 ) { DEGRADED_PATH_ALERT( "mcp watcher: kqueue() unavailable — falling back to stat-sweep freshness" ); return; }
@@ -261,10 +255,8 @@ namespace mcpdetail
         // failure degrades to `true` (assume changed → force a sweep — never skip on uncertainty).
         bool drainHadEvent() noexcept
         {
-            if( kq < 0 ) return true;                                   // unhealthy (incl. every non-kqueue platform) → force the sweep
-#if !RIPWIRE_HAS_KQUEUE
-            return true;                                                // arm() never opens kq here, so the line above already returned
-#else
+            if( kq < 0 ) return true;                                   // unhealthy (incl. every non-kqueue platform, where arm() never opens kq) → force the sweep
+#if RIPWIRE_HAS_KQUEUE
             struct kevent out[ 32 ];
             struct timespec zero = { 0, 0 };
             bool any = false;
@@ -277,6 +269,8 @@ namespace mcpdetail
                 if( n < 32 ) break;                                     // fewer than the batch cap → queue drained
             }
             return any;
+#else
+            return true;
 #endif
         }
     };
