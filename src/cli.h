@@ -13,10 +13,10 @@
 #include <string_view>
 #include <vector>
 
-#include "ingest.h"   // ctx::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
+#include "ingest.h"   // rw::kDefaultMaxFileBytes — the canonical crawl size ceiling (--max-file-size)
 #include "version.h"  // P5 (AUDIT5): configure-generated kRipwireVersion + short build info (--version)
 
-namespace ctx
+namespace rw
 {
 
 enum class RankBy { PageRank, Authority, Hub, Rrf, Churn };   // --rank-by=pagerank|authority|hub|rrf|churn
@@ -2600,4 +2600,4 @@ inline Config parseArgs( int argc, char** argv ) noexcept
     return c;
 }
 
-}   // namespace ctx
+}   // namespace rw

@@ -48,7 +48,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace quality
 {
@@ -2646,4 +2646,4 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 }
 
 }   // namespace quality
-}   // namespace ctx
+}   // namespace rw

@@ -1,15 +1,15 @@
-// bench_svector3.cpp — the evidence for why src/svector.h (ctx::svector) earns a place ALONGSIDE the
+// bench_svector3.cpp — the evidence for why src/svector.h (rw::svector) earns a place ALONGSIDE the
 // vendored martinus/svector. A controlled 3-way: same partition-by-hash machinery, same FixedStr keys,
 // 64 shards — ONLY the Map<FixedStr, V> value type V differs. So any timing delta is the value type.
 //
 //   B  std::vector<uint32>          24 B — per-name malloc on build; branch-free size() (ptr subtraction)
 //   C  ankerl::svector<uint32,2>    16 B — alloc-free build; size() branches on SVO is_direct()
-//   D  ctx::svector<uint32,2>       24 B — alloc-free build; size() is `return sz_` (branch-free)
+//   D  rw::svector<uint32,2>       24 B — alloc-free build; size() is `return sz_` (branch-free)
 //
 // Measured (5 runs, contended box — repeat, n=1 is noise): for this WRITE-ONCE / READ-HOT map value,
 //   build:   C≈D ~7ms  ≪  B ~22ms      (both svectors kill the per-name malloc)
 //   resolve: B≈D ~11ms  <  C ~18ms      (B & D branch-free size(); C's SVO size() branch costs ~6ms/4M)
-//   total:   D ~18ms  <  C ~24ms  <  B ~33ms   → ctx::svector ~25% over martinus, ~45% over std::vector.
+//   total:   D ~18ms  <  C ~24ms  <  B ~33ms   → rw::svector ~25% over martinus, ~45% over std::vector.
 // D wins by spending 8 bytes (24 vs 16) on an explicit size field. Prefer martinus when compactness wins
 // or the value is iterated more than size()'d (begin()/end() branch in BOTH).
 //
@@ -18,7 +18,7 @@
 
 #define PROFILE_AUTO_REPORT 0
 #include "fixedStr.h"
-#include "svector.h"                          // ctx::svector — src/, picked up via -Isrc (first)
+#include "svector.h"                          // rw::svector — src/, picked up via -Isrc (first)
 #include "../third_party/svector.h"     // martinus/svector → ankerl::svector — explicit path (dodges the basename clash)
 #include "profileScope.h"
 #include "unordered_dense.h"
@@ -30,8 +30,8 @@
 #include <thread>
 #include <vector>
 
-using ctx::FixedStr;
-using ctx::FixedStrHash;
+using rw::FixedStr;
+using rw::FixedStrHash;
 template <class V> using Map = ankerl::unordered_dense::map<FixedStr, V, FixedStrHash>;
 constexpr int SHARDS = 64;
 
@@ -52,8 +52,8 @@ int main()
     for( std::size_t i = 0; i < R; ++i ) refN[i] = pool[ rng() % D ];
     unsigned T = std::thread::hardware_concurrency();  if( T == 0 ) T = 1;
 
-    std::printf( "sizeof: std::vector=%zu  martinus/svector=%zu  ctx::svector=%zu\n",
-                 sizeof( std::vector<std::uint32_t> ), sizeof( ankerl::svector<std::uint32_t, 2> ), sizeof( ctx::svector<std::uint32_t, 2> ) );
+    std::printf( "sizeof: std::vector=%zu  martinus/svector=%zu  rw::svector=%zu\n",
+                 sizeof( std::vector<std::uint32_t> ), sizeof( ankerl::svector<std::uint32_t, 2> ), sizeof( rw::svector<std::uint32_t, 2> ) );
 
     std::vector<std::vector<std::vector<std::uint32_t>>> tBuckets( T, std::vector<std::vector<std::uint32_t>>( SHARDS ) );
     timedMs( [ & ] { std::vector<std::thread> pool; std::atomic<std::size_t> next{ 0 };
@@ -74,7 +74,7 @@ int main()
 
     std::vector<Map<std::vector<std::uint32_t>>>        sB( SHARDS );
     std::vector<Map<ankerl::svector<std::uint32_t, 2>>> sC( SHARDS );
-    std::vector<Map<ctx::svector<std::uint32_t, 2>>>    sD( SHARDS );
+    std::vector<Map<rw::svector<std::uint32_t, 2>>>    sD( SHARDS );
     std::uint64_t rB, rC, rD;
     const double bB = timedMs( [ & ] { PROFILE_SCOPE_DESCRIBE( "B.build.std_vector" ); build( sB ); } );
     const double rrB = timedMs( [ & ] { PROFILE_SCOPE_DESCRIBE( "B.resolve" );          rB = resolve( sB ); } );
@@ -86,6 +86,6 @@ int main()
     std::printf( "verify: B=%llu C=%llu D=%llu %s\n", (unsigned long long)rB, (unsigned long long)rC, (unsigned long long)rD, ( rB == rC && rC == rD ) ? "(match)" : "(MISMATCH)" );
     std::printf( "  %-28s build=%5.1f  resolve=%5.1f  total=%5.1f\n", "B std::vector (24B)",          bB, rrB, bB + rrB );
     std::printf( "  %-28s build=%5.1f  resolve=%5.1f  total=%5.1f\n", "C martinus/svector (16B)",     bC, rrC, bC + rrC );
-    std::printf( "  %-28s build=%5.1f  resolve=%5.1f  total=%5.1f\n", "D ctx::svector (24B)",         bD, rrD, bD + rrD );
+    std::printf( "  %-28s build=%5.1f  resolve=%5.1f  total=%5.1f\n", "D rw::svector (24B)",         bD, rrD, bD + rrD );
     return 0;
 }

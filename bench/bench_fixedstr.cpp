@@ -6,7 +6,7 @@
 #include <functional>
 #include <string>
 #include <vector>
-using namespace ctx;
+using namespace rw;
 using Clock = std::chrono::steady_clock;
 static double nsPer( Clock::time_point a, Clock::time_point b, std::size_t ops )
 { return std::chrono::duration_cast<std::chrono::nanoseconds>( b - a ).count() / double( ops ); }

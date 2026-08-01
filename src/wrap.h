@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // Render kMcpVerbTable as three comma-joined, grouped lines (read / flagship-reflex / edit) for
@@ -289,4 +289,4 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
     return 2;
 }
 
-}   // namespace ctx
+}   // namespace rw

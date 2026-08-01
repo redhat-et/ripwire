@@ -27,7 +27,7 @@
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
 
-namespace ctx
+namespace rw
 {
 
 // ─── §B6 M4: the ONE place both MCP arms read a paging window ────────────────────────────────────────────
@@ -976,10 +976,10 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     {
         const FileOwnership& ow  = ownerships[i];
         const AuthorScore&   top = ow.authors[0];
-        const auto ep = ctx::escapeXml( ing.files[ ow.fileId ], owEsc );
+        const auto ep = rw::escapeXml( ing.files[ ow.fileId ], owEsc );
         std::fprintf( mem, "<f p=\"%.*s\" authors=\"%u\" bf=\"%d\"",
                       int( ep.size() ), ep.data(), ow.uniqueAuthors, int( ow.busFactor ) );
-        const auto em = ctx::escapeXml( top.email, owEsc );
+        const auto em = rw::escapeXml( top.email, owEsc );
         std::fprintf( mem, " top=\"%.*s\" share=\"%.2f\"/>", int( em.size() ), em.data(), top.share );
     }
     std::fprintf( mem, "</owners>" );
@@ -1636,8 +1636,8 @@ inline std::string connectText( const std::string& root, const std::vector<std::
 // (quality::rootQualifiedSidecar / quality::baselinePath / quality::acksPath in quality.h; see that header's
 // comment for the full rationale). These two are now thin forwarders so every existing call site here keeps
 // working unchanged; the canonical implementation lives in quality.h.
-inline std::string qualityBaselinePath( const std::string& root ) { return ctx::quality::baselinePath( root ); }
-inline std::string qualityAcksPath( const std::string& root )     { return ctx::quality::acksPath( root ); }
+inline std::string qualityBaselinePath( const std::string& root ) { return rw::quality::baselinePath( root ); }
+inline std::string qualityAcksPath( const std::string& root )     { return rw::quality::acksPath( root ); }
 
 // the applied-vs-HEAD comparison, shared by the JSON emitter. `regs` = the regressions; `baseMarker` = the
 // baseline= marker (sidecar / git-HEAD / git-HEAD (stale sidecar ignored)); `ok`=false + `errMsg` when the
@@ -1647,7 +1647,7 @@ struct QualityDeltaOutcome
     bool                              ok = false;
     std::string                       errMsg;        // on degrade (non-git, no sidecar)
     std::string                       baseMarker;    // "sidecar" | "git-HEAD" | "git-HEAD (stale sidecar …)" — see §B6 M10 below
-    std::vector<ctx::quality::Regression> regs;
+    std::vector<rw::quality::Regression> regs;
     std::size_t                       ackedCount = 0;// findings suppressed by the .ripwire_quality_acks ratchet (honest suppression)
 };
 
@@ -1667,9 +1667,9 @@ struct QualityDeltaOutcome
 // It is a named step rather than a block inside computeQualityDelta so that "which marker does this arm
 // report" has ONE answer with ONE reason, and adding a state later is an arm here instead of another `if`
 // buried in the middle of an ingest-and-compare function.
-inline const char* mcpBaselineMarker( const ctx::quality::BaselineSelection& selection, const std::string& sidecarPath )
+inline const char* mcpBaselineMarker( const rw::quality::BaselineSelection& selection, const std::string& sidecarPath )
 {
-    if( selection.source != ctx::quality::BaselineSource::Absent ) return selection.marker;
+    if( selection.source != rw::quality::BaselineSource::Absent ) return selection.marker;
 
     std::error_code sidecarEc;
     if( std::filesystem::exists( std::filesystem::path( sidecarPath ), sidecarEc ) && !sidecarEc )
@@ -1687,7 +1687,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     // the SAME mutex internally, so keep this guard SCOPED to the ingest only (no re-entrant lock → no deadlock).
     IngestResult ing;
     {
-        std::lock_guard<std::mutex> ingestLk( ctx::quality::headSnapshotIngestMutex() );
+        std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
         ing = ingest( root.c_str(), {}, {} );
     }
     const Graph  g   = buildGraph( ing, nullptr );
@@ -1701,10 +1701,10 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     // merely ignored ("git-HEAD (stale sidecar ignored)"), where the CLI passes true and self-heals it away.
     // The strict-equality test itself used to be MCP-only; the CLI carried a reachable-ancestor carve-out that
     // made it honor sidecars this arm dropped, which is the divergence R3 revoked.
-    ctx::quality::BaselineSelection baseSel = ctx::quality::selectBaseline( root, sidecar, /*removeStaleFile=*/false );
+    rw::quality::BaselineSelection baseSel = rw::quality::selectBaseline( root, sidecar, /*removeStaleFile=*/false );
     if( !baseSel.isSidecarHonored() )
     {
-        auto [ headSnap, headOk ] = ctx::quality::computeHeadSnapshot( root );
+        auto [ headSnap, headOk ] = rw::quality::computeHeadSnapshot( root );
         if( !headOk )
         {
             oc.ok = false;
@@ -1713,19 +1713,19 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
             // always the true instruction and the wording needs no removed-vs-ignored split. The CLI twin,
             // which unlinks, does branch on isStaleFileOnDisk().
             oc.errMsg = baseSel.isSidecarStale()
-                ? std::string( ctx::quality::kBaselineFile ) + " is STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — delete it or re-run the quality_baseline verb"
-                : std::string( "no " ) + ctx::quality::kBaselineFile + " and no git HEAD to auto-compare against — run the quality_baseline verb BEFORE the change you want to measure";
+                ? std::string( rw::quality::kBaselineFile ) + " is STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — delete it or re-run the quality_baseline verb"
+                : std::string( "no " ) + rw::quality::kBaselineFile + " and no git HEAD to auto-compare against — run the quality_baseline verb BEFORE the change you want to measure";
             return oc;
         }
         baseSel.snapshot = std::move( headSnap );
     }
 
-    oc.regs       = ctx::quality::computeDelta( ing, g, baseSel.snapshot, root );
+    oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root );
 
     // signal-to-noise round: honor the per-finding ack ratchet exactly like the CLI — the acks sidecar is
     // root-qualified (same SIDECAR LOCATION discipline as the baseline), suppression is reported via `acked`.
-    const auto acks = ctx::quality::readAckRecords( qualityAcksPath( root ) );
-    oc.ackedCount   = ctx::quality::applyAckRatchet( oc.regs, acks );
+    const auto acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
+    oc.ackedCount   = rw::quality::applyAckRatchet( oc.regs, acks );
 
     // R3: the marker spelling table lives in selectBaseline, so CLI and MCP name the same state the same way;
     // §B6 M10: plus this arm's own unreadable-sidecar state (mcpBaselineMarker, above).
@@ -1753,7 +1753,7 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
 
     // r26 ORIGIN SPLIT — the same three counts main.cpp derives, so both surfaces encode one contract.
     std::size_t minorCount = 0, newSymbolCount = 0, gatingCount = 0;
-    for( const ctx::quality::Regression& r : oc.regs )
+    for( const rw::quality::Regression& r : oc.regs )
     {
         if( r.isMinor )       ++minorCount;
         if( r.isNewSymbol )   ++newSymbolCount;
@@ -1773,7 +1773,7 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
                     + ",\"gating\":" + std::to_string( gatingCount )
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
-    for( const ctx::quality::Regression& r : oc.regs )
+    for( const rw::quality::Regression& r : oc.regs )
     {
         if( !first ) out += ",";
         first = false;
@@ -1781,11 +1781,11 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
         // api-surface when was==now) are sym-only; every other kind carries was/now — the CLI's exact split.
         out += "{\"kind\":\"" + mcpdetail::jsonEscape( r.kind ) + "\"";
         if( r.kind == "duplication" )
-            out += ",\"members\":\"" + mcpdetail::jsonEscape( ctx::quality::displaySym( r.sym, root ) )
+            out += ",\"members\":\"" + mcpdetail::jsonEscape( rw::quality::displaySym( r.sym, root ) )
                  + "\",\"tokens\":" + std::to_string( r.now );
         else
         {
-            out += ",\"sym\":\"" + mcpdetail::jsonEscape( ctx::quality::displaySym( r.sym, root ) ) + "\"";
+            out += ",\"sym\":\"" + mcpdetail::jsonEscape( rw::quality::displaySym( r.sym, root ) ) + "\"";
             if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
                 out += ",\"was\":" + std::to_string( r.was ) + ",\"now\":" + std::to_string( r.now );
         }
@@ -1814,14 +1814,14 @@ inline std::string qualityBaselineJson( const std::string& root, std::string& er
 {
     IngestResult ing;                                          // Phase-M: serialize the ingest vs the prefetch worker (§2b)
     {
-        std::lock_guard<std::mutex> ingestLk( ctx::quality::headSnapshotIngestMutex() );
+        std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
         ing = ingest( root.c_str(), {}, {} );
     }
     const Graph  g   = buildGraph( ing, nullptr );
 
     const std::string sidecar = qualityBaselinePath( root );   // root-qualified (see SIDECAR LOCATION note)
-    const std::string headSha = ctx::quality::gitHeadSha( root );
-    const bool wrote = ctx::quality::writeBaseline( ctx::quality::computeSnapshot( ing, g, root ),
+    const std::string headSha = rw::quality::gitHeadSha( root );
+    const bool wrote = rw::quality::writeBaseline( rw::quality::computeSnapshot( ing, g, root ),
                                                     sidecar, headSha );
     if( !wrote )
     {
@@ -1950,8 +1950,8 @@ inline std::string fromTraceText( const std::string& root, const std::string& tr
 
     FromTraceInputs in;
     in.bundleBudgetBytes = budgetTokens > 0
-        ? std::size_t( double( budgetTokens ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom )
-        : ctx::kForPayloadBudgetBytes;
+        ? std::size_t( double( budgetTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+        : rw::kForPayloadBudgetBytes;
     in.fanIn  = &fanIn;
     in.impure = &impure;
     in.redact = redact;
@@ -1980,7 +1980,7 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
 {
     IngestResult ing;   // Phase-M: serialize the ingest vs the qsnap-prefetch worker (§2b), same as computeQualityDelta
     {
-        std::lock_guard<std::mutex> ingestLk( ctx::quality::headSnapshotIngestMutex() );
+        std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
         ing = ingest( root.c_str(), {}, {} );
     }
     const Graph g = buildGraph( ing, nullptr );
@@ -2640,4 +2640,4 @@ inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t req
     return out;
 }
 
-}   // namespace ctx
+}   // namespace rw

@@ -29,7 +29,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // per-symbol lens rank + the routing/mention/co-change header note fragments — populated identically by the
@@ -170,7 +170,7 @@ inline PackTaskSection packTaskListSection( std::string_view tag, std::string_vi
 // `<!-- body omitted (over budget): NAME -->` comment and the JSON dialect named none of them. Same set, same
 // reason, spelled for a parser. The key is OMITTED (not `[]`) when nothing was skipped, matching the
 // silence-means-nothing-happened convention route/mention/boost/over_ceiling already use in this dialect.
-inline std::string packTaskOmittedBodiesJson( const IngestResult& ing, const ctx::EmittedBodies& emitted )
+inline std::string packTaskOmittedBodiesJson( const IngestResult& ing, const rw::EmittedBodies& emitted )
 {
     if( emitted.omitted.empty() ) return {};
     std::string out = ",\"bodies_omitted\":[";
@@ -565,7 +565,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
     // ── the deterministic byte budget (default 6K tokens; in.budgetTokens overrides) ────────────────────────
     const std::size_t budgetTokens = in.budgetTokens > 0 ? in.budgetTokens : std::size_t( kPackTaskDefaultTokens );
-    const std::size_t bundleBudget = std::size_t( double( budgetTokens ) * ctx::kMinBytesPerToken * ctx::kBudgetHeadroom );
+    const std::size_t bundleBudget = std::size_t( double( budgetTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom );
     // §B1.7 fixup + W3FIX M1: the header's user-length text is bytes kPackTaskHeaderReserve (a fixed 1024)
     // cannot bound. The fixup charged the verbatim task=/route= ATTRIBUTES and left the SIBLING one line away —
     // the comment's echo of the same text — free, so the ceiling still blew out ~3.4x on a long task. Charge
@@ -612,7 +612,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // counts it. The previous `countSub( bodiesStr, "<b " )` was both a second answer and a fragile one: body
     // text rides in CDATA verbatim, so a corpus body containing that literal inflated the count.
     std::string        bodiesStr;
-    ctx::EmittedBodies emittedBodies;
+    rw::EmittedBodies emittedBodies;
     const std::size_t  bodiesTotal = bodyIds.size();
     std::size_t        bodiesKept  = 0;
     if( !bodyIds.empty() && cap( kShareBodies ) >= kPackTaskSectionFloor )
@@ -694,20 +694,20 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     {
         std::vector<NodeId> testSeeds;
         for( NodeId b : bodyIds )
-            if( b < ing.symbols.size() && !ctx::isTestPath( ing.files[ ing.symbols[b].fileId ] ) ) testSeeds.push_back( b );
+            if( b < ing.symbols.size() && !rw::isTestPath( ing.files[ ing.symbols[b].fileId ] ) ) testSeeds.push_back( b );
         if( testSeeds.empty() ) testSeeds = bodyIds;
         const std::vector<NodeId>  reach = transitiveCallers( g, testSeeds );
         std::vector<char>          fseen( ing.files.size(), 0 );
         for( NodeId n : reach )
         {
             const std::uint32_t f = ing.symbols[n].fileId;
-            if( f < fseen.size() && !fseen[f] && ctx::isTestPath( ing.files[f] ) ) { fseen[f] = 1;  testFiles.push_back( f ); }
+            if( f < fseen.size() && !fseen[f] && rw::isTestPath( ing.files[f] ) ) { fseen[f] = 1;  testFiles.push_back( f ); }
         }
         std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
         // §A9.5 / §P11.4: the one-call bundle names the tests you owe; it now also names how to RUN them,
         // from the same TestRunnerIndex --affected / --situ / --test-gate / --exercises read. Built here,
         // inside the section's scope, because it is lazy — a bundle with no test row reads no runner script.
-        const ctx::TestRunnerIndex runners( ing );
+        const rw::TestRunnerIndex runners( ing );
         for( std::uint32_t f : testFiles )
         {
             // §B14 — std::string, not char[512]. This row carried TWO unbounded interpolands (the test path
@@ -715,7 +715,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             std::string row = "<test p=\"";
             row += ex( ing.files[f] );
             row += "\"";
-            row += ctx::runAttr( runners, f, ex );
+            row += rw::runAttr( runners, f, ex );
             row += "/>";
             testRows.emplace_back( std::move( row ) );
         }
@@ -757,7 +757,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // after the headroom factor, and is always the smaller of the two. Same expression as the XML line
         // below, so the two serializations cannot report different ceilings.
         { char b[ 128 ];  std::snprintf( b, sizeof( b ), ",\"budget_tokens\":%zu,\"budget_bytes\":%zu,\"budget_ceiling_bytes\":%zu",
-                                         budgetTokens, bundleBudget, std::size_t( double( budgetTokens ) * ctx::kMinBytesPerToken ) );  j += b; }
+                                         budgetTokens, bundleBudget, std::size_t( double( budgetTokens ) * rw::kMinBytesPerToken ) );  j += b; }
 
         // R2: the SAME distance mask the XML <sigs> used (eligibleIds only) — one eligibility decision, two shapes.
         j += std::string( ",\"ranking_capped\":" ) + ( sigsCapped ? "true" : "false" ) + ",\"ranking\":";
@@ -824,11 +824,11 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         { char b[ 96 ];  std::snprintf( b, sizeof( b ), ",\"tests_total\":%zu,\"tests_kept\":%zu,\"tests_to_run\":[", testsTotal, testsShown );  j += b; }
         // §A9.5: the JSON sibling of the XML run= above — situ's tests_to_run already carries it, and one
         // computation path must not serialize two different obligations.
-        const ctx::TestRunnerIndex jsonRunners( ing );
+        const rw::TestRunnerIndex jsonRunners( ing );
         const auto                 jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
         for( std::size_t i = 0; i < testsShown; ++i )
             j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( ing.files[ testFiles[i] ] ) + "\""
-               + ctx::runFieldJson( jsonRunners, testFiles[i], jrun ) + "}";
+               + rw::runFieldJson( jsonRunners, testFiles[i], jrun ) + "}";
         j += "]";
 
         // W3FIX M1 — the JSON sibling of the XML header's over_ceiling sentence. §B1.6 gave this dialect
@@ -837,7 +837,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // ceiling (the silence-means-nothing-happened convention route/mention/boost use above), never "not
         // measured". Measured on the FINISHED document, so the key's own bytes are part of what it reports on.
         constexpr std::size_t kOverCeilingKeyBytes = 22;   // `,"over_ceiling":true` + the closing brace
-        if( j.size() + kOverCeilingKeyBytes > ctx::ceilingAllowanceBytes( budgetTokens ) ) j += ",\"over_ceiling\":true";
+        if( j.size() + kOverCeilingKeyBytes > rw::ceilingAllowanceBytes( budgetTokens ) ) j += ",\"over_ceiling\":true";
         j += "}";
     }
 
@@ -851,7 +851,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     };
     std::string report = "budget=";
     { char b[ 160 ];  std::snprintf( b, sizeof( b ), "%zu bytes (%zu-token target, ceiling %zu) | ",
-                                    bundleBudget, budgetTokens, std::size_t( double( budgetTokens ) * ctx::kMinBytesPerToken ) );  report += b; }
+                                    bundleBudget, budgetTokens, std::size_t( double( budgetTokens ) * rw::kMinBytesPerToken ) );  report += b; }
     report += std::string( "ranking: " ) + ( sigsCapped ? "capped" : "full" ) + " | ";
     report += "bodies: "  + listStatus( bodiesTotal,  bodiesStr,  bodiesKept )  + ( bodiesTotal > 0 && !bodiesStr.empty() && bodiesKept < bodiesTotal ? " (capped)" : "" ) + " | ";
     report += "callers: " + listStatus( callersTotal, callersStr, callersKept ) + " | ";
@@ -893,7 +893,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // the allowance wearing no label.
         const std::string chosen = climbCeilingLadder( buildHeader, headerStr,
                                                        whole.size() - headerStr.size() + in.trailingSectionBytes,
-                                                       ctx::ceilingAllowanceBytes( budgetTokens ),
+                                                       rw::ceilingAllowanceBytes( budgetTokens ),
                                                        /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
         if( chosen != headerStr ) whole.replace( 0, headerStr.size(), chosen );
     }
@@ -914,4 +914,4 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     return whole;
 }
 
-}   // namespace ctx
+}   // namespace rw

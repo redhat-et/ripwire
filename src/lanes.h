@@ -98,7 +98,7 @@
 #include <string>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace lanes
 {
@@ -1039,4 +1039,4 @@ inline void writePlanLanes( std::FILE* out, const PlanLanesResult& r )
 }
 
 }   // namespace lanes
-}   // namespace ctx
+}   // namespace rw

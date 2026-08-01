@@ -29,7 +29,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // A name defined in forty files must not print forty paths into one stderr line — same reasoning (and the
@@ -121,4 +121,4 @@ inline std::string selectorNotFoundMessage( const IngestResult& ing, std::string
     return std::move( prefix ) + std::string( spec ) + selectorFaultClause( ing, spec, retryForm );
 }
 
-}   // namespace ctx
+}   // namespace rw

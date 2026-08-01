@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // Does `p` contain `seg` (which must end in '/') as a whole leading directory component? Factored out of
@@ -212,4 +212,4 @@ inline void applyIgnoreTests( IngestResult& ing )
     ing.bindings   = std::move( keptBinds );
 }
 
-}   // namespace ctx
+}   // namespace rw

@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // XML 1.0 forbids the C0 control set even ESCAPED (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F — only \t \n \r
@@ -880,7 +880,7 @@ struct OverloadRows
 inline OverloadRows collapseOverloadRows( const IngestResult& ing, const std::vector<NodeId>& bucket )
 {
     OverloadRows out;
-    ctx::HashMap<std::string, std::size_t> rowOf;   // (kind,id) key -> index into out.id/out.overloads
+    rw::HashMap<std::string, std::size_t> rowOf;   // (kind,id) key -> index into out.id/out.overloads
     for( NodeId nodeId : bucket )
     {
         const Symbol&     s   = ing.symbols[nodeId];
@@ -3477,8 +3477,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // ` offset= limit=` pair — the SECOND paging vocabulary main.cpp's pageAttr() also spoke, and the reason
     // a loop over --deps could cut rows correctly and still never terminate (no total=, no has_more=). It
     // uses pageview's window + disclosure now, like every other paging verb.
-    const int         depLimit = ctx::effectiveRowCap( pageLimit, topN > 0 ? topN : int( order.size() ) );
-    const ctx::PageWindow depPage = ctx::pageWindow( order.size(), depLimit, pageOffset );
+    const int         depLimit = rw::effectiveRowCap( pageLimit, topN > 0 ? topN : int( order.size() ) );
+    const rw::PageWindow depPage = rw::pageWindow( order.size(), depLimit, pageOffset );
     const std::size_t begin    = depPage.begin;
     const std::size_t end      = depPage.end;
 
@@ -3496,9 +3496,9 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // with nothing saying so is bug 2 verbatim (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3). The
     // paging half still appears only when --limit/--offset is active.
     {
-        char db[ 64 + ctx::kPageDisclosureCap ], pd[ ctx::kPageDisclosureCap ];
+        char db[ 64 + rw::kPageDisclosureCap ], pd[ rw::kPageDisclosureCap ];
         std::snprintf( db, sizeof( db ), "<deps files=\"%zu\"%s>", order.size(),
-                       ctx::pageDisclosure( pd, sizeof( pd ), end - begin, order.size(), end, pageLimit, pageOffset, true ) );
+                       rw::pageDisclosure( pd, sizeof( pd ), end - begin, order.size(), end, pageLimit, pageOffset, true ) );
         w.write( db );
     }
 
@@ -4477,4 +4477,4 @@ inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const Emitt
     w.flush();
 }
 
-}   // namespace ctx
+}   // namespace rw

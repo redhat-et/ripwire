@@ -30,7 +30,7 @@
 //     preserved as a flag so unifying the core doesn't change either surface's byte output.
 //
 // Every existing call site keeps its original name/signature (mcpdetail::jsonEscape,
-// ctx::jsonEscape, ctx::ccJsonEscape) — only their bodies now forward into escapeInto() here, so
+// rw::jsonEscape, rw::ccJsonEscape) — only their bodies now forward into escapeInto() here, so
 // this header is a pure internal refactor: verified byte-identical against the pre-unification
 // implementations (see AUDIT4_fable2026.md §B A4-F27 disposition).
 
@@ -39,7 +39,7 @@
 #include <string>
 #include <string_view>
 
-namespace ctx
+namespace rw
 {
 namespace jsonesc
 {
@@ -150,7 +150,7 @@ inline void escapeInto( std::string_view s, std::string& out,
 // mcp.h's mcpdetail::jsonEscape posture: no <>& hardening (stdio JSON-RPC, never re-embedded in
 // markup), UTF-8-validated with raw U+FFFD bytes on scrub. std::string_view (not `const std::string&`)
 // so every call site — a std::string, a std::string_view, or a `const char*` — binds without a temporary;
-// L2's --json output (serialize.h ctx::jsonStr) reuses this exact posture for its CLI-stdout stream (never
+// L2's --json output (serialize.h rw::jsonStr) reuses this exact posture for its CLI-stdout stream (never
 // re-embedded in HTML/markup, same as MCP's stdio JSON-RPC) instead of hand-rolling a near-clone.
 inline std::string escapeMcp( std::string_view in )
 {
@@ -222,14 +222,14 @@ inline bool isJsonWs( char c ) noexcept
 
 // ── shSingleQuote — A4-F27 residual: canonical shell single-quoting ─────────────────────────────
 //
-// Was duplicated as ctx::shSingleQuote (gitmine.h) and docparse::detail::shellQuote (docparse.h) —
+// Was duplicated as rw::shSingleQuote (gitmine.h) and docparse::detail::shellQuote (docparse.h) —
 // byte-identical bodies (0.87-similar per --clones), security-relevant duplication: a quoting-bug
 // fix in one wouldn't reach the other. Homed here, not in gitmine.h or docparse.h, because jsonesc.h
 // is the lightest header both can include without a coupling cost: gitmine.h already pulls model.h +
 // graph.h + Diagnostics.h (heavy, ingest-graph dependency chain), while docparse.h is deliberately
 // STL-only (Diagnostics.h) so ingest.cpp's doc-parsing path stays decoupled from the graph. jsonesc.h
 // has zero project includes beyond <cstdint>/<cstdio>/<string>/<string_view>, so either side can pull
-// it in for free. gitmine.h's ctx::shSingleQuote is the more widely used name (main.cpp, prcontext.h,
+// it in for free. gitmine.h's rw::shSingleQuote is the more widely used name (main.cpp, prcontext.h,
 // quality.h, mcp server) — kept as the canonical spelling; docparse.h's detail::shellQuote now
 // forwards here instead of carrying its own copy.
 inline std::string shSingleQuote( const std::string& s )
@@ -240,4 +240,4 @@ inline std::string shSingleQuote( const std::string& s )
     return out;
 }
 
-}   // namespace ctx
+}   // namespace rw

@@ -15,7 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-using namespace ctx;
+using namespace rw;
 
 int main( int argc, char** argv )
 {

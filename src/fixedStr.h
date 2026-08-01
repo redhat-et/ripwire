@@ -19,7 +19,7 @@
     #include <arm_neon.h>
 #endif
 
-namespace ctx
+namespace rw
 {
 
 struct alignas( 16 ) FixedStr
@@ -70,4 +70,4 @@ static_assert( sizeof( FixedStr ) == 32, "FixedStr must be exactly 32 bytes (2 p
 
 struct FixedStrHash { std::uint64_t operator()( const FixedStr& s ) const noexcept { return s.hash(); } };
 
-}   // namespace ctx
+}   // namespace rw

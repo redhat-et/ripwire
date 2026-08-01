@@ -11,7 +11,7 @@
 #include "sparseCsr.h"          // first-party infra math (src/infra/)
 #include "csrverify.h"          // SPEC §8 structural gate, VERIFY'd after every production CSR build
 #include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
-#include "svector.h"            // ctx::svector — branch-free-size() small-vector for the byName id-lists
+#include "svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
 #include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before §2a fallback
 #include "scipoverlay.h"        // W4-#15 SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "sortutil.h"           // radix edge sorting for large integer-key graph edge lists
@@ -24,7 +24,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ComposeEdge defined in model.h (so serialize.h can use it without including graph.h).
@@ -427,11 +427,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
     }
 
-    // name → candidate definition ids. ctx::svector<,2>: most names define 1-2 symbols, so the id-list is
+    // name → candidate definition ids. rw::svector<,2>: most names define 1-2 symbols, so the id-list is
     // inline (no per-name malloc) and size() is branch-free — the measured-best value type for this
     // write-once (here) / read-hot (resolve below) shape (see bench/bench_svector3.cpp). Iterates in
     // insertion order exactly like std::vector, so the resolved graph — and the output — is unchanged.
-    HashMap<std::string, ctx::svector<NodeId, 2>> byName;
+    HashMap<std::string, rw::svector<NodeId, 2>> byName;
     byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
     for( const Symbol& s : ing.symbols )
         byName[ s.name ].push_back( s.id );
@@ -451,7 +451,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             bool anyDef = false;
             for( NodeId id : ids ) if( hasBody( id ) ) { anyDef = true; break; }
             if( !anyDef ) continue;
-            ctx::svector<NodeId, 2> defs;
+            rw::svector<NodeId, 2> defs;
             for( NodeId id : ids ) if( hasBody( id ) ) defs.push_back( id );
             ids = std::move( defs );
         }
@@ -469,7 +469,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( NodeId id : ids )
                 if( !hasBody( id ) && rootHasDef( ing.fileRoot[ ing.symbols[id].fileId ] ) ) { anyRootCollapses = true; break; }
             if( !anyRootCollapses ) continue;
-            ctx::svector<NodeId, 2> kept;
+            rw::svector<NodeId, 2> kept;
             for( NodeId id : ids )
                 if( hasBody( id ) || !rootHasDef( ing.fileRoot[ ing.symbols[id].fileId ] ) ) kept.push_back( id );
             ids = std::move( kept );
@@ -480,7 +480,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph
     // ambiguity. Definitions only (body present); the obj.method()/unqualified halves stay bare-name (and
     // keep their honest `amb`). C++ only (scope is populated for Lang::Cpp).
-    HashMap<std::string, ctx::svector<NodeId, 2>> canonByName;
+    HashMap<std::string, rw::svector<NodeId, 2>> canonByName;
     canonByName.reserve( N );
     std::string canonKey;
     for( const Symbol& s : ing.symbols )
@@ -544,7 +544,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
         std::vector<NodeId> tgt;
-        const auto pushCFamily = [ & ]( const ctx::svector<NodeId, 2>& srcIds )
+        const auto pushCFamily = [ & ]( const rw::svector<NodeId, 2>& srcIds )
         {
             for( NodeId c : srcIds )
                 if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC ) tgt.push_back( c );
@@ -2586,4 +2586,4 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
     return h;
 }
 
-}   // namespace ctx
+}   // namespace rw

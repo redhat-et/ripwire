@@ -21,7 +21,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // §P12.1: bounded edit distance (Optimal String Alignment — Levenshtein + adjacent-transposition, the
@@ -117,4 +117,4 @@ inline std::string withDidYouMean( const IngestResult& ing, std::string_view nam
     return msg;
 }
 
-}   // namespace ctx
+}   // namespace rw

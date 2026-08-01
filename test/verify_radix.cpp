@@ -233,14 +233,14 @@ void verifyRipwireWrappers()
         std::vector<std::uint32_t> expected = order;
         stableReferenceSort( expected, [ & ]( std::uint32_t a, std::uint32_t b )
         {
-            return ctx::sortutil::lessByScoreDescId( nonnegativeScores, a, b );
+            return rw::sortutil::lessByScoreDescId( nonnegativeScores, a, b );
         } );
         std::vector<std::uint32_t> scratch;
-        ctx::sortutil::radixSortByScoreDescId( order, nonnegativeScores, scratch );
+        rw::sortutil::radixSortByScoreDescId( order, nonnegativeScores, scratch );
         CHECK( order == expected );
 
         std::vector<float> adaptive = nonnegativeScores;
-        ctx::sortutil::radixSortNonNegativeFloatsDesc( adaptive );
+        rw::sortutil::radixSortNonNegativeFloatsDesc( adaptive );
         for( std::size_t scoreIndex = 1; scoreIndex < adaptive.size(); ++scoreIndex )
             CHECK( adaptive[ scoreIndex - 1 ] >= adaptive[ scoreIndex ] );
 
@@ -249,9 +249,9 @@ void verifyRipwireWrappers()
             edges[ edgeIndex ] = EdgeRecord{ std::uint32_t( edgeIndex % 31 ), std::uint32_t( edgeIndex % 17 ), std::uint32_t( edgeIndex ) };
         deterministicShuffle( edges, shuffleSeed ^ 0xED6Eu );
         std::vector<EdgeRecord> expectedEdges = edges;
-        stableReferenceSort( expectedEdges, ctx::sortutil::lessByFromTo<EdgeRecord> );
+        stableReferenceSort( expectedEdges, rw::sortutil::lessByFromTo<EdgeRecord> );
         std::vector<EdgeRecord> edgeScratch;
-        ctx::sortutil::radixSortByFromTo( edges, edgeScratch );
+        rw::sortutil::radixSortByFromTo( edges, edgeScratch );
         REQUIRE( edges.size() == expectedEdges.size() );
         for( std::size_t edgeIndex = 0; edgeIndex < edges.size(); ++edgeIndex )
         {

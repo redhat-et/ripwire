@@ -38,7 +38,7 @@
 #include <unistd.h>
 #include <sys/time.h>       // struct timeval — SO_RCVTIMEO (slow-loris guard)
 
-namespace ctx
+namespace rw
 {
 
 // ─── configuration handed down from the CLI (main.cpp parses --listen/--mcp-token/--allow-remote-edits) ──
@@ -531,4 +531,4 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     return 0;
 }
 
-}   // namespace ctx
+}   // namespace rw

@@ -47,7 +47,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace binstale
 {
@@ -74,8 +74,8 @@ inline bool looksBinary( const std::string& absPath )
 }
 
 // "directory of a path", "basename of a path", and "a filename's stem sans extension" are NOT reimplemented
-// here — resolve.h::ctx::includerDir (found via ordinary enclosing-namespace lookup: binstale nests inside
-// ctx, same as includerDir itself) and mention.h::ctx::mention_detail::{baseNameOf,stripExt} are the
+// here — resolve.h::rw::includerDir (found via ordinary enclosing-namespace lookup: binstale nests inside
+// ctx, same as includerDir itself) and mention.h::rw::mention_detail::{baseNameOf,stripExt} are the
 // existing, already-reused primitives for exactly these questions (the house rule: reuse before you rewrite
 // a one-liner; the docdrift.h/flipimpact.h precedent for pulling a sibling-namespace helper in by name).
 // stripExt strips the LAST '.' (not the first), same as every other stemming call site in the repo — a
@@ -189,4 +189,4 @@ inline BinaryStaleResult computeBinaryStaleness( const std::string& root )
 }
 
 }   // namespace binstale
-}   // namespace ctx
+}   // namespace rw

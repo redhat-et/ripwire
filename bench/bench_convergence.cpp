@@ -6,14 +6,14 @@
 //   B partition-by-hash : shard the keyspace by hash(name); each shard built + read independently →
 //                         DISJOINT writes → lock-free, parallel. The DV lesson: beat many-writers by NOT
 //                         sharing — partition until writes don't collide, then it scales with cores.
-//   C  = B + ctx::svector shard values (inline ≤2 ids → no per-name malloc, AND branch-free size()).
+//   C  = B + rw::svector shard values (inline ≤2 ids → no per-name malloc, AND branch-free size()).
 //
 // VERIFIED FINDINGS (component medians over 5–7 runs — on a contended box where n=1 IS noise, so repeat):
 //   • partition-by-hash ≈ 7.5x over serial — the DV many-writers win (the headline).
-//   • ctx::svector shard_build ~2x faster than std::vector (alloc elimination, ~200k fewer mallocs).
-//   • ctx::svector resolve ≈ std::vector resolve: size() is `return sz_`, branch-free (the design point).
+//   • rw::svector shard_build ~2x faster than std::vector (alloc elimination, ~200k fewer mallocs).
+//   • rw::svector resolve ≈ std::vector resolve: size() is `return sz_`, branch-free (the design point).
 //   ⇒ C beats BOTH here — std::vector (per-name malloc on build) and martinus/svector (whose SVO-packed
-//     size() branches on the 4M-read hot loop, ~6ms). The full 3-way std::vector / martinus / ctx::svector
+//     size() branches on the 4M-read hot loop, ~6ms). The full 3-way std::vector / martinus / rw::svector
 //     comparison + the isolation proving the gap is size() lives in bench/bench_svector3.cpp.
 //
 // Keys are FixedStr (32-byte branchless SIMD short string). Profiled with the real PROFILE_SCOPE
@@ -23,7 +23,7 @@
 
 #define PROFILE_AUTO_REPORT 0          // we call prof::report() explicitly, in order
 #include "fixedStr.h"
-#include "svector.h"                    // ctx::svector (src/, -Isrc first) — the branch-free-size() hot-read variant
+#include "svector.h"                    // rw::svector (src/, -Isrc first) — the branch-free-size() hot-read variant
 #include "profileScope.h"               // prof::* (src/infra/)
 #include "unordered_dense.h"
 
@@ -35,8 +35,8 @@
 #include <thread>
 #include <vector>
 
-using ctx::FixedStr;
-using ctx::FixedStrHash;
+using rw::FixedStr;
+using rw::FixedStrHash;
 template <class V> using Map = ankerl::unordered_dense::map<FixedStr, V, FixedStrHash>;
 
 constexpr int SHARDS = 64;
@@ -114,9 +114,9 @@ int main()
     const double bBuild   = timedMs( [ & ] { PROFILE_SCOPE_DESCRIBE( "B.shard_build.vector" ); buildShards( shardV ); } );
     const double bResolve = timedMs( [ & ] { PROFILE_SCOPE_DESCRIBE( "B.resolve" ); resolvedB = resolveShards( shardV ); } );
 
-    // ---- C (ctx::svector shards — alloc-free build + branch-free size()) ----
+    // ---- C (rw::svector shards — alloc-free build + branch-free size()) ----
     std::uint64_t resolvedC = 0;
-    std::vector<Map<ctx::svector<std::uint32_t, 2>>> shardS( SHARDS );
+    std::vector<Map<rw::svector<std::uint32_t, 2>>> shardS( SHARDS );
     const double cBuild   = timedMs( [ & ] { PROFILE_SCOPE_DESCRIBE( "C.shard_build.svector" ); buildShards( shardS ); } );
     const double cResolve = timedMs( [ & ] { PROFILE_SCOPE_DESCRIBE( "C.resolve" ); resolvedC = resolveShards( shardS ); } );
 
@@ -132,7 +132,7 @@ int main()
     std::printf( "\nconvergence totals (%u threads, chrono):\n", T );
     std::printf( "  serial (A)                   %6.1f ms\n", aMs );
     std::printf( "  partition + std::vector (B)  %6.1f ms   (%.2fx vs serial)\n", bMs, aMs / bMs );
-    std::printf( "  partition + ctx::svector (C) %6.1f ms   (%.2fx vs serial)\n", cMs, aMs / cMs );
-    std::printf( "  └─ shard_build: std::vector %.1f ms → ctx::svector %.1f ms  (%.2fx, ~%zu fewer mallocs)\n", bBuild, cBuild, cBuild > 0 ? bBuild / cBuild : 0.0, D );
+    std::printf( "  partition + rw::svector (C) %6.1f ms   (%.2fx vs serial)\n", cMs, aMs / cMs );
+    std::printf( "  └─ shard_build: std::vector %.1f ms → rw::svector %.1f ms  (%.2fx, ~%zu fewer mallocs)\n", bBuild, cBuild, cBuild > 0 ? bBuild / cBuild : 0.0, D );
     return 0;
 }

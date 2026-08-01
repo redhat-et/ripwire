@@ -31,7 +31,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace tracein
 {
@@ -356,4 +356,4 @@ inline std::uint32_t innermostKey( const ParsedFrame& f, FrameFormat dominant, s
 }
 
 } // namespace tracein
-} // namespace ctx
+} // namespace rw

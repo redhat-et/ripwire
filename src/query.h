@@ -41,7 +41,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace query
 {
@@ -310,4 +310,4 @@ struct Eval
 };
 
 }   // namespace query
-}   // namespace ctx
+}   // namespace rw

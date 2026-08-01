@@ -9,7 +9,7 @@
 //   4. run ONE ts_query per file, map @definition.* -> Symbol, @reference.* -> Reference;
 //   5. assign Symbol ids in (file, line, name) order so the whole pipeline is reproducible.
 //
-// Returns ctx::IngestResult exactly as defined in model.h (the GRAPH/RANK/SERIALIZE contract).
+// Returns rw::IngestResult exactly as defined in model.h (the GRAPH/RANK/SERIALIZE contract).
 // Single-threaded for v1 (SPEC: "Single-threaded is fine for v1"); tree-sitter parsers are
 // not thread-safe, so multithreading would need one parser per worker (deferred).
 
@@ -18,7 +18,7 @@
 #include <cctype>
 #include <string_view>
 
-namespace ctx
+namespace rw
 {
 
 // The crawl's per-file byte ceiling (SPEC §1). A text file larger than this is skipped: at this size
@@ -182,4 +182,4 @@ inline AstQueryShape astQueryShape( std::string_view query )
 // Each finding carries tag "unreachable-code"; results are sorted (fileId, startByte) → deterministic.
 std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t maxMatches = 5000 );
 
-}   // namespace ctx
+}   // namespace rw

@@ -114,7 +114,7 @@ diff -q "$TMP/det1" "$TMP/det2" >/dev/null \
 # and the cap always cuts the tail.
 #
 # The fix is ORDERING ONLY: grepHits() (src/search.h pass 2) stable-sorts into three path tiers —
-# source → test/bench → docs (ctx::pathTierOf, src/filter.h) — with path-alphabetical order preserved
+# source → test/bench → docs (rw::pathTierOf, src/filter.h) — with path-alphabetical order preserved
 # untouched INSIDE each tier. Nothing is dropped, no attribute changes, and because the order lives in
 # the SHARED grepHits() the CLI verb and the MCP `grep` verb cannot diverge.
 #

@@ -27,7 +27,7 @@
 #include <cstdlib>         // ::realpath — the workspace-pin canonicalization (mcpCanonRoot)
 #include <climits>         // PATH_MAX
 
-namespace ctx
+namespace rw
 {
 
 // ─── MCP verb registry (A4-S2) ───────────────────────────────────────────────────────────────
@@ -1355,4 +1355,4 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
     return 0;
 }
 
-}   // namespace ctx
+}   // namespace rw

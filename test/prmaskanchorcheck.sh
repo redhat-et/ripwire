@@ -12,7 +12,7 @@
 # form. §H6b deleted BOTH halves: the anchored pass only fires when the crawl root IS the repo toplevel, and
 # the fallback marked EVERY boundary-suffix match — the same over-permissive join §H6 removed from gitmine.h,
 # surviving here in a third private copy. The verb now calls the ONE shared join
-# (ctx::markChangedFilesFromGitPaths), which derives the git-root→index-root offset per root and binds each
+# (rw::markChangedFilesFromGitPaths), which derives the git-root→index-root offset per root and binds each
 # changed path to the one file whose own derived git spelling it is, or to nothing.
 #
 # Asserts:

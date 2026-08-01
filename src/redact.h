@@ -33,7 +33,7 @@
 #include <string>
 #include <string_view>
 
-namespace ctx
+namespace rw
 {
 
 // ── the redaction kinds (one counter slot each) ──────────────────────────────────────────────────────
@@ -413,4 +413,4 @@ inline void reportRedactions( std::FILE* err, const RedactCounts& counts )
     std::fprintf( err, ") — pass --no-redact to disable\n" );
 }
 
-}   // namespace ctx
+}   // namespace rw

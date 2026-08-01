@@ -18,7 +18,7 @@
     #include "unordered_dense.h"   // ankerl flat hash map — far faster than std::unordered_map
 #endif
 
-namespace ctx
+namespace rw
 {
 
 // project-wide fast map alias — use HashMap<>, never std::unordered_map (flat, cache-friendly).
@@ -364,4 +364,4 @@ inline const std::string& diskPath( const IngestResult& ing, std::uint32_t fileI
     return ing.realPaths.empty() ? ing.files[ fileId ] : ing.realPaths[ fileId ];
 }
 
-}   // namespace ctx
+}   // namespace rw

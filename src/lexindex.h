@@ -21,7 +21,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // field weights for the two file-text BM25F fields (lexical.h keeps name=3 / callee=1 locally; these two
@@ -191,4 +191,4 @@ inline void buildDefLexStats( const std::string& src, std::uint32_t startByte, s
 }
 
 
-}   // namespace ctx
+}   // namespace rw

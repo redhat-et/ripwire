@@ -33,7 +33,7 @@
                       // --mentions=SYM verb already exposes) — same header gitmine.h already pulls in for
                       // an analogous "read one more Graph field" reason.
 
-namespace ctx
+namespace rw
 {
 
 // Fixed knobs — deliberately NOT flags (one documented behavior, one ablation switch to kill it whole).
@@ -371,4 +371,4 @@ inline std::vector<MentionFileRow> collapseMentionsToFileRows( const IngestResul
     return fileRows;
 }
 
-} // namespace ctx
+} // namespace rw

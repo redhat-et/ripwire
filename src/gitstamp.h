@@ -35,7 +35,7 @@
 
 #include <string>
 
-namespace ctx { namespace gitstamp
+namespace rw { namespace gitstamp
 {
 
 // The stamp value itself: "<9-hex-char sha>[+dirty]", or "" when `root` is not a git repo with a resolvable
@@ -58,4 +58,4 @@ inline std::string atAttr( const std::string& root )
     return v.empty() ? std::string() : ( " at=\"" + v + "\"" );
 }
 
-}}   // namespace ctx::gitstamp
+}}   // namespace rw::gitstamp

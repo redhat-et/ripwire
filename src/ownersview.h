@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // authors==1 deterministically implies bf=1 AND share=1.00 — a sole author's weighted-commit share
@@ -37,4 +37,4 @@ inline std::vector<std::size_t> ownershipRowsToPrint( const std::vector<FileOwne
     return rows;
 }
 
-}   // namespace ctx
+}   // namespace rw

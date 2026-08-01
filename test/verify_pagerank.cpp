@@ -54,13 +54,13 @@ std::vector<std::uint32_t> topOrder( std::span<const double> rank )
 
 TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
 {
-    const ctx::PageRankConfig preciseConfig{ .alpha = 0.85, .tolerance = 1e-13, .maxIterationCount = 400 };
+    const rw::PageRankConfig preciseConfig{ .alpha = 0.85, .tolerance = 1e-13, .maxIterationCount = 400 };
 
     // Empty input is a valid graph boundary.
     {
         const sparseCsr<float> csr( 0, 0, 0 );
         std::vector<double> rank;
-        const unsigned iterationCount = ctx::pageRankDouble( csr, {}, {}, rank, preciseConfig );
+        const unsigned iterationCount = rw::pageRankDouble( csr, {}, {}, rank, preciseConfig );
         const bool isEmptyBoundaryValid = iterationCount == 0 && rank.empty();
         CHECK_MESSAGE( isEmptyBoundaryValid, "empty PageRank boundary failed" );
     }
@@ -74,7 +74,7 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
         const std::array<double, 2> weightedOutDegree{ 1.0, 0.0 };
         const std::array<double, 2> teleport{ 0.5, 0.5 };
         std::vector<double> rank( 2, 0.0 );
-        ctx::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
+        rw::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
 
         CHECK_MESSAGE( isProbabilityVector( rank ), "dangling PageRank lost probability mass or produced invalid values" );
         const bool matchesDominantVector = std::fabs( rank[ 0 ] - 20.0 / 57.0 ) <= 1e-5
@@ -89,7 +89,7 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
         const std::array<double, 3> weightedOutDegree{ 0.0, 0.0, 0.0 };
         const std::array<double, 3> teleport{ 0.6, 0.3, 0.1 };
         std::vector<double> rank( 3, 0.0 );
-        ctx::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
+        rw::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
         CHECK_MESSAGE( isProbabilityVector( rank ), "all-dangling PageRank lost probability mass" );
         for( std::size_t nodeIndex = 0; nodeIndex < rank.size(); ++nodeIndex )
             CHECK_MESSAGE( std::fabs( rank[ nodeIndex ] - teleport[ nodeIndex ] ) <= 1e-12,
@@ -106,7 +106,7 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
         const std::array<double, 3> weightedOutDegree{ double( values[ 0 ] ) + double( values[ 1 ] ), 0.0, 0.0 };
         const std::array<double, 3> teleport{ 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0 };
         std::vector<double> rank( 3, 0.0 );
-        ctx::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
+        rw::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
         CHECK_MESSAGE( isProbabilityVector( rank ), "fractional-edge PageRank lost probability mass" );
     }
 
@@ -124,7 +124,7 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
         for( unsigned runIndex = 0; runIndex < 3; ++runIndex )
         {
             std::vector<double> rank( 4, 0.0 );
-            ctx::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
+            rw::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
             CHECK_MESSAGE( isProbabilityVector( rank ), "star PageRank produced an invalid probability vector" );
             const std::vector<std::uint32_t> order = topOrder( rank );
             CHECK_MESSAGE( std::equal( order.begin(), order.end(), expectedOrder.begin() ), "star PageRank top-K order is wrong" );

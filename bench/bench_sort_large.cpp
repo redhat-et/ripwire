@@ -42,7 +42,7 @@ static double timedMs( Fn&& fn )
 static bool isSorted( const std::vector<Edge>& v )
 {
     for( std::size_t i = 1; i < v.size(); ++i )
-        if( ctx::sortutil::lessByFromTo( v[ i ], v[ i - 1 ] ) )
+        if( rw::sortutil::lessByFromTo( v[ i ], v[ i - 1 ] ) )
             return false;
     return true;
 }
@@ -123,7 +123,7 @@ static std::vector<Edge> makeNearlySortedEdges( std::size_t edgeCount, std::uint
 {
     std::vector<Edge> edges = makeRandomEdges( edgeCount, nodeCount );
     std::vector<Edge> scratch;
-    ctx::sortutil::radixSortByFromTo( edges, scratch );
+    rw::sortutil::radixSortByFromTo( edges, scratch );
 
     std::mt19937_64 rng( 0xA11CE5ull );
     const std::size_t swapCount = std::max<std::size_t>( 1, edgeCount / 200 );
@@ -164,23 +164,23 @@ static double runSorter( std::string_view name, const std::vector<Edge>& base, c
 static void benchCase( std::string_view caseName, const std::vector<Edge>& base )
 {
     std::vector<Edge> sorted = base;
-    std::sort( sorted.begin(), sorted.end(), ctx::sortutil::lessByFromTo<Edge> );
+    std::sort( sorted.begin(), sorted.end(), rw::sortutil::lessByFromTo<Edge> );
 
     const double stdMs = runSorter( "std::sort", base, sorted,
                                     []( std::vector<Edge>& v )
                                     {
-                                        std::sort( v.begin(), v.end(), ctx::sortutil::lessByFromTo<Edge> );
+                                        std::sort( v.begin(), v.end(), rw::sortutil::lessByFromTo<Edge> );
                                     } );
     const double pdqMs = runSorter( "pdqsort", base, sorted,
                                     []( std::vector<Edge>& v )
                                     {
-                                        infra::sort::unstable( v.begin(), v.end(), ctx::sortutil::lessByFromTo<Edge> );
+                                        infra::sort::unstable( v.begin(), v.end(), rw::sortutil::lessByFromTo<Edge> );
                                     } );
     const double radixMs = runSorter( "edge-radix", base, sorted,
                                       []( std::vector<Edge>& v )
                                       {
                                           std::vector<Edge> scratch;
-                                          ctx::sortutil::radixSortByFromTo( v, scratch );
+                                          rw::sortutil::radixSortByFromTo( v, scratch );
                                       } );
 
     std::printf( "%-15.*s std %8.3f ms | pdq %8.3f ms (%5.2fx std) | radix %8.3f ms (%5.2fx std)\n",
@@ -232,27 +232,27 @@ static void benchScoreCase( std::string_view caseName, const std::vector<float>&
     std::vector<std::uint32_t> expected( scores.size() );
     for( std::uint32_t i = 0; i < expected.size(); ++i ) expected[ i ] = i;
     std::sort( expected.begin(), expected.end(),
-               [ &scores ]( std::uint32_t a, std::uint32_t b ) noexcept { return ctx::sortutil::lessByScoreDescId( scores, a, b ); } );
+               [ &scores ]( std::uint32_t a, std::uint32_t b ) noexcept { return rw::sortutil::lessByScoreDescId( scores, a, b ); } );
 
     const double stdMs = runScoreSorter( "std::sort.score", scores, expected,
                                          [ &scores ]( std::vector<std::uint32_t>& order )
                                          {
                                              std::sort( order.begin(), order.end(),
                                                         [ &scores ]( std::uint32_t a, std::uint32_t b ) noexcept
-                                                        { return ctx::sortutil::lessByScoreDescId( scores, a, b ); } );
+                                                        { return rw::sortutil::lessByScoreDescId( scores, a, b ); } );
                                          } );
     const double pdqMs = runScoreSorter( "pdqsort.score", scores, expected,
                                          [ &scores ]( std::vector<std::uint32_t>& order )
                                          {
                                              infra::sort::unstable( order.begin(), order.end(),
                                                                     [ &scores ]( std::uint32_t a, std::uint32_t b ) noexcept
-                                                                    { return ctx::sortutil::lessByScoreDescId( scores, a, b ); } );
+                                                                    { return rw::sortutil::lessByScoreDescId( scores, a, b ); } );
                                          } );
     const double radixMs = runScoreSorter( "score-radix", scores, expected,
                                            [ &scores ]( std::vector<std::uint32_t>& order )
                                            {
                                                std::vector<std::uint32_t> scratch;
-                                               ctx::sortutil::radixSortByScoreDescId( order, scores, scratch );
+                                               rw::sortutil::radixSortByScoreDescId( order, scores, scratch );
                                            } );
 
     std::printf( "%-15.*s std %8.3f ms | pdq %8.3f ms (%5.2fx std) | radix %8.3f ms (%5.2fx std)\n",

@@ -67,7 +67,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace mergescout
 {
@@ -635,4 +635,4 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
     std::fprintf( out, "</merge-scout>" );
 }
 
-}}   // namespace ctx::mergescout
+}}   // namespace rw::mergescout

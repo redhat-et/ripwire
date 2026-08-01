@@ -67,7 +67,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace layout
 {
@@ -1925,4 +1925,4 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
     std::fprintf( out, "</layout>" );
 }
 
-}}   // namespace ctx::layout
+}}   // namespace rw::layout

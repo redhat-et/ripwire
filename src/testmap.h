@@ -31,7 +31,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 // ── §P11.2a — the --affected argument, read under the FILE-FIRST rule ────────────────────────────────
@@ -289,4 +289,4 @@ inline std::size_t scriptGatesUnmodelledCount( const IngestResult& ing )
     return gateCount;
 }
 
-}   // namespace ctx
+}   // namespace rw

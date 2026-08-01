@@ -35,7 +35,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 
 inline constexpr std::uint32_t kNoTraceFile = UINT32_MAX;
@@ -102,7 +102,7 @@ inline constexpr std::size_t kNameCandidateCap = 8;
 // the SAME scan for the H4 qualified-call re-split and cannot include this header (it pulls graph.h +
 // serialize.h). These using-declarations keep every call site below — and every gate that rides them —
 // spelled and behaving exactly as before; nothing but the definition's location changed.
-using ctx::namesplit::stripTrailingGroup;
+using rw::namesplit::stripTrailingGroup;
 
 // drop a trailing `(…)` parameter list AND any cv/ref/noexcept qualifiers after it, so a demangled C++ frame
 // name reduces to the spelling the symbol table keys: `runDefaultMap(MainDispatch const&) const` ->
@@ -119,7 +119,7 @@ inline std::string_view stripCallSignature( std::string_view f ) noexcept
 
 // drop a trailing balanced `<…>` template-argument group: `make<Foo,Bar>` -> `make`. (Definition hoisted to
 // namesplit.h alongside the scanner it wraps; the spelling here is unchanged.)
-using ctx::namesplit::stripTemplateArgs;
+using rw::namesplit::stripTemplateArgs;
 
 // the ordered name spellings to probe for one raw frame function name, most-qualified FIRST: the cleaned name,
 // then every suffix after a `::` or `.` separator (C++ namespaces/classes, Python/JS module and method dots).
@@ -483,4 +483,4 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
     return res;
 }
 
-}   // namespace ctx
+}   // namespace rw

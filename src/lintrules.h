@@ -30,7 +30,7 @@
 #include "ingest.h"         // AstQuerySpec, AstMatch, astQuery, IngestResult
 #include "Diagnostics.h"    // DEGRADED_PATH_ALERT (no-op in release; the fprintf below is the visible line)
 
-namespace ctx
+namespace rw
 {
 
 // ── the parsed shape ────────────────────────────────────────────────────────────────────────────
@@ -767,4 +767,4 @@ inline std::vector<ErrorMaskHit> findErrorMasking( const IngestResult& ing )
     return out;
 }
 
-}   // namespace ctx
+}   // namespace rw

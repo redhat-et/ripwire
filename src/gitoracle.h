@@ -80,7 +80,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace gitoracle
 {
@@ -604,4 +604,4 @@ inline void writeNameFate( std::FILE* out, const std::string& name, const NameFa
     std::fprintf( out, " note=\"%s\"/>", escape( kFateTable[ std::size_t( f.fate ) ].note ).c_str() );
 }
 
-}}   // namespace ctx::gitoracle
+}}   // namespace rw::gitoracle

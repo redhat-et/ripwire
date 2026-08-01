@@ -54,7 +54,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace landingplan
 {
@@ -235,4 +235,4 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
     std::fprintf( out, "</landing-plan>" );
 }
 
-}}   // namespace ctx::landingplan
+}}   // namespace rw::landingplan

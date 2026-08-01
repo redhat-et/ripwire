@@ -117,7 +117,7 @@
 #include <utility>
 #include <vector>
 
-namespace ctx
+namespace rw
 {
 namespace abicheck
 {
@@ -776,4 +776,4 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
     std::fprintf( out, "</abi>" );
 }
 
-}}   // namespace ctx::abicheck
+}}   // namespace rw::abicheck

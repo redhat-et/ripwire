@@ -165,7 +165,7 @@ US="$( run . --uses=selectBaseline --no-cache )"
     && ok "repo: --uses=selectBaseline count=2 and names the mcpverbs.h qualified caller (was 1)" \
     || no "repo: --uses=selectBaseline expected 2 incl. mcpverbs.h, got '$( cnt "$US" )': $US"
 [ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 4 ] \
-    && ok "repo: --uses=readWholeFile count=4 (docparse::detail:: — a seam the audit's ctx::-anchored grep missed)" \
+    && ok "repo: --uses=readWholeFile count=4 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
     || no "repo: --uses=readWholeFile expected 4"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
@@ -179,7 +179,7 @@ US="$( run . --uses=selectBaseline --no-cache )"
 
 # ── §7 --edit-check names a CROSS-FILE QUALIFIED caller on a contract change (plan §6) ──────────────────
 # The measured defect: `--edit-check=selectBaseline` on an arity change reported callers="1" and never named
-# the `ctx::quality::selectBaseline( … )` caller in mcpverbs.h — a hard compile error under that change.
+# the `rw::quality::selectBaseline( … )` caller in mcpverbs.h — a hard compile error under that change.
 # Same scenario, hermetically, in a private temp git repo (editcheckcheck.sh's mechanism).
 if command -v git >/dev/null 2>&1; then
     WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT

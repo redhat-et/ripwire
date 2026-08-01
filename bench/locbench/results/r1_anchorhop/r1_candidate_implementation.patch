@@ -178,7 +178,7 @@ index 5df032d..76fff5c 100644
 +    //      Conservative resolution: the use-site name must map to exactly ONE langCompatible in-corpus def.
 +    {
 +        // name → def-ids map, built once per query (the CSR has no read/write/import edges to reuse)
-+        HashMap<std::string_view, ctx::svector<NodeId, 2>> defsByName;
++        HashMap<std::string_view, rw::svector<NodeId, 2>> defsByName;
 +        defsByName.reserve( N );
 +        for( const Symbol& s : ing.symbols ) defsByName[ std::string_view( s.name ) ].push_back( s.id );
 +

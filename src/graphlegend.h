@@ -25,7 +25,7 @@
 
 #include <string>
 
-namespace ctx
+namespace rw
 {
 
 // The floor sentence. Shared verbatim by all five verbs on every surface that can carry prose. Written with
@@ -114,4 +114,4 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
     "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. ";
 
-}   // namespace ctx
+}   // namespace rw

@@ -28,7 +28,7 @@
 #include <string_view>
 #include <utility>         // std::pair — blankPayloadSpelling's return
 
-namespace ctx
+namespace rw
 {
 
 // ── THE RULING, and why the set is DERIVED rather than listed ────────────────────────────────────────────
@@ -220,4 +220,4 @@ inline std::pair<std::size_t, std::string> blankPayloadSpelling( std::string_vie
     return { codePointCount, spelling };
 }
 
-}   // namespace ctx
+}   // namespace rw
