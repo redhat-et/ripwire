@@ -539,6 +539,41 @@ inline StatInfo statSizeMtime( const std::string& path ) noexcept
     return { m, (long long)st.st_size };
 }
 
+// L1 (Linux runtime probe) — what KIND of thing is at `path`? The cache seams need all three answers, so
+// this is a tri-state and not a bool: absent is a silent miss, regular is the only usable shape, and
+// anything else (directory, fifo, socket, device) is an unexpected shape worth disclosing once.
+//
+// The platform split it exists for: `fopen( "<a directory>", "rb" )` FAILS on macOS and SUCCEEDS on
+// Linux/glibc. readFile above then fseek/ftell's that directory handle, gets a nonsense length, and
+// `out.resize()`s to it — the Ubuntu probe measured `--cache=<existing directory>` dying with
+// std::bad_alloc → SIGABRT (exit 134) where the same argument on macOS took the quiet cold-parse path.
+// A cache blob is a REGULAR file by construction (saveCache renames one into place), so every other shape
+// is the same self-healing "corrupt cache" state, on every platform.
+//
+// Checked BEFORE the open, never after: a FIFO at the path would BLOCK inside fopen( "rb" ) until a writer
+// appeared, which no post-open fstat can undo. Race-wise it is advisory only — a path that changes shape
+// between this stat and the open still lands in a degrade path, because a degrade path is all a cache miss
+// has. ::stat, not ::lstat: a symlink TO a regular file is a legitimate cache blob.
+enum class PathShape : std::uint8_t { Absent, RegularFile, Other };
+
+inline PathShape shapeOfPath( const std::string& path ) noexcept
+{
+    struct stat st;
+    const bool  isStatable = ::stat( path.c_str(), &st ) == 0;
+    return !isStatable ? PathShape::Absent : ( S_ISREG( st.st_mode ) ? PathShape::RegularFile : PathShape::Other );
+}
+
+// The READ seam's use of it, named so loadCache reads as one decision instead of three lines of shape
+// analysis. Absent stays silent (the ordinary cold-start miss); an odd shape is disclosed here, once, from
+// the one site that knows the read is what got refused.
+inline bool isReadableCacheBlob( const std::string& path ) noexcept
+{
+    const PathShape shape = shapeOfPath( path );
+    if( shape == PathShape::Other )
+        DEGRADED_PATH_ALERT( "ingest: cache path is not a regular file (directory/device/fifo) — cache treated as corrupt (full reparse)" );
+    return shape == PathShape::RegularFile;
+}
+
 // Wall-clock now in ns since the Unix epoch — the SAME clock domain as st_mtime, so the racy-rule
 // comparison (cached file mtime >= cache-blob write time ⇒ re-hash) is meaningful across the two.
 inline long long wallClockNs() noexcept
@@ -559,10 +594,48 @@ std::string_view queryFor( std::string_view querySub ) noexcept
 // the shared immutable TSQuery* and create only a cheap per-thread TSQueryCursor. INVARIANT: the cache is
 // written ONLY by ingest()'s prewarm (which compiles the present grammars in parallel into locals, then
 // installs here single-threaded after the join), so the parse-pool workers only READ it — lock-free.
+//
+// OWNERSHIP (N2). The cache is the SOLE owner of every TSQuery it holds; every other holder — the parse
+// pool, captureTagsFacts — only borrows the raw pointer for the length of a call, which is why ownership
+// lives in the CONTAINER and not in the entries (a per-entry move-only guard would have to survive the
+// map's rehash-and-move for no benefit). Same shape as ParserGuard/TreeGuard below: a struct whose
+// destructor frees the tree-sitter object it holds.
+//
+// Before this struct existed there was no owner at all. The install loop in ingest() deletes a DISPLACED
+// query on an in-process re-ingest (A652/A4-F16), which bounds growth in a long-lived MCP server, but the
+// queries finally resident in the map were never freed: the map's own destructor drops the pointers at
+// exit and the blocks go unreachable. Real LeakSanitizer — Linux only, absent from Apple clang, and
+// therefore invisible on this repo's whole history of macOS runs — reports exactly that:
+//   Direct leak of 672 B in 3 objects:  ts_malloc_default -> ts_query_new (query.c:2995)
+//                                       -> compileQueryStandalone (ingest.cpp) -> ingest thread lambda
+// fired by the cachefuzzcheck arms whose cache is unusable (/dev/null, a directory at the cache path), i.e.
+// exactly the arms that take the L1 guard's full-reparse route and therefore compile every grammar cold.
+// A suppression would have been the wrong tool: lsan_suppressions.txt exists for tree-sitter's INTERNED,
+// never-freed data, and these are ordinary per-run allocations with a well-defined lifetime.
+struct CompiledQueryCache
+{
+    HashMap<const TSLanguage*, TSQuery*> byGrammar;   // grammar → compiled query (owned)
+
+    CompiledQueryCache()                                       = default;
+    CompiledQueryCache( const CompiledQueryCache& )            = delete;
+    CompiledQueryCache& operator=( const CompiledQueryCache& ) = delete;
+
+    // Only ever runs at process teardown, single-threaded, after every parse pool has joined. Each entry is
+    // a distinct query (the compile set is deduplicated BY GRAMMAR, so no two keys can alias one TSQuery)
+    // and a displaced entry is deleted at the moment it is overwritten, never left in the map — so nothing
+    // here can be a second delete of the same pointer.
+    ~CompiledQueryCache()
+    {
+        for( const auto& entry : byGrammar )
+            if( entry.second != nullptr )
+                ts_query_delete( entry.second );
+    }
+};
+
 HashMap<const TSLanguage*, TSQuery*>& compiledQueryCache()
 {
-    static HashMap<const TSLanguage*, TSQuery*> cache;   // grammar → compiled query
-    return cache;
+    static CompiledQueryCache cache;   // grammar → compiled query; owns every TSQuery it hands out
+    return cache.byGrammar;
 }
 
 struct QueryReadyGate
@@ -847,7 +920,7 @@ inline std::uint32_t parserVerFor( bool captureValueUses ) noexcept
 inline std::uint64_t contentHash64( std::string_view s ) noexcept
 {
     std::uint64_t h = 1469598103934665603ull;
-    for( unsigned char c : s ) { h ^= c; h = hashutil::fnv1aMultiply( h ); }
+    for( const char c : s ) h = hashutil::fnv1aAbsorb( h, c );
     return h;
 }
 
@@ -1077,6 +1150,12 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     PROFILE_SCOPE_DESCRIBE( "ingest: loadCache (read + deserialize)" );
     HashMap<std::string, FileFacts> out;
     blobWriteNsOut = -1;
+
+    // L1: only a REGULAR file may reach readFile below — on Linux a directory opens cleanly and takes its
+    // resize() down with it. Any other shape self-heals into a full reparse, exactly like a checksum
+    // mismatch (see isReadableCacheBlob); blobWriteNsOut stays -1 ⇒ the caller cold-parses.
+    if( !isReadableCacheBlob( path ) ) return out;
+
     std::string blob;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: read cache blob" );
@@ -1205,6 +1284,15 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
+
+    // L1 (write half): never publish over a non-regular file, and decide it BEFORE the serialize so a
+    // directory at `path` costs no wasted pass and temp write before rename(tmp,dir) fails EISDIR.
+    if( shapeOfPath( path ) == PathShape::Other )
+    {
+        DEGRADED_PATH_ALERT( "ingest: cache path is not a regular file (directory/device/fifo) — cache not written" );
+        return;
+    }
+
     const std::size_t F = files.size();
     std::vector<std::vector<std::uint32_t>> dIdx( F ), rIdx( F ), iIdx( F ), bIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
     for( std::uint32_t i = 0; i < defs.size();  ++i ) if( defs[i].fileId  < F ) dIdx[ defs[i].fileId  ].push_back( i );
@@ -4530,9 +4618,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
             for( std::thread& th : queryCompilePool )
                 th.join();
-            // Install compiled queries single-threaded (workers are still gated). A652: on an in-process
-            // re-ingest (long-lived MCP server) the same grammar can already own a cached query — delete the
-            // displaced entry before overwriting or it leaks one TSQuery per grammar per re-ingest (A4-F16).
+            // Install compiled queries single-threaded (workers are still gated). Installing TRANSFERS
+            // ownership to CompiledQueryCache, which frees whatever is still resident at process teardown
+            // (N2). A652: on an in-process re-ingest (long-lived MCP server) the same grammar can already
+            // own a cached query, and overwriting drops the only pointer to it — delete the displaced entry
+            // here or it leaks one TSQuery per grammar per re-ingest (A4-F16).
             HashMap<const TSLanguage*, TSQuery*>& cache = compiledQueryCache();
             for( std::size_t i = 0; i < toCompile.size(); ++i )
             {
@@ -5227,8 +5317,19 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
         for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i ) pr.push_back( steps[i] );
         ++i;                                                            // skip the Done step
         if( pr.size() < 3 || pr[0].type != TSQueryPredicateStepTypeString ) continue;
-        std::uint32_t nl = 0;
-        const std::string_view op( ts_query_string_value_for_id( q, pr[0].value_id, &nl ), nl );
+        // TWO statements, deliberately. Written as ONE — `string_view( f( …, &nl ), nl )` — the length
+        // argument `nl` and the call that WRITES it are two arguments of the SAME call, and the order in
+        // which a call's arguments are evaluated is UNSPECIFIED. GCC on x86-64 evaluates them right-to-left,
+        // so it read `nl` while it was still 0: `op` came out EMPTY, matched none of the operator names
+        // below, and every #eq?/#not-eq?/#match?/#not-match? predicate was silently skipped (`ok` stays
+        // true ⇒ nothing filtered). GCC on aarch64 and Clang everywhere evaluate left-to-right and happened
+        // to get it right, which is why this only ever reddened on x86-64 Linux/gcc — measured 2026-08-02:
+        // g++-13 -O0 AND -O2 on x86-64 print len=0, the same g++-13 on aarch64 and clang-18 on x86-64 print
+        // len=6. Sequencing the write before the read IS the fix; do not re-inline these two lines.
+        std::uint32_t nl     = 0;
+        const char*   opText = ts_query_string_value_for_id( q, pr[0].value_id, &nl );
+        if( opText == nullptr ) continue;                               // no operator name ⇒ can't evaluate ⇒ don't filter
+        const std::string_view op( opText, nl );
         std::string lhs, rhs;
         if( !argText( pr[1], lhs ) || !argText( pr[2], rhs ) ) continue;   // can't evaluate → don't filter
         bool ok = true;

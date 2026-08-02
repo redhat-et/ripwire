@@ -108,7 +108,60 @@ cd "$ROOT"
 
 echo "pagingsweepcheck: BIN=$BIN  PREBIN=${PREBIN:-<none>}"
 
-run(){ "$BIN" "$ROOT" "$@" --no-cache 2>/dev/null; }
+# PAGE_CORPUS lets one arm point at a corpus other than this checkout. The paging contract
+# (limit windows, offset advances, has_more terminates) is a property of the CODE, not of the corpus, so
+# an arm whose row supply this repo cannot guarantee is re-anchored onto a fixture built below rather
+# than left to red on whichever clone happens to be short of rows. Defaults to $ROOT: every other arm is
+# untouched.
+run(){ "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --no-cache 2>/dev/null; }
+
+# ── the in-gate paging fixture ────────────────────────────────────────────────────────────────────────
+# TWO of these arms — --mentions and --stray-content — need a corpus-SHAPE this repo does not supply on
+# a fresh clone, which is every clone but the author's and therefore every CI leg:
+#
+#   --mentions=main       needs >= 6 doc rows for page_verb's (C) seam check (page[0:3]+[3:6] == [0:6])
+#                         and >= 4 for has_more="1" on --limit=3. The published repo has exactly 3 docs
+#                         naming `main`, so (B) and (C) red — on a gate about paging, over a fact about
+#                         how many READMEs mention a symbol.
+#   --stray-content       lists refs holding divergent work. A fresh clone has one branch and nothing
+#                         stray, so it emits ZERO rows and five arms red. Worse, CI checks out SHALLOW
+#                         by default, and this verb's own header says a shallow clone makes EVERY ref
+#                         unanalysable ("v=unknown ... the fix is to deepen the clone") — so even a repo
+#                         with real stray branches could not assert here.
+#
+# So both are re-anchored onto one throwaway fixture built from scratch here: 8 markdown docs naming one
+# symbol, and 8 branches each authoring lines HEAD does not have. It carries its own full history, so it
+# asserts identically on a fresh clone, a shallow CI checkout, and the author's machine. Every other arm
+# still runs against $ROOT. Both verbs also still meet the live corpus in section (K)'s honoring-set loop.
+PAGEFIX="$TMP/pagefix"
+mkPagingFixture(){
+    mkdir -p "$PAGEFIX/src" "$PAGEFIX/docs" || return 1
+    printf 'int renderWidget( int n ){ return n; }\nint layoutWidget( int n ){ return renderWidget( n ) + 1; }\n' > "$PAGEFIX/src/widget.cpp"
+    local i
+    for i in 1 2 3 4 5 6 7 8; do
+        printf '# Note %d\n\nThe `renderWidget` entry point is described here (note %d).\n' "$i" "$i" > "$PAGEFIX/docs/note$i.md"
+    done
+    (
+        cd "$PAGEFIX" || exit 1
+        git init -q . || exit 1
+        git config user.email paging@example.invalid
+        git config user.name  paging-fixture
+        git config commit.gpgsign false
+        git add -A && git commit -qm "fixture base" || exit 1
+        local home; home="$( git rev-parse --abbrev-ref HEAD )"   # init.defaultBranch varies by host
+        local b
+        for b in 1 2 3 4 5 6 7 8; do
+            git checkout -q -b "stray$b" || exit 1
+            printf 'int strayFn%d(){ return %d; }\n' "$b" "$b" > "src/stray$b.cpp"
+            git add -A && git commit -qm "stray work $b" || exit 1
+            git checkout -q "$home" || exit 1
+        done
+        # advance the home line so the 8 branches are genuinely divergent, not fast-forwardable
+        printf 'int liveFn(){ return 0; }\n' > src/live.cpp
+        git add -A && git commit -qm "live work" || exit 1
+    ) >/dev/null 2>&1
+}
+mkPagingFixture || { echo "pagingsweepcheck: could not build the paging fixture (git unusable?)"; exit 2; }
 
 # ── (A)-(G): the paging contract, one verb at a time ─────────────────────────────────────────────────
 # $1 = label, $2 = row-element ERE (an item = one emitted result row), $3.. = verb args.
@@ -206,12 +259,15 @@ page_verb "uses"        '<u role='                  --uses=escapeXml
 # independent, still-capped-at-5 listing per row — rowpat pins the SPACE after "<seam" so it cannot match
 # the plural root tag "<seams ...>").
 page_verb "seams"           '<seam '        --seams
-# --external-surface / --mentions / --graph-query / --stray-content are all flat listings with row counts
-# comfortably above 6 in this repo (the corpus page_verb's seam-continuity check (C) needs).
+# --external-surface / --graph-query are flat listings with row counts comfortably above 6 in this repo
+# (the corpus page_verb's seam-continuity check (C) needs), so they stay anchored to $ROOT.
 page_verb "external-surface" '<x n='         --external-surface
-page_verb "mentions"         '<doc p='       --mentions=main
 page_verb "graph-query"      '<s t='         --graph-query='name("main")'
-page_verb "stray-content"    '<ref name='    --stray-content
+# --mentions / --stray-content run against the in-gate fixture instead — see mkPagingFixture() above for
+# why this checkout cannot supply their rows on a fresh clone or a shallow CI checkout. The CONTRACT
+# asserted is identical; only the corpus that supplies the rows changes.
+PAGE_CORPUS="$PAGEFIX" page_verb "mentions"      '<doc p='    --mentions=renderWidget
+PAGE_CORPUS="$PAGEFIX" page_verb "stray-content" '<ref name=' --stray-content
 
 # --zoom is a NESTED hierarchy — every level emits a <module level="L" ...> element, so a bare '<module '
 # pattern would count every descendant too, not just the top-level row list --limit/--offset actually

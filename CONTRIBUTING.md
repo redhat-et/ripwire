@@ -33,6 +33,43 @@ cmake -S . -B asan -DRIPWIRE_ASAN=ON && cmake --build asan -j
 LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <dir> >/dev/null
 ```
 
+### Building on Linux
+
+ripwire builds and passes its suite on Ubuntu 24.04 with gcc 13.3 or clang 18, but a few things
+differ from macOS enough to cost you an afternoon if nobody says them out loud.
+
+**Memory, not cores, sizes `-j`.** `src/main.cpp` is one very large translation unit. Compiling it
+at `-O2` needs roughly **3 GB of RAM per parallel job under gcc**; clang does the same file inside
+2 GB. A machine with fewer gigabytes than `3 × jobs` does not fail with a diagnostic — it meets the
+OOM killer, and you get a `cc1plus … killed` line with no explanation. On an 8 GB box, use `-j2`
+with gcc, or use clang.
+
+**Suite prerequisites.** Beyond a compiler and CMake, the gates shell out to `xmllint`
+(`libxml2-utils`), `ripgrep`, `bc`, `jq`, `curl`, `python3` and `git`. Two further conditions are
+easy to miss because they make gates *fail* rather than skip:
+
+- **Full git history.** The churn, co-change, ownership and hotspot gates mine `git log` for real.
+  A `--depth 1` clone — GitHub `actions/checkout`'s default — leaves them measuring nothing, so CI
+  pins `fetch-depth: 0` at every checkout step. Clone the same way locally.
+- **Not as root.** Several gates assert that an unreadable file degrades cleanly. Under `root`,
+  `chmod 000` does not actually deny a read, so those arms self-skip and prove nothing.
+
+**`XDG_CACHE_HOME` must already exist.** The cache-directory ladder creates its own `ripwire/`
+subdirectory but does not create the parent recursively, so pointing `XDG_CACHE_HOME` at a path
+that is not there yet silently disables caching. Correctness is unaffected — every run is then a
+cold parse — but the warm-run speed is simply gone, with nothing on stderr to say so.
+
+**GNU `stat` is not BSD `stat`.** `-f` selects *filesystem* status on GNU coreutils and takes no
+format argument, so the tempting `stat -f FMT … || stat -c FMT …` fallback does not fall back: the
+first arm prints a filesystem block and exits 1, and the second arm's answer lands underneath six
+lines of noise. Gate scripts detect the flavour once (`stat --version`) and then use a single form.
+Please keep it that way.
+
+**No kqueue.** The long-lived MCP server's FS-event watcher is a macOS/BSD optimisation. On Linux it
+is compiled out and freshness comes from the per-request stat sweep — that is the designed path, not
+a degradation, so it is silent and the staleness contract is unchanged. You can build and run that
+path on a Mac with `cmake -S . -B build-nokqueue -DCMAKE_CXX_FLAGS=-DRIPWIRE_HAS_KQUEUE=0`.
+
 ### Determinism gate
 
 Output is a sorted top-K. A sort has no tolerance band, so the contract is byte-identity:
@@ -218,6 +255,10 @@ review discipline.
   never free them, which reads as a false leak). ThreadSanitizer is a **separate** build target —
   it is mutually exclusive with ASan. Valgrind is not a gate here; it has no working Apple Silicon
   port, so memcheck belongs in a Linux CI job if it is wanted at all.
+  **Build G1 with Clang.** `integer` is a Clang-only UBSan group and GCC rejects the whole option, so
+  a `-DRIPWIRE_ASAN=ON` configure under GCC drops `integer` (and its ignorelist exemptions) and says
+  so at configure time — a real but reduced stack. CI pins its Linux asan job to clang for that
+  reason; the GCC path exists so a contributor's build degrades honestly instead of failing.
 - **G2 — cache locality over abstraction.** DOD, POD, SoA, 32-bit handles, no generic graph
   library. The no-dynamic-allocation rule is scoped to the code *we* write inside the PageRank
   power-iteration loop: preallocate two rank buffers plus scratch once and ping-pong them.

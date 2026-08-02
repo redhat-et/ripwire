@@ -62,6 +62,7 @@
 #include "cli.h"
 #include "embedded_queries.h"   // configure-generated tags.scm table shared with ingest and --doctor
 #include "hashutil.h"           // sanitizer-clean modulo-2^64 FNV multiplication
+#include "charconvcompat.h"     // rw::parseFloating — FP from_chars is `= delete` on older libc++ (macos-14 CI)
 
 #include <algorithm>
 #include <array>
@@ -436,7 +437,7 @@ bool isUniversalOrAllowlistedNumber( std::string_view spelling ) noexcept
     if( normalized.empty() ) return false;
 
     double parsed = 0.0;
-    const auto [ end, error ] = std::from_chars( normalized.data(), normalized.data() + normalized.size(), parsed );
+    const auto [ end, error ] = rw::parseFloating( normalized.data(), normalized.data() + normalized.size(), parsed );
     if( error != std::errc{} || end != normalized.data() + normalized.size() ) return false;
     return parsed == -2.0 || parsed == -1.0 || parsed == 0.0 || parsed == 1.0 || parsed == 2.0;
 }
@@ -540,7 +541,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
     std::uint64_t h = 1469598103934665603ull;
-    for( unsigned char c : urlOrPath ) { h ^= c; h = rw::hashutil::fnv1aMultiply( h ); }
+    for( const char c : urlOrPath ) h = rw::hashutil::fnv1aAbsorb( h, c );
     char tail[ 48 ];
     std::snprintf( tail, sizeof( tail ), "/ripwire-remote-%016llx", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
@@ -6586,7 +6587,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
     if( cfg.grepRegex )
         if( const std::optional<std::string> reErr = regexCompileError( pat ) )
         {
-            std::fprintf( stderr, "ripwire: --regex='%s' is not a valid regular expression: %s "
+            // The lead-in is deliberately NEUTRAL ("refused", not "invalid"): regexCompileError() also
+            // refuses patterns that are perfectly valid ECMAScript — L5's non-portable escapes and M2's
+            // catastrophic-backtracking family — so "is not a valid regular expression" would be false
+            // for two of its three verdicts. The reason string itself names which case it was.
+            std::fprintf( stderr, "ripwire: --regex='%s' refused, nothing was scanned: %s "
                                   "(a hits=\"0\" here would be a failure, not a measurement — fix the pattern, e.g. ripwire <dir> --regex='fnv1a\\w+')\n",
                           pat.c_str(), reErr->c_str() );
             return 1;

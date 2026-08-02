@@ -180,7 +180,40 @@ if RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then o
 #     dedicated standalone gate; run with the binary under test (skip any not yet present).
 for _g in archcheck lintcheck swiftcheck ownerscheck baselinecheck resolvecheck canoncheck deadcheck hasacheck zoomcheck situdiffcheck xmlwellformed localitycheck mcpverbscheck regexcheck narrowcheck usescheck archmetricscheck querycheck qualitycheck clicheck grepcheck emptycorpuscheck bm25check rankbycheck callerscheck prcheck mcprobustcheck hostilecheck langcheck lintrulescheck prcontextcheck ccjsoncheck scipcheck mcpeditcheck redactcheck mcpstalecheck baselineportcheck clonecachecheck cachehashcheck tornreadcheck metricscheck propcostcheck coplintcheck forlenscheck exemplarcheck tokenbudgetcheck paginationcheck portablecachecheck mcphandlecheck fillordercheck jslangcheck expandrangecheck importnarrowcheck mcpreloadcheck reachcheck mapdiffcheck affectedcheck reportcheck evalcheck outlinecheck recallrelcheck treecheck javarubycheck jsonlangcheck type3clonecheck clonebandcheck zonecheck sincecheck jsmetricscheck jsverbscheck mcprangeedgecheck narrowlangcheck rangecomposecheck unreachablecheck grepcontextcheck cyclecutcheck rubymetricscheck type3check sincewindowcheck zoneconsistencycheck w2verbscheck sincecochangecheck includeanglecheck includeprecisecheck crossdirincludecheck legocheck pyimportprecisecheck tsimportprecisecheck rustimportprecisecheck unresolvedcheck resolverhonestycheck depsprecisecheck cppoperatorcheck skillinstallcheck skilltruthcheck qualitystalecheck qualitykindscheck mcpeditkindcheck mcpeditracecheck swiftmemberscheck gointerfacecheck mcpflagshipcheck didyoumeancheck routecheck writetargetcheck clonelexcheck qualityexcludecheck prrenamecheck gitquotepathcheck mcpaudit4hardencheck mcpremotecheck regexbombcheck adaptivecutshapecheck columnarcommacheck overbudgetcommentcheck utf8scrubcheck wrapverbscheck cachesplitcheck testgatecheck headsnapcachecheck qsnapcachecheck qsnapprefetchcheck fficheck statgatecheck prbudgetcheck detailcheck candidatescheck batchcheck traceminecheck connectcheck artifactcheck indexoutcheck spectimingcheck multirootcheck cachefuzzcheck clonededupcheck doctorcheck evictioncheck adaptivecheck anchorcheck columnarcheck connectcorecheck expandtokencheck knownitemcheck mcpeditmodecheck mcpredactcheck mcpwatchercheck savecachecheck manifestcheck selfcontainedcheck dependencypincheck g1configcheck communitylabelcheck lintprecisioncheck isolateprovenancecheck deadprecisioncheck retrievalqualitycheck postingscheck chacheck cochangeboostcheck qualitysignalcheck hookcheck mentioncheck csharpcheck routeedgecheck relinkcheck mergescoutcheck scoutkeycheck planlanescheck editcheckcheck tracecheck notescheck packtaskcheck cppbenchcheck versioncheck aritycheck qchurncheck qschemetripcheck qualifiedresolvecheck racymtimecheck ordercheck jsoncheck ccheck portablebuildcheck weaksignalcheck withgraphcheck scorecardcheck multiswecheck docmentioncheck crossrefcheck flagscheck partitioncheck metalcheck layoutcheck docdriftcheck skillevalcheck flipcheck historyoraclecheck landingcheck abicheck qualityorigincheck pranchorcheck scoutheadconflictcheck gitstampcheck gateabilitycheck deckcheck skillevalsplitcheck prrefsafecheck prmaskanchorcheck emittertruthcheck bundleidcheck chainidcheck crossrefdegradecheck grepscancheck qextractionkeycheck qackorigincheck ackonlycheck flagsurfacecheck argvdiffcheck qrowlocatorcheck qoriginoraclecheck qchurnmemocheck qrevtokencheck morecontractcheck flagsnoisecheck docanchorcheck dispatchordercheck guardmsgcheck flagtablecheck qualitycrosslangcheck lintbudgetcheck deadfiltercheck regexrefusecheck graphqueryrefusecheck hotspotsincecheck maxfilesizecheck matchcapturecheck skillscanreadcheck cochangesurprisecheck recallbudgetcheck exemplarconfcheck mdembedcheck legobundlecheck lintdedupcheck qualitysymcheck duprowcheck pagingsweepcheck selectorchaincheck modifierguardcheck truncvocabcheck attrvocabcheck usesselectorcheck recallevalcheck exercisescheck runhintcheck communitydrillcheck genrecallcheck expandcallscheck grepseamcheck testgatepagecheck jsonparitycheck selectorhonestycheck mentionsverbcheck a9disclosurecheck jsonredactcheck recalltotalcheck columnarattrcheck churnjsonstampcheck fornotesjsoncheck jsonrefusallegendcheck prnestedcapcheck emptyvaluerefusecheck numericrefusecheck mcptranchecheck mcpclidiffcheck mcpw2fixcheck selectorrefusecheck sigredactcheck fornotesbudgetcheck taskechocheck mcpw3fixcheck w3fixlegendcheck w3fixbudgetcheck mcpreadloopcheck recallbufcheck mcpeditpresencecheck mcpframehonestycheck churnjoincheck estchargecheck nulbytecheck bodydialectcheck jsonwalkcheck mcpcontractcheck probecheck fixedbufsweep shapingflagcheck gateexitcheck showcasecapturecheck legendcoveragecheck csharpcondcheck qualnewcheck objcfieldcheck goinstcheck mergechurncheck cppqualcheck floormarkcheck rustqualcheck callformcheck ripwirepubliccheck docscommandscheck readmedriftcheck; do
     [ -f "$ROOT/test/$_g.sh" ] || continue
-    if RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then ok "absorb gate ($_g.sh)"; else no "absorb gate ($_g.sh failed)"; fi
+    if RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then
+        ok "absorb gate ($_g.sh)"
+    else
+        # A BARE NAME IS UNDIAGNOSABLE IN CI. The >/dev/null 2>&1 above eats the gate's own FAIL text, so the
+        # only thing a log reader gets is "absorb gate (X.sh failed)" — the whole of PR #1's first round
+        # (run 30732976779) landed as eight such names across two OSes with zero evidence attached, and every
+        # one of them had to be re-derived by hand. Re-run ONLY the gate that failed, with output captured,
+        # and echo the part that matters, prefixed with the gate name — the same shape as the NAMED gates
+        # above, which already grep a few lines on failure. Cost: one extra run of the few gates that failed.
+        #
+        # WINDOW, not head. A gate's failing arm is usually NOT in its first 25 lines (lintrulescheck emits
+        # ~35 PASS rows before its later arms), so a plain head shows 25 PASSes and hides the failure. Start
+        # at the first failure-shaped line and take 25 from there — that captures the FAIL row AND the
+        # evidence the gate prints under it (compile logs, diffs, sanitizer reports). A gate that died
+        # without ever printing one (missing tool, bad precondition, crash) has no such line, so fall back
+        # to the TAIL, where those messages land.
+        _rc_absorb=0
+        RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >"$TMP/absorb.out" 2>&1 || _rc_absorb=$?
+        no "absorb gate ($_g.sh failed, rc=$_rc_absorb)"
+        # the repo's OWN marker first (`  FAIL  …` / `FAILURES ABOVE`, case-sensitive and anchored, so a PASS
+        # row whose prose contains "fail"/"failure" cannot hijack the window), then the shapes a gate that
+        # never reached its own reporting prints instead.
+        _first_fail="$( grep -nE -m1 '^[[:space:]]*FAIL|^FAILURES ABOVE' "$TMP/absorb.out" | cut -d: -f1 )"
+        [ -n "${_first_fail:-}" ] || _first_fail="$( grep -nE -m1 'error:|fatal|Sanitizer|required$|no ripwire binary|command not found' "$TMP/absorb.out" | cut -d: -f1 )"
+        if [ -n "${_first_fail:-}" ]; then
+            sed -n "${_first_fail},$(( _first_fail + 24 ))p" "$TMP/absorb.out" | sed "s/^/    [$_g] /"
+            printf '    [%s] (window of 25 from line %s of %s; rerun: RIPWIRE_BIN=%s bash test/%s.sh)\n' \
+                   "$_g" "$_first_fail" "$( wc -l <"$TMP/absorb.out" | tr -d ' ' )" "$BIN" "$_g"
+        else
+            tail -n 25 "$TMP/absorb.out" | sed "s/^/    [$_g] /"
+            printf '    [%s] (no failure-shaped line — last 25 of %s shown; rerun: RIPWIRE_BIN=%s bash test/%s.sh)\n' \
+                   "$_g" "$( wc -l <"$TMP/absorb.out" | tr -d ' ' )" "$BIN" "$_g"
+        fi
+    fi
 done
 
 # 3l) arch-layer auto-tags (P3): a file node under a known layer dir gets a built-in layer= attribute

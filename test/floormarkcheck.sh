@@ -392,10 +392,38 @@ done
 #     disabled.
 # So the assertions are the verb's OWN contract (fit your estimate, or say you could not) plus the one claim
 # this lane is answerable for: the budget the ladder CAN meet must still be met with the marker in it.
-PRFULL="$( "$BIN" . --pr-context=HEAD~1 2>/dev/null | wc -c | tr -d ' ' )"
+#
+# THE BASE IS CHOSEN, NOT PINNED (2026-08-01, Lane O). These arms read the LIVE repo at `HEAD~1`, and
+# "HEAD~1" is not a stable thing. When the tip commit touches only files --pr-context does not count (a
+# .txt, a workflow, docs) the bundle comes back files="0" carrying no est_tokens at all, and all three
+# rows red with "est_tokens=<none> … silently over its own ceiling" — blaming the verb for the shape of
+# somebody's last commit. It happened on this branch (tip = a one-line lsan_suppressions.txt fix) and it
+# would happen in CI on any PR whose last commit is docs-only. Same class this file already documents
+# below ("after a run of doc-only commits HEAD~1's diff was ONE file"), which is what sent (8f) to a
+# fixture repo.
+#
+# The arms are content-INDEPENDENT (the verb's own fit contract at every budget), so they never needed a
+# FIXED base — they need a base with something in it. Walk back to the newest ancestor whose changed set
+# is non-empty, bounded at 12; if nothing in that window changes a counted file, SKIP with that named.
+# Presence-guarded: with a non-empty base every assertion below is byte-for-byte the one it replaced.
+prChangedFiles(){   # $1 = base ref → the ROOT files= count ('' if the run failed)
+    "$BIN" . --pr-context="$1" 2>/dev/null | grep -oE '<pr-context[^>]*>' | head -1 \
+        | grep -oE 'files="[0-9]+"' | head -1 | tr -dc '0-9'
+}
+PRBASE=""
+for _n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    git rev-parse --verify -q "HEAD~$_n" >/dev/null 2>&1 || break
+    _nf="$( prChangedFiles "HEAD~$_n" )"
+    if [ -n "$_nf" ] && [ "$_nf" -gt 0 ] 2>/dev/null; then PRBASE="HEAD~$_n"; break; fi
+done
+if [ -z "$PRBASE" ]; then
+    printf '  SKIP  (8) pr-context budget arms — no ancestor within HEAD~12 changes a file --pr-context counts (the tip commits touch only uncounted files: docs, workflows, .txt), so this corpus has no bundle to budget. The budget-BINDS half of this arm is asserted on the deterministic fixture repo in (8f) below.\n'
+else
+[ "$PRBASE" = "HEAD~1" ] || printf '  ..    (8) base=%s — HEAD~1..%s change no file --pr-context counts\n' "$PRBASE" "$PRBASE"
+PRFULL="$( "$BIN" . --pr-context="$PRBASE" 2>/dev/null | wc -c | tr -d ' ' )"
 for t in 4000 1500 600; do
     OUTF="$TMP/pr_$t.xml"
-    "$BIN" . --pr-context=HEAD~1 --max-tokens="$t" >"$OUTF" 2>/dev/null
+    "$BIN" . --pr-context="$PRBASE" --max-tokens="$t" >"$OUTF" 2>/dev/null
     B="$( wc -c <"$OUTF" | tr -d ' ' )"
     EST="$( grep -oE 'est_tokens="[0-9]+"' "$OUTF" | head -1 | tr -dc '0-9' )"
     if [ -n "$EST" ] && [ "$EST" -le "$t" ]; then
@@ -419,9 +447,10 @@ done
 printf '  ..    (8) INFO pr-context --max-tokens=4000 emits %s B (diff-dependent, deliberately not pinned)\n' \
        "$( wc -c <"$TMP/pr_4000.xml" | tr -d ' ' )"
 # the marker survives whatever the live tree's budget does — cheap, content-independent, kept as-is.
-"$BIN" . --pr-context=HEAD~1 --max-tokens=600 2>/dev/null | grep -qE "$PR_ROOT_MARK" \
+"$BIN" . --pr-context="$PRBASE" --max-tokens=600 2>/dev/null | grep -qE "$PR_ROOT_MARK" \
     && ok "(8) pr-context keeps $MARK_XML ON THE ROOT under a tight budget on the live tree" \
     || no "(8) pr-context DROPPED $MARK_XML from the root under --max-tokens=600 — a budget must not silently buy back the false claim"
+fi   # PRBASE non-empty
 
 # ── (8f) THE SHRINK HALF, on a DETERMINISTIC FIXTURE REPO ──────────────────────────────────────────────
 # This assertion — "the budget actually BINDS, so the arms above are not vacuous" — is the one part of (8)

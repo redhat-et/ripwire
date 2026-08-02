@@ -21,6 +21,12 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 CXX="${CXX:-c++}"
+
+# §CI-P3: ask THIS front end how it spells C++23 rather than assuming the Clang-17 spelling — an
+# AppleClang 15 (LLVM 16) macos-14 runner rejects `-std=c++23` outright and took this gate with it
+# (PR #1, run 30732976779). Rationale + the CMake mapping this mirrors: scripts/cxxstd.sh.
+. "$ROOT/scripts/cxxstd.sh"
+CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 HARNESS="$ROOT/test/connectcore_harness.cpp"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 BIN="$WORK/connectcoreharness"
@@ -30,7 +36,7 @@ echo "connectcorecheck: CXX=$CXX"
 # ── compile the harness against graph.h (header-only): infra + src on the include path ────────────────────────
 # diagnostics.cpp supplies Diagnostics::ConsoleLog::handleDegraded (the DEGRADED_PATH_ALERT seam) — link it exactly
 # as the real ripwire target does, so any degrade path resolves at link time.
-if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra \
+if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$BIN" 2> "$WORK/cc.log"; then
     echo "  FAIL  harness failed to compile"; sed 's/^/    /' "$WORK/cc.log"; exit 2
@@ -45,7 +51,7 @@ fi
 
 # ── ASan/UBSan pass: the same harness under the G1 sanitizer stack (integer BFS/MST must be clean) ───────────
 ASAN_BIN="$WORK/connectcoreharness_asan"
-if "$CXX" -std=c++23 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+if "$CXX" "$CXXSTD" -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$ASAN_BIN" 2> "$WORK/asan_cc.log"; then
     if "$ASAN_BIN" > /dev/null; then

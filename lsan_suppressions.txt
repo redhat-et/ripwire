@@ -1,9 +1,22 @@
 # ripwire LeakSanitizer suppressions (the G1 sanitizer stack — see CONTRIBUTING.md §4).
-# Tree-sitter grammars allocate static parse tables (and the core allocates internal state
-# for incremental reuse) that are intentionally never freed — these read as leaks under LSan
-# but are not. Suppress by the tree-sitter allocation entry points, not broadly.
+# Scope: tree-sitter's INTERNED, never-freed static data ONLY — grammar objects and the parse
+# tables behind them, reached solely through the grammar entry points (tree_sitter_<lang>) and the
+# TSLanguage accessors. Nothing ripwire owns is allocated through these frames, so neither entry
+# can hide a product bug.
+#
+# Deliberately ABSENT: ts_query_*, ts_parser_*, ts_subtree_*. Every TSQuery, TSParser and TSTree
+# in the process has a real owner (CompiledQueryCache, ParserGuard, TreeGuard — src/ingest.cpp;
+# the --doctor probe deletes inline), so a leak reached through those entry points is a REAL
+# product leak and must stay visible. leak:ts_query_* used to sit here and masked exactly that:
+# the pre-N2 compiledQueryCache() never freed its resident queries, and the leak could only
+# surface in gates that load no suppression file (cachefuzzcheck's ASan arms) — never in this
+# file's own self-run gate. A suppression that matches an owned object's allocation entry point
+# is a blindfold, not a suppression.
+#
+# Verified on the Linux leg (Ubuntu 24.04 / clang 18 — the only G1 runtime with LeakSanitizer;
+# Apple clang has none, CMake sets detect_leaks=0 on Darwin): the flagless repo self-run, the
+# fixture self-run and the five CI heavy-verb gates are leak-clean with NO suppression file
+# loaded at all. The two entries below are insurance for grammar-static allocations, not
+# load-bearing today.
 leak:ts_language_*
-leak:ts_parser_*
-leak:ts_query_*
 leak:tree_sitter_*
-leak:ts_subtree_*

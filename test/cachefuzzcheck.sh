@@ -55,6 +55,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 note(){ printf '  NOTE  %s\n' "$*"; }
+skip(){ printf '  SKIP  %s\n' "$*"; }   # an ABSENT PRECONDITION with a named reason — never a silent pass
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIXTURE" ] || { echo "no fixture at $FIXTURE"; exit 2; }
@@ -352,8 +353,13 @@ if [ -x "$ASAN_BIN" ]; then
     [ "$asan_fail" -eq 0 ] && ok "ASan sweep: no sanitizer report across the whole mutation table" \
                            || no "ASan sweep: at least one sanitizer report fired (see above)"
 else
-    echo "no ASan binary at $ASAN_BIN — build with: cmake -S . -B asan -DRIPWIRE_ASAN=ON && cmake --build asan -j"
-    no "ASan sweep skipped — no ASan binary available"
+    # ABSENT PRECONDITION, not a defect. The CI `release` jobs configure ONE build dir (build/) and never
+    # -DRIPWIRE_ASAN=ON, so $ASAN_BIN cannot exist there — a hard FAIL made both release legs red for a
+    # sanitizer sweep they were never asked to run (PR #1, run 30732976779: "absorb gate
+    # (cachefuzzcheck.sh failed)" on macos-14 AND ubuntu-24.04, with this as the only failing line).
+    # It stays PRESENCE-GUARDED: hand it an ASan binary and every arm above still runs and still asserts.
+    # The sweep itself is not lost — ci.yml's `asan` job runs this gate with RIPWIRE_ASAN_BIN set.
+    skip "ASan sweep — no ASan binary supplied at $ASAN_BIN (the ASan sweeps run in CI's asan job; locally: cmake -S . -B asan -DRIPWIRE_ASAN=ON && cmake --build asan -j)"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -517,6 +523,10 @@ PYEOF
             cp "$TMP/q_good.bin" "$QBLOB"
         done
         [ "$asanq_fail" -eq 0 ] && ok "qsnap ASan sweep: no sanitizer report" || no "qsnap ASan sweep: sanitizer report fired"
+    else
+        # same absent precondition as Part 1's sweep — but this arm used to vanish in SILENCE, which reads
+        # identically to "ran and passed" in a log. Name the reason instead.
+        skip "qsnap ASan sweep — no ASan binary supplied at $ASAN_BIN (see Part 1's skip)"
     fi
 fi
 fi

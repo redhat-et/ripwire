@@ -302,12 +302,21 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_c>
 )
 
+# ---- threading: std::thread / std::mutex need an explicit link on most Unixes ----
+# The parallel ingest and the MCP qsnap-prefetch worker are std::thread; on Apple platforms the pthread
+# runtime is inside libSystem and nothing extra is needed, which is why this was never noticed here. On
+# Linux it depends on the glibc version — merged into libc from 2.34 (so ubuntu-24.04 happens to link
+# without it), a separate -lpthread before that, and -pthread also changes CODEGEN, not just the link
+# line. Threads::Threads asks CMake for whatever this platform actually requires; on macOS it resolves
+# to nothing, so the dev build is untouched.
+find_package(Threads REQUIRED)
+
 # ---- probe target: the Phase-1/2 proof binary ----
 add_executable(ripwire_probe
   src/tsprobe.cpp
   ${RIPWIRE_SRCS}
   ${RIPWIRE_TS_OBJECTS})
-target_link_libraries(ripwire_probe PRIVATE tree-sitter)
+target_link_libraries(ripwire_probe PRIVATE tree-sitter Threads::Threads)
 target_include_directories(ripwire_probe PRIVATE
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${_ripwire_generated_dir}
@@ -321,7 +330,7 @@ add_executable(ripwire
   src/main.cpp
   ${RIPWIRE_SRCS}
   ${RIPWIRE_TS_OBJECTS})
-target_link_libraries(ripwire PRIVATE tree-sitter)
+target_link_libraries(ripwire PRIVATE tree-sitter Threads::Threads)
 target_include_directories(ripwire PRIVATE
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${_ripwire_generated_dir}
@@ -393,14 +402,41 @@ set(RIPWIRE_GRAMMAR_TARGETS
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
+# The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
+# the only ones the libstdc++ header exemption below has anything to say about (the grammars are C).
+set(RIPWIRE_OWNED_CXX_TARGETS ripwire_probe ripwire)
 if(RIPWIRE_TESTS)
   list(APPEND RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
   list(APPEND RIPWIRE_RUNTIME_LINK_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
+  list(APPEND RIPWIRE_OWNED_CXX_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
 endif()
-set(RIPWIRE_G1_SANITIZERS "-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast-overflow")
+# G1's `integer` is a CLANG-ONLY UBSan group (unsigned-integer-overflow, implicit-*-truncation,
+# implicit-integer-sign-change — the defined-but-suspicious conversions, not UB). GCC has no such group
+# and rejects the whole option: "cc: error: unrecognized argument to '-fsanitize=' option: 'integer'",
+# which is where the ubuntu asan leg of the first public CI run died (default cc there is gcc). The three
+# `-fno-sanitize=` names and `-fsanitize-ignorelist=` below are members/features of that same Clang-only
+# group, so they are dropped together — under GCC there is nothing for them to switch off.
+#
+# address / undefined / float-divide-by-zero / float-cast-overflow ARE all supported by GCC and stay.
+# The result is a REAL but reduced stack on gcc, announced at configure time so nobody reads a green gcc
+# asan run as full-G1 evidence. Public CI does not rely on this path: ci.yml pins the Linux asan job to
+# clang and keeps the complete stack (see the job comment there). This branch is for a contributor who
+# builds -DRIPWIRE_ASAN=ON with gcc — it must degrade honestly rather than fail to configure.
+set(RIPWIRE_G1_SANITIZER_CHECKS address undefined integer float-divide-by-zero float-cast-overflow)
+set(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER ON)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  list(REMOVE_ITEM RIPWIRE_G1_SANITIZER_CHECKS integer)
+  set(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER OFF)
+  message(STATUS "G1 sanitizers: dropped 'integer' (+ its -fno-sanitize= members and -fsanitize-ignorelist=) "
+                 "— Clang-only, GCC ${CMAKE_CXX_COMPILER_VERSION} rejects the option. Remaining: "
+                 "${RIPWIRE_G1_SANITIZER_CHECKS}. Build with clang for the complete G1 stack.")
+endif()
+list(JOIN RIPWIRE_G1_SANITIZER_CHECKS "," _ripwire_g1_check_list)
+set(RIPWIRE_G1_SANITIZERS "-fsanitize=${_ripwire_g1_check_list}")
 set(_ripwire_tree_sitter_ignorelist "${_ripwire_generated_dir}/tree_sitter_sanitizer_ignorelist.txt")
 set(_ripwire_swift_ignorelist "${_ripwire_generated_dir}/swift_sanitizer_ignorelist.txt")
 set(_ripwire_bash_ignorelist "${_ripwire_generated_dir}/bash_sanitizer_ignorelist.txt")
+set(_ripwire_libstdcxx_ignorelist "${_ripwire_generated_dir}/libstdcxx_sanitizer_ignorelist.txt")
 # Full G1 remains enabled on ripwire and every grammar. Pinned tree-sitter v0.26.9 intentionally uses
 # defined C unsigned wrap throughout reverse loops and erase-at-zero iteration, so only that non-UB check
 # is disabled target-wide for the pinned core. All other integer/undefined/conversion checks remain on.
@@ -417,6 +453,34 @@ file(WRITE "${_ripwire_swift_ignorelist}"
 # Bash's scanner decrements zero-valued nesting depths after marking the scan complete; uint32 wrap is intentional.
 file(WRITE "${_ripwire_bash_ignorelist}"
   "[unsigned-integer-overflow]\nfun:scan\n")
+# libstdc++'s std::basic_string_view::find/rfind scan loops are written `for (++__size; __size-- > 0;)`, so
+# the counter wraps past zero BY DESIGN on the iteration that ends the loop. Under G1's Clang-only
+# `integer` group that is a hard stop, because G1 is -fno-sanitize-recover=all: the first real Linux run
+# (Ubuntu 24.04, clang 18 + libstdc++, full G1) aborted with
+#   string_view.tcc:124:25: runtime error: unsigned integer overflow: 0 - 1
+# reached from rw::lowerExtensionOf (src/ingest.cpp:160) via string_view::rfind, and again at :109 (the
+# find twin) partway through cachefuzzcheck's qsnap ASan sweep. This is library-internal, intentional, and
+# not UB — nothing in ripwire can avoid it short of not calling find/rfind. libc++ has no such wrap, which
+# is why macOS never saw it and why this entry is inert (but must still parse) on the Apple leg.
+# Scoped as narrowly as the mechanism allows: these THREE libstdc++ headers' code, this ONE check. Every
+# other integer and conversion check stays on for our own code, including in the same translation units.
+#
+# The re-smoke on the same Ubuntu 24.04 / clang 18 / libstdc++ image found std::basic_string carrying the
+# identical deliberate-wrap idiom in two more headers, so all three entries share the one section:
+#   * bits/basic_string.h:490 — `_S_compare` returns `__n1 - __n2` computed in size_type, so any comparison
+#     whose left operand is the shorter string wraps by design. Reached from a plain `std::string`
+#     `operator<=`/`operator<` inside a sort comparator, i.e. from ordinary ripwire code that cannot avoid
+#     it short of not comparing strings.
+#   * bits/basic_string.tcc:689 — the basic_string twin of the string_view find/rfind loop above, same
+#     `for (++__size; __size-- > 0;)` shape, same wrap on the iteration that ends the loop.
+# Both are library-internal, intentional and not UB; both abort the run under -fno-sanitize-recover=all;
+# both are absent on libc++, which is why the Apple leg never saw them and why these entries are inert
+# (but must still parse) on macOS. With the three entries in place the Linux ASan self-run exits 0 with
+# empty stderr and cachefuzzcheck's 13 UBSan arms go green.
+file(WRITE "${_ripwire_libstdcxx_ignorelist}"
+  "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n"
+  "src:*/bits/basic_string.h\n"
+  "src:*/bits/basic_string.tcc\n")
 
 if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
@@ -426,13 +490,21 @@ if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_LINK_TARGETS)
     target_link_options(${_t} PRIVATE ${RIPWIRE_G1_SANITIZERS})
   endforeach()
-  target_compile_options(tree-sitter PRIVATE
-    -fno-sanitize=unsigned-integer-overflow
-    -fno-sanitize=implicit-signed-integer-truncation
-    -fno-sanitize=implicit-integer-sign-change
-    "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
-  target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
-  target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
+  # Every exemption below names a check inside the Clang-only `integer` group, or uses
+  # -fsanitize-ignorelist=, which GCC does not implement. With `integer` absent there is nothing to
+  # exempt, and passing them anyway is the same "unrecognized argument" failure one level down.
+  if(RIPWIRE_HAS_CLANG_INTEGER_SANITIZER)
+    target_compile_options(tree-sitter PRIVATE
+      -fno-sanitize=unsigned-integer-overflow
+      -fno-sanitize=implicit-signed-integer-truncation
+      -fno-sanitize=implicit-integer-sign-change
+      "-fsanitize-ignorelist=${_ripwire_tree_sitter_ignorelist}")
+    target_compile_options(ts_swift PRIVATE "-fsanitize-ignorelist=${_ripwire_swift_ignorelist}")
+    target_compile_options(ts_bash PRIVATE "-fsanitize-ignorelist=${_ripwire_bash_ignorelist}")
+    foreach(_t IN LISTS RIPWIRE_OWNED_CXX_TARGETS)
+      target_compile_options(${_t} PRIVATE "-fsanitize-ignorelist=${_ripwire_libstdcxx_ignorelist}")
+    endforeach()
+  endif()
 
   # Xcode's arm64 Darwin runtime rejects both the standalone leak sanitizer and detect_leaks=1 at startup.
   # Keep the local ASan/UBSan gate executable and explicit; LeakSanitizer remains a Linux/upstream-runtime
