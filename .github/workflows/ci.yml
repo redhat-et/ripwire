@@ -138,12 +138,20 @@ jobs:
       - name: "test/regression.sh (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
         run: RIPWIRE_BIN=build/ripwire bash test/regression.sh
 
-      # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so every
-      # degrade-path gate above passed for the WRONG REASON: it could not observe the alert it asserts.
-      # The e7405e7 qsnap fix was invisible to CI before it landed, and the 2026-07-27 round added several
-      # more degrade gates (shallow-clone v="unknown", the pr-context ref refusal, the doc-drift VERIFY
-      # demotion). Build a SECOND time with the plain local flavour and re-run the suite against it, so both
-      # the optimizer-visible Release behaviour and the degrade paths are covered — neither alone is enough.
+      # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so a degrade-path
+      # gate run against it cannot observe the alert it asserts. The e7405e7 qsnap fix was invisible to CI
+      # before it landed, and the 2026-07-27 round added several more degrade gates (shallow-clone
+      # v="unknown", the pr-context ref refusal, the doc-drift VERIFY demotion). Build a SECOND time with
+      # the plain local flavour and re-run the suite against it, so both the optimizer-visible Release
+      # behaviour and the degrade paths are covered — neither alone is enough.
+      #
+      # 2026-08-01: the two gates that assert an alert directly (estchargecheck #14, qualitystalecheck
+      # arms 7/8c) no longer pass — or fail — silently on the Release leg. Each probes the flavour with
+      # TWO independent readings (an unrelated already-gated degrade path, plus --version's build-type
+      # token) and, only when both agree the binary is NDEBUG, prints a SKIP naming what is unobservable
+      # and pointing at THIS second leg as where it is proven. If the alert is missing on a flavour that
+      # should see it, they still FAIL. So the Release leg is honestly green rather than either
+      # vacuously green (the 2026-07-27 trap) or unconditionally red (the same trap inverted).
       - name: Configure (plain — NDEBUG off, so DEGRADED_PATH_ALERT compiles in)
         run: cmake -S . -B build-debugalerts
 

@@ -144,7 +144,7 @@ mkPagingFixture(){
     (
         cd "$PAGEFIX" || exit 1
         git init -q . || exit 1
-        git config user.email paging@fixture.invalid
+        git config user.email paging@example.invalid
         git config user.name  paging-fixture
         git config commit.gpgsign false
         git add -A && git commit -qm "fixture base" || exit 1

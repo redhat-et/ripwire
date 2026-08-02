@@ -31,14 +31,43 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
-no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+ok(){   printf '  PASS  %s\n' "$*"; }
+no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
+skip(){ printf '  SKIP  %s\n' "$*"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
 echo "estchargecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+
+# ── BUILD-FLAVOUR / DEGRADE-OBSERVABILITY PROBE (read by #14 below) ───────────────────────────────────
+# CI runs the whole suite TWICE: once against a Release binary (catches optimizer-only bugs, e.g. the
+# VERIFY-then-defend trap) and once against the plain build — Release defines NDEBUG, which compiles
+# DEGRADED_PATH_ALERT out, so "if you add a degrade path, it is the PLAIN run that proves it" (CLAUDE.md).
+# #14 asserts a DEGRADED_PATH_ALERT, so under the Release binary it is unobservable BY DESIGN and must
+# SKIP with the reason named; under the plain binary it must assert. What it must never do is pass
+# silently for lack of an alert it could not have seen — the 2026-07-27 CI trap this gate was written
+# against. (Before 2026-08-01 it took the other branch and FAILED under NDEBUG, which is the same trap
+# from the other side: it made the Release CI leg unconditionally red, so the leg could never be trusted.)
+#
+# Two INDEPENDENT readings, because either alone can lie:
+#   (1) an unrelated, already-gated degrade path (--since=<not a date> → "[math degraded]"). If THAT one
+#       is silent too, this binary compiles alerts out globally rather than #14's own seam having broken.
+#   (2) --version's build-type token — versioncheck's source of truth, set by CMakeLists from
+#       CMAKE_BUILD_TYPE ("dev" for the plain configure). Release/RelWithDebInfo/MinSizeRel define
+#       NDEBUG; nothing else does.
+# Only when BOTH agree — no alert observable anywhere AND an NDEBUG-defining flavour — is a skip honest.
+# A binary that CLAIMS to be dev/asan yet observes no alerts is a real FAILURE, and so is one that can
+# observe the unrelated alert but not #14's own.
+alerts_observable=0
+"$BIN" test/fixture --rank-by=churn --since=notadate >/dev/null 2>"$TMP/flavour.err"
+grep -q 'math degraded' "$TMP/flavour.err" && alerts_observable=1
+BUILD_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$BUILD_FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel) ndebug_flavour=1 ;;
+    *)                                 ndebug_flavour=0 ;;
+esac
 
 # The symbol the payload arms expand/outline: a real, large fn in src/ (stable across rounds).
 SYM=estimateTokens
@@ -562,12 +591,13 @@ fi
 # ── #14 (the CA4 coverage debt, trap #3): THE open_memstream DEGRADE PATH. The wave-1 verifier declared these
 #    paths never exercised: `open_memstream` fails on ALLOCATION, so no `ulimit -n` harness reaches them. The
 #    fault switch RIPWIRE_FAULT_CHARGE_BUFFER=1 exists ONLY on the non-NDEBUG flavour — the same flavour
-#    DEGRADED_PATH_ALERT exists on — so this arm must FAIL, NOT SKIP, on a build that cannot observe alerts,
-#    and it establishes that flavour with its OWN observability probe rather than assuming it.
+#    DEGRADED_PATH_ALERT exists on — so this arm establishes that flavour with its OWN observability probe
+#    rather than assuming it, and it must never pass for lack of an alert it could not have seen.
 #
-#    (a) OBSERVABILITY PROBE. If the switch has no effect, this build is either Release (alerts compiled out,
-#        so a degrade assertion here would pass for the wrong reason — the exact 2026-07-27 CI trap) or the
-#        seam regressed. Either way it is a FAILURE of this gate, never a skip. ────────────────────────────────
+#    (a) OBSERVABILITY PROBE. If the switch has no effect, exactly one of two things is true, and the
+#        preamble's two independent readings tell them apart: either this is an NDEBUG build, where the
+#        arm is unobservable BY DESIGN and the plain-flavour CI leg is what proves it (→ SKIP, reason
+#        named), or the seam regressed on a flavour that CAN see alerts (→ FAILURE). ─────────────────────
 RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" src --top-k=10 --pack-signatures --no-cache >"$TMP/dg.out" 2>"$TMP/dg.err"
 rc_dg=$?
 if grep -aq 'chargeSection: open_memstream failed' "$TMP/dg.err"; then
@@ -656,8 +686,10 @@ PY
         fi
     done
     [ "$g4fail" = 0 ] && ok "#14e the fault switch is exact-match: 8 non-\"1\" values (incl. 10 / 1x / 1000000) are byte-identical to unset"
+elif [ "$alerts_observable" -eq 0 ] && [ "$ndebug_flavour" -eq 1 ]; then
+    skip "#14 open_memstream degrade arms — DEGRADED_PATH_ALERT is compiled out of this binary (--version says build type \"$BUILD_FLAVOUR\", which defines NDEBUG; the unrelated --since=notadate degrade path is silent here too, so alerts are unobservable globally rather than this seam having broken). The RIPWIRE_FAULT_CHARGE_BUFFER switch does not exist on this flavour either. These arms are proven by the PLAIN-flavour run of the same suite, which CI executes as a second leg for exactly this reason."
 else
-    no "#14a observability probe FAILED: RIPWIRE_FAULT_CHARGE_BUFFER=1 produced no DEGRADED_PATH_ALERT. Either this is an NDEBUG/Release build (alerts compiled out — every degrade arm below would pass for the wrong reason: see CLAUDE.md, the 2026-07-27 CI trap) or the openChargeBuffer seam regressed. This is a FAILURE, not a skip."
+    no "#14a observability probe FAILED: RIPWIRE_FAULT_CHARGE_BUFFER=1 produced no DEGRADED_PATH_ALERT on a build that CAN observe alerts (--version build type \"$BUILD_FLAVOUR\", unrelated-degrade-path observable=$alerts_observable) — the openChargeBuffer seam regressed. This is a FAILURE, not a skip."
 fi
 
 # ── §C1 + §C2 (capture-audit-4, wave 3): --for --json's ENVELOPE is charged, and so is over_ceiling ─────
