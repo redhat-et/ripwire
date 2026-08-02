@@ -5317,8 +5317,19 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
         for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i ) pr.push_back( steps[i] );
         ++i;                                                            // skip the Done step
         if( pr.size() < 3 || pr[0].type != TSQueryPredicateStepTypeString ) continue;
-        std::uint32_t nl = 0;
-        const std::string_view op( ts_query_string_value_for_id( q, pr[0].value_id, &nl ), nl );
+        // TWO statements, deliberately. Written as ONE — `string_view( f( …, &nl ), nl )` — the length
+        // argument `nl` and the call that WRITES it are two arguments of the SAME call, and the order in
+        // which a call's arguments are evaluated is UNSPECIFIED. GCC on x86-64 evaluates them right-to-left,
+        // so it read `nl` while it was still 0: `op` came out EMPTY, matched none of the operator names
+        // below, and every #eq?/#not-eq?/#match?/#not-match? predicate was silently skipped (`ok` stays
+        // true ⇒ nothing filtered). GCC on aarch64 and Clang everywhere evaluate left-to-right and happened
+        // to get it right, which is why this only ever reddened on x86-64 Linux/gcc — measured 2026-08-02:
+        // g++-13 -O0 AND -O2 on x86-64 print len=0, the same g++-13 on aarch64 and clang-18 on x86-64 print
+        // len=6. Sequencing the write before the read IS the fix; do not re-inline these two lines.
+        std::uint32_t nl     = 0;
+        const char*   opText = ts_query_string_value_for_id( q, pr[0].value_id, &nl );
+        if( opText == nullptr ) continue;                               // no operator name ⇒ can't evaluate ⇒ don't filter
+        const std::string_view op( opText, nl );
         std::string lhs, rhs;
         if( !argText( pr[1], lhs ) || !argText( pr[2], rhs ) ) continue;   // can't evaluate → don't filter
         bool ok = true;
