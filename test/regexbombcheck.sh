@@ -82,6 +82,30 @@ capRun(){                        # capRun <seconds> <outfile> <errfile> <args…
 #   ((a+))+b   the inner repetition one group deeper than the outer quantifier
 #   ((a)+)+b   the repetition is on the INNER GROUP, not on an atom inside it
 #   (a+|b)+c   alternation is no defence when a branch repeats without bound
+#   (a?)+b     M2-b — BOUNDED inner under an unbounded outer (see the block below)
+#   (a{1,3})+b M2-b — the interval flavour of the same
+#   ((a)?)+b   M2-b — the bounded repetition is ON the inner group, not on an atom inside it
+#   (a{3})+b   M2-b — exact {n} is a quantifier too; deliberately in, see the block below
+#
+# ── M2-b (2026-08-01): TWO OF THESE ARMS USED TO BE "MUST STILL SCAN" CONTROLS ──────────────────────────
+# `(a?)+b` and `(a{1,3})+b` were arms of the PRECISION battery below. The screen only refused an unbounded
+# quantifier over a group that repeated WITHOUT bound inside it, on the reasoning that '?' and '{m,n}' are
+# bounded and so cannot drive the blowup. That reasoning encoded libc++ behaviour. The re-smoke ran the
+# gate's own control set on Ubuntu 24.04 / clang 18 / libstdc++ and BOTH controls HUNG — killed by this
+# harness's wall-clock cap, exactly like the (a+)+b bomb they were supposed to contrast with. Bounded is
+# not the same as unambiguous: '(a?)+' can split a run of 'a' in as many ways as '(a+)+' can, because the
+# inner may also match EMPTY, and '(a{1,3})+' because the inner's width varies. On libc++ the same two
+# patterns return in milliseconds (and '(a{1,3})+b' even trips the mid-match complexity degrade), which is
+# why this repo shipped them as controls for as long as it only ever ran on a Mac.
+#
+# Cross-platform-identical behaviour is the standing law and it admits exactly one verdict per pattern, so
+# the screen was WIDENED rather than the controls re-labelled per platform: an unbounded quantifier
+# ('*', '+', '{n,}') applied to a group that contains ANY quantifier at all — '?', '{m,n}' and exact '{n}'
+# included — is refused. Exact '{n}' is in on purpose: a fixed-count inner is only unambiguous when what it
+# repeats is itself fixed-width, and '((ab|c){2})+d' is a genuine bomb that reading the quantifier alone
+# cannot tell apart from '(a{3})+b'. A structural screen that must return the same verdict on two different
+# backtrackers cannot make that call, so it refuses — bounded, named, with a workaround — rather than hand
+# either engine a pattern one of them never comes back from.
 bombCase(){
     local label="$1" pat="$2"
     local rc; rc="$( capRun 20 "$TMP/out" "$TMP/err" "$CORPUS" --regex="$pat" --no-prefilter --no-cache )"
@@ -104,6 +128,11 @@ bombCase "(a{2,})+b" '(a{2,})+b'
 bombCase "((a+))+b"  '((a+))+b'
 bombCase "((a)+)+b"  '((a)+)+b'
 bombCase "(a+|b)+c"  '(a+|b)+c'
+bombCase "(a?)+b"    '(a?)+b'
+bombCase "(a{1,3})+b" '(a{1,3})+b'
+bombCase "((a)?)+b"  '((a)?)+b'
+bombCase "(a{3})+b"  '(a{3})+b'
+bombCase "(?:a+)+b"  '(?:a+)+b'
 
 # The refusal must carry a WORKAROUND, not just a complaint — the L5 refusal set that bar and this one
 # keeps it. (Checked once; the sentence is shared by every construct.)
@@ -122,9 +151,17 @@ rc="$( capRun 20 "$TMP/out" "$TMP/err" "$BENIGN" --regex='(a+)+b' --no-cache )"
     || no "corpus without bait: exit $rc — the verdict depends on the corpus"
 
 # ── (3) PRECISION: the guard must catch the nested-unbounded class and nothing wider ─────────────────────
-# Over-refusal is the failure mode a structural guard invites, and it is silent — a user just loses
-# patterns. Each of these is either bounded-inner, unquantified, quantifier-free inside, or a literal '+'
-# in a class or behind a backslash, and every one of them must still SCAN.
+# Over-refusal is the failure mode a structural guard invites. Each of these is quantifier-free inside its
+# group, or unquantified on the outside, or BOUNDED on the outside, or has its '+' in a character class or
+# behind a backslash — and every one of them must still SCAN.
+#
+# M2-b left this list SHORTER on one axis and longer on another. The two bounded-inner arms moved to the
+# bomb battery (they hang libstdc++ — see the block above), and three arms were added to pin down what the
+# widened screen must NOT touch: a non-capturing group, because '(?:' opens a group with a '?' that is a
+# MODIFIER and not a quantifier and a screen reading it as one would refuse every '(?:abc)+' in the world;
+# a BOUNDED outer quantifier over a group stuffed with unbounded ones, which is the refusal message's own
+# suggested workaround and would be a self-contradiction to refuse; and a bounded inner under an
+# UNQUANTIFIED outer, which proves the verdict turns on the outer quantifier and not on the inner.
 safeCase(){
     local label="$1" pat="$2"
     local rc; rc="$( capRun 20 "$TMP/out" "$TMP/err" "$CORPUS" --regex="$pat" --no-cache )"
@@ -137,11 +174,12 @@ safeCase "a+b (no group)"          'a+b'
 safeCase "(a)+b (empty inner)"     '(a)+b'
 safeCase "(abc)+ (literal group)"  '(abc)+'
 safeCase "(a|b)+ (plain alt)"      '(a|b)+'
-safeCase "(a?)+b (bounded inner)"  '(a?)+b'
-safeCase "(a{1,3})+b (bounded {})" '(a{1,3})+b'
 safeCase "[a+]+b ('+' in class)"   '[a+]+b'
 safeCase "(a+)b (outer unquant.)"  '(a+)b'
 safeCase "(a+)(b)+ (siblings)"     '(a+)(b)+'
+safeCase "(?:abc)+ (non-capturing)" '(?:abc)+'
+safeCase "(\s*\w+){1,20} (bounded outer)" '(\s*\w+){1,20}'
+safeCase "(a?)b (bounded, outer unquant.)" '(a?)b'
 
 # and the point of the fixture survives: a safe pattern still finds normal.cpp's ordinary matches while
 # bomb.md sits in the very same candidate set, scanned harmlessly.

@@ -821,16 +821,30 @@ inline std::optional<std::string> nonPortableRegexEscape( const std::string& pat
 // right outcome rather than a silent skip — a skipped file reads as a measurement, an exit-1 refusal that
 // names the construct cannot.
 //
-// WHAT IS CAUGHT: an unbounded quantifier ('*', '+', '{n,}') applied to a group that already repeats
-// without bound anywhere inside it, at any nesting depth — (X+)+, (X*)*, (X+)*, (X{n,})+, ((X+))+,
-// ((X)+)+, (X+|Y)+. That is the whole exponential family reachable by inspection.
+// M2-b (Linux RE-smoke) — the first cut of this screen refused only an unbounded quantifier over a group
+// that repeated WITHOUT bound inside it, and let (a?)+ and (a{1,3})+ through as "bounded inner, cannot
+// blow up". That was libc++ behaviour written down as a law. On Ubuntu 24.04 / clang 18 / libstdc++ both
+// of those patterns HANG — the re-smoke killed them on the harness's wall-clock cap, on the same fixture
+// and in the same way as (a+)+b, and they had been shipping as this gate's "must still scan" controls.
+// BOUNDED IS NOT UNAMBIGUOUS: '(a?)+' splits a run of 'a' in as many ways as '(a+)+' does, because the
+// inner may also match EMPTY, and '(a{1,3})+' because the inner's width varies. So the screen is widened
+// rather than the verdict split per platform.
 //
-// WHAT IS DELIBERATELY NOT CAUGHT, so the guard does not quietly eat working patterns: '?' and '{n,m}'
-// are BOUNDED and never drive the blowup, so (a?)+ and (a{1,3})+ pass; a group with no repetition inside
-// passes however it is quantified, so (abc)+ and (a|b)+ pass; '+' inside a character class or behind a
-// backslash is a literal, so [a+]+ and (\+)+ pass; and an unquantified group passes whatever it contains,
-// so (a+)b and (a+)(b)+ pass. The known GAP is overlapping alternation — (a|a)+b is a real bomb whose
-// branches only overlap semantically — which is why grepScanText's mid-match catch is kept as
+// WHAT IS CAUGHT: an unbounded quantifier ('*', '+', '{n,}') applied to a group that contains ANY
+// quantifier anywhere inside it, at any nesting depth — bounded ones included. (X+)+, (X*)*, (X+)*,
+// (X{n,})+, ((X+))+, ((X)+)+, (X+|Y)+ as before, and now (X?)+, (X{m,n})+, ((X)?)+ and (X{n})+ too.
+// Exact '{n}' is in ON PURPOSE: a fixed-count inner is only unambiguous when what it repeats is itself
+// fixed-width, and '((ab|c){2})+d' is a real bomb that reading the quantifier alone cannot tell apart from
+// '(a{3})+b'. A screen that must return ONE verdict on two different backtrackers cannot make that call.
+//
+// WHAT IS DELIBERATELY NOT CAUGHT, so the guard does not quietly eat working patterns: a group with no
+// quantifier inside passes however it is quantified, so (abc)+, (a|b)+ and (a)+b pass; a BOUNDED outer
+// quantifier passes whatever the group contains, which is what keeps the workaround this very message
+// suggests — '(\s*\w+){1,20}' — legal; an UNQUANTIFIED group passes whatever it contains, so (a+)b, (a?)b
+// and (a+)(b)+ pass; '+' inside a character class or behind a backslash is a literal, so [a+]+ and (\+)+
+// pass; and the '?' that opens '(?:', '(?=' or '(?!' is a group MODIFIER, not a quantifier, so (?:abc)+
+// passes while (?:a+)+b is still refused. The known GAP is overlapping alternation — (a|a)+b is a real
+// bomb whose branches only overlap semantically — which is why grepScanText's mid-match catch is kept as
 // belt-and-braces rather than removed. Every one of these cases is an arm of test/regexbombcheck.sh.
 //
 // Scope: this screens --regex, the one place a user's own pattern meets an unbounded corpus. The --arch
@@ -861,10 +875,37 @@ inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at
     return { true, upperDigitCount == 0, ( cursor + 1 ) - at };                                           // {n,} unbounded, {n,m} bounded
 }
 
+// '(?:' / '(?=' / '(?!' — a '?' immediately after '(' opens a NON-CAPTURING or lookaround group. It is a
+// group MODIFIER, not a quantifier, and reading it as one (which M2-b's widened flag otherwise would)
+// refuses every '(?:abc)+' ever written. Returns how many characters the scan must step over.
+inline std::size_t regexGroupModifierLength( const std::string& pat, std::size_t openAt )
+{
+    return ( openAt + 1 < pat.size() && pat[ openAt + 1 ] == '?' ) ? 1 : 0;
+}
+
+// The one refusal this screen emits, kept out of the scan loop so the loop reads as the small state
+// machine it is. `outerQuant` is the quantifier character that was applied to the offending group.
+inline std::string catastrophicRegexMessage( char outerQuant )
+{
+    return   std::string( "catastrophic backtracking: the unbounded quantifier '" ) + outerQuant + "' is applied to a group whose contents "
+             "already repeat (the (X+)+ / (X*)* / (X+)* / (X{n,})+ family, and equally the bounded-inner (X?)+ / (X{m,n})+ / (X{n})+ one). "
+             "Every way of splitting the input between the inner and the outer repetition is a separate path, so matching a non-matching "
+             "line costs time exponential in its length; a BOUNDED inner is no defence, because it is ambiguity and not unboundedness that "
+             "multiplies the paths. std::regex has no backtracking budget you can set, and the standard libraries do not agree about it — "
+             "libc++ abandons the match in under a second, libstdc++ never gives up at all (measured on Ubuntu 24.04 / clang 18 / libstdc++: "
+             "'(a+)+b' still running after 560 s, and '(a?)+b' and '(a{1,3})+b' both still running when the harness killed them) — so this "
+             "is refused rather than answered differently per platform. Workaround: collapse the two repetitions into one, since the outer "
+             "adds no string the inner does not already match ('(a+)+' is the language of 'a+', '(a?)+' of 'a*', '(a{1,3})+' of 'a+'), or "
+             "make the OUTER bounded with an explicit interval ('(\\s*\\w+){1,20}')";
+}
+
 inline std::optional<std::string> catastrophicRegexConstruct( const std::string& pat )
 {
-    // one flag per OPEN group: does anything inside it, at any depth, repeat an unbounded number of times?
-    std::vector<char> hasUnboundedInsideGroup;
+    // one flag per OPEN group: does anything inside it, at any depth, carry a quantifier — of ANY kind?
+    // (M2-b: this used to track only UNBOUNDED inner repetition, which let the libstdc++-hanging (a?)+ and
+    // (a{1,3})+ through. Unbounded is a subset of "any", so widening the flag is the whole behaviour change
+    // — the refusal condition below still requires the OUTER quantifier to be unbounded.)
+    std::vector<char> hasQuantifierInsideGroup;
     bool              isInsideClass = false;
 
     for( std::size_t i = 0; i < pat.size(); ++i )
@@ -877,36 +918,29 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
         if( c == '[' )      { isInsideClass = true; continue; }
 
         // group open / close — the close is where the whole verdict is made
-        if( c == '(' ) { hasUnboundedInsideGroup.push_back( 0 ); continue; }
+        if( c == '(' ) { hasQuantifierInsideGroup.push_back( 0 ); i += regexGroupModifierLength( pat, i ); continue; }
         if( c == ')' )
         {
-            if( hasUnboundedInsideGroup.empty() ) continue;                             // unbalanced: the compile probe below owns that error
+            if( hasQuantifierInsideGroup.empty() ) continue;                            // unbalanced: the compile probe below owns that error
 
-            const bool isRepeatingInside = hasUnboundedInsideGroup.back() != 0;
-            hasUnboundedInsideGroup.pop_back();
+            const bool isRepeatingInside = hasQuantifierInsideGroup.back() != 0;
+            hasQuantifierInsideGroup.pop_back();
             const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
 
             if( quant.isPresent && quant.isUnbounded && isRepeatingInside )
-                return   std::string( "catastrophic backtracking: the unbounded quantifier '" ) + pat[ i + 1 ] + "' is applied to a group that already "
-                         "repeats without bound inside it (the (X+)+ / (X*)* / (X+)* / (X{n,})+ family). Every way of splitting the input between the "
-                         "inner and the outer repetition is a separate path, so matching a non-matching line costs time exponential in its length. "
-                         "std::regex has no backtracking budget you can set, and the standard libraries do not agree about it — libc++ abandons the "
-                         "match in under a second, libstdc++ never gives up at all (measured: still running after 560 s) — so this is refused rather "
-                         "than answered differently per platform. Workaround: collapse the two repetitions into one, since the outer adds no string the "
-                         "inner does not already match ('(a+)+' is the language of 'a+', '([a-z]+\\.)+' of '([a-z]\\.?)+'), or make the outer bounded "
-                         "with an explicit interval ('(\\s*\\w+){1,20}')";
+                return catastrophicRegexMessage( pat[ i + 1 ] );
 
-            // the group is now an ATOM of its parent: an unbounded repetition anywhere inside it — or ON it —
-            // is an unbounded repetition inside the parent too, which is what makes ((a+))+ and ((a)+)+ visible
-            if( !hasUnboundedInsideGroup.empty() && ( isRepeatingInside || ( quant.isPresent && quant.isUnbounded ) ) )
-                hasUnboundedInsideGroup.back() = 1;
+            // the group is now an ATOM of its parent: a quantifier anywhere inside it — or ON it — is a
+            // quantifier inside the parent too, which is what makes ((a+))+, ((a)+)+ and ((a)?)+ visible
+            if( !hasQuantifierInsideGroup.empty() && ( isRepeatingInside || quant.isPresent ) )
+                hasQuantifierInsideGroup.back() = 1;
             if( quant.isPresent ) i += quant.lengthCount;                               // step over the quantifier we just judged
             continue;
         }
 
         // a plain quantifier: it marks the innermost enclosing group, if any (top-level repetition is fine)
         const RegexQuantifier quant = regexQuantifierAt( pat, i );
-        if( quant.isPresent && quant.isUnbounded && !hasUnboundedInsideGroup.empty() ) hasUnboundedInsideGroup.back() = 1;
+        if( quant.isPresent && !hasQuantifierInsideGroup.empty() ) hasQuantifierInsideGroup.back() = 1;
         if( quant.isPresent ) i += quant.lengthCount - 1;
     }
     return std::nullopt;
