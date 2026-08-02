@@ -594,10 +594,48 @@ std::string_view queryFor( std::string_view querySub ) noexcept
 // the shared immutable TSQuery* and create only a cheap per-thread TSQueryCursor. INVARIANT: the cache is
 // written ONLY by ingest()'s prewarm (which compiles the present grammars in parallel into locals, then
 // installs here single-threaded after the join), so the parse-pool workers only READ it — lock-free.
+//
+// OWNERSHIP (N2). The cache is the SOLE owner of every TSQuery it holds; every other holder — the parse
+// pool, captureTagsFacts — only borrows the raw pointer for the length of a call, which is why ownership
+// lives in the CONTAINER and not in the entries (a per-entry move-only guard would have to survive the
+// map's rehash-and-move for no benefit). Same shape as ParserGuard/TreeGuard below: a struct whose
+// destructor frees the tree-sitter object it holds.
+//
+// Before this struct existed there was no owner at all. The install loop in ingest() deletes a DISPLACED
+// query on an in-process re-ingest (A652/A4-F16), which bounds growth in a long-lived MCP server, but the
+// queries finally resident in the map were never freed: the map's own destructor drops the pointers at
+// exit and the blocks go unreachable. Real LeakSanitizer — Linux only, absent from Apple clang, and
+// therefore invisible on this repo's whole history of macOS runs — reports exactly that:
+//   Direct leak of 672 B in 3 objects:  ts_malloc_default -> ts_query_new (query.c:2995)
+//                                       -> compileQueryStandalone (ingest.cpp) -> ingest thread lambda
+// fired by the cachefuzzcheck arms whose cache is unusable (/dev/null, a directory at the cache path), i.e.
+// exactly the arms that take the L1 guard's full-reparse route and therefore compile every grammar cold.
+// A suppression would have been the wrong tool: lsan_suppressions.txt exists for tree-sitter's INTERNED,
+// never-freed data, and these are ordinary per-run allocations with a well-defined lifetime.
+struct CompiledQueryCache
+{
+    HashMap<const TSLanguage*, TSQuery*> byGrammar;   // grammar → compiled query (owned)
+
+    CompiledQueryCache()                                       = default;
+    CompiledQueryCache( const CompiledQueryCache& )            = delete;
+    CompiledQueryCache& operator=( const CompiledQueryCache& ) = delete;
+
+    // Only ever runs at process teardown, single-threaded, after every parse pool has joined. Each entry is
+    // a distinct query (the compile set is deduplicated BY GRAMMAR, so no two keys can alias one TSQuery)
+    // and a displaced entry is deleted at the moment it is overwritten, never left in the map — so nothing
+    // here can be a second delete of the same pointer.
+    ~CompiledQueryCache()
+    {
+        for( const auto& entry : byGrammar )
+            if( entry.second != nullptr )
+                ts_query_delete( entry.second );
+    }
+};
+
 HashMap<const TSLanguage*, TSQuery*>& compiledQueryCache()
 {
-    static HashMap<const TSLanguage*, TSQuery*> cache;   // grammar → compiled query
-    return cache;
+    static CompiledQueryCache cache;   // grammar → compiled query; owns every TSQuery it hands out
+    return cache.byGrammar;
 }
 
 struct QueryReadyGate
@@ -4580,9 +4618,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
             for( std::thread& th : queryCompilePool )
                 th.join();
-            // Install compiled queries single-threaded (workers are still gated). A652: on an in-process
-            // re-ingest (long-lived MCP server) the same grammar can already own a cached query — delete the
-            // displaced entry before overwriting or it leaks one TSQuery per grammar per re-ingest (A4-F16).
+            // Install compiled queries single-threaded (workers are still gated). Installing TRANSFERS
+            // ownership to CompiledQueryCache, which frees whatever is still resident at process teardown
+            // (N2). A652: on an in-process re-ingest (long-lived MCP server) the same grammar can already
+            // own a cached query, and overwriting drops the only pointer to it — delete the displaced entry
+            // here or it leaks one TSQuery per grammar per re-ingest (A4-F16).
             HashMap<const TSLanguage*, TSQuery*>& cache = compiledQueryCache();
             for( std::size_t i = 0; i < toCompile.size(); ++i )
             {
