@@ -34,9 +34,12 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 {
     std::string cur;
     const auto  flush = [ & ] { if( cur.size() >= 2 ) out.push_back( cur ); cur.clear(); };
-    for( unsigned char c : id )
+    // EXPLICIT narrowing: `char` is signed on x86-64/macOS, so an IMPLICIT `unsigned char c : id` trips G1's
+    // implicit-integer-sign-change on any byte ≥ 0x80 (a UTF-8 identifier). hashutil.h owns the full note.
+    for( const char ch : id )
     {
-        const bool upper = c >= 'A' && c <= 'Z';
+        const unsigned char c     = static_cast<unsigned char>( ch );
+        const bool          upper = c >= 'A' && c <= 'Z';
         const bool lower = c >= 'a' && c <= 'z';
         const bool digit = c >= '0' && c <= '9';
         if( !upper && !lower && !digit ) { flush(); continue; }                       // separator
@@ -489,8 +492,9 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     {
         std::string cur;
         const auto  flush = [ & ] { if( cur.size() >= 2 ) qToks.push_back( cur ); cur.clear(); };
-        for( unsigned char c : query )
+        for( const char ch : query )   // EXPLICIT narrowing — see subtokens() above / hashutil.h
         {
+            const unsigned char c = static_cast<unsigned char>( ch );
             if( c == ' ' || c == '\t' || c == '\n' || c == '\r' ) { flush(); continue; }
             cur.push_back( ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : char( c ) );
         }

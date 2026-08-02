@@ -371,7 +371,7 @@ struct Type3Stats
 inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) noexcept
 {
     std::uint64_t h = seed;
-    for( unsigned char c : t ) { h ^= c; h = hashutil::fnv1aMultiply( h ); }
+    for( const char c : t ) h = hashutil::fnv1aAbsorb( h, c );
     h ^= 0x9e3779b97f4a7c15ull;  h = hashutil::fnv1aMultiply( h );   // token separator so [ab][c] != [a][bc]
     return h;
 }
@@ -454,7 +454,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
             std::uint64_t sh = 1469598103934665603ull;
             for( const std::string& t : raw )
             {
-                for( unsigned char c : t ) { sh ^= c; sh = hashutil::fnv1aMultiply( sh ); }
+                for( const char c : t ) sh = hashutil::fnv1aAbsorb( sh, c );
                 sh ^= 0x2full;
                 sh = hashutil::fnv1aMultiply( sh );
             }
