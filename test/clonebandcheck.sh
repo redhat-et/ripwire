@@ -21,6 +21,12 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 CXX="${CXX:-c++}"
+
+# §CI-P3: ask THIS front end how it spells C++23 rather than assuming the Clang-17 spelling — an
+# AppleClang 15 (LLVM 16) macos-14 runner rejects `-std=c++23` outright and took this gate with it
+# (PR #1, run 30732976779). Rationale + the CMake mapping this mirrors: scripts/cxxstd.sh.
+. "$ROOT/scripts/cxxstd.sh"
+CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 HARNESS="$ROOT/test/cloneband_harness.cpp"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 
@@ -30,7 +36,7 @@ echo "clonebandcheck: CXX=$CXX"
 #    link as type3clonecheck.sh (Diagnostics' DEGRADED_PATH_ALERT seam). ─────────────────────────────────────────
 build_one() {   # $1 = tag, $2.. = extra flags
     local tag="$1"; shift
-    if ! "$CXX" -std=c++23 -O2 -g -Wall -Wextra "$@" \
+    if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra "$@" \
             -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
             "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$WORK/harness_$tag" 2> "$WORK/cc_$tag.log"; then
         echo "  FAIL  harness ($tag) failed to compile"; sed 's/^/    /' "$WORK/cc_$tag.log"; exit 2
