@@ -6587,7 +6587,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
     if( cfg.grepRegex )
         if( const std::optional<std::string> reErr = regexCompileError( pat ) )
         {
-            std::fprintf( stderr, "ripwire: --regex='%s' is not a valid regular expression: %s "
+            // The lead-in is deliberately NEUTRAL ("refused", not "invalid"): regexCompileError() also
+            // refuses patterns that are perfectly valid ECMAScript — L5's non-portable escapes and M2's
+            // catastrophic-backtracking family — so "is not a valid regular expression" would be false
+            // for two of its three verdicts. The reason string itself names which case it was.
+            std::fprintf( stderr, "ripwire: --regex='%s' refused, nothing was scanned: %s "
                                   "(a hits=\"0\" here would be a failure, not a measurement — fix the pattern, e.g. ripwire <dir> --regex='fnv1a\\w+')\n",
                           pat.c_str(), reErr->c_str() );
             return 1;
