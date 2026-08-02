@@ -183,8 +183,11 @@ jobs:
       # matrix.os, not runner.os: the runner context does not exist at job-level env — GitHub's
       # parser rejects the whole workflow (found by the first real Actions run; local YAML lint
       # cannot see it). Step-level `if: runner.os` below is legal and stays.
-      ASAN_OPTIONS: ${{ matrix.os == 'macos-14' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1' }}
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      # log_path: a sanitizer abort inside a gate that pipes 2>/dev/null leaves NO report in the log
+      # (CI round 3: an asan/x86-64 abort read as "pin no longer resolves"). With log_path the report
+      # lands in a file the failure artifact below preserves.
+      ASAN_OPTIONS: ${{ matrix.os == 'macos-14' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1:log_path=/tmp/asanlog' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1:log_path=/tmp/asanlog' }}
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:log_path=/tmp/asanlog
       LSAN_OPTIONS: suppressions=${{ github.workspace }}/lsan_suppressions.txt
     steps:
       # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
@@ -298,3 +301,13 @@ jobs:
       # fixed and the review notes carry a self-date: at that point drift= can be gated at 0.
       - name: Self-report (non-gating) — --doc-drift on our own docs
         run: ./asan/ripwire . --doc-drift --with-history || true
+
+      # Sanitizer reports written via log_path survive gates that swallow stderr; keep them when a
+      # step failed so the log tells us WHICH abort happened, not just that one did.
+      - name: Upload sanitizer reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-reports-${{ matrix.os }}
+          path: /tmp/asanlog*
+          if-no-files-found: ignore
