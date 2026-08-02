@@ -1,6 +1,6 @@
 # ripwire documentation
 
-Six entries, each written for one reader. Start with the row that matches why you are here.
+Seven entries, each written for one reader. Start with the row that matches why you are here.
 
 | File | Who it is for | What it answers |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ Six entries, each written for one reader. Start with the row that matches why yo
 | **[`EVALS.md`](EVALS.md)** | Anyone checking whether the tool is oversold | Every published number with its instrument, corpus and pinning file — plus the honest counterexamples, and the claims this project deliberately does *not* publish. |
 | **[`METHODOLOGY.md`](METHODOLOGY.md)** | Anyone building something similar | The process, as transferable method: write the gate before the code, capture-audit your own output, and the sibling-completeness rule — the defect class where a fix lands on one member of a family and never on the rest. |
 | **[`docs_commands_build.py`](docs_commands_build.py)** | Maintainers | The generator behind `COMMANDS.md`. Reads the binary's `--help` and a recorded showcase capture; `--check` is the drift comparison that `test/docscommandscheck.sh` runs. |
+| **[`assets/`](assets/)** | The front page | The README banner artwork (SVG, self-contained). |
 | **[`captures/`](captures/)** | Maintainers, and the curious | One recorded run of every verb against a real repository — the source of `COMMANDS.md`'s sample output, and the harvest source for the differential argv harness. |
 
 Outside this directory:
