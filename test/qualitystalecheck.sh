@@ -170,15 +170,32 @@ echo "$unstamped" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
 r1="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"; r2="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"
 [ "$r1" = "$r2" ] && ok "--quality-delta deterministic run-to-run" || no "--quality-delta non-deterministic"
 
-# ── DEGRADE-OBSERVABILITY PROBE (for arm 7) ───────────────────────────────────────────────────────────────
-# Arm 7 asserts a DEGRADED_PATH_ALERT, which a Release/NDEBUG build compiles OUT ("if you add a degrade path,
-# it is the PLAIN run that proves it" — CLAUDE.md). Probe the flavour with an UNRELATED, already-gated
-# degrading invocation (--since=notadate) so that a missing alert inside arm 7 itself is a genuine FAILURE
-# rather than a silent skip — the whole point of the finding is that no alert fired where one was owed.
+# ── DEGRADE-OBSERVABILITY / BUILD-FLAVOUR PROBE (for arms 7 and 8c) ───────────────────────────────────────
+# Arms 7 and 8c assert a DEGRADED_PATH_ALERT, which a Release/NDEBUG build compiles OUT ("if you add a
+# degrade path, it is the PLAIN run that proves it" — CLAUDE.md). Probe the flavour with an UNRELATED,
+# already-gated degrading invocation (--since=notadate) so that a missing alert INSIDE arm 7 is a genuine
+# FAILURE rather than a silent skip — the whole point of the finding is that no alert fired where one was owed.
+#
+# What the missing alert MEANS still has to be decided, and that needs a second, independent reading:
+# --version's build-type token (versioncheck's source of truth; CMakeLists sets it from CMAKE_BUILD_TYPE,
+# "dev" for the plain configure). Release/RelWithDebInfo/MinSizeRel define NDEBUG, nothing else does.
+#   both silent + NDEBUG flavour  → unobservable BY DESIGN → SKIP, reason named; CI's PLAIN leg proves it
+#   unrelated alert fires, arm 7's does not → the seam regressed → FAIL
+#   both silent on a dev/asan flavour → the binary contradicts its own version string → FAIL
+# Before 2026-08-01 the NDEBUG case took the FAIL branch, which made CI's Release leg unconditionally red —
+# the 2026-07-27 trap from the other side: a leg that always fails proves exactly as little as one that
+# always passes.
 alerts_observable=0
 "$BIN" "$REPO" --rank-by=churn --since=notadate >/dev/null 2>"$REPO/.probe.err"
 grep -q 'math degraded' "$REPO/.probe.err" && alerts_observable=1
 rm -f "$REPO/.probe.err"
+BUILD_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$BUILD_FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel) ndebug_flavour=1 ;;
+    *)                                 ndebug_flavour=0 ;;
+esac
+skip(){ printf '  SKIP  %s\n' "$*"; }
+DEGRADE_SKIP_WHY="DEGRADED_PATH_ALERT is compiled out of this binary (--version says build type \"$BUILD_FLAVOUR\", which defines NDEBUG; the unrelated --since=notadate degrade path is silent here too, so alerts are unobservable globally rather than this seam having broken). Proven by the PLAIN-flavour run of the same suite, which CI executes as a second leg for exactly this reason."
 
 # 7) w1 MED #1 — the self-heal unlink FAILS (read-only parent dir). The marker used to say "stale sidecar
 #    removed" on the strength of the CLI's INTENT while the file was demonstrably still on disk (the unlink's
@@ -215,8 +232,10 @@ if [ "$alerts_observable" -eq 1 ]; then
     printf '%s' "$ro_err" | grep -q 'math degraded.*git HEAD' \
         && ok "…and says the baseline still falls back to git HEAD (states the CONSEQUENCE, not just the failure)" \
         || no "the alert does not say what the run fell back to"
+elif [ "$ndebug_flavour" -eq 1 ]; then
+    skip "arm 7's degrade assertions (one [math degraded] alert naming the surviving sidecar and the git-HEAD fallback) — $DEGRADE_SKIP_WHY"
 else
-    no "this binary compiles DEGRADED_PATH_ALERT out (Release/NDEBUG): arm 7's degrade assertion CANNOT be made — run the PLAIN build"
+    no "arm 7: no DEGRADED_PATH_ALERT is observable, yet --version reports build type \"$BUILD_FLAVOUR\", which does NOT define NDEBUG — the alert seam regressed on a flavour that should be able to see it"
 fi
 chmod u+w "$RREPO"; rm -rf "$RREPO"; ROSANDBOXES=""
 
@@ -287,8 +306,10 @@ if [ "$alerts_observable" -eq 1 ]; then
     printf '%s' "$nohead2_err" | grep -q 'math degraded.*no baseline floor at all' \
         && ok "8c: the alert instead names the TRUE consequence (no baseline floor at all)" \
         || { no "8c: the alert does not name the true no-HEAD consequence"; printf '     got: %s\n' "$( printf '%s' "$nohead2_err" | grep 'math degraded' | head -1 )"; }
+elif [ "$ndebug_flavour" -eq 1 ]; then
+    skip "8c's §B12.11 alert-wording assertion (the no-HEAD case must name \"no baseline floor at all\", never an unconditional git-HEAD fallback) — $DEGRADE_SKIP_WHY"
 else
-    no "8c: this binary compiles DEGRADED_PATH_ALERT out (Release/NDEBUG): the §B12.11 alert-wording assertion CANNOT be made — run the PLAIN build"
+    no "8c: no DEGRADED_PATH_ALERT is observable, yet --version reports build type \"$BUILD_FLAVOUR\", which does NOT define NDEBUG — the alert seam regressed on a flavour that should be able to see it"
 fi
 chmod u+w "$NOHEADRO"; rm -rf "$NOHEADRO"; ROSANDBOXES=""
 

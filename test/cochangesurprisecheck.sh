@@ -117,7 +117,7 @@ mkCochangeFixture(){
     (
         cd "$FIX" || exit 1
         git init -q . || exit 1
-        git config user.email cochange@fixture.invalid
+        git config user.email cochange@example.invalid
         git config user.name  cochange-fixture
         git config commit.gpgsign false
         git add -A && git commit -qm "fixture base" || exit 1
