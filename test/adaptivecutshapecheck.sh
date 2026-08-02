@@ -27,7 +27,19 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "adaptivecutshapecheck: SRC=$SRC"
 
 CXX="${CXX:-clang++}"
-"$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$SRC" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/t" 2>"$TMP/build.err"
+# …and if `clang++` is not on PATH, use whatever C++ driver is (the same fallback utf8scrubcheck
+# already does). This gate prefers clang++ but does not depend on it, and a machine that only ships
+# `c++`/`g++` used to fail it with a bare "clang++: command not found" — a missing tool reported as a
+# product defect. Reproduced on a stock ubuntu:24.04 image while diagnosing PR #1.
+command -v "$CXX" >/dev/null 2>&1 || CXX=c++
+command -v "$CXX" >/dev/null 2>&1 || CXX=g++
+
+# §CI-P3: ask THIS front end how it spells C++23 rather than assuming the Clang-17 spelling — an
+# AppleClang 15 (LLVM 16) macos-14 runner rejects `-std=c++23` outright and took this gate with it
+# (PR #1, run 30732976779). Rationale + the CMake mapping this mirrors: scripts/cxxstd.sh.
+. "$ROOT/scripts/cxxstd.sh"
+CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
+"$CXX" "$CXXSTD" -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$SRC" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/t" 2>"$TMP/build.err"
 if [ -x "$TMP/t" ]; then
     ok "gate binary built"
 else
