@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="176" viewBox="0 0 880 176" role="img" aria-label="ripwire — the ripgrep of AI context">
+  <!-- ripwire wordmark banner: dark terminal card, two-tone identity (cyan = ripgrep speed, amber = tripwire honesty) -->
+  <defs>
+    <clipPath id="r"><rect width="880" height="176" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#r)">
+    <rect width="880" height="176" fill="#0D1117"/>
+    <rect x="0.5" y="0.5" width="879" height="175" rx="13.5" fill="none" stroke="#232D3D"/>
+    <!-- traffic dots -->
+    <circle cx="26" cy="26" r="5" fill="#2A3547"/>
+    <circle cx="44" cy="26" r="5" fill="#2A3547"/>
+    <circle cx="62" cy="26" r="5" fill="#2A3547"/>
+    <!-- wordmark -->
+    <text x="40" y="96" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="58" font-weight="700">
+      <tspan fill="#56D6E8">rip</tspan><tspan fill="#F2B84B">wire</tspan>
+    </text>
+    <text x="42" y="132" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="19" fill="#E6EDF3" font-weight="600">The ripgrep of AI context.</text>
+    <!-- right column: the two halves -->
+    <text x="470" y="66" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+      <tspan fill="#56D6E8" font-weight="700">rip</tspan><tspan fill="#8B95A5">  structural answers in tens of milliseconds,</tspan>
+    </text>
+    <text x="470" y="86" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     from a call graph it built itself</text>
+    <text x="470" y="118" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+      <tspan fill="#F2B84B" font-weight="700">wire</tspan><tspan fill="#8B95A5"> every count it cannot prove is a total</tspan>
+    </text>
+    <text x="470" y="138" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     ships labelled as a floor</text>
+  </g>
+</svg>
