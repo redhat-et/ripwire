@@ -246,6 +246,18 @@ jobs:
       - name: Heavy verb — --edit-check (test/editcheckcheck.sh)
         run: RIPWIRE_BIN=asan/ripwire bash test/editcheckcheck.sh
 
+      # cachefuzzcheck's two mutation tables ARE sanitizer sweeps: they drive corrupt/truncated/hostile cache
+      # blobs and corrupt qsnap blobs through the readers and assert that no sanitizer report fires. That needs
+      # an instrumented binary — RIPWIRE_ASAN_BIN is the whole point of the gate — and the `release` jobs, which
+      # configure only build/, cannot supply one. Until now the gate hard-FAILED there for the missing binary
+      # (PR #1, run 30732976779: "absorb gate (cachefuzzcheck.sh failed)" on BOTH release legs, that one line
+      # its only failure) while NO job anywhere ran the sweeps it exists for. The gate now skips those two arms
+      # with a named reason on a leg that has no ASan build, and this step is where they actually run: both
+      # variables point at the instrumented binary, so the ground-truth arms and the sanitizer arms agree by
+      # construction. Adding it here is what makes that skip reason true rather than an excuse.
+      - name: Sanitizer sweep — corrupt cache / qsnap blobs (test/cachefuzzcheck.sh)
+        run: RIPWIRE_BIN=asan/ripwire RIPWIRE_ASAN_BIN=asan/ripwire bash test/cachefuzzcheck.sh
+
       # NOT a heavy verb — here because it is the ONLY gate whose subject is an integer-overflow class that
       # a plain binary cannot observe. cppqualcheck §9 drives an unbalanced `operator>` frame through
       # --from-trace; before the H4 W2b fixup that aborted the G1 build (rc=134) while the plain build ran
