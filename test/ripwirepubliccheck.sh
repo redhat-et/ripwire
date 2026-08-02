@@ -141,7 +141,9 @@ fi
 # tree is read by people and by agents that never look at `git log`, and `--owners`/`--pr-context` put
 # real author addresses into any recorded output. The generators scrub them (docs/docs_commands_build.py,
 # test/showcase_capture.py); this arm is the statement that the scrub ran.
-PERSON_RE='Brewster|brewster|qgames|davidbrewster|barefoot\.ski|quaterniongames'
+# Concatenated on purpose: the tracked tree must not itself SPELL the identifiers this arm hunts
+# (the detector was the last tracked file carrying them). The regex is byte-identical after joining.
+PERSON_RE='Brew''ster|brew''ster|qga''mes|davidbrew''ster|bare''foot\.ski|quaternion''games'
 hits="$( sweep "$PERSON_RE" \
          | grep -vE '^(LICENSE|AUTHORS|THIRD_PARTY\.md|test/ripwirepubliccheck\.sh):' \
          | grep -vE ':[0-9]+:[[:space:]]*(//|#)?[[:space:]]*Copyright [0-9]{4} David Brewster[[:space:]]*$' \
