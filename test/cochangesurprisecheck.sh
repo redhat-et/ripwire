@@ -13,13 +13,35 @@
 # and used by BOTH cochangePartners (per-file) and the repo-wide pair scan in src/main.cpp.
 #
 # This gate:
-#   (1) NEGATIVE  — a pair with a real transitive #include path (ingest.cpp/model.h, main.cpp/notes.h)
-#                   must NOT carry surprising="1", if present in the top-N at all.
-#   (2) POSITIVE  — a genuinely uncoupled DEPENDENCY-CAPABLE pair (src<->src, no transitive #include)
-#                   must STILL carry surprising="1": the fix must not suppress the signal wholesale.
+#   (1) NEGATIVE  — a pair with a real #include path, DIRECT or TRANSITIVE (and in either direction),
+#                   must NOT carry surprising="1".
+#   (1b) NEGATIVE — a CROSS-DIRECTORY bare-name `#include "x.h"` (the `-I` form the path-precise
+#                   resolver structurally cannot see) must not carry surprising="1" either.
+#   (2) POSITIVE  — a genuinely uncoupled DEPENDENCY-CAPABLE pair (src<->src, no #include path either
+#                   way) must STILL carry surprising="1": the fix must not suppress the signal wholesale.
 #   (2b) §A9.3    — a pair with a DEP-INCAPABLE side (.sh/.md/.pdf/.pptx/.json) must carry dep_capable="0"
-#                   and never surprising="1".
+#                   and never surprising="1"; the per-file path must say the same thing.
 #   (3) DETERMINISM — two runs are byte-identical.
+#
+# CORPUS ANCHORING (2026-08-01, Lane O). Arms (1), (1b), (2) and (2b) USED to be pinned to named pairs
+# out of THIS repo's git history (ingest.cpp<->model.h, main.cpp<->notes.h, bench_convergence.cpp<->
+# svector.h) and to whatever happened to sit in the live top-30. That is not a property of the code under
+# test, it is a property of one machine's `.git`: on the published fresh-history repo — i.e. on every
+# clone anyone but the author will ever make, and therefore on every CI run — those commits do not exist,
+# both NEGATIVE arms printed "pair not found ... (fixture drifted — cannot assert)" and the gate exited 1.
+# A gate that can only pass on the author's laptop is not a gate.
+#
+# So the four semantic arms are re-anchored onto a DETERMINISTIC IN-GATE FIXTURE REPO built from scratch
+# by mkCochangeFixture() below: a throwaway git tree with a scripted co-change history that contains, by
+# construction, one pair of every kind the predicate has to separate. It needs no history but its own, so
+# it asserts identically on a fresh clone, a shallow CI checkout and the author's machine — and it closes
+# the ledgered "the positive control is picked from live output, so it can silently stop being a control"
+# gate-health item, because the fixture's positive pair is uncoupled BY CONSTRUCTION.
+#
+# The LIVE repo is still swept afterwards (§A9.3's uncapped no-leak sweep is exactly the kind of check
+# that wants a big real corpus), but every live arm is now PRESENCE-GUARDED: where the row it needs does
+# not exist in this corpus it SKIPs with the missing precondition named, and where the row DOES exist it
+# hard-asserts exactly as before. No live arm can red merely because a clone has different history.
 #
 # §A9.3 AMENDMENT (2026-07-28) — arm (2)'s control INVERTED, on purpose. It used to require that a
 # src<->test/*.sh pair still carry surprising="1", on the reasoning "a shell script can never be
@@ -46,68 +68,169 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v git >/dev/null || { echo "cochangesurprisecheck: git not on PATH"; exit 2; }
 echo "cochangesurprisecheck: BIN=$BIN  ROOT=$ROOT"
 
+skip(){ printf '  SKIP  %s\n' "$*"; }
+
 "$BIN" "$ROOT" --cochange >"$TMP/out" 2>"$TMP/err"
 rc=$?
 [ "$rc" -eq 0 ] && ok "--cochange exits 0" || { no "--cochange exits $rc"; cat "$TMP/err"; }
 [ -s "$TMP/out" ] || { echo "cochangesurprisecheck: empty output, cannot proceed"; exit 2; }
 
-# --pack-top-n raises the cap so the two specific rows checked below aren't hidden by the default 30-row
-# truncation (surprising=0 pairs sort AFTER surprising=1 ones, so a fixed cap alone could make a false
-# positive silently "pass" by dropping out of the top-N instead of by being correctly unflagged).
+# --pack-top-n raises the cap so the rows checked below aren't hidden by the default 30-row truncation
+# (surprising=0 pairs sort AFTER surprising=1 ones, so a fixed cap alone could make a false positive
+# silently "pass" by dropping out of the top-N instead of by being correctly unflagged).
 "$BIN" "$ROOT" --cochange --pack-top-n=1000 >"$TMP/full" 2>/dev/null
 
-# pull out one <pair .../> element mentioning BOTH basenames, regardless of a=/b= order — read from the
-# uncapped run so a genuine pass means "present, correctly unflagged", not "truncated out of the top-N"
-pairRow(){
-    local needle1="$1" needle2="$2"
-    grep -oE '<pair [^>]*/>' "$TMP/full" \
-        | grep -F "$needle1" \
-        | grep -F "$needle2" \
-        | head -n1
+# ══ 0. THE FIXTURE REPO — every semantic arm's corpus, built here, owned here ═════════════════════════
+#
+# One throwaway git repo whose co-change history is scripted so that ONE co-change wave touches every
+# file: every pair therefore has identical together=/deg= support, and the ONLY thing that can vary
+# between two pairs is the #include predicate itself. That is what makes each arm below a clean
+# single-variable test rather than a correlation over whatever the corpus happened to contain.
+#
+#   src/apply.cpp  --#include "mid.h"-->  src/mid.h  --#include "leaf.h"-->  src/leaf.h
+#       → apply.cpp/mid.h  = DIRECT include            (arm 1a)
+#       → apply.cpp/leaf.h = TRANSITIVE, 2 hops        (arm 1b — the §P9.1 defect: a 1-hop-only
+#                                                       predicate flags exactly this pair)
+#       → leaf.h/mid.h     = REVERSE (leaf is includED) (arm 1c — the closure is undirected)
+#   bench/probe.cpp --#include "leaf.h"--> (bare name, other directory, resolvable only through -Isrc)
+#       → probe.cpp/leaf.h = the §P9.1 RESIDUE class   (arm 1d)
+#   src/alpha.cpp / src/beta.cpp and src/alpha.cpp / src/beta.h — both sides dependency-capable, NO
+#   include path in either direction
+#       → the POSITIVE controls                         (arms 2a/2b). 2b is deliberately the SAME .cpp/.h
+#         shape as the negatives above and differs from them in exactly one bit — whether the include
+#         line exists — so a single edited line in this fixture flips it, which is what makes it a
+#         mutation-testable control rather than an assertion nobody has ever seen fail.
+#   tools/deploy.sh — cannot participate in a C++ include graph at all
+#       → dep_capable="0", never surprising="1"         (arms 3a/3b)
+FIX="$TMP/cofix"
+mkCochangeFixture(){
+    mkdir -p "$FIX/src" "$FIX/bench" "$FIX/tools" || return 1
+    printf '#pragma once\nint leafValue();\n'                                      > "$FIX/src/leaf.h"
+    printf '#pragma once\n#include "leaf.h"\nint midValue();\n'                    > "$FIX/src/mid.h"
+    printf '#include "mid.h"\nint apply(){ return midValue() + leafValue(); }\n'   > "$FIX/src/apply.cpp"
+    printf '#pragma once\nint alphaValue();\n'                                     > "$FIX/src/alpha.h"
+    printf '#include "alpha.h"\nint alphaValue(){ return 1; }\n'                   > "$FIX/src/alpha.cpp"
+    printf '#pragma once\nint betaValue();\n'                                      > "$FIX/src/beta.h"
+    printf '#include "beta.h"\nint betaValue(){ return 2; }\n'                     > "$FIX/src/beta.cpp"
+    printf '#include "leaf.h"\nint probe(){ return leafValue(); }\n'               > "$FIX/bench/probe.cpp"
+    printf '#!/bin/sh\necho deploy\n'                                              > "$FIX/tools/deploy.sh"
+    (
+        cd "$FIX" || exit 1
+        git init -q . || exit 1
+        git config user.email cochange@fixture.invalid
+        git config user.name  cochange-fixture
+        git config commit.gpgsign false
+        git add -A && git commit -qm "fixture base" || exit 1
+        # Four co-change waves. The support floor is 3 commits-together, so four is one clear of it and
+        # every pair in the tree crosses it in the same wave — see the single-variable note above.
+        for i in 1 2 3 4; do
+            printf 'int pad%d(){ return %d; }\n' "$i" "$i" >> src/apply.cpp
+            printf '// pad %d\n' "$i"                      >> src/mid.h
+            printf '// pad %d\n' "$i"                      >> src/leaf.h
+            printf '// pad %d\n' "$i"                      >> src/alpha.cpp
+            printf '// pad %d\n' "$i"                      >> src/beta.cpp
+            printf '// pad %d\n' "$i"                      >> src/beta.h
+            printf '// pad %d\n' "$i"                      >> bench/probe.cpp
+            printf '# pad %d\n'  "$i"                      >> tools/deploy.sh
+            git add -A && git commit -qm "co-change wave $i" || exit 1
+        done
+    ) >/dev/null 2>&1
+}
+mkCochangeFixture || { echo "cochangesurprisecheck: could not build the fixture repo (git unusable?)"; exit 2; }
+
+"$BIN" "$FIX" --cochange --pack-top-n=1000 --no-cache >"$TMP/fix" 2>"$TMP/fix.err"
+rc_fix=$?
+[ "$rc_fix" -eq 0 ] && ok "fixture: --cochange exits 0 on the scripted repo" || { no "fixture: --cochange exits $rc_fix"; head -3 "$TMP/fix.err"; }
+
+# pull out one <pair .../> element mentioning BOTH path fragments, regardless of a=/b= order. Fragments
+# are matched against the fixture's own repo-relative paths, which are unique inside it.
+fixPairRow(){
+    grep -oE '<pair [^>]*/>' "$TMP/fix" | grep -F "$1" | grep -F "$2" | head -n1
 }
 
-# ── 1. NEGATIVE — transitively-coupled src<->src pairs must never carry surprising="1"
-checkNotSurprising(){
-    local n1="$1" n2="$2"
-    local row; row="$( pairRow "$n1" "$n2" )"
+# ── 1. NEGATIVE — a pair joined by an #include path (direct, transitive, or reverse) is NOT surprising.
+#      Absence here is a hard FAILURE, not a skip: this gate built the history itself, so a missing pair
+#      means the support floor or the pair scan moved, which is exactly what the gate is for.
+fixNotSurprising(){
+    local n1="$1" n2="$2" why="$3"
+    local row; row="$( fixPairRow "$n1" "$n2" )"
     if [ -z "$row" ]; then
-        no "$n1 <-> $n2: pair not found even with --pack-top-n=1000 (fixture drifted — cannot assert)"
-        return
-    fi
-    if echo "$row" | grep -q 'surprising="1"'; then
-        no "$n1 <-> $n2: FALSE POSITIVE — carries surprising=\"1\" despite a transitive #include path: $row"
+        no "fixture $n1 <-> $n2: pair ABSENT from the fixture's own uncapped output — the pair scan or the support floor regressed ($why)"
+    elif echo "$row" | grep -q 'surprising="1"'; then
+        no "fixture $n1 <-> $n2: FALSE POSITIVE — surprising=\"1\" despite $why: $row"
     else
-        ok "$n1 <-> $n2: present, no surprising=\"1\" (transitive #include coupling correctly recognised): $row"
+        ok "fixture $n1 <-> $n2: present, no surprising=\"1\" ($why correctly recognised)"
     fi
 }
-checkNotSurprising "ingest.cpp" "model.h"
-checkNotSurprising "main.cpp" "notes.h"
+fixNotSurprising "src/apply.cpp" "src/mid.h"    "a DIRECT #include"
+fixNotSurprising "src/apply.cpp" "src/leaf.h"   "a TRANSITIVE 2-hop #include path (apply.cpp -> mid.h -> leaf.h) — the §P9.1 defect a 1-hop predicate flags"
+fixNotSurprising "src/leaf.h"    "src/mid.h"    "a REVERSE #include (mid.h includes leaf.h) — the closure is undirected"
+fixNotSurprising "bench/probe.cpp" "src/leaf.h" "a CROSS-DIRECTORY bare-name \`#include \"leaf.h\"\` (the -I form the path-precise resolver cannot see) — the §P9.1 residue"
+fixNotSurprising "src/beta.cpp"  "src/beta.h"   "a DIRECT #include (the mutation-control twin of the src/alpha.cpp <-> src/beta.h positive arm below)"
 
-# ── 1b. NEGATIVE (§P9.1 residue, 2026-07-28) — a CROSS-DIRECTORY `-I` include is a plain `#include` that
-#      the path-precise resolver structurally cannot see: bench/bench_convergence.cpp:26 is literally
-#      `#include "svector.h"`, resolved through `-Isrc`, so resolveIncludeAdj finds no edge and the pair
-#      shipped as surprising="1". A repo-wide sweep found this was the ONLY leaked pair, so the fix is a
-#      narrow bare-name fallback in StaticIncludeCoupling (it can only ever SUPPRESS the flag).
-#      Conditional on the pair being present at all — git history ages and the pair can fall below the
-#      3-commit support floor; what must NEVER happen is it coming back FLAGGED.
-residueRow="$( pairRow "bench_convergence.cpp" "svector.h" )"
-if [ -z "$residueRow" ]; then
-    ok "-I residue: bench_convergence.cpp <-> svector.h no longer co-changes above the support floor (nothing to assert)"
-elif echo "$residueRow" | grep -q 'surprising="1"'; then
-    no "-I residue: FALSE POSITIVE — cross-directory -I include (\`#include \"svector.h\"\` via -Isrc) still reads as hidden coupling: $residueRow"
+# ── 2. POSITIVE controls — the signal must still FIRE where it means something. Both pairs co-change in
+#      the SAME waves as every negative pair above and differ from them in exactly one respect: no
+#      #include path joins them, in either direction. Uncoupled BY CONSTRUCTION, so unlike the old
+#      live-output pick these controls cannot quietly stop being controls.
+fixSurprising(){
+    local n1="$1" n2="$2" why="$3"
+    local row; row="$( fixPairRow "$n1" "$n2" )"
+    if [ -z "$row" ]; then
+        no "fixture positive control $n1 <-> $n2: ABSENT from the fixture's own uncapped output"
+    elif echo "$row" | grep -q 'surprising="1"'; then
+        ok "fixture positive control fires: $n1 <-> $n2 ($why) carries surprising=\"1\""
+    else
+        no "fixture positive control $n1 <-> $n2 is NOT surprising=\"1\" — the signal has been suppressed wholesale ($why): $row"
+    fi
+}
+fixSurprising "src/alpha.cpp" "src/beta.cpp" "two dependency-capable translation units, no include path either way"
+fixSurprising "src/alpha.cpp" "src/beta.h"   "the same .cpp/.h shape as the negatives, minus the include line"
+
+# ── 3a. §A9.3 on the fixture — the .sh side cannot participate in a C++ include graph, so its rows must
+#       carry dep_capable="0" and must never claim surprising="1" (vacuously-true is not evidence).
+shRow="$( fixPairRow "tools/deploy.sh" "src/alpha.cpp" )"
+if [ -z "$shRow" ]; then
+    no "fixture §A9.3: tools/deploy.sh <-> src/alpha.cpp ABSENT from the fixture's own output"
+elif echo "$shRow" | grep -q 'surprising="1"'; then
+    no "fixture §A9.3: a dependency-INCAPABLE pair claims surprising=\"1\": $shRow"
+elif echo "$shRow" | grep -q 'dep_capable="0"'; then
+    ok "fixture §A9.3: the .sh-sided pair keeps its row and carries the dep_capable=\"0\" tell"
 else
-    ok "-I residue: present, no surprising=\"1\" (bare-name fallback recognised the -I include): $residueRow"
+    no "fixture §A9.3: the .sh-sided pair is silent — neither surprising= nor dep_capable=\"0\": $shRow"
 fi
 
-# ── 2. POSITIVE control — the signal must still FIRE where it means something: a src<->src pair (both
-#      sides dependency-capable) with no transitive #include between them. Picked dynamically from the
-#      live top-30 so no single pair is hardcoded as git history ages.
-posRow="$( grep -oE '<pair [^>]*/>' "$TMP/out" | grep 'surprising="1"' \
-           | grep -E 'a="[^"]*/src/[^"]*\.(h|cpp)"' | grep -E 'b="[^"]*/src/[^"]*\.(h|cpp)"' | head -n1 )"
-if [ -z "$posRow" ]; then
-    no "positive control: no src<->src surprising=\"1\" pair in --cochange's first screen (the signal may have been suppressed wholesale)"
+# ── 3b. §A9.3 — the PER-FILE path must speak the same vocabulary as the repo-wide one (§P9.1's rule, one
+#       flag over). Same fixture, same .sh partner, read through --cochange=<file>.
+"$BIN" "$FIX" --cochange=src/alpha.cpp --pack-top-n=1000 --no-cache >"$TMP/fixpf" 2>/dev/null
+fixPfRow="$( grep -oE '<f [^>]*/>' "$TMP/fixpf" | grep -F 'deploy.sh' | head -n1 )"
+if [ -z "$fixPfRow" ]; then
+    no "fixture §A9.3 per-file: --cochange=src/alpha.cpp lists no deploy.sh partner — the per-file scan regressed"
+elif echo "$fixPfRow" | grep -q 'surprising="1"'; then
+    no "fixture §A9.3 per-file: the .sh partner claims surprising=\"1\" — the two paths disagree again: $fixPfRow"
+elif echo "$fixPfRow" | grep -q 'dep_capable="0"'; then
+    ok "fixture §A9.3 per-file: the .sh partner carries dep_capable=\"0\", same vocabulary as the repo-wide path"
 else
-    ok "positive control still fires on a dependency-capable pair: $posRow"
+    no "fixture §A9.3 per-file: the .sh partner is silent (no surprising=, no dep_capable=): $fixPfRow"
+fi
+
+# ── 3c. fixture determinism — the scripted history is fixed, so two runs must be byte-identical.
+"$BIN" "$FIX" --cochange --no-cache >"$TMP/fd1" 2>/dev/null
+"$BIN" "$FIX" --cochange --no-cache >"$TMP/fd2" 2>/dev/null
+diff -q "$TMP/fd1" "$TMP/fd2" >/dev/null && ok "fixture: deterministic (byte-identical run-to-run)" || no "fixture: non-deterministic --cochange output"
+
+# ══ LIVE-CORPUS SWEEP — presence-guarded ═════════════════════════════════════════════════════════════
+# §A9.3's no-leak sweep genuinely wants a big real corpus, so it keeps running against this checkout.
+# What it must NOT do is red because a clone's history differs: an arm whose row is absent SKIPs with the
+# missing precondition named, and hard-asserts wherever the row exists.
+
+# The live positive control. Its DUTY moved to the fixture arm above; here it is a corroboration on real
+# history, so absence is a named SKIP rather than a failure.
+livePos="$( grep -oE '<pair [^>]*/>' "$TMP/out" | grep 'surprising="1"' \
+           | grep -E 'a="[^"]*/src/[^"]*\.(h|cpp)"' | grep -E 'b="[^"]*/src/[^"]*\.(h|cpp)"' | head -n1 )"
+if [ -z "$livePos" ]; then
+    skip "live positive control — no src<->src pair clears the co-change support floor in THIS corpus's history (fresh-history export); the duty is discharged by the fixture positive-control arm above"
+else
+    ok "live corroboration: the signal fires on a real dependency-capable pair too: $livePos"
 fi
 
 # ── 2b. §A9.3 — every row with a DEP-INCAPABLE side must carry dep_capable="0" and must NOT carry
@@ -124,7 +247,7 @@ fi
 
 depRow="$( grep -oE '<pair [^>]*/>' "$TMP/full" | grep -E '(a|b)="[^"]*\.sh"' | head -n1 )"
 if [ -z "$depRow" ]; then
-    no "§A9.3: no .sh-sided pair in the uncapped output at all — cannot verify the dep_capable=\"0\" tell"
+    skip "live dep_capable=\"0\" tell — no .sh-sided pair clears the co-change support floor in THIS corpus's history (fresh-history export); the duty is discharged by the fixture §A9.3 arm above"
 elif echo "$depRow" | grep -q 'dep_capable="0"'; then
     ok "§A9.3: a .sh-sided pair keeps its row and carries the dep_capable=\"0\" tell: $depRow"
 else
@@ -132,11 +255,12 @@ else
 fi
 
 # ── 2c. §A9.3 — the per-file path must speak the SAME vocabulary as the repo-wide one (§P9.1's rule,
-#      one flag over): src/quality.h co-changes with test/regression.sh in this repo's history.
+#      one flag over). Live corroboration of the fixture per-file arm; presence-guarded, because whether
+#      src/quality.h co-changes with any .sh at all is a property of THIS clone's history.
 "$BIN" "$ROOT" --cochange=src/quality.h --pack-top-n=1000 >"$TMP/perfile" 2>/dev/null
 perFileRow="$( grep -oE '<f [^>]*/>' "$TMP/perfile" | grep -E 'p="[^"]*\.sh"' | head -n1 )"
 if [ -z "$perFileRow" ]; then
-    ok "§A9.3 per-file: no .sh partner above the support floor (nothing to assert)"
+    skip "live per-file vocabulary — src/quality.h has no .sh partner above the co-change support floor in THIS corpus's history (fresh-history export); the duty is discharged by the fixture per-file arm above"
 elif echo "$perFileRow" | grep -q 'surprising="1"'; then
     no "§A9.3 per-file: a .sh partner still claims surprising=\"1\" — the two paths disagree again: $perFileRow"
 elif echo "$perFileRow" | grep -q 'dep_capable="0"'; then
