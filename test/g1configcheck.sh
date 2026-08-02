@@ -52,24 +52,30 @@ swiftSignSectionCount="$( grep -c '\[implicit-integer-sign-change\]' "$CMAKE" )"
 swiftWhitespaceCount="$( grep -c 'fun:eat_whitespace' "$CMAKE" )"
 bashScanCount="$( grep -c 'fun:scan' "$CMAKE" )"
 # M2-era note: `[unsigned-integer-overflow]` now opens TWO ignorelists — bash's scanner (fun:scan) and
-# libstdc++'s string_view.tcc — so the section count is 2, and the two entries are audited separately
-# below so that neither can be added or dropped without moving this gate.
+# the libstdc++ one — so the SECTION count is 2, and every entry underneath is audited separately below
+# so that none can be added or dropped without moving this gate.
 # …counted by OCCURRENCE, not by line: an ignorelist here is one CMake string holding several `\n`-joined
 # entries, so `grep -c` (which counts matching LINES) reads a smuggled second entry on an existing line as
 # zero new entries. Caught by this gate's own mutation control — the first version of this arm passed a
 # planted `src:*/bits/basic_string.tcc`.
 occurrences(){ grep -o -- "$1" "$CMAKE" | wc -l | tr -d ' '; }
 scannerUnsignedSectionCount="$( occurrences '\[unsigned-integer-overflow\]' )"
-# M1: the ONE file-scoped rule in the whole build. libstdc++'s string_view find/rfind scan loops wrap past
-# zero by design (`for (++__size; __size-- > 0;)`), which G1's Clang-only `integer` group flags and
-# -fno-sanitize-recover=all turns into a hard abort — the first real Linux G1 run died on it at
-# string_view.tcc:124 from rw::lowerExtensionOf. libc++ has no such wrap, so macOS never saw it.
+# M1/N1: the file-scoped rules in the whole build — EXACTLY THREE, all libstdc++ headers carrying the same
+# deliberate-wrap idiom, all under the one `[unsigned-integer-overflow]` section. Those loops wrap past zero
+# by design (`for (++__size; __size-- > 0;)`, and `_S_compare`'s `__n1 - __n2` in size_type), which G1's
+# Clang-only `integer` group flags and -fno-sanitize-recover=all turns into a hard abort. The first real
+# Linux G1 run died at string_view.tcc:124 from rw::lowerExtensionOf (M1); the re-smoke then died at
+# basic_string.h:490 (_S_compare, reached from a plain std::string operator<= in a sort comparator) and
+# basic_string.tcc:689 (the find/rfind twin) — N1. libc++ has no such wrap, so macOS never saw any of them.
 #
 # This arm used to ban `src:` outright, because a file-scoped rule is the easy way to smuggle a whole
 # directory out of the sanitizer. The ban is kept in spirit and tightened in practice: `src:` may appear
-# EXACTLY once, and that once must be this exact header. A second `src:` line, or a different path in the
-# first, reds this gate — which is the whole point of an audited list.
-libstdcxxHeaderRuleCount="$( occurrences 'src:\*/bits/string_view\.tcc' )"
+# EXACTLY three times, and those three must be exactly these headers. A fourth `src:` entry, or a different
+# path in any of them, reds this gate — which is the whole point of an audited list.
+stringViewRuleCount="$( occurrences 'src:\*/bits/string_view\.tcc' )"
+basicStringHeaderRuleCount="$( occurrences 'src:\*/bits/basic_string\.h' )"
+basicStringTccRuleCount="$( occurrences 'src:\*/bits/basic_string\.tcc' )"
+libstdcxxHeaderRuleCount="$(( stringViewRuleCount + basicStringHeaderRuleCount + basicStringTccRuleCount ))"
 srcScopedRuleCount="$( occurrences 'src:' )"
 if [ "$unsignedTruncationSectionCount" = 1 ] && [ "$balanceCount" = 1 ] \
     && [ "$functionSectionCount" = 1 ] && [ "$scannerCreateCount" = 1 ] \
@@ -77,11 +83,12 @@ if [ "$unsignedTruncationSectionCount" = 1 ] && [ "$balanceCount" = 1 ] \
     && [ "$signChangeDisableCount" = 2 ] \
     && [ "$swiftSignSectionCount" = 1 ] && [ "$swiftWhitespaceCount" = 1 ] \
     && [ "$scannerUnsignedSectionCount" = 2 ] && [ "$bashScanCount" = 1 ] \
-    && [ "$libstdcxxHeaderRuleCount" = 1 ] && [ "$srcScopedRuleCount" = 1 ] \
+    && [ "$stringViewRuleCount" = 1 ] && [ "$basicStringHeaderRuleCount" = 1 ] && [ "$basicStringTccRuleCount" = 1 ] \
+    && [ "$libstdcxxHeaderRuleCount" = 3 ] && [ "$srcScopedRuleCount" = 3 ] \
     && ! grep -Eq 'fun:\*' "$CMAKE"; then
-    ok "dependency policy is limited to audited Tree-sitter core, Swift/bash scanner and libstdc++ string_view seams"
+    ok "dependency policy is limited to audited Tree-sitter core, Swift/bash scanner and the 3 libstdc++ string seams"
 else
-    no "sanitizer exemption policy differs from the audited list (sections uint=$scannerUnsignedSectionCount, src:-scoped=$srcScopedRuleCount of which string_view.tcc=$libstdcxxHeaderRuleCount)"
+    no "sanitizer exemption policy differs from the audited list (sections uint=$scannerUnsignedSectionCount, src:-scoped=$srcScopedRuleCount of which string_view.tcc=$stringViewRuleCount basic_string.h=$basicStringHeaderRuleCount basic_string.tcc=$basicStringTccRuleCount)"
 fi
 
 grep -q 'set(_ripwire_asan_options "detect_leaks=0' "$CMAKE" \

@@ -462,10 +462,25 @@ file(WRITE "${_ripwire_bash_ignorelist}"
 # find twin) partway through cachefuzzcheck's qsnap ASan sweep. This is library-internal, intentional, and
 # not UB — nothing in ripwire can avoid it short of not calling find/rfind. libc++ has no such wrap, which
 # is why macOS never saw it and why this entry is inert (but must still parse) on the Apple leg.
-# Scoped as narrowly as the mechanism allows: this ONE header's code, this ONE check. Every other integer
-# and conversion check stays on for our own code, including in the same translation units.
+# Scoped as narrowly as the mechanism allows: these THREE libstdc++ headers' code, this ONE check. Every
+# other integer and conversion check stays on for our own code, including in the same translation units.
+#
+# The re-smoke on the same Ubuntu 24.04 / clang 18 / libstdc++ image found std::basic_string carrying the
+# identical deliberate-wrap idiom in two more headers, so all three entries share the one section:
+#   * bits/basic_string.h:490 — `_S_compare` returns `__n1 - __n2` computed in size_type, so any comparison
+#     whose left operand is the shorter string wraps by design. Reached from a plain `std::string`
+#     `operator<=`/`operator<` inside a sort comparator, i.e. from ordinary ripwire code that cannot avoid
+#     it short of not comparing strings.
+#   * bits/basic_string.tcc:689 — the basic_string twin of the string_view find/rfind loop above, same
+#     `for (++__size; __size-- > 0;)` shape, same wrap on the iteration that ends the loop.
+# Both are library-internal, intentional and not UB; both abort the run under -fno-sanitize-recover=all;
+# both are absent on libc++, which is why the Apple leg never saw them and why these entries are inert
+# (but must still parse) on macOS. With the three entries in place the Linux ASan self-run exits 0 with
+# empty stderr and cachefuzzcheck's 13 UBSan arms go green.
 file(WRITE "${_ripwire_libstdcxx_ignorelist}"
-  "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n")
+  "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n"
+  "src:*/bits/basic_string.h\n"
+  "src:*/bits/basic_string.tcc\n")
 
 if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
