@@ -297,9 +297,14 @@ printf '%s' "$OUTG" | grep -q 'change="defs,broken-callers"' \
 # written, and only ever in the case the arm exists to cover (a document with flagged rows in it). Anchored
 # to the root element, which is also the only place the COUNT lives.
 if [ -d "$ROOT/src" ] && [ -e "$ROOT/.git" ]; then
-    OUTR="$( cd "$ROOT" && "$BIN" . --edit-check=src/ingest.cpp:find 2>/dev/null | sed 's/.*-->//' )"
+    # rc and stderr are PRESERVED (the P4 lesson): a sanitizer abort, a refusal and a genuinely
+    # unresolvable pin are three different failures, and 2>/dev/null once collapsed them into the
+    # misleading "no longer resolves" message below (CI round 3, asan/x86-64).
+    _gerr="$WORK/arm_g_stderr"
+    OUTR="$( cd "$ROOT" && "$BIN" . --edit-check=src/ingest.cpp:find 2>"$_gerr" | sed 's/.*-->//' )"; _grc=$?
     if ! printf '%s' "$OUTR" | grep -q '<edit-check '; then
-        no "(g) the clean-tree pin no longer resolves src/ingest.cpp:find — re-point it at a live name-colliding method"
+        no "(g) the clean-tree pin produced no <edit-check element (rc=$_grc, stdout bytes=${#OUTR}) — crash, refusal, or the pin src/ingest.cpp:find no longer resolves"
+        printf '    [arm-g] stderr follows (first 15 lines):\n'; head -15 "$_gerr" | sed 's/^/    [arm-g] /'
     else
         _ric="$( printf '%s' "$OUTR" | grep -oE '<edit-check [^>]*' | grep -oE 'incompatible="[0-9]+"' | grep -oE '[0-9]+' )"
         if ! printf '%s' "${_ric:-}" | grep -qE '^[0-9]+$'; then

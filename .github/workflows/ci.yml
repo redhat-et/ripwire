@@ -64,7 +64,13 @@ jobs:
     env:
       CLANG_VERSION: "22"
     steps:
+      # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
+      # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
+      # quality short-horizon-churn kind) mine `git log` for real, so on a shallow checkout they do not
+      # error — they measure zero and fail, or worse, pass while measuring nothing. Full history it is.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
       - name: Install clang-format / clang-tidy (PINNED major — see the job comment)
         run: |
@@ -104,7 +110,13 @@ jobs:
         os: [macos-14, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
+      # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
+      # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
+      # quality short-horizon-churn kind) mine `git log` for real, so on a shallow checkout they do not
+      # error — they measure zero and fail, or worse, pass while measuring nothing. Full history it is.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
@@ -126,12 +138,20 @@ jobs:
       - name: "test/regression.sh (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
         run: RIPWIRE_BIN=build/ripwire bash test/regression.sh
 
-      # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so every
-      # degrade-path gate above passed for the WRONG REASON: it could not observe the alert it asserts.
-      # The e7405e7 qsnap fix was invisible to CI before it landed, and the 2026-07-27 round added several
-      # more degrade gates (shallow-clone v="unknown", the pr-context ref refusal, the doc-drift VERIFY
-      # demotion). Build a SECOND time with the plain local flavour and re-run the suite against it, so both
-      # the optimizer-visible Release behaviour and the degrade paths are covered — neither alone is enough.
+      # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so a degrade-path
+      # gate run against it cannot observe the alert it asserts. The e7405e7 qsnap fix was invisible to CI
+      # before it landed, and the 2026-07-27 round added several more degrade gates (shallow-clone
+      # v="unknown", the pr-context ref refusal, the doc-drift VERIFY demotion). Build a SECOND time with
+      # the plain local flavour and re-run the suite against it, so both the optimizer-visible Release
+      # behaviour and the degrade paths are covered — neither alone is enough.
+      #
+      # 2026-08-01: the two gates that assert an alert directly (estchargecheck #14, qualitystalecheck
+      # arms 7/8c) no longer pass — or fail — silently on the Release leg. Each probes the flavour with
+      # TWO independent readings (an unrelated already-gated degrade path, plus --version's build-type
+      # token) and, only when both agree the binary is NDEBUG, prints a SKIP naming what is unobservable
+      # and pointing at THIS second leg as where it is proven. If the alert is missing on a flavour that
+      # should see it, they still FAIL. So the Release leg is honestly green rather than either
+      # vacuously green (the 2026-07-27 trap) or unconditionally red (the same trap inverted).
       - name: Configure (plain — NDEBUG off, so DEGRADED_PATH_ALERT compiles in)
         run: cmake -S . -B build-debugalerts
 
@@ -163,24 +183,49 @@ jobs:
       # matrix.os, not runner.os: the runner context does not exist at job-level env — GitHub's
       # parser rejects the whole workflow (found by the first real Actions run; local YAML lint
       # cannot see it). Step-level `if: runner.os` below is legal and stays.
-      ASAN_OPTIONS: ${{ matrix.os == 'macos-14' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1' }}
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      # log_path: a sanitizer abort inside a gate that pipes 2>/dev/null leaves NO report in the log
+      # (CI round 3: an asan/x86-64 abort read as "pin no longer resolves"). With log_path the report
+      # lands in a file the failure artifact below preserves.
+      ASAN_OPTIONS: ${{ matrix.os == 'macos-14' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1:log_path=/tmp/asanlog' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1:log_path=/tmp/asanlog' }}
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:log_path=/tmp/asanlog
       LSAN_OPTIONS: suppressions=${{ github.workspace }}/lsan_suppressions.txt
     steps:
+      # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
+      # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
+      # quality short-horizon-churn kind) mine `git log` for real, so on a shallow checkout they do not
+      # error — they measure zero and fail, or worse, pass while measuring nothing. Full history it is.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 
       - name: Install tooling (macOS)
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
 
+      # CLANG, not the default cc. G1's `integer` group is Clang-only and gcc rejects the whole option
+      # ("unrecognized argument to '-fsanitize=' option: 'integer'" — the first public CI run). CMakeLists.txt
+      # now filters the Clang-only members out under GCC, but that is the HONEST-DEGRADE path for a
+      # contributor, not something public CI should be running: pinning clang here keeps the COMPLETE G1
+      # stack on Linux, so the gates below mean the same thing on both matrix legs.
+      #
+      # Deliberately NOT applied to the release job: gcc there is a FEATURE. It is a second front end over
+      # the same tree and it found three real portability bugs on its first run.
+      - name: Configure (G1 sanitizer stack — clang, see the step comment)
+        if: runner.os == 'Linux'
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S . -B asan -DRIPWIRE_ASAN=ON
+
       - name: Configure (G1 sanitizer stack)
+        if: runner.os == 'macOS'
         run: cmake -S . -B asan -DRIPWIRE_ASAN=ON
 
       - name: Build
@@ -203,6 +248,18 @@ jobs:
 
       - name: Heavy verb — --edit-check (test/editcheckcheck.sh)
         run: RIPWIRE_BIN=asan/ripwire bash test/editcheckcheck.sh
+
+      # cachefuzzcheck's two mutation tables ARE sanitizer sweeps: they drive corrupt/truncated/hostile cache
+      # blobs and corrupt qsnap blobs through the readers and assert that no sanitizer report fires. That needs
+      # an instrumented binary — RIPWIRE_ASAN_BIN is the whole point of the gate — and the `release` jobs, which
+      # configure only build/, cannot supply one. Until now the gate hard-FAILED there for the missing binary
+      # (PR #1, run 30732976779: "absorb gate (cachefuzzcheck.sh failed)" on BOTH release legs, that one line
+      # its only failure) while NO job anywhere ran the sweeps it exists for. The gate now skips those two arms
+      # with a named reason on a leg that has no ASan build, and this step is where they actually run: both
+      # variables point at the instrumented binary, so the ground-truth arms and the sanitizer arms agree by
+      # construction. Adding it here is what makes that skip reason true rather than an excuse.
+      - name: Sanitizer sweep — corrupt cache / qsnap blobs (test/cachefuzzcheck.sh)
+        run: RIPWIRE_BIN=asan/ripwire RIPWIRE_ASAN_BIN=asan/ripwire bash test/cachefuzzcheck.sh
 
       # NOT a heavy verb — here because it is the ONLY gate whose subject is an integer-overflow class that
       # a plain binary cannot observe. cppqualcheck §9 drives an unbalanced `operator>` frame through
@@ -244,3 +301,13 @@ jobs:
       # fixed and the review notes carry a self-date: at that point drift= can be gated at 0.
       - name: Self-report (non-gating) — --doc-drift on our own docs
         run: ./asan/ripwire . --doc-drift --with-history || true
+
+      # Sanitizer reports written via log_path survive gates that swallow stderr; keep them when a
+      # step failed so the log tells us WHICH abort happened, not just that one did.
+      - name: Upload sanitizer reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-reports-${{ matrix.os }}
+          path: /tmp/asanlog*
+          if-no-files-found: ignore

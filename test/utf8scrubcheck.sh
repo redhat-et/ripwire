@@ -96,6 +96,12 @@ xmllint --html --noout "$HTMLOUT" 2>"$TMP/htmllint.err" \
 
 # ── (B) unit: ccJsonEscape / escapeXml / utf8SeqLen / jsonesc::escapeHtml on invalid + valid bytes ────
 CXX="${CXX:-c++}"
+
+# §CI-P3: ask THIS front end how it spells C++23 rather than assuming the Clang-17 spelling — an
+# AppleClang 15 (LLVM 16) macos-14 runner rejects `-std=c++23` outright and took this gate with it
+# (PR #1, run 30732976779). Rationale + the CMake mapping this mirrors: scripts/cxxstd.sh.
+. "$ROOT/scripts/cxxstd.sh"
+CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 command -v "$CXX" >/dev/null 2>&1 || CXX=g++
 if command -v "$CXX" >/dev/null 2>&1; then
     UTU="$TMP/ccu.cpp"
@@ -135,7 +141,7 @@ int main()
     return 0;
 }
 EOF
-    if "$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$UTU" -o "$TMP/ccu" 2>"$TMP/ccu.err"; then
+    if "$CXX" "$CXXSTD" -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$UTU" -o "$TMP/ccu" 2>"$TMP/ccu.err"; then
         if "$TMP/ccu" >"$TMP/ccu.out" 2>&1 && grep -q UNIT_OK "$TMP/ccu.out"; then
             ok "unit: ccJsonEscape/escapeXml/utf8SeqLen/jsonesc::escapeHtml scrub invalid UTF-8, preserve valid"
         else

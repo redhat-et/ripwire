@@ -406,7 +406,7 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
 inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 {
     std::uint64_t h = 14695981039346656037ull;
-    for( unsigned char c : s ) { h ^= c; h = hashutil::fnv1aMultiply( h ); }
+    for( const char c : s ) h = hashutil::fnv1aAbsorb( h, c );
     return h;
 }
 
@@ -461,7 +461,7 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
     std::uint64_t h = 14695981039346656037ull;
     const auto mix = [ &h ]( std::string_view sv ) noexcept
     {
-        for( unsigned char c : sv ) { h ^= c; h = hashutil::fnv1aMultiply( h ); }
+        for( const char c : sv ) h = hashutil::fnv1aAbsorb( h, c );
         h ^= 0u; h = hashutil::fnv1aMultiply( h );   // NUL separator byte
     };
     mix( srcFile );

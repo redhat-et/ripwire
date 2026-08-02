@@ -82,6 +82,18 @@
   #include <chrono>               // portable fallback clock for non-ARM dev/CI
 #endif
 
+// Thread IDENTITY — the numeric tid and "am I the process's initial thread" — has no portable spelling.
+// This file was written against Darwin's pthread_threadid_np / pthread_main_np extensions; on Linux NEITHER
+// is declared, which is exactly where the first public CI run stopped on both ubuntu legs. See
+// detail::threadIdNumeric() / detail::isInitialThread() below for the three branches.
+#if defined( __linux__ )
+  #include <sys/syscall.h>        // SYS_gettid — the kernel task id pthread_threadid_np returns on Darwin
+  #include <unistd.h>             // ::syscall, ::getpid
+#elif !defined( __APPLE__ )
+  #include <functional>           // std::hash<std::thread::id> — the last-resort numeric id
+  #include <thread>               // std::this_thread::get_id
+#endif
+
 namespace prof
 {
 
@@ -323,6 +335,63 @@ private:
 };
 
 // ============================================================================
+// detail — per-platform thread identity. All three values feed the REPORT only
+// (tid= column, the [main] tag, the thread name); nothing here can reach a
+// ripwire output byte, so the contract is just "stable per thread, and the two
+// queries agree with each other". Registration is once per thread, never hot.
+// ============================================================================
+namespace detail
+{
+
+// Darwin's pthread_threadid_np returns the 64-bit kernel thread id. Linux's equivalent is the tid
+// SYS_gettid yields (what gdb/htop/perf show), so a report row can still be matched against a tracer.
+inline uint64_t threadIdNumeric() noexcept
+{
+#if defined( __APPLE__ )
+    uint64_t tid = 0;
+    pthread_threadid_np( nullptr, &tid );
+    return tid;
+#elif defined( __linux__ )
+    return (uint64_t) ::syscall( SYS_gettid );
+#else
+    return (uint64_t) std::hash<std::thread::id>{}( std::this_thread::get_id() );
+#endif
+}
+
+// Am I the process's initial thread? Linux: the initial thread is the one whose tid EQUALS the pid — the
+// exact definition, not an approximation. Elsewhere there is no such query, so latch the first caller;
+// registration happens on a thread's first PROFILE_SCOPE, and main() runs before any worker is spawned,
+// so this is right on every startup that profiles anything before it goes wide, and degrades to "the
+// first profiled thread" otherwise. Wrong only mislabels one report row.
+inline bool isInitialThread() noexcept
+{
+#if defined( __APPLE__ )
+    return pthread_main_np() != 0;
+#elif defined( __linux__ )
+    return ::getpid() == (pid_t) ::syscall( SYS_gettid );
+#else
+    static const std::thread::id firstCaller = std::this_thread::get_id();
+    return std::this_thread::get_id() == firstCaller;
+#endif
+}
+
+// pthread_getname_np is a *_np extension too, but unlike the other two it exists with this exact
+// (thread, buffer, length) signature on both Darwin and glibc/musl. Elsewhere the name stays empty —
+// the report already prints "unnamed" for that case.
+inline void copyThreadName( char* buffer, std::size_t bufferCount ) noexcept
+{
+    VERIFY( buffer != nullptr && bufferCount > 0 );
+    buffer[ 0 ] = '\0';
+#if defined( __APPLE__ ) || defined( __linux__ )
+    pthread_getname_np( pthread_self(), buffer, bufferCount );
+#else
+    (void) bufferCount;
+#endif
+}
+
+}   // namespace detail
+
+// ============================================================================
 // ThreadData — one heap node per thread, owned by the registry. The hot path
 // never touches this after acquire(); the mutex guards add/snapshot only.
 // ============================================================================
@@ -330,10 +399,9 @@ struct alignas( kCacheLine ) ThreadData
 {
     ThreadData() noexcept
     {
-        pthread_threadid_np( nullptr, &tid );
-        name[ 0 ] = '\0';
-        pthread_getname_np( pthread_self(), name, sizeof( name ) );
-        isMain = pthread_main_np() != 0;
+        tid    = detail::threadIdNumeric();
+        detail::copyThreadName( name, sizeof( name ) );
+        isMain = detail::isInitialThread();
     }
 
     // once per (thread, site); rare — never on the hot path

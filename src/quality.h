@@ -1103,11 +1103,21 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
     return true;
 }
 
-// Read a qsnap blob whole. Returns 1 = readable non-empty file (out filled), 0 = absent/empty/unreadable (a
+// Read a qsnap blob whole. Returns 1 = readable non-empty file (out filled), 0 = absent/empty/unreadable/not-a-regular-file (a
 // CLEAN miss — no alert). A present-but-invalid blob still returns 1 here; deserializeSnapshot then rejects it,
 // and the caller alerts. Binary-safe (no getline/text translation).
 inline int readQSnapBlob( const std::string& path, std::string& out )
 {
+    // L1 (Linux runtime probe): opening a DIRECTORY succeeds on Linux/glibc and fails on macOS, so a
+    // non-regular file at a cache-blob path is a platform-split hazard rather than a clean miss — it cost
+    // ingest.cpp's loadCache an abort (see isRegularFileAt there). A qsnap blob is always a REGULAR file
+    // (atomicWriteQSnap renames one into place); every other shape is a miss on every platform, which is
+    // exactly what this function's 0 already means, so it stays silent and the caller recomputes.
+    {
+        struct stat probe;
+        if( ::stat( path.c_str(), &probe ) != 0 || !S_ISREG( probe.st_mode ) ) return 0;
+    }
+
     std::ifstream f( path, std::ios::binary | std::ios::ate );
     if( !f ) return 0;
     const std::streamsize sz = f.tellg();

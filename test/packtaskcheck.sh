@@ -208,15 +208,56 @@ defbytes="$( wc -c < "$DEF" | tr -d ' ' )"; defceil="$( ceiling_bytes 6000 )"
 xmllint --noout "$DEF" 2>/dev/null && ok "default bundle is xmllint-clean" || no "default bundle is not well-formed"
 
 # ── 5) --for is UNPERTURBED: pack-task's ranking is the SAME ranking --for emits (shared computeLensRanking) ─
+#
+# THE ARM USED TO BE BLIND (PR #1, run 30732976779, asan (ubuntu-24.04)). It piped both runs straight into
+# grep with `2>/dev/null`, so it kept ONE bit — the extracted path — and threw away the exit code, stderr,
+# and the emitted bytes. CI reported exactly `for= pack=…/src/serialize.h` and nothing else, which is the
+# SAME observation for at least four different causes:
+#   (a) --for aborted (a sanitizer report / a VERIFY panic) and wrote nothing — rc and stderr both discarded;
+#   (b) --for emitted an EMPTY payload, `<sigs capped="1"></sigs>` (serialize.h's ladder drops every <f>
+#       once sigsBudget clamps toward 1), which is a real product defect and a real thing to see;
+#   (c) the <sigs>/<f> shape changed and only the EXTRACTOR broke — a gate bug, not a product bug;
+#   (d) the ranking genuinely diverged — the only cause the message actually named.
+# Not reproducible on macos-14/arm64 or on ubuntu-24.04/aarch64 under the identical ASan stack and the
+# identical env (checked at this commit, in a clean clone at the CI path), so the next run has to identify
+# itself. Keep BOTH runs' rc, stderr and bytes, and report whichever of (a)-(d) the evidence shows.
 Q="serialize signatures budget payload"
-FOR_TOPF="$(  "$BIN" "$ROOT/src" --no-cache --for="$Q"       2>/dev/null | grep -oE '<sigs[^>]*><f p="[^"]*"' | head -1 | sed -E 's/.*<f p="([^"]*)"/\1/' )"
-PACK_TOPF="$( "$BIN" "$ROOT/src" --no-cache --pack-task="$Q" 2>/dev/null | grep -oE '<sigs[^>]*><f p="[^"]*"' | head -1 | sed -E 's/.*<f p="([^"]*)"/\1/' )"
-{ [ -n "$FOR_TOPF" ] && [ "$FOR_TOPF" = "$PACK_TOPF" ]; } \
-    && ok "--for ranking is unperturbed: pack-task's top file == --for's top file ($FOR_TOPF)" \
-    || no "pack-task ranking diverges from --for (for=$FOR_TOPF pack=$PACK_TOPF)"
-# --for is itself deterministic + well-formed with the feature compiled in
+run_lens(){                                    # $1 = tag, $2… = the flags; sets rc_<tag>, and leaves $TMP/<tag>.{xml,err}
+    local tag="$1"; shift
+    "$BIN" "$ROOT/src" --no-cache "$@" >"$TMP/$tag.xml" 2>"$TMP/$tag.err"
+    printf '%s' "$?"
+}
+top_file(){ grep -oE '<sigs[^>]*><f p="[^"]*"' "$1" | head -1 | sed -E 's/.*<f p="([^"]*)"/\1/'; }
+lens_evidence(){                               # the four-way discriminator, printed only on failure
+    local tag="$1" rc="$2"
+    printf '    [%s] rc=%s  bytes=%s\n' "$tag" "$rc" "$( wc -c <"$TMP/$tag.xml" | tr -d ' ' )"
+    [ -s "$TMP/$tag.err" ] && { printf '    [%s] stderr:\n' "$tag"; sed -n '1,12p' "$TMP/$tag.err" | sed "s/^/      /"; }
+    printf '    [%s] sigs region: %s\n' "$tag" "$( grep -oE '<sigs[^>]*>.{0,120}' "$TMP/$tag.xml" | head -1 )"
+    return 0
+}
+FOR_RC="$(  run_lens forlens  --for="$Q" )"
+PACK_RC="$( run_lens packlens --pack-task="$Q" )"
+FOR_TOPF="$(  top_file "$TMP/forlens.xml" )"
+PACK_TOPF="$( top_file "$TMP/packlens.xml" )"
+if [ "$FOR_RC" -ne 0 ] || [ "$PACK_RC" -ne 0 ]; then
+    # cause (a): name the crash instead of mis-reporting it as a ranking divergence
+    no "--for/--pack-task did not exit 0 (for rc=$FOR_RC pack rc=$PACK_RC) — the ranking comparison below is moot"
+    lens_evidence forlens "$FOR_RC"; lens_evidence packlens "$PACK_RC"
+elif [ -z "$FOR_TOPF" ] || [ -z "$PACK_TOPF" ]; then
+    # causes (b)/(c): both exited 0, so the payload really is empty or the shape really did move
+    no "no top file extractable (for='$FOR_TOPF' pack='$PACK_TOPF') — empty <sigs> payload, or the <sigs>/<f> shape moved"
+    lens_evidence forlens "$FOR_RC"; lens_evidence packlens "$PACK_RC"
+elif [ "$FOR_TOPF" = "$PACK_TOPF" ]; then
+    ok "--for ranking is unperturbed: pack-task's top file == --for's top file ($FOR_TOPF)"
+else
+    # cause (d): the real assertion, now the only thing this message can mean
+    no "pack-task ranking diverges from --for (for=$FOR_TOPF pack=$PACK_TOPF)"
+fi
+# --for is itself deterministic + well-formed with the feature compiled in. NOTE: two EMPTY outputs are
+# byte-identical, so this arm passed vacuously in the run above — require non-empty before comparing.
 F1="$( "$BIN" "$ROOT/src" --no-cache --for="$Q" 2>/dev/null )"; F2="$( "$BIN" "$ROOT/src" --no-cache --for="$Q" 2>/dev/null )"
-[ "$F1" = "$F2" ] && ok "--for stays deterministic with --pack-task compiled in" || no "--for became non-deterministic"
+{ [ -n "$F1" ] && [ "$F1" = "$F2" ]; } && ok "--for stays deterministic with --pack-task compiled in" \
+    || no "--for non-deterministic or empty (bytes: ${#F1} vs ${#F2})"
 
 # ── 6) hostile note text stays xmllint-clean in the bundle ────────────────────────────────────────────────
 runw --note-add="$PID: danger ]]> <script>alpha & beta --> end" >/dev/null

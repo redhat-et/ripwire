@@ -79,7 +79,7 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
     const auto idc = []( unsigned char c ) { return std::isalnum( c ) || c == '_'; };
     while( i < n )
     {
-        const unsigned char c = src[i];
+        const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
         if( std::isspace( c ) )                              { ++i; continue; }
         if( c == '/' && i + 1 < n && src[i + 1] == '/' )     { i += 2; while( i < n && src[i] != '\n' ) ++i; continue; }
         if( c == '/' && i + 1 < n && src[i + 1] == '*' )     { i += 2; while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) ) ++i; i = std::min( n, i + 2 ); continue; }
@@ -95,11 +95,11 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
             if( lit ) { i += lit; out += "$S "; ++tokenCount; continue; }
             out += '\'';  out += ' ';  ++i;  ++tokenCount;  continue;   // punctuation
         }
-        if( std::isdigit( c ) )                              { while( i < n && ( idc( src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) ) ++i; out += "$N "; ++tokenCount; continue; }
+        if( std::isdigit( c ) )                              { while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) ) ++i; out += "$N "; ++tokenCount; continue; }
         if( std::isalpha( c ) || c == '_' )
         {
             const std::size_t s = i;
-            while( i < n && idc( src[i] ) ) ++i;
+            while( i < n && idc( (unsigned char)src[i] ) ) ++i;
             const std::string_view w( src.data() + s, i - s );
             if( cloneIsKeyword( w ) ) { out += w; out += ' '; } else out += "$I ";
             ++tokenCount;
@@ -124,7 +124,7 @@ inline std::vector<std::string> normalizeTokens( const std::string& src, std::ui
     const auto  idc = []( unsigned char c ) { return std::isalnum( c ) || c == '_'; };
     while( i < n )
     {
-        const unsigned char c = src[i];
+        const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
         if( std::isspace( c ) )                              { ++i; continue; }
         if( c == '/' && i + 1 < n && src[i + 1] == '/' )     { i += 2; while( i < n && src[i] != '\n' ) ++i; continue; }
         if( c == '/' && i + 1 < n && src[i + 1] == '*' )     { i += 2; while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) ) ++i; i = std::min( n, i + 2 ); continue; }
@@ -138,11 +138,11 @@ inline std::vector<std::string> normalizeTokens( const std::string& src, std::ui
             if( lit ) { i += lit; out.emplace_back( "$S" ); continue; }
             out.emplace_back( 1, '\'' );  ++i;  continue;   // punctuation
         }
-        if( std::isdigit( c ) )                              { while( i < n && ( idc( src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) ) ++i; out.emplace_back( "$N" ); continue; }
+        if( std::isdigit( c ) )                              { while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) ) ++i; out.emplace_back( "$N" ); continue; }
         if( std::isalpha( c ) || c == '_' )
         {
             const std::size_t s = i;
-            while( i < n && idc( src[i] ) ) ++i;
+            while( i < n && idc( (unsigned char)src[i] ) ) ++i;
             const std::string_view w( src.data() + s, i - s );
             if( cloneIsKeyword( w ) ) out.emplace_back( w ); else out.emplace_back( "$I" );
             continue;
@@ -371,7 +371,7 @@ struct Type3Stats
 inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) noexcept
 {
     std::uint64_t h = seed;
-    for( unsigned char c : t ) { h ^= c; h = hashutil::fnv1aMultiply( h ); }
+    for( const char c : t ) h = hashutil::fnv1aAbsorb( h, c );
     h ^= 0x9e3779b97f4a7c15ull;  h = hashutil::fnv1aMultiply( h );   // token separator so [ab][c] != [a][bc]
     return h;
 }
@@ -454,7 +454,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
             std::uint64_t sh = 1469598103934665603ull;
             for( const std::string& t : raw )
             {
-                for( unsigned char c : t ) { sh ^= c; sh = hashutil::fnv1aMultiply( sh ); }
+                for( const char c : t ) sh = hashutil::fnv1aAbsorb( sh, c );
                 sh ^= 0x2full;
                 sh = hashutil::fnv1aMultiply( sh );
             }

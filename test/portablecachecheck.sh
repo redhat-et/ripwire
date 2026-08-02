@@ -193,13 +193,28 @@ fi
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 DIRTY_PROBE="$TMP/dirty_probe.cache"
 "$BIN" "$PATH_A" --cache="$DIRTY_PROBE" --no-stable >/dev/null 2>&1     # cold populate
-BEFORE_SIZE="$(stat -f %z "$DIRTY_PROBE" 2>/dev/null || stat -c %s "$DIRTY_PROBE")"
+# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
+# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
+# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
+# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
+# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
+# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
+# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
+if stat --version >/dev/null 2>&1; then   # GNU coreutils
+    mtime_of(){ stat -c '%Y' "$1" 2>/dev/null; }
+    size_of(){  stat -c '%s' "$1" 2>/dev/null; }
+else                                     # BSD / macOS
+    mtime_of(){ stat -f '%m' "$1" 2>/dev/null; }
+    size_of(){  stat -f '%z' "$1" 2>/dev/null; }
+fi
+
+BEFORE_SIZE="$( size_of "$DIRTY_PROBE" )"
 # touch nothing; re-run warm — the cache file must NOT be rewritten (Win-2 dirty-flag: unchanged tree
 # skips saveCache entirely), which only happens if every file HASH-MATCHED against a re-absolutized key.
-BEFORE_MTIME="$(stat -f %m "$DIRTY_PROBE" 2>/dev/null || stat -c %Y "$DIRTY_PROBE")"
+BEFORE_MTIME="$( mtime_of "$DIRTY_PROBE" )"
 sleep 1
 "$BIN" "$PATH_A" --cache="$DIRTY_PROBE" --no-stable >/dev/null 2>&1
-AFTER_MTIME="$(stat -f %m "$DIRTY_PROBE" 2>/dev/null || stat -c %Y "$DIRTY_PROBE")"
+AFTER_MTIME="$( mtime_of "$DIRTY_PROBE" )"
 if [ "$BEFORE_MTIME" = "$AFTER_MTIME" ]; then
     ok "(d) same-path warm run skips saveCache entirely (dirty flag stayed clear -> every key actually hash-matched via re-absolutize)"
 else
