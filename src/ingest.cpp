@@ -920,7 +920,7 @@ inline std::uint32_t parserVerFor( bool captureValueUses ) noexcept
 inline std::uint64_t contentHash64( std::string_view s ) noexcept
 {
     std::uint64_t h = 1469598103934665603ull;
-    for( unsigned char c : s ) { h ^= c; h = hashutil::fnv1aMultiply( h ); }
+    for( const char c : s ) h = hashutil::fnv1aAbsorb( h, c );
     return h;
 }
 

@@ -541,7 +541,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
     std::uint64_t h = 1469598103934665603ull;
-    for( unsigned char c : urlOrPath ) { h ^= c; h = rw::hashutil::fnv1aMultiply( h ); }
+    for( const char c : urlOrPath ) h = rw::hashutil::fnv1aAbsorb( h, c );
     char tail[ 48 ];
     std::snprintf( tail, sizeof( tail ), "/ripwire-remote-%016llx", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
