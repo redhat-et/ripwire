@@ -11,10 +11,11 @@
 #   scripts/formatcheck.sh --list       Prints the gated file list and exits.
 #
 # WHY THE LIST IS SHORT (9 of 98 files). CONTRIBUTING.md §3's house style is hand-formatted in
-# ways clang-format has no option to preserve — multi-statement one-liners, `for( … ) if( … )
-# return i;`, several initialiser rows or `case` labels packed per line, wrap seams chosen by
-# hand at 160-200 columns. Measured at 73963d2: reformatting all 98 first-party C++ files
-# changes 11837 lines that survive `git diff -w`, i.e. real joins and splits, across 89 files.
+# ways clang-format has no option to preserve — multi-statement one-liners, several initialiser
+# rows or `case` labels packed per line, wrap seams chosen by hand at 160-200 columns, `[ & ]`
+# lambda intros. Re-measured after the 2026-08-03 always-braces sweep: reformatting all 98
+# first-party C++ files changes 14235 lines that survive `git diff -w`, i.e. real joins and
+# splits, across 89 files.
 # So a whole-tree --Werror check would be red on a correctly-styled tree. GATED therefore holds
 # exactly the files that already agree with .clang-format byte for byte; they are gated so they
 # stay that way, and the other 89 are reported by --advisory so the gap stays visible.
