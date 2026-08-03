@@ -117,10 +117,6 @@ deps | v@from
 deps | v@gap
 edit-check | edit-check@at
 edit-check | edit-check@sym
-exemplar | bodies@capped
-exemplar | bodies@shown
-exemplar | bodies@total
-exemplar | calls@total
 exercises | exercises@capped
 exercises | exercises@note
 exercises | exercises@reaches

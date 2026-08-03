@@ -2206,10 +2206,16 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // the SELECTION EVIDENCE the sentence above claims to be showing ("tested before untested, higher
         // fan-in, lower complexity" is the rule; in=/ccx=/tested= are its inputs, unreadable without a gloss).
         // tested= is absence-meaningful and says so, per the house rule for an omitted-not-zero attribute.
+        // The truncation-trio clause closes the four baseline lines this verb held (bodies@shown/total/capped
+        // + calls@total, the "cheapest bulk win" shape the baseline header names) — packBodies emits both
+        // children, and calls@total only surfaces when the winner has callees, so the gap was tree-dependent.
         std::printf( "<!-- ripwire exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
                      "On the root, the three attributes that ARE that ordering's evidence: in=reuse-count "
                      "(callers), ccx=cognitive complexity, tested=1 when a test reaches it (OMITTED, never 0, "
-                     "when none does). Copy its shape, not its text. -->",
+                     "when none does). The body follows in a bodies section, its callee signatures in a calls "
+                     "child; both disclose truncation the house way: total= is how many qualified, shown= how "
+                     "many are printed, capped=1 when the two differ (calls omits shown= and capped= when its "
+                     "list is complete). Copy its shape, not its text. -->",
                      ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), rw::kExemplarSelectionRule );
         std::printf( "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s>",
                      symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
@@ -3366,7 +3372,15 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      // Found by this lane's own legend-coverage sweep, not by the brief: the two attributes
                      // that IDENTIFY a row — which axis regressed, and on what — were the only ones the
                      // dictionary below never named, while it defines p=, sev=, origin= and gating=.
-                     "kind= (which of the measured axes regressed) and sym= (the canonical id it regressed on), plus "
+                     "kind= (which of the measured axes regressed) and sym= (the canonical id it regressed on) — "
+                     // The duplication pair is a DIRTY-TREE-ONLY first screen: a clean tree emits no rows at
+                     // all, so the legendcoverage ratchet only meets members=/tokens= when the working tree
+                     // holds a fresh duplicate, and a gap here reds the suite exactly when an agent has
+                     // uncommitted edits open. Defined here so that encounter is green; the baseline stays a
+                     // downward-only ratchet with no line added for it.
+                     "except duplication rows, which name the whole clone group rather than one symbol: members= "
+                     "is the group's member list and tokens= its shared normalized-token count (the same per-group "
+                     "pair the clones verb reports) — plus "
                      "p=\"path:line\" (root-relative; the first-sorting member for the clone kinds; omitted, "
                      "never faked, when no locator resolves), and every row the header's gating= counter "
                      "counts also carries a gating attribute set to 1 — those are the rows the exit code fires "
