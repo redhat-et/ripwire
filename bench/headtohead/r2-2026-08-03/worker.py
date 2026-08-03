@@ -14,8 +14,10 @@
 #                               is done by RL.file_ranks over the universe, non-file pages simply never match)
 import argparse, json, os, pathlib, re, subprocess, sys, time
 
+# Archived copy: the run executed from the session scratchpad with HERE = that scratchpad's h2h/
+# directory. For the archive, both roots derive from this file's location so no host path is baked in.
 HERE = pathlib.Path(__file__).resolve().parent
-RIPWIRE_REPO = pathlib.Path("/Users/qgames/AppDevelopLocal/project2/ripwire")
+RIPWIRE_REPO = pathlib.Path(__file__).resolve().parents[2].parent
 sys.path.insert(0, str(RIPWIRE_REPO / "bench" / "locbench"))
 import run_locbench as RL  # file_ranks, acc metrics, checkout — imported unmodified
 
