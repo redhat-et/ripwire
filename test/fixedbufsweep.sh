@@ -254,7 +254,7 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 164, "calls": 146, "sites": 34, "rows": 23, "widthforms": 3 }
+EXPECTED = { "mentions": 166, "calls": 148, "sites": 34, "rows": 23, "widthforms": 3 }   # 2026-08-03: +2 calls/mentions — handoff.h degBuf/sBuf (bounded floats, truncate-safe snprintf)
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
 drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
 if drift:

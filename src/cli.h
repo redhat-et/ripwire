@@ -164,6 +164,9 @@ struct Config
                                                             // partition, so on a non-test file its subtraction means nothing.
     bool             situ        = false;                  // --situ[=FILES]: situational awareness (blast radius + tests + co-change) for a change
     std::string_view situFiles;                            // --situ=FILES: explicit changed files (else the current git diff)
+    bool             handoff     = false;                  // --handoff: the continuation packet for the NEXT session — <verified> disk truth (branch/sha,
+                                                            // changed files+symbols, blast radius, tests-to-run) + <heuristic> labeled suggestions
+                                                            // (co-change partners, committed notes, plan/design doc pointers). Composes with --token-budget.
     bool             testGate    = false;                  // --test-gate[=FILES]: TDAD-parity regression contract — tests-to-run + untested blast radius (exit 4 if obligations)
     std::string_view testGateFiles;                        // --test-gate=FILES: explicit changed files (else the current git diff)
     bool             scanSkills  = false;                  // --scan-skills[=DIR]: scan skill files for injection/exfiltration patterns
@@ -711,6 +714,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               A shell harness carries harness=script: subprocess coverage is unmodelled, so reaches=0\n"
         "                               there is a stated limit, not a measurement (the inverse of script_gates_unmodelled).\n"
         "    --situ[=F1,F2]             situational awareness for a change: blast radius + tests + co-change (default = git diff)\n"
+        "    --handoff                  continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed files+symbols,\n"
+        "                               blast radius, tests-to-run) + <heuristic> labeled suggestions (co-change partners, committed notes,\n"
+        "                               plan/design doc pointers via a branch+commit-subject query). Empty diff is fine — the packet still\n"
+        "                               carries branch/sha + heuristics. Composes with --token-budget=N (drops heuristic rows tail-first,\n"
+        "                               disclosed as withheld= in the header; verified rows are never dropped). Single-root only.\n"
         "    --test-gate[=F1,F2]        agent self-check before a PR (pair with --quality-delta): names the tests to run + the UNTESTED blast radius;\n"
         "                               exit 4 if either obligation is non-empty (run the tests, then rely on green). (default = git diff)\n"
         "      run= on a test row        --affected/--situ/--test-gate/--exercises/--pr-context/--pack-task name harness FILES, not commands. A row carries\n"
@@ -1388,6 +1396,7 @@ inline constexpr BoolFlag kBoolFlags[] =
 
     // change / blast-radius
     { "--situ",               &Config::situ               },
+    { "--handoff",            &Config::handoff            },
     { "--test-gate",          &Config::testGate           },
     { "--exercises",          &Config::exercisesFlag      },   // bare flag → empty TESTFILE → handler refuses loudly
 
@@ -1673,7 +1682,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 149;
+inline constexpr std::size_t kTotalFlagArms       = 150;   // +1: --handoff (kBoolFlags row)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2147,6 +2156,7 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--report",       &Config::report,       nullptr },
     { "--edit-check",   nullptr, &Config::editCheckSym },
     { "--situ",         &Config::situ,         nullptr },
+    { "--handoff",      &Config::handoff,      nullptr, false, false, true },   // writeHandoffPacket takes the budget
     { "--scan-skills",  &Config::scanSkills,   nullptr },
     { "--merge-scout",  &Config::mergeScoutFlag, nullptr },
     { "--connect",      nullptr, &Config::connectSpec,  false, true },   // packConnect takes the budget
