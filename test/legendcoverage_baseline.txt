@@ -142,12 +142,10 @@ grep | grep@pattern
 hotspots | f@top_ccx
 hotspots | f@top_l
 hotspots | hotspots@capped
-hotspots | hotspots@ranked
 hotspots | hotspots@shown
 impact | impact@capped
 impact | impact@defs
 impact | impact@of
-impact | impact@reaches
 impact | impact@shown
 layout | caveat@d
 layout | def@agg
