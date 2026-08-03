@@ -43,7 +43,7 @@ architecture pipeline data model determinism contract	docs/ARCHITECTURE.md	docs/
 evaluation instruments and published numbers with provenance	docs/EVALS.md	docs/README.md	name
 documentation index which document is for which reader	docs/README.md	-	name
 self profile where does the time go in the pipeline	bench/PROFILE.md	-	name
-head to head report against other context tools	bench/headtohead/REPORT.md	bench/headtohead/README.md	name
+head to head report against other context tools	bench/headtohead/REPORT.md,bench/headtohead/r2-2026-08-03/REPORT.md	bench/headtohead/README.md	name
 locbench localization harness readme	bench/locbench/README.md	-	name
 agent in the loop eval harness	bench/agentloop/README.md	-	name
 answer quality co-change recall evaluation	bench/ANSWERQUALITY.md	-	name
