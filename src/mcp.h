@@ -132,7 +132,12 @@ inline constexpr std::string_view kMcpProtocolVersions[] =
 inline bool isMcpProtocolVersionSupported( std::string_view version ) noexcept
 {
     for( const std::string_view supported : kMcpProtocolVersions )
-        if( version == supported ) return true;
+    {
+        if( version == supported )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -165,7 +170,10 @@ struct McpDispatchPolicy
 inline std::string mcpCanonRoot( const std::string& root )
 {
     char buf[ PATH_MAX ];
-    if( ::realpath( root.c_str(), buf ) ) return std::string( buf );
+    if( ::realpath( root.c_str(), buf ) )
+    {
+        return std::string( buf );
+    }
     return root;
 }
 
@@ -176,9 +184,15 @@ inline std::string mcpCanonRoot( const std::string& root )
 // containment check, not a hand-rolled string comparison, is what makes "outside the root" mean anything.
 inline bool mcpPathInsideRoot( const std::string& canonRoot, const std::string& candidatePath )
 {
-    if( canonRoot.empty() ) return false;   // an unset root contains nothing — never treat "" as "everywhere"
+    if( canonRoot.empty() )
+    {
+        return false; // an unset root contains nothing — never treat "" as "everywhere"
+    }
     const std::string canonCandidate = mcpCanonRoot( candidatePath );
-    if( canonCandidate == canonRoot ) return true;
+    if( canonCandidate == canonRoot )
+    {
+        return true;
+    }
     const std::string prefix = canonRoot.back() == '/' ? canonRoot : canonRoot + "/";
     return canonCandidate.size() > prefix.size() && canonCandidate.compare( 0, prefix.size(), prefix ) == 0;
 }
@@ -264,7 +278,12 @@ inline bool mcpPathInsideRoot( const std::string& canonRoot, const std::string& 
 inline bool isMcpEditVerb( std::string_view name ) noexcept
 {
     for( const McpVerbInfo& verb : kMcpVerbTable )
-        if( name == verb.name ) return verb.group == McpVerbGroup::Edit;
+    {
+        if( name == verb.name )
+        {
+            return verb.group == McpVerbGroup::Edit;
+        }
+    }
 
     return false;   // an unadvertised name is not a write — the unknown-tool refusal owns that request
 }
@@ -277,7 +296,12 @@ consteval std::size_t mcpEditVerbCount() noexcept
 {
     std::size_t editVerbCount = 0;
     for( const McpVerbInfo& verb : kMcpVerbTable )
-        if( verb.group == McpVerbGroup::Edit ) ++editVerbCount;
+    {
+        if( verb.group == McpVerbGroup::Edit )
+        {
+            ++editVerbCount;
+        }
+    }
 
     return editVerbCount;
 }
@@ -356,19 +380,27 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
         // the envelope's own two shape/presence faults, checked once for all three methods.
         const McpObjectArg paramsArg = mcpObjectArg( line, "params" );
         if( methodRaw.isPresent && !methodRaw.isQuoted )
+        {
             resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32600,\"message\":\""
                  + mcpdetail::jsonEscape( mcprefuse::badValueRefusal( "method", methodRaw.text ) ) + "\"}}";
+        }
         else if( !methodRaw.isPresent )
+        {
             resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32600,\"message\":\""
                  + mcpdetail::jsonEscape( mcprefuse::missingEnvelopeField( "method" ) ) + "\"}}";
+        }
         else if( !paramsArg.refusal.empty() )
+        {
             resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32600,\"message\":\""
                  + mcpdetail::jsonEscape( paramsArg.refusal ) + "\"}}";
         // §B6 M11: `ping` — the one utility method both advertised protocol versions define, and the server
         // answered it with "method not found". A client using it as a liveness probe concludes the server is
         // broken. The spec's contract is exactly this: an empty result object, no params read, no side effect.
+        }
         else if( method == "ping" )
+        {
             resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{}}";
+        }
         else if( method == "initialize" )
         {
             // W3FIX H3: the key lookups are TOP-LEVEL-only now (mcpjson.h's findKeyValuePos), and
@@ -394,9 +426,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                             ? mcpStringArg( line, "protocolVersion" )
                                             : McpStringArg{};
             if( !nestedVerArg.refusal.empty() || !lineVerArg.refusal.empty() )
+            {
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32602,\"message\":\""
                      + mcpdetail::jsonEscape( !nestedVerArg.refusal.empty() ? nestedVerArg.refusal : lineVerArg.refusal )
                      + "\"}}";
+            }
             else
             {
                 const std::string requestedVersion = !nestedVerArg.value.empty() ? nestedVerArg.value : lineVerArg.value;
@@ -409,6 +443,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             }
         }
         else if( method == "tools/list" )
+        {
             // §B6 M4: is `path` actually REQUIRED of this caller? Only when this server cannot supply a root
             // itself — no `ripwire <root> --mcp` startup root and no pinned remote workspace. That is the
             // DEFAULT shipped install (`ripwire wrap claude` passes no startup root), which is why every
@@ -528,6 +563,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             {
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32603,\"message\":\"internal error\"}}";
             }
+        }
         else if( method == "tools/call" )
         {
             // A3-F6/A4-F26: the tool `name` and EVERY per-verb argument (path/symbol/file/task/…) are scoped to
@@ -550,7 +586,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string  args     = argsArg.isPresent ? argsArg.span : params;
             const McpStringArg nameArg  = mcpStringArg( params, "name" );            // params-level, before arguments — the tool selector
             const std::string  name     = nameArg.value;
-            if( !name.empty() ) timingVerb = name;                                   // MEASURE-FIRST: attribute the wall to the actual verb
+            if( !name.empty() )
+            {
+                timingVerb = name; // MEASURE-FIRST: attribute the wall to the actual verb
+            }
             // ── W3FIX H5: every STRING argument through the ONE guarded reader ─────────────────────────────
             //
             // Verifier N11 wired mcpStringArg into `files` and stopped there, so thirteen sibling fields kept
@@ -572,7 +611,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const auto  strArg = [ & ]( const char* field ) -> std::string
             {
                 const McpStringArg a = mcpStringArg( args, field );
-                if( shapeRefusal.empty() && !a.refusal.empty() ) shapeRefusal = a.refusal;
+                if( shapeRefusal.empty() && !a.refusal.empty() )
+                {
+                    shapeRefusal = a.refusal;
+                }
                 return a.value;
             };
 
@@ -608,7 +650,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const auto intArg = [ & ]( const char* field, long long least, long long most ) -> McpIntArg
             {
                 const McpIntArg a = mcpIntArg( args, field, least, most );
-                if( shapeRefusal.empty() && !a.refusal.empty() ) shapeRefusal = a.refusal;
+                if( shapeRefusal.empty() && !a.refusal.empty() )
+                {
+                    shapeRefusal = a.refusal;
+                }
                 return a;
             };
 
@@ -687,7 +732,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const auto pagedResult = [ & ]( auto&& buildWithPage ) -> std::string
             {
                 const McpPageParse pg = mcpPageArgs( args );
-                if( !pg.refusal.empty() ) return errResultMsg( -32602, pg.refusal );
+                if( !pg.refusal.empty() )
+                {
+                    return errResultMsg( -32602, pg.refusal );
+                }
                 return buildWithPage( pg.page );
             };
 
@@ -736,7 +784,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // (a) workspace pinning: one listener serves ONE workspace fixed at startup. An OMITTED path
                 //     defaults to it; a path naming a DIFFERENT tree is refused with no rebuild.
                 if( path.empty() )
+                {
                     path = policy.pinnedRoot;                                  // default to the pinned workspace
+                }
                 else if( mcpCanonRoot( path ) != policy.pinnedRoot )
                 {
                     resp = errResultMsg( -32602, "path is outside this server's workspace (this listener serves one "
@@ -765,7 +815,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             if( !pathsUsageError && policy.pinnedRoot.empty() && !policy.defaultRoot.empty() )
             {
                 if( path.empty() )
+                {
                     path = policy.defaultRoot;
+                }
                 else if( isMcpEditVerb( name ) && !mcpPathInsideRoot( policy.defaultRoot, path ) )
                 {
                     resp = errResult( -32602, "path outside workspace; start the server on that root or pass an absolute in-root path" );
@@ -790,11 +842,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // directory is NOT a fault: "nothing there" and "no such place" are different answers, which is the
             // CLI's own rule.
             if( !pathsUsageError && !path.empty() )
+            {
                 if( const std::string rootErr = mcpRootRefusal( path ); !rootErr.empty() )
                 {
                     resp = errResultMsg( -32602, rootErr );
                     pathsUsageError = true;   // reuse the skip-flag: no dispatch, no getIndex(), no byte written
                 }
+            }
 
             // ── W3FIX M4: an argument this verb does not DECLARE refuses, with a near-miss ──────────────────
             // `explore` honored budget_tokens while token_budget / max_tokens were dropped in silence. Checked
@@ -831,33 +885,81 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // refusal below, which is now a DIFFERENT message rather than the same conflated one.
             const auto argPresent = [ & ]( std::string_view field ) -> bool
             {
-                if( field == "symbol"   ) return !symbol.empty();
-                if( field == "pattern"  ) return !pattern.empty();
-                if( field == "file"     ) return !file.empty();
-                if( field == "task"     ) return !task.empty();
-                if( field == "type"     ) return !type.empty();
-                if( field == "kind"     ) return !kind.empty();
-                if( field == "from"     ) return !from.empty();
-                if( field == "to"       ) return !to.empty();
-                if( field == "handle"   ) return !handle.empty();
-                if( field == "trace"    ) return !trace.empty();
+                if( field == "symbol" )
+                {
+                    return !symbol.empty();
+                }
+                if( field == "pattern" )
+                {
+                    return !pattern.empty();
+                }
+                if( field == "file" )
+                {
+                    return !file.empty();
+                }
+                if( field == "task" )
+                {
+                    return !task.empty();
+                }
+                if( field == "type" )
+                {
+                    return !type.empty();
+                }
+                if( field == "kind" )
+                {
+                    return !kind.empty();
+                }
+                if( field == "from" )
+                {
+                    return !from.empty();
+                }
+                if( field == "to" )
+                {
+                    return !to.empty();
+                }
+                if( field == "handle" )
+                {
+                    return !handle.empty();
+                }
+                if( field == "trace" )
+                {
+                    return !trace.empty();
+                }
                 // ITEM A: the two PAYLOAD fields answer presence with hasVisibleContent, not `!empty()` — a
                 // whitespace-only payload is the same unset-argument bug as an omitted one and used to DELETE
                 // the definition while reporting {"applied":…}. See the ruling at isMcpEditVerb above for the
                 // exact class and for why the read verbs' required strings are deliberately NOT widened.
-                if( field == "new_body" ) return hasVisibleContent( newBody );
-                if( field == "text"     ) return hasVisibleContent( text );
-                if( field == "path"     ) return !path.empty();
+                if( field == "new_body" )
+                {
+                    return hasVisibleContent( newBody );
+                }
+                if( field == "text" )
+                {
+                    return hasVisibleContent( text );
+                }
+                if( field == "path" )
+                {
+                    return !path.empty();
+                }
                 // M8: PRESENCE, not shape — the array readers own the shape verdict, and this predicate must
                 // answer "did the request carry this field at all" so a wrong-shaped one is never reported
                 // missing (which is the collapse M8 exists to undo).
-                if( field == "queries"  ) return mcpArrayArg( args, "queries", false ).isPresent;
-                if( field == "symbols"  ) return mcpArrayArg( args, "symbols", true  ).isPresent;
+                if( field == "queries" )
+                {
+                    return mcpArrayArg( args, "queries", false ).isPresent;
+                }
+                if( field == "symbols" )
+                {
+                    return mcpArrayArg( args, "symbols", true ).isPresent;
+                }
                 return true;   // a field this arm does not parse cannot be reported missing by it
             };
             const auto missingArgMsg = [ & ]() -> std::string
             {
-                if( path.empty() ) return mcprefuse::missingPathRefusal();
+                if( path.empty() )
+                {
+                    return mcprefuse::missingPathRefusal();
+                }
                 return mcprefuse::missingFieldRefusal( name, argPresent );
             };
 
@@ -873,6 +975,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // `if( !pathsUsageError )` that used to gate the try from outside is now the first arm of the
                 // dispatch chain below, which is what makes room for this.
                 if( !pathsUsageError && isMcpEditVerb( name ) )
+                {
                     if( std::string missingEditArg = missingArgMsg(); !missingEditArg.empty() )
                     {
                         // F2: name WHICH invisible code points were sent, when any were. G5: the payload FIELD
@@ -895,6 +998,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, missingEditArg );
                         pathsUsageError = true;   // reuse the skip-flag: no dispatch, no getIndex(), no byte written
                     }
+                }
 
                 // §B6 M1: the MCP twin of the CLI's multi-root refusal enumeration, as ONE gate reading ONE
                 // table (mcprefusal.h's kMcpSingleRootVerbs). Wave 1 built singleRootRefusal and wired it to
@@ -905,11 +1009,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // one fewer place to forget, and the consteval floor beside the table makes a forgotten row a
                 // build error. quality_baseline's own inline check is now this gate — one sentence, one origin.
                 if( !pathsUsageError && isMcpMultiRootPath( path ) )
+                {
                     if( const std::string_view because = mcprefuse::singleRootReason( name ); !because.empty() )
                     {
                         resp            = errResultMsg( -32602, mcprefuse::singleRootRefusal( name, because ) );
                         pathsUsageError = true;
                     }
+                }
 
                 // A pre-dispatch refusal — a bad `paths` (checked above), the §H2 write gate, or the M1
                 // single-root gate just above — has already composed the entire response, so dispatch nothing.
@@ -940,8 +1046,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                      : textResult( j );
                 }
                 else if( name == "grep" && !path.empty() && !pattern.empty() )
+                {
                     // verifier N8: grep pages through the SAME window both other paged verbs use.
                     resp = pagedResult( [ & ]( McpPageArgs pg ) { return textResult( grepHitsJson( path, pattern, pg ) ); } );
+                }
                 else if( name == "cochange" && !path.empty() && !file.empty() )
                 {
                     const std::string j = cochangePartnersJson( path, file );
@@ -949,9 +1057,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                      : textResult( j );
                 }
                 else if( name == "memory_recall" && !path.empty() && !task.empty() )
+                {
                     // §B6 M15: `top_k` (default 8, the historic hardcode) — the budget lever the in-band
                     // est_tokens disclosure has always implied, and the CLI's --recall now honors.
                     resp = textResult( recallText( path, task, recallTopK, 0, redactPtr ) );
+                }
                 else if( name == "situational_awareness" && !path.empty() )
                 {
                     // diff source: explicit `diff` or `files` list, else default to the working-tree git diff.
@@ -969,7 +1079,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // `symbol` field through the same bare-name resolver, so a qualified spelling used to come
                     // back as "symbol not found" about a symbol that plainly exists.
                     const std::string refusal = qualifiedSelectorRefusal( getIndex( path ).ing, symbol, "--mentions=" );
-                    if( !refusal.empty() ) resp = errResultMsg( -32602, refusal );
+                    if( !refusal.empty() )
+                    {
+                        resp = errResultMsg( -32602, refusal );
+                    }
                     else
                     {
                         const std::string j = mentionsJson( path, symbol );
@@ -1019,7 +1132,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             if( !nearMisses.empty() )
                             {
                                 msg += " (did you mean";
-                                for( std::size_t i = 0; i < nearMisses.size(); ++i ) msg += ( i ? ", '" : " '" ) + nearMisses[i] + "'";
+                                for( std::size_t i = 0; i < nearMisses.size(); ++i )
+                                {
+                                    msg += ( i ? ", '" : " '" ) + nearMisses[i] + "'";
+                                }
                                 msg += "?)";
                             }
                             resp = errResultMsg( -32602, msg );
@@ -1183,12 +1299,18 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
                 else if( name == "replace_symbol_body" && !path.empty() && !symbol.empty() )
+                {
                     resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody ) );
+                }
                 else if( name == "insert_before_symbol" && !path.empty() && !symbol.empty() )
+                {
                     resp = editResult( runEditVerb( path, mcpedit::Op::InsertBefore, symbol, file, text ) );
+                }
                 else if( name == "insert_after_symbol" && !path.empty() && !symbol.empty() )
+                {
                     resp = editResult( runEditVerb( path, mcpedit::Op::InsertAfter, symbol, file, text ) );
                 // T4 lazy-body verb: return a def's full source by its stable handle (or a staleness/refusal message).
+                }
                 else if( name == "fetch_body" && !path.empty() && !handle.empty() )
                 {
                     // Feature 2: a range is in play if EITHER bound was given. A lone start_line ⇒ start..EOF
@@ -1213,22 +1335,30 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const McpArrayArg queriesArg = mcpArrayArg( args, "queries", false );
                     const std::string arr        = queriesArg.isPresent ? queriesArg.span : std::string{};
                     if( !queriesArg.refusal.empty() )
+                    {
                         resp = errResultMsg( -32602, queriesArg.refusal );
+                    }
                     else if( !queriesArg.isPresent )
+                    {
                         resp = errResultMsg( -32602, mcprefuse::missingFieldRefusal( "batch" ) );
+                    }
                     else
                     {
                         const std::vector<std::string> objs      = mcpdetail::arrayObjects( arr );
                         const std::size_t               requested = objs.size();
                         if( requested == 0 )
+                        {
                             resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "queries", arr ) );
+                        }
                         else
                         {
                             const std::size_t     take = std::min<std::size_t>( requested, kBatchCap );
                             std::vector<BatchSub> subs;
                             subs.reserve( take );
                             for( std::size_t i = 0; i < take; ++i )
+                            {
                                 subs.push_back( runBatchSub( path, objs[i], topK, stable, redactPtr ) );
+                            }
                             resp = textResult( batchText( subs, requested, kBatchCap ) );
                         }
                     }
@@ -1242,17 +1372,25 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // the `flags` verb has offered since it shipped.
                     const std::string missing = missingArgMsg();
                     if( !missing.empty() )
+                    {
                         resp = errResultMsg( -32602, missing );
+                    }
                     else
                     {
                         std::vector<std::string_view> knownVerbs;
                         knownVerbs.reserve( kMcpVerbCount + std::size( mcprefuse::kMcpVerbAliases ) );
-                        for( const McpVerbInfo& info : kMcpVerbTable ) knownVerbs.push_back( info.name );
+                        for( const McpVerbInfo& info : kMcpVerbTable )
+                        {
+                            knownVerbs.push_back( info.name );
+                        }
                         // W3FIX M4: the callable ALIASES join the near-miss pool (a `packtask` typo should land
                         // on `pack_task`, which this server answers) — the printed COUNT below stays the
                         // advertised one, which is what "call tools/list for the N available tools" promises.
                         const std::size_t advertisedCount = knownVerbs.size();
-                        for( const mcprefuse::McpVerbAlias& alias : mcprefuse::kMcpVerbAliases ) knownVerbs.push_back( alias.alias );
+                        for( const mcprefuse::McpVerbAlias& alias : mcprefuse::kMcpVerbAliases )
+                        {
+                            knownVerbs.push_back( alias.alias );
+                        }
                         // code stays -32602 (what this arm has always sent for an unknown tool); the FIX
                         // here is the message, and changing the code too would break callers switching on it
                         // for a reason unrelated to the finding.
@@ -1276,7 +1414,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
         // `method` is a non-empty string, so this arm could only ever have been reached by the four cases that
         // no longer arrive: keeping it would be keeping the sentence that made them indistinguishable.
         else
+        {
             resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32601,\"message\":\"method not found\"}}";
+        }
 
         out.resp       = std::move( resp );
         out.timingVerb = std::move( timingVerb );
@@ -1309,10 +1449,15 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
     {
         std::string wsErr;
         const std::string key = mcpWorkspaceKey( roots, wsErr );
-        if( !key.empty() ) defaultRoot = mcpCanonRoot( key );
+        if( !key.empty() )
+        {
+            defaultRoot = mcpCanonRoot( key );
+        }
     }
     else if( !root.empty() )
+    {
         defaultRoot = mcpCanonRoot( root );
+    }
 
     McpDispatchPolicy policy;      // stdio: no HARD workspace pinning (pinnedRoot stays ""), edit verbs allowed
     policy.defaultRoot = defaultRoot;   // "" unless a startup root was given — see the comment above
@@ -1324,7 +1469,10 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
     std::string line;
     while( readByteSafeLine( stdin, line ) )
     {
-        if( line.find_first_not_of( " \t\r\n" ) == std::string::npos ) continue;
+        if( line.find_first_not_of( " \t\r\n" ) == std::string::npos )
+        {
+            continue;
+        }
 
         // per-request timing capture (only when the env observable is on — zero clock/atomic work otherwise).
         const std::chrono::steady_clock::time_point t0 =
@@ -1333,7 +1481,9 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
 
         const McpDispatchResult r = dispatchMcpLine( line, topK, stable, noRedact, policy );
         if( r.isNotification )
+        {
             continue;
+        }
 
         std::fputs( r.resp.c_str(), stdout );
         std::fputc( '\n', stdout );

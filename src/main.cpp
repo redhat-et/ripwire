@@ -152,11 +152,19 @@ bool gitChangedFiles( const std::string& root, const rw::IngestResult& ing, std:
                       std::uint32_t onlyRoot = UINT32_MAX )
 {
     const auto [ mask, isGitOk ] = rw::gitDiffChangedMask( root, ing, onlyRoot );
-    if( !isGitOk ) return false;
+    if( !isGitOk )
+    {
+        return false;
+    }
 
     const std::size_t markCount = std::min( out.size(), mask.size() );
     for( std::size_t fileIndex = 0; fileIndex < markCount; ++fileIndex )
-        if( mask[ fileIndex ] ) out[ fileIndex ] = 1;
+    {
+        if( mask[fileIndex] )
+        {
+            out[fileIndex] = 1;
+        }
+    }
     return true;
 }
 
@@ -171,7 +179,10 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     const auto idOf = [ & ]( std::string_view d ) -> std::uint32_t
     {
         const auto it = dirId.find( std::string( d ) );
-        if( it != dirId.end() ) return it->second;
+        if( it != dirId.end() )
+        {
+            return it->second;
+        }
         const std::uint32_t id = std::uint32_t( dirName.size() );
         dirId.emplace( std::string( d ), id );  dirName.emplace_back( d );
         return id;
@@ -200,12 +211,20 @@ bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::
     const std::string windowArgs = scope ? rw::sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
     const rw::GitCommandLines touched = rw::gitCommandLines(
         "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
-    if( !touched.isStarted ) return false;
+    if( !touched.isStarted )
+    {
+        return false;
+    }
 
     rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
-    for( const std::string& p : touched.lines ) ++counts[ p ];
+    for( const std::string& p : touched.lines )
+    {
+        ++counts[p];
+    }
     if( counts.empty() )
+    {
         return false;   // no in-window commit touched anything — the caller's "empty churn" case, NOT an error (see --hotspots' two causes)
+    }
 
     // Map the per-path tally onto ingested fileIds through THE ONE specificity-ordered mapper (§H6,
     // gitmine.h::mapChurnCountsOntoFiles). This loop used to be spelled here AND in gitmine.h's
@@ -233,7 +252,10 @@ bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::
 // second, cheap gate on the "is this even a URL" recognizer itself.
 bool isGitUrl( std::string_view s ) noexcept
 {
-    if( s.empty() || s.front() == '-' ) return false;   // never treat a dash-leading arg as a URL (option-injection guard)
+    if( s.empty() || s.front() == '-' )
+    {
+        return false; // never treat a dash-leading arg as a URL (option-injection guard)
+    }
     return s.rfind( "https://", 0 ) == 0 || s.rfind( "http://", 0 ) == 0 || s.rfind( "git@", 0 ) == 0 || s.rfind( "ssh://", 0 ) == 0;
 }
 
@@ -280,10 +302,18 @@ constexpr std::array<std::string_view, 31> kAccessorNames = {
 
 bool isAccessorName( std::string_view name ) noexcept
 {
-    for( std::string_view accessor : kAccessorNames ) if( name == accessor ) return true;
+    for( std::string_view accessor : kAccessorNames )
+    {
+        if( name == accessor )
+        {
+            return true;
+        }
+    }
     // getX / setX getter-setter convention (name[3] uppercase, e.g. "getIndex", "setFlag").
     if( name.size() > 3 && ( name.rfind( "get", 0 ) == 0 || name.rfind( "set", 0 ) == 0 ) )
+    {
         return name[3] >= 'A' && name[3] <= 'Z';
+    }
     return false;
 }
 
@@ -329,7 +359,10 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
     for( std::size_t communityIndex = 0; communityIndex < members.size(); ++communityIndex )
     {
         const std::vector<rw::NodeId>& communityMembers = members[ communityIndex ];
-        if( communityMembers.empty() ) continue;
+        if( communityMembers.empty() )
+        {
+            continue;
+        }
 
         rw::HashMap<std::string, std::uint32_t> directoryCount;
         const auto keyOf = [ & ]( rw::NodeId nodeId ) -> AnchorKey
@@ -348,16 +381,21 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
 
         std::uint32_t dominantCount = 0;
         for( const auto& [ directory, count ] : directoryCount )
+        {
             if( count > dominantCount || ( count == dominantCount && directory < out.directory[ communityIndex ] ) )
             {
                 dominantCount                   = count;
                 out.directory[ communityIndex ] = directory;
         }
+        }
 
         const rw::Symbol& symbol = ing.symbols[ lead ];
         std::string_view   anchorPath = ing.files[ symbol.fileId ];
         const std::string  directoryPrefix = out.directory[ communityIndex ] + "/";
-        if( anchorPath.rfind( directoryPrefix, 0 ) == 0 ) anchorPath.remove_prefix( directoryPrefix.size() );
+        if( anchorPath.rfind( directoryPrefix, 0 ) == 0 )
+        {
+            anchorPath.remove_prefix( directoryPrefix.size() );
+        }
         out.label[ communityIndex ] = out.directory[ communityIndex ] + "::" + symbol.name + "@"
                                     + std::string( anchorPath ) + ":" + std::to_string( symbol.line ) + ":"
                                     + std::to_string( symbol.sigStartByte );
@@ -368,7 +406,10 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
 bool isHeaderPath( std::string_view path ) noexcept
 {
     const std::size_t dot = path.rfind( '.' );
-    if( dot == std::string_view::npos ) return false;
+    if( dot == std::string_view::npos )
+    {
+        return false;
+    }
     const std::string_view extension = path.substr( dot + 1 );
     return extension == "h" || extension == "hpp" || extension == "hh" || extension == "hxx";
 }
@@ -391,24 +432,45 @@ IsolateStats isolateStats( const rw::IngestResult& ing, const rw::Graph& graph,
 
     for( const std::vector<rw::NodeId>& communityMembers : members )
     {
-        if( communityMembers.size() != 1 ) continue;
+        if( communityMembers.size() != 1 )
+        {
+            continue;
+        }
         const rw::NodeId nodeId = communityMembers.front();
         const bool isConnected = graph.outOff[nodeId] != graph.outOff[nodeId + 1]
                               || inRowOffset[nodeId] != inRowOffset[nodeId + 1];
-        if( isConnected ) ++stats.connectedSingletons;
+        if( isConnected )
+        {
+            ++stats.connectedSingletons;
+        }
     }
 
     for( const rw::Symbol& symbol : ing.symbols )
     {
         const rw::NodeId nodeId = symbol.id;
-        if( graph.outOff[nodeId] != graph.outOff[nodeId + 1] || inRowOffset[nodeId] != inRowOffset[nodeId + 1] ) continue;
+        if( graph.outOff[nodeId] != graph.outOff[nodeId + 1] || inRowOffset[nodeId] != inRowOffset[nodeId + 1] )
+        {
+            continue;
+        }
         ++stats.total;
 
         // Mutually-exclusive provenance, ordered from semantic node kind to definition placement.
-        if( symbol.kind == rw::SymKind::Section )                              ++stats.document;
-        else if( symbol.sigEndByte >= symbol.endByte )                          ++stats.declaration;
-        else if( isHeaderPath( ing.files[ symbol.fileId ] ) )                   ++stats.header;
-        else                                                                     ++stats.source;
+        if( symbol.kind == rw::SymKind::Section )
+        {
+            ++stats.document;
+        }
+        else if( symbol.sigEndByte >= symbol.endByte )
+        {
+            ++stats.declaration;
+        }
+        else if( isHeaderPath( ing.files[symbol.fileId] ) )
+        {
+            ++stats.header;
+        }
+        else
+        {
+            ++stats.source;
+        }
     }
     return stats;
 }
@@ -421,24 +483,48 @@ bool isUniversalOrAllowlistedNumber( std::string_view spelling ) noexcept
 {
     std::string normalized;
     normalized.reserve( spelling.size() );
-    for( char c : spelling ) if( c != '\'' ) normalized.push_back( c );
+    for( char c : spelling )
+    {
+        if( c != '\'' )
+        {
+            normalized.push_back( c );
+        }
+    }
 
     std::string_view valueText = normalized;
-    if( !valueText.empty() && ( valueText.front() == '+' || valueText.front() == '-' ) ) valueText.remove_prefix( 1 );
+    if( !valueText.empty() && ( valueText.front() == '+' || valueText.front() == '-' ) )
+    {
+        valueText.remove_prefix( 1 );
+    }
     constexpr std::string_view kBasePrefixes[] = { "0x", "0X", "0b", "0B" };
-    for( std::string_view prefix : kBasePrefixes ) if( valueText.rfind( prefix, 0 ) == 0 ) return true;
+    for( std::string_view prefix : kBasePrefixes )
+    {
+        if( valueText.rfind( prefix, 0 ) == 0 )
+        {
+            return true;
+        }
+    }
 
     while( !normalized.empty() )
     {
         const char suffix = normalized.back();
-        if( suffix != 'u' && suffix != 'U' && suffix != 'l' && suffix != 'L' && suffix != 'f' && suffix != 'F' ) break;
+        if( suffix != 'u' && suffix != 'U' && suffix != 'l' && suffix != 'L' && suffix != 'f' && suffix != 'F' )
+        {
+            break;
+        }
         normalized.pop_back();
     }
-    if( normalized.empty() ) return false;
+    if( normalized.empty() )
+    {
+        return false;
+    }
 
     double parsed = 0.0;
     const auto [ end, error ] = rw::parseFloating( normalized.data(), normalized.data() + normalized.size(), parsed );
-    if( error != std::errc{} || end != normalized.data() + normalized.size() ) return false;
+    if( error != std::errc {} || end != normalized.data() + normalized.size() )
+    {
+        return false;
+    }
     return parsed == -2.0 || parsed == -1.0 || parsed == 0.0 || parsed == 1.0 || parsed == 2.0;
 }
 
@@ -474,24 +560,42 @@ inline ExpandToken parseExpandToken( const std::string& token, const char* verb 
     // is full of ':' and every one of them is scope syntax, never a range seam. Splitting at the FIRST ':'
     // turned "./src/serialize.h::XmlWriter::write" into the name "./src/serialize.h" and then refused it.
     const std::size_t colon = token.rfind( ':' );
-    if( colon == std::string::npos ) return out;                        // no range → whole-body, unchanged
+    if( colon == std::string::npos )
+    {
+        return out; // no range → whole-body, unchanged
+    }
 
     const std::string_view rangeStr = std::string_view( token ).substr( colon + 1 );
 
     // The disambiguator. A tail that does not open with a digit is a NAME, so the whole token is a
     // file-qualified selector — return it untouched and silently (this is a CORRECT input, not a botch).
-    if( rangeStr.empty() || rangeStr.front() < '0' || rangeStr.front() > '9' ) return out;
+    if( rangeStr.empty() || rangeStr.front() < '0' || rangeStr.front() > '9' )
+    {
+        return out;
+    }
 
     out.selector = token.substr( 0, colon );
     const std::size_t dash = rangeStr.find( '-' );
 
     const auto parseU32 = []( std::string_view s, std::uint32_t& v ) noexcept
     {
-        if( s.empty() ) return false;
-        for( char c : s ) if( c < '0' || c > '9' ) return false;         // digits only — no sign, no whitespace
+        if( s.empty() )
+        {
+            return false;
+        }
+        for( char c : s )
+        {
+            if( c < '0' || c > '9' )
+            {
+                return false; // digits only — no sign, no whitespace
+            }
+        }
         char*      end = nullptr;
         const long n   = std::strtol( std::string( s ).c_str(), &end, 10 );
-        if( n <= 0 || n > 0x7FFFFFFFL ) return false;                    // START/END are 1-based; 0 or overflow is malformed
+        if( n <= 0 || n > 0x7FFFFFFFL )
+        {
+            return false; // START/END are 1-based; 0 or overflow is malformed
+        }
         v = std::uint32_t( n );
         return true;
     };
@@ -524,7 +628,9 @@ long cloneAgeDays( const std::string& cacheDir )
 {
     struct stat st{};
     if( ::stat( cacheDir.c_str(), &st ) != 0 )
+    {
         return 0;
+    }
     const long long ageSec = static_cast<long long>( std::time( nullptr ) ) - static_cast<long long>( st.st_mtime );
     return ageSec > 0 ? static_cast<long>( ageSec / 86400 ) : 0;
 }
@@ -535,13 +641,18 @@ long cloneAgeDays( const std::string& cacheDir )
 std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bool refetch = false )
 {
     if( !isGitUrl( urlOrPath ) )
+    {
         return { urlOrPath, true };
+    }
 
     // cache key = FNV-1a-64 of the URL → <hardened cache dir>/ripwire-remote-<hex>. Reuse if the dir
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
     std::uint64_t h = 1469598103934665603ull;
-    for( const char c : urlOrPath ) h = rw::hashutil::fnv1aAbsorb( h, c );
+    for( const char c : urlOrPath )
+    {
+        h = rw::hashutil::fnv1aAbsorb( h, c );
+    }
     char tail[ 48 ];
     std::snprintf( tail, sizeof( tail ), "/ripwire-remote-%016llx", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
@@ -576,7 +687,10 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
         return { std::string(), false };
     }
     char line[ 4096 ];
-    while( std::fgets( line, sizeof( line ), pipe ) ) std::fprintf( stderr, "  %s", line );   // surface git's own diagnostics
+    while( std::fgets( line, sizeof( line ), pipe ) )
+    {
+        std::fprintf( stderr, "  %s", line ); // surface git's own diagnostics
+    }
     const int rc = pclose( pipe );
     if( rc != 0 || !( fs::exists( fs::path( cacheDir ) / ".git", ec ) && !ec ) )
     {
@@ -635,7 +749,10 @@ inline std::string selfExecutablePath( const char* argv0 )
     if( _NSGetExecutablePath( buf, &size ) == 0 )
     {
         char resolved[ PATH_MAX ];
-        if( ::realpath( buf, resolved ) ) return std::string( resolved );
+        if( ::realpath( buf, resolved ) )
+        {
+            return std::string( resolved );
+        }
         return std::string( buf );
     }
 #elif defined( __linux__ )
@@ -645,12 +762,18 @@ inline std::string selfExecutablePath( const char* argv0 )
     {
         buf[ byteCount ] = '\0';
         char resolved[ PATH_MAX ];
-        if( ::realpath( buf, resolved ) ) return std::string( resolved );
+        if( ::realpath( buf, resolved ) )
+        {
+            return std::string( resolved );
+        }
         return std::string( buf );
     }
 #endif
     char resolved[ PATH_MAX ];
-    if( argv0 && ::realpath( argv0, resolved ) ) return std::string( resolved );
+    if( argv0 && ::realpath( argv0, resolved ) )
+    {
+        return std::string( resolved );
+    }
 
     // Last-resort PATH search for platforms without a process-executable API. Returning a bare argv0
     // would recreate the exact Codex Desktop failure this path is used to prevent.
@@ -663,8 +786,14 @@ inline std::string selfExecutablePath( const char* argv0 )
             const std::size_t split = remaining.find( ':' );
             const std::string_view dir = remaining.substr( 0, split );
             const std::string candidate = std::string( dir.empty() ? "." : dir ) + "/" + argv0;
-            if( ::realpath( candidate.c_str(), resolved ) && ::access( resolved, X_OK ) == 0 ) return std::string( resolved );
-            if( split == std::string_view::npos ) break;
+            if( ::realpath( candidate.c_str(), resolved ) && ::access( resolved, X_OK ) == 0 )
+            {
+                return std::string( resolved );
+            }
+            if( split == std::string_view::npos )
+            {
+                break;
+            }
             remaining.remove_prefix( split + 1 );
         }
     }
@@ -688,7 +817,10 @@ inline std::string doctorPopenTrim( const std::string& cmd )
 inline std::string doctorBinaryPathVerdictAttr( bool copied, const std::string& selfPath, const std::string& whichPath,
                                                 const struct stat& selfSt, const struct stat& whichSt, std::vector<char>& esc )
 {
-    if( copied ) return " copied=\"1\"";
+    if( copied )
+    {
+        return " copied=\"1\"";
+    }
     const bool        selfIsOlder = selfSt.st_mtime < whichSt.st_mtime;
     const std::string olderPath   = selfIsOlder ? selfPath : whichPath;
     const std::string newerPath   = selfIsOlder ? whichPath : selfPath;
@@ -700,7 +832,10 @@ inline std::string doctorBinaryPathVerdictAttr( bool copied, const std::string& 
 
 inline std::string doctorGrammarsHint( int loaded, int expected, const std::string& failedLabels, std::vector<char>& esc )
 {
-    if( loaded == expected ) return "";
+    if( loaded == expected )
+    {
+        return "";
+    }
     return " hint=\"" + std::string( rw::escapeXml( std::string_view(
                   "failed to compile: " + failedLabels
                 + " — a build/embedded-resource mismatch (rebuild with cmake --build build -j; "
@@ -744,15 +879,28 @@ inline DoctorGrammarProbe doctorProbeGrammars()
             TSQuery*      q       = ts_query_new( g.grammar(), scm.data(), static_cast<std::uint32_t>( scm.size() ), &errOff, &errType );
             if( q ) { ok = true; ts_query_delete( q ); }
         }
-        if( ok ) ++out.loaded;
-        else { if( !out.failedLabels.empty() ) out.failedLabels += ","; out.failedLabels += g.label; }
+        if( ok )
+        {
+            ++out.loaded;
+        }
+        else
+        {
+            if( !out.failedLabels.empty() )
+            {
+                out.failedLabels += ",";
+            }
+            out.failedLabels += g.label;
+        }
     }
     return out;
 }
 
 inline std::string doctorCacheDirHint( bool writable, const std::string& dir, std::vector<char>& esc )
 {
-    if( writable ) return "";
+    if( writable )
+    {
+        return "";
+    }
     return " hint=\"" + std::string( rw::escapeXml( std::string_view(
                   "cannot write to " + dir + " (from TMPDIR/XDG_CACHE_HOME/tmp fallback) — fix its "
                   "permissions, or point TMPDIR/XDG_CACHE_HOME at a directory you can write to" ), esc ) ) + "\"";
@@ -760,14 +908,20 @@ inline std::string doctorCacheDirHint( bool writable, const std::string& dir, st
 
 inline std::string doctorGitHint( bool gitAvailable )
 {
-    if( gitAvailable ) return "";
+    if( gitAvailable )
+    {
+        return "";
+    }
     return " hint=\"git not found on PATH — install it (required for --hotspots/--cochange/--owners/"
            "--merge-scout/--quality-delta and every other churn-mining verb) or check PATH\"";
 }
 
 inline std::string doctorTrackedBinariesHint( bool ok, std::size_t staleCount )
 {
-    if( ok ) return "";
+    if( ok )
+    {
+        return "";
+    }
     return " hint=\"" + std::to_string( staleCount ) + " stale tracked binar" + ( staleCount == 1 ? "y" : "ies" )
          + " — the source (src0=, src1=, …) was committed AFTER its binary (p0=, p1=, …); "
            "rebuild the binary from that newer source and recommit it\"";
@@ -785,7 +939,10 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     const auto row = [ & ]( const char* name, bool ok, const std::string& attrs )
     {
         ++checks;
-        if( ok ) ++okCount;
+        if( ok )
+        {
+            ++okCount;
+        }
         rows += "<c n=\"";  rows += name;  rows += "\" ok=\"";  rows += ( ok ? "1" : "0" );  rows += "\"";
         if( !attrs.empty() ) { rows += " "; rows += attrs; }
         rows += "/>";
@@ -869,12 +1026,21 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
             std::error_code ec;
             for( const auto& entry : fs::directory_iterator( dir, ec ) )
             {
-                if( ec ) break;
+                if( ec )
+                {
+                    break;
+                }
                 const std::string fn = entry.path().filename().string();
-                if( fn.rfind( "ripwire-", 0 ) != 0 ) continue;   // only our own blob family
+                if( fn.rfind( "ripwire-", 0 ) != 0 )
+                {
+                    continue; // only our own blob family
+                }
                 std::error_code sec;
                 const auto sz = entry.file_size( sec );
-                if( !sec ) totalBytes += static_cast<long long>( sz );
+                if( !sec )
+                {
+                    totalBytes += static_cast<long long>( sz );
+                }
                 ++blobCount;
             }
         }
@@ -904,9 +1070,11 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
                 const bool history = gitRepoHasHistory( root );
                 attrs += " history=\"" + std::string( history ? "1" : "0" ) + "\"";
                 if( history )
+                {
                     // §A10.4: 9-hex-char width, matching the at= convention (gitstamp.h) every other
                     // repo-reading verb uses — this was the tool's one remaining 40-char head=.
                     attrs += " head=\"" + std::string( escapeXml( gitHeadSha( root ).substr( 0, 9 ), esc ) ) + "\"";
+                }
             }
         }
         attrs += doctorGitHint( gitAvailable );
@@ -944,7 +1112,10 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
             attrs += " p" + std::to_string( i ) + "=\"" + std::string( escapeXml( s.path, esc ) ) + "\"";
             attrs += " src" + std::to_string( i ) + "=\"" + std::string( escapeXml( s.srcPath, esc ) ) + "\"";
         }
-        if( bs.stale.size() > kShown ) attrs += " more=\"" + std::to_string( bs.stale.size() - kShown ) + "\"";
+        if( bs.stale.size() > kShown )
+        {
+            attrs += " more=\"" + std::to_string( bs.stale.size() - kShown ) + "\"";
+        }
         const bool ok = bs.nonGitRoot || bs.truncated || bs.stale.empty();
         // §P11 doctor item: name the derived verdict, not just p0=/src0='s raw pair — the fix is always the
         // same shape (rebuild + recommit), so state it once instead of leaving the reader to infer it.
@@ -1028,7 +1199,10 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
             {
                 const std::string& p = ing.files[fid];
                 const std::size_t  d = p.rfind( '.' );
-                if( d == std::string::npos ) return false;
+                if( d == std::string::npos )
+                {
+                    return false;
+                }
                 const std::string_view ext( p.data() + d );
                 return ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx"
                     || ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx";
@@ -1037,20 +1211,41 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
             std::vector<AstMatch> symHits;
             for( const Symbol& s : ing.symbols )
             {
-                if( s.kind != SymKind::Function && s.kind != SymKind::Method ) continue;
-                if( s.endByte <= s.sigEndByte ) continue;           // no body (prototype / abstract)
-                if( !isCFamily( s.fileId ) ) continue;
+                if( s.kind != SymKind::Function && s.kind != SymKind::Method )
+                {
+                    continue;
+                }
+                if( s.endByte <= s.sigEndByte )
+                {
+                    continue; // no body (prototype / abstract)
+                }
+                if( !isCFamily( s.fileId ) )
+                {
+                    continue;
+                }
 
                 const std::string& src = getBytes( s.fileId );
-                if( src.empty() ) continue;
+                if( src.empty() )
+                {
+                    continue;
+                }
                 const std::uint32_t bodyA = std::min( s.sigEndByte, std::uint32_t( src.size() ) );
                 const std::uint32_t bodyB = std::min( s.endByte,    std::uint32_t( src.size() ) );
-                if( bodyB <= bodyA ) continue;
+                if( bodyB <= bodyA )
+                {
+                    continue;
+                }
 
                 // large-function: count newlines in body span
                 {
                     std::uint32_t lines = 0;
-                    for( std::uint32_t i = bodyA; i < bodyB; ++i ) if( src[i] == '\n' ) ++lines;
+                    for( std::uint32_t i = bodyA; i < bodyB; ++i )
+                    {
+                        if( src[i] == '\n' )
+                        {
+                            ++lines;
+                        }
+                    }
                     if( lines > 80 )
                     {
                         AstMatch hit;
@@ -1076,7 +1271,10 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
                     {
                         const char c = src[i];
                         if( c == '\n' ) { ++curLine; inLineComment = false; continue; }
-                        if( inLineComment ) continue;
+                        if( inLineComment )
+                        {
+                            continue;
+                        }
                         if( inBlockComment )
                         {
                             if( c == '*' && i + 1 < bodyB && src[i + 1] == '/' ) { inBlockComment = false; ++i; }
@@ -1085,7 +1283,10 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
                         if( inString != 0 )
                         {
                             if( c == '\\' ) { ++i; continue; }
-                            if( c == inString ) inString = 0;
+                            if( c == inString )
+                            {
+                                inString = 0;
+                            }
                             continue;
                         }
                         if( c == '/' && i + 1 < bodyB && src[i + 1] == '/' ) { inLineComment = true; continue; }
@@ -1096,7 +1297,10 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
                             ++depth;
                             if( depth > maxDepth ) { maxDepth = depth; deepLine = curLine; }
                         }
-                        else if( c == '}' && depth > 0 ) --depth;
+                        else if( c == '}' && depth > 0 )
+                        {
+                            --depth;
+                        }
                     }
                     // depth=1 is the outer function body `{` — threshold is >4 meaning depth 5+
                     if( maxDepth > 4 )
@@ -1127,13 +1331,19 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
                         if( inBlockComment )
                         {
                             if( c == '*' && i + 1 < bodyB && src[i + 1] == '/' ) { inBlockComment = false; i += 2; }
-                            else ++i;
+                            else
+                            {
+                                ++i;
+                            }
                             continue;
                         }
                         if( inString != 0 )
                         {
                             if( c == '\\' ) { i += 2; continue; }
-                            if( c == inString ) inString = 0;
+                            if( c == inString )
+                            {
+                                inString = 0;
+                            }
                             ++i; continue;
                         }
                         if( c == '/' && i + 1 < bodyB && src[i + 1] == '/' ) { inLineComment = true; i += 2; continue; }
@@ -1145,16 +1355,27 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
                             && ( i + 6 == bodyB || !std::isalnum( (unsigned char)src[i+6] ) && src[i+6] != '_' ) )
                         {
                             std::uint32_t j = i + 6;
-                            while( j < bodyB && ( src[j] == ' ' || src[j] == '\t' ) ) ++j;   // skip spaces after `return`
+                            while( j < bodyB && ( src[j] == ' ' || src[j] == '\t' ) )
+                            {
+                                ++j; // skip spaces after `return`
+                            }
                             if( j < bodyB && src[j] == ';' )
                             {
                                 // bare return — count the line for reporting
                                 std::uint32_t bl = s.line;
-                                for( std::uint32_t k = bodyA; k < i; ++k ) if( src[k] == '\n' ) ++bl;
+                                for( std::uint32_t k = bodyA; k < i; ++k )
+                                {
+                                    if( src[k] == '\n' )
+                                    {
+                                        ++bl;
+                                    }
+                                }
                                 hasBare = true;  bareReturnLine = bl;
                             }
-                            else if( j < bodyB && src[j] != '}' )  // ignore `return}` (impossible in well-formed code, defensive)
+                            else if( j < bodyB && src[j] != '}' )
+                            { // ignore `return}` (impossible in well-formed code, defensive)
                                 hasValue = true;
+                            }
                             i = j; continue;
                         }
                         ++i;
@@ -1175,12 +1396,13 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
 
             // Sort by (file, line) for determinism, then merge into ms.
             std::sort( symHits.begin(), symHits.end(), [ & ]( const AstMatch& x, const AstMatch& y )
-            {
-                if( ing.files[x.fileId] != ing.files[y.fileId] ) return ing.files[x.fileId] < ing.files[y.fileId];
-                if( x.line != y.line ) return x.line < y.line;
-                return x.tag < y.tag;
-            } );
-    return symHits;
+                       {
+                if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
+}
+                if( x.line != y.line ) { return x.line < y.line;
+}
+                return x.tag < y.tag; } );
+            return symHits;
 }
 
 // Unified lint finding shape (built-in tags and user rule ids emit identically). sev is empty for
@@ -1201,13 +1423,32 @@ std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vecto
 {
     using namespace rw;
     std::vector<std::vector<NodeId>> fileSyms( ing.files.size() );
-    for( const Symbol& s : ing.symbols ) if( s.fileId < fileSyms.size() ) fileSyms[ s.fileId ].push_back( s.id );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < fileSyms.size() )
+        {
+            fileSyms[s.fileId].push_back( s.id );
+        }
+    }
     for( auto& v : fileSyms )
+    {
         std::sort( v.begin(), v.end(), [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
+    }
     const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
     {
         const Symbol* best = nullptr;
-        for( NodeId id : fileSyms[f] ) { const Symbol& s = ing.symbols[id]; if( s.sigStartByte > off ) break; if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) ) best = &s; }
+        for( NodeId id : fileSyms[f] )
+        {
+            const Symbol& s = ing.symbols[id];
+            if( s.sigStartByte > off )
+            {
+                break;
+            }
+            if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
+            {
+                best = &s;
+            }
+        }
         return best;
     };
 
@@ -1224,7 +1465,10 @@ std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vecto
         key += std::to_string( o.line );              key += '\x1f';
         key += e ? e->name : std::string();           key += '\x1f';
         key += o.text;
-        if( seenRow.find( key ) != seenRow.end() ) continue;   // same visible row already kept
+        if( seenRow.find( key ) != seenRow.end() )
+        {
+            continue; // same visible row already kept
+        }
         seenRow.emplace( std::move( key ), 0 );
         deduped.push_back( o );
     }
@@ -1263,7 +1507,12 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         {
             ifaceExact.assign( ing.symbols.size(), 0 );
             for( std::size_t i = 0; i < g.implementors.size() && i < ifaceExact.size(); ++i )
-                if( !g.implementors[i].empty() ) ifaceExact[i] = 1;
+            {
+                if( !g.implementors[i].empty() )
+                {
+                    ifaceExact[i] = 1;
+                }
+            }
         }
     }
     const std::vector<char>* ifaceExactPtr = ifaceExact.empty() ? nullptr : &ifaceExact;
@@ -1284,17 +1533,24 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         out.routeTag  = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
     }
     else
+    {
         lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
+    }
 
     // R4: capture the RAW routed lexical score's max BEFORE --anchor/mention/cochange reshape lensRank — the
     // honesty signal reads the actual textual evidence, not a graph-expanded or query-mention-boosted number
     // (those can promote a symbol the query's words never touched, which would mask a genuinely weak query).
     // The §P4 tier factor is divided back out for the same reason (maxScoreUndoingTier, filter.h).
     if( !lensRank.empty() )
+    {
         out.maxLexicalScore = maxScoreUndoingTier( lensRank, tierMul );
+    }
 
     // --anchor (EXPERIMENTAL): lexically-anchored graph expansion (byte-identical without the flag).
-    if( cfg.anchor ) lensRank = anchoredLexicalRank( g, lensRank );
+    if( cfg.anchor )
+    {
+        lensRank = anchoredLexicalRank( g, lensRank );
+    }
 
     // B8 query-mention anchoring: lift a file / dotted module / Scope.symbol the task literally NAMES near the
     // top (inert — byte-identical — when the text names nothing indexed). Routed path only.
@@ -1321,13 +1577,21 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         {
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
-                if( !hasEnclosingGitRepo( ws[r].arg ) ) continue;
+                if( !hasEnclosingGitRepo( ws[r].arg ) )
+                {
+                    continue;
+                }
                 auto part = gitRecentCommitFileSets( ws[r].arg, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit, r );
-                for( std::vector<std::uint32_t>& c : part ) coSets.push_back( std::move( c ) );
+                for( std::vector<std::uint32_t>& c : part )
+                {
+                    coSets.push_back( std::move( c ) );
+                }
             }
         }
         else if( hasEnclosingGitRepo( root ) )
+        {
             coSets = gitRecentCommitFileSets( root, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit );
+        }
 
         CoBoostInfo boostInfo;
         if( !coSets.empty() && applyCoChangeBoost( ing, coSets, lensRank, &boostInfo ) )
@@ -1379,17 +1643,25 @@ inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const s
         const rw::AdaptiveCut ac = rw::adaptiveCut( rank, 5, std::size_t( topK ), scanFullDistribution );
         char nb[ 208 ];
         if( !ac.hitCeiling && ac.cliffRank < ac.kept )
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu -->",
                            ac.kept, topK, ac.cliffRank, ac.dropPct, ac.kept );
+        }
         else if( !ac.hitCeiling )
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - cliff at rank %zu, %d%% drop -->",
                            ac.kept, topK, ac.cliffRank, ac.dropPct );
+        }
         else if( ac.positiveHits <= ac.kept )
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - only %zu symbols matched this query (sharp query, short tail) -->",
                            ac.kept, topK, ac.positiveHits );
+        }
         else
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - no relevance cliff (broad query saturates the score); capped at the ceiling -->",
                            ac.kept, topK );
+        }
         std::fputs( nb, out );
         capN = int( ac.kept );
     }
@@ -1474,16 +1746,21 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {} );
     h += "<!-- ripwire lens for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
-    else                 h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+    else
+    {
+        h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+    }
     h.append( p.routeNote );
     h.append( p.adaptiveNote );
     h.append( p.mentionNote );      // B8: present only when the task named something indexed (else "")
     h.append( p.boostNote );        // B3: present only when the co-change prior actually promoted something
     h.append( p.docMentionNote );   // R5: present only when a resolved symbol's mentioning docs surfaced
     if( p.anchor )
+    {
         h += " [anchored, EXPERIMENTAL: lexical + graph-expanded rank; honest numbers: on the 80-commit co-change "
              "eval it MATCHES lexical-alone (within 0.3pt) and stays below whole-name BM25 - it adds lexically-"
              "invisible neighbours without hurting, no measured recall lift; see bench/ANSWERQUALITY.md]";
+    }
     h += ": reusable building blocks + quality facts for what you're about to touch "
          "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
@@ -1496,16 +1773,34 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
 {
     using rw::jsonStr;
     std::string h = "{\"task\":\"" + jsonStr( task ) + "\"";
-    if( !notes.route.empty() )      h += ",\"route\":\""       + jsonStr( notes.route )      + "\"";
+    if( !notes.route.empty() )
+    {
+        h += ",\"route\":\"" + jsonStr( notes.route ) + "\"";
+    }
     // the XML twin of these two fields carries task_scrubbed=/route_scrubbed= when the scrub lost bytes; this
     // dialect is the faithful one and says so from its own side (serialize.h ctxRootJsonScrubKeys). Absent on
     // clean input, so no ordinary document moves a byte.
     h += rw::ctxRootJsonScrubKeys( task, notes.route );
-    if( !notes.mention.empty() )    h += ",\"mention\":\""     + jsonStr( notes.mention )    + "\"";
-    if( !notes.boost.empty() )      h += ",\"boost\":\""       + jsonStr( notes.boost )      + "\"";
-    if( !notes.docMention.empty() ) h += ",\"doc_mention\":\"" + jsonStr( notes.docMention ) + "\"";
-    if( !notes.adaptive.empty() )   h += ",\"adaptive\":\""    + jsonStr( notes.adaptive )   + "\"";
-    if( notes.weak )                h += ",\"weak\":true";
+    if( !notes.mention.empty() )
+    {
+        h += ",\"mention\":\"" + jsonStr( notes.mention ) + "\"";
+    }
+    if( !notes.boost.empty() )
+    {
+        h += ",\"boost\":\"" + jsonStr( notes.boost ) + "\"";
+    }
+    if( !notes.docMention.empty() )
+    {
+        h += ",\"doc_mention\":\"" + jsonStr( notes.docMention ) + "\"";
+    }
+    if( !notes.adaptive.empty() )
+    {
+        h += ",\"adaptive\":\"" + jsonStr( notes.adaptive ) + "\"";
+    }
+    if( notes.weak )
+    {
+        h += ",\"weak\":true";
+    }
     return h;
 }
 
@@ -1515,7 +1810,10 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
 // pre-feature bytes exactly (the L3 inertness contract).
 inline std::string forLensNotesStanza( const rw::JsonSigNoteCounts& counts, bool active )
 {
-    if( !active ) return {};
+    if( !active )
+    {
+        return {};
+    }
     return ",\"notes_total\":" + std::to_string( counts.total ) + ",\"notes_kept\":" + std::to_string( counts.kept );
 }
 
@@ -1622,7 +1920,10 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
         const std::size_t withKey   = bundleBytesBase + digits + ( isOver ? 20u : 0u );   // ,"over_ceiling":true
         const std::size_t nextTokens = std::size_t( double( withKey ) / kBytesPerTokenDefault + 0.5 );
         bundleBytes = withKey;
-        if( nextTokens == estTokens ) break;
+        if( nextTokens == estTokens )
+        {
+            break;
+        }
         estTokens = nextTokens;
     }
     VERIFY( bundleBytes >= bundleBytesBase );
@@ -1636,7 +1937,9 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // one of which did not count the key it was deciding to emit).
     std::string overCeiling;
     if( in.tokenBudget > 0 && bundleBytes > ceilingAllowance )
+    {
         overCeiling = ",\"over_ceiling\":true";
+    }
     VERIFY( overCeiling.size() == 0 || overCeiling.size() == 20 );   // the 20 the charge above reserved for it
     std::fputs( header.c_str(), out );
     std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
@@ -1750,17 +2053,25 @@ std::optional<int> runForLens( const MainDispatch& d )
             forTopN = int( ac.kept );
             char nb[ 200 ];
             if( !ac.hitCeiling && ac.cliffRank < ac.kept )
+            {
                 std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu]",
                                ac.kept, ceil, ac.cliffRank, ac.dropPct, ac.kept );
+            }
             else if( !ac.hitCeiling )
+            {
                 std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - cliff at rank %zu, %d%% drop]",
                                ac.kept, ceil, ac.cliffRank, ac.dropPct );
+            }
             else if( ac.positiveHits <= ac.kept )
+            {
                 std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - only %zu symbols matched this query (sharp query, short tail)]",
                                ac.kept, ceil, ac.positiveHits );
+            }
             else
+            {
                 std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - no relevance cliff (broad query saturates the score); capped at the ceiling]",
                                ac.kept, ceil );
+            }
             adaptiveNote = nb;
         }
 
@@ -1783,12 +2094,22 @@ std::optional<int> runForLens( const MainDispatch& d )
         // to the ccx/tested/amp already computed above. A4-P6: churn (12-month) was already computed above in
         // the SAME 18-month co-change popen (gitCoChangeAndChurn), so there is no second git subprocess here.
         // git-less ⇒ forChurn stays all-0 → churn= omitted. Guard sizing defensively (always sized above).
-        if( forChurn.size() != ing.files.size() ) forChurn.assign( ing.files.size(), 0u );
+        if( forChurn.size() != ing.files.size() )
+        {
+            forChurn.assign( ing.files.size(), 0u );
+        }
         // clone membership: 1 if the symbol is in any duplicate-clone group (same threshold as --clones default).
         std::vector<std::uint8_t> forClone( ing.symbols.size(), 0u );
         for( const CloneGroup& cg : findClones( ing, 40 ) )
+        {
             for( NodeId m : cg.members )
-                if( m < forClone.size() ) forClone[m] = 1u;
+            {
+                if( m < forClone.size() )
+                {
+                    forClone[m] = 1u;
+                }
+            }
+        }
 
         // THE BUNDLE'S RESOLVED SURFACE: the top-N ids by lensRank — the exact set <sigs> selects. Three
         // consumers now: the S5-E HAS-A compose view, the B6.3 route view, and (§P3) the <lego> scope
@@ -1800,7 +2121,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             const std::size_t S = ing.symbols.size();
             lensSurfaceIds.resize( S );
-            for( NodeId i = 0; i < S; ++i ) lensSurfaceIds[i] = i;
+            for( NodeId i = 0; i < S; ++i )
+            {
+                lensSurfaceIds[i] = i;
+            }
             // A4-F23c: score-only sort left ties straddling the cut stdlib-dependent. Use the (score desc, id
             // asc) total order (same key packSignatures selects with) so the surface set is deterministic.
             rw::sortutil::radixSortByScoreDescId( lensSurfaceIds, lensRank );
@@ -1826,13 +2150,27 @@ std::optional<int> runForLens( const MainDispatch& d )
             // continue without it, the same warn-and-continue shape --partition's --with-graph note (below,
             // runPackTask) already uses, rather than silently dropping the flag's effect with no tell at all.
             if( cfg.withGraph )
+            {
                 std::fprintf( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
+            }
 
             std::size_t legoTotal = 0;
-            for( const std::vector<NodeId>& impls : legoScoped ) if( !impls.empty() ) ++legoTotal;
+            for( const std::vector<NodeId>& impls : legoScoped )
+            {
+                if( !impls.empty() )
+                {
+                    ++legoTotal;
+                }
+            }
 
             std::vector<char> onSurfaceFlags( ing.symbols.size(), 0 );
-            for( NodeId sid : lensSurfaceIds ) if( sid < onSurfaceFlags.size() ) onSurfaceFlags[sid] = 1;
+            for( NodeId sid : lensSurfaceIds )
+            {
+                if( sid < onSurfaceFlags.size() )
+                {
+                    onSurfaceFlags[sid] = 1;
+                }
+            }
             const auto isOnSurface = [ & ]( NodeId sid ) noexcept -> bool
             { return sid < onSurfaceFlags.size() && onSurfaceFlags[sid] != 0; };
 
@@ -1840,12 +2178,20 @@ std::optional<int> runForLens( const MainDispatch& d )
             // escaping/redaction/XmlWriter machinery — a COUNT, never a render, so it never touches redactCounts.
             std::size_t composeTotal = 0;
             for( const ComposeEdge& ce : g.composeEdges )
+            {
                 if( ce.ownerSym < ing.symbols.size() && ( isOnSurface( ce.ownerSym ) || isOnSurface( ce.typeSym ) ) )
+                {
                     ++composeTotal;
+                }
+            }
             std::size_t routesTotal = 0;
             for( const RouteEdge& re : g.routeEdges )
+            {
                 if( isOnSurface( re.fromSym ) || isOnSurface( re.toSym ) )
+                {
                     ++routesTotal;
+                }
+            }
 
             const int jsonRc = emitForLensJson( stdout,
                                                 forLensJsonHeader( cfg.forTask, ForLensNotes{ routeNoteRaw, mentionNote, boostNote,
@@ -1877,7 +2223,9 @@ std::optional<int> runForLens( const MainDispatch& d )
                 legoPreRendered = true;
             }
             else
+            {
                 DEGRADED_PATH_ALERT( "main: open_memstream failed for the lego block — budget will not see its size" );
+            }
         }
         if( !g.composeEdges.empty() )
         {
@@ -1891,10 +2239,14 @@ std::optional<int> runForLens( const MainDispatch& d )
                 composePreRendered = true;
             }
             else
+            {
                 DEGRADED_PATH_ALERT( "main: open_memstream failed for the compose block — budget will not see its size" );
+            }
         }
         else
+        {
             composePreRendered = true;                                // nothing to emit
+        }
         if( !g.routeEdges.empty() )
         {
             // B6.3: route view for the same relevant symbol set (top-N by lensRank)
@@ -1908,10 +2260,14 @@ std::optional<int> runForLens( const MainDispatch& d )
                 routePreRendered = true;
             }
             else
+            {
                 DEGRADED_PATH_ALERT( "main: open_memstream failed for the routes block — budget will not see its size" );
+            }
         }
         else
+        {
             routePreRendered = true;                                  // nothing to emit
+        }
 
         // the bundle budget: default kForPayloadBudgetBytes; an explicit --token-budget beats it
         const std::size_t bundleBudget = cfg.tokenBudget > 0
@@ -1954,14 +2310,18 @@ std::optional<int> runForLens( const MainDispatch& d )
                 sigsPreRendered = true;
             }
             else
+            {
                 DEGRADED_PATH_ALERT( "main: open_memstream failed for the sigs block — est_tokens omitted from the header" );
+            }
         }
 
         // §P3 × §P4: the budget trim above can drop files the lego scope still references — narrow the lego
         // block to the RENDERED sigs' files and re-render (a byte-subset of what the budget already charged
         // for, so the bundle only shrinks; before est_tokens so the header reports the delivered size).
         if( sigsPreRendered && legoPreRendered && !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
+        {
             legoStr = captureXml( [ & ]( std::FILE* f ) { packLego( f, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true ); } );
+        }
 
         // ── §F1 (CA4 wave-1 verifier): the lens's LAST TWO payload sections, rendered and CHARGED here ──────
         // §H7 gave the default map the structural property "a section cannot be APPENDED without being
@@ -1979,8 +2339,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the bodies' budget be exact.
         rw::ChargedSection graphSection, detailSection;
         if( cfg.withGraph )
+        {
             graphSection = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
                                                rw::kBytesPerTokenDefault );
+        }
 
         // both kept alive past the render so the isRendered=false degrade path below re-emits the SAME set at
         // the SAME budget (the map path's emitSection lambda has the identical contract)
@@ -1996,7 +2358,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             const std::size_t S = ing.symbols.size();
             detailIds.resize( S );
-            for( NodeId i = 0; i < S; ++i ) detailIds[i] = i;
+            for( NodeId i = 0; i < S; ++i )
+            {
+                detailIds[i] = i;
+            }
             rw::sortutil::radixSortByScoreDescId( detailIds, lensRank );   // (score desc, id asc) — same order as the sigs
             const std::size_t detN = std::min<std::size_t>( { std::size_t( cfg.detail ), std::size_t( forTopN ), S } );
             detailIds.resize( detN );
@@ -2054,7 +2419,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( forWeak )
         {
             const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos ) headerStr.insert( closeAt, " weak=\"1\"" );   // else: unexpected shape, header left as-is
+            if( closeAt != std::string::npos )
+            {
+                headerStr.insert( closeAt, " weak=\"1\"" ); // else: unexpected shape, header left as-is
+            }
         }
 
         if( sigsPreRendered )
@@ -2087,24 +2455,54 @@ std::optional<int> runForLens( const MainDispatch& d )
             for( int pass = 0; pass < 4; ++pass )
             {
                 const std::size_t next = rw::tokensForEmittedBytes( markupBytes + attr.size(), kBytesPerTokenDefault ) + bodyTokens;
-                if( next == estTokens ) break;
+                if( next == estTokens )
+                {
+                    break;
+                }
                 estTokens = next;
                 attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             }
             const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos ) headerStr.insert( closeAt, attr );   // else: unexpected shape, header left as-is
+            if( closeAt != std::string::npos )
+            {
+                headerStr.insert( closeAt, attr ); // else: unexpected shape, header left as-is
+            }
         }
 
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
-        if( sigsPreRendered ) std::fwrite( sigsStr.data(), 1, sigsStr.size(), stdout );
-        else                  packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
-                                              &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr );
-        if( legoPreRendered ) std::fwrite( legoStr.data(), 1, legoStr.size(), stdout );
-        else                  packLego( stdout, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true );   // same scope+identity on the degrade path (§P3; un-narrowed — sigs bytes unknown here)
-        if( composePreRendered )                     std::fwrite( composeStr.data(), 1, composeStr.size(), stdout );
-        else if( !g.composeEdges.empty() )           packCompose( stdout, ing, g.composeEdges, lensSurfaceIds );
-        if( routePreRendered )                        std::fwrite( routeStr.data(), 1, routeStr.size(), stdout );
-        else if( !g.routeEdges.empty() )              packRoutes( stdout, ing, g.routeEdges, lensSurfaceIds );
+        if( sigsPreRendered )
+        {
+            std::fwrite( sigsStr.data(), 1, sigsStr.size(), stdout );
+        }
+        else
+        {
+            packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
+                            &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr );
+        }
+        if( legoPreRendered )
+        {
+            std::fwrite( legoStr.data(), 1, legoStr.size(), stdout );
+        }
+        else
+        {
+            packLego( stdout, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true ); // same scope+identity on the degrade path (§P3; un-narrowed — sigs bytes unknown here)
+        }
+        if( composePreRendered )
+        {
+            std::fwrite( composeStr.data(), 1, composeStr.size(), stdout );
+        }
+        else if( !g.composeEdges.empty() )
+        {
+            packCompose( stdout, ing, g.composeEdges, lensSurfaceIds );
+        }
+        if( routePreRendered )
+        {
+            std::fwrite( routeStr.data(), 1, routeStr.size(), stdout );
+        }
+        else if( !g.routeEdges.empty() )
+        {
+            packRoutes( stdout, ing, g.routeEdges, lensSurfaceIds );
+        }
 
         // §F1: the last two sections, from the bytes already RENDERED and CHARGED above — so what the header
         // priced and what stdout receives are the same bytes by construction, not by two pieces of code
@@ -2112,13 +2510,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // bundle keeps signatures-only. A section whose pre-render degraded (isRendered=false) is emitted here
         // directly at the SAME budget — uncharged for that one run, with an alert, never a fabricated number.
         if( cfg.detail > 0 )
+        {
             rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
                                                                               cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr ); } );
+        }
 
         // R8: --with-graph — a compact mermaid flowchart of the ranked bundle's anchor neighborhood,
         // right before </ctx>. Off by default (G5): omitted, this is a no-op and output is byte-identical.
         if( cfg.withGraph )
+        {
             rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
+        }
 
         std::printf( "</ctx>" );
         reportRedactions( stderr, redactCounts );
@@ -2176,10 +2578,14 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
 
         if( pick.winner == kNoNode )
         {
-            if( pick.targetKind == SymKind::Other )   // task string matched nothing lexical at all
+            if( pick.targetKind == SymKind::Other )
+            { // task string matched nothing lexical at all
                 std::fprintf( stderr, "ripwire: --exemplar: no symbol matches '%.*s'\n", int( cfg.exemplar.size() ), cfg.exemplar.data() );
+            }
             else
+            {
                 std::fprintf( stderr, "ripwire: --exemplar: no %s in the corpus to exemplify\n", symTag( pick.targetKind ) );
+            }
             return 1;   // no-candidate case degrades cleanly (clear message, nonzero exit, no crash)
         }
 
@@ -2267,7 +2673,16 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
         const RestrictedDepHealth rh = restrictDependencyHealth( ing, h.transitive );
         std::vector<std::uint32_t> afferent( ing.files.size(), 0 );   // Ca: # files that include each file (blast radius)
-        for( const auto& outs : adj ) for( std::uint32_t g : outs ) if( g < afferent.size() ) ++afferent[g];
+        for( const auto& outs : adj )
+        {
+            for( std::uint32_t g : outs )
+            {
+                if( g < afferent.size() )
+                {
+                    ++afferent[g];
+                }
+            }
+        }
         packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, cfg.pageLimit, cfg.pageOffset );
         return 0;
     }
@@ -2290,7 +2705,9 @@ std::optional<int> runArchViews( const MainDispatch& d )
             // parseArchRules itself (mirrors --lint-rules) — printing the generic "cannot read" on top would
             // misdescribe a syntax error (file exists, parses to nothing) as a missing/unreadable file.
             if( !ar.parseError )
+            {
                 std::fprintf( stderr, "ripwire: --arch cannot read rules file: %.*s\n", int( cfg.archRules.size() ), cfg.archRules.data() );
+            }
             return 1;
         }
         const auto adj = resolveIncludeAdj( ing );
@@ -2318,10 +2735,16 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // is not under the root degrades to itself, leading-`./`-normalized — the same degrade the baseline
         // hash takes, and the only shape a multi-root invocation could reach here.
         std::vector<std::string_view> relFiles( ing.files.size() );
-        for( std::size_t f = 0; f < ing.files.size(); ++f ) relFiles[f] = relForHash( ing.files[f], cfg.rootPath );
+        for( std::size_t f = 0; f < ing.files.size(); ++f )
+        {
+            relFiles[f] = relForHash( ing.files[f], cfg.rootPath );
+        }
 
         std::vector<int> lof( ing.files.size() );
-        for( std::size_t f = 0; f < ing.files.size(); ++f ) lof[f] = archLayerOf( ar, relFiles[f] );
+        for( std::size_t f = 0; f < ing.files.size(); ++f )
+        {
+            lof[f] = archLayerOf( ar, relFiles[f] );
+        }
 
         // Collect all violations (sorted for determinism). Each violation carries its own from/to layer
         // labels so layer-name rules and ABS-4 regex PATH-rules share one emit/baseline path. A path-rule
@@ -2338,7 +2761,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
         {
             for( std::uint32_t g : adj[f] )
             {
-                if( g >= lof.size() ) continue;
+                if( g >= lof.size() )
+                {
+                    continue;
+                }
 
                 // layer-name rules (unchanged): both files layered, distinct layers, edge violates.
                 const int la = lof[f], lb = lof[g];
@@ -2365,12 +2791,17 @@ std::optional<int> runArchViews( const MainDispatch& d )
                 }
             }
         }
-        std::sort( viols.begin(), viols.end(), [ & ]( const Viol& a, const Viol& b )
-                   {   // (src path, dst path, fromLayer) — fromLayer breaks a layer-vs-path tie on the same edge
-                       if( ing.files[a.from] != ing.files[b.from] ) return ing.files[a.from] < ing.files[b.from];
-                       if( ing.files[a.to]   != ing.files[b.to]   ) return ing.files[a.to]   < ing.files[b.to];
-                       return a.fromLayer < b.fromLayer;
-                   } );
+        std::sort( viols.begin(), viols.end(), [ & ]( const Viol& a, const Viol& b ) { // (src path, dst path, fromLayer) — fromLayer breaks a layer-vs-path tie on the same edge
+            if( ing.files[a.from] != ing.files[b.from] )
+            {
+                return ing.files[a.from] < ing.files[b.from];
+            }
+            if( ing.files[a.to] != ing.files[b.to] )
+            {
+                return ing.files[a.to] < ing.files[b.to];
+            }
+            return a.fromLayer < b.fromLayer;
+        } );
 
         const std::string sidecarPath = archBaselinePath( std::string( cfg.archRules ) );
 
@@ -2416,10 +2847,22 @@ std::optional<int> runArchViews( const MainDispatch& d )
             std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0;
             for( const ModuleMetric& mm : mods )
             {
-                if( mm.zone == std::string_view( "pain" ) )         ++zonePain;
-                else if( mm.zone == std::string_view( "useless" ) ) ++zoneUseless;
-                else if( mm.zone == std::string_view( "n/a" ) )     ++zoneNa;
-                else if( mm.zone == std::string_view( "ok" ) )      ++zoneOk;
+                if( mm.zone == std::string_view( "pain" ) )
+                {
+                    ++zonePain;
+                }
+                else if( mm.zone == std::string_view( "useless" ) )
+                {
+                    ++zoneUseless;
+                }
+                else if( mm.zone == std::string_view( "n/a" ) )
+                {
+                    ++zoneNa;
+                }
+                else if( mm.zone == std::string_view( "ok" ) )
+                {
+                    ++zoneOk;
+                }
             }
             std::printf( "<metrics modules=\"%zu\" typed_modules=\"%zu\" zone_pain=\"%u\" zone_useless=\"%u\" zone_ok=\"%u\" zone_na=\"%u\" propagation_cost=\"%.3f\" note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file\">",
                          mods.size(), mods.size() - zoneNa, zonePain, zoneUseless, zoneOk, zoneNa, propCost );
@@ -2446,7 +2889,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
         if( cfg.baseline )
         {
             std::unordered_set<std::uint64_t> hashes;
-            for( const Viol& v : viols ) hashes.insert( v.hash );
+            for( const Viol& v : viols )
+            {
+                hashes.insert( v.hash );
+            }
             if( !archWriteBaseline( sidecarPath, hashes ) )
             {
                 std::fprintf( stderr, "ripwire: --baseline cannot write sidecar: %s\n", sidecarPath.c_str() );
@@ -2458,7 +2904,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             std::printf( "<!-- ripwire arch: baseline mode — all %zu violation(s) accepted as baseline. exit=0.%s -->", viols.size(), kArchMatchDomain );
             std::printf( "<arch layers=\"%zu\" rules=\"%zu\" pathRules=\"%zu\" violations=\"%zu\" baselined=\"%zu\" new_violations=\"0\">",
                          ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size() );
-            for( const Viol& v : viols ) emitViol( v, true );
+            for( const Viol& v : viols )
+            {
+                emitViol( v, true );
+            }
             emitMetrics();
             std::printf( "</arch>" );
             return 0;
@@ -2468,7 +2917,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
         if( cfg.baselineUpdate )
         {
             std::unordered_set<std::uint64_t> hashes = archReadBaseline( sidecarPath );
-            for( const Viol& v : viols ) hashes.insert( v.hash );
+            for( const Viol& v : viols )
+            {
+                hashes.insert( v.hash );
+            }
             if( !archWriteBaseline( sidecarPath, hashes ) )
             {
                 std::fprintf( stderr, "ripwire: --baseline-update cannot write sidecar: %s\n", sidecarPath.c_str() );
@@ -2479,7 +2931,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             std::printf( "<!-- ripwire arch: baseline-update mode — %zu violation(s) merged into baseline. exit=0.%s -->", viols.size(), kArchMatchDomain );
             std::printf( "<arch layers=\"%zu\" rules=\"%zu\" pathRules=\"%zu\" violations=\"%zu\" baselined=\"%zu\" new_violations=\"0\">",
                          ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size() );
-            for( const Viol& v : viols ) emitViol( v, true );
+            for( const Viol& v : viols )
+            {
+                emitViol( v, true );
+            }
             emitMetrics();
             std::printf( "</arch>" );
             return 0;
@@ -2497,19 +2952,30 @@ std::optional<int> runArchViews( const MainDispatch& d )
         std::vector<const Viol*> newViols, basedViols;
         for( const Viol& v : viols )
         {
-            if( hasBaseline && baseline.count( v.hash ) ) basedViols.push_back( &v );
-            else                                           newViols.push_back( &v );
+            if( hasBaseline && baseline.count( v.hash ) )
+            {
+                basedViols.push_back( &v );
+            }
+            else
+            {
+                newViols.push_back( &v );
+            }
         }
 
         // Informational stderr line when baseline is active.
         if( hasBaseline )
+        {
             std::fprintf( stderr, "ripwire arch: %zu violation(s) total — %zu suppressed (baseline) — %zu new\n",
                           viols.size(), basedViols.size(), newViols.size() );
+        }
 
         std::printf( "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.%s -->", kArchMatchDomain );
         std::printf( "<arch layers=\"%zu\" rules=\"%zu\" pathRules=\"%zu\" violations=\"%zu\" baselined=\"%zu\" new_violations=\"%zu\">",
                      ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(), newViols.size() );
-        for( const Viol& v : viols ) emitViol( v, hasBaseline && baseline.count( v.hash ) );
+        for( const Viol& v : viols )
+        {
+            emitViol( v, hasBaseline && baseline.count( v.hash ) );
+        }
         emitMetrics();
         std::printf( "</arch>" );
         return newViols.empty() ? 0 : 2;
@@ -2532,7 +2998,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
 // of that name would break XML well-formedness.
 std::string cloneUnpagedTotalAttr( bool clonePaging, std::size_t cloneTotal )
 {
-    if( clonePaging ) return {};
+    if( clonePaging )
+    {
+        return {};
+    }
     char buf[ 32 ];
     std::snprintf( buf, sizeof( buf ), " total=\"%zu\"", cloneTotal );
     return buf;
@@ -2558,8 +3027,14 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     const std::size_t          keep3       = clonePaging ? cg3.size() : std::min<std::size_t>( std::size_t( cap > 0 ? cap : 0 ), cg3.size() );
     std::vector<std::size_t>   rows;
     rows.reserve( keep12 + keep3 );
-    for( std::size_t i = 0; i < keep12; ++i ) rows.push_back( i );
-    for( std::size_t i = 0; i < keep3;  ++i ) rows.push_back( cg.size() + i );
+    for( std::size_t i = 0; i < keep12; ++i )
+    {
+        rows.push_back( i );
+    }
+    for( std::size_t i = 0; i < keep3; ++i )
+    {
+        rows.push_back( cg.size() + i );
+    }
 
     // The denominator is honest either way: every group that EXISTS, not just the kept ones.
     const std::size_t cloneTotal = cg.size() + cg3.size();
@@ -2579,14 +3054,32 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
         {
             const std::string& p        = ing.files[ ing.symbols[id].fileId ];
             const bool         isScript = quality::isTestScriptPath( p );
-            if( !isScript && !quality::isFixturePath( p ) ) allExempt = false;
-            if( !isScript )                                 allScript = false;
+            if( !isScript && !quality::isFixturePath( p ) )
+            {
+                allExempt = false;
+            }
+            if( !isScript )
+            {
+                allScript = false;
+            }
         }
         return allExempt ? ( allScript ? "shell-runner" : "fixture" ) : nullptr;
     };
     std::size_t exemptGroupCount = 0;
-    for( const CloneGroup& gp : cg )  if( groupExemptKind( gp ) ) ++exemptGroupCount;
-    for( const CloneGroup& gp : cg3 ) if( groupExemptKind( gp ) ) ++exemptGroupCount;
+    for( const CloneGroup& gp : cg )
+    {
+        if( groupExemptKind( gp ) )
+        {
+            ++exemptGroupCount;
+        }
+    }
+    for( const CloneGroup& gp : cg3 )
+    {
+        if( groupExemptKind( gp ) )
+        {
+            ++exemptGroupCount;
+        }
+    }
 
     // §A8.1: total= (new) is ALWAYS the true row total (groups+type3-group-count), unpaged included — see
     // cloneUnpagedTotalAttr() above for why it is skipped when paging is active (pageDisclosure already
@@ -2605,11 +3098,18 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
         const CloneGroup& gp      = isType3 ? cg3[ flat - cg.size() ] : cg[ flat ];
         const char* exemptKind = groupExemptKind( gp );
         char        exemptAttr[ 40 ] = "";
-        if( exemptKind ) std::snprintf( exemptAttr, sizeof( exemptAttr ), " exempt=\"%s\"", exemptKind );
+        if( exemptKind )
+        {
+            std::snprintf( exemptAttr, sizeof( exemptAttr ), " exempt=\"%s\"", exemptKind );
+        }
         if( isType3 )
+        {
             std::printf( "<group type=\"3\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s>", gp.tokens, gp.members.size(), gp.similarity, exemptAttr );
+        }
         else
+        {
             std::printf( "<group type=\"%u\" tokens=\"%u\" n=\"%zu\"%s>", gp.type, gp.tokens, gp.members.size(), exemptAttr );
+        }
         for( NodeId id : gp.members )
         {
             const Symbol& s = ing.symbols[id];
@@ -2626,7 +3126,10 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 struct HotspotWorstFn { const char* name; std::uint32_t line; };
 inline HotspotWorstFn hotspotWorstFnOf( const rw::IngestResult& ing, rw::NodeId worstSym )
 {
-    if( worstSym == rw::kNoNode ) return { "", 0 };
+    if( worstSym == rw::kNoNode )
+    {
+        return { "", 0 };
+    }
     const rw::Symbol& s = ing.symbols[ worstSym ];
     return { s.name.c_str(), s.line };
 }
@@ -2704,13 +3207,20 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 const rw::SinceScope rootScope = rw::resolveSinceScope( ws[r].arg, cfg.since );
                 std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
                 if( !gitChurnCounts( ws[r].arg, ing, rootChurn, "12 months ago", cfg.since.empty() ? nullptr : &rootScope, r ) )
+                {
                     continue;
+                }
                 churnOk = true;
-                for( std::size_t f = 0; f < churn.size(); ++f ) churn[f] += rootChurn[f];
+                for( std::size_t f = 0; f < churn.size(); ++f )
+                {
+                    churn[f] += rootChurn[f];
+                }
             }
         }
         else
+        {
             churnOk = gitChurnCounts( root, ing, churn, "12 months ago", cfg.since.empty() ? nullptr : &sinceScope );
+        }
         if( !churnOk )
         {
             // Empty churn has TWO causes: (1) genuine git-unavailable / not-a-repo / no-history-at-all →
@@ -2739,7 +3249,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::vector<NodeId>        worstSym( ing.files.size(), kNoNode );
         for( const Symbol& s : ing.symbols )
         {
-            if( s.kind != SymKind::Function && s.kind != SymKind::Method ) continue;
+            if( s.kind != SymKind::Function && s.kind != SymKind::Method )
+            {
+                continue;
+            }
             ccxSum[ s.fileId ] += s.ccx;
             if( s.ccx > worstCcx[ s.fileId ] ) { worstCcx[ s.fileId ] = s.ccx;  worstSym[ s.fileId ] = s.id; }
         }
@@ -2780,7 +3293,12 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                                        : "12mo";
         std::string windowLabelInComment = windowLabel;   // "--" is illegal inside an XML comment (G4)
         for( std::size_t i = 1; i < windowLabelInComment.size(); ++i )
-            if( windowLabelInComment[ i - 1 ] == '-' && windowLabelInComment[i] == '-' ) windowLabelInComment[i] = ' ';
+        {
+            if( windowLabelInComment[i - 1] == '-' && windowLabelInComment[i] == '-' )
+            {
+                windowLabelInComment[i] = ' ';
+            }
+        }
         std::printf( "<!-- ripwire hotspots: maintenance-pain = complexity × recent churn (window=%s). "
                      "churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. "
                      "files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so "
@@ -2793,8 +3311,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "upper bound on quietness, not a measure of it. "
                      "raise the default cap with limit=N (offset=M pages) -->%s",
                      windowLabelInComment.c_str(), rw::kAtStampLegend );   // sweep: at= was undefined on this screen
-        if( multiRoot )   // §5 comparability caveat: churn scales (commit-count conventions) differ per repo
+        if( multiRoot )
+        { // §5 comparability caveat: churn scales (commit-count conventions) differ per repo
             std::printf( "<!-- multi-root workspace: churn is mined PER root — hotspot scores are comparable within a root, not across roots -->" );
+        }
         // T2: --limit/--offset paginate the sorted `order`. When no --limit, the historic topN cap (40 or
         // --pack-top-n) still bounds the response; --limit overrides it. ranked= is the TRUE total either way.
         // §P8: ranked="185" over 40 emitted rows was a SILENT cap — shown=/capped= now reconcile the two on
@@ -2829,7 +3349,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         return 0;
     }
 
-    if( cfg.clones ) return emitClonesReport( cfg, ing );   // body + §P8 paging: emitClonesReport() above
+    if( cfg.clones )
+    {
+        return emitClonesReport( cfg, ing ); // body + §P8 paging: emitClonesReport() above
+    }
 
     // --cochange[=FILE]: files that change together in git history but may share NO static dependency —
     // the hidden coupling a call graph can't see (the lockstep partner you'd forget to update). With a
@@ -2880,9 +3403,11 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                                          cfg.pageLimit, cfg.pageOffset, true ),
                          gitstamp::atAttr( root ).c_str() );
             for( std::size_t partnerIndex = ppw.begin; partnerIndex < ppw.end; ++partnerIndex )
+            {
                 std::printf( "<f p=\"%s\" together=\"%u\" deg=\"%.2f\"%s/>",
                              ex( ing.files[ ps[ partnerIndex ].fileId ] ).c_str(), ps[ partnerIndex ].together,
                              ps[ partnerIndex ].deg, coPairAttr( ps[ partnerIndex ] ) );
+            }
             std::printf( "</cochange>" );
             return 0;
         }
@@ -2898,11 +3423,16 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 const rw::SinceScope rs = rw::resolveSinceScope( ws[r].arg, cfg.since );
                 std::vector<std::vector<std::uint32_t>> part = gitCommitFileSets( ws[r].arg, ing, "18 months ago", 30,
                                                                                   cfg.since.empty() ? nullptr : &rs, r );
-                for( std::vector<std::uint32_t>& cs : part ) sets.push_back( std::move( cs ) );
+                for( std::vector<std::uint32_t>& cs : part )
+                {
+                    sets.push_back( std::move( cs ) );
+                }
             }
         }
         else
+        {
             sets = gitCommitFileSets( root, ing, "18 months ago", 30, sinceScopeP );
+        }
         if( sets.empty() )
         {
             // Same two-cause split as --hotspots: an ACTIVE --since window that matched zero commits is a
@@ -2923,10 +3453,17 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         HashMap<std::uint64_t, std::uint32_t>  pair;                       // (lo<<32|hi) → co-change count
         for( const auto& cs : sets )
         {
-            for( std::uint32_t f : cs ) ++freq[f];
+            for( std::uint32_t f : cs )
+            {
+                ++freq[f];
+            }
             for( std::size_t i = 0; i < cs.size(); ++i )
-                for( std::size_t j = i + 1; j < cs.size(); ++j )           // cs is sorted+unique → cs[i] < cs[j]
+            {
+                for( std::size_t j = i + 1; j < cs.size(); ++j )
+                { // cs is sorted+unique → cs[i] < cs[j]
                     ++pair[ ( std::uint64_t( cs[i] ) << 32 ) | cs[j] ];
+                }
+            }
         }
         // P9.1: the repo-wide pair scan must use the SAME predicate as the per-file path (gitmine.h's
         // StaticIncludeCoupling) — a bare 1-hop check here previously mis-flagged transitively-coupled
@@ -2940,18 +3477,26 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::vector<PR> prs;
         for( const auto& [k, n] : pair )
         {
-            if( n < kSupport ) continue;
+            if( n < kSupport )
+            {
+                continue;
+            }
             const std::uint32_t a = std::uint32_t( k >> 32 ), b = std::uint32_t( k );
             const std::uint32_t mn = std::min( freq[a], freq[b] );
             const bool isDepCapable = coPairDependencyCapable( ing, a, b );   // §A9.3, the same predicate the per-file path uses
             prs.push_back( { a, b, n, mn ? double( n ) / mn : 0.0, isDepCapable && !staticDep( a, b ), isDepCapable } );
         }
-        std::sort( prs.begin(), prs.end(), [ & ]( const PR& x, const PR& y )
-                   {   // surprising-and-strong first
-                       if( x.surprising != y.surprising ) return x.surprising;
-                       if( x.deg != y.deg ) return x.deg > y.deg;
-                       return x.n > y.n;
-                   } );
+        std::sort( prs.begin(), prs.end(), [ & ]( const PR& x, const PR& y ) { // surprising-and-strong first
+            if( x.surprising != y.surprising )
+            {
+                return x.surprising;
+            }
+            if( x.deg != y.deg )
+            {
+                return x.deg > y.deg;
+            }
+            return x.n > y.n;
+        } );
         // §P8: this is the verb the audit caught red-handed — pairs="363" with 30 rows, and --limit=3 still
         // emitted all 30, so a paging loop re-read page 0 forever. The window is honest now, and shown= /
         // capped= reconcile pairs= against the rows that follow even with no --limit at all.
@@ -2963,10 +3508,12 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                                      cfg.pageLimit, cfg.pageOffset, true ),
                      gitstamp::atAttr( root ).c_str() );   // §P8: same anchor as the per-file path above
         for( std::size_t pairIndex = prpw.begin; pairIndex < prpw.end; ++pairIndex )
+        {
             std::printf( "<pair a=\"%s\" b=\"%s\" together=\"%u\" deg=\"%.2f\"%s/>",
                          ex( ing.files[ prs[ pairIndex ].a ] ).c_str(), ex( ing.files[ prs[ pairIndex ].b ] ).c_str(),
                          prs[ pairIndex ].n, prs[ pairIndex ].deg,
                          coPairAttr( prs[ pairIndex ].depCapable, prs[ pairIndex ].surprising ) );
+        }
         std::printf( "</cochange>" );
         return 0;
     }
@@ -3012,13 +3559,21 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         {
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
-                if( onlyFileId != UINT32_MAX && ing.fileRoot[ onlyFileId ] != r ) continue;   // --owners=SYM: its one root
+                if( onlyFileId != UINT32_MAX && ing.fileRoot[onlyFileId] != r )
+                {
+                    continue; // --owners=SYM: its one root
+                }
                 std::vector<FileOwnership> part = gitFileAuthors( ws[r].arg, ing, onlyFileId, 182.5, r );
-                for( FileOwnership& ow : part ) ownerships.push_back( std::move( ow ) );
+                for( FileOwnership& ow : part )
+                {
+                    ownerships.push_back( std::move( ow ) );
+                }
             }
         }
         else
+        {
             ownerships = gitFileAuthors( root, ing, onlyFileId );
+        }
         if( ownerships.empty() )
         {
             std::fprintf( stderr, "ripwire --owners: git unavailable / no history (need a git repo with commits)\n" );
@@ -3065,7 +3620,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                                      cfg.pageLimit, cfg.pageOffset, false ),
                      owSymAttr.c_str(),
                      gitstamp::atAttr( root ).c_str() );
-        if( !detail && uniformCount > 0 ) std::printf( "<uniform authors=\"1\" bf=\"1\" share=\"1.00\" files=\"%zu\"/>", uniformCount );
+        if( !detail && uniformCount > 0 )
+        {
+            std::printf( "<uniform authors=\"1\" bf=\"1\" share=\"1.00\" files=\"%zu\"/>", uniformCount );
+        }
         std::vector<char> owEsc;
         for( std::size_t rowIndex = owpw.begin; rowIndex < owpw.end; ++rowIndex )
         {
@@ -3100,7 +3658,9 @@ std::string noBaselineFatalMessage( const std::string& baselineFile, const rw::q
     // could not tell the fallback had even been tried and would look for a bug in the sidecar. Same two
     // clauses, same order, same verb-name spelling convention as the stale arms below.
     if( !sel.isSidecarStale() )
+    {
         return "ripwire: no " + baselineFile + " and no git HEAD to auto-compare against — run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n";
+    }
 
     return "ripwire: " + baselineFile + " was STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — "
          + ( sel.isStaleFileOnDisk() ? "it is still on disk (could not be removed): delete it, or re-run `ripwire <dir> --quality-baseline` to re-pin it\n"
@@ -3177,9 +3737,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 return 1;
             }
             baseSel.snapshot = std::move( headSnap );
-            if( !baseSel.isSidecarStale() )   // the stale/healed case is silent by design — only the true "never baselined" case is informative
+            if( !baseSel.isSidecarStale() )
+            { // the stale/healed case is silent by design — only the true "never baselined" case is informative
                 std::fprintf( stderr, "ripwire: no %s — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)\n",
                               baselineFile.c_str() );
+            }
         }
         std::vector<quality::Regression> regs = quality::computeDelta( ing, g, baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
 
@@ -3198,7 +3760,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // in its canonical id (so "api-surface", "src/quality.h", or one exact id all work).
             const auto ackSelected = [ & ]( const quality::Regression& r ) -> bool
             {
-                if( cfg.qualityAckOnly.empty() ) return true;
+                if( cfg.qualityAckOnly.empty() )
+                {
+                    return true;
+                }
                 std::string_view rest = cfg.qualityAckOnly;
                 while( !rest.empty() )
                 {
@@ -3209,12 +3774,14 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                     // sweep in 59 findings to accept 8. --ack-only=contract-change accepts exactly the
                     // deliberate ones. The pseudo-token "gating" selects whatever would actually exit 2.
                     const bool gates = !r.isMinor && !r.isNewSymbol;
-                    if( !pat.empty() && ( r.kind.find( pat ) != std::string::npos
-                                       || r.sym.find( pat ) != std::string::npos
-                                       || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos )
-                                       || ( pat == "gating" && gates ) ) )
+                    if( !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) || ( pat == "gating" && gates ) ) )
+                    {
                         return true;
-                    if( comma == std::string_view::npos ) break;
+                    }
+                    if( comma == std::string_view::npos )
+                    {
+                        break;
+                    }
                     rest = rest.substr( comma + 1 );
                 }
                 return false;
@@ -3241,13 +3808,19 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             const bool wroteAcks = quality::writeAckRecords( acksFile, acks );
             if( wroteAcks && !cfg.qualityAckOnly.empty() )
+            {
                 std::fprintf( stderr, "ripwire: acknowledged %zu of %zu finding(s) (%zu left UNACKED by --ack-only, %zu already acked) → %s\n",
                               ackWritten, regs.size(), ackSkipped, ackedCount, acksFile.c_str() );
+            }
             else if( wroteAcks )
+            {
                 std::fprintf( stderr, "ripwire: acknowledged %zu finding(s) (%zu already acked) → %s\n",
                               regs.size(), ackedCount, acksFile.c_str() );
+            }
             else
+            {
                 std::fprintf( stderr, "ripwire: could not write %s\n", acksFile.c_str() );
+            }
             return wroteAcks ? 0 : 1;
         }
 
@@ -3261,9 +3834,18 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         std::size_t minorCount = 0, newSymbolCount = 0, gatingCount = 0;
         for( const quality::Regression& r : regs )
         {
-            if( r.isMinor )      ++minorCount;
-            if( r.isNewSymbol )  ++newSymbolCount;
-            else if( !r.isMinor ) ++gatingCount;
+            if( r.isMinor )
+            {
+                ++minorCount;
+            }
+            if( r.isNewSymbol )
+            {
+                ++newSymbolCount;
+            }
+            else if( !r.isMinor )
+            {
+                ++gatingCount;
+            }
         }
         const std::size_t preexistingCount = regs.size() - newSymbolCount;
 
@@ -3279,7 +3861,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         {
             const quality::Regression* first = nullptr;
             for( const quality::Regression& r : regs )
+            {
                 if( !r.isNewSymbol && !r.isMinor ) { first = &r; break; }
+            }
             if( first )
             {
                 const std::string at = first->path.empty() ? std::string{}
@@ -3305,28 +3889,50 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             bool firstR = true;
             for( const quality::Regression& r : regs )
             {
-                if( !firstR ) std::printf( "," );
+                if( !firstR )
+                {
+                    std::printf( "," );
+                }
                 firstR = false;
                 std::printf( "{\"kind\":\"%s\"", jsonStr( r.kind ).c_str() );
                 if( r.kind == "duplication" )
+                {
                     std::printf( ",\"members\":\"%s\",\"tokens\":%u", jsonStr( quality::displaySym( r.sym, root ) ).c_str(), r.now );
+                }
                 else
                 {
                     std::printf( ",\"sym\":\"%s\"", jsonStr( quality::displaySym( r.sym, root ) ).c_str() );
                     if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
+                    {
                         std::printf( ",\"was\":%u,\"now\":%u", r.was, r.now );
+                    }
                 }
-                if( !r.path.empty() ) std::printf( ",\"p\":\"%s:%u\"", jsonStr( r.path ).c_str(), r.line );   // P2.5 locator
-                if( !r.isNewSymbol && !r.isMinor ) std::printf( ",\"gating\":true" );                         // P2.5 — the exit predicate, stated per row
-                if( r.isMinor ) std::printf( ",\"sev\":\"minor\"" );
+                if( !r.path.empty() )
+                {
+                    std::printf( ",\"p\":\"%s:%u\"", jsonStr( r.path ).c_str(), r.line ); // P2.5 locator
+                }
+                if( !r.isNewSymbol && !r.isMinor )
+                {
+                    std::printf( ",\"gating\":true" ); // P2.5 — the exit predicate, stated per row
+                }
+                if( r.isMinor )
+                {
+                    std::printf( ",\"sev\":\"minor\"" );
+                }
                 if( !r.facet.empty() )
                 {
                     const char* facetName = ( r.kind == "short-horizon-churn" ) ? "churn"
                                            : ( r.kind == "api-surface" )        ? "surface"
                                            : nullptr;
-                    if( facetName ) std::printf( ",\"%s\":\"%s\"", facetName, jsonStr( r.facet ).c_str() );
+                    if( facetName )
+                    {
+                        std::printf( ",\"%s\":\"%s\"", facetName, jsonStr( r.facet ).c_str() );
+                    }
                 }
-                if( r.isNewSymbol ) std::printf( ",\"origin\":\"new-symbol\"" );   // absent = preexisting-worse (mirrors the XML)
+                if( r.isNewSymbol )
+                {
+                    std::printf( ",\"origin\":\"new-symbol\"" ); // absent = preexisting-worse (mirrors the XML)
+                }
                 std::printf( "}" );
             }
             std::printf( "]}" );
@@ -3408,7 +4014,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 const char* facetName = ( r.kind == "short-horizon-churn" ) ? "churn"
                                        : ( r.kind == "api-surface" )        ? "surface"
                                        : nullptr;
-                if( facetName ) facetAttr = std::string( " " ) + facetName + "=\"" + r.facet + "\"";
+                if( facetName )
+                {
+                    facetAttr = std::string( " " ) + facetName + "=\"" + r.facet + "\"";
+                }
             }
             // r26 — the ORIGIN axis, emitted LAST so the existing attribute order is untouched. Present only
             // on new-symbol rows (absent = preexisting-worse), the same "mark the exception" convention sev=
@@ -3423,20 +4032,31 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             //     Until now a gating row was identifiable ONLY by the ABSENCE of sev="minor" (and of
             //     origin="new-symbol") — absence-as-signal is the least machine-friendly encoding available.
             std::string locAttr;
-            if( !r.path.empty() ) locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
+            if( !r.path.empty() )
+            {
+                locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
+            }
             const char* gatingAttr = ( !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
             if( r.kind == "duplication" )
+            {
                 std::printf( "<r kind=\"duplication\" members=\"%s\" tokens=\"%u\"%s%s%s%s%s/>", ex( quality::displaySym( r.sym, root ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+            }
             else if( r.kind == "dead-code" )
+            {
                 std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             // B10.2e: api-surface now carries two shapes — a brand-new/newly-public symbol (was=now=0, no
             // param comparison to show) and a param-count contract-change (was/now = the real counts). Print
             // was/now whenever they differ from each other so the contract-change case's was=/now= is visible
             // while the new-symbol case's meaningless was="0" now="0" is omitted, matching its old sym-only shape.
+            }
             else if( r.kind == "api-surface" && r.was == r.now )
+            {
                 std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+            }
             else
+            {
                 std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+            }
         }
         std::printf( "</quality-delta>" );
         return gatingCount > 0 ? 2 : 0;   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
@@ -3448,7 +4068,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
 // used to normalize both the user's --dead-code=DIR filter and every indexed path it is matched against.
 inline std::string_view deadCodeStripDotSlash( std::string_view p ) noexcept
 {
-    while( p.size() >= 2 && p[ 0 ] == '.' && p[ 1 ] == '/' ) p.remove_prefix( 2 );
+    while( p.size() >= 2 && p[0] == '.' && p[1] == '/' )
+    {
+        p.remove_prefix( 2 );
+    }
     return p;
 }
 
@@ -3472,7 +4095,10 @@ inline bool deadCodeFilterMatchesPath( std::string_view path, std::string_view d
     const std::string_view p = anchoredAtRoot ? rw::relForHash( path, root ) : deadCodeStripDotSlash( path );
     if( anchoredAtRoot )
     {
-        if( dirFilter.size() > p.size() || p.substr( 0, dirFilter.size() ) != dirFilter ) return false;
+        if( dirFilter.size() > p.size() || p.substr( 0, dirFilter.size() ) != dirFilter )
+        {
+            return false;
+        }
         const std::size_t afterEnd = dirFilter.size();
         return afterEnd == p.size() || p[ afterEnd ] == '/';
     }
@@ -3481,7 +4107,10 @@ inline bool deadCodeFilterMatchesPath( std::string_view path, std::string_view d
         const std::size_t afterEnd = at + dirFilter.size();
         const bool leftOnBoundary  = at == 0 || p[ at - 1 ] == '/';
         const bool rightOnBoundary = afterEnd == p.size() || p[ afterEnd ] == '/';
-        if( leftOnBoundary && rightOnBoundary ) return true;
+        if( leftOnBoundary && rightOnBoundary )
+        {
+            return true;
+        }
     }
     return false;
 }
@@ -3507,10 +4136,16 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         std::vector<char>        sourceLoaded( ing.files.size(), 0 );
         const auto sourceFor = [ & ]( std::uint32_t fileId ) -> const std::string&
         {
-            if( sourceLoaded[fileId] ) return sourceByFile[fileId];
+            if( sourceLoaded[fileId] )
+            {
+                return sourceByFile[fileId];
+            }
             sourceLoaded[fileId] = 1;
             std::FILE* file = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
-            if( !file ) return sourceByFile[fileId];
+            if( !file )
+            {
+                return sourceByFile[fileId];
+            }
             std::fseek( file, 0, SEEK_END );
             const long byteCount = std::ftell( file );
             std::fseek( file, 0, SEEK_SET );
@@ -3528,7 +4163,10 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             const std::string& source = sourceFor( symbol.fileId );
             const std::size_t begin = std::min<std::size_t>( symbol.sigStartByte, source.size() );
             const std::size_t end   = std::min<std::size_t>( symbol.sigEndByte, source.size() );
-            if( begin >= end ) return false;
+            if( begin >= end )
+            {
+                return false;
+            }
             constexpr std::string_view token = "static";
             std::size_t position = begin;
             while( ( position = source.find( token, position ) ) != std::string::npos && position + token.size() <= end )
@@ -3536,7 +4174,10 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                 const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
                 const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
                 const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
-                if( leftBoundary && rightBoundary ) return true;
+                if( leftBoundary && rightBoundary )
+                {
+                    return true;
+                }
                 position += token.size();
             }
             return false;
@@ -3556,7 +4197,10 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         // answered. The unanchored (component-anywhere) arm never read the root and is untouched.
         const std::string_view dirFilterRaw = cfg.deadCodeDir;
         std::string_view       dirFilter = deadCodeStripDotSlash( dirFilterRaw );
-        while( !dirFilter.empty() && dirFilter.back() == '/' ) dirFilter.remove_suffix( 1 );   // `test/` ≡ `test`
+        while( !dirFilter.empty() && dirFilter.back() == '/' )
+        {
+            dirFilter.remove_suffix( 1 ); // `test/` ≡ `test`
+        }
         const bool anchoredAtRoot = dirFilterRaw.size() >= 2 && dirFilterRaw[ 0 ] == '.' && dirFilterRaw[ 1 ] == '/';
         const auto filterMatchesPath = [ & ]( std::string_view path ) noexcept -> bool
         {
@@ -3569,7 +4213,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         {
             bool filterHitsIndex = false;
             for( const std::string& indexedPath : ing.files )
+            {
                 if( filterMatchesPath( indexedPath ) ) { filterHitsIndex = true; break; }
+            }
             if( !filterHitsIndex )
             {
                 std::fprintf( stderr, "ripwire: --dead-code=%.*s matches no indexed path — a zero here would be a failure, not a measurement "
@@ -3584,18 +4230,35 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         candidates.reserve( 64 );
         for( const Symbol& s : ing.symbols )
         {
-            if( s.kind != SymKind::Function ) continue;             // methods and non-callable nodes are out of scope
-            if( s.sigEndByte >= s.endByte ) continue;                // declarations have no deletion evidence
-            if( isHeaderPath( ing.files[ s.fileId ] ) ) continue;    // may be instantiated by external TUs
-            if( !hasStaticToken( s ) ) continue;                     // external linkage may be an entry point/API
+            if( s.kind != SymKind::Function )
+            {
+                continue; // methods and non-callable nodes are out of scope
+            }
+            if( s.sigEndByte >= s.endByte )
+            {
+                continue; // declarations have no deletion evidence
+            }
+            if( isHeaderPath( ing.files[s.fileId] ) )
+            {
+                continue; // may be instantiated by external TUs
+            }
+            if( !hasStaticToken( s ) )
+            {
+                continue; // external linkage may be an entry point/API
+            }
 
             // optional path filter: directory prefix, trailing component, or the whole path
-            if( !dirFilter.empty() && !filterMatchesPath( ing.files[ s.fileId ] ) ) continue;
+            if( !dirFilter.empty() && !filterMatchesPath( ing.files[s.fileId] ) )
+            {
+                continue;
+            }
 
             // in-degree == 0 → no call in the indexed tree reaches this symbol
             const std::uint32_t inDeg = inRo[ s.id + 1 ] - inRo[ s.id ];
             if( inDeg == 0 )
+            {
                 candidates.push_back( s.id );
+            }
         }
 
         // deterministic order: file path asc, then line asc, then name asc (stable across runs)
@@ -3603,8 +4266,14 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         {
             const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
             const std::string& pa = ing.files[ sa.fileId ];  const std::string& pb = ing.files[ sb.fileId ];
-            if( pa != pb ) return pa < pb;
-            if( sa.line != sb.line ) return sa.line < sb.line;
+            if( pa != pb )
+            {
+                return pa < pb;
+            }
+            if( sa.line != sb.line )
+            {
+                return sa.line < sb.line;
+            }
             return sa.name < sb.name;
         } );
 
@@ -3711,7 +4380,10 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     const Config&        cfg = d.cfg;
     const IngestResult&  ing = d.ing;
 
-    if( cfg.editCheckSym.empty() ) return std::nullopt;
+    if( cfg.editCheckSym.empty() )
+    {
+        return std::nullopt;
+    }
 
     const std::vector<NodeId> matches = resolveAllByNameQualified( ing, cfg.editCheckSym );
     if( matches.empty() )
@@ -3758,18 +4430,24 @@ std::optional<int> runEvalViews( const MainDispatch& d )
     // anchoring) that the seed-based --eval structurally cannot measure. No git history needed (the gold item
     // is in the corpus by construction), so it runs on any parsed tree. Deterministic.
     if( cfg.evalRetrieval )
+    {
         return runEvalRetrieval( ing, g );
+    }
 
     // --eval-mined=FILE: session-trace-mined retrieval eval — consumes a
     // bench/mine_traces.py minedpair.jsonl artifact, file-level gold, reuses recallAtK/rankFiles.
     if( !cfg.evalMined.empty() )
+    {
         return runEvalMined( root, ing, g, std::string( cfg.evalMined ) );
+    }
 
     // --eval-skills=FILE: labelled skill-ROUTING eval — ROOT is the skills
     // directory; FILE is the prompt→permitted-skill(s) corpus. Runs the shipping --for computation over
     // the skills ingest as one arm, so it dispatches here where ing+g are already built. Deterministic.
     if( !cfg.evalSkills.empty() )
+    {
         return runEvalSkills( root, ing, g, std::string( cfg.evalSkills ) );
+    }
     return std::nullopt;
 }
 
@@ -3813,16 +4491,25 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                 const auto* ro = g.inEdges.rowOffsets();
                 const auto* ci = g.inEdges.colIndices();
                 for( std::uint32_t k = ro[x]; k < ro[x + 1]; ++k )
+                {
                     if( NodeId c = ci[k]; c < seen.size() && !seen[c] ) { seen[c] = 1; result.push_back( c ); }
+                }
             }
             else
+            {
                 for( std::uint32_t k = g.outOff[x]; k < g.outOff[x + 1]; ++k )
+                {
                     if( NodeId c = g.outTargets[k]; c < seen.size() && !seen[c] ) { seen[c] = 1; result.push_back( c ); }
+                }
+            }
         }
         std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
         {
             const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
-            if( sa.fileId != sb.fileId ) return ing.files[sa.fileId] < ing.files[sb.fileId];
+            if( sa.fileId != sb.fileId )
+            {
+                return ing.files[sa.fileId] < ing.files[sb.fileId];
+            }
             return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
         } );
         const char*       tag = wantCallers ? "callers" : "callees";
@@ -3843,7 +4530,9 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // columnar and default shapes carry the identical disclosure. JSON has no comment-node analogue, so
         // there the marker travels as the counts_floor key on the root object instead.
         if( !cfg.json )
+        {
             std::printf( "%s%s-->", rw::kCallHierarchyLegendOpen, rw::graphCountDisclosure().c_str() );
+        }
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
         // arrays (dedups the repeated per-row markup + paths). Default --format=xml is byte-identical below.
@@ -3936,10 +4625,10 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         const std::vector<float> rank  = rankGraph( g );
         const std::size_t        total = result.size();
         std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
-        {
-            if( rank[a] != rank[b] ) return rank[a] > rank[b];
-            return a < b;
-        } );
+                   {
+            if( rank[a] != rank[b] ) { return rank[a] > rank[b];
+}
+            return a < b; } );
         // §P15/§P16: result is now a real, deterministically-ordered (rank desc, id asc) row list — --limit
         // overrides the --top-k display cap exactly like --graph-query's siblings' packTopN/effectiveRowCap
         // composition, and --offset finally pages past it. count= stays the un-windowed total, unaffected by
@@ -3992,8 +4681,14 @@ inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::strin
     UsesSelector u;
     u.fileQualified = sym.find( "::" ) == std::string_view::npos && sym.find( ':' ) != std::string_view::npos;
     std::string_view file;
-    if( u.fileQualified ) rw::splitQualifiedSpec( sym, file, u.siteMatchName );
-    else                  u.siteMatchName = sym;
+    if( u.fileQualified )
+    {
+        rw::splitQualifiedSpec( sym, file, u.siteMatchName );
+    }
+    else
+    {
+        u.siteMatchName = sym;
+    }
     rw::splitQualifiedSpec( sym, file, u.suggestName );
     u.defsOfName = u.fileQualified ? rw::resolveAllByName( ing, u.siteMatchName ).size() : defsCount;
     return u;
@@ -4017,9 +4712,17 @@ inline std::vector<char> usesChosenCallers( const rw::IngestResult& ing, const r
     const auto*       ci = g.inEdges.colIndices();
     for( NodeId def : defs )
     {
-        if( def >= ing.symbols.size() ) continue;
+        if( def >= ing.symbols.size() )
+        {
+            continue;
+        }
         for( std::uint32_t k = ro[def]; k < ro[def + 1]; ++k )
-            if( NodeId c = ci[k]; c < isChosenCaller.size() ) isChosenCaller[c] = 1;
+        {
+            if( NodeId c = ci[k]; c < isChosenCaller.size() )
+            {
+                isChosenCaller[c] = 1;
+            }
+        }
     }
     return isChosenCaller;
 }
@@ -4039,15 +4742,29 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
     std::size_t          callSitesOfName = 0;
     for( const Reference& r : ing.references )
     {
-        if( r.calleeName != sel.siteMatchName ) continue;
-        if( r.isCompose || r.isDocLink )        continue;   // type edge / doc mention — not a use-site
-        if( r.lang == Lang::Markdown )          continue;   // markdown [[wikilink]] — not a code use-site
-        if( r.role == RefRole::Call )           ++callSitesOfName;
+        if( r.calleeName != sel.siteMatchName )
+        {
+            continue;
+        }
+        if( r.isCompose || r.isDocLink )
+        {
+            continue; // type edge / doc mention — not a use-site
+        }
+        if( r.lang == Lang::Markdown )
+        {
+            continue; // markdown [[wikilink]] — not a code use-site
+        }
+        if( r.role == RefRole::Call )
+        {
+            ++callSitesOfName;
+        }
         // the file: qualifier's call-role narrowing. A file-scope call site (fromSymbol==kNoNode) carries no
         // resolved edge to test, so it cannot be SHOWN to reach the chosen def and is dropped with the rest —
         // call_sites_of_name= keeps the size of what was dropped visible.
-        if( sel.fileQualified && r.role == RefRole::Call
-            && ( r.fromSymbol >= isChosenCaller.size() || !isChosenCaller[ r.fromSymbol ] ) ) continue;
+        if( sel.fileQualified && r.role == RefRole::Call && ( r.fromSymbol >= isChosenCaller.size() || !isChosenCaller[r.fromSymbol] ) )
+        {
+            continue;
+        }
         std::string in;
         if( r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() )
         {
@@ -4058,12 +4775,14 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
     }
 
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
-    {
-        if( a.fileId != b.fileId ) return ing.files[ a.fileId ] < ing.files[ b.fileId ];
-        if( a.line   != b.line )   return a.line < b.line;
-        if( a.role   != b.role )   return std::uint8_t( a.role ) < std::uint8_t( b.role );
-        return a.in < b.in;
-    } );
+               {
+        if( a.fileId != b.fileId ) { return ing.files[ a.fileId ] < ing.files[ b.fileId ];
+}
+        if( a.line   != b.line ) {   return a.line < b.line;
+}
+        if( a.role   != b.role ) {   return std::uint8_t( a.role ) < std::uint8_t( b.role );
+}
+        return a.in < b.in; } );
     return { std::move( sites ), callSitesOfName };
 }
 
@@ -4128,7 +4847,10 @@ std::optional<int> runUses( const MainDispatch& d )
 
         // §A6b(ii): a file: qualifier naming a file with NO definition of the name is a WRONG SELECTOR — its
         // three siblings all refuse it, and so does this one now.
-        if( defs.empty() && sel.fileQualified ) return refuseUsesFileQualifier( ing, sym, sel );
+        if( defs.empty() && sel.fileQualified )
+        {
+            return refuseUsesFileQualifier( ing, sym, sel );
+        }
 
         // r27-emitters T3 / §P10.2: external="1" is a real answer, a typo is not — distinguished by the
         // sites, not the defs. The message states only what defs.empty() proves (no indexed definition),
@@ -4200,7 +4922,10 @@ std::optional<int> runUses( const MainDispatch& d )
             // fan-in COUNT (--for/--pack-task/--exemplar), and here the enclosing symbol's canonical ID. The
             // first two are load-bearing and stay; this one had ZERO consumers, so it is the one that moves.
             // `in_id=` keeps the "enclosing" sense while saying it is an ID, per the index-vs-count rule.
-            if( !u.in.empty() ) std::printf( " in_id=\"%s\"", ex( u.in ).c_str() );
+            if( !u.in.empty() )
+            {
+                std::printf( " in_id=\"%s\"", ex( u.in ).c_str() );
+            }
             std::printf( "/>" );
         }
         std::printf( "</uses>" );
@@ -4229,15 +4954,33 @@ accumulateExternalSurface( const rw::IngestResult& ing, const rw::HashMap<std::s
     rw::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>> ext;
     for( const Reference& r : ing.references )
     {
-        if( r.isCompose || r.isDocLink ) continue;       // type edge / doc mention — not a code reference
-        if( r.lang == Lang::Markdown )   continue;       // markdown link — not a code reference
-        if( r.calleeName.empty() )       continue;
-        if( r.role == RefRole::Read || r.role == RefRole::Write ) continue;   // a bare read/write ⇒ a local, not a dependency
-        if( defined.contains( r.calleeName ) ) continue; // DEFINED in-corpus → not external (set-difference)
+        if( r.isCompose || r.isDocLink )
+        {
+            continue; // type edge / doc mention — not a code reference
+        }
+        if( r.lang == Lang::Markdown )
+        {
+            continue; // markdown link — not a code reference
+        }
+        if( r.calleeName.empty() )
+        {
+            continue;
+        }
+        if( r.role == RefRole::Read || r.role == RefRole::Write )
+        {
+            continue; // a bare read/write ⇒ a local, not a dependency
+        }
+        if( defined.contains( r.calleeName ) )
+        {
+            continue; // DEFINED in-corpus → not external (set-difference)
+        }
         const std::size_t langSlot = std::size_t( r.lang ) < kExtSurfaceLangSlots ? std::size_t( r.lang ) : 0;
         ExtSurfaceAcc& e = ext[ r.calleeName ][ langSlot ];
         ++e.refs;
-        if( r.role == RefRole::Call ) ++e.calls;
+        if( r.role == RefRole::Call )
+        {
+            ++e.calls;
+        }
     }
     return ext;
 }
@@ -4248,15 +4991,27 @@ buildExternalSurfaceRows( const rw::HashMap<std::string, std::array<ExtSurfaceAc
     std::vector<ExtSurfaceName> names;
     names.reserve( ext.size() );
     for( const auto& [ nm, slots ] : ext )
-        for( std::size_t li = 0; li < kExtSurfaceLangSlots; ++li )
-            if( slots[li].refs )
-                names.push_back( { nm, rw::Lang( li ), slots[li].refs, slots[li].calls } );
-    std::sort( names.begin(), names.end(), []( const ExtSurfaceName& a, const ExtSurfaceName& b )
     {
-        if( a.refs != b.refs ) return a.refs > b.refs;   // most-leaned-on first
-        if( a.name != b.name ) return a.name < b.name;   // then name asc
-        return a.lang < b.lang;                          // then lang (deterministic tie-break for a split name)
-    } );
+        for( std::size_t li = 0; li < kExtSurfaceLangSlots; ++li )
+        {
+            if( slots[li].refs )
+            {
+                names.push_back( { nm, rw::Lang( li ), slots[li].refs, slots[li].calls } );
+            }
+        }
+    }
+    std::sort( names.begin(), names.end(), []( const ExtSurfaceName& a, const ExtSurfaceName& b )
+               {
+                   if( a.refs != b.refs )
+                   {
+                       return a.refs > b.refs; // most-leaned-on first
+                   }
+                   if( a.name != b.name )
+                   {
+                       return a.name < b.name; // then name asc
+                   }
+                   return a.lang < b.lang;                          // then lang (deterministic tie-break for a split name)
+               } );
     return names;
 }
 
@@ -4276,8 +5031,12 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         HashMap<std::string, char> defined;
         defined.reserve( ing.symbols.size() );
         for( const Symbol& s : ing.symbols )
-            if( s.kind != SymKind::Section )                 // markdown headings are doc structure, not code defs
+        {
+            if( s.kind != SymKind::Section )
+            { // markdown headings are doc structure, not code defs
                 defined.emplace( s.name, char( 1 ) );
+            }
+        }
 
         const auto ext   = accumulateExternalSurface( ing, defined );
         const auto names = buildExternalSurfaceRows( ext );
@@ -4298,8 +5057,10 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
                      pageDisclosure( extAb, sizeof( extAb ), extShown, names.size(), extPw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ) );
         for( std::size_t i = extPw.begin; i < extPw.end; ++i )
+        {
             std::printf( "<x n=\"%s\" lang=\"%s\" refs=\"%u\" calls=\"%u\"/>",
                          ex( names[i].name ).c_str(), langLabel( names[i].lang ), names[i].refs, names[i].calls );
+        }
         std::printf( "</external-surface>" );
         return 0;
     }
@@ -4363,9 +5124,11 @@ std::optional<int> runPath( const MainDispatch& d )
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
         if( path.empty() )
+        {
             std::printf( " hint=\"no directed call path — try --connect=%s,%s (undirected: finds a shared caller), or --uses/--impact for non-call references%s\"",
                          ex( srcN ).c_str(), ex( dstN ).c_str(),
                          ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" );
+        }
         std::printf( ">" );
         for( NodeId n : path )
         {
@@ -4398,8 +5161,14 @@ std::optional<int> runConnect( const MainDispatch& d )
             {
                 const std::size_t comma = s.find( ',' );
                 const std::string_view tok = s.substr( 0, comma );
-                if( !tok.empty() ) specs.push_back( tok );
-                if( comma == std::string_view::npos ) break;
+                if( !tok.empty() )
+                {
+                    specs.push_back( tok );
+                }
+                if( comma == std::string_view::npos )
+                {
+                    break;
+                }
                 s.remove_prefix( comma + 1 );
             }
         }
@@ -4466,13 +5235,15 @@ std::optional<int> runImpact( const MainDispatch& d )
         std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        if( !cfg.json )   // L2: JSON has no comment-node analogue; the XML-only leading doc comment
+        if( !cfg.json )
+        { // L2: JSON has no comment-node analogue; the XML-only leading doc comment
             // §B12.4 in-band (W3FIX): the paging clause comes from pageview.h::kPageRaiseCapClause, which
             // carries the limit="0" definition too — rule 7 existed only in --help and that header before.
             // §H4 §3.4: opener + the shared floor/counting-unit tail, both from src/graphlegend.h so the MCP
             // twin cannot drift from this wording (the §B4 echo-site class).
             std::printf( "%s%s. %s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          rw::graphCountDisclosure().c_str() );
+        }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact. reaches= stays the un-windowed reach-set size — the blast radius the INDEXED graph
         // can see, which counts_floor= discloses is a floor (V3 L-4); pageDisclosure emits the same ` shown=
@@ -4556,7 +5327,16 @@ std::optional<int> runMentions( const MainDispatch& d )
             return 1;
         }
         std::vector<NodeId> docs;
-        for( NodeId d : defs ) if( d < g.mentions.size() ) for( NodeId dn : g.mentions[d] ) docs.push_back( dn );
+        for( NodeId d : defs )
+        {
+            if( d < g.mentions.size() )
+            {
+                for( NodeId dn : g.mentions[d] )
+                {
+                    docs.push_back( dn );
+                }
+            }
+        }
         std::sort( docs.begin(), docs.end() );  docs.erase( std::unique( docs.begin(), docs.end() ), docs.end() );
         const std::size_t           sectionCount = docs.size();
         std::vector<MentionFileRow> fileRows     = collapseMentionsToFileRows( ing, docs );
@@ -4609,9 +5389,15 @@ inline const char* exercisesHarnessKind( const rw::IngestResult& ing, const std:
     for( const std::uint32_t f : seedFiles )
     {
         const std::string& fp = ing.files[f];
-        if( fp.size() >= 3 && fp.compare( fp.size() - 3, 3, ".sh" ) == 0 ) ++scriptSeedCount;
+        if( fp.size() >= 3 && fp.compare( fp.size() - 3, 3, ".sh" ) == 0 )
+        {
+            ++scriptSeedCount;
+        }
     }
-    if( scriptSeedCount == 0 )                 return nullptr;
+    if( scriptSeedCount == 0 )
+    {
+        return nullptr;
+    }
     return scriptSeedCount == seedFiles.size() ? "script" : "mixed";
 }
 
@@ -4620,7 +5406,10 @@ inline const char* exercisesHarnessKind( const rw::IngestResult& ing, const std:
 inline std::string exercisesHarnessAttr( const rw::IngestResult& ing, const std::vector<std::uint32_t>& seedFiles )
 {
     const char* kind = exercisesHarnessKind( ing, seedFiles );
-    if( kind == nullptr ) return {};
+    if( kind == nullptr )
+    {
+        return {};
+    }
     return std::string( " harness=\"" ) + kind + "\" note=\"a shell gate invokes the compiled binary as a subprocess; "
            "script-to-binary edges are not modelled, so reaches= counts call-graph reach only and cannot see what the "
            "subprocess covers\"";
@@ -4675,7 +5464,9 @@ std::optional<int> runAffected( const MainDispatch& d )
         // here (not hoisted into MainDispatch) because it is lazy — a run with no test row reads no script.
         const rw::TestRunnerIndex runners( ing );
         for( std::uint32_t f : testFiles )
+        {
             std::printf( "<test p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), rw::runAttr( runners, f, ex ).c_str() );
+        }
         std::printf( "</affected>" );
         return 0;
     }
@@ -4697,7 +5488,10 @@ std::optional<int> runExercises( const MainDispatch& d )
     const IngestResult& ing = d.ing;
     const Graph&        g   = d.g;
 
-    if( !cfg.exercisesFlag ) return std::nullopt;
+    if( !cfg.exercisesFlag )
+    {
+        return std::nullopt;
+    }
     if( cfg.exercisesFile.empty() )
     {
         std::fprintf( stderr, "ripwire: --exercises needs a test file — e.g. --exercises=test/foo_harness.cpp "
@@ -4753,7 +5547,9 @@ std::optional<int> runExercises( const MainDispatch& d )
                  pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true ) );
     const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
     for( std::size_t i = 0; i < shownSeed; ++i )
+    {
         std::printf( "<t p=\"%s\"%s/>", ex( ing.files[ sel.testFiles[i] ] ).c_str(), rw::runAttr( runners, sel.testFiles[i], ex ).c_str() );
+    }
     for( std::size_t i = epw.begin; i < epw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
     std::printf( "</exercises>" );
@@ -4788,13 +5584,21 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 {
                     perRootChanged[r] = rw::changedMaskFromList( ing, cfg.situFiles );
                     for( std::size_t f = 0; f < perRootChanged[r].size(); ++f )
-                        if( perRootChanged[r][f] && ing.fileRoot[f] != r ) perRootChanged[r][f] = 0;
+                    {
+                        if( perRootChanged[r][f] && ing.fileRoot[f] != r )
+                        {
+                            perRootChanged[r][f] = 0;
+                        }
+                    }
                     anyGit = true;   // explicit file list — no git needed
                 }
                 else
                 {
                     perRootChanged[r].assign( ing.files.size(), 0 );
-                    if( gitChangedFiles( ws[r].arg, ing, perRootChanged[r], r ) ) anyGit = true;
+                    if( gitChangedFiles( ws[r].arg, ing, perRootChanged[r], r ) )
+                    {
+                        anyGit = true;
+                    }
                 }
             }
             if( !anyGit )
@@ -4803,7 +5607,14 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             {
                 std::fprintf( stdout, "=== root %s (%s) ===\n", ws[r].label.c_str(), ws[r].arg.c_str() );
                 bool any = false;
-                for( char c : perRootChanged[r] ) if( c ) { any = true; break; }
+                for( char c : perRootChanged[r] )
+                {
+                    if( c )
+                    {
+                        any = true;
+                        break;
+                    }
+                }
                 if( !any ) { std::fprintf( stdout, "  (no changed files in this root)\n" ); continue; }
                 rw::writeSituation( stdout, ws[r].arg, ing, g, perRootChanged[r], r );
             }
@@ -4812,7 +5623,9 @@ std::optional<int> runChangeViews( const MainDispatch& d )
 
         std::vector<char> changed;
         if( !cfg.situFiles.empty() )
+        {
             changed = rw::changedMaskFromList( ing, cfg.situFiles );
+        }
         else
         {
             changed.assign( ing.files.size(), 0 );
@@ -4831,7 +5644,9 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     {
         std::vector<char> changed;
         if( !cfg.testGateFiles.empty() )
+        {
             changed = rw::changedMaskFromList( ing, cfg.testGateFiles );
+        }
         else
         {
             changed.assign( ing.files.size(), 0 );
@@ -4844,8 +5659,14 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // runs, so the two report shapes can never disagree about tests/untested and never re-pay the
         // blast-radius traversal.
         const rw::TestGateResult tg = rw::computeTestGate( ing, g, changed );
-        if( cfg.json ) rw::writeTestGateReportJson( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
-        else            rw::writeTestGateReport(     stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+        if( cfg.json )
+        {
+            rw::writeTestGateReportJson( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+        }
+        else
+        {
+            rw::writeTestGateReport( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+        }
         return tg.hasObligations ? 4 : 0;
     }
 
@@ -4887,7 +5708,13 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                                   int( cfg.prContextBase.size() ), cfg.prContextBase.data(), ws[r].arg.c_str() );
                     return 1;
                 }
-                for( char c : masks[r].mask ) if( c ) ++changedCount[r];
+                for( char c : masks[r].mask )
+                {
+                    if( c )
+                    {
+                        ++changedCount[r];
+                    }
+                }
                 totalChanged += changedCount[r];
             }
 
@@ -4902,7 +5729,12 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                 { rootBudget[r] = std::size_t( cfg.maxTokens ) * changedCount[r] / totalChanged; assigned += rootBudget[r]; }
                 rootBudget[0] += std::size_t( cfg.maxTokens ) - assigned;   // remainder → canonical-first label
                 for( std::uint32_t r = 0; r < ws.size(); ++r )
-                    if( changedCount[r] > 0 && rootBudget[r] == 0 ) rootBudget[r] = 1;
+                {
+                    if( changedCount[r] > 0 && rootBudget[r] == 0 )
+                    {
+                        rootBudget[r] = 1;
+                    }
+                }
             }
 
             std::vector<char> prEsc;
@@ -4912,8 +5744,10 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                          "blast radius crossing roots via real evidence edges. base=%s. deterministic. -->", baseLabelEsc.c_str() );
             std::printf( "<pr-context-workspace base=\"%s\" roots=\"%zu\">", baseLabelEsc.c_str(), ws.size() );
             for( std::uint32_t r = 0; r < ws.size(); ++r )
+            {
                 rw::writePrContext( stdout, ws[r].arg, ing, g, masks[r].mask, baseLabel, masks[r].skippedModeOnly,
                                      rootBudget[r], r, ws[r].label, masks[r] );
+            }
             std::printf( "</pr-context-workspace>" );
             return 0;
         }
@@ -4962,15 +5796,28 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
                 std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
-                if( !gitChurnCounts( ws[r].arg, ing, rootChurn, "18 months ago", nullptr, r ) ) continue;
+                if( !gitChurnCounts( ws[r].arg, ing, rootChurn, "18 months ago", nullptr, r ) )
+                {
+                    continue;
+                }
                 ccChurnOk = true;
-                for( std::size_t f = 0; f < churn.size(); ++f ) churn[f] += rootChurn[f];
+                for( std::size_t f = 0; f < churn.size(); ++f )
+                {
+                    churn[f] += rootChurn[f];
+                }
             }
         }
         else
+        {
             ccChurnOk = gitChurnCounts( root, ing, churn, "18 months ago" );
+        }
         if( ccChurnOk )
-            for( std::size_t f = 0; f < ccm.size() && f < churn.size(); ++f ) ccm[f].churn = churn[f];
+        {
+            for( std::size_t f = 0; f < ccm.size() && f < churn.size(); ++f )
+            {
+                ccm[f].churn = churn[f];
+            }
+        }
 
         std::FILE* ccOut = stdout;
         if( !cfg.exportFile.empty() )
@@ -4985,7 +5832,10 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             }
         }
         rw::writeCcJson( ccOut, root, ing, ccm );
-        if( ccOut != stdout ) std::fclose( ccOut );
+        if( ccOut != stdout )
+        {
+            std::fclose( ccOut );
+        }
         return 0;
     }
     return std::nullopt;
@@ -5013,7 +5863,10 @@ bool readTraceText( const std::string& src, std::string& text )
     std::FILE* f = std::fopen( src.c_str(), "rb" );
     if( !f ) { std::fprintf( stderr, "ripwire: --from-trace: cannot open '%s'\n", src.c_str() ); return false; }
     char buf[ 4096 ]; std::size_t n;
-    while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 ) text.append( buf, n );
+    while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
+    {
+        text.append( buf, n );
+    }
     std::fclose( f );
     return true;
 }
@@ -5030,11 +5883,17 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     const IngestResult&  ing = d.ing;
     const Graph&         g   = d.g;
 
-    if( cfg.fromTrace.empty() ) return std::nullopt;
+    if( cfg.fromTrace.empty() )
+    {
+        return std::nullopt;
+    }
 
     const std::string src( cfg.fromTrace );
     std::string       text;
-    if( !readTraceText( src, text ) ) return 1;
+    if( !readTraceText( src, text ) )
+    {
+        return 1;
+    }
 
     FromTraceInputs in;
     in.bundleBudgetBytes = cfg.tokenBudget > 0
@@ -5113,7 +5972,10 @@ std::optional<int> runNotes( const MainDispatch& d )
             // the original quoted echo, and only the present-but-invisible one is spelled.
             const auto describeField = []( const notes::NoteField& field ) -> std::string
             {
-                if( field.hasContent || field.text.empty() ) return "'" + field.text + "'";
+                if( field.hasContent || field.text.empty() )
+                {
+                    return "'" + field.text + "'";
+                }
 
                 const auto [ blankCodePointCount, blankSpelling ] = rw::blankPayloadSpelling( field.text );
                 return std::to_string( blankCodePointCount )
@@ -5185,17 +6047,29 @@ std::optional<int> runNotes( const MainDispatch& d )
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
             const Symbol& s = ing.symbols[i];
-            if( s.fileId < ing.files.size() ) live[ canonicalId( relForHash( ing.files[ s.fileId ], d.root ), s.scope, s.name ) ] = 1;
+            if( s.fileId < ing.files.size() )
+            {
+                live[canonicalId( relForHash( ing.files[s.fileId], d.root ), s.scope, s.name )] = 1;
+            }
         }
-        for( const std::string& fp : ing.files ) live[ std::string( relForHash( fp, d.root ) ) ] = 1;
+        for( const std::string& fp : ing.files )
+        {
+            live[std::string( relForHash( fp, d.root ) )] = 1;
+        }
 
         std::size_t targetCount = 0, danglingCount = 0;
         for( std::size_t i = 0; i < all.size(); )
         {
             std::size_t j = i;
-            while( j < all.size() && all[j].target == all[i].target ) ++j;
+            while( j < all.size() && all[j].target == all[i].target )
+            {
+                ++j;
+            }
             ++targetCount;
-            if( live.find( all[i].target ) == live.end() ) ++danglingCount;
+            if( live.find( all[i].target ) == live.end() )
+            {
+                ++danglingCount;
+            }
             i = j;
         }
 
@@ -5211,11 +6085,17 @@ std::optional<int> runNotes( const MainDispatch& d )
             for( std::size_t i = 0; i < all.size(); )
             {
                 std::size_t j = i;
-                while( j < all.size() && all[j].target == all[i].target ) ++j;
+                while( j < all.size() && all[j].target == all[i].target )
+                {
+                    ++j;
+                }
                 const bool dangling = ( live.find( all[i].target ) == live.end() );
                 w.write( "<target id=\"" );  w.write( escapeXml( all[i].target, esc ) );
                 w.write( dangling ? "\" dangling=\"1\">" : "\" dangling=\"0\">" );
-                for( std::size_t k = i; k < j; ++k ) appendOneNote( w, all[k], esc );
+                for( std::size_t k = i; k < j; ++k )
+                {
+                    appendOneNote( w, all[k], esc );
+                }
                 w.write( "</target>" );
                 i = j;
             }
@@ -5253,7 +6133,10 @@ std::optional<int> runPackTask( const MainDispatch& d )
     const IngestResult& ing = d.ing;
     const Graph&        g   = d.g;
 
-    if( !cfg.packTaskFlag ) return std::nullopt;
+    if( !cfg.packTaskFlag )
+    {
+        return std::nullopt;
+    }
     if( cfg.packTask.empty() )   // refuse loudly without a task string (never fall through to the default map)
     {
         std::fprintf( stderr, "ripwire: --pack-task: a task string is required — e.g. --pack-task=\"add retry to the http client\"\n" );
@@ -5267,7 +6150,10 @@ std::optional<int> runPackTask( const MainDispatch& d )
     // Q3 per-file churn (mirror --for): only mined on the --for git pass, so here it stays empty/zero when
     // --for wasn't also given → the churn= attr is simply omitted by packSignatures (nullptr-safe).
     std::vector<std::uint32_t> forChurn = d.forChurn;
-    if( forChurn.size() != ing.files.size() ) forChurn.assign( ing.files.size(), 0u );
+    if( forChurn.size() != ing.files.size() )
+    {
+        forChurn.assign( ing.files.size(), 0u );
+    }
 
     PackTaskInputs in;
     in.budgetTokens         = cfg.tokenBudget;        // F5: stays std::size_t end-to-end (0 ⇒ the shared default)
@@ -5292,7 +6178,9 @@ std::optional<int> runPackTask( const MainDispatch& d )
         // place it belongs. Say so on stderr rather than dropping it silently (it is not worth failing the
         // whole run over — the bundles themselves are unaffected).
         if( cfg.withGraph )
+        {
             std::fprintf( stderr, "ripwire: --with-graph is not applied in --partition mode (N+1 bundles, no single graph) — bundles emitted without it\n" );
+        }
         if( cfg.json )
         {
             std::string js;
@@ -5317,7 +6205,9 @@ std::optional<int> runPackTask( const MainDispatch& d )
         // warn-and-continue shape the --partition branch above already uses, rather than silently dropping
         // the flag's effect with no tell at all.
         if( cfg.withGraph )
+        {
             std::fprintf( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
+        }
         std::string js;
         packTaskBundleText( ing, g, task, lr, in, &js );
         std::fwrite( js.data(), 1, js.size(), stdout );
@@ -5352,7 +6242,9 @@ std::optional<int> runPackTask( const MainDispatch& d )
         std::printf( "</ctx>" );
     }
     else
+    {
         std::fwrite( bundle.data(), 1, bundle.size(), stdout );
+    }
     reportRedactions( stderr, d.redactCounts );
     return 0;
 }
@@ -5382,9 +6274,13 @@ std::optional<int> runMergeScout( const MainDispatch& d )
             // X9(a): a non-git root gets its OWN message — there is no offending ref to name, and "unknown
             // ref ''" would be a confusing refusal for a completely different reason (no git history at all).
             if( result.nonGitRoot )
+            {
                 std::fprintf( stderr, "ripwire: --merge-scout: %s is not a git repository (or has no HEAD commit) — nothing to scout\n", root.c_str() );
+            }
             else
+            {
                 std::fprintf( stderr, "ripwire: --merge-scout: unknown ref '%s'\n", result.badRef.c_str() );
+            }
             return 1;
         }
         mergescout::writeMergeScout( stdout, result );
@@ -5408,16 +6304,25 @@ BriefFile readBriefFile( const std::string& path )
 {
     BriefFile  out;
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
-    if( !fp ) return out;                                  // caller refuses loudly, naming the path
+    if( !fp )
+    {
+        return out; // caller refuses loudly, naming the path
+    }
     out.ok = true;
 
     char buf[ 4096 ];
     while( std::fgets( buf, sizeof( buf ), fp ) )
     {
         std::string line( buf );
-        while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) ) line.pop_back();
+        while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) )
+        {
+            line.pop_back();
+        }
         const std::size_t first = line.find_first_not_of( " \t" );
-        if( first == std::string::npos ) continue;         // blank (or whitespace-only) → not a lane
+        if( first == std::string::npos )
+        {
+            continue; // blank (or whitespace-only) → not a lane
+        }
         out.lines.push_back( line.substr( first, line.find_last_not_of( " \t" ) - first + 1 ) );
     }
     std::fclose( fp );
@@ -5432,8 +6337,14 @@ rw::lanes::CorpusStats laneCorpusStats( const rw::IngestResult& ing, const rw::G
     c.files   = ing.files.size();
     c.symbols = ing.symbols.size();
     c.edges   = g.outTargets.size();
-    for( std::uint32_t v : g.ambOut )        c.ambiguous  += v;
-    for( std::uint32_t v : g.unresolvedOut ) c.unresolved += v;
+    for( std::uint32_t v : g.ambOut )
+    {
+        c.ambiguous += v;
+    }
+    for( std::uint32_t v : g.unresolvedOut )
+    {
+        c.unresolved += v;
+    }
     return c;
 }
 
@@ -5445,7 +6356,10 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
     const Graph&        g    = d.g;
     const std::string&  root = d.root;
 
-    if( !cfg.planLanesFlag ) return std::nullopt;
+    if( !cfg.planLanesFlag )
+    {
+        return std::nullopt;
+    }
 
     // cli.h has already enforced task-XOR-brief and the 2..16 range on the auto-carve form. What is left to
     // refuse here is what only the tree can answer: an unreadable brief, a brief whose lane count is out of
@@ -5502,7 +6416,10 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
     else
     {
         laneRanks.reserve( in.laneTasks.size() );
-        for( const std::string& laneTask : in.laneTasks ) laneRanks.push_back( computeLensRanking( d, laneTask ).rank );
+        for( const std::string& laneTask : in.laneTasks )
+        {
+            laneRanks.push_back( computeLensRanking( d, laneTask ).rank );
+        }
         in.laneRanks = &laneRanks;
     }
 
@@ -5510,7 +6427,9 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
     // A non-git root simply leaves it zero (every hotspot_rank then emits null, never a fabricated rank).
     std::vector<std::uint32_t> churn( ing.files.size(), 0u );
     if( !gitChurnCounts( root, ing, churn, "12 months ago" ) )
+    {
         DEGRADED_PATH_ALERT( "plan-lanes: no git churn history for this root — claims.files churn/hotspot_rank report 0/null" );
+    }
     in.churn  = &churn;
     in.tested = d.testedPtr;
     in.corpus = laneCorpusStats( ing, g );
@@ -5526,11 +6445,16 @@ std::optional<int> runPlanLanes( const MainDispatch& d )
 // the whole compute-then-write sequence). `verbNote` names what degrades, so the message stays specific.
 rw::gitoracle::HistoryIndex buildHistoryIndex( const rw::Config& cfg, const std::string& root, const char* verbNote )
 {
-    if( !cfg.withHistory ) return {};
+    if( !cfg.withHistory )
+    {
+        return {};
+    }
 
     rw::gitoracle::HistoryIndex idx = rw::gitoracle::probeNameHistory( root );
     if( idx.nonGitRoot )
+    {
         std::fprintf( stderr, "ripwire: --with-history: %s has no git history — %s\n", root.c_str(), verbNote );
+    }
     return idx;
 }
 
@@ -5563,7 +6487,9 @@ int runFlip( const MainDispatch& d )
         {
             msg += " (did you mean";
             for( std::size_t i = 0; i < result.nearMisses.size(); ++i )
+            {
                 msg += ( i ? ", '" : " '" ) + result.nearMisses[i] + "'";
+            }
             msg += "?)";
         }
         std::fprintf( stderr, "%s\n", msg.c_str() );
@@ -5588,9 +6514,13 @@ int runAbiCheck( const MainDispatch& d )
     if( !result.ok )
     {
         if( result.nonGitRoot )
+        {
             std::fprintf( stderr, "ripwire: --abi: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
+        }
         else
+        {
             std::fprintf( stderr, "ripwire: --abi: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+        }
         return 1;
     }
     // --detail=N is this verb's ONE "show me everything" lever: it lifts the per-ref display cap AND prints
@@ -5616,8 +6546,12 @@ inline std::vector<rw::crossref::IndexDefSite> whereisIndexDefSites( const rw::I
 {
     std::vector<rw::crossref::IndexDefSite> sites;
     for( const rw::Symbol& s : ing.symbols )
+    {
         if( s.name == name )
+        {
             sites.push_back( rw::crossref::IndexDefSite{ std::string( rw::relForHash( ing.files[ s.fileId ], root ) ), s.line } );
+        }
+    }
     return sites;
 }
 
@@ -5639,9 +6573,13 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         if( !result.ok )
         {
             if( result.nonGitRoot )
+            {
                 std::fprintf( stderr, "ripwire: --plan: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
+            }
             else
+            {
                 std::fprintf( stderr, "ripwire: --plan: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+            }
             return 1;
         }
         landingplan::writePlan( stdout, result );
@@ -5655,14 +6593,21 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             std::fprintf( stderr, "ripwire: --stray-content is single-root only (one repo = one ref namespace) — run it per root\n" );
             return 1;
         }
-        if( cfg.abiFlag ) return runAbiCheck( d );   // --stray-content --abi: the cross-branch ABI-break gate
+        if( cfg.abiFlag )
+        {
+            return runAbiCheck( d ); // --stray-content --abi: the cross-branch ABI-break gate
+        }
         const crossref::StrayResult result = crossref::computeStrayContent( root, cfg.strayFilter );
         if( !result.ok )
         {
             if( result.nonGitRoot )
+            {
                 std::fprintf( stderr, "ripwire: --stray-content: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
+            }
             else
+            {
                 std::fprintf( stderr, "ripwire: --stray-content: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+            }
             return 1;
         }
         // §P15/§P16: real paging over the outer, deterministically-sorted refs listing (see crossref.h's
@@ -5687,7 +6632,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
 
     if( cfg.darkFlags )
     {
-        if( cfg.flipFlag ) return runFlip( d );                     // --flags --flip=NAME: one gate's radius
+        if( cfg.flipFlag )
+        {
+            return runFlip( d ); // --flags --flip=NAME: one gate's radius
+        }
         const darkflags::FlagsResult result = darkflags::computeFlags( d.ing, root, cfg.excludes, cfg.darkFlagsFilter );
         darkflags::writeFlags( stdout, result, cfg.detail ? SIZE_MAX : darkflags::kMaxSitesShown );
         return 0;
@@ -5734,7 +6682,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
 std::optional<int> runDocDrift( const MainDispatch& d )
 {
     using namespace rw;
-    if( !d.cfg.docDrift ) return std::nullopt;
+    if( !d.cfg.docDrift )
+    {
+        return std::nullopt;
+    }
 
     // --with-history (opt-in): the git-history name oracle that splits the mention lane's why="undefined"
     // into "this repo deleted it" (rot) and "this repo never had it" (a plan doc naming unbuilt work, not
@@ -5760,7 +6711,10 @@ std::optional<int> runLayout( const MainDispatch& d )
     using namespace rw;
     const Config& cfg = d.cfg;
 
-    if( !cfg.layoutFlag ) return std::nullopt;
+    if( !cfg.layoutFlag )
+    {
+        return std::nullopt;
+    }
 
     if( cfg.layoutStruct.empty() )
     {
@@ -5778,15 +6732,21 @@ std::optional<int> runLayout( const MainDispatch& d )
         // findDefBody's generic aggregate scan (a scoped enum's head contains the word "class"/"struct" too)
         // and silently degrade to a confident modeled="1" zero-field struct instead of refusing.
         if( result.enumCandidates > 0 )
+        {
             std::fprintf( stderr, "ripwire: --layout: '%.*s' is an enum, --layout models structs (a scoped/unscoped enum's underlying type is not a byte layout)\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
+        }
         else if( result.bodilessCandidates > 0 )
+        {
             std::fprintf( stderr, "ripwire: --layout: '%.*s' is indexed but has no C-family aggregate body — this verb models C/C++/ObjC byte layout only\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
+        }
         else
+        {
             std::fprintf( stderr, "ripwire: --layout: no indexed struct/class named '%.*s' (try --grep=%.*s to find its spelling)\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data(),
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
+        }
         return 1;
     }
     layout::writeLayout( stdout, result );
@@ -5799,7 +6759,13 @@ std::optional<int> runLayout( const MainDispatch& d )
 std::uint32_t nonIsolatedModuleCount( const std::vector<std::vector<rw::NodeId>>& members )
 {
     std::uint32_t modules = 0;
-    for( const std::vector<rw::NodeId>& mem : members ) if( mem.size() >= 2 ) ++modules;
+    for( const std::vector<rw::NodeId>& mem : members )
+    {
+        if( mem.size() >= 2 )
+        {
+            ++modules;
+        }
+    }
     return modules;
 }
 
@@ -5815,21 +6781,32 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
 
     std::vector<std::vector<NodeId>> members( K );
-    for( NodeId i = 0; i < N; ++i ) members[ cm.comm[i] ].push_back( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        members[cm.comm[i]].push_back( i );
+    }
     const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
 
     HashMap<std::uint64_t, std::uint32_t> bridge;   // (min,max) community pair → inter-module edge count
     for( NodeId u = 0; u < N; ++u )
+    {
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
         {
             const std::uint32_t cu = cm.comm[u], cv = cm.comm[ g.outTargets[k] ];
-            if( cu == cv ) continue;
+            if( cu == cv )
+            {
+                continue;
+            }
             const std::uint32_t a = std::min( cu, cv ), b = std::max( cu, cv );
             ++bridge[ ( std::uint64_t( a ) << 32 ) | b ];
         }
+    }
 
     std::vector<std::uint32_t> order( K );
-    for( std::uint32_t c = 0; c < K; ++c ) order[c] = c;
+    for( std::uint32_t c = 0; c < K; ++c )
+    {
+        order[c] = c;
+    }
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                { return members[a].size() != members[b].size() ? members[a].size() > members[b].size() : a < b; } );
 
@@ -5843,7 +6820,13 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     // a continuation of the module rows), which is why shown_bridges= keeps its own count.
     std::vector<std::uint32_t> moduleOrder;
     moduleOrder.reserve( modules );
-    for( std::uint32_t c : order ) if( members[c].size() >= 2 ) moduleOrder.push_back( c );
+    for( std::uint32_t c : order )
+    {
+        if( members[c].size() >= 2 )
+        {
+            moduleOrder.push_back( c );
+        }
+    }
     const PageWindow  cmpw = pageWindow( moduleOrder.size(), effectiveRowCap( cfg.pageLimit, 30 ), cfg.pageOffset );
     char              cmab[ 192 ];
 
@@ -5916,7 +6899,10 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
 
 std::optional<int> runCommunities( const MainDispatch& d )
 {
-    if( d.cfg.communities ) return emitCommunitiesReport( d.cfg, d.ing, d.g );   // body: emitCommunitiesReport() above
+    if( d.cfg.communities )
+    {
+        return emitCommunitiesReport( d.cfg, d.ing, d.g ); // body: emitCommunitiesReport() above
+    }
     return std::nullopt;
 }
 
@@ -5958,7 +6944,10 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
     const std::uint32_t want = std::uint32_t( parsed );
 
     std::vector<std::vector<NodeId>> members( K );
-    for( NodeId i = 0; i < N; ++i ) members[ cm.comm[i] ].push_back( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        members[cm.comm[i]].push_back( i );
+    }
 
     // §A8.6: this root used to print the FULL partition size (K, isolated singletons included) under the
     // SAME attribute name (`modules=`) the parent uses for the non-isolated count — 9x apart on this repo.
@@ -5978,15 +6967,27 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
     // the parent's <bridge> is undirected too, so "how coupled are these two" means the same thing here).
     HashMap<std::uint32_t, std::uint32_t> peerEdges;
     for( NodeId u = 0; u < N; ++u )
+    {
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
         {
             const std::uint32_t cu = cm.comm[u], cv = cm.comm[ g.outTargets[k] ];
-            if( cu == cv ) continue;
-            if( cu == want )      ++peerEdges[ cv ];
-            else if( cv == want ) ++peerEdges[ cu ];
+            if( cu == cv )
+            {
+                continue;
+            }
+            if( cu == want )
+            {
+                ++peerEdges[cv];
+            }
+            else if( cv == want )
+            {
+                ++peerEdges[cu];
+            }
         }
+    }
     std::vector<std::pair<std::uint32_t, std::uint32_t>> peers( peerEdges.begin(), peerEdges.end() );
-    std::sort( peers.begin(), peers.end(), []( const auto& a, const auto& b ) { return a.second != b.second ? a.second > b.second : a.first < b.first; } );
+    std::sort( peers.begin(), peers.end(), []( const auto& a, const auto& b )
+               { return a.second != b.second ? a.second > b.second : a.first < b.first; } );
 
     // §P8 / src/pageview.h: the MEMBER listing is the primary windowed one (rule 6) — this is the verb that
     // exists because five preview rows were not enough, so its cap must be raisable. The bridge listing is
@@ -6013,14 +7014,19 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
         std::printf( "<member t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
     }
     for( std::size_t i = 0; i < shownBridges; ++i )
+    {
         std::printf( "<bridge to=\"%u\" to_label=\"%s\" edges=\"%u\"/>", peers[i].first, ex( presentation.label[ peers[i].first ] ).c_str(), peers[i].second );
+    }
     std::printf( "</community>" );
     return 0;
 }
 
 std::optional<int> runCommunityDrill( const MainDispatch& d )
 {
-    if( !d.cfg.communityFlag ) return std::nullopt;
+    if( !d.cfg.communityFlag )
+    {
+        return std::nullopt;
+    }
     if( d.cfg.communityId.empty() )
     {
         std::fprintf( stderr, "ripwire: --community needs a module ID — take one from the id= values --communities "
@@ -6059,7 +7065,10 @@ std::optional<int> runZoom( const MainDispatch& d )
         for( std::size_t l = 0; l < L; ++l )
         {
             members[l].assign( h.counts[l], {} );
-            for( NodeId i = 0; i < N; ++i ) members[l][ h.levels[l][i] ].push_back( i );
+            for( NodeId i = 0; i < N; ++i )
+            {
+                members[l][h.levels[l][i]].push_back( i );
+            }
         }
 
         // children[l][gid] = the level-(l-1) groups whose parent is gid (l≥1). Inverts h.parentOf[l-1].
@@ -6068,7 +7077,10 @@ std::optional<int> runZoom( const MainDispatch& d )
         {
             children[l].assign( h.counts[l], {} );
             const std::vector<std::uint32_t>& par = h.parentOf[l - 1];   // level (l-1) group → level l group
-            for( std::uint32_t cg = 0; cg < h.counts[l - 1]; ++cg ) children[l][ par[cg] ].push_back( cg );
+            for( std::uint32_t cg = 0; cg < h.counts[l - 1]; ++cg )
+            {
+                children[l][par[cg]].push_back( cg );
+            }
         }
 
         // dominant directory of a level-l group (most-frequent parent dir of its member files; ties → lexicographically first).
@@ -6082,7 +7094,14 @@ std::optional<int> runZoom( const MainDispatch& d )
                 ++dirCount[ std::string( sl == std::string_view::npos ? p : p.substr( 0, sl ) ) ];
             }
             std::string d;  std::uint32_t best = 0;
-            for( const auto& [ dir, cnt ] : dirCount ) if( cnt > best || ( cnt == best && dir < d ) ) { best = cnt; d = dir; }
+            for( const auto& [dir, cnt] : dirCount )
+            {
+                if( cnt > best || ( cnt == best && dir < d ) )
+                {
+                    best = cnt;
+                    d = dir;
+                }
+            }
             return d;
         };
 
@@ -6090,7 +7109,13 @@ std::optional<int> runZoom( const MainDispatch& d )
         // not a module" rule as --communities.
         const std::size_t        topL = L - 1;
         std::vector<std::uint32_t> topOrder;
-        for( std::uint32_t gid = 0; gid < h.counts[topL]; ++gid ) if( members[topL][gid].size() >= 2 ) topOrder.push_back( gid );
+        for( std::uint32_t gid = 0; gid < h.counts[topL]; ++gid )
+        {
+            if( members[topL][gid].size() >= 2 )
+            {
+                topOrder.push_back( gid );
+            }
+        }
         std::sort( topOrder.begin(), topOrder.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                    { return members[topL][a].size() != members[topL][b].size() ? members[topL][a].size() > members[topL][b].size() : a < b; } );
 
@@ -6099,13 +7124,18 @@ std::optional<int> runZoom( const MainDispatch& d )
         const std::vector<std::uint32_t>& topOf = h.levels[topL];        // symbol → top module
         rw::HashMap<std::uint64_t, std::uint32_t> bridge;               // (min,max) top-module pair → edge count
         for( NodeId u = 0; u < N; ++u )
+        {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
             {
                 const std::uint32_t tu = topOf[u], tv = topOf[ g.outTargets[k] ];
-                if( tu == tv ) continue;
+                if( tu == tv )
+                {
+                    continue;
+                }
                 const std::uint32_t a = std::min( tu, tv ), b = std::max( tu, tv );
                 ++bridge[ ( std::uint64_t( a ) << 32 ) | b ];
             }
+        }
 
         if( cfg.mermaid )
         {
@@ -6114,7 +7144,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             std::printf( "%%%% ripwire --zoom --mermaid: nested module hierarchy (multi-level Louvain). subgraph = top module, inner node = sub-module (dir, symbol count); edge = cross-module call count. Render at mermaid.live.\n" );
             std::printf( "flowchart TB\n" );
             std::vector<char> esc;
-            const auto ex = [ & ]( std::string_view s ) -> std::string { std::string r( s ); for( char& ch : r ) if( ch == '"' ) ch = '\''; return r; };
+            const auto ex = [ & ]( std::string_view s ) -> std::string { std::string r( s ); for( char& ch : r ) { if( ch == '"' ) { ch = '\''; } } return r; };
             const std::size_t maxTopShown = std::min<std::size_t>( 10, topOrder.size() );
             for( std::size_t ti = 0; ti < maxTopShown; ++ti )
             {
@@ -6127,7 +7157,9 @@ std::optional<int> runZoom( const MainDispatch& d )
                                { return members[topL - 1][a].size() != members[topL - 1][b].size() ? members[topL - 1][a].size() > members[topL - 1][b].size() : a < b; } );
                     const std::size_t maxKids = std::min<std::size_t>( 8, kids.size() );
                     for( std::size_t ki = 0; ki < maxKids; ++ki )
+                    {
                         std::printf( "    nL%zu_%u[\"%s<br/>%zu\"]\n", topL - 1, kids[ki], ex( domDirOf( topL - 1, kids[ki] ) ).c_str(), members[topL - 1][ kids[ki] ].size() );
+                    }
                 }
                 else   // single-level (no coarsening happened): show the module's top symbols as inner nodes
                 {
@@ -6135,18 +7167,26 @@ std::optional<int> runZoom( const MainDispatch& d )
                     std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
                     const std::size_t maxS = std::min<std::size_t>( 5, mem.size() );
                     for( std::size_t si = 0; si < maxS; ++si )
+                    {
                         std::printf( "    sL%zu_%u_%zu[\"%s\"]\n", topL, t, si, ex( ing.symbols[ mem[si] ].name ).c_str() );
+                    }
                 }
                 std::printf( "  end\n" );
             }
             std::vector<char> shownTop( h.counts[topL], 0 );
-            for( std::size_t ti = 0; ti < maxTopShown; ++ti ) shownTop[ topOrder[ti] ] = 1;
+            for( std::size_t ti = 0; ti < maxTopShown; ++ti )
+            {
+                shownTop[topOrder[ti]] = 1;
+            }
             std::vector<std::pair<std::uint64_t, std::uint32_t>> br( bridge.begin(), bridge.end() );
             std::sort( br.begin(), br.end(), []( const auto& a, const auto& b ) { return a.second != b.second ? a.second > b.second : a.first < b.first; } );
             for( const auto& [ key, w ] : br )
             {
                 const std::uint32_t a = std::uint32_t( key >> 32 ), b = std::uint32_t( key & 0xffffffffu );
-                if( !shownTop[a] || !shownTop[b] ) continue;
+                if( !shownTop[a] || !shownTop[b] )
+                {
+                    continue;
+                }
                 std::printf( "  sgL%zu_%u -->|%u| sgL%zu_%u\n", topL, a, w, topL, b );
             }
             return 0;
@@ -6165,7 +7205,10 @@ std::optional<int> runZoom( const MainDispatch& d )
         // shown or not), so the identity below is exact by construction rather than by agreeing with
         // another verb's independently-computed number.
         std::size_t inHierarchy = 0;
-        for( std::uint32_t gid : topOrder ) inHierarchy += members[topL][gid].size();
+        for( std::uint32_t gid : topOrder )
+        {
+            inHierarchy += members[topL][gid].size();
+        }
         const std::uint32_t isolatedCount = N - std::uint32_t( inHierarchy );
         std::printf( "<!-- ripwire zoom: NESTED module hierarchy (multi-level Louvain); indent = one level deeper; module = dominant-dir(symbol-count); leaf lists top-ranked symbols; bridge = cross-top-module call traffic. "
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
@@ -6194,7 +7237,10 @@ std::optional<int> runZoom( const MainDispatch& d )
             // which rather than leaving a reader to infer it from an absent attribute.
             const std::size_t leafShown = ( l == 0 ) ? std::min<std::size_t>( 5, members[0][gid].size() ) : 0;
             std::printf( "<module level=\"%zu\" id=\"%u\" size=\"%zu\" dir=\"%s\"", l, gid, members[l][gid].size(), ex( domDirOf( l, gid ) ).c_str() );
-            if( l == 0 ) std::printf( " shown=\"%zu\" capped=\"%u\"", leafShown, unsigned( leafShown < members[0][gid].size() ) );
+            if( l == 0 )
+            {
+                std::printf( " shown=\"%zu\" capped=\"%u\"", leafShown, unsigned( leafShown < members[0][gid].size() ) );
+            }
             std::printf( ">" );
             if( l == 0 )   // finest community → list its top-ranked symbols
             {
@@ -6212,17 +7258,25 @@ std::optional<int> runZoom( const MainDispatch& d )
                 std::vector<std::uint32_t> kids = children[l][gid];
                 std::sort( kids.begin(), kids.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                            { return members[l - 1][a].size() != members[l - 1][b].size() ? members[l - 1][a].size() > members[l - 1][b].size() : a < b; } );
-                for( std::uint32_t cg : kids ) emit( l - 1, cg );
+                for( std::uint32_t cg : kids )
+                {
+                    emit( l - 1, cg );
+                }
             }
             std::printf( "</module>" );
         };
-        for( std::size_t ti = zoomPw.begin; ti < zoomPw.end; ++ti ) emit( topL, topOrder[ti] );
+        for( std::size_t ti = zoomPw.begin; ti < zoomPw.end; ++ti )
+        {
+            emit( topL, topOrder[ti] );
+        }
 
         std::vector<std::pair<std::uint64_t, std::uint32_t>> br( bridge.begin(), bridge.end() );
         std::sort( br.begin(), br.end(), []( const auto& a, const auto& b ) { return a.second != b.second ? a.second > b.second : a.first < b.first; } );
         const std::size_t topB = std::min<std::size_t>( 12, br.size() );
         for( std::size_t i = 0; i < topB; ++i )
+        {
             std::printf( "<bridge a=\"%u\" b=\"%u\" edges=\"%u\"/>", std::uint32_t( br[i].first >> 32 ), std::uint32_t( br[i].first & 0xffffffffu ), br[i].second );
+        }
         std::printf( "</zoom>" );
         return 0;
     }
@@ -6246,7 +7300,10 @@ inline void orderFilesByBestSymbolRank( std::vector<std::uint32_t>& ford, const 
     for( rw::NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const std::uint32_t sf = ing.symbols[i].fileId;
-        if( rank[i] > bestRankByFile[sf] ) bestRankByFile[sf] = rank[i];
+        if( rank[i] > bestRankByFile[sf] )
+        {
+            bestRankByFile[sf] = rank[i];
+        }
     }
     rw::orderIdsByKeyDescPathAsc( ford, bestRankByFile, ing.files );
 }
@@ -6275,30 +7332,54 @@ std::optional<int> runStructureText( const MainDispatch& d )
 
         // testReach = everything transitively called from test files → a seam u→v is exercised if testReach[u]
         std::vector<NodeId> testSeeds;
-        for( NodeId i = 0; i < N; ++i ) if( rw::isTestPath( ing.files[ ing.symbols[i].fileId ] ) ) testSeeds.push_back( i );
+        for( NodeId i = 0; i < N; ++i )
+        {
+            if( rw::isTestPath( ing.files[ing.symbols[i].fileId] ) )
+            {
+                testSeeds.push_back( i );
+            }
+        }
         const std::vector<char> testReach = rw::forwardReach( g, testSeeds );
         std::vector<char> isTestFile( ing.files.size(), 0 );
-        for( NodeId s : testSeeds ) isTestFile[ ing.symbols[s].fileId ] = 1;
-        std::uint32_t testFileCount = 0;  for( char c : isTestFile ) testFileCount += c;
+        for( NodeId s : testSeeds )
+        {
+            isTestFile[ing.symbols[s].fileId] = 1;
+        }
+        std::uint32_t testFileCount = 0;
+        for( char c : isTestFile )
+        {
+            testFileCount += c;
+        }
 
         // untested cross-directory edges, grouped by DIRECTED dir pair (caller-module → callee-module)
         struct SeamEdge { NodeId u, v; };
         HashMap<std::uint64_t, std::vector<SeamEdge>> grp;
         std::uint32_t bridges = 0, untested = 0;
         for( NodeId u = 0; u < N; ++u )
+        {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
             {
                 const NodeId        v  = g.outTargets[k];
                 const std::uint32_t du = symDir[u], dv = symDir[ v ];
-                if( du == dv ) continue;                                // same directory — not a seam
+                if( du == dv )
+                {
+                    continue; // same directory — not a seam
+                }
                 ++bridges;
-                if( u < testReach.size() && testReach[u] ) continue;    // a test reaches the caller → exercised
+                if( u < testReach.size() && testReach[u] )
+                {
+                    continue; // a test reaches the caller → exercised
+                }
                 ++untested;
                 grp[ ( std::uint64_t( du ) << 32 ) | dv ].push_back( { u, v } );
             }
+        }
 
         std::vector<std::pair<std::uint64_t, std::vector<SeamEdge>*>> pairs;
-        for( auto& kv : grp ) pairs.push_back( { kv.first, &kv.second } );
+        for( auto& kv : grp )
+        {
+            pairs.push_back( { kv.first, &kv.second } );
+        }
         std::sort( pairs.begin(), pairs.end(), [ & ]( const auto& a, const auto& b )
                    { return a.second->size() != b.second->size() ? a.second->size() > b.second->size() : a.first < b.first; } );
 
@@ -6365,30 +7446,56 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const std::uint32_t M = std::uint32_t( dirName.size() );
 
         std::vector<std::uint32_t> sz( M, 0 );
-        for( NodeId i = 0; i < N; ++i ) ++sz[ symDir[i] ];
+        for( NodeId i = 0; i < N; ++i )
+        {
+            ++sz[symDir[i]];
+        }
         HashMap<std::uint64_t, std::uint32_t> w;                       // (du<<32|dv) → cross-module call count
         for( NodeId u = 0; u < N; ++u )
+        {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
             {
                 const std::uint32_t du = symDir[u], dv = symDir[ g.outTargets[k] ];
-                if( du != dv ) ++w[ ( std::uint64_t( du ) << 32 ) | dv ];
+                if( du != dv )
+                {
+                    ++w[( std::uint64_t( du ) << 32 ) | dv];
+                }
             }
+        }
 
         std::vector<std::uint32_t> order( M );                         // top modules by symbol count
-        for( std::uint32_t c = 0; c < M; ++c ) order[c] = c;
+        for( std::uint32_t c = 0; c < M; ++c )
+        {
+            order[c] = c;
+        }
         std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                    { return sz[a] != sz[b] ? sz[a] > sz[b] : dirName[a] < dirName[b]; } );
         const std::size_t  nShown = std::min<std::size_t>( 30, M );
         std::vector<char>  shown( M, 0 );
-        for( std::size_t i = 0; i < nShown; ++i ) shown[ order[i] ] = 1;
+        for( std::size_t i = 0; i < nShown; ++i )
+        {
+            shown[order[i]] = 1;
+        }
 
         const std::string base = root + "/";                          // clean labels: strip the corpus root prefix
         const auto        label = [ & ]( std::uint32_t c ) -> std::string
         {
             std::string s = dirName[c];
-            if( s == root )                    s = "(root)";
-            else if( s.rfind( base, 0 ) == 0 ) s = s.substr( base.size() );
-            for( char& ch : s ) if( ch == '"' ) ch = '\'';            // mermaid label safety
+            if( s == root )
+            {
+                s = "(root)";
+            }
+            else if( s.rfind( base, 0 ) == 0 )
+            {
+                s = s.substr( base.size() );
+            }
+            for( char& ch : s )
+            {
+                if( ch == '"' )
+                {
+                    ch = '\''; // mermaid label safety
+                }
+            }
             return s;
         };
 
@@ -6404,7 +7511,10 @@ std::optional<int> runStructureText( const MainDispatch& d )
             const std::string   lab = label( c );
             const std::size_t   sl  = lab.find( '/' );
             const auto [ it, ins ]  = groups.try_emplace( sl == std::string::npos ? lab : lab.substr( 0, sl ) );
-            if( ins ) groupOrder.push_back( it->first );
+            if( ins )
+            {
+                groupOrder.push_back( it->first );
+            }
             it->second.push_back( c );
         }
         std::size_t gi = 0;
@@ -6412,10 +7522,18 @@ std::optional<int> runStructureText( const MainDispatch& d )
         {
             const std::vector<std::uint32_t>& gnodes = groups[ gname ];
             const bool wrap = gnodes.size() > 1;                       // wrap multi-node subsystems; lone dirs stay bare
-            if( wrap ) std::printf( "  subgraph sg%zu [\"%s\"]\n", gi, gname.c_str() );
+            if( wrap )
+            {
+                std::printf( "  subgraph sg%zu [\"%s\"]\n", gi, gname.c_str() );
+            }
             for( std::uint32_t c : gnodes )
+            {
                 std::printf( "%sn%u[\"%s<br/>%u\"]\n", wrap ? "    " : "  ", c, label( c ).c_str(), sz[c] );
-            if( wrap ) std::printf( "  end\n" );
+            }
+            if( wrap )
+            {
+                std::printf( "  end\n" );
+            }
             ++gi;
         }
         std::vector<std::pair<std::uint64_t, std::uint32_t>> edges( w.begin(), w.end() );
@@ -6423,7 +7541,10 @@ std::optional<int> runStructureText( const MainDispatch& d )
         for( const auto& [ key, weight ] : edges )
         {
             const std::uint32_t du = std::uint32_t( key >> 32 ), dv = std::uint32_t( key & 0xffffffffu );
-            if( weight < minW || !shown[du] || !shown[dv] ) continue;
+            if( weight < minW || !shown[du] || !shown[dv] )
+            {
+                continue;
+            }
             std::printf( "  n%u -->|%u| n%u\n", du, weight, dv );
         }
         return 0;
@@ -6439,20 +7560,39 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const std::vector<float> rank = rankGraph( g );
 
         std::vector<std::vector<NodeId>> members( cm.count );
-        for( NodeId i = 0; i < N; ++i ) members[ cm.comm[i] ].push_back( i );
+        for( NodeId i = 0; i < N; ++i )
+        {
+            members[cm.comm[i]].push_back( i );
+        }
         const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
-        for( auto& m : members ) std::sort( m.begin(), m.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
+        for( auto& m : members )
+        {
+            std::sort( m.begin(), m.end(), [ & ]( NodeId a, NodeId b )
+                       { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
+        }
 
         std::uint32_t modules = 0;
         for( std::uint32_t c = 0; c < cm.count; ++c )
         {
-            if( members[c].size() >= 2 ) ++modules;
+            if( members[c].size() >= 2 )
+            {
+                ++modules;
+            }
         }
         const IsolateStats isolates = isolateStats( ing, g, members );
 
         const auto                 adj = resolveIncludeAdj( ing );
         std::vector<std::uint32_t> afferent( F, 0 );
-        for( std::size_t a = 0; a < adj.size(); ++a ) for( std::uint32_t b : adj[a] ) if( b < F ) ++afferent[b];
+        for( std::size_t a = 0; a < adj.size(); ++a )
+        {
+            for( std::uint32_t b : adj[a] )
+            {
+                if( b < F )
+                {
+                    ++afferent[b];
+                }
+            }
+        }
         const auto cycles = sccCycles( adj );
 
         // §P7 embedding contract: this markdown never contains a run of 4-or-more backticks, so a consumer's
@@ -6465,7 +7605,11 @@ std::optional<int> runStructureText( const MainDispatch& d )
         std::printf( "Call-graph isolate provenance: %u declaration, %u header, %u source, %u document; %u connected Louvain singletons\n\n",
                      isolates.declaration, isolates.header, isolates.source, isolates.document, isolates.connectedSingletons );
 
-        std::vector<std::uint32_t> ord( cm.count );  for( std::uint32_t c = 0; c < cm.count; ++c ) ord[c] = c;
+        std::vector<std::uint32_t> ord( cm.count );
+        for( std::uint32_t c = 0; c < cm.count; ++c )
+        {
+            ord[c] = c;
+        }
         std::sort( ord.begin(), ord.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return members[a].size() != members[b].size() ? members[a].size() > members[b].size() : a < b; } );
         const std::uint32_t reportModules = std::min<std::uint32_t>( modules, 12 );
         std::printf( "## Modules (call-graph clusters; showing %u of %u)\n", reportModules, modules );
@@ -6473,38 +7617,102 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §P6.2: no separate "(lead: ...)" annotation — the label above IS the semantic anchor now (highest
         // fan-in non-accessor member), so a second "top PageRank member" field would just reintroduce the
         // accessor name (push_back/empty/...) this fix exists to keep out of the reader's first screen.
-        for( std::uint32_t c : ord ) { if( members[c].size() < 2 ) continue; if( shown++ >= 12 ) break;
-            std::printf( "- **%s** — %zu symbols\n", presentation.label[c].c_str(), members[c].size() ); }
+        for( std::uint32_t c : ord )
+        {
+            if( members[c].size() < 2 )
+            {
+                continue;
+            }
+            if( shown++ >= 12 )
+            {
+                break;
+            }
+            std::printf( "- **%s** — %zu symbols\n", presentation.label[c].c_str(), members[c].size() );
+        }
 
-        std::vector<std::uint32_t> ford( F );  for( std::uint32_t f = 0; f < F; ++f ) ford[f] = f;
+        std::vector<std::uint32_t> ford( F );
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            ford[f] = f;
+        }
         std::sort( ford.begin(), ford.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return afferent[a] != afferent[b] ? afferent[a] > afferent[b] : a < b; } );
         const std::size_t godFileCount = std::count_if( afferent.begin(), afferent.end(), []( std::uint32_t count ) { return count > 0; } );
         const std::size_t reportGodFiles = std::min<std::size_t>( godFileCount, 10 );
         std::printf( "\n## God files (most depended-on; showing %zu of %zu)\n", reportGodFiles, godFileCount );
         bool anyGod = false;
-        for( std::uint32_t i = 0; i < F && i < 10; ++i ) { if( afferent[ ford[i] ] == 0 ) break; anyGod = true; std::printf( "- `%s` — %u dependents\n", ing.files[ ford[i] ].c_str(), afferent[ ford[i] ] ); }
-        if( !anyGod ) std::printf( "- (no include/import edges captured)\n" );
+        for( std::uint32_t i = 0; i < F && i < 10; ++i )
+        {
+            if( afferent[ford[i]] == 0 )
+            {
+                break;
+            }
+            anyGod = true;
+            std::printf( "- `%s` — %u dependents\n", ing.files[ford[i]].c_str(), afferent[ford[i]] );
+        }
+        if( !anyGod )
+        {
+            std::printf( "- (no include/import edges captured)\n" );
+        }
 
         const std::size_t reportCycles = std::min<std::size_t>( cycles.size(), 6 );
         std::printf( "\n## Dependency cycles (showing %zu of %zu)\n", reportCycles, cycles.size() );
-        if( cycles.empty() ) std::printf( "- none (acyclic)\n" );
-        else for( std::size_t i = 0; i < cycles.size() && i < 6; ++i ) { std::printf( "- " ); for( std::size_t j = 0; j < cycles[i].size(); ++j ) std::printf( "%s`%s`", j ? " ↔ " : "", ing.files[ cycles[i][j] ].c_str() ); std::printf( "\n" ); }
+        if( cycles.empty() )
+        {
+            std::printf( "- none (acyclic)\n" );
+        }
+        else
+        {
+            for( std::size_t i = 0; i < cycles.size() && i < 6; ++i )
+            {
+                std::printf( "- " );
+                for( std::size_t j = 0; j < cycles[i].size(); ++j )
+                {
+                    std::printf( "%s`%s`", j ? " ↔ " : "", ing.files[cycles[i][j]].c_str() );
+                }
+                std::printf( "\n" );
+            }
+        }
 
-        std::vector<NodeId> ts( N );  for( NodeId i = 0; i < N; ++i ) ts[i] = i;
+        std::vector<NodeId> ts( N );
+        for( NodeId i = 0; i < N; ++i )
+        {
+            ts[i] = i;
+        }
         std::sort( ts.begin(), ts.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         const std::uint32_t reportTopSymbols = std::min<std::uint32_t>( N, 10 );
         std::printf( "\n## Top symbols (PageRank; showing %u of %u)\n", reportTopSymbols, N );
         for( std::uint32_t i = 0; i < N && i < 10; ++i ) { const Symbol& s = ing.symbols[ ts[i] ]; std::printf( "- `%s` (%s:%u)\n", s.name.c_str(), ing.files[ s.fileId ].c_str(), s.line ); }
 
         HashMap<std::uint64_t, std::uint32_t> bridge;
-        for( NodeId u = 0; u < N; ++u ) for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
-        { const std::uint32_t cu = cm.comm[u], cv = cm.comm[ g.outTargets[k] ]; if( cu == cv ) continue; const std::uint32_t a = std::min( cu, cv ), b = std::max( cu, cv ); ++bridge[ ( std::uint64_t( a ) << 32 ) | b ]; }
+        for( NodeId u = 0; u < N; ++u )
+        {
+            for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
+            {
+                const std::uint32_t cu = cm.comm[u], cv = cm.comm[g.outTargets[k]];
+                if( cu == cv )
+                {
+                    continue;
+                }
+                const std::uint32_t a = std::min( cu, cv ), b = std::max( cu, cv );
+                ++bridge[( std::uint64_t( a ) << 32 ) | b];
+            }
+        }
         std::vector<std::pair<std::uint64_t, std::uint32_t>> br( bridge.begin(), bridge.end() );
         std::sort( br.begin(), br.end(), []( const auto& a, const auto& b ) { return a.second != b.second ? a.second > b.second : a.first < b.first; } );
         const std::size_t reportBridges = std::min<std::size_t>( br.size(), 8 );
         std::printf( "\n## Cross-module bridges (showing %zu of %zu)\n", reportBridges, br.size() );
-        if( br.empty() ) std::printf( "- (none)\n" );
-        else for( std::size_t i = 0; i < br.size() && i < 8; ++i ) { const std::uint32_t a = std::uint32_t( br[i].first >> 32 ), b = std::uint32_t( br[i].first & 0xffffffffu ); std::printf( "- %s ↔ %s (%u edges)\n", presentation.label[a].c_str(), presentation.label[b].c_str(), br[i].second ); }
+        if( br.empty() )
+        {
+            std::printf( "- (none)\n" );
+        }
+        else
+        {
+            for( std::size_t i = 0; i < br.size() && i < 8; ++i )
+            {
+                const std::uint32_t a = std::uint32_t( br[i].first >> 32 ), b = std::uint32_t( br[i].first & 0xffffffffu );
+                std::printf( "- %s ↔ %s (%u edges)\n", presentation.label[a].c_str(), presentation.label[b].c_str(), br[i].second );
+            }
+        }
         return 0;
     }
 
@@ -6517,9 +7725,18 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
         const std::uint32_t      F    = std::uint32_t( ing.files.size() );
         std::vector<std::vector<NodeId>> byFile( F );
-        for( NodeId i = 0; i < N; ++i ) byFile[ ing.symbols[i].fileId ].push_back( i );
+        for( NodeId i = 0; i < N; ++i )
+        {
+            byFile[ing.symbols[i].fileId].push_back( i );
+        }
         std::vector<std::uint32_t> ford;  ford.reserve( F );   // ONLY non-empty files (the emitted set)
-        for( std::uint32_t f = 0; f < F; ++f ) if( !byFile[f].empty() ) ford.push_back( f );
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            if( !byFile[f].empty() )
+            {
+                ford.push_back( f );
+            }
+        }
 
         // §P11.8: files lead by their best symbol's rank, not asciibetically — see the function above.
         orderFilesByBestSymbolRank( ford, ing, rank );
@@ -6599,6 +7816,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // indistinguishable from a true negative on every channel. Refuse before scanning, so the prefilter
     // and --no-prefilter paths refuse identically and no <grep> element is produced at all.
     if( cfg.grepRegex )
+    {
         if( const std::optional<std::string> reErr = regexCompileError( pat ) )
         {
             // The lead-in is deliberately NEUTRAL ("refused", not "invalid"): regexCompileError() also
@@ -6610,6 +7828,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
                           pat.c_str(), reErr->c_str() );
             return 1;
         }
+    }
 
     // --regex uses the sound Russ-Cox trigram prefilter by default; --no-prefilter forces a full scan
     // (the oracle the soundness gate compares against — prefiltered must equal full-scan).
@@ -6621,7 +7840,14 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // files= counts the whole COLLECTED set, never the printed page — it is a property of the search, so it
     // must read the same on every page of a walk (it used to be counted over the window's rows).
     std::uint32_t prev = UINT32_MAX;  int filesMatched = 0;
-    for( const GrepRawHit& r : found.raw ) if( r.fileId != prev ) { ++filesMatched; prev = r.fileId; }   // hits sorted by file
+    for( const GrepRawHit& r : found.raw )
+    {
+        if( r.fileId != prev )
+        {
+            ++filesMatched;
+            prev = r.fileId;
+        } // hits sorted by file
+    }
     // the WINDOW: a pure slice of the sorted list. pageWindow() clamps a past-the-end offset to an empty
     // page, so a 64-bit offset can never index out of range.
     const PageWindow           grepPage = pageWindow( hitCount, rowCap, cfg.pageOffset );
@@ -6703,7 +7929,10 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
 
 std::optional<int> runGrep( const MainDispatch& d )
 {
-    if( d.cfg.grep.empty() ) return std::nullopt;   // not this verb — fall through the dispatch chain
+    if( d.cfg.grep.empty() )
+    {
+        return std::nullopt; // not this verb — fall through the dispatch chain
+    }
     return emitGrepReport( d.cfg, d.ing );          // body: emitGrepReport() above
 }
 
@@ -6718,23 +7947,54 @@ std::optional<int> runLint( const MainDispatch& d )
     if( !cfg.match.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
     {
         std::vector<std::vector<NodeId>> fileSyms( ing.files.size() );
-        for( const Symbol& s : ing.symbols ) if( s.fileId < fileSyms.size() ) fileSyms[ s.fileId ].push_back( s.id );
+        for( const Symbol& s : ing.symbols )
+        {
+            if( s.fileId < fileSyms.size() )
+            {
+                fileSyms[s.fileId].push_back( s.id );
+            }
+        }
         for( auto& v : fileSyms )
+        {
             std::sort( v.begin(), v.end(), [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
+        }
         const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
         {
             const Symbol* best = nullptr;
-            for( NodeId id : fileSyms[f] ) { const Symbol& s = ing.symbols[id]; if( s.sigStartByte > off ) break; if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) ) best = &s; }
+            for( NodeId id : fileSyms[f] )
+            {
+                const Symbol& s = ing.symbols[id];
+                if( s.sigStartByte > off )
+                {
+                    break;
+                }
+                if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
+                {
+                    best = &s;
+                }
+            }
             return best;
         };
         const auto emitEscaped = []( const std::string& s )
         {
             for( char ch : s )
             {
-                if(      ch == '<' ) std::fputs( "&lt;",  stdout );
-                else if( ch == '>' ) std::fputs( "&gt;",  stdout );
-                else if( ch == '&' ) std::fputs( "&amp;", stdout );
-                else                 std::fputc( ch, stdout );
+                if( ch == '<' )
+                {
+                    std::fputs( "&lt;", stdout );
+                }
+                else if( ch == '>' )
+                {
+                    std::fputs( "&gt;", stdout );
+                }
+                else if( ch == '&' )
+                {
+                    std::fputs( "&amp;", stdout );
+                }
+                else
+                {
+                    std::fputc( ch, stdout );
+                }
             }
         };
         std::vector<char> esc;
@@ -6859,37 +8119,77 @@ std::optional<int> runLint( const MainDispatch& d )
         for( const AstQuerySpec& check : checks )       // saturation is measured on the RAW captures, before the post-filters below thin them
         {
             std::size_t rawForRule = 0;
-            for( const AstMatch& m : ms ) if( m.tag == check.tag ) ++rawForRule;
-            if( rawForRule >= kLintMaxPerRule ) saturatedRules.push_back( { check.tag, false } );
+            for( const AstMatch& m : ms )
+            {
+                if( m.tag == check.tag )
+                {
+                    ++rawForRule;
+                }
+            }
+            if( rawForRule >= kLintMaxPerRule )
+            {
+                saturatedRules.push_back( { check.tag, false } );
+            }
         }
 
         // suspicious-semicolon: the query also matches a normal `if(x) foo();` (the grammar gives both an
         // expression_statement consequence). Keep ONLY an empty body — matched text trims to just ";" — the real bug.
         ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m )
-        {
-            if( m.tag != "suspicious-semicolon" ) return false;
-            const auto       ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-            std::string_view t  = m.text;
-            while( !t.empty() && ws( t.front() ) ) t.remove_prefix( 1 );
-            while( !t.empty() && ws( t.back() ) )  t.remove_suffix( 1 );
-            return t != ";";   // non-empty body → not the bug → drop
-        } ), ms.end() );
+                                  {
+                                      if( m.tag != "suspicious-semicolon" )
+                                      {
+                                          return false;
+                                      }
+                                      const auto ws = []( char c )
+                                      { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+                                      std::string_view t  = m.text;
+                                      while( !t.empty() && ws( t.front() ) )
+                                      {
+                                          t.remove_prefix( 1 );
+                                      }
+                                      while( !t.empty() && ws( t.back() ) )
+                                      {
+                                          t.remove_suffix( 1 );
+                                      }
+                                      return t != ";";   // non-empty body → not the bug → drop
+                                  } ),
+                  ms.end() );
 
         // empty-catch: keep ONLY catch bodies whose trimmed text is empty (nothing but whitespace/braces).
         // The captured node is the compound_statement — its text is "{...}"; trim and check for "{}".
         ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m )
-        {
-            if( m.tag != "empty-catch" ) return false;
-            const auto ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-            std::string_view t = m.text;
-            while( !t.empty() && ws( t.front() ) ) t.remove_prefix( 1 );
-            while( !t.empty() && ws( t.back() ) )  t.remove_suffix( 1 );
-            // After trimming, an empty body is "{}" or "{ }" (only whitespace between braces).
-            if( t.size() < 2 || t.front() != '{' || t.back() != '}' ) return true;   // malformed — drop
-            std::string_view inner = t.substr( 1, t.size() - 2 );
-            for( char c : inner ) if( !ws( c ) ) return true;   // non-whitespace inside → not empty → drop
-            return false;   // truly empty catch body → keep the finding
-        } ), ms.end() );
+                                  {
+                                      if( m.tag != "empty-catch" )
+                                      {
+                                          return false;
+                                      }
+                                      const auto ws = []( char c )
+                                      { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+                                      std::string_view t = m.text;
+                                      while( !t.empty() && ws( t.front() ) )
+                                      {
+                                          t.remove_prefix( 1 );
+                                      }
+                                      while( !t.empty() && ws( t.back() ) )
+                                      {
+                                          t.remove_suffix( 1 );
+                                      }
+                                      // After trimming, an empty body is "{}" or "{ }" (only whitespace between braces).
+                                      if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
+                                      {
+                                          return true; // malformed — drop
+                                      }
+                                      std::string_view inner = t.substr( 1, t.size() - 2 );
+                                      for( char c : inner )
+                                      {
+                                          if( !ws( c ) )
+                                          {
+                                              return true; // non-whitespace inside → not empty → drop
+                                          }
+                                      }
+                                      return false;   // truly empty catch body → keep the finding
+                                  } ),
+                  ms.end() );
 
         // magic-number: drop literals that are:
         //   (a) semantic -2..2 forms (universal idioms) or base-prefixed masks/protocol constants
@@ -6898,14 +8198,24 @@ std::optional<int> runLint( const MainDispatch& d )
         // Keep only literals inside function/method bodies to limit noise.
         // The enclosing symbol check (Function/Method) is the main guard.
         ms.erase( std::remove_if( ms.begin(), ms.end(), [ & ]( const AstMatch& m )
-        {
-            if( m.tag != "magic-number" ) return false;
-            if( isUniversalOrAllowlistedNumber( m.text ) ) return true;
-            // must be inside a function/method body to be a magic-number finding
-            const Symbol* e = enclosing( m.fileId, m.startByte );
-            if( !e || ( e->kind != SymKind::Function && e->kind != SymKind::Method ) ) return true;
-            return false;   // non-trivial literal in a function body → flag it
-        } ), ms.end() );
+                                  {
+                                      if( m.tag != "magic-number" )
+                                      {
+                                          return false;
+                                      }
+                                      if( isUniversalOrAllowlistedNumber( m.text ) )
+                                      {
+                                          return true;
+                                      }
+                                      // must be inside a function/method body to be a magic-number finding
+                                      const Symbol* e = enclosing( m.fileId, m.startByte );
+                                      if( !e || ( e->kind != SymKind::Function && e->kind != SymKind::Method ) )
+                                      {
+                                          return true;
+                                      }
+                                      return false;   // non-trivial literal in a function body → flag it
+                                  } ),
+                  ms.end() );
 
         // self-assign: the "(assignment_expression left: @lhs right: @rhs)" query captures BOTH captures as
         // two AstMatch entries with the same fileId/line but different startByte. We need to pair them up
@@ -6919,7 +8229,10 @@ std::optional<int> runLint( const MainDispatch& d )
             HashMap<std::uint64_t, SA> saMap;   // key = (fileId<<32)|line
             for( const AstMatch& m : ms )
             {
-                if( m.tag != "self-assign" ) continue;
+                if( m.tag != "self-assign" )
+                {
+                    continue;
+                }
                 const std::uint64_t key = ( std::uint64_t( m.fileId ) << 32 ) | m.line;
                 SA& sa = saMap[ key ];
                 sa.f = m.fileId;  sa.line = m.line;
@@ -6930,16 +8243,28 @@ std::optional<int> runLint( const MainDispatch& d )
             ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m ) { return m.tag == "self-assign"; } ), ms.end() );
             for( auto& [ key, sa ] : saMap )
             {
-                if( !sa.hasLhs || !sa.hasRhs ) continue;   // incomplete pair → skip
+                if( !sa.hasLhs || !sa.hasRhs )
+                {
+                    continue; // incomplete pair → skip
+                }
                 const auto trim = []( std::string_view t ) -> std::string
                 {
                     const auto ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                    while( !t.empty() && ws( t.front() ) ) t.remove_prefix( 1 );
-                    while( !t.empty() && ws( t.back() ) )  t.remove_suffix( 1 );
+                    while( !t.empty() && ws( t.front() ) )
+                    {
+                        t.remove_prefix( 1 );
+                    }
+                    while( !t.empty() && ws( t.back() ) )
+                    {
+                        t.remove_suffix( 1 );
+                    }
                     return std::string( t );
                 };
                 const std::string lhsTrimmed = trim( sa.lhs ), rhsTrimmed = trim( sa.rhs );
-                if( lhsTrimmed != rhsTrimmed ) continue;    // different identifiers → not a self-assign
+                if( lhsTrimmed != rhsTrimmed )
+                {
+                    continue; // different identifiers → not a self-assign
+                }
                 // Re-insert a single merged finding at the lhs position.
                 AstMatch hit;
                 hit.fileId    = sa.f;
@@ -6952,11 +8277,14 @@ std::optional<int> runLint( const MainDispatch& d )
             }
             // Sort saKeep for determinism before appending.
             std::sort( saKeep.begin(), saKeep.end(), [ & ]( const AstMatch& x, const AstMatch& y )
+                       {
+                if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
+}
+                return x.line < y.line; } );
+            for( auto& hit : saKeep )
             {
-                if( ing.files[x.fileId] != ing.files[y.fileId] ) return ing.files[x.fileId] < ing.files[y.fileId];
-                return x.line < y.line;
-            } );
-            for( auto& hit : saKeep ) ms.push_back( std::move( hit ) );
+                ms.push_back( std::move( hit ) );
+            }
         }
 
         // Symbol-level checks (S6-A): walk each Function/Method body — checks that need line-counting or
@@ -6970,7 +8298,10 @@ std::optional<int> runLint( const MainDispatch& d )
         // Note: deep-nesting uses curly-brace depth as a proxy for control-flow depth (fast, no full reparse).
         // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
         // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
-        for( AstMatch& symHit : lintSymbolLevelChecks( ing ) ) ms.push_back( std::move( symHit ) );
+        for( AstMatch& symHit : lintSymbolLevelChecks( ing ) )
+        {
+            ms.push_back( std::move( symHit ) );
+        }
 
         // unreachable-code (joern-lite CFG sketch): pure-syntactic intra-block dead-code — a statement
         // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
@@ -6978,16 +8309,20 @@ std::optional<int> runLint( const MainDispatch& d )
         // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
         {
             std::vector<AstMatch> urHits = unreachableCheck( ing );
-            for( auto& h : urHits ) ms.push_back( std::move( h ) );
+            for( auto& h : urHits )
+            {
+                ms.push_back( std::move( h ) );
+            }
         }
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
-        {
-            if( ing.files[x.fileId] != ing.files[y.fileId] ) return ing.files[x.fileId] < ing.files[y.fileId];
-            if( x.startByte != y.startByte ) return x.startByte < y.startByte;
-            return x.tag < y.tag;
-        } );
+                   {
+            if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
+}
+            if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
+}
+            return x.tag < y.tag; } );
         }   // if( cfg.lint ) — built-in checks
 
         // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
@@ -7002,7 +8337,10 @@ std::optional<int> runLint( const MainDispatch& d )
         // at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
         // built-ins (facts, not severities); user findings carry their declared sev=.
         std::vector<LintOut> outs;  outs.reserve( ms.size() );
-        for( const AstMatch& m : ms ) outs.push_back( { m.fileId, m.startByte, m.line, m.tag, std::string(), m.text } );
+        for( const AstMatch& m : ms )
+        {
+            outs.push_back( { m.fileId, m.startByte, m.line, m.tag, std::string(), m.text } );
+        }
 
         // --lint-rules=DIR: load user YAML rules and run them through the SAME astQuery engine. Malformed
         // files alert+skip inside the loader; a bad ts query alert+skips inside astQuery. Exit 1 ONLY if the
@@ -7017,17 +8355,24 @@ std::optional<int> runLint( const MainDispatch& d )
                 return 1;
             }
             const auto [ userFindings, saturatedUserRuleIds ] = runLintRules( ing, userRules );
-            for( const LintFinding& f : userFindings ) outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
-            for( const std::string& id : saturatedUserRuleIds ) saturatedRules.push_back( { id, true } );
+            for( const LintFinding& f : userFindings )
+            {
+                outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
+            }
+            for( const std::string& id : saturatedUserRuleIds )
+            {
+                saturatedRules.push_back( { id, true } );
+            }
         }
 
         // Final deterministic order over the COMBINED set: (file path, startByte, rule).
         std::sort( outs.begin(), outs.end(), [ & ]( const LintOut& x, const LintOut& y )
-        {
-            if( ing.files[x.fileId] != ing.files[y.fileId] ) return ing.files[x.fileId] < ing.files[y.fileId];
-            if( x.startByte != y.startByte ) return x.startByte < y.startByte;
-            return x.rule < y.rule;
-        } );
+                   {
+            if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
+}
+            if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
+}
+            return x.rule < y.rule; } );
 
         // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
         // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
@@ -7043,7 +8388,13 @@ std::optional<int> runLint( const MainDispatch& d )
         // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
         const auto capOf = [ & ]( const std::string& ruleName, bool isUserRule ) -> const RuleCap*
         {
-            for( const RuleCap& rc : saturatedRules ) if( rc.rule == ruleName && rc.isUserRule == isUserRule ) return &rc;
+            for( const RuleCap& rc : saturatedRules )
+            {
+                if( rc.rule == ruleName && rc.isUserRule == isUserRule )
+                {
+                    return &rc;
+                }
+            }
             return nullptr;
         };
         const bool anyRuleCapped = !saturatedRules.empty();
@@ -7072,35 +8423,63 @@ std::optional<int> runLint( const MainDispatch& d )
                          anyRuleCapped ? " findings_capped=\"1\"" : "" );
         }
         else
+        {
             std::printf( "<lint findings=\"%zu\"%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "" );
-        if( cfg.lint )                                                // built-in per-rule tally (order → deterministic)
+        }
+        if( cfg.lint )
+        { // built-in per-rule tally (order → deterministic)
             for( const std::string& rn : allRuleNames )
             {
                 std::uint32_t n = 0;
-                for( const LintOut& m : outs ) if( m.rule == rn && m.sev.empty() ) ++n;
-                if( capOf( rn, false ) != nullptr )                   // budget spent → count= is a floor, say so
+                for( const LintOut& m : outs )
+                {
+                    if( m.rule == rn && m.sev.empty() )
+                    {
+                        ++n;
+                    }
+                }
+                if( capOf( rn, false ) != nullptr )
+                { // budget spent → count= is a floor, say so
                     std::printf( "<rule name=\"%s\" count=\"%u\" capped=\"1\"/>", rn.c_str(), n );
+                }
                 else
+                {
                     std::printf( "<rule name=\"%s\" count=\"%u\"/>", rn.c_str(), n );
+                }
             }
+        }
         for( const LintRule& r : userRules )                          // user per-rule tally (declaration order → deterministic)
         {
             std::uint32_t n = 0;
-            for( const LintOut& m : outs ) if( m.rule == r.id && !m.sev.empty() ) ++n;
-            if( capOf( r.id, true ) != nullptr )                      // budget spent → count= is a floor, say so
+            for( const LintOut& m : outs )
+            {
+                if( m.rule == r.id && !m.sev.empty() )
+                {
+                    ++n;
+                }
+            }
+            if( capOf( r.id, true ) != nullptr )
+            { // budget spent → count= is a floor, say so
                 std::printf( "<rule name=\"%s\" sev=\"%s\" count=\"%u\" capped=\"1\"/>",
                              ex( r.id ).c_str(), ex( r.severity ).c_str(), n );
+            }
             else
+            {
                 std::printf( "<rule name=\"%s\" sev=\"%s\" count=\"%u\"/>", ex( r.id ).c_str(), ex( r.severity ).c_str(), n );
+            }
         }
         for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
         {
             const LintOut& m = outs[ findingIndex ];
             const Symbol* e = enclosing( m.fileId, m.startByte );
-            if( m.sev.empty() )   // built-in finding — unchanged shape (no sev=)
+            if( m.sev.empty() )
+            { // built-in finding — unchanged shape (no sev=)
                 std::printf( "<f rule=\"%s\" p=\"%s:%u\" in=\"%s\">", ex( m.rule ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
-            else                  // user finding — carries sev=
+            }
+            else
+            { // user finding — carries sev=
                 std::printf( "<f rule=\"%s\" sev=\"%s\" p=\"%s:%u\" in=\"%s\">", ex( m.rule ).c_str(), ex( m.sev ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
+            }
             emitEscaped( m.text );
             std::printf( "</f>" );
         }
@@ -7136,7 +8515,9 @@ std::optional<int> runAround( const MainDispatch& d )
         const EgoGraph eg = egoGraph( g, focus, cfg.aroundDepth, cfg.aroundFanout );
         std::vector<float> rank( ing.symbols.size(), 0.f );
         for( std::size_t i = 0; i < eg.nodes.size(); ++i )
+        {
             rank[ eg.nodes[i] ] = 1.0f / ( 1.0f + float( eg.hopDist[i] ) );   // focus + closest neighbours lead
+        }
         // §F1 — the two sibling blocks --around appends after its map, RENDERED AND CHARGED before the map's
         // header states est_tokens. They were emitted straight to stdout afterwards, so this verb reported the
         // map only: MEASURED on src/, `--around=Config` = 804 B at est_tokens="262" (3.07 B/tok, outside the
@@ -7147,11 +8528,15 @@ std::optional<int> runAround( const MainDispatch& d )
         // B6.3: HTTP-route cross-service view for the same neighbourhood.
         rw::ChargedSection aroundCompose, aroundRoutes;
         if( !g.composeEdges.empty() )
+        {
             aroundCompose = rw::chargeSection( [ & ]( std::FILE* f ) { packCompose( f, ing, g.composeEdges, eg.nodes ); },
                                                 rw::kBytesPerTokenDefault );
+        }
         if( !g.routeEdges.empty() )
+        {
             aroundRoutes = rw::chargeSection( [ & ]( std::FILE* f ) { packRoutes( f, ing, g.routeEdges, eg.nodes ); },
                                                rw::kBytesPerTokenDefault );
+        }
 
         // §B4b — G4: serialize() owns <r>…</r> and CLOSES it, so these two sibling blocks were a SECOND
         // top-level element (`--around=buildRecall` tailed `…</r><compose>…</compose>`, xmllint rejected it,
@@ -7161,16 +8546,26 @@ std::optional<int> runAround( const MainDispatch& d )
         const rw::CtxWrap wrap = rw::ctxWrapFor( aroundCompose, !g.composeEdges.empty(),
                                                    aroundRoutes,  !g.routeEdges.empty() );
 
-        if( wrap.isNeeded ) std::fputs( "<ctx>", stdout );
+        if( wrap.isNeeded )
+        {
+            std::fputs( "<ctx>", stdout );
+        }
 
         serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens );
 
         if( !g.composeEdges.empty() )
+        {
             rw::emitChargedSection( stdout, aroundCompose, [ & ]{ packCompose( stdout, ing, g.composeEdges, eg.nodes ); } );
+        }
         if( !g.routeEdges.empty() )
+        {
             rw::emitChargedSection( stdout, aroundRoutes, [ & ]{ packRoutes( stdout, ing, g.routeEdges, eg.nodes ); } );
+        }
 
-        if( wrap.isNeeded ) std::fputs( "</ctx>", stdout );
+        if( wrap.isNeeded )
+        {
+            std::fputs( "</ctx>", stdout );
+        }
         return 0;
     }
     return std::nullopt;
@@ -7231,8 +8626,14 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
         std::fprintf( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n", mapEstTokens, tokenBudget );
         if( tb.buf )
         {
-            if( asJson ) std::fprintf( real, "{\"withheld_est_tokens\":%zu,\"budget\":%zu,\"withheld\":true}", mapEstTokens, tokenBudget );
-            else         std::fprintf( real, "<r withheld_est_tokens=\"%zu\" budget=\"%zu\" withheld=\"1\"/>", mapEstTokens, tokenBudget );
+            if( asJson )
+            {
+                std::fprintf( real, "{\"withheld_est_tokens\":%zu,\"budget\":%zu,\"withheld\":true}", mapEstTokens, tokenBudget );
+            }
+            else
+            {
+                std::fprintf( real, "<r withheld_est_tokens=\"%zu\" budget=\"%zu\" withheld=\"1\"/>", mapEstTokens, tokenBudget );
+            }
         }
         std::free( tb.buf );
         return 3;
@@ -7269,7 +8670,10 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
 
     const auto discloseEmptyChurn = [ & ]( const std::string& windowStamp )
     {
-        if( hasChurnEvidence ) return;
+        if( hasChurnEvidence )
+        {
+            return;
+        }
         std::fprintf( stderr, "ripwire: --rank-by=churn found no commits in its window; using uniform (structural) ranking — this map is "
                               "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", windowStamp.c_str() );
     };
@@ -7277,7 +8681,10 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
     if( d.multiRoot )
     {
         std::vector<std::string> rootDirs;
-        for( const WorkspaceRoot& r : d.ws ) rootDirs.push_back( r.arg );
+        for( const WorkspaceRoot& r : d.ws )
+        {
+            rootDirs.push_back( r.arg );
+        }
         std::vector<float> rank   = rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
         std::string        window = churnWindowStamp( "18mo", hasChurnEvidence );
         discloseEmptyChurn( window );
@@ -7347,7 +8754,9 @@ int runDefaultMap( const MainDispatch& d )
             queryRouteNote = "<!-- routed: " + std::string( rw::xmlCommentText( rc.reason ) ) + " -->";
         }
         else
+        {
             rank = lexicalScoresTiered( ing, g.outOff, g.outTargets, cfg.query, 0, nullptr, &tierMul );
+        }
     }
     else if( cfg.mapDiff )
     {
@@ -7357,14 +8766,29 @@ int runDefaultMap( const MainDispatch& d )
         if( multiRoot )
         {
             for( std::uint32_t r = 0; r < ws.size(); ++r )
-                if( gitChangedFiles( ws[r].arg, ing, changed, r ) ) gitOk = true;
+            {
+                if( gitChangedFiles( ws[r].arg, ing, changed, r ) )
+                {
+                    gitOk = true;
+                }
+            }
         }
         else
+        {
             gitOk = gitChangedFiles( root, ing, changed );
+        }
         mapDiffActive = true;   // D6: header emits changed= regardless of gitOk — 0 on a clean tree / no-git degrade too
-        for( char c : changed ) if( c ) ++mapDiffChanged;
+        for( char c : changed )
+        {
+            if( c )
+            {
+                ++mapDiffChanged;
+            }
+        }
         if( gitOk )
+        {
             rank = rankGraphTeleport( g, diffTeleport( ing, changed ) );
+        }
         else
         {
             std::fprintf( stderr, "ripwire: --map-diff requires git in PATH; using uniform ranking\n" );
@@ -7388,9 +8812,13 @@ int runDefaultMap( const MainDispatch& d )
     {
         auto [ authority, hub ] = hits( g );
         if( cfg.rankBy == RankBy::Rrf )
+        {
             rank = rrfFuse( { &rank, &authority, &hub } );   // fuse pagerank + authority + hub
+        }
         else
+        {
             rank = ( cfg.rankBy == RankBy::Hub ) ? std::move( hub ) : std::move( authority );
+        }
     }
 
     // R6 (A4-R6) — --format=candidates on --query: the same FLAT top-K export as the --for path, over the
@@ -7505,7 +8933,10 @@ int runDefaultMap( const MainDispatch& d )
     // provably 0 on this path — asserted rather than assumed.
     const auto measureEmittedMapBytes = [ & ]( int k, std::size_t extraPayloadTokens ) -> std::size_t
     {
-        if( !cfg.json ) return measureMapBytes( k, extraPayloadTokens );
+        if( !cfg.json )
+        {
+            return measureMapBytes( k, extraPayloadTokens );
+        }
 
         VERIFY( extraPayloadTokens == 0 );          // the payload verbs are all refused under --json
         char*       buf = nullptr;
@@ -7519,7 +8950,9 @@ int runDefaultMap( const MainDispatch& d )
         serializeJson( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics,
                        fanInPtr, &g.ambOut, cfg.stable, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut,
                        g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, mapProvPtr, mapAnn );
-        std::fflush( m );  std::fclose( m );  std::free( buf );
+        std::fflush( m );
+        std::fclose( m );
+        std::free( buf );
         return sz;
     };
     const std::size_t maxTokensCeilingBytes = std::size_t( double( cfg.maxTokens ) * kMinBytesPerToken * kBudgetHeadroom );
@@ -7538,7 +8971,10 @@ int runDefaultMap( const MainDispatch& d )
         {
             const int mid = lo + ( hi - lo ) / 2;
             if( measureMapBytes( mid, 0 ) <= maxTokensCeilingBytes ) { best = mid; lo = mid + 1; }
-            else                                                      hi = mid - 1;
+            else
+            {
+                hi = mid - 1;
+            }
         }
         mapTopK = best;
     }
@@ -7546,7 +8982,10 @@ int runDefaultMap( const MainDispatch& d )
     // routed pick for --query: a LEADING comment before the map (serialize owns the map header, not ours to
     // extend) — mirrors how --adaptive surfaces its cut. Emitted only for a real --query with routing on, and
     // NOT on the --html path (which returns above with its own document). Under --no-route the note is empty.
-    if( !cfg.query.empty() && !cfg.html && !queryRouteNote.empty() ) std::fputs( queryRouteNote.c_str(), stdout );
+    if( !cfg.query.empty() && !cfg.html && !queryRouteNote.empty() )
+    {
+        std::fputs( queryRouteNote.c_str(), stdout );
+    }
 
     // --adaptive on --query (lever 2): cut the ranked map at the relevance cliff, exactly like
     // the --for path. --query's rank IS the lexical score, so the cliff is meaningful; floor=5, ceiling=the
@@ -7558,17 +8997,25 @@ int runDefaultMap( const MainDispatch& d )
         const AdaptiveCut ac = adaptiveCut( rank, 5, std::size_t( mapTopK ) );
         char nb[ 208 ];
         if( !ac.hitCeiling && ac.cliffRank < ac.kept )
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu -->",
                            ac.kept, mapTopK, ac.cliffRank, ac.dropPct, ac.kept );
+        }
         else if( !ac.hitCeiling )
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - cliff at rank %zu, %d%% drop -->",
                            ac.kept, mapTopK, ac.cliffRank, ac.dropPct );
+        }
         else if( ac.positiveHits <= ac.kept )
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - only %zu symbols matched this query (sharp query, short tail) -->",
                            ac.kept, mapTopK, ac.positiveHits );
+        }
         else
+        {
             std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - no relevance cliff (broad query saturates the score); capped at the ceiling -->",
                            ac.kept, mapTopK );
+        }
         std::fputs( nb, stdout );
         mapTopK = int( ac.kept );
     }
@@ -7591,7 +9038,10 @@ int runDefaultMap( const MainDispatch& d )
             }
         }
         writeHtml( htmlOut, ing, rank, g, mapTopK );
-        if( htmlOut != stdout ) std::fclose( htmlOut );
+        if( htmlOut != stdout )
+        {
+            std::fclose( htmlOut );
+        }
         return 0;
     }
 
@@ -7634,16 +9084,24 @@ int runDefaultMap( const MainDispatch& d )
                 std::fprintf( stderr, "ripwire: --expand=%s matched no symbol%s\n", et.selector.c_str(),
                               rw::selectorFaultClause( ing, et.selector, "--expand=" ).c_str() );
             }
-            else if( matches.size() > 8 )   // final-segment names (reset/size/update) collide widely
+            else if( matches.size() > 8 )
+            { // final-segment names (reset/size/update) collide widely
                 std::fprintf( stderr, "ripwire: --expand=%s matches %zu symbols; emitting all up to --pack-budget-bytes (qualify with file:name to narrow)\n",
                               et.selector.c_str(), matches.size() );
+            }
             for( NodeId id : matches )
             {
                 expandNodes.push_back( id );
-                if( et.range.hasRange ) expandRanges[ id ] = et.range;   // same range applies to every match of this token
+                if( et.range.hasRange )
+                {
+                    expandRanges[id] = et.range; // same range applies to every match of this token
+                }
             }
         }
-        if( expandMissed ) return 1;   // refusal + empty stdout — nothing has been printed yet
+        if( expandMissed )
+        {
+            return 1; // refusal + empty stdout — nothing has been printed yet
+        }
     }
 
     // --outline=NAME,...: same resolution, same refusal contract. A miss used to emit the map and exit 0,
@@ -7664,9 +9122,11 @@ int runDefaultMap( const MainDispatch& d )
             const ExpandToken ot = parseExpandToken( rawNm, "--outline" );
             const std::string nm = ot.range.hasRange ? ot.selector : rawNm;
             if( ot.range.hasRange )
+            {
                 std::fprintf( stderr, "ripwire: --outline=%s: --outline has no line-range form — outlining the whole symbol "
                                       "(use --expand=%s:%u-%u for a body slice)\n",
                               rawNm.c_str(), ot.selector.c_str(), ot.range.startLine, ot.range.endLine );
+            }
 
             const std::vector<NodeId> matches = resolveAllByNameQualified( ing, nm );
             if( matches.empty() )
@@ -7676,9 +9136,15 @@ int runDefaultMap( const MainDispatch& d )
                 std::fprintf( stderr, "ripwire: --outline=%s matched no symbol%s\n", nm.c_str(),
                               rw::selectorFaultClause( ing, nm, "--outline=" ).c_str() );
             }
-            for( NodeId id : matches ) outlineNodes.push_back( id );
+            for( NodeId id : matches )
+            {
+                outlineNodes.push_back( id );
+            }
         }
-        if( outlineMissed ) return 1;
+        if( outlineMissed )
+        {
+            return 1;
+        }
     }
 
     // §P6.8: `out` replaces every `stdout` from here through the map body's closing tag, so nothing reaches
@@ -7687,7 +9153,10 @@ int runDefaultMap( const MainDispatch& d )
     TokenBudgetBuffer tbBuf = openTokenBudgetBuffer( cfg.tokenBudget, stdout );
     std::FILE* const  out   = tbBuf.out;
 
-    if( hasExtension ) std::fprintf( out, "<ctx>" );
+    if( hasExtension )
+    {
+        std::fprintf( out, "<ctx>" );
+    }
 
     // §H7 — PRE-RENDER every block that gets appended after the map, and CHARGE it from its own emitted bytes.
     // The ordering constraint is real and it is the whole reason this block sits HERE, above serialize(): the
@@ -7701,22 +9170,30 @@ int runDefaultMap( const MainDispatch& d )
     // directly — uncharged for that one run, with an alert, never a fabricated number.
     rw::ChargedSection sigsSection, srcSection, bodiesSection, outlineSection;
     if( cfg.packSignatures )
+    {
         sigsSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packSignatures( f, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr ); },
             rw::kBytesPerTokenDefault );
+    }
     else if( cfg.packTopN > 0 )
+    {
         srcSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packSource( f, ing, rank, cfg.packTopN, cfg.packBudgetBytes, redactPtr ); },
             rw::kBytesPerTokenBody );
+    }
     if( !expandNodes.empty() )
+    {
         bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr ); },
             rw::kBytesPerTokenBody );
+    }
     if( !outlineNodes.empty() )
+    {
         outlineSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packOutline( f, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr ); },
             rw::kBytesPerTokenBody );
+    }
 
     // The --expand fallback: estimateExpandBodyTokens is no longer the primary estimate (measured bytes are),
     // but it remains the honest answer on the degrade path — better than dropping the <bodies> block out of the
@@ -7732,7 +9209,9 @@ int runDefaultMap( const MainDispatch& d )
     // default emits, so the map stays — but the caller is TOLD, once, on stderr (stdout stays byte-identical),
     // and --top-k=0 is the documented off switch. Fires only when the user did not choose a top-k themselves.
     if( !cfg.topKExplicit && ( !cfg.expand.empty() || !cfg.outline.empty() ) && !cfg.json )
+    {
         std::fprintf( stderr, "ripwire: note — the ranked top-%d map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
+    }
 
     // §F5 — THE CEILING VERDICT, taken here because this is the first point where every input to the map's own
     // byte count is settled: mapTopK (post --max-tokens, post --adaptive) and payloadTokens (the §H7 charge that
@@ -7754,7 +9233,9 @@ int runDefaultMap( const MainDispatch& d )
     //     here would ship a document whose own disclosure contradicts it. ROUTED, with the measurement, to
     //     whoever owns both halves — the cap does not yet HOLD under --json, but from here it is LABELLED.
     if( cfg.maxTokens > 0 && mapTopK > 0 && measureEmittedMapBytes( mapTopK, cfg.json ? 0 : payloadTokens ) > maxTokensCeilingBytes )
+    {
         maxTokensFit.isOverCeiling = true;
+    }
 
     std::size_t mapEstTokens = 0;   // --token-budget reads this — the SAME value serialize() puts in the header, never a second counter
     if( mapTopK > 0 )               // --top-k=0: payload only — skip the ranked map entirely (never the payload below)
@@ -7775,11 +9256,15 @@ int runDefaultMap( const MainDispatch& d )
         // probe and this emission describe the same document — see their definitions there (that hoist carries
         // the r26-stamp / §A9.6 / §A4d / §B1.2 rationale the ternaries used to carry here).
         if( cfg.json )
+        {
             serializeJson( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics,
                            fanInPtr, &g.ambOut, cfg.stable, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut,
                            g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, mapProvPtr, mapAnn );
+        }
         else
+        {
             serialize( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, payloadTokens, mapAnn );
+        }
     }
     else
     {
@@ -7803,16 +9288,27 @@ int runDefaultMap( const MainDispatch& d )
     const auto emitSection = [ & ]( const rw::ChargedSection& sec, auto&& renderDirect )
     { rw::emitChargedSection( out, sec, renderDirect ); };
     if( cfg.packSignatures )
+    {
         emitSection( sigsSection, [ & ]{ packSignatures( out, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr ); } );
+    }
     else if( cfg.packTopN > 0 )
+    {
         emitSection( srcSection, [ & ]{ packSource( out, ing, rank, cfg.packTopN, cfg.packBudgetBytes, redactPtr ); } );
+    }
     if( !expandNodes.empty() )
+    {
         emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                                                        expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr ); } );   // L3: --expand bodies surface notes
-    if( !outlineNodes.empty() )   // resolved (and refused on a miss) above, before the first stdout byte
+    }
+    if( !outlineNodes.empty() )
+    { // resolved (and refused on a miss) above, before the first stdout byte
         emitSection( outlineSection, [ & ]{ packOutline( out, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr ); } );
+    }
 
-    if( hasExtension ) std::fprintf( out, "</ctx>" );
+    if( hasExtension )
+    {
+        std::fprintf( out, "</ctx>" );
+    }
 
     reportRedactions( stderr, redactCounts );
 
@@ -7821,7 +9317,9 @@ int runDefaultMap( const MainDispatch& d )
     // buffer, and on exit 3 the buffered body never reaches stdout (finishTokenBudgetGate's own comment has
     // the full reasoning) — a small refusal record instead, shaped to match --json.
     if( std::optional<int> gated = finishTokenBudgetGate( tbBuf, stdout, mapEstTokens, cfg.tokenBudget, cfg.json ) )
+    {
         return *gated;
+    }
 
     // A4-F18: a short fwrite anywhere in the emitters (disk full, closed pipe) sets ferror(stdout);
     // fail loudly instead of exiting 0 with a silently-truncated map (CI gates trust the exit code)
@@ -7904,12 +9402,21 @@ void warnReportVerbPrecedence( const rw::Config& c )
     std::string ignored;
     for( const ReportVerbSlot& s : slots )
     {
-        if( !s.isActive ) continue;
+        if( !s.isActive )
+        {
+            continue;
+        }
         if( winner == nullptr ) { winner = s.flag;  continue; }
-        if( !ignored.empty() ) ignored += ", ";
+        if( !ignored.empty() )
+        {
+            ignored += ", ";
+        }
         ignored += s.flag;
     }
-    if( ignored.empty() ) return;   // 0 or 1 verb — nothing was dropped, so nothing is said
+    if( ignored.empty() )
+    {
+        return; // 0 or 1 verb — nothing was dropped, so nothing is said
+    }
 
     std::fprintf( stderr, "ripwire: %s takes precedence when several verbs are given — IGNORED this run: %s. "
                           "The winner is fixed by ripwire's dispatch order, NOT by the order you typed them; "
@@ -7918,73 +9425,253 @@ void warnReportVerbPrecedence( const rw::Config& c )
 
 const char* jsonUnsupportedVerb( const rw::Config& c )
 {
-    if( c.mcp )                     return "--mcp";
-    if( c.mapDiff )                 return "--map-diff";
-    if( c.packSignatures )          return "--pack-signatures";
-    if( c.packTopN > 0 )            return "--pack-top-n";
-    if( !c.query.empty() )          return "--query";
+    if( c.mcp )
+    {
+        return "--mcp";
+    }
+    if( c.mapDiff )
+    {
+        return "--map-diff";
+    }
+    if( c.packSignatures )
+    {
+        return "--pack-signatures";
+    }
+    if( c.packTopN > 0 )
+    {
+        return "--pack-top-n";
+    }
+    if( !c.query.empty() )
+    {
+        return "--query";
+    }
     // §B1.4: `--regex=PAT` sets BOTH c.grep and c.grepRegex, so a separate --grep arm ahead of the --regex
     // arm told a --regex caller that "--grep" was unsupported — a flag they never typed. One arm, and the
     // spelling comes from what was actually parsed.
-    if( !c.grep.empty() || c.grepRegex ) return c.grepRegex ? "--regex" : "--grep";
-    if( !c.match.empty() )          return "--match";
-    if( c.lint )                    return "--lint";
-    if( !c.lintRulesDir.empty() )   return "--lint-rules";
-    if( !c.expand.empty() )         return "--expand";
-    if( !c.outline.empty() )        return "--outline";
-    if( !c.legoType.empty() )       return "--lego";
-    if( !c.exemplar.empty() )       return "--exemplar";
-    if( !c.recall.empty() )         return "--recall";
-    if( c.deps )                    return "--deps";
-    if( c.hotspots )                return "--hotspots";
-    if( c.clones )                  return "--clones";
-    if( c.cochange )                return "--cochange";
-    if( !c.archRules.empty() )      return "--arch";
-    if( c.communities )             return "--communities";
-    if( c.zoom )                    return "--zoom";
-    if( c.report )                  return "--report";
-    if( c.tree )                    return "--tree";
-    if( c.seams )                   return "--seams";
-    if( c.mermaid )                 return "--mermaid";
-    if( !c.pathSpec.empty() )       return "--path";
-    if( !c.connectSpec.empty() )    return "--connect";
-    if( !c.mentionsSym.empty() )    return "--mentions";
-    if( !c.affectedFiles.empty() )  return "--affected";
-    if( c.situ )                    return "--situ";
-    if( !c.usesSym.empty() )        return "--uses";
-    if( !c.graphQuery.empty() )     return "--graph-query";
-    if( c.externalSurface )         return "--external-surface";
-    if( c.scanSkills )              return "--scan-skills";
-    if( !c.scanSkillFile.empty() )  return "--scan-skill";
-    if( !c.batchFile.empty() )      return "--batch";
-    if( c.html )                    return "--html";
-    if( c.owners )                  return "--owners";
-    if( c.baseline )                return "--baseline";
-    if( c.baselineUpdate )          return "--baseline-update";
-    if( c.deadCode )                return "--dead-code";
-    if( c.qualityBaseline )         return "--quality-baseline";
-    if( c.qualityAck )              return "--quality-ack";
-    if( !c.editCheckSym.empty() )   return "--edit-check";
-    if( c.prContext )               return "--pr-context";
-    if( c.mergeScoutFlag )          return "--merge-scout";
-    if( !c.fromTrace.empty() )      return "--from-trace";
-    if( c.noteAddFlag )             return "--note-add";
-    if( c.notesList )               return "--notes";
-    if( c.exportCcJson )            return "--export=cc.json";
-    if( c.doctor )                  return "--doctor";
-    if( !c.around.empty() )         return "--around";
+    if( !c.grep.empty() || c.grepRegex )
+    {
+        return c.grepRegex ? "--regex" : "--grep";
+    }
+    if( !c.match.empty() )
+    {
+        return "--match";
+    }
+    if( c.lint )
+    {
+        return "--lint";
+    }
+    if( !c.lintRulesDir.empty() )
+    {
+        return "--lint-rules";
+    }
+    if( !c.expand.empty() )
+    {
+        return "--expand";
+    }
+    if( !c.outline.empty() )
+    {
+        return "--outline";
+    }
+    if( !c.legoType.empty() )
+    {
+        return "--lego";
+    }
+    if( !c.exemplar.empty() )
+    {
+        return "--exemplar";
+    }
+    if( !c.recall.empty() )
+    {
+        return "--recall";
+    }
+    if( c.deps )
+    {
+        return "--deps";
+    }
+    if( c.hotspots )
+    {
+        return "--hotspots";
+    }
+    if( c.clones )
+    {
+        return "--clones";
+    }
+    if( c.cochange )
+    {
+        return "--cochange";
+    }
+    if( !c.archRules.empty() )
+    {
+        return "--arch";
+    }
+    if( c.communities )
+    {
+        return "--communities";
+    }
+    if( c.zoom )
+    {
+        return "--zoom";
+    }
+    if( c.report )
+    {
+        return "--report";
+    }
+    if( c.tree )
+    {
+        return "--tree";
+    }
+    if( c.seams )
+    {
+        return "--seams";
+    }
+    if( c.mermaid )
+    {
+        return "--mermaid";
+    }
+    if( !c.pathSpec.empty() )
+    {
+        return "--path";
+    }
+    if( !c.connectSpec.empty() )
+    {
+        return "--connect";
+    }
+    if( !c.mentionsSym.empty() )
+    {
+        return "--mentions";
+    }
+    if( !c.affectedFiles.empty() )
+    {
+        return "--affected";
+    }
+    if( c.situ )
+    {
+        return "--situ";
+    }
+    if( !c.usesSym.empty() )
+    {
+        return "--uses";
+    }
+    if( !c.graphQuery.empty() )
+    {
+        return "--graph-query";
+    }
+    if( c.externalSurface )
+    {
+        return "--external-surface";
+    }
+    if( c.scanSkills )
+    {
+        return "--scan-skills";
+    }
+    if( !c.scanSkillFile.empty() )
+    {
+        return "--scan-skill";
+    }
+    if( !c.batchFile.empty() )
+    {
+        return "--batch";
+    }
+    if( c.html )
+    {
+        return "--html";
+    }
+    if( c.owners )
+    {
+        return "--owners";
+    }
+    if( c.baseline )
+    {
+        return "--baseline";
+    }
+    if( c.baselineUpdate )
+    {
+        return "--baseline-update";
+    }
+    if( c.deadCode )
+    {
+        return "--dead-code";
+    }
+    if( c.qualityBaseline )
+    {
+        return "--quality-baseline";
+    }
+    if( c.qualityAck )
+    {
+        return "--quality-ack";
+    }
+    if( !c.editCheckSym.empty() )
+    {
+        return "--edit-check";
+    }
+    if( c.prContext )
+    {
+        return "--pr-context";
+    }
+    if( c.mergeScoutFlag )
+    {
+        return "--merge-scout";
+    }
+    if( !c.fromTrace.empty() )
+    {
+        return "--from-trace";
+    }
+    if( c.noteAddFlag )
+    {
+        return "--note-add";
+    }
+    if( c.notesList )
+    {
+        return "--notes";
+    }
+    if( c.exportCcJson )
+    {
+        return "--export=cc.json";
+    }
+    if( c.doctor )
+    {
+        return "--doctor";
+    }
+    if( !c.around.empty() )
+    {
+        return "--around";
+    }
     // §B1.1: the eight verb surfaces this list forgot — see the header comment above. abiFlag is checked
     // ahead of strayContent (it only ever fires nested inside `--stray-content --abi`, main.cpp's
     // runCrossRef) so the refusal names the more specific sub-verb the caller actually typed, the same
     // specific-before-general order the --regex/--grep arm above already uses.
-    if( c.abiFlag )                 return "--abi";
-    if( c.strayContent )            return "--stray-content";
-    if( c.whereisFlag )             return "--whereis";
-    if( c.exercisesFlag )           return "--exercises";
-    if( !c.communityId.empty() )    return "--community";
-    if( c.docDrift )                return "--doc-drift";
-    if( c.darkFlags )               return "--flags";
-    if( c.layoutFlag )              return "--layout";
+    if( c.abiFlag )
+    {
+        return "--abi";
+    }
+    if( c.strayContent )
+    {
+        return "--stray-content";
+    }
+    if( c.whereisFlag )
+    {
+        return "--whereis";
+    }
+    if( c.exercisesFlag )
+    {
+        return "--exercises";
+    }
+    if( !c.communityId.empty() )
+    {
+        return "--community";
+    }
+    if( c.docDrift )
+    {
+        return "--doc-drift";
+    }
+    if( c.darkFlags )
+    {
+        return "--flags";
+    }
+    if( c.layoutFlag )
+    {
+        return "--layout";
+    }
     // §B1.5 (capture-audit-4, wave 3) — the FIVE self-eval verbs, as one group. The wave-2 verifier's
     // 96-flag sweep found exactly one flag still emitting XML at exit 0 under --json (--eval-stray) and
     // concluded the class was down to one; it was not, because the sweep's tell was "does it emit XML".
@@ -7994,18 +9681,45 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     // doc-commented symbols, a real minedpair.jsonl, a real labels TSV, the skills tree) — which is the
     // distinction the §B9 caveat names: exercise the shape where the flag would bind, not the one where the
     // verb refuses for an unrelated reason. Owner ruling 4's REFUSE-ALL shape, verbatim.
-    if( c.eval )                    return "--eval";
-    if( c.evalRetrieval )           return "--eval-retrieval";
-    if( !c.evalMined.empty() )      return "--eval-mined";
-    if( !c.evalSkills.empty() )     return "--eval-skills";
-    if( !c.evalStray.empty() )      return "--eval-stray";
+    if( c.eval )
+    {
+        return "--eval";
+    }
+    if( c.evalRetrieval )
+    {
+        return "--eval-retrieval";
+    }
+    if( !c.evalMined.empty() )
+    {
+        return "--eval-mined";
+    }
+    if( !c.evalSkills.empty() )
+    {
+        return "--eval-skills";
+    }
+    if( !c.evalStray.empty() )
+    {
+        return "--eval-stray";
+    }
     // output-shape modifiers not (yet) mirrored in JSON — refuse rather than silently drop them.
     // §B1.4: these four are the SHAPE half; kJsonShapeModifiers below names the same four so the refusal can
     // word them as encodings rather than verbs.
-    if( c.columnar )                return "--format=columnar";
-    if( c.candidates )              return "--format=candidates";
-    if( c.detail > 0 )              return "--detail";
-    if( !c.scipIndex.empty() )      return "--scip";
+    if( c.columnar )
+    {
+        return "--format=columnar";
+    }
+    if( c.candidates )
+    {
+        return "--format=candidates";
+    }
+    if( c.detail > 0 )
+    {
+        return "--detail";
+    }
+    if( !c.scipIndex.empty() )
+    {
+        return "--scip";
+    }
     return nullptr;
 }
 
@@ -8017,7 +9731,13 @@ inline constexpr const char* kJsonShapeModifiers[] = { "--format=columnar", "--f
 inline bool isJsonShapeModifier( const char* flag ) noexcept
 {
     VERIFY( flag != nullptr );
-    for( const char* s : kJsonShapeModifiers ) if( std::strcmp( s, flag ) == 0 ) return true;
+    for( const char* s : kJsonShapeModifiers )
+    {
+        if( std::strcmp( s, flag ) == 0 )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -8027,22 +9747,32 @@ int main( int argc, char** argv )
 {
     using namespace rw;
 
-    if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )   // adoption recipe (subcommand, not a flag)
+    if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )
+    { // adoption recipe (subcommand, not a flag)
         return runWrap( argc, argv, selfExecutablePath( argv[0] ) );
+    }
 
     const Config cfg = parseArgs( argc, argv );
     if( !cfg.ok )
+    {
         return 1;
+    }
 
     // X9(c): mode flags have a hidden precedence when more than one is given at once — the earlier-checked
     // one silently wins and the rest are ignored outright, with no signal to the caller that anything was
     // dropped. Warn once, on stderr, one line per conflict; behavior is UNCHANGED (the same flag still wins).
     if( !cfg.forTask.empty() && ( !cfg.query.empty() || cfg.packTaskFlag ) )
+    {
         std::fprintf( stderr, "ripwire: --for takes precedence over --query/--pack-task when both are given (the others are ignored)\n" );
+    }
     else if( cfg.packTaskFlag && !cfg.query.empty() )
+    {
         std::fprintf( stderr, "ripwire: --pack-task takes precedence over --query when both are given (--query is ignored)\n" );
+    }
     if( cfg.stable && cfg.mostImportantLast )
+    {
         std::fprintf( stderr, "ripwire: --stable takes precedence over --most-important-last when both are given (emit order stays path/id order)\n" );
+    }
 
     // §B11.4 (CA4) — the SAME hazard X9(c) discloses for three flags, on the ~50 report verbs it never
     // reached. `--hotspots --clones` emits hotspots only, exit 0, stderr EMPTY; `--owners --clones` emits
@@ -8059,12 +9789,16 @@ int main( int argc, char** argv )
     // not). An output-SHAPE modifier is told it collided with another encoding — enumerating "supported
     // verbs" at someone who typed --format=columnar names nothing they can act on.
     if( cfg.json )
+    {
         if( const char* unsupported = jsonUnsupportedVerb( cfg ) )
         {
             if( isJsonShapeModifier( unsupported ) )
+            {
                 std::fprintf( stderr, "ripwire: --json and %s are two output SHAPES for the same rows — pass one, not both "
                               "(e.g. ripwire <dir> --callers=SYM --json, or ripwire <dir> --callers=SYM %s)\n", unsupported, unsupported );
+            }
             else
+            {
                 // §B1.2: the enumeration used to stop at --test-gate and never mention --metrics, which HAS
                 // had a full JSON twin (row keys amp/cbo/ccx/cx/in/loc/nest/out/params/role/tested) since it
                 // was never added to the deny-chain above — so a caller obeying THIS refusal never learned
@@ -8073,8 +9807,10 @@ int main( int argc, char** argv )
                 std::fprintf( stderr, "ripwire: --json is not yet supported for %s — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
                               "--metrics (e.g. ripwire <dir> --callers=SYM --json)\n", unsupported );
+            }
             return 1;
         }
+    }
 
     // §B1.5 (capture-audit-4, wave 3) — --plan-lanes is the INERT case, and it wants a different answer from
     // the five eval verbs above. Those emit a dialect --json asked them to change and silently did not; this
@@ -8085,7 +9821,9 @@ int main( int argc, char** argv )
     // tell a no-op from a typo, and one line on stderr closes exactly that gap while changing no output byte.
     // Deliberately not a refusal, and deliberately not silence.
     if( cfg.json && cfg.planLanesFlag )
+    {
         std::fprintf( stderr, "ripwire: --plan-lanes always emits JSON — --json is redundant here and changes nothing\n" );
+    }
 
     if( cfg.mcp )
     {
@@ -8097,9 +9835,17 @@ int main( int argc, char** argv )
             hc.listenSpec = std::string( cfg.listen );
             hc.token      = std::string( cfg.mcpToken );
             if( hc.token.empty() )
-                if( const char* envTok = std::getenv( "RIPWIRE_MCP_TOKEN" ); envTok && *envTok ) hc.token = envTok;   // env fallback (avoids the secret in argv/ps)
+            {
+                if( const char* envTok = std::getenv( "RIPWIRE_MCP_TOKEN" ); envTok && *envTok )
+                {
+                    hc.token = envTok; // env fallback (avoids the secret in argv/ps)
+                }
+            }
             hc.root             = std::string( cfg.rootPath );
-            for( std::string_view r : cfg.roots ) hc.roots.emplace_back( r );
+            for( std::string_view r : cfg.roots )
+            {
+                hc.roots.emplace_back( r );
+            }
             hc.topK             = cfg.topK;
             hc.stable           = cfg.stable;
             hc.noRedact         = cfg.noRedact;
@@ -8110,7 +9856,10 @@ int main( int argc, char** argv )
         // loop too — a bare `ripwire --mcp` (no root) keeps the pre-X7 "every request names its own path"
         // behavior (roots empty ⇒ runMcp's defaultRoot stays ""); `ripwire <root> --mcp` now actually uses it.
         std::vector<std::string> mcpRoots;
-        for( std::string_view r : cfg.roots ) mcpRoots.emplace_back( r );
+        for( std::string_view r : cfg.roots )
+        {
+            mcpRoots.emplace_back( r );
+        }
         return runMcp( cfg.topK, cfg.stable, cfg.noRedact, std::string( cfg.rootPath ), mcpRoots );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
     }
 
@@ -8125,21 +9874,37 @@ int main( int argc, char** argv )
             return 1;
         };
         if( cfg.qualityDelta || cfg.qualityBaseline )
+        {
             return refuse( "--quality-delta/--quality-baseline", "its baseline is keyed to ONE repo's HEAD; run it per root" );
+        }
         if( !cfg.editCheckSym.empty() )
+        {
             return refuse( "--edit-check", "its git-HEAD baseline (computeHeadSnapshot) is keyed to ONE repo; run it per root" );
+        }
         if( cfg.testGate )
+        {
             return refuse( "--test-gate", "its HEAD-keyed contract is per-repo; run it per root" );
+        }
         if( cfg.eval || cfg.evalRetrieval || !cfg.evalMined.empty() || !cfg.evalSkills.empty() )
+        {
             return refuse( "--eval/--eval-retrieval/--eval-mined/--eval-skills", "corpora, goldens and scoreboards are single-root artifacts; run it per root" );
+        }
         if( !cfg.archRules.empty() && ( cfg.baseline || cfg.baselineUpdate ) )
+        {
             return refuse( "--arch --baseline/--baseline-update", "a committed baseline sidecar lives in ONE repo; run it per root" );
+        }
         if( !cfg.indexOut.empty() )
+        {
             return refuse( "--index-out", "the committable index artifact is per-repo; generate one per root" );
+        }
         if( !cfg.cacheFile.empty() )
+        {
             return refuse( "--cache=PATH", "a workspace uses one auto cache blob PER root (drop --cache, or use --no-cache)" );
+        }
         if( !cfg.scipIndex.empty() )
+        {
             return refuse( "--scip", "a SCIP index describes ONE repo; overlays across roots are deferred" );
+        }
         // §B6 (capture-audit-4, wave 3) — the ONE deliberate CLI/MCP divergence on this list, DECIDED and
         // RECORDED rather than left silent. The wave-2 MCP lane left `batch` diverging and argued the CLI
         // restriction is the questionable side; verified before deciding — the MCP verb with
@@ -8155,22 +9920,34 @@ int main( int argc, char** argv )
         // changes anyway: a refusal that implies a capability does not exist, when it does and the caller may
         // already be using it on the other surface, is the §B1-class defect this whole round is about.
         if( !cfg.batchFile.empty() )
+        {
             return refuse( "--batch", "each CLI sub-query resolves its index from ONE root path — run it per root, "
                                       "or use the MCP `batch` verb with a `paths` array, which DOES answer a merged "
                                       "multi-root batch (the two surfaces deliberately differ here)" );
+        }
         if( cfg.doctor )
+        {
             return refuse( "--doctor", "its cache-dir/git checks are per-repo; run it per root" );
+        }
         if( cfg.mergeScoutFlag )
+        {
             return refuse( "--merge-scout", "its git history/branches are per-repo; run it per root" );
+        }
         if( cfg.planLanesFlag )
+        {
             return refuse( "--plan-lanes", "the carve, the at= stamp and the churn/hotspot lens are all per-repo; run it per root" );
+        }
         if( cfg.noteAddFlag || cfg.notesList )
+        {
             return refuse( "--note-add/--notes", "the .ripwire_notes file lives at ONE repo root (its targets are that root's canonical ids); run it per root" );
+        }
     }
 
     // ── --doctor: self-diagnosis, before the heavy ingest pipeline (like --scan-skill above) ─────
     if( cfg.doctor )
+    {
         return runDoctor( cfg, argv[0] );
+    }
 
     // ── P1-C security scan — purely additive, exits before the heavy ingest pipeline ─────────────
     // --scan-skill=FILE: scan one skill file; emit a `<skillscan>` artifact; exit with skillScanExitCode.
@@ -8197,7 +9974,10 @@ int main( int argc, char** argv )
         }
         std::vector<SkillScanRow> rows;
         rows.reserve( result.findings.size() );
-        for( const SkillFinding& f : result.findings ) rows.push_back( { path, f } );
+        for( const SkillFinding& f : result.findings )
+        {
+            rows.push_back( { path, f } );
+        }
         printSkillScanArtifact( stdout, rows, /*filesScanned=*/1 );
         std::fprintf( stderr, "ripwire scan: %d finding(s) in %s\n", int( result.findings.size() ), path.c_str() );
         return skillScanExitCode( result.findings );
@@ -8230,7 +10010,9 @@ int main( int argc, char** argv )
         const auto addDir = [&]( std::string dir )
         {
             if( std::find( dirs.begin(), dirs.end(), dir ) == dirs.end() )
+            {
                 dirs.push_back( std::move( dir ) );
+            }
         };
         if( !cfg.scanSkillsDir.empty() )
         {
@@ -8241,13 +10023,19 @@ int main( int argc, char** argv )
             addDir( ".agents/skills" );
             const char* homeEnv = std::getenv( "HOME" );
             if( homeEnv && *homeEnv )
+            {
                 addDir( std::string( homeEnv ) + "/.claude/skills" );
+            }
 
             const char* codexHomeEnv = std::getenv( "CODEX_HOME" );
             if( codexHomeEnv && *codexHomeEnv )
+            {
                 addDir( std::string( codexHomeEnv ) + "/skills" );
+            }
             else if( homeEnv && *homeEnv )
+            {
                 addDir( std::string( homeEnv ) + "/.codex/skills" );
+            }
         }
 
         // Scan each dir; accumulate findings per-file (deterministic dir/file order), then emit ONE
@@ -8286,7 +10074,10 @@ int main( int argc, char** argv )
             // Walk dir manually so file order stays deterministic across the whole directory tree.
             namespace fs = std::filesystem;
             std::error_code ec;
-            if( !fs::exists( dir, ec ) || ec ) continue;
+            if( !fs::exists( dir, ec ) || ec )
+            {
+                continue;
+            }
 
             // follow_directory_symlink, because a skills HOME is normally built out of symlinks: on this
             // machine every entry of ~/.claude/skills is a link to the skill's source directory, and
@@ -8305,7 +10096,10 @@ int main( int argc, char** argv )
                 std::error_code cec;
                 const fs::path  canon = fs::canonical( d, cec );
                 const std::string key = cec ? d.string() : canon.string();   // unresolvable ⇒ its own identity
-                if( std::find( visitedDirs.begin(), visitedDirs.end(), key ) != visitedDirs.end() ) return false;
+                if( std::find( visitedDirs.begin(), visitedDirs.end(), key ) != visitedDirs.end() )
+                {
+                    return false;
+                }
                 visitedDirs.push_back( key );
                 return true;
             };
@@ -8339,10 +10133,16 @@ int main( int argc, char** argv )
                 if( !res.readable ) { ++filesSkipped;  continue; }   // never a scanned-with-zero-findings "clean"
 
                 ++filesScanned;
-                for( const SkillFinding& f : res.findings ) allRows.push_back( { p, f } );
+                for( const SkillFinding& f : res.findings )
+                {
+                    allRows.push_back( { p, f } );
+                }
                 totalFindings += int( res.findings.size() );
                 const int code = skillScanExitCode( res.findings );
-                if( code > maxSev ) maxSev = code;
+                if( code > maxSev )
+                {
+                    maxSev = code;
+                }
             }
         }
 
@@ -8383,7 +10183,10 @@ int main( int argc, char** argv )
             std::FILE* f = std::fopen( bf.c_str(), "rb" );
             if( !f ) { std::fprintf( stderr, "ripwire: --batch: cannot open '%s'\n", bf.c_str() ); return 1; }
             char buf[ 4096 ]; std::size_t n;
-            while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 ) content.append( buf, n );
+            while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
+            {
+                content.append( buf, n );
+            }
             std::fclose( f );
         }
 
@@ -8404,11 +10207,26 @@ int main( int argc, char** argv )
             else if( !arg.empty() )
             {
                 const char* key = "symbol";                          // callers/callees/impact/uses/mentions/owners/find_*
-                if(      verb == "for" || verb == "exemplar" ) key = "task";
-                else if( verb == "grep" )                      key = "pattern";
-                else if( verb == "lego" )                      key = "type";
-                else if( verb == "cochange" )                  key = "file";
-                else if( verb == "fetch_body" )                key = "handle";
+                if( verb == "for" || verb == "exemplar" )
+                {
+                    key = "task";
+                }
+                else if( verb == "grep" )
+                {
+                    key = "pattern";
+                }
+                else if( verb == "lego" )
+                {
+                    key = "type";
+                }
+                else if( verb == "cochange" )
+                {
+                    key = "file";
+                }
+                else if( verb == "fetch_body" )
+                {
+                    key = "handle";
+                }
                 obj += ",\"" + std::string( key ) + "\":\"" + j( arg ) + "\"";
             }
             obj += "}";
@@ -8429,13 +10247,22 @@ int main( int argc, char** argv )
 
             // trim surrounding whitespace (incl. a trailing '\r' from CRLF)
             const std::size_t b = line.find_first_not_of( " \t\r" );
-            if( b == std::string::npos ) continue;                    // blank line
+            if( b == std::string::npos )
+            {
+                continue; // blank line
+            }
             const std::size_t e = line.find_last_not_of( " \t\r" );
             line = line.substr( b, e - b + 1 );
-            if( line.empty() || line[0] == '#' ) continue;            // comment
+            if( line.empty() || line[0] == '#' )
+            {
+                continue; // comment
+            }
 
             ++requested;
-            if( subs.size() >= kBatchCap ) continue;                  // count, don't process past the cap
+            if( subs.size() >= kBatchCap )
+            {
+                continue; // count, don't process past the cap
+            }
 
             const std::size_t colon = line.find( ':' );
             const std::string verb  = ( colon == std::string::npos ) ? line : line.substr( 0, colon );
@@ -8459,7 +10286,9 @@ int main( int argc, char** argv )
     {
         const auto [ resolvedRoot, cloneOk ] = resolveRemoteRoot( std::string( rootArg ), cfg.refetch );
         if( !cloneOk )
+        {
             return 1;
+        }
 
         // a root that does not EXIST is caller error (a typo'd path), not a degradable runtime condition —
         // exit 1 with empty stdout so agent pipelines can detect it. A readable-but-empty directory still
@@ -8482,7 +10311,9 @@ int main( int argc, char** argv )
     if( resolvedRoots.size() >= 2 )
     {
         if( !buildWorkspaceRoots( resolvedRoots, ws ) )
+        {
             return 1;
+        }
         if( ws.size() == 1 ) { resolvedRoots.assign( 1, ws[0].arg );  ws.clear(); }
     }
     const bool        multiRoot = ws.size() >= 2;
@@ -8521,8 +10352,10 @@ int main( int argc, char** argv )
                 rc = 1;
             }
             else
+            {
                 std::fprintf( stderr, "ripwire: --index-out wrote %s (%llu bytes, %s family)\n",
                               path.c_str(), static_cast<unsigned long long>( sz ), fam.rich ? "rich" : "lean" );
+            }
         }
         return rc;
     }
@@ -8545,7 +10378,10 @@ int main( int argc, char** argv )
         for( const WorkspaceRoot& r : ws )
         {
             std::string cachePath;
-            if( !cfg.noCache ) cachePath = defaultCachePath( r.arg, needsValueUses );
+            if( !cfg.noCache )
+            {
+                cachePath = defaultCachePath( r.arg, needsValueUses );
+            }
             parts.push_back( ingest( r.arg.c_str(), cfg.excludes, cachePath, cfg.maxFileBytes, needsValueUses,
                                      /*excludeLabel=*/r.label ) );
         }
@@ -8563,15 +10399,29 @@ int main( int argc, char** argv )
         ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses );
     }
     if( cfg.ignoreTests )
+    {
         applyIgnoreTests( ing );
+    }
 
     if( std::getenv( "RIPWIRE_STATS" ) )   // how many std::strings the stored model holds (+ their bytes)
     {
         std::size_t pathB = 0, nameB = 0, calleeB = 0, incB = 0;
-        for( const auto& f : ing.files )      pathB   += f.size();
-        for( const auto& s : ing.symbols )    nameB   += s.name.size();
-        for( const auto& r : ing.references ) calleeB += r.calleeName.size();
-        for( const auto& i : ing.includes )   incB    += i.target.size();
+        for( const auto& f : ing.files )
+        {
+            pathB += f.size();
+        }
+        for( const auto& s : ing.symbols )
+        {
+            nameB += s.name.size();
+        }
+        for( const auto& r : ing.references )
+        {
+            calleeB += r.calleeName.size();
+        }
+        for( const auto& i : ing.includes )
+        {
+            incB += i.target.size();
+        }
         const std::size_t total  = ing.files.size() + ing.symbols.size() + ing.references.size() + ing.includes.size();
         const std::size_t bytes  = pathB + nameB + calleeB + incB;
         std::fprintf( stderr,
@@ -8587,7 +10437,9 @@ int main( int argc, char** argv )
     // (one DEGRADED_PATH_ALERT + stderr note) and the build proceeds name-based, byte-identical to no --scip.
     ScipOverlay scipOverlay;
     if( !cfg.scipIndex.empty() )
+    {
         scipOverlay = loadScipOverlay( cfg.scipIndex, ing );
+    }
     // An EMPTY overlay (no --scip, OR a missing/corrupt/mismatched index that already alerted) is treated as
     // no overlay at all: scipPtr stays nullptr so buildGraph/serialize produce output BYTE-IDENTICAL to a
     // run with no --scip (the degrade contract — a bad index must never change the map, only stderr).
@@ -8601,7 +10453,10 @@ int main( int argc, char** argv )
     {
         fanIn.assign( ing.symbols.size(), 0 );
         const auto* ro = g.inEdges.rowOffsets();
-        for( std::size_t i = 0; i < ing.symbols.size(); ++i ) fanIn[i] = ro[i + 1] - ro[i];
+        for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+        {
+            fanIn[i] = ro[i + 1] - ro[i];
+        }
     }
     const std::vector<std::uint32_t>* fanInPtr = fanIn.empty() ? nullptr : &fanIn;
 
@@ -8654,36 +10509,56 @@ int main( int argc, char** argv )
                         quality::gitCoChangeAndChurnCached( ws[r].arg, ing, "18 months ago", 30,
                                              cfg.forTask.empty() ? 0u : 12u,
                                              cfg.forTask.empty() ? nullptr : &rootChurn, r );
-                    for( std::vector<std::uint32_t>& c : part ) commits.push_back( std::move( c ) );
+                    for( std::vector<std::uint32_t>& c : part )
+                    {
+                        commits.push_back( std::move( c ) );
+                    }
                     if( !cfg.forTask.empty() )
                     {
-                        if( forChurn.size() != ing.files.size() ) forChurn.assign( ing.files.size(), 0u );
-                        for( std::size_t f = 0; f < forChurn.size() && f < rootChurn.size(); ++f ) forChurn[f] += rootChurn[f];
+                        if( forChurn.size() != ing.files.size() )
+                        {
+                            forChurn.assign( ing.files.size(), 0u );
+                        }
+                        for( std::size_t f = 0; f < forChurn.size() && f < rootChurn.size(); ++f )
+                        {
+                            forChurn[f] += rootChurn[f];
+                        }
                     }
                 }
             }
             else
+            {
                 // Y2: memoized — see the multi-root branch above.
                 commits = quality::gitCoChangeAndChurnCached( root, ing, "18 months ago", 30,
                                                cfg.forTask.empty() ? 0u : 12u,
                                                cfg.forTask.empty() ? nullptr : &forChurn );
+            }
             if( !commits.empty() )
             {
                 // co-change degree per file = # of OTHER files that share ≥1 commit with it (file-level).
                 std::vector<HashMap<std::uint32_t, char>> partners( ing.files.size() );
                 for( const std::vector<std::uint32_t>& c : commits )
+                {
                     for( std::size_t i = 0; i < c.size(); ++i )
+                    {
                         for( std::size_t j = i + 1; j < c.size(); ++j )
                         {
                             const std::uint32_t a = c[i], b = c[j];
                             if( a < ing.files.size() && b < ing.files.size() ) { partners[a][b] = 1; partners[b][a] = 1; }
                         }
-                for( std::size_t f = 0; f < ing.files.size(); ++f ) coPartnersPerFile[f] = std::uint32_t( partners[f].size() );
+                    }
+                }
+                for( std::size_t f = 0; f < ing.files.size(); ++f )
+                {
+                    coPartnersPerFile[f] = std::uint32_t( partners[f].size() );
+                }
             }
         }
         amp.assign( ing.symbols.size(), 0u );
         for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+        {
             amp[i] = qmetrics.callerCount[i] + coPartnersPerFile[ ing.symbols[i].fileId ];
+        }
         ampPtr = &amp;
     }
 
@@ -8725,81 +10600,183 @@ int main( int argc, char** argv )
     const MainDispatch dsp{ cfg, ing, g, root, multiRoot, ws, fanIn, fanInPtr, qmetrics,
                            ampPtr, cboPtr, testedPtr, lcom4Ptr, impurePtr, forChurn, redactCounts, redactPtr, notesPtr };
 
-    if( std::optional<int> handled = runForLens( dsp ) ) return *handled;
+    if( std::optional<int> handled = runForLens( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runTargetedViews( dsp ) ) return *handled;
+    if( std::optional<int> handled = runTargetedViews( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runArchViews( dsp ) ) return *handled;
+    if( std::optional<int> handled = runArchViews( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runMaintenanceViews( dsp ) ) return *handled;
+    if( std::optional<int> handled = runMaintenanceViews( dsp ) )
+    {
+        return *handled;
+    }
 
     // §6.3: --quality-baseline/--quality-delta, then --dead-code — the two branches of the old
     // runQualityViews, in the order that chain evaluated them.
-    if( std::optional<int> handled = runQualityDelta( dsp ) ) return *handled;
+    if( std::optional<int> handled = runQualityDelta( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runQualityViews( dsp ) ) return *handled;
+    if( std::optional<int> handled = runQualityViews( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runEditCheck( dsp ) ) return *handled;
+    if( std::optional<int> handled = runEditCheck( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runEvalViews( dsp ) ) return *handled;
+    if( std::optional<int> handled = runEvalViews( dsp ) )
+    {
+        return *handled;
+    }
 
     // The nine navigate verbs, in the SAME order the old runNavigateVerbs if-chain evaluated them. The order
     // is behaviour, not layout: a run passing two of these flags gets exactly one answer, and which one is
     // decided here. test/dispatchordercheck.sh pins every seam below.
-    if( std::optional<int> handled = runCallHierarchy( dsp ) ) return *handled;
+    if( std::optional<int> handled = runCallHierarchy( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runGraphQuery( dsp ) ) return *handled;
+    if( std::optional<int> handled = runGraphQuery( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runUses( dsp ) ) return *handled;
+    if( std::optional<int> handled = runUses( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runExternalSurface( dsp ) ) return *handled;
+    if( std::optional<int> handled = runExternalSurface( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runPath( dsp ) ) return *handled;
+    if( std::optional<int> handled = runPath( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runConnect( dsp ) ) return *handled;
+    if( std::optional<int> handled = runConnect( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runImpact( dsp ) ) return *handled;
+    if( std::optional<int> handled = runImpact( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runMentions( dsp ) ) return *handled;
+    if( std::optional<int> handled = runMentions( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runAffected( dsp ) ) return *handled;
+    if( std::optional<int> handled = runAffected( dsp ) )
+    {
+        return *handled;
+    }
 
     // §P11.2b: the inverse direction of the same map, immediately after it — the two are read together and
     // neither can shadow the other (one takes --affected=, the other --exercises=).
-    if( std::optional<int> handled = runExercises( dsp ) ) return *handled;
+    if( std::optional<int> handled = runExercises( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runChangeViews( dsp ) ) return *handled;
+    if( std::optional<int> handled = runChangeViews( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runMergeScout( dsp ) ) return *handled;
+    if( std::optional<int> handled = runMergeScout( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runPlanLanes( dsp ) ) return *handled;
+    if( std::optional<int> handled = runPlanLanes( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runCrossRef( dsp ) ) return *handled;
+    if( std::optional<int> handled = runCrossRef( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runLayout( dsp ) ) return *handled;
+    if( std::optional<int> handled = runLayout( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runDocDrift( dsp ) ) return *handled;
+    if( std::optional<int> handled = runDocDrift( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runFromTrace( dsp ) ) return *handled;
+    if( std::optional<int> handled = runFromTrace( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runNotes( dsp ) ) return *handled;
+    if( std::optional<int> handled = runNotes( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runPackTask( dsp ) ) return *handled;
+    if( std::optional<int> handled = runPackTask( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runCommunities( dsp ) ) return *handled;
+    if( std::optional<int> handled = runCommunities( dsp ) )
+    {
+        return *handled;
+    }
 
     // §P11.6: the drill-down for the ids runCommunities/runZoom print, immediately after its parent.
-    if( std::optional<int> handled = runCommunityDrill( dsp ) ) return *handled;
+    if( std::optional<int> handled = runCommunityDrill( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runZoom( dsp ) ) return *handled;
+    if( std::optional<int> handled = runZoom( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runStructureText( dsp ) ) return *handled;
+    if( std::optional<int> handled = runStructureText( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runGrep( dsp ) ) return *handled;
+    if( std::optional<int> handled = runGrep( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runLint( dsp ) ) return *handled;
+    if( std::optional<int> handled = runLint( dsp ) )
+    {
+        return *handled;
+    }
 
-    if( std::optional<int> handled = runAround( dsp ) ) return *handled;
+    if( std::optional<int> handled = runAround( dsp ) )
+    {
+        return *handled;
+    }
 
     return runDefaultMap( dsp );
 }

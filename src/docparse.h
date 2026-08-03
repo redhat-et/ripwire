@@ -37,13 +37,24 @@ enum class DocKind : std::uint8_t { None, Ipynb, Html, Csv, Markitdown };
 // this a doc file" — collectSources() and the ingest post-pass both consult isDocExtension().
 inline DocKind docKindOf( std::string_view extLower ) noexcept
 {
-    if( extLower == ".ipynb" )                                                   return DocKind::Ipynb;
-    if( extLower == ".html" || extLower == ".htm" )                             return DocKind::Html;
-    if( extLower == ".csv" )                                                     return DocKind::Csv;
+    if( extLower == ".ipynb" )
+    {
+        return DocKind::Ipynb;
+    }
+    if( extLower == ".html" || extLower == ".htm" )
+    {
+        return DocKind::Html;
+    }
+    if( extLower == ".csv" )
+    {
+        return DocKind::Csv;
+    }
     // binary formats — handled by the markitdown bridge (NOTE: not collected in v1; the crawl's binary
     // sniff excludes them. The bridge is reachable once binary-doc collection lands — see §P1-B.)
     if( extLower == ".pdf" || extLower == ".docx" || extLower == ".pptx" || extLower == ".xlsx" )
+    {
         return DocKind::Markitdown;
+    }
     return DocKind::None;
 }
 
@@ -54,10 +65,16 @@ inline DocKind docKindOf( std::string_view extLower ) noexcept
 inline std::string lowerExtOf( std::string_view path )
 {
     const std::size_t dot = path.find_last_of( '.' );
-    if( dot == std::string_view::npos ) return {};
+    if( dot == std::string_view::npos )
+    {
+        return {};
+    }
     std::string ext;
     ext.reserve( path.size() - dot );
-    for( std::size_t i = dot; i < path.size(); ++i ) ext.push_back( char( std::tolower( (unsigned char)path[i] ) ) );
+    for( std::size_t i = dot; i < path.size(); ++i )
+    {
+        ext.push_back( char( std::tolower( (unsigned char)path[i] ) ) );
+    }
     return ext;
 }
 
@@ -75,7 +92,9 @@ inline bool readWholeFile( const std::string& path, std::string& out )
 {
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
     if( fp == nullptr )
+    {
         return false;
+    }
 
     if( std::fseek( fp, 0, SEEK_END ) != 0 )
     {
@@ -98,7 +117,10 @@ inline bool readWholeFile( const std::string& path, std::string& out )
     const std::size_t want = out.size();
     const std::size_t got  = want == 0 ? 0 : std::fread( out.data(), 1, want, fp );
     const bool ok = ( got == want ) && ( std::fclose( fp ) == 0 );
-    if( !ok ) out.clear();
+    if( !ok )
+    {
+        out.clear();
+    }
     return ok;
 }
 
@@ -130,7 +152,10 @@ inline void appendJsonString( std::string_view s, std::size_t& i, std::string& o
             ++i;
         }
     }
-    if( i < s.size() ) ++i;   // past the closing quote
+    if( i < s.size() )
+    {
+        ++i; // past the closing quote
+    }
 }
 
 }   // namespace detail
@@ -143,16 +168,22 @@ inline std::string extractIpynb( std::string_view json )
     std::string                  out;
     std::size_t                  i   = 0;
     constexpr std::string_view   key = "\"source\"";
-    const auto skipWs = [ & ]() { while( i < json.size() && ( json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r' ) ) ++i; };
+    const auto skipWs = [ & ]() { while( i < json.size() && ( json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r' ) ) { ++i; } };
 
     while( ( i = json.find( key, i ) ) != std::string_view::npos )
     {
         i += key.size();
         skipWs();
-        if( i >= json.size() || json[i] != ':' ) continue;          // not a "source": key
+        if( i >= json.size() || json[i] != ':' )
+        {
+            continue; // not a "source": key
+        }
         ++i;
         skipWs();
-        if( i >= json.size() ) break;
+        if( i >= json.size() )
+        {
+            break;
+        }
 
         if( json[i] == '"' )                                         // "source": "one string"
         {
@@ -164,10 +195,19 @@ inline std::string extractIpynb( std::string_view json )
             ++i;
             while( i < json.size() && json[i] != ']' )
             {
-                if( json[i] == '"' ) detail::appendJsonString( json, i, out );
-                else                 ++i;
+                if( json[i] == '"' )
+                {
+                    detail::appendJsonString( json, i, out );
+                }
+                else
+                {
+                    ++i;
+                }
             }
-            if( i < json.size() ) ++i;                               // past ']'
+            if( i < json.size() )
+            {
+                ++i; // past ']'
+            }
             out.push_back( '\n' );
         }
     }
@@ -182,9 +222,17 @@ namespace detail
 // Case-insensitive: does s, at offset p, begin with the lowercase `lit` (e.g. "<script")?
 inline bool ciStartsWith( std::string_view s, std::size_t p, std::string_view lit ) noexcept
 {
-    if( p + lit.size() > s.size() ) return false;
+    if( p + lit.size() > s.size() )
+    {
+        return false;
+    }
     for( std::size_t k = 0; k < lit.size(); ++k )
-        if( char( std::tolower( static_cast<unsigned char>( s[ p + k ] ) ) ) != lit[k] ) return false;
+    {
+        if( char( std::tolower( static_cast<unsigned char>( s[p + k] ) ) ) != lit[k] )
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -204,15 +252,27 @@ inline std::string extractHtml( std::string_view html )
             {
                 const std::string_view close = detail::ciStartsWith( html, i, "<script" ) ? "</script" : "</style";
                 std::size_t            e     = i + 1;
-                while( e < html.size() && !detail::ciStartsWith( html, e, close ) ) ++e;
-                while( e < html.size() && html[e] != '>' ) ++e;     // to end of the closing tag
+                while( e < html.size() && !detail::ciStartsWith( html, e, close ) )
+                {
+                    ++e;
+                }
+                while( e < html.size() && html[e] != '>' )
+                {
+                    ++e; // to end of the closing tag
+                }
                 i = ( e < html.size() ) ? e + 1 : html.size();
                 out.push_back( ' ' );
                 continue;
             }
             // ordinary tag — skip to '>'
-            while( i < html.size() && html[i] != '>' ) ++i;
-            if( i < html.size() ) ++i;
+            while( i < html.size() && html[i] != '>' )
+            {
+                ++i;
+            }
+            if( i < html.size() )
+            {
+                ++i;
+            }
             out.push_back( ' ' );
             continue;
         }
@@ -224,12 +284,30 @@ inline std::string extractHtml( std::string_view html )
             if( semi != std::string_view::npos && semi - i <= 8 )
             {
                 const std::string_view ent = html.substr( i, semi - i + 1 );
-                if( ent == "&amp;" )        out.push_back( '&' );
-                else if( ent == "&lt;" )    out.push_back( '<' );
-                else if( ent == "&gt;" )    out.push_back( '>' );
-                else if( ent == "&quot;" )  out.push_back( '"' );
-                else if( ent == "&#39;" || ent == "&apos;" ) out.push_back( '\'' );
-                else                        out.push_back( ' ' );   // &nbsp; and friends → space
+                if( ent == "&amp;" )
+                {
+                    out.push_back( '&' );
+                }
+                else if( ent == "&lt;" )
+                {
+                    out.push_back( '<' );
+                }
+                else if( ent == "&gt;" )
+                {
+                    out.push_back( '>' );
+                }
+                else if( ent == "&quot;" )
+                {
+                    out.push_back( '"' );
+                }
+                else if( ent == "&#39;" || ent == "&apos;" )
+                {
+                    out.push_back( '\'' );
+                }
+                else
+                {
+                    out.push_back( ' ' ); // &nbsp; and friends → space
+                }
                 i = semi + 1;
                 continue;
             }
@@ -251,10 +329,16 @@ inline std::string extractHtml( std::string_view html )
             bool hasNewline = false;
             while( k < out.size() && std::isspace( static_cast<unsigned char>( out[k] ) ) )
             {
-                if( out[k] == '\n' ) hasNewline = true;
+                if( out[k] == '\n' )
+                {
+                    hasNewline = true;
+                }
                 ++k;
             }
-            if( !collapsed.empty() ) collapsed.push_back( hasNewline ? '\n' : ' ' );
+            if( !collapsed.empty() )
+            {
+                collapsed.push_back( hasNewline ? '\n' : ' ' );
+            }
         }
         else
         {
@@ -263,7 +347,9 @@ inline std::string extractHtml( std::string_view html )
         }
     }
     while( !collapsed.empty() && std::isspace( static_cast<unsigned char>( collapsed.back() ) ) )
+    {
         collapsed.pop_back();
+    }
     return collapsed;
 }
 
@@ -274,7 +360,10 @@ inline std::string extractCsv( std::string_view csv )
     // first line = header; the rest are data rows. We summarise rather than dump (a 100k-row CSV is noise).
     std::size_t nl = csv.find( '\n' );
     std::string_view header = ( nl == std::string_view::npos ) ? csv : csv.substr( 0, nl );
-    if( !header.empty() && header.back() == '\r' ) header.remove_suffix( 1 );
+    if( !header.empty() && header.back() == '\r' )
+    {
+        header.remove_suffix( 1 );
+    }
 
     // count data rows
     std::size_t rows = 0;
@@ -284,16 +373,27 @@ inline std::string extractCsv( std::string_view csv )
         const char c = csv[p];
         if( c == '\n' )
         {
-            if( hasData ) ++rows;
+            if( hasData )
+            {
+                ++rows;
+            }
             hasData = false;
         }
         else if( c != '\r' )
+        {
             hasData = true;
+        }
     }
-    if( hasData ) ++rows;
+    if( hasData )
+    {
+        ++rows;
+    }
 
     std::string out = "CSV columns: ";
-    for( char c : header ) out.push_back( c == ',' ? ' ' : c );   // commas → spaces so column names tokenize
+    for( char c : header )
+    {
+        out.push_back( c == ',' ? ' ' : c ); // commas → spaces so column names tokenize
+    }
     out += "\nrows: ";
     out += std::to_string( rows );
     out.push_back( '\n' );
@@ -304,14 +404,23 @@ inline std::string extractCsv( std::string_view csv )
     {
         const std::size_t e = csv.find( '\n', p );
         std::string_view line = csv.substr( p, ( e == std::string_view::npos ? csv.size() : e ) - p );
-        if( !line.empty() && line.back() == '\r' ) line.remove_suffix( 1 );
+        if( !line.empty() && line.back() == '\r' )
+        {
+            line.remove_suffix( 1 );
+        }
         if( !line.empty() )
         {
-            for( char c : line ) out.push_back( c == ',' ? ' ' : c );
+            for( char c : line )
+            {
+                out.push_back( c == ',' ? ' ' : c );
+            }
             out.push_back( '\n' );
             ++emitted;
         }
-        if( e == std::string_view::npos ) break;
+        if( e == std::string_view::npos )
+        {
+            break;
+        }
         p = e + 1;
     }
     return out;
@@ -352,10 +461,14 @@ inline std::string runMarkitdown( const std::string& path )
     std::array<char, 65536> buf;
     std::size_t         n = 0;
     while( ( n = std::fread( buf.data(), 1, buf.size(), pipe ) ) > 0 )
+    {
         out.append( buf.data(), n );
+    }
     const int rc = ::pclose( pipe );
-    if( rc != 0 )                                   // markitdown absent or errored → degrade to no-doc
+    if( rc != 0 )
+    { // markitdown absent or errored → degrade to no-doc
         return {};
+    }
     return out;
 }
 
@@ -471,12 +584,21 @@ inline MarkdownFenceScan scanMarkdownFences( std::string_view text ) noexcept
     for( std::size_t lineStart = 0; lineStart < text.size(); )
     {
         std::size_t lineEnd = text.find( '\n', lineStart );
-        if( lineEnd == std::string_view::npos ) lineEnd = text.size();
+        if( lineEnd == std::string_view::npos )
+        {
+            lineEnd = text.size();
+        }
 
         std::size_t cursor = lineStart;
-        while( cursor < lineEnd && ( text[ cursor ] == ' ' || text[ cursor ] == '\t' ) ) ++cursor;
+        while( cursor < lineEnd && ( text[cursor] == ' ' || text[cursor] == '\t' ) )
+        {
+            ++cursor;
+        }
         std::size_t tickCount = 0;
-        while( cursor + tickCount < lineEnd && text[ cursor + tickCount ] == '`' ) ++tickCount;
+        while( cursor + tickCount < lineEnd && text[cursor + tickCount] == '`' )
+        {
+            ++tickCount;
+        }
 
         ++scan.lineCount;
         if( tickCount >= 3 )        { isInsideFence = !isInsideFence; ++scan.fencedLineCount; }
@@ -501,9 +623,17 @@ namespace detail
 // Case-insensitive substring search over an ASCII haystack for an already-lower-cased needle.
 inline bool ciContains( std::string_view haystack, std::string_view needle ) noexcept
 {
-    if( needle.empty() || needle.size() > haystack.size() ) return false;
+    if( needle.empty() || needle.size() > haystack.size() )
+    {
+        return false;
+    }
     for( std::size_t at = 0; at + needle.size() <= haystack.size(); ++at )
-        if( ciStartsWith( haystack, at, needle ) ) return true;
+    {
+        if( ciStartsWith( haystack, at, needle ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -530,7 +660,12 @@ inline bool hasGeneratedMarker( std::string_view text ) noexcept
 
     const std::string_view head = text.substr( 0, headEnd );
     for( std::string_view phrase : kMarkerPhrases )
-        if( detail::ciContains( head, phrase ) ) return true;
+    {
+        if( detail::ciContains( head, phrase ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -540,13 +675,28 @@ inline bool hasGeneratedMarker( std::string_view text ) noexcept
 inline GeneratedDocReason classifyGeneratedDoc( std::string_view text, std::size_t bytes,
                                                 std::size_t medianDocBytes, std::size_t docCount ) noexcept
 {
-    if( hasGeneratedMarker( text ) ) return GeneratedDocReason::Marker;
+    if( hasGeneratedMarker( text ) )
+    {
+        return GeneratedDocReason::Marker;
+    }
 
     const bool isCorpusMeasurable = docCount >= kGeneratedMinDocCount && medianDocBytes > 0;
-    if( !isCorpusMeasurable )                                          return GeneratedDocReason::None;
-    if( bytes < kGeneratedMinBytes )                                   return GeneratedDocReason::None;
-    if( double( bytes ) < kGeneratedSizeRatio * double( medianDocBytes ) ) return GeneratedDocReason::None;
-    if( fencedLineFraction( scanMarkdownFences( text ) ) < kGeneratedFencedFraction ) return GeneratedDocReason::None;
+    if( !isCorpusMeasurable )
+    {
+        return GeneratedDocReason::None;
+    }
+    if( bytes < kGeneratedMinBytes )
+    {
+        return GeneratedDocReason::None;
+    }
+    if( double( bytes ) < kGeneratedSizeRatio * double( medianDocBytes ) )
+    {
+        return GeneratedDocReason::None;
+    }
+    if( fencedLineFraction( scanMarkdownFences( text ) ) < kGeneratedFencedFraction )
+    {
+        return GeneratedDocReason::None;
+    }
     return GeneratedDocReason::SizeAndFences;
 }
 

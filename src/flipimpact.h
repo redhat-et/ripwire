@@ -200,7 +200,13 @@ inline constexpr std::string_view kCFamilyExtTable[] = {
 template<std::size_t N>
 inline bool hasAnyExt( std::string_view p, const std::string_view ( &table )[N] ) noexcept
 {
-    for( std::string_view e : table ) if( endsWithView( p, e ) ) return true;
+    for( std::string_view e : table )
+    {
+        if( endsWithView( p, e ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -225,10 +231,22 @@ inline bool isCMakePath( std::string_view p ) noexcept
 // not a use of it. Single-line judgement — see the LIMITS note in the help text.
 inline bool isCodeLine( std::string_view trimmed ) noexcept
 {
-    if( trimmed.empty() )  return false;
-    if( trimmed[0] == '#' ) return false;
-    if( trimmed[0] == '*' ) return false;
-    if( trimmed.size() >= 2 && trimmed[0] == '/' && ( trimmed[1] == '/' || trimmed[1] == '*' ) ) return false;
+    if( trimmed.empty() )
+    {
+        return false;
+    }
+    if( trimmed[0] == '#' )
+    {
+        return false;
+    }
+    if( trimmed[0] == '*' )
+    {
+        return false;
+    }
+    if( trimmed.size() >= 2 && trimmed[0] == '/' && ( trimmed[1] == '/' || trimmed[1] == '*' ) )
+    {
+        return false;
+    }
     return true;
 }
 
@@ -240,19 +258,40 @@ inline bool isCodeLine( std::string_view trimmed ) noexcept
 inline std::string_view bindingNameOnLine( std::string_view line, std::size_t gateAt )
 {
     const std::size_t eq = line.rfind( '=', gateAt );
-    if( eq == std::string_view::npos || eq == 0 ) return {};
-    if( eq + 1 < line.size() && line[ eq + 1 ] == '=' ) return {};
+    if( eq == std::string_view::npos || eq == 0 )
+    {
+        return {};
+    }
+    if( eq + 1 < line.size() && line[eq + 1] == '=' )
+    {
+        return {};
+    }
     const char prev = line[ eq - 1 ];
-    if( prev == '=' || prev == '!' || prev == '<' || prev == '>' ) return {};
+    if( prev == '=' || prev == '!' || prev == '<' || prev == '>' )
+    {
+        return {};
+    }
 
     const std::string_view head = line.substr( 0, eq );
-    if( !containsWord( head, "constexpr" ) && !containsWord( head, "const" ) ) return {};
+    if( !containsWord( head, "constexpr" ) && !containsWord( head, "const" ) )
+    {
+        return {};
+    }
 
     std::size_t e = head.size();
-    while( e > 0 && std::isspace( (unsigned char)head[ e - 1 ] ) ) --e;
+    while( e > 0 && std::isspace( (unsigned char)head[e - 1] ) )
+    {
+        --e;
+    }
     std::size_t s = e;
-    while( s > 0 && darkflags::identByte( (unsigned char)head[ s - 1 ] ) ) --s;
-    if( s == e || std::isdigit( (unsigned char)head[s] ) ) return {};
+    while( s > 0 && darkflags::identByte( (unsigned char)head[s - 1] ) )
+    {
+        --s;
+    }
+    if( s == e || std::isdigit( (unsigned char)head[s] ) )
+    {
+        return {};
+    }
     return head.substr( s, e - s );
 }
 
@@ -265,13 +304,28 @@ inline bool declaresConstant( std::string_view line, std::string_view name )
 {
     for( std::size_t at = line.find( name ); at != std::string_view::npos; at = line.find( name, at + 1 ) )
     {
-        if( !wholeWordAt( line, at, name.size() ) ) continue;
+        if( !wholeWordAt( line, at, name.size() ) )
+        {
+            continue;
+        }
         std::size_t j = at + name.size();
-        while( j < line.size() && std::isspace( (unsigned char)line[j] ) ) ++j;
-        if( j >= line.size() || line[j] != '=' ) continue;
-        if( j + 1 < line.size() && line[ j + 1 ] == '=' ) continue;
+        while( j < line.size() && std::isspace( (unsigned char)line[j] ) )
+        {
+            ++j;
+        }
+        if( j >= line.size() || line[j] != '=' )
+        {
+            continue;
+        }
+        if( j + 1 < line.size() && line[j + 1] == '=' )
+        {
+            continue;
+        }
         const std::string_view head = line.substr( 0, at );
-        if( containsWord( head, "constexpr" ) || containsWord( head, "const" ) ) return true;
+        if( containsWord( head, "constexpr" ) || containsWord( head, "const" ) )
+        {
+            return true;
+        }
     }
     return false;
 }
@@ -290,10 +344,17 @@ inline SymbolLineIndex buildSymbolLineIndex( const IngestResult& ing )
     SymbolLineIndex ix;
     ix.byFile.resize( ing.files.size() );
     for( const Symbol& s : ing.symbols )
-        if( s.fileId < ix.byFile.size() ) ix.byFile[ s.fileId ].push_back( s.id );
+    {
+        if( s.fileId < ix.byFile.size() )
+        {
+            ix.byFile[s.fileId].push_back( s.id );
+        }
+    }
     for( std::vector<NodeId>& v : ix.byFile )
+    {
         std::sort( v.begin(), v.end(), [ & ]( NodeId a, NodeId b )
                    { return ing.symbols[a].line != ing.symbols[b].line ? ing.symbols[a].line < ing.symbols[b].line : a < b; } );
+    }
     return ix;
 }
 
@@ -314,17 +375,33 @@ inline std::vector<NodeId> hostsForSpan( const IngestResult& ing, const SymbolLi
                                          std::uint32_t fileId, std::uint32_t lo, std::uint32_t hi )
 {
     std::vector<NodeId> hosts;
-    if( fileId >= ix.byFile.size() ) return hosts;
+    if( fileId >= ix.byFile.size() )
+    {
+        return hosts;
+    }
     NodeId innermost = kNoNode;
     for( NodeId id : ix.byFile[ fileId ] )
     {
         const Symbol& s = ing.symbols[ id ];
-        if( s.line > hi ) break;                                  // sorted by start line ⇒ nothing later can begin inside
+        if( s.line > hi )
+        {
+            break; // sorted by start line ⇒ nothing later can begin inside
+        }
         const std::uint32_t end = symbolEndLine( s );
-        if( s.line >= lo && end <= hi ) { hosts.push_back( id ); continue; }
-        if( s.line <= lo && end >= lo && ( innermost == kNoNode || s.line >= ing.symbols[ innermost ].line ) ) innermost = id;
+        if( s.line >= lo && end <= hi )
+        {
+            hosts.push_back( id );
+            continue;
+        }
+        if( s.line <= lo && end >= lo && ( innermost == kNoNode || s.line >= ing.symbols[innermost].line ) )
+        {
+            innermost = id;
+        }
     }
-    if( innermost != kNoNode ) hosts.push_back( innermost );
+    if( innermost != kNoNode )
+    {
+        hosts.push_back( innermost );
+    }
     return hosts;
 }
 
@@ -332,13 +409,22 @@ inline std::vector<NodeId> hostsForSpan( const IngestResult& ing, const SymbolLi
 // one function, and reporting its whole enclosing-class chain instead would blur the radius.
 inline NodeId innermostAtLine( const IngestResult& ing, const SymbolLineIndex& ix, std::uint32_t fileId, std::uint32_t line )
 {
-    if( fileId >= ix.byFile.size() ) return kNoNode;
+    if( fileId >= ix.byFile.size() )
+    {
+        return kNoNode;
+    }
     NodeId best = kNoNode;
     for( NodeId id : ix.byFile[ fileId ] )
     {
         const Symbol& s = ing.symbols[ id ];
-        if( s.line > line ) break;
-        if( symbolEndLine( s ) >= line && ( best == kNoNode || s.line >= ing.symbols[ best ].line ) ) best = id;
+        if( s.line > line )
+        {
+            break;
+        }
+        if( symbolEndLine( s ) >= line && ( best == kNoNode || s.line >= ing.symbols[best].line ) )
+        {
+            best = id;
+        }
     }
     return best;
 }
@@ -357,20 +443,42 @@ inline std::vector<std::string> aliasDescendants( const gtl::btree_map<std::stri
         std::vector<std::string> next;
         for( const auto& [ name, g ] : byName )                       // name order ⇒ deterministic family order
         {
-            if( g.aliasParent.empty() ) continue;
-            if( std::find( family.begin(), family.end(), name ) != family.end() ) continue;
-            if( std::find( family.begin(), family.end(), g.aliasParent ) == family.end() ) continue;
+            if( g.aliasParent.empty() )
+            {
+                continue;
+            }
+            if( std::find( family.begin(), family.end(), name ) != family.end() )
+            {
+                continue;
+            }
+            if( std::find( family.begin(), family.end(), g.aliasParent ) == family.end() )
+            {
+                continue;
+            }
             next.push_back( name );
         }
-        if( next.empty() ) break;
+        if( next.empty() )
+        {
+            break;
+        }
         for( std::string& n : next )
         {
-            if( family.size() >= kMaxFamily ) { capped = true; break; }
+            if( family.size() >= kMaxFamily )
+            {
+                capped = true;
+                break;
+            }
             family.push_back( std::move( n ) );
         }
-        if( capped ) break;
+        if( capped )
+        {
+            break;
+        }
     }
-    if( capped ) DEGRADED_PATH_ALERT( "flip: alias family hit the fan-out cap — the radius below is a lower bound" );
+    if( capped )
+    {
+        DEGRADED_PATH_ALERT( "flip: alias family hit the fan-out cap — the radius below is a lower bound" );
+    }
     return family;
 }
 
@@ -387,15 +495,17 @@ struct ValueScanResult
 template<class Visit>
 inline void forEachCodeLine( std::string_view bytes, Visit&& visit )
 {
-    forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t lineNo )
-                 { if( isCodeLine( darkflags::trimView( line ) ) ) visit( line, lineNo ); } );
+    forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t lineNo ) { if( isCodeLine( darkflags::trimView( line ) ) ) { visit( line, lineNo ); } } );
 }
 
 // The C-family files worth opening for `needles`, as (fileId, display path) — the needles-first screen that
 // keeps both passes off the ~97% of a tree that never mentions the gate family.
 inline bool fileMayHold( const IngestResult& ing, std::uint32_t fileId, std::string& bytesOut )
 {
-    if( !isCFamilyPath( ing.files[ fileId ] ) ) return false;
+    if( !isCFamilyPath( ing.files[fileId] ) )
+    {
+        return false;
+    }
     return darkflags::readWhole( diskPath( ing, fileId ), bytesOut );
 }
 
@@ -407,11 +517,22 @@ inline void scanGateMentions( const IngestResult& ing, const std::string& root,
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( !fileMayHold( ing, f, bytes ) ) continue;
+        if( !fileMayHold( ing, f, bytes ) )
+        {
+            continue;
+        }
         std::vector<std::string_view> needles;                     // the family names this file actually contains
         for( const std::string& gname : family )
-            if( bytes.find( gname ) != std::string::npos ) needles.push_back( gname );
-        if( needles.empty() ) continue;
+        {
+            if( bytes.find( gname ) != std::string::npos )
+            {
+                needles.push_back( gname );
+            }
+        }
+        if( needles.empty() )
+        {
+            continue;
+        }
 
         const std::string rel( relForHash( ing.files[f], root ) );
         forEachCodeLine( bytes, [ & ]( std::string_view line, std::uint32_t lineNo )
@@ -419,10 +540,19 @@ inline void scanGateMentions( const IngestResult& ing, const std::string& root,
             for( std::string_view gname : needles )
             {
                 const std::size_t at = firstWordAt( line, gname );
-                if( at == std::string_view::npos ) continue;       // one row per (line, gate) — a repeat is the same site
+                if( at == std::string_view::npos )
+                {
+                    continue; // one row per (line, gate) — a repeat is the same site
+                }
                 const std::string_view bound = bindingNameOnLine( line, at );
-                if( !bound.empty() ) out.bindings.push_back( ValueBinding{ std::string( bound ), std::string( gname ), rel, lineNo, 0 } );
-                else                 out.branches.push_back( LitBranch{ std::string( gname ), {}, rel, lineNo, kNoNode } );
+                if( !bound.empty() )
+                {
+                    out.bindings.push_back( ValueBinding { std::string( bound ), std::string( gname ), rel, lineNo, 0 } );
+                }
+                else
+                {
+                    out.branches.push_back( LitBranch { std::string( gname ), {}, rel, lineNo, kNoNode } );
+                }
             }
         } );
     }
@@ -448,11 +578,22 @@ inline void scanBindingUses( const IngestResult& ing, const std::string& root, V
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( !fileMayHold( ing, f, bytes ) ) continue;
+        if( !fileMayHold( ing, f, bytes ) )
+        {
+            continue;
+        }
         std::vector<std::size_t> needles;                          // indices into out.bindings
         for( std::size_t b = 0; b < out.bindings.size(); ++b )
-            if( bytes.find( out.bindings[b].name ) != std::string::npos ) needles.push_back( b );
-        if( needles.empty() ) continue;
+        {
+            if( bytes.find( out.bindings[b].name ) != std::string::npos )
+            {
+                needles.push_back( b );
+            }
+        }
+        if( needles.empty() )
+        {
+            continue;
+        }
 
         const std::string        rel( relForHash( ing.files[f], root ) );
         std::vector<char>        shadowed( needles.size(), 0 );
@@ -464,16 +605,25 @@ inline void scanBindingUses( const IngestResult& ing, const std::string& root, V
             {
                 const ValueBinding& bind      = out.bindings[ needles[k] ];
                 const bool          isOwnDecl = rel == bind.path && lineNo == bind.line;
-                if( isOwnDecl )                                continue;   // a declaration is not a use of itself
+                if( isOwnDecl )
+                {
+                    continue; // a declaration is not a use of itself
+                }
                 if( declaresConstant( line, bind.name ) )      { shadowed[k] = 1; continue; }
-                if( firstWordAt( line, bind.name ) == std::string_view::npos ) continue;
+                if( firstWordAt( line, bind.name ) == std::string_view::npos )
+                {
+                    continue;
+                }
                 pending.push_back( LitBranch{ bind.gate, bind.name, rel, lineNo, kNoNode } );
                 pendingNeedle.push_back( k );
             }
         } );
         for( std::size_t i = 0; i < pending.size(); ++i )
         {
-            if( shadowed[ pendingNeedle[i] ] ) continue;
+            if( shadowed[pendingNeedle[i]] )
+            {
+                continue;
+            }
             ++out.bindings[ needles[ pendingNeedle[i] ] ].uses;
             out.branches.push_back( std::move( pending[i] ) );
         }
@@ -486,9 +636,15 @@ inline ValueScanResult scanValueLane( const IngestResult& ing, const std::string
                                       const std::vector<std::string>& family )
 {
     ValueScanResult out;
-    if( family.empty() ) return out;
+    if( family.empty() )
+    {
+        return out;
+    }
     scanGateMentions( ing, root, family, out );
-    if( !out.bindings.empty() ) scanBindingUses( ing, root, out );   // a pure `#if` gate has nothing to cross to
+    if( !out.bindings.empty() )
+    {
+        scanBindingUses( ing, root, out ); // a pure `#if` gate has nothing to cross to
+    }
     return out;
 }
 
@@ -498,8 +654,7 @@ inline ValueScanResult scanValueLane( const IngestResult& ing, const std::string
 // the SYMBOL pool for typo'd function names — a different pool answering a different question.)
 inline std::vector<std::string> nearestGateNames( const std::vector<darkflags::Gate>& gates, std::string_view want )
 {
-    const auto lower = []( std::string_view v )
-    { std::string o; o.reserve( v.size() ); for( char c : v ) o.push_back( char( std::tolower( (unsigned char)c ) ) ); return o; };
+    const auto lower = []( std::string_view v ) { std::string o; o.reserve( v.size() ); for( char c : v ) { o.push_back( char( std::tolower( (unsigned char)c ) ) ); } return o; };
     const std::string wantLow = lower( want );
 
     constexpr int     kContainsBonus = 1000;   // a literal containment beats any prefix score, by construction
@@ -509,24 +664,41 @@ inline std::vector<std::string> nearestGateNames( const std::vector<darkflags::G
     {
         const std::string low = lower( g.name );
         int score = 0;
-        if( !wantLow.empty() && low.find( wantLow ) != std::string::npos ) score += kContainsBonus;
+        if( !wantLow.empty() && low.find( wantLow ) != std::string::npos )
+        {
+            score += kContainsBonus;
+        }
         std::size_t pfx = 0;
         const std::size_t lim = std::min( low.size(), wantLow.size() );
-        while( pfx < lim && low[pfx] == wantLow[pfx] ) ++pfx;
+        while( pfx < lim && low[pfx] == wantLow[pfx] )
+        {
+            ++pfx;
+        }
         score += int( pfx ) * 4 - std::abs( int( low.size() ) - int( wantLow.size() ) );
-        if( score > 8 ) cands.push_back( Cand{ score, g.name } );
+        if( score > 8 )
+        {
+            cands.push_back( Cand { score, g.name } );
+        }
     }
     std::sort( cands.begin(), cands.end(), []( const Cand& a, const Cand& b )
                { return a.score != b.score ? a.score > b.score : a.name < b.name; } );
     // When ANY gate literally contains what was typed, that is the answer — offering four family siblings
     // beside it just because they share the `FIXTURE_` prefix makes the hint noise instead of a fix.
     if( !cands.empty() && cands.front().score >= kContainsBonus )
+    {
         cands.erase( std::find_if( cands.begin(), cands.end(), []( const Cand& c ) { return c.score < kContainsBonus; } ), cands.end() );
-    if( cands.size() > kMaxNearMisses ) cands.resize( kMaxNearMisses );
+    }
+    if( cands.size() > kMaxNearMisses )
+    {
+        cands.resize( kMaxNearMisses );
+    }
 
     std::vector<std::string> out;
     out.reserve( cands.size() );
-    for( Cand& c : cands ) out.push_back( std::move( c.name ) );
+    for( Cand& c : cands )
+    {
+        out.push_back( std::move( c.name ) );
+    }
     return out;
 }
 
@@ -546,7 +718,9 @@ inline SiteLocator buildSiteLocator( const IngestResult& ing, const std::string&
     loc.lines = buildSymbolLineIndex( ing );
     loc.fileIdOf.reserve( ing.files.size() );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
         loc.fileIdOf[ std::string( relForHash( ing.files[f], root ) ) ] = f;
+    }
     return loc;
 }
 
@@ -561,9 +735,18 @@ inline std::uint32_t fileIdFor( const SiteLocator& loc, const std::string& rel )
 inline void attachHost( const IngestResult& ing, const SiteLocator& loc, LitBranch& b, FlipResult& res )
 {
     const std::uint32_t f = fileIdFor( loc, b.path );
-    if( f != UINT32_MAX ) b.host = innermostAtLine( ing, loc.lines, f, b.line );
-    if( b.host != kNoNode ) res.hosts.push_back( b.host );      // deduped once, in computeFlip
-    else                    ++res.fileScopeLights;
+    if( f != UINT32_MAX )
+    {
+        b.host = innermostAtLine( ing, loc.lines, f, b.line );
+    }
+    if( b.host != kNoNode )
+    {
+        res.hosts.push_back( b.host ); // deduped once, in computeFlip
+    }
+    else
+    {
+        ++res.fileScopeLights;
+    }
 }
 
 // The `#if` lane: every family member's region spans, joined to the defs they hold. Also picks off each
@@ -575,7 +758,10 @@ inline void collectRegions( const IngestResult& ing, const SiteLocator& loc,
     for( const std::string& member : family )
     {
         const auto m = byName.find( member );
-        if( m == byName.end() ) continue;
+        if( m == byName.end() )
+        {
+            continue;
+        }
         for( const darkflags::Region& r : m->second.regionSpans )
         {
             LitRegion           lit{ member, r.site.path, r.site.line, r.lines, 0 };
@@ -586,13 +772,21 @@ inline void collectRegions( const IngestResult& ing, const SiteLocator& loc,
                 lit.hostCount = std::uint32_t( hosts.size() );
                 res.hosts.insert( res.hosts.end(), hosts.begin(), hosts.end() );
             }
-            if( lit.hostCount == 0 ) ++res.fileScopeLights;
+            if( lit.hostCount == 0 )
+            {
+                ++res.fileScopeLights;
+            }
             res.totalRegions += 1;
             res.totalLines   += r.lines;
             res.regions.push_back( std::move( lit ) );
         }
         for( const darkflags::Site& s : m->second.reads )
-            if( isCMakePath( s.path ) ) res.buildSites.push_back( s );
+        {
+            if( isCMakePath( s.path ) )
+            {
+                res.buildSites.push_back( s );
+            }
+        }
     }
 }
 
@@ -606,10 +800,16 @@ inline void collectEnvBranches( const IngestResult& ing, const SiteLocator& loc,
     for( const std::string& member : family )
     {
         const auto m = byName.find( member );
-        if( m == byName.end() ) continue;
+        if( m == byName.end() )
+        {
+            continue;
+        }
         for( const darkflags::Site& s : m->second.reads )
         {
-            if( isCMakePath( s.path ) || isProsePath( s.path ) ) continue;   // a build row / a doc mention, not a read
+            if( isCMakePath( s.path ) || isProsePath( s.path ) )
+            {
+                continue; // a build row / a doc mention, not a read
+            }
             LitBranch b{ member, "getenv", s.path, s.line, kNoNode };
             attachHost( ing, loc, b, res );
             res.branches.push_back( std::move( b ) );
@@ -635,7 +835,10 @@ inline void collectValueBranches( const IngestResult& ing, const SiteLocator& lo
 // exactly as --impact and --test-gate use them; no third traversal is invented here.
 inline void computeRadius( const IngestResult& ing, const Graph& g, FlipResult& res )
 {
-    if( res.hosts.empty() ) return;
+    if( res.hosts.empty() )
+    {
+        return;
+    }
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
@@ -647,21 +850,51 @@ inline void computeRadius( const IngestResult& ing, const Graph& g, FlipResult& 
         const std::uint32_t f = ing.symbols[n].fileId;
         if( isTestPath( ing.files[f] ) && !testFileSeen[f] ) { testFileSeen[f] = 1; res.tests.push_back( f ); }
     };
-    for( NodeId n : up )        noteTestFile( n );
-    for( NodeId h : res.hosts ) noteTestFile( h );                    // a host that IS test code is its own test
+    for( NodeId n : up )
+    {
+        noteTestFile( n );
+    }
+    for( NodeId h : res.hosts )
+    {
+        noteTestFile( h ); // a host that IS test code is its own test
+    }
     std::sort( res.tests.begin(), res.tests.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
     // coverage — the forward dual from every test symbol (situ.h's convention, same primitive)
     std::vector<NodeId> testSeeds;
-    for( NodeId i = 0; i < N; ++i ) if( isTestPath( ing.files[ ing.symbols[i].fileId ] ) ) testSeeds.push_back( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        if( isTestPath( ing.files[ing.symbols[i].fileId] ) )
+        {
+            testSeeds.push_back( i );
+        }
+    }
     res.testReach = forwardReach( g, testSeeds );
-    for( NodeId h : res.hosts ) if( h < res.testReach.size() && !res.testReach[h] ) res.untested.push_back( h );
+    for( NodeId h : res.hosts )
+    {
+        if( h < res.testReach.size() && !res.testReach[h] )
+        {
+            res.untested.push_back( h );
+        }
+    }
 
     // what the newly-live code will now CALL — the forward reach, minus the hosts themselves
     const std::vector<char> down = forwardReach( g, res.hosts );
     std::vector<char>       isHost( N, 0 );
-    for( NodeId h : res.hosts ) if( h < N ) isHost[h] = 1;
-    for( NodeId i = 0; i < N; ++i ) if( down[i] && !isHost[i] ) res.downstream.push_back( i );
+    for( NodeId h : res.hosts )
+    {
+        if( h < N )
+        {
+            isHost[h] = 1;
+        }
+    }
+    for( NodeId i = 0; i < N; ++i )
+    {
+        if( down[i] && !isHost[i] )
+        {
+            res.downstream.push_back( i );
+        }
+    }
 }
 
 // Every emitted list gets a total order here — determinism is a property of this one function, not of a
@@ -679,11 +912,20 @@ inline void orderFlipResult( const IngestResult& ing, FlipResult& res )
 
     const auto bySymbolRisk = [ & ]( NodeId a, NodeId b )
     {
-        if( ing.symbols[a].ccx != ing.symbols[b].ccx )    return ing.symbols[a].ccx > ing.symbols[b].ccx;
+        if( ing.symbols[a].ccx != ing.symbols[b].ccx )
+        {
+            return ing.symbols[a].ccx > ing.symbols[b].ccx;
+        }
         const std::string& fa = ing.files[ ing.symbols[a].fileId ];
         const std::string& fb = ing.files[ ing.symbols[b].fileId ];
-        if( fa != fb )                                    return fa < fb;
-        if( ing.symbols[a].name != ing.symbols[b].name )  return ing.symbols[a].name < ing.symbols[b].name;
+        if( fa != fb )
+        {
+            return fa < fb;
+        }
+        if( ing.symbols[a].name != ing.symbols[b].name )
+        {
+            return ing.symbols[a].name < ing.symbols[b].name;
+        }
         return a < b;
     };
     std::sort( res.hosts.begin(),      res.hosts.end(),      bySymbolRisk );
@@ -707,9 +949,17 @@ inline void adoptGateIdentity( const gtl::btree_map<std::string, darkflags::Gate
     res.alsoDef   = gate.alsoDef;
     res.alsoSite  = gate.alsoSite;
     res.parent    = gate.aliasParent;
-    if( res.parent.empty() ) return;
+    if( res.parent.empty() )
+    {
+        return;
+    }
     for( const auto& [ name, other ] : byName )
-        if( name != gate.name && other.aliasParent == res.parent ) ++res.siblingCount;
+    {
+        if( name != gate.name && other.aliasParent == res.parent )
+        {
+            ++res.siblingCount;
+        }
+    }
 }
 
 inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const std::string& root,
@@ -723,7 +973,10 @@ inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const st
     res.filesScanned = harvest.filesScanned;
 
     gtl::btree_map<std::string, darkflags::Gate> byName;
-    for( const darkflags::Gate& gate : harvest.gates ) byName[ gate.name ] = gate;
+    for( const darkflags::Gate& gate : harvest.gates )
+    {
+        byName[gate.name] = gate;
+    }
 
     const auto self = byName.find( std::string( gateName ) );
     if( self == byName.end() )
@@ -741,8 +994,14 @@ inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const st
     // (2) the lit sites, by lane, each joined to the def that holds it
     const SiteLocator loc = buildSiteLocator( ing, root );
     collectRegions( ing, loc, byName, family, res );
-    if( res.isRuntime ) collectEnvBranches( ing, loc, byName, family, res );
-    else                collectValueBranches( ing, loc, root, family, res );
+    if( res.isRuntime )
+    {
+        collectEnvBranches( ing, loc, byName, family, res );
+    }
+    else
+    {
+        collectValueBranches( ing, loc, root, family, res );
+    }
 
     // (3) the per-member roll-up the report leads with (a master's weight IS its children's)
     for( const std::string& member : family )
@@ -750,7 +1009,13 @@ inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const st
         FamilyMember fm{ member, member == gate.name, 0, 0, 0 };
         const auto   m = byName.find( member );
         if( m != byName.end() ) { fm.regions = m->second.regions; fm.lines = m->second.guardedLines; }
-        for( const LitBranch& b : res.branches ) if( b.gate == member ) ++fm.branches;
+        for( const LitBranch& b : res.branches )
+        {
+            if( b.gate == member )
+            {
+                ++fm.branches;
+            }
+        }
         res.family.push_back( std::move( fm ) );
     }
 
@@ -786,11 +1051,17 @@ inline std::size_t writeCappedRows( std::FILE* out, const char* moreAttr, const 
     std::size_t shown = 0;
     for( const auto& item : seq )
     {
-        if( shown >= maxRows ) break;
+        if( shown >= maxRows )
+        {
+            break;
+        }
         ++shown;
         row( item );
     }
-    if( seq.size() > shown ) std::fprintf( out, "<more %s=\"%zu\"/>", moreAttr, seq.size() - shown );
+    if( seq.size() > shown )
+    {
+        std::fprintf( out, "<more %s=\"%zu\"/>", moreAttr, seq.size() - shown );
+    }
     return shown;
 }
 
@@ -834,19 +1105,29 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
 
     // the contradiction row: this gate is ALREADY lit by the winning declaration, and dark only in the other
     if( !res.isDark )
+    {
         std::fprintf( out, "<already-lit note=\"the winning default already builds this code; the radius below is what the other declaration keeps dark\"/>" );
+    }
     if( res.hasAlso )
+    {
         std::fprintf( out, "<also kind=\"%s\" default=\"%s\" p=\"%s\" l=\"%u\"/>",
                       darkflags::gateKindTag( res.alsoKind ), ex( res.alsoDef ).c_str(),
                       ex( res.alsoSite.path ).c_str(), res.alsoSite.line );
+    }
     if( !res.parent.empty() )
+    {
         std::fprintf( out, "<parent name=\"%s\" siblings=\"%u\"/>", ex( res.parent ).c_str(), res.siblingCount );
+    }
     if( res.familyCapped )
+    {
         std::fprintf( out, "<capped what=\"family\" at=\"%zu\"/>", kMaxFamily );
+    }
 
     for( const FamilyMember& m : res.family )
+    {
         std::fprintf( out, "<member name=\"%s\" via=\"%s\" regions=\"%u\" loc=\"%u\" branches=\"%u\"/>",
                       ex( m.name ).c_str(), m.isSelf ? "self" : "alias", m.regions, m.lines, m.branches );
+    }
 }
 
 // The two lit-site row kinds, in one element: `#if` regions and C++ branch sites.
@@ -880,8 +1161,10 @@ inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult
     writeFlipLights( out, res, ing, ex, maxRows );
 
     for( const ValueBinding& b : res.bindings )
+    {
         std::fprintf( out, "<bind name=\"%s\" gate=\"%s\" p=\"%s\" l=\"%u\" uses=\"%u\"/>",
                       ex( b.name ).c_str(), ex( b.gate ).c_str(), ex( b.path ).c_str(), b.line, b.uses );
+    }
 
     writeCappedList( out, "hosts", res.hosts, maxRows, [ & ]( NodeId h )
     {

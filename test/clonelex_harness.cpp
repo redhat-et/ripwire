@@ -34,7 +34,10 @@ static int g_fail = 0;
 static void check( bool cond, const char* msg )
 {
     std::printf( "  %s  %s\n", cond ? "PASS" : "FAIL", msg );
-    if( !cond ) g_fail = 1;
+    if( !cond )
+    {
+        g_fail = 1;
+    }
 }
 
 // normalizeSpan over the whole string; returns the joined token stream (trailing space trimmed) + count.
@@ -42,7 +45,10 @@ static std::pair<std::string, std::uint32_t> norm( const std::string& s, bool st
 {
     std::uint32_t tc = 0;
     std::string   out = normalizeSpan( s, 0, std::uint32_t( s.size() ), tc, stripHash );
-    if( !out.empty() && out.back() == ' ' ) out.pop_back();
+    if( !out.empty() && out.back() == ' ' )
+    {
+        out.pop_back();
+    }
     return { out, tc };
 }
 // normalizeTokens over the whole string; join with single spaces so it can be compared to norm()'s stream.
@@ -50,7 +56,14 @@ static std::string toks( const std::string& s, bool stripHash = false )
 {
     std::vector<std::string> v = normalizeTokens( s, 0, std::uint32_t( s.size() ), stripHash );
     std::string out;
-    for( std::size_t i = 0; i < v.size(); ++i ) { if( i ) out += ' '; out += v[i]; }
+    for( std::size_t i = 0; i < v.size(); ++i )
+    {
+        if( i )
+        {
+            out += ' ';
+        }
+        out += v[i];
+    }
     return out;
 }
 

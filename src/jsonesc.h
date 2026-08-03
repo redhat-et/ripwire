@@ -51,25 +51,48 @@ namespace jsonesc
 inline int utf8SeqLen( const char* s, std::size_t i, std::size_t n ) noexcept
 {
     const unsigned char c = static_cast<unsigned char>( s[i] );
-    if( c < 0x80 ) return 1;
+    if( c < 0x80 )
+    {
+        return 1;
+    }
     const auto cont = [ & ]( std::size_t k ) noexcept
     { return k < n && ( static_cast<unsigned char>( s[k] ) & 0xC0 ) == 0x80; };
     if( ( c & 0xE0 ) == 0xC0 )
+    {
         return ( c >= 0xC2 && cont( i + 1 ) ) ? 2 : 0;
+    }
     if( ( c & 0xF0 ) == 0xE0 )
     {
-        if( !cont( i + 1 ) || !cont( i + 2 ) ) return 0;
+        if( !cont( i + 1 ) || !cont( i + 2 ) )
+        {
+            return 0;
+        }
         const unsigned char c1 = static_cast<unsigned char>( s[i + 1] );
-        if( c == 0xE0 && c1 < 0xA0 ) return 0;
-        if( c == 0xED && c1 >= 0xA0 ) return 0;
+        if( c == 0xE0 && c1 < 0xA0 )
+        {
+            return 0;
+        }
+        if( c == 0xED && c1 >= 0xA0 )
+        {
+            return 0;
+        }
         return 3;
     }
     if( ( c & 0xF8 ) == 0xF0 && c <= 0xF4 )
     {
-        if( !cont( i + 1 ) || !cont( i + 2 ) || !cont( i + 3 ) ) return 0;
+        if( !cont( i + 1 ) || !cont( i + 2 ) || !cont( i + 3 ) )
+        {
+            return 0;
+        }
         const unsigned char c1 = static_cast<unsigned char>( s[i + 1] );
-        if( c == 0xF0 && c1 < 0x90 ) return 0;
-        if( c == 0xF4 && c1 >= 0x90 ) return 0;
+        if( c == 0xF0 && c1 < 0x90 )
+        {
+            return 0;
+        }
+        if( c == 0xF4 && c1 >= 0x90 )
+        {
+            return 0;
+        }
         return 4;
     }
     return 0;
@@ -126,7 +149,9 @@ inline void escapeInto( std::string_view s, std::string& out,
             if( c < 0x20 )
             { char b[ 8 ]; std::snprintf( b, sizeof( b ), "\\u%04x", unsigned( c ) ); out += b; }
             else
+            {
                 out += char( c );
+            }
             ++i;
             continue;
         }
@@ -137,8 +162,14 @@ inline void escapeInto( std::string_view s, std::string& out,
         const int len = utf8SeqLen( d, i, n );
         if( len == 0 )
         {
-            if( replacementAsTextEscape ) out += "\\ufffd";           // ccjson posture: literal escape text
-            else                          out += "\xEF\xBF\xBD";      // mcp posture: raw U+FFFD bytes
+            if( replacementAsTextEscape )
+            {
+                out += "\\ufffd"; // ccjson posture: literal escape text
+            }
+            else
+            {
+                out += "\xEF\xBF\xBD"; // mcp posture: raw U+FFFD bytes
+            }
             ++i;
         }
         else { out.append( d + i, std::size_t( len ) ); i += std::size_t( len ); }
@@ -207,7 +238,9 @@ inline std::size_t jsonStringEnd( std::string_view s, std::size_t quotePos ) noe
 {
     std::size_t q = quotePos + 1;
     while( q < s.size() && s[q] != '"' )
+    {
         q += ( s[q] == '\\' && q + 1 < s.size() ) ? 2 : 1;
+    }
     return q < s.size() ? q : std::string_view::npos;
 }
 
@@ -235,7 +268,14 @@ inline bool isJsonWs( char c ) noexcept
 inline std::string shSingleQuote( const std::string& s )
 {
     std::string out = "'";
-    for( char c : s ) { if( c == '\'' ) out += "'\\''"; else out += c; }
+    for( char c : s )
+    {
+        if( c == '\'' ) { out += "'\\''"; }
+        else
+        {
+            out += c;
+        }
+    }
     out += "'";
     return out;
 }

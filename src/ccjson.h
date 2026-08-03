@@ -53,7 +53,10 @@ struct CcFileMetrics
 inline std::uint32_t ccCountLoc( const std::string& path ) noexcept
 {
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
-    if( !fp ) return 0;
+    if( !fp )
+    {
+        return 0;
+    }
     std::uint32_t lines = 0;
     bool          sawByte = false, lastNl = false;
     char          buf[ 65536 ];
@@ -61,10 +64,20 @@ inline std::uint32_t ccCountLoc( const std::string& path ) noexcept
     while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
     {
         sawByte = true;
-        for( std::size_t i = 0; i < n; ++i ) { lastNl = ( buf[i] == '\n' ); if( lastNl ) ++lines; }
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            lastNl = ( buf[i] == '\n' );
+            if( lastNl )
+            {
+                ++lines;
+            }
+        }
     }
     std::fclose( fp );
-    if( sawByte && !lastNl ) ++lines;   // final line without a trailing '\n'
+    if( sawByte && !lastNl )
+    {
+        ++lines; // final line without a trailing '\n'
+    }
     return lines;
 }
 
@@ -95,7 +108,12 @@ struct CcNode
 inline std::uint32_t childNamed( std::vector<CcNode>& pool, std::uint32_t parent, std::string_view seg )
 {
     for( std::uint32_t ci : pool[ parent ].children )
-        if( pool[ ci ].name == seg ) return ci;
+    {
+        if( pool[ci].name == seg )
+        {
+            return ci;
+        }
+    }
     const std::uint32_t id = std::uint32_t( pool.size() );
     pool.push_back( CcNode{ std::string( seg ), -1, {} } );
     pool[ parent ].children.push_back( id );   // NOTE: pool may reallocate; do not hold a CcNode& across this
@@ -111,7 +129,10 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
     std::vector<CcFileMetrics> m( F );
 
     // LOC per file (read bytes once).
-    for( std::uint32_t f = 0; f < F; ++f ) m[f].loc = ccCountLoc( ing.files[f] );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        m[f].loc = ccCountLoc( ing.files[f] );
+    }
 
     // symbol count + Σcx + Σccx per file.
     for( const Symbol& s : ing.symbols )
@@ -131,7 +152,13 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
         std::sort( outs.begin(), outs.end() );
         outs.erase( std::unique( outs.begin(), outs.end() ), outs.end() );
         m[f].fanOut = std::uint32_t( outs.size() );
-        for( std::uint32_t to : outs ) if( to < F ) ++m[ to ].fanIn;   // afferent
+        for( std::uint32_t to : outs )
+        {
+            if( to < F )
+            {
+                ++m[to].fanIn; // afferent
+            }
+        }
     }
     return m;
 }
@@ -146,7 +173,10 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
 
     // normalize the root prefix (drop trailing '/') so relative paths strip cleanly.
     std::string rootPrefix = root;
-    while( rootPrefix.size() > 1 && rootPrefix.back() == '/' ) rootPrefix.pop_back();
+    while( rootPrefix.size() > 1 && rootPrefix.back() == '/' )
+    {
+        rootPrefix.pop_back();
+    }
 
     // project name = basename of the root (or "project" for "." / empty).
     std::string projectName;
@@ -166,7 +196,9 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         // repo-relative path: strip "<rootPrefix>/" when present, else use the path as-is.
         std::string_view p = ing.files[f];
         if( p.size() > rootPrefix.size() + 1 && p.compare( 0, rootPrefix.size(), rootPrefix ) == 0 && p[ rootPrefix.size() ] == '/' )
+        {
             p = p.substr( rootPrefix.size() + 1 );
+        }
 
         // walk the path segments, creating folders; the final segment becomes a File leaf.
         std::uint32_t cur = 0;
@@ -179,17 +211,25 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
             if( !seg.empty() )
             {
                 cur = childNamed( pool, cur, seg );
-                if( isLeaf ) pool[ cur ].fileId = std::int64_t( f );
+                if( isLeaf )
+                {
+                    pool[cur].fileId = std::int64_t( f );
+                }
             }
-            if( isLeaf ) break;
+            if( isLeaf )
+            {
+                break;
+            }
             start = sl + 1;
         }
     }
 
     // sort every folder's children by name (deterministic emit; CodeCharta re-sorts on import anyway).
     for( CcNode& n : pool )
+    {
         std::sort( n.children.begin(), n.children.end(),
                    [ & ]( std::uint32_t a, std::uint32_t b ) { return pool[a].name < pool[b].name; } );
+    }
 
     // ---- streamed recursive emit. A small explicit helper (no std::function alloc) via a lambda that
     //      captures itself through a reference wrapper is awkward; use an index-driven recursion with a
@@ -222,7 +262,10 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         std::fprintf( out, "\"type\":\"Folder\",\"attributes\":{},\"children\":[" );
         for( std::size_t i = 0; i < n.children.size(); ++i )
         {
-            if( i ) std::fprintf( out, "," );
+            if( i )
+            {
+                std::fprintf( out, "," );
+            }
             self( self, n.children[i] );
         }
         std::fprintf( out, "]}" );

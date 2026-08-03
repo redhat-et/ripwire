@@ -44,7 +44,10 @@ inline std::vector<std::string> definingFilesOf( const IngestResult& ing, std::s
     for( NodeId n : resolveAllByName( ing, name ) )
     {
         const std::string& path = ing.files[ ing.symbols[n].fileId ];
-        if( std::find( files.begin(), files.end(), path ) == files.end() ) files.push_back( path );
+        if( std::find( files.begin(), files.end(), path ) == files.end() )
+        {
+            files.push_back( path );
+        }
     }
     return files;
 }
@@ -85,9 +88,11 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
     const bool fileQualified = spec.find( "::" ) == std::string_view::npos && spec.find( ':' ) != std::string_view::npos;
 
     if( fileQualified && !file.empty() && !indexHasFileMatching( ing, file ) )
+    {
         return " (no indexed file matches '" + std::string( file ) + "' — the PATH half is the fault, so nothing is claimed "
                "about '" + std::string( bareName ) + "'; drop the qualifier (" + std::string( retryForm ) + std::string( bareName )
              + ") to search every file, or pass a path the map lists)";
+    }
 
     if( fileQualified )
     {
@@ -96,8 +101,14 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
         {
             const std::size_t shownCount = std::min( definingFiles.size(), kSelectorFilesShown );
             std::string       clause     = " (that file defines no '" + std::string( bareName ) + "' — defined in ";
-            for( std::size_t fileIndex = 0; fileIndex < shownCount; ++fileIndex ) clause += ( fileIndex ? ", " : "" ) + definingFiles[ fileIndex ];
-            if( definingFiles.size() > shownCount ) clause += " (+" + std::to_string( definingFiles.size() - shownCount ) + " more files)";
+            for( std::size_t fileIndex = 0; fileIndex < shownCount; ++fileIndex )
+            {
+                clause += ( fileIndex ? ", " : "" ) + definingFiles[fileIndex];
+            }
+            if( definingFiles.size() > shownCount )
+            {
+                clause += " (+" + std::to_string( definingFiles.size() - shownCount ) + " more files)";
+            }
             return clause + " — e.g. " + std::string( retryForm ) + definingFiles[0] + ":" + std::string( bareName ) + ")";
         }
     }

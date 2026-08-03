@@ -16,7 +16,9 @@ namespace
 void check( bool condition, const char* expression, int line )
 {
     if( condition )
+    {
         return;
+    }
     std::fprintf( stderr, "radix gate failed at line %d: %s\n", line, expression );
     std::exit( 1 );
 }
@@ -52,7 +54,9 @@ template<class Value, class Less>
 void stableReferenceSort( std::vector<Value>& values, Less less )
 {
     if( values.size() < 2 )
+    {
         return;
+    }
     std::vector<Value> scratch( values.size() );
     Value* source = values.data();
     Value* destination = scratch.data();
@@ -71,22 +75,36 @@ void stableReferenceSort( std::vector<Value>& values, Less less )
             while( left < middle && right < end )
             {
                 if( less( source[ right ], source[ left ] ) )
+                {
                     destination[ out++ ] = source[ right++ ];
+                }
                 else
+                {
                     destination[ out++ ] = source[ left++ ];
+                }
             }
-            while( left < middle ) destination[ out++ ] = source[ left++ ];
-            while( right < end ) destination[ out++ ] = source[ right++ ];
+            while( left < middle )
+            {
+                destination[out++] = source[left++];
+            }
+            while( right < end )
+            {
+                destination[out++] = source[right++];
+            }
             begin = end;
         }
         std::swap( source, destination );
         sourceIsScratch = !sourceIsScratch;
         if( width > values.size() / 2 )
+        {
             break;
+        }
         width *= 2;
     }
     if( sourceIsScratch )
+    {
         std::copy( source, source + values.size(), values.data() );
+    }
 }
 
 template<class Key>
@@ -111,7 +129,9 @@ std::vector<std::uint32_t> makeU32Keys( std::size_t count )
     std::uint32_t state = 0xC7A6u ^ std::uint32_t( count );
     std::vector<std::uint32_t> keys( count );
     for( std::size_t keyIndex = 0; keyIndex < count; ++keyIndex )
+    {
         keys[ keyIndex ] = keyIndex % 7 == 0 ? 42u : nextRandom( state );
+    }
     return keys;
 }
 
@@ -147,7 +167,9 @@ void verifyLargePaths()
 
         std::vector<std::uint64_t> u64Keys( count );
         for( std::size_t keyIndex = 0; keyIndex < count; ++keyIndex )
+        {
             u64Keys[ keyIndex ] = ( std::uint64_t( u32Keys[ keyIndex ] ) << 32 ) | std::uint64_t( u32Keys[ count - keyIndex - 1 ] );
+        }
         std::vector<std::uint32_t> expected( count );
         std::iota( expected.begin(), expected.end(), 0u );
         stableReferenceSort( expected, [ & ]( std::uint32_t a, std::uint32_t b ) { return u64Keys[ a ] < u64Keys[ b ]; } );
@@ -172,7 +194,9 @@ void verifySmallAndIndexedPaths()
     constexpr std::size_t kCount = 4097;
     std::vector<SmallRecord> records( kCount );
     for( std::size_t recordIndex = 0; recordIndex < kCount; ++recordIndex )
+    {
         records[ recordIndex ] = SmallRecord{ std::uint32_t( recordIndex % 19 ), std::uint32_t( recordIndex ) };
+    }
 
     std::vector<SmallRecord> expected = records;
     stableReferenceSort( expected, []( const SmallRecord& a, const SmallRecord& b ) { return a.key < b.key; } );
@@ -188,8 +212,12 @@ void verifySmallAndIndexedPaths()
     const std::vector<std::uint32_t> keys = makeU32Keys( kCount );
     std::vector<std::uint32_t> subset;
     for( std::uint32_t keyIndex = 0; keyIndex < keys.size(); ++keyIndex )
+    {
         if( keyIndex % 3 != 0 )
+        {
             subset.push_back( keyIndex );
+        }
+    }
     std::vector<std::uint32_t> expectedSubset = subset;
     stableReferenceSort( expectedSubset, [ & ]( std::uint32_t a, std::uint32_t b ) { return keys[ a ] < keys[ b ]; } );
     std::vector<std::uint32_t> subsetScratch( subset.size() );
@@ -225,7 +253,9 @@ void verifyRipwireWrappers()
         const std::vector<float> scores = makeFloatKeys( count );
         std::vector<float> nonnegativeScores( count );
         for( std::size_t scoreIndex = 0; scoreIndex < count; ++scoreIndex )
+        {
             nonnegativeScores[ scoreIndex ] = scores[ scoreIndex ] < 0.f ? -scores[ scoreIndex ] : scores[ scoreIndex ];
+        }
         std::vector<std::uint32_t> order( count );
         std::iota( order.begin(), order.end(), 0u );
         const std::uint32_t shuffleSeed = 0xD35Cu ^ std::uint32_t( count );
@@ -242,11 +272,15 @@ void verifyRipwireWrappers()
         std::vector<float> adaptive = nonnegativeScores;
         rw::sortutil::radixSortNonNegativeFloatsDesc( adaptive );
         for( std::size_t scoreIndex = 1; scoreIndex < adaptive.size(); ++scoreIndex )
+        {
             CHECK( adaptive[ scoreIndex - 1 ] >= adaptive[ scoreIndex ] );
+        }
 
         std::vector<EdgeRecord> edges( count );
         for( std::size_t edgeIndex = 0; edgeIndex < count; ++edgeIndex )
+        {
             edges[ edgeIndex ] = EdgeRecord{ std::uint32_t( edgeIndex % 31 ), std::uint32_t( edgeIndex % 17 ), std::uint32_t( edgeIndex ) };
+        }
         deterministicShuffle( edges, shuffleSeed ^ 0xED6Eu );
         std::vector<EdgeRecord> expectedEdges = edges;
         stableReferenceSort( expectedEdges, rw::sortutil::lessByFromTo<EdgeRecord> );
@@ -258,7 +292,9 @@ void verifyRipwireWrappers()
             CHECK( edges[ edgeIndex ].from == expectedEdges[ edgeIndex ].from );
             CHECK( edges[ edgeIndex ].to == expectedEdges[ edgeIndex ].to );
             if( count >= 2048 )
+            {
                 CHECK( edges[ edgeIndex ].originalIndex == expectedEdges[ edgeIndex ].originalIndex );
+            }
         }
     }
 }

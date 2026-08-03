@@ -261,7 +261,13 @@ inline constexpr struct { const char* name; HttpMethod method; } kHttpMethodTabl
 
 inline HttpMethod httpMethodFromName( std::string_view name ) noexcept
 {
-    for( const auto& e : kHttpMethodTable ) if( name == e.name ) return e.method;
+    for( const auto& e : kHttpMethodTable )
+    {
+        if( name == e.name )
+        {
+            return e.method;
+        }
+    }
     return HttpMethod::Unknown;
 }
 

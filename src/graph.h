@@ -102,7 +102,10 @@ struct Graph
 // language pairs stay strictly separate (a Python `draw` never resolves to a C++ `draw`).
 inline bool langCompatible( Lang a, Lang b ) noexcept
 {
-    if( a == b ) return true;
+    if( a == b )
+    {
+        return true;
+    }
     const bool aCish = ( a == Lang::Cpp || a == Lang::ObjC || a == Lang::C );
     const bool bCish = ( b == Lang::Cpp || b == Lang::ObjC || b == Lang::C );
     return aCish && bCish;
@@ -151,7 +154,10 @@ namespace priorwt
             const bool digit = c >= '0' && c <= '9';
             if( !upper && !lower && !digit ) { inWord = false; prev = c; continue; }   // separator (incl. '_')
             const bool camelBoundary = upper && inWord && !( prev >= 'A' && prev <= 'Z' );  // aB → new word
-            if( !inWord || camelBoundary ) ++words;
+            if( !inWord || camelBoundary )
+            {
+                ++words;
+            }
             inWord = true;
             prev   = c;
         }
@@ -162,9 +168,18 @@ namespace priorwt
     inline constexpr float weight( std::string_view name, std::size_t defCount ) noexcept
     {
         float w = 1.0f;
-        if( defCount > kCommonNameDefThreshold )                            w *= kCommonNameMul;    // common name
-        if( !name.empty() && name.front() == '_' )                         w *= kPrivateNameMul;   // private convention
-        if( name.size() >= kSpecificMinLen && wordCount( name ) >= kSpecificMinWords ) w *= kSpecificNameMul;   // specific
+        if( defCount > kCommonNameDefThreshold )
+        {
+            w *= kCommonNameMul; // common name
+        }
+        if( !name.empty() && name.front() == '_' )
+        {
+            w *= kPrivateNameMul; // private convention
+        }
+        if( name.size() >= kSpecificMinLen && wordCount( name ) >= kSpecificMinWords )
+        {
+            w *= kSpecificNameMul; // specific
+        }
         return w;
     }
 }   // namespace priorwt
@@ -177,16 +192,25 @@ namespace priorwt
 inline std::string decodeJniName( std::string_view mangled )
 {
     constexpr std::string_view kPre = "Java_";
-    if( mangled.size() <= kPre.size() || mangled.substr( 0, kPre.size() ) != kPre ) return {};
+    if( mangled.size() <= kPre.size() || mangled.substr( 0, kPre.size() ) != kPre )
+    {
+        return {};
+    }
     std::string_view body = mangled.substr( kPre.size() );
-    if( const std::size_t dd = body.find( "__" ); dd != std::string_view::npos ) body = body.substr( 0, dd );
+    if( const std::size_t dd = body.find( "__" ); dd != std::string_view::npos )
+    {
+        body = body.substr( 0, dd );
+    }
     std::string out;
     out.reserve( body.size() );
     for( std::size_t i = 0; i < body.size(); ++i )
     {
         if( body[i] != '_' ) { out.push_back( body[i] ); continue; }
         if( i + 1 < body.size() && body[i + 1] == '1' ) { out.push_back( '_' ); ++i; }   // "_1" → literal '_'
-        else                                              out.push_back( '.' );          // '_'  → segment separator
+        else
+        {
+            out.push_back( '.' ); // '_'  → segment separator
+        }
     }
     return out;
 }
@@ -206,10 +230,19 @@ namespace routematch
         std::size_t i = 0;
         while( i < path.size() )
         {
-            while( i < path.size() && path[i] == '/' ) ++i;
+            while( i < path.size() && path[i] == '/' )
+            {
+                ++i;
+            }
             const std::size_t start = i;
-            while( i < path.size() && path[i] != '/' ) ++i;
-            if( i > start ) segs.push_back( path.substr( start, i - start ) );
+            while( i < path.size() && path[i] != '/' )
+            {
+                ++i;
+            }
+            if( i > start )
+            {
+                segs.push_back( path.substr( start, i - start ) );
+            }
         }
         return segs;
     }
@@ -218,10 +251,22 @@ namespace routematch
     // detects: FastAPI `{id}`, Express `:id`, Flask `<int:id>` / `<id>`.
     inline bool isTemplateSegment( std::string_view seg ) noexcept
     {
-        if( seg.empty() ) return false;
-        if( seg.front() == ':' ) return true;
-        if( seg.front() == '{' && seg.back() == '}' && seg.size() >= 2 ) return true;
-        if( seg.front() == '<' && seg.back() == '>' && seg.size() >= 2 ) return true;
+        if( seg.empty() )
+        {
+            return false;
+        }
+        if( seg.front() == ':' )
+        {
+            return true;
+        }
+        if( seg.front() == '{' && seg.back() == '}' && seg.size() >= 2 )
+        {
+            return true;
+        }
+        if( seg.front() == '<' && seg.back() == '>' && seg.size() >= 2 )
+        {
+            return true;
+        }
         return false;
     }
 
@@ -232,9 +277,17 @@ namespace routematch
     {
         const std::vector<std::string_view> defSegs = splitSegments( defPath );
         const std::vector<std::string_view> useSegs = splitSegments( usePath );
-        if( defSegs.size() != useSegs.size() ) return false;
+        if( defSegs.size() != useSegs.size() )
+        {
+            return false;
+        }
         for( std::size_t i = 0; i < defSegs.size(); ++i )
-            if( !isTemplateSegment( defSegs[i] ) && defSegs[i] != useSegs[i] ) return false;
+        {
+            if( !isTemplateSegment( defSegs[i] ) && defSegs[i] != useSegs[i] )
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -256,10 +309,19 @@ inline std::string_view rustFileModuleOf( std::string_view path ) noexcept
 {
     const std::size_t slash = path.find_last_of( '/' );
     std::string_view  base  = ( slash == std::string_view::npos ) ? path : path.substr( slash + 1 );
-    if( const std::size_t dot = base.find_last_of( '.' ); dot != std::string_view::npos ) base = base.substr( 0, dot );
+    if( const std::size_t dot = base.find_last_of( '.' ); dot != std::string_view::npos )
+    {
+        base = base.substr( 0, dot );
+    }
 
-    if( base != "mod" ) return ( base == "lib" || base == "main" ) ? std::string_view{} : base;
-    if( slash == std::string_view::npos ) return {};                     // a bare `mod.rs` names no directory
+    if( base != "mod" )
+    {
+        return ( base == "lib" || base == "main" ) ? std::string_view {} : base;
+    }
+    if( slash == std::string_view::npos )
+    {
+        return {}; // a bare `mod.rs` names no directory
+    }
 
     const std::string_view dir = path.substr( 0, slash );                // `x/mod.rs` → the DIRECTORY is the module
     const std::size_t      up  = dir.find_last_of( '/' );
@@ -307,24 +369,39 @@ inline std::string_view rustFileModuleOf( std::string_view path ) noexcept
 inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<std::string, std::vector<std::string>>& chaUp,
                                          const Reference& r, bool alreadyPinned, std::vector<NodeId>& cand )
 {
-    if( alreadyPinned || r.lang != Lang::Rust || r.qualifier.empty() || cand.empty() ) return true;   // guard does not apply
+    if( alreadyPinned || r.lang != Lang::Rust || r.qualifier.empty() || cand.empty() )
+    {
+        return true; // guard does not apply
+    }
     const std::string& qualifier = r.qualifier;
 
     std::vector<std::string> ancestors;                                  // transitive chaUp closure of one candidate scope
     const auto implementsQualifier = [ & ]( const std::string& scopeName ) -> bool
     {
-        if( scopeName.empty() ) return false;
+        if( scopeName.empty() )
+        {
+            return false;
+        }
         ancestors.clear();
         ancestors.push_back( scopeName );
         for( std::size_t queueIndex = 0; queueIndex < ancestors.size() && ancestors.size() < 4096; ++queueIndex )
         {
             const std::string current = ancestors[ queueIndex ];         // COPIED — push_back may reallocate
             const auto        upIt    = chaUp.find( current );
-            if( upIt == chaUp.end() ) continue;
+            if( upIt == chaUp.end() )
+            {
+                continue;
+            }
             for( const std::string& up : upIt->second )
             {
-                if( up == qualifier ) return true;
-                if( std::find( ancestors.begin(), ancestors.end(), up ) == ancestors.end() ) ancestors.push_back( up );
+                if( up == qualifier )
+                {
+                    return true;
+                }
+                if( std::find( ancestors.begin(), ancestors.end(), up ) == ancestors.end() )
+                {
+                    ancestors.push_back( up );
+                }
             }
         }
         return false;
@@ -339,9 +416,15 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<
         const bool memberOfFileModule =    candScope.empty()
                                         && cs.fileId < ing.files.size()
                                         && rustFileModuleOf( ing.files[ cs.fileId ] ) == qualifier;
-        if( candScope == qualifier || memberOfFileModule || implementsQualifier( candScope ) ) survivors.push_back( c );
+        if( candScope == qualifier || memberOfFileModule || implementsQualifier( candScope ) )
+        {
+            survivors.push_back( c );
+        }
     }
-    if( survivors.empty() ) return false;
+    if( survivors.empty() )
+    {
+        return false;
+    }
     cand.swap( survivors );
     return true;
 }
@@ -390,17 +473,28 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
     g.canonId.resize( N );
     for( const Symbol& s : ing.symbols )
+    {
         g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+    }
 
     // A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it as
     // the symbol's binding label. No ingest capture / cache change — it is a pure function of the def NAME. The
     // vector stays EMPTY (no allocation) when the tree holds no JNI export, so a JNI-free corpus is unaffected.
     for( const Symbol& s : ing.symbols )
     {
-        if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 ) continue;
+        if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
+        {
+            continue;
+        }
         std::string readable = decodeJniName( s.name );
-        if( readable.empty() ) continue;
-        if( g.bindLabel.empty() ) g.bindLabel.assign( N, std::string() );
+        if( readable.empty() )
+        {
+            continue;
+        }
+        if( g.bindLabel.empty() )
+        {
+            g.bindLabel.assign( N, std::string() );
+        }
         g.bindLabel[ s.id ] = std::move( readable );
     }
 
@@ -434,7 +528,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::string, rw::svector<NodeId, 2>> byName;
     byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
     for( const Symbol& s : ing.symbols )
+    {
         byName[ s.name ].push_back( s.id );
+    }
 
     // decl/def collapse (adversarial-review #1): a C++ header decl + its .cpp def are TWO same-named
     // symbols. Left alone, that (a) makes tier-3 see cand.size()==2 and DROP every cross-dir call to the
@@ -449,10 +545,26 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !multiRoot )
         {
             bool anyDef = false;
-            for( NodeId id : ids ) if( hasBody( id ) ) { anyDef = true; break; }
-            if( !anyDef ) continue;
+            for( NodeId id : ids )
+            {
+                if( hasBody( id ) )
+                {
+                    anyDef = true;
+                    break;
+                }
+            }
+            if( !anyDef )
+            {
+                continue;
+            }
             rw::svector<NodeId, 2> defs;
-            for( NodeId id : ids ) if( hasBody( id ) ) defs.push_back( id );
+            for( NodeId id : ids )
+            {
+                if( hasBody( id ) )
+                {
+                    defs.push_back( id );
+                }
+            }
             ids = std::move( defs );
         }
         else
@@ -463,15 +575,30 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             const auto rootHasDef = [ & ]( std::uint32_t r ) noexcept
             {
                 for( NodeId id : ids )
-                    if( ing.fileRoot[ ing.symbols[id].fileId ] == r && hasBody( id ) ) return true;
+                {
+                    if( ing.fileRoot[ing.symbols[id].fileId] == r && hasBody( id ) )
+                    {
+                        return true;
+                    }
+                }
                 return false;
             };
             for( NodeId id : ids )
+            {
                 if( !hasBody( id ) && rootHasDef( ing.fileRoot[ ing.symbols[id].fileId ] ) ) { anyRootCollapses = true; break; }
-            if( !anyRootCollapses ) continue;
+            }
+            if( !anyRootCollapses )
+            {
+                continue;
+            }
             rw::svector<NodeId, 2> kept;
             for( NodeId id : ids )
-                if( hasBody( id ) || !rootHasDef( ing.fileRoot[ ing.symbols[id].fileId ] ) ) kept.push_back( id );
+            {
+                if( hasBody( id ) || !rootHasDef( ing.fileRoot[ing.symbols[id].fileId] ) )
+                {
+                    kept.push_back( id );
+                }
+            }
             ids = std::move( kept );
         }
     }
@@ -485,7 +612,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     std::string canonKey;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.scope.empty() || !hasBody( s.id ) ) continue;
+        if( s.scope.empty() || !hasBody( s.id ) )
+        {
+            continue;
+        }
         canonKey.clear();
         canonKey.append( s.scope ).append( "::" ).append( s.name );
         canonByName[ canonKey ].push_back( s.id );
@@ -504,14 +634,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
         for( const Binding& b : ing.bindings )
         {
-            if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() ) continue;   // file-scope/empty → unusable
+            if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() )
+            {
+                continue; // file-scope/empty → unusable
+            }
             key.clear();
             Narrower::appendUint( key, b.fromSymbol );
             key.push_back( '#' );
             key.append( b.var );
             const auto [ it, inserted ] = varType.try_emplace( key, b.typeName );
             if( !inserted && !it->second.empty() && it->second != b.typeName )
+            {
                 it->second.clear();   // conflicting types for one var in one scope → tombstone (never narrow this var)
+            }
         }
     }
 
@@ -528,7 +663,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
-    for( const Symbol& s : ing.symbols ) symFileId[ s.id ] = s.fileId;
+    for( const Symbol& s : ing.symbols )
+    {
+        symFileId[s.id] = s.fileId;
+    }
 
     // ── A4-R5 cross-language FFI binding alias tables ────────────────────────────────────────────────
     // A pybind11 `m.def("name",&fn)` / extern-C decl / ctypes handle, captured syntactically at ingest,
@@ -546,7 +684,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const auto pushCFamily = [ & ]( const rw::svector<NodeId, 2>& srcIds )
         {
             for( NodeId c : srcIds )
-                if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC ) tgt.push_back( c );
+            {
+                if( ing.symbols[c].lang == Lang::Cpp || ing.symbols[c].lang == Lang::ObjC )
+                {
+                    tgt.push_back( c );
+                }
+            }
         };
         for( const BindingAlias& ba : ing.bindingAliases )
         {
@@ -561,14 +704,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 sk.clear();  sk.append( ba.targetScope ).append( "::" ).append( ba.targetName );
                 const auto cit = canonByName.find( sk );
-                if( cit != canonByName.end() ) pushCFamily( cit->second );
+                if( cit != canonByName.end() )
+                {
+                    pushCFamily( cit->second );
+                }
             }
             if( tgt.empty() )                                    // else the bare-name target
             {
                 const auto bit = byName.find( ba.targetName );
-                if( bit != byName.end() ) pushCFamily( bit->second );
+                if( bit != byName.end() )
+                {
+                    pushCFamily( bit->second );
+                }
             }
-            if( tgt.empty() ) continue;                          // target not an in-repo C/C++ def → no alias edge
+            if( tgt.empty() )
+            {
+                continue; // target not an in-repo C/C++ def → no alias edge
+            }
             std::vector<NodeId>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
                                                                         : externCAlias[ ba.aliasName ];
             slot.insert( slot.end(), tgt.begin(), tgt.end() );
@@ -614,13 +766,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
         for( const Reference& ir : ing.references )
         {
-            if( !ir.isInherit ) continue;
+            if( !ir.isInherit )
+            {
+                continue;
+            }
             std::string_view derivedName;
-            if( !ir.qualifier.empty() )                                   // Rust impl → derived type name in qualifier
+            if( !ir.qualifier.empty() )
+            { // Rust impl → derived type name in qualifier
                 derivedName = ir.qualifier;
+            }
             else if( ir.fromSymbol != kNoNode && isClassLikeK( ing.symbols[ ir.fromSymbol ].kind ) )
+            {
                 derivedName = ing.symbols[ ir.fromSymbol ].name;          // the ref sits inside the derived class header
-            if( derivedName.empty() || ir.calleeName.empty() ) continue;
+            }
+            if( derivedName.empty() || ir.calleeName.empty() )
+            {
+                continue;
+            }
             chaUp  [ std::string( derivedName ) ].push_back( ir.calleeName );
             chaDown[ ir.calleeName ].push_back( std::string( derivedName ) );
         }
@@ -638,7 +800,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // file-scope / inheritance / doc-mention / HAS-A → not a call. ABS-3: read/write/import use-sites
         // (role != Call) are ALSO excluded here — they live only in the use-site index, NEVER in the call
         // graph CSR, so PageRank and the default ranked map are byte-for-byte unchanged (G5).
-        if( r.fromSymbol == kNoNode || r.isInherit || r.isDocLink || r.isCompose || r.role != RefRole::Call ) continue;
+        if( r.fromSymbol == kNoNode || r.isInherit || r.isDocLink || r.isCompose || r.role != RefRole::Call )
+        {
+            continue;
+        }
         const auto it = byName.find( r.calleeName );
 
         cand.clear();
@@ -656,12 +821,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( std::size_t i = cb; i < ce; ++i )
             {
                 const NodeId to = scip->coveredFrom[ i ].to;
-                if( to != r.fromSymbol && to < N ) tier.push_back( to );   // precise target (self-loops dropped, as the fallback ladder below does)
+                if( to != r.fromSymbol && to < N )
+                {
+                    tier.push_back( to ); // precise target (self-loops dropped, as the fallback ladder below does)
+                }
             }
             scipPinned = !tier.empty();
             // a covered site whose precise targets are all self / out-of-range yields no edge — treat as pinned
             // (the index HAS resolved it) so we do NOT fall back to a name-based guess for a site SCIP resolved.
-            if( cb != ce ) scipPinned = true;
+            if( cb != ce )
+            {
+                scipPinned = true;
+            }
         }
 
         // ---- A4-R5 FFI binding fallback: compute cross-language alias candidates UP FRONT. Applied below ONLY
@@ -679,7 +850,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 const auto pit = pybindAlias.find( r.calleeName );
                 if( pit != pybindAlias.end() )
-                    for( NodeId c : pit->second ) if( c != r.fromSymbol && c < N ) bindingTier.push_back( c );
+                {
+                    for( NodeId c : pit->second )
+                    {
+                        if( c != r.fromSymbol && c < N )
+                        {
+                            bindingTier.push_back( c );
+                        }
+                    }
+                }
             }
             if( bindingTier.empty() && !externCAlias.empty()
                 && r.lang == Lang::Python && r.recv == RecvKind::NamedVar && !r.recvVar.empty() )
@@ -690,7 +869,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     const auto eit = externCAlias.find( r.calleeName );
                     if( eit != externCAlias.end() )
                     {
-                        for( NodeId c : eit->second ) if( c != r.fromSymbol && c < N ) bindingTier.push_back( c );
+                        for( NodeId c : eit->second )
+                        {
+                            if( c != r.fromSymbol && c < N )
+                            {
+                                bindingTier.push_back( c );
+                            }
+                        }
                         bindingLowConf = !bindingTier.empty();
                     }
                 }
@@ -705,8 +890,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             qkey.append( r.qualifier ).append( "::" ).append( r.calleeName );
             const auto cit = canonByName.find( qkey );
             if( cit != canonByName.end() )
+            {
                 for( NodeId c : cit->second )
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) ) cand.push_back( c );
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    {
+                        cand.push_back( c );
+                    }
+                }
+            }
             canonical = !cand.empty();
         }
         // P2-D Rule 1 (class membership): a `this->m()` / `self.m()` call resolves to the caller's enclosing
@@ -716,24 +908,38 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // was already pinned by an explicit `A::` qualifier (canonical) — that is the more specific signal.
         bool narrowed = false;
         if( !scipPinned && !canonical )
+        {
             if( const auto* hit = narrower.rule1ClassMember( r, ing.symbols[ r.fromSymbol ].scope ) )
             {
                 for( NodeId c : *hit )
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) ) cand.push_back( c );
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    {
+                        cand.push_back( c );
+                    }
+                }
                 narrowed = !cand.empty();
             }
+        }
         // P2-D Rule 2 (receiver-variable type): a named-receiver call `x.m()` / `x->m()` resolves to the method
         // on the VARIABLE's type (`Foo::m` for `Foo x;`), BEFORE the bare-name spray — the other half of the
         // [TYPE] cut. Only when the var has a single unambiguous in-scope binding AND that type defines `m`
         // (canonByName, defs only); otherwise narrowed stays false and we fall through to the name-based fallback. Skipped when the
         // call was already pinned canonically or by Rule 1 (those are the more specific / already-resolved signals).
         if( !scipPinned && !canonical && !narrowed )
+        {
             if( const auto* hit = narrower.rule2RecvVarType( r ) )
             {
                 for( NodeId c : *hit )
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) ) cand.push_back( c );
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    {
+                        cand.push_back( c );
+                    }
+                }
                 narrowed = !cand.empty();
             }
+        }
         // P2-D Rule 3 (import/include-based file narrow): when the name is ambiguous (K same-name defs) but the
         // caller's file #includes / imports EXACTLY ONE file that defines it, resolve to that file's def(s) and
         // DROP the rest — BEFORE the bare-name spray. Sound with no type info: it consumes only the file→file
@@ -741,12 +947,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // only on an unambiguous single-included-file match with NO same-file candidate (that is the name-based fallback's job);
         // otherwise degrades to the name-based fallback. Skipped when already pinned canonically / by Rule 1 / Rule 2 (more specific).
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
+        {
             if( narrower.rule3IncludeFile( it->second, r.fileId, rule3Out ) )
             {
                 for( NodeId c : rule3Out )
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) ) cand.push_back( c );
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) )
+                    {
+                        cand.push_back( c );
+                    }
+                }
                 narrowed = !cand.empty();
             }
+        }
         if( !scipPinned && !canonical && !narrowed )
         {
             // Honesty lever #2 — site A: the name has NO in-repo def at all. This is dominated by genuine
@@ -756,31 +969,55 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // high-signal cross-language miss is counted at the `cand.empty()` site below instead.
             // A4-R5: keep going when an FFI alias offers a cross-language target (cand stays empty → the
             // binding fallback is taken in the tier block below). Otherwise unresolved-but-external → drop.
-            if( it == byName.end() ) { if( bindingTier.empty() ) continue; }
+            if( it == byName.end() )
+            {
+                if( bindingTier.empty() )
+                {
+                    continue;
+                }
+            }
             else
             {
                 for( NodeId c : it->second )
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) ) cand.push_back( c );   // same lang, or ObjC↔C++ bridge; same ROOT (A10)
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    {
+                        cand.push_back( c ); // same lang, or ObjC↔C++ bridge; same ROOT (A10)
+                    }
+                }
                 // §3.1 cross-root EVIDENCE channel for a name with NO same-root def: admit another root's
                 // def ONLY when the caller's file has a path-resolved (transitive) include/import reaching
                 // that def's file — the SameInclude evidence tier, never a bare-name guess. (K≥2 mixed-root
                 // names take the Rule-3 path above instead; this covers the unique-cross-root case Rule 3's
                 // K≥2 gate cannot reach.) The tier ladder below still applies its unique-or-drop gate.
                 if( multiRoot && cand.empty() )
+                {
                     for( NodeId c : it->second )
                     {
-                        if( !langCompatible( ing.symbols[c].lang, r.lang ) || sameRoot( c, r.fileId ) ) continue;
-                        if( r.fileId >= fileIncludes.size() ) continue;
+                        if( !langCompatible( ing.symbols[c].lang, r.lang ) || sameRoot( c, r.fileId ) )
+                        {
+                            continue;
+                        }
+                        if( r.fileId >= fileIncludes.size() )
+                        {
+                            continue;
+                        }
                         const std::vector<NodeId>& inc = fileIncludes[ r.fileId ];
-                        if( std::binary_search( inc.begin(), inc.end(), symFileId[ c ] ) ) cand.push_back( c );
+                        if( std::binary_search( inc.begin(), inc.end(), symFileId[c] ) )
+                        {
+                            cand.push_back( c );
+                        }
                     }
+                }
             }
         }
 
         // ---- H4 W3: RUST qualified-call scope guard — see keepRustQualifiedCandidates ------------------
         const bool alreadyPinned = scipPinned || canonical || narrowed;
         if( !keepRustQualifiedCandidates( ing, chaUp, r, alreadyPinned, cand ) && bindingTier.empty() )
+        {
             continue;                                                           // qualified-external → no edge
+        }
 
         // ---- tier ladder (the name-based fallback) — SKIPPED when the SCIP overlay pinned this site (tier already holds the
         // precise target(s) at full confidence; the ladder would only re-derive a guess). -----------------
@@ -808,21 +1045,40 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         // external for this root — counting it would RAISE unresolved vs the solo runs.
                         bool anySameRootDef = !multiRoot;
                         if( multiRoot )
+                        {
                             for( NodeId c : it->second )
+                            {
                                 if( sameRoot( c, r.fileId ) ) { anySameRootDef = true; break; }
-                        if( anySameRootDef ) ++g.unresolvedOut[ r.fromSymbol ];
+                            }
+                        }
+                        if( anySameRootDef )
+                        {
+                            ++g.unresolvedOut[r.fromSymbol];
+                        }
                     }
                     continue;
                 }
             }
             else
             {
-            for( NodeId c : cand ) if( ing.symbols[c].fileId == r.fileId ) tier.push_back( c );   // tier 1: same file
+                for( NodeId c : cand )
+                {
+                    if( ing.symbols[c].fileId == r.fileId )
+                    {
+                        tier.push_back( c ); // tier 1: same file
+                    }
+                }
             if( tier.empty() )                                     // tier 2: same directory
             {
                 tierConf = 0.5f;
                 const std::uint32_t rdir = fileDir[ r.fileId ];
-                for( NodeId c : cand ) if( fileDir[ ing.symbols[c].fileId ] == rdir ) tier.push_back( c );
+                for( NodeId c : cand )
+                {
+                    if( fileDir[ing.symbols[c].fileId] == rdir )
+                    {
+                        tier.push_back( c );
+                    }
+                }
             }
             if( tier.empty() )                                     // tier 3: a UNIQUE global, else DROP
             {
@@ -834,11 +1090,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // H4 V3 M-3: `canonical` belongs in the same rescue, for the same reason — see the note above
                 // buildGraph ("the tier-3 canonical rescue").
                 if( cand.size() == 1 || narrowed || canonical ) { tier = cand; tierConf = 0.2f; }
-                else                                            continue;
+                else
+                {
+                    continue;
+                }
             }
             }
         }
-        if( tier.empty() ) continue;   // a covered-but-empty SCIP site (all self/out-of-range) yields no edge
+        if( tier.empty() )
+        {
+            continue; // a covered-but-empty SCIP site (all self/out-of-range) yields no edge
+        }
 
         // ── B2.1 CHA-lite + B2.2 arity filter — two SOUND, deterministic prunes of a STILL-ambiguous tier, run
         // BEFORE the locality tie-break. Both only ever DROP candidates the true target is provably not among,
@@ -874,23 +1136,42 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         {
                             const std::string cur = out[ qi ];
                             const auto it = adj.find( cur );
-                            if( it == adj.end() ) continue;
+                            if( it == adj.end() )
+                            {
+                                continue;
+                            }
                             for( const std::string& nm : it->second )
-                                if( std::find( out.begin(), out.end(), nm ) == out.end() ) out.push_back( nm );
+                            {
+                                if( std::find( out.begin(), out.end(), nm ) == out.end() )
+                                {
+                                    out.push_back( nm );
+                                }
+                            }
                         }
                     };
                     closure( chaUp,   chaAllowed );              // {recvType} ∪ ancestors
                     closure( chaDown, chaDesc );                 // {recvType} ∪ descendants
-                    for( const std::string& nm : chaDesc )       // merge descendants into the allowed cone (dedup)
+                    for( const std::string& nm : chaDesc )
+                    { // merge descendants into the allowed cone (dedup)
                         if( std::find( chaAllowed.begin(), chaAllowed.end(), nm ) == chaAllowed.end() )
+                        {
                             chaAllowed.push_back( nm );
+                        }
+                    }
                     // keep only candidates whose enclosing class name is in the cone (a scope-less free function
                     // is not a member-call target ⇒ correctly excluded). Degrade if the intersection is empty.
                     filtScratch.clear();
                     for( NodeId c : tier )
+                    {
                         if( std::find( chaAllowed.begin(), chaAllowed.end(), ing.symbols[ c ].scope ) != chaAllowed.end() )
+                        {
                             filtScratch.push_back( c );
-                    if( !filtScratch.empty() && filtScratch.size() < tier.size() ) tier.swap( filtScratch );
+                        }
+                    }
+                    if( !filtScratch.empty() && filtScratch.size() < tier.size() )
+                    {
+                        tier.swap( filtScratch );
+                    }
                 }
             }
 
@@ -918,9 +1199,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     const Symbol& cs = ing.symbols[ c ];
                     const bool provablyWrong = ( cs.arityExact != 0 ) && ( r.argCount > cs.params );
-                    if( !provablyWrong ) filtScratch.push_back( c );
+                    if( !provablyWrong )
+                    {
+                        filtScratch.push_back( c );
+                    }
                 }
-                if( !filtScratch.empty() && filtScratch.size() < tier.size() ) tier.swap( filtScratch );
+                if( !filtScratch.empty() && filtScratch.size() < tier.size() )
+                {
+                    tier.swap( filtScratch );
+                }
             }
         }
 
@@ -941,7 +1228,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // stable_partition predicate). locShare[i] parallels tier[i]; the compaction below reads the memo.
             locShare.clear();
             std::size_t bestShare = 0;
-            for( NodeId c : tier ) { const std::size_t sh = sharedLocality( callerCanon, g.canonId[c] ); locShare.push_back( sh ); if( sh > bestShare ) bestShare = sh; }
+            for( NodeId c : tier )
+            {
+                const std::size_t sh = sharedLocality( callerCanon, g.canonId[c] );
+                locShare.push_back( sh );
+                if( sh > bestShare )
+                {
+                    bestShare = sh;
+                }
+            }
             if( bestShare > 0 )                                // keep only the maximal-locality candidates (id order preserved)
             {
                 // stable in-place keep of the maximal-locality survivors — identical result to the old
@@ -949,11 +1244,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // strictly-less-local ones are dropped. The `kept != 0 && kept != tier.size()` guard reproduces the old
                 // `mid != begin && mid != end` (a full tie — every survivor maximal — leaves the tier untouched).
                 std::size_t kept = 0;
-                for( std::size_t sh : locShare ) if( sh == bestShare ) ++kept;
+                for( std::size_t sh : locShare )
+                {
+                    if( sh == bestShare )
+                    {
+                        ++kept;
+                    }
+                }
                 if( kept != 0 && kept != tier.size() )
                 {
                     std::size_t w = 0;
-                    for( std::size_t i = 0; i < tier.size(); ++i ) if( locShare[i] == bestShare ) tier[ w++ ] = tier[i];
+                    for( std::size_t i = 0; i < tier.size(); ++i )
+                    {
+                        if( locShare[i] == bestShare )
+                        {
+                            tier[w++] = tier[i];
+                        }
+                    }
                     tier.resize( w );
                 }
             }
@@ -975,37 +1282,70 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned )   // a SCIP-pinned call is PRECISE — never an ambiguity clue (that is the whole point).
         {
             std::uint32_t pickTargets = 0;   // non-self tier survivors = EXACTLY the targets the 1/k edge split spans
-            for( NodeId c : tier ) if( c != r.fromSymbol ) ++pickTargets;
-            if( pickTargets > 1 ) ++g.ambOut[ r.fromSymbol ];
+            for( NodeId c : tier )
+            {
+                if( c != r.fromSymbol )
+                {
+                    ++pickTargets;
+                }
+            }
+            if( pickTargets > 1 )
+            {
+                ++g.ambOut[r.fromSymbol];
+            }
         }
         // A4-R5 provenance (visible today, no serialize change): a cross-language binding edge is resolved via a
         // name-pattern binding table, not direct name resolution — so it carries the existing amb= "verify in
         // source" honesty mark (and feeds the header `ambiguous=N`). Conservative: an FFI edge is NEVER a silent
         // confident edge. The precise prov="binding" label rides outProv=2 below (pending the serialize one-liner).
-        if( bindingPinned ) ++g.ambOut[ r.fromSymbol ];
+        if( bindingPinned )
+        {
+            ++g.ambOut[r.fromSymbol];
+        }
 
         // aider-style per-ref confidence: tier × deboosts. overcommon = name defined in ≥16 places
         // (definition fan-out proxy for "appears everywhere"); private = leading-underscore convention.
         float conf = tierConf;
         if( !scipPinned && !bindingPinned )   // a SCIP-pinned / FFI-binding edge keeps its own confidence (no name-quality deboost).
         {
-            if( it != byName.end() && it->second.size() >= 16 )       conf *= 0.1f;   // overcommon
-            if( !r.calleeName.empty() && r.calleeName.front() == '_' ) conf *= 0.1f;   // private name
+            if( it != byName.end() && it->second.size() >= 16 )
+            {
+                conf *= 0.1f; // overcommon
+            }
+            if( !r.calleeName.empty() && r.calleeName.front() == '_' )
+            {
+                conf *= 0.1f; // private name
+            }
         }
 
         // drop self-loops BEFORE the split so the confidence mass is conserved over real targets
         std::size_t nReal = 0;
-        for( NodeId c : tier ) if( c != r.fromSymbol ) ++nReal;
-        if( nReal == 0 ) continue;
+        for( NodeId c : tier )
+        {
+            if( c != r.fromSymbol )
+            {
+                ++nReal;
+            }
+        }
+        if( nReal == 0 )
+        {
+            continue;
+        }
         const float base = conf / float( nReal );              // split over real (non-self) targets
         for( NodeId to : tier )
         {
-            if( to == r.fromSymbol ) continue;
+            if( to == r.fromSymbol )
+            {
+                continue;
+            }
             const std::uint64_t ekey = ( std::uint64_t( r.fromSymbol ) << 32 ) | to;
             EdgeAcc& e = acc[ ekey ];
             e.confSum += base;
             e.nref    += 1;
-            if( bindingPinned ) bindingEdges[ ekey ] = 1;      // A4-R5: remember (from,to) for prov="binding"
+            if( bindingPinned )
+            {
+                bindingEdges[ekey] = 1; // A4-R5: remember (from,to) for prov="binding"
+            }
         }
     }
 
@@ -1016,7 +1356,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     for( const auto& [ k, e ] : acc )
     {
         float w = ( e.confSum / float( e.nref ) ) * std::sqrt( float( e.nref ) );   // confidence·√num_refs
-        if( w > 8.f ) w = 8.f;
+        if( w > 8.f )
+        {
+            w = 8.f;
+        }
         edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w } );
     }
     std::vector<E> edgeScratch;
@@ -1024,14 +1367,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // out-edges (by source) + weighted out-degree
     g.outOff.assign( N + 1, 0 );
-    for( const E& e : edges ) ++g.outOff[ e.from + 1 ];
-    for( std::size_t i = 0; i < N; ++i ) g.outOff[ i + 1 ] += g.outOff[ i ];
+    for( const E& e : edges )
+    {
+        ++g.outOff[e.from + 1];
+    }
+    for( std::size_t i = 0; i < N; ++i )
+    {
+        g.outOff[i + 1] += g.outOff[i];
+    }
     g.outTargets.resize( edges.size() );
     g.outVals.resize( edges.size() );
     // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists —
     // the common run keeps it EMPTY so serialize emits no prov= (zero token cost, byte-identical to before).
     //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding".
-    if( scip || !bindingEdges.empty() ) g.outProv.assign( edges.size(), 0u );
+    if( scip || !bindingEdges.empty() )
+    {
+        g.outProv.assign( edges.size(), 0u );
+    }
     {
         std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
         for( const E& e : edges )
@@ -1040,21 +1392,31 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             g.outTargets[ pos ] = e.to;
             g.outVals[ pos ]    = e.w;
             g.wOutDeg[ e.from ] += e.w;
-            if( scip && scip->isPrecise( e.from, e.to ) ) g.outProv[ pos ] = 1u;   // (from,to) pinned by SCIP
-            else if( !bindingEdges.empty()
-                     && bindingEdges.find( ( std::uint64_t( e.from ) << 32 ) | e.to ) != bindingEdges.end() )
+            if( scip && scip->isPrecise( e.from, e.to ) )
+            {
+                g.outProv[pos] = 1u; // (from,to) pinned by SCIP
+            }
+            else if( !bindingEdges.empty() && bindingEdges.find( ( std::uint64_t( e.from ) << 32 ) | e.to ) != bindingEdges.end() )
+            {
                 g.outProv[ pos ] = 2u;                                             // (from,to) an FFI binding edge
+            }
         }
     }
 
     // in-edge CSR (row = target) for PageRank
     std::vector<std::uint32_t> inDeg( N, 0 );
-    for( const E& e : edges ) ++inDeg[ e.to ];
+    for( const E& e : edges )
+    {
+        ++inDeg[e.to];
+    }
     g.inEdges = sparseCsr<float>( N, N, edges.size() );
     {
         auto* ro = g.inEdges.rowOffsets();  auto* ci = g.inEdges.colIndices();  auto* val = g.inEdges.values();
         ro[0] = 0;
-        for( std::size_t i = 0; i < N; ++i ) ro[ i + 1 ] = ro[ i ] + inDeg[ i ];
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            ro[i + 1] = ro[i] + inDeg[i];
+        }
         std::vector<std::uint32_t> cur( ro, ro + N );
         for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
     }
@@ -1067,7 +1429,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
     for( const Reference& r : ing.references )
     {
-        if( !r.isInherit ) continue;
+        if( !r.isInherit )
+        {
+            continue;
+        }
 
         // The DERIVED symbol. Normal case (C++/TS/Java/Python/Swift): the ref sits inside the derived class
         // header, so byte-span attribution already set fromSymbol = the derived class — use it directly.
@@ -1081,25 +1446,48 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             derived = kNoNode;
             const auto dit = byName.find( r.qualifier );
-            if( dit == byName.end() ) continue;
+            if( dit == byName.end() )
+            {
+                continue;
+            }
             for( NodeId cand : dit->second )
+            {
                 if( isClassLike( ing.symbols[ cand ].kind ) && langCompatible( ing.symbols[ cand ].lang, r.lang )
                     && sameRoot( cand, r.fileId ) )
                 { derived = cand; break; }              // ids are ascending → lowest-id match (deterministic)
+            }
         }
-        if( derived == kNoNode ) continue;
+        if( derived == kNoNode )
+        {
+            continue;
+        }
 
         const auto it = byName.find( r.calleeName );
-        if( it == byName.end() ) continue;
+        if( it == byName.end() )
+        {
+            continue;
+        }
         for( NodeId baseId : it->second )
         {
-            if( !isClassLike( ing.symbols[ baseId ].kind ) ) continue;
-            if( !sameRoot( baseId, r.fileId ) ) continue;   // §3: an extends NAME never crosses roots
+            if( !isClassLike( ing.symbols[baseId].kind ) )
+            {
+                continue;
+            }
+            if( !sameRoot( baseId, r.fileId ) )
+            {
+                continue; // §3: an extends NAME never crosses roots
+            }
             // Lang guard (same as every call resolver above): a name resolves ACROSS files but only
             // WITHIN a compatible language (or the ObjC↔C++ bridge). Without it a mixed-lang tree merges
             // e.g. a TS `Animal` + a Java `Animal` into ONE interface with cross-language duplicate impls.
-            if( !langCompatible( ing.symbols[ baseId ].lang, r.lang ) ) continue;
-            if( baseId == derived ) continue;
+            if( !langCompatible( ing.symbols[baseId].lang, r.lang ) )
+            {
+                continue;
+            }
+            if( baseId == derived )
+            {
+                continue;
+            }
             g.implementors[ baseId ].push_back( derived );
         }
     }
@@ -1115,14 +1503,29 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.mentions.assign( N, {} );
     for( const Reference& r : ing.references )
     {
-        if( !r.isDocLink || r.fromSymbol == kNoNode ) continue;
+        if( !r.isDocLink || r.fromSymbol == kNoNode )
+        {
+            continue;
+        }
         const auto it = byName.find( r.calleeName );
-        if( it == byName.end() ) continue;
+        if( it == byName.end() )
+        {
+            continue;
+        }
         for( NodeId def : it->second )
         {
-            if( ing.symbols[ def ].endByte <= ing.symbols[ def ].sigEndByte ) continue;   // a real def, not a decl
-            if( def == r.fromSymbol ) continue;
-            if( !sameRoot( def, r.fileId ) ) continue;      // §3: a doc backtick-name never crosses roots
+            if( ing.symbols[def].endByte <= ing.symbols[def].sigEndByte )
+            {
+                continue; // a real def, not a decl
+            }
+            if( def == r.fromSymbol )
+            {
+                continue;
+            }
+            if( !sameRoot( def, r.fileId ) )
+            {
+                continue; // §3: a doc backtick-name never crosses roots
+            }
             g.mentions[ def ].push_back( r.fromSymbol );
         }
     }
@@ -1137,15 +1540,30 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // PageRank, ranks, and the default map are UNCHANGED. Sorted (ownerSym, typeSym) for determinism.
     for( const Reference& r : ing.references )
     {
-        if( !r.isCompose || r.fromSymbol == kNoNode ) continue;
+        if( !r.isCompose || r.fromSymbol == kNoNode )
+        {
+            continue;
+        }
         const auto it = byName.find( r.calleeName );
-        if( it == byName.end() ) continue;
+        if( it == byName.end() )
+        {
+            continue;
+        }
         for( NodeId typeId : it->second )
         {
             const SymKind k = ing.symbols[ typeId ].kind;
-            if( k != SymKind::Class && k != SymKind::Struct ) continue;
-            if( typeId == r.fromSymbol ) continue;
-            if( !sameRoot( typeId, r.fileId ) ) continue;   // §3: a HAS-A type NAME never crosses roots
+            if( k != SymKind::Class && k != SymKind::Struct )
+            {
+                continue;
+            }
+            if( typeId == r.fromSymbol )
+            {
+                continue;
+            }
+            if( !sameRoot( typeId, r.fileId ) )
+            {
+                continue; // §3: a HAS-A type NAME never crosses roots
+            }
             ComposeEdge ce;
             ce.ownerSym  = r.fromSymbol;
             ce.typeSym   = typeId;
@@ -1161,8 +1579,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     std::sort( g.composeEdges.begin(), g.composeEdges.end(),
                []( const ComposeEdge& a, const ComposeEdge& b ) noexcept
                {
-                   if( a.ownerSym != b.ownerSym ) return a.ownerSym < b.ownerSym;
-                   if( a.typeSym  != b.typeSym  ) return a.typeSym  < b.typeSym;
+                   if( a.ownerSym != b.ownerSym )
+                   {
+                       return a.ownerSym < b.ownerSym;
+                   }
+                   if( a.typeSym != b.typeSym )
+                   {
+                       return a.typeSym < b.typeSym;
+                   }
                    return a.fieldName < b.fieldName;
                } );
     {
@@ -1186,12 +1610,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
         {
             const RouteDef& rd = ing.routeDefs[d];
-            if( rd.handlerName.empty() ) continue;                         // inline/anonymous handler → stays unresolved
+            if( rd.handlerName.empty() )
+            {
+                continue; // inline/anonymous handler → stays unresolved
+            }
             const auto it = byName.find( rd.handlerName );
-            if( it == byName.end() ) continue;
+            if( it == byName.end() )
+            {
+                continue;
+            }
             for( NodeId cand : it->second )
+            {
                 if( isFunctionLike( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
                 { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
+            }
         }
 
         std::vector<NodeId> distinctScratch;   // reused per USE — the "≥2 distinct handlers ⇒ ambiguous" set
@@ -1204,17 +1636,31 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
             {
                 const RouteDef& rd = ing.routeDefs[d];
-                if( defHandler[d] == kNoNode ) continue;                   // an unresolved match adds no distinctness
-                if( !routematch::methodsCompatible( rd.method, ru.method ) ) continue;
-                if( !routematch::pathsMatch( rd.path, ru.path ) ) continue;
+                if( defHandler[d] == kNoNode )
+                {
+                    continue; // an unresolved match adds no distinctness
+                }
+                if( !routematch::methodsCompatible( rd.method, ru.method ) )
+                {
+                    continue;
+                }
+                if( !routematch::pathsMatch( rd.path, ru.path ) )
+                {
+                    continue;
+                }
                 if( std::find( distinctScratch.begin(), distinctScratch.end(), defHandler[d] ) != distinctScratch.end() )
+                {
                     continue;                                              // same handler already counted (dup registration)
+                }
                 distinctScratch.push_back( defHandler[d] );
                 matchedHandler = defHandler[d];
                 matchedMethod  = rd.method;
                 matchedPath    = rd.path;
             }
-            if( distinctScratch.size() != 1 ) continue;                    // 0 ⇒ unresolved, ≥2 ⇒ ambiguous — never guess
+            if( distinctScratch.size() != 1 )
+            {
+                continue; // 0 ⇒ unresolved, ≥2 ⇒ ambiguous — never guess
+            }
             RouteEdge re;
             re.fromSym  = ru.fromSymbol;
             re.toSym    = matchedHandler;
@@ -1227,8 +1673,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         std::sort( g.routeEdges.begin(), g.routeEdges.end(),
                    []( const RouteEdge& a, const RouteEdge& b ) noexcept
                    {
-                       if( a.fromSym != b.fromSym ) return a.fromSym < b.fromSym;
-                       if( a.toSym   != b.toSym   ) return a.toSym   < b.toSym;
+                       if( a.fromSym != b.fromSym )
+                       {
+                           return a.fromSym < b.fromSym;
+                       }
+                       if( a.toSym != b.toSym )
+                       {
+                           return a.toSym < b.toSym;
+                       }
                        return a.path < b.path;
                    } );
         const auto sameRouteEdge = []( const RouteEdge& a, const RouteEdge& b ) noexcept
@@ -1262,13 +1714,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 inline std::vector<float> biasPrior( const Graph& g, const std::vector<float>& p )
 {
     const std::size_t N = p.size();
-    if( g.priorWeight.size() != N ) return p;                 // no weights (e.g. empty graph) → unchanged
+    if( g.priorWeight.size() != N )
+    {
+        return p; // no weights (e.g. empty graph) → unchanged
+    }
     std::vector<float> pw( N );
     double sum = 0.0;
     for( std::size_t i = 0; i < N; ++i ) { pw[i] = p[i] * g.priorWeight[i]; sum += pw[i]; }
-    if( !( sum > 0.0 ) ) return p;                            // degenerate (all zero) → caller's prior intact
+    if( !( sum > 0.0 ) )
+    {
+        return p; // degenerate (all zero) → caller's prior intact
+    }
     const float inv = float( 1.0 / sum );
-    for( float& v : pw ) v *= inv;                            // renormalize to Σ=1 (the PageRank invariant)
+    for( float& v : pw )
+    {
+        v *= inv; // renormalize to Σ=1 (the PageRank invariant)
+    }
     return pw;
 }
 
@@ -1285,12 +1746,16 @@ inline std::vector<float> rankGraphTeleport( const Graph& g, const std::vector<f
     {
         double teleportMass = 0.0;
         for( const double value : teleport )
+        {
             teleportMass += value;
+        }
         if( teleportMass > 0.0 )
         {
             const double inverseMass = 1.0 / teleportMass;
             for( double& value : teleport )
+            {
                 value *= inverseMass;
+            }
         }
         pageRankDouble( g.inEdges, g.wOutDeg, teleport, rankDouble, PageRankConfig{ .alpha = double( alpha ) } );
     }
@@ -1314,7 +1779,9 @@ inline void applyOutInto( const Graph& g, const float* a, float* h ) noexcept
     {
         float acc = 0.f;
         for( std::uint32_t k = g.outOff[j]; k < g.outOff[j + 1]; ++k )
+        {
             acc += g.outVals[k] * a[ g.outTargets[k] ];
+        }
         h[j] = acc;
     }
 }
@@ -1328,7 +1795,9 @@ inline std::pair<std::vector<float>, std::vector<float>> hits( const Graph& g, f
     const std::size_t N = g.wOutDeg.size();
     std::vector<float> a( N, 0.f ), h( N, 0.f );
     if( N == 0 )
+    {
         return { a, h };
+    }
 
     const float seed = 1.0f / std::sqrt( float( N ) );
     std::fill( a.begin(), a.end(), seed );
@@ -1341,15 +1810,33 @@ inline std::pair<std::vector<float>, std::vector<float>> hits( const Graph& g, f
 
         g.inEdges.applyInto( h.data(), a.data() );                         // a[i] = Σ_{j→i} w·h[j]
         const float an = std::sqrt( csrdetail::blockReduceDot( a.data(), a.data(), N ) );
-        if( an > 0.f ) for( float& v : a ) v /= an;
+        if( an > 0.f )
+        {
+            for( float& v : a )
+            {
+                v /= an;
+            }
+        }
 
         applyOutInto( g, a.data(), h.data() );                             // h[j] = Σ_{j→i} w·a[i]
         const float hn = std::sqrt( csrdetail::blockReduceDot( h.data(), h.data(), N ) );
-        if( hn > 0.f ) for( float& v : h ) v /= hn;
+        if( hn > 0.f )
+        {
+            for( float& v : h )
+            {
+                v /= hn;
+            }
+        }
 
         float resid = 0.f;
-        for( std::size_t i = 0; i < N; ++i ) resid += std::fabs( a[i] - aPrev[i] ) + std::fabs( h[i] - hPrev[i] );
-        if( resid < tol ) break;
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            resid += std::fabs( a[i] - aPrev[i] ) + std::fabs( h[i] - hPrev[i] );
+        }
+        if( resid < tol )
+        {
+            break;
+        }
     }
     return { a, h };
 }
@@ -1373,19 +1860,31 @@ struct EgoGraph
 inline std::string_view stripLineLocator( std::string_view path ) noexcept
 {
     const std::size_t colon = path.rfind( ':' );
-    if( colon == std::string_view::npos || colon == 0 ) return path;
+    if( colon == std::string_view::npos || colon == 0 )
+    {
+        return path;
+    }
 
     const std::string_view tail = path.substr( colon + 1 );
     bool                   sawDash = false;
-    if( tail.empty() ) return path;
+    if( tail.empty() )
+    {
+        return path;
+    }
     for( std::size_t i = 0; i < tail.size(); ++i )
     {
         const char c = tail[i];
-        if( c >= '0' && c <= '9' ) continue;
+        if( c >= '0' && c <= '9' )
+        {
+            continue;
+        }
         if( c == '-' && i > 0 && !sawDash ) { sawDash = true;  continue; }
         return path;                                       // not a pure N / N-M locator — leave it alone
     }
-    if( tail.back() == '-' ) return path;                  // "12-" is a truncated range, not a locator
+    if( tail.back() == '-' )
+    {
+        return path; // "12-" is a truncated range, not a locator
+    }
     return path.substr( 0, colon );
 }
 
@@ -1395,14 +1894,22 @@ inline std::string_view stripLineLocator( std::string_view path ) noexcept
 // haystack actually carries a "/./", so a single-root corpus never allocates and is byte-identical.
 inline bool filePathContains( std::string_view haystack, std::string_view needle )
 {
-    if( haystack.find( needle ) != std::string_view::npos ) return true;
-    if( haystack.find( "/./" ) == std::string_view::npos )  return false;
+    if( haystack.find( needle ) != std::string_view::npos )
+    {
+        return true;
+    }
+    if( haystack.find( "/./" ) == std::string_view::npos )
+    {
+        return false;
+    }
 
     std::string collapsed;
     collapsed.reserve( haystack.size() );
     for( std::size_t i = 0; i < haystack.size(); )
+    {
         if( haystack.substr( i, 3 ) == "/./" ) { collapsed.push_back( '/' );          i += 3; }
         else                                   { collapsed.push_back( haystack[i] );  ++i;    }
+    }
     return collapsed.find( needle ) != std::string::npos;
 }
 
@@ -1432,8 +1939,15 @@ inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec )
 
     NodeId best = kNoNode;
     for( const Symbol& s : ing.symbols )
+    {
         if( s.name == name && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
-            if( best == kNoNode || s.id < best ) best = s.id;
+        {
+            if( best == kNoNode || s.id < best )
+            {
+                best = s.id;
+            }
+        }
+    }
     return best;
 }
 
@@ -1443,7 +1957,10 @@ inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanou
 {
     EgoGraph eg;
     const std::size_t N = g.wOutDeg.size();
-    if( focus >= N ) return eg;
+    if( focus >= N )
+    {
+        return eg;
+    }
     eg.focus = focus;
 
     std::vector<int> dist( N, -1 );
@@ -1462,8 +1979,14 @@ inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanou
         for( NodeId u : frontier )
         {
             std::vector<Nb> nbs;
-            for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k ) nbs.push_back( { g.outTargets[k], g.outVals[k], +1 } );
-            for( std::uint32_t k = inRo[u];     k < inRo[u + 1];     ++k ) nbs.push_back( { inCi[k],        inV[k],     -1 } );
+            for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
+            {
+                nbs.push_back( { g.outTargets[k], g.outVals[k], +1 } );
+            }
+            for( std::uint32_t k = inRo[u]; k < inRo[u + 1]; ++k )
+            {
+                nbs.push_back( { inCi[k], inV[k], -1 } );
+            }
 
             if( int( nbs.size() ) > fanout )                  // cap hub blast-radius: top `fanout` by (w desc, id asc)
             {
@@ -1474,12 +1997,14 @@ inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanou
             std::sort( nbs.begin(), nbs.end(), []( const Nb& a, const Nb& b ) { return a.v < b.v; } );   // stable visit order
 
             for( const Nb& nb : nbs )
+            {
                 if( dist[ nb.v ] < 0 )
                 {
                     dist[ nb.v ] = hop;
                     eg.nodes.push_back( nb.v );  eg.hopDist.push_back( std::uint8_t( hop ) );  eg.direction.push_back( nb.d );
                     next.push_back( nb.v );
                 }
+            }
         }
         frontier = std::move( next );
     }
@@ -1497,9 +2022,15 @@ inline std::vector<float> rrfFuse( std::initializer_list<const std::vector<float
     for( const std::vector<float>* rv : rankings )
     {
         const std::vector<float>& r = *rv;
-        for( std::uint32_t i = 0; i < N; ++i ) order[i] = i;
+        for( std::uint32_t i = 0; i < N; ++i )
+        {
+            order[i] = i;
+        }
         sortutil::radixSortByScoreDescId( order, r );
-        for( std::uint32_t pos = 0; pos < N; ++pos ) fused[ order[pos] ] += 1.0f / ( k + float( pos ) );
+        for( std::uint32_t pos = 0; pos < N; ++pos )
+        {
+            fused[order[pos]] += 1.0f / ( k + float( pos ) );
+        }
     }
     return fused;
 }
@@ -1531,14 +2062,35 @@ namespace anchorcfg
 // (empty / non-positive max) — never a zero vector. Single-threaded, index order ⇒ deterministic.
 inline std::vector<float> blendMaxNorm( const std::vector<float>& a, const std::vector<float>& b, float lambda )
 {
-    if( a.size() != b.size() || a.empty() ) return a;
+    if( a.size() != b.size() || a.empty() )
+    {
+        return a;
+    }
     float amax = 0.f, bmax = 0.f;
-    for( float v : a ) if( v > amax ) amax = v;
-    for( float v : b ) if( v > bmax ) bmax = v;
-    if( !( amax > 0.f ) || !( bmax > 0.f ) ) return a;
+    for( float v : a )
+    {
+        if( v > amax )
+        {
+            amax = v;
+        }
+    }
+    for( float v : b )
+    {
+        if( v > bmax )
+        {
+            bmax = v;
+        }
+    }
+    if( !( amax > 0.f ) || !( bmax > 0.f ) )
+    {
+        return a;
+    }
     std::vector<float> out( a.size() );
     const float ia = ( 1.0f - lambda ) / amax, ib = lambda / bmax;
-    for( std::size_t i = 0; i < a.size(); ++i ) out[i] = a[i] * ia + b[i] * ib;
+    for( std::size_t i = 0; i < a.size(); ++i )
+    {
+        out[i] = a[i] * ia + b[i] * ib;
+    }
     return out;
 }
 
@@ -1552,23 +2104,41 @@ inline std::vector<float> blendMaxNorm( const std::vector<float>& a, const std::
 inline std::vector<float> anchoredLexicalRank( const Graph& g, const std::vector<float>& lex )
 {
     const std::size_t N = lex.size();
-    if( N == 0 || g.wOutDeg.size() != N ) return lex;
+    if( N == 0 || g.wOutDeg.size() != N )
+    {
+        return lex;
+    }
 
     // top-K anchor candidates by (lex desc, id asc); positive scores only
     std::vector<NodeId> anchorIds( N );
-    for( NodeId i = 0; i < N; ++i ) anchorIds[i] = NodeId( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        anchorIds[i] = NodeId( i );
+    }
     const std::size_t anchorCount = std::min( anchorcfg::kAnchorCount, N );
     std::partial_sort( anchorIds.begin(), anchorIds.begin() + anchorCount, anchorIds.end(),
                        [ & ]( NodeId a, NodeId b ) { return lex[a] != lex[b] ? lex[a] > lex[b] : a < b; } );
     anchorIds.resize( anchorCount );
-    while( !anchorIds.empty() && !( lex[ anchorIds.back() ] > 0.f ) ) anchorIds.pop_back();
-    if( anchorIds.empty() ) return lex;                       // no lexical signal → anchoring is a no-op
+    while( !anchorIds.empty() && !( lex[anchorIds.back()] > 0.f ) )
+    {
+        anchorIds.pop_back();
+    }
+    if( anchorIds.empty() )
+    {
+        return lex; // no lexical signal → anchoring is a no-op
+    }
 
     // personalization ∝ per-anchor lexical confidence, Σp = 1 (the PageRank invariant)
     double confSum = 0.0;
-    for( NodeId a : anchorIds ) confSum += lex[a];
+    for( NodeId a : anchorIds )
+    {
+        confSum += lex[a];
+    }
     std::vector<float> p( N, 0.f );
-    for( NodeId a : anchorIds ) p[a] = float( lex[a] / confSum );
+    for( NodeId a : anchorIds )
+    {
+        p[a] = float( lex[a] / confSum );
+    }
 
     // bounded graph expansion from the anchors (existing PPR core), then the score-space blend
     const std::vector<float> ppr = rankGraphTeleport( g, p );
@@ -1587,7 +2157,10 @@ inline std::vector<std::uint32_t> fanInFromInEdges( const IngestResult& ing, con
     std::vector<std::uint32_t> fanIn( symbolCount, 0u );
     const auto*                ro = g.inEdges.rowOffsets();
     if( !ro ) { DEGRADED_PATH_ALERT( "bundle: in-edge CSR unavailable — in= omitted from the bundle rows" );  return {}; }
-    for( std::size_t i = 0; i < symbolCount; ++i ) fanIn[i] = ro[i + 1] - ro[i];
+    for( std::size_t i = 0; i < symbolCount; ++i )
+    {
+        fanIn[i] = ro[i + 1] - ro[i];
+    }
     return fanIn;
 }
 
@@ -1599,7 +2172,12 @@ inline std::vector<NodeId> resolveAllByCanonicalId( const IngestResult& ing, std
 {
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
-        if( canonicalId( ing.files[ s.fileId ], s.scope, s.name ) == spec ) out.push_back( s.id );
+    {
+        if( canonicalId( ing.files[s.fileId], s.scope, s.name ) == spec )
+        {
+            out.push_back( s.id );
+        }
+    }
     return out;
 }
 
@@ -1611,12 +2189,20 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     if( name.find( "::" ) != std::string_view::npos )
     {
         std::vector<NodeId> byId = resolveAllByCanonicalId( ing, name );
-        if( !byId.empty() ) return byId;
+        if( !byId.empty() )
+        {
+            return byId;
+        }
     }
 
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
-        if( s.name == name ) out.push_back( s.id );
+    {
+        if( s.name == name )
+        {
+            out.push_back( s.id );
+        }
+    }
     return out;
 }
 
@@ -1636,7 +2222,10 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     if( spec.find( "::" ) != std::string_view::npos )
     {
         std::vector<NodeId> byId = resolveAllByCanonicalId( ing, spec );
-        if( !byId.empty() ) return byId;
+        if( !byId.empty() )
+        {
+            return byId;
+        }
     }
 
     std::string_view file, name;
@@ -1644,8 +2233,12 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
 
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
+    {
         if( s.name == name && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
+        {
             out.push_back( s.id );
+        }
+    }
     return out;
 }
 
@@ -1680,8 +2273,12 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
     std::vector<char> impure( S, 0 );
     std::vector<NodeId> worklist;                                       // seed: direct side-effecting calls
     for( const Reference& r : ing.references )
-        if( r.role == RefRole::Call && r.fromSymbol != kNoNode && r.fromSymbol < S && isImpureName( r.calleeName ) )   // ABS-3: only CALL sites seed impurity (not a var read named "free")
+    {
+        if( r.role == RefRole::Call && r.fromSymbol != kNoNode && r.fromSymbol < S && isImpureName( r.calleeName ) )
+        { // ABS-3: only CALL sites seed impurity (not a var read named "free")
             if( !impure[ r.fromSymbol ] ) { impure[ r.fromSymbol ] = 1; worklist.push_back( r.fromSymbol ); }
+        }
+    }
 
     const auto* inRo = g.inEdges.rowOffsets();
     const auto* inCi = g.inEdges.colIndices();
@@ -1690,7 +2287,10 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
     {
         const NodeId f = worklist.back();
         worklist.pop_back();
-        if( !haveCsr ) continue;
+        if( !haveCsr )
+        {
+            continue;
+        }
         for( std::uint32_t e = inRo[f]; e < inRo[f + 1]; ++e )
         {
             const NodeId caller = inCi[e];
@@ -1733,9 +2333,22 @@ inline constexpr std::uint32_t kLcom4NA = 0xFFFFFFFFu;   // LCOM4 not applicable
 struct UnionFind
 {
     std::vector<std::uint32_t> parent;
-    explicit UnionFind( std::size_t n ) : parent( n ) { for( std::uint32_t i = 0; i < n; ++i ) parent[i] = i; }
+    explicit UnionFind( std::size_t n ) : parent( n )
+    {
+        for( std::uint32_t i = 0; i < n; ++i )
+        {
+            parent[i] = i;
+        }
+    }
     std::uint32_t find( std::uint32_t x ) { while( parent[x] != x ) { parent[x] = parent[ parent[x] ]; x = parent[x]; } return x; }
-    void unite( std::uint32_t a, std::uint32_t b ) { const std::uint32_t ra = find( a ), rb = find( b ); if( ra != rb ) parent[ ra < rb ? rb : ra ] = ( ra < rb ? ra : rb ); }
+    void unite( std::uint32_t a, std::uint32_t b )
+    {
+        const std::uint32_t ra = find( a ), rb = find( b );
+        if( ra != rb )
+        {
+            parent[ra < rb ? rb : ra] = ( ra < rb ? ra : rb );
+        }
+    }
 };
 
 inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
@@ -1760,33 +2373,60 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
     {
         const NodeId owner = g.composeEdges[e].ownerSym;
         const NodeId type  = g.composeEdges[e].typeSym;
-        if( owner >= S ) continue;
+        if( owner >= S )
+        {
+            continue;
+        }
         // count a composed type only if it isn't already a resolved callee target of the owner (avoid double
         // count) AND is distinct from the previous compose edge's type for this owner (edges are sorted).
         const bool dupOfPrev = ( e > 0 && g.composeEdges[e - 1].ownerSym == owner && g.composeEdges[e - 1].typeSym == type );
-        if( dupOfPrev ) continue;
+        if( dupOfPrev )
+        {
+            continue;
+        }
         bool isCallee = false;
         for( std::uint32_t k = g.outOff[owner]; k < g.outOff[owner + 1]; ++k )
+        {
             if( g.outTargets[k] == type ) { isCallee = true; break; }
-        if( !isCallee ) ++q.cbo[ owner ];
+        }
+        if( !isCallee )
+        {
+            ++q.cbo[owner];
+        }
     }
 
     // ── tested=: any reference (any role) FROM a test-path file marks the referenced symbol as tested. We
     //    resolve each ref's callee name to its definition(s) by name and, if the ref's file is a test path,
     //    flag those defs. Deterministic: references are in a fixed order; byName is insertion-order stable.
     std::vector<char> fileIsTest( ing.files.size(), 0 );
-    for( std::size_t f = 0; f < ing.files.size(); ++f ) fileIsTest[f] = isTestPath( ing.files[f] ) ? 1 : 0;
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        fileIsTest[f] = isTestPath( ing.files[f] ) ? 1 : 0;
+    }
     HashMap<std::string, std::vector<NodeId>> byNameDefs;
     byNameDefs.reserve( S );
-    for( const Symbol& s : ing.symbols ) byNameDefs[ s.name ].push_back( s.id );
+    for( const Symbol& s : ing.symbols )
+    {
+        byNameDefs[s.name].push_back( s.id );
+    }
     for( const Reference& r : ing.references )
     {
-        if( r.fileId >= fileIsTest.size() || !fileIsTest[ r.fileId ] ) continue;   // only refs living in a test file
+        if( r.fileId >= fileIsTest.size() || !fileIsTest[r.fileId] )
+        {
+            continue; // only refs living in a test file
+        }
         const auto it = byNameDefs.find( r.calleeName );
-        if( it == byNameDefs.end() ) continue;
+        if( it == byNameDefs.end() )
+        {
+            continue;
+        }
         for( NodeId def : it->second )
-            if( !fileIsTest[ ing.symbols[def].fileId ] )   // a test referencing a PRODUCTION symbol = that symbol is tested
+        {
+            if( !fileIsTest[ing.symbols[def].fileId] )
+            { // a test referencing a PRODUCTION symbol = that symbol is tested
                 q.tested[ def ] = 1u;
+            }
+        }
     }
 
     // ── LCOM4: per class-kind symbol, components of its method graph. Group methods by their enclosing class
@@ -1802,17 +2442,26 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
         for( const Symbol& s : ing.symbols )
         {
             const bool isClassKind = ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
-            if( !isClassKind ) continue;
+            if( !isClassKind )
+            {
+                continue;
+            }
             key.clear(); key.append( ing.files[ s.fileId ] ); key.push_back( '\x1f' ); key.append( s.name );
             classByFileScope.emplace( key, s.id );   // first (lowest-id) class of that name/file wins
         }
         std::string mkey;
         for( const Symbol& s : ing.symbols )
         {
-            if( s.kind != SymKind::Method || s.scope.empty() ) continue;
+            if( s.kind != SymKind::Method || s.scope.empty() )
+            {
+                continue;
+            }
             mkey.clear(); mkey.append( ing.files[ s.fileId ] ); mkey.push_back( '\x1f' ); mkey.append( s.scope );
             const auto it = classByFileScope.find( mkey );
-            if( it != classByFileScope.end() ) classMethods[ it->second ].push_back( s.id );
+            if( it != classByFileScope.end() )
+            {
+                classMethods[it->second].push_back( s.id );
+            }
         }
     }
     if( !classMethods.empty() )
@@ -1820,19 +2469,28 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
         // declared (typed-class) field names per class, from compose edges (owner = the class symbol).
         HashMap<NodeId, std::vector<std::string>> classFields;
         for( const ComposeEdge& ce : g.composeEdges )
+        {
             classFields[ ce.ownerSym ].push_back( ce.fieldName );
+        }
         // per method: the set of field names it references (Read/Write/Call refs by name). Built once, filtered
         // to declared fields per class below.
         // methodRefs[methodId] = names referenced in that method (any role).
         HashMap<NodeId, std::vector<std::string>> methodRefNames;
         for( const Reference& r : ing.references )
+        {
             if( r.fromSymbol != kNoNode && r.fromSymbol < S && ing.symbols[ r.fromSymbol ].kind == SymKind::Method )
+            {
                 methodRefNames[ r.fromSymbol ].push_back( r.calleeName );
+            }
+        }
 
         // deterministic iteration: sort the class ids before processing (HashMap order is unspecified).
         std::vector<NodeId> classIds;
         classIds.reserve( classMethods.size() );
-        for( const auto& [ cid, methods ] : classMethods ) classIds.push_back( cid );
+        for( const auto& [cid, methods] : classMethods )
+        {
+            classIds.push_back( cid );
+        }
         std::sort( classIds.begin(), classIds.end() );
 
         for( NodeId cid : classIds )
@@ -1840,10 +2498,16 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
             std::vector<NodeId>& methods = classMethods[ cid ];
             std::sort( methods.begin(), methods.end() );                  // id-sorted → union-find is deterministic
             const std::size_t m = methods.size();
-            if( m == 0 ) continue;
+            if( m == 0 )
+            {
+                continue;
+            }
             // slot index of a method id within this class (for union-find over [0,m)).
             HashMap<NodeId, std::uint32_t> slot;
-            for( std::uint32_t i = 0; i < m; ++i ) slot.emplace( methods[i], i );
+            for( std::uint32_t i = 0; i < m; ++i )
+            {
+                slot.emplace( methods[i], i );
+            }
 
             UnionFind uf( m );
             // (a) method-calls-method: an out-edge from one class method to another unites them.
@@ -1853,7 +2517,10 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
                 for( std::uint32_t k = g.outOff[a]; k < g.outOff[a + 1]; ++k )
                 {
                     const auto sit = slot.find( g.outTargets[k] );
-                    if( sit != slot.end() ) uf.unite( i, sit->second );
+                    if( sit != slot.end() )
+                    {
+                        uf.unite( i, sit->second );
+                    }
                 }
             }
             // (b) method-shares-field: two methods that both reference the SAME declared (typed-class) field.
@@ -1867,17 +2534,40 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
                     for( std::uint32_t i = 0; i < m; ++i )
                     {
                         const auto mit = methodRefNames.find( methods[i] );
-                        if( mit == methodRefNames.end() ) continue;
+                        if( mit == methodRefNames.end() )
+                        {
+                            continue;
+                        }
                         bool touches = false;
-                        for( const std::string& nm : mit->second ) if( nm == fld ) { touches = true; break; }
-                        if( !touches ) continue;
-                        if( firstSlot == 0xFFFFFFFFu ) firstSlot = i; else uf.unite( firstSlot, i );
+                        for( const std::string& nm : mit->second )
+                        {
+                            if( nm == fld )
+                            {
+                                touches = true;
+                                break;
+                            }
+                        }
+                        if( !touches )
+                        {
+                            continue;
+                        }
+                        if( firstSlot == 0xFFFFFFFFu ) { firstSlot = i; }
+                        else
+                        {
+                            uf.unite( firstSlot, i );
+                        }
                     }
                 }
             }
             // component count = # distinct roots.
             std::uint32_t comps = 0;
-            for( std::uint32_t i = 0; i < m; ++i ) if( uf.find( i ) == i ) ++comps;
+            for( std::uint32_t i = 0; i < m; ++i )
+            {
+                if( uf.find( i ) == i )
+                {
+                    ++comps;
+                }
+            }
             q.lcom4[ cid ] = comps;
         }
     }
@@ -1919,7 +2609,10 @@ inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std:
     std::vector<Frame> call;
     for( std::uint32_t s = 0; s < F; ++s )
     {
-        if( idx[s] != -1 ) continue;
+        if( idx[s] != -1 )
+        {
+            continue;
+        }
         call.push_back( { s, 0 } );
         while( !call.empty() )
         {
@@ -1932,18 +2625,40 @@ inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std:
             {
                 const std::uint32_t w = adj[v][ fr.i++ ];
                 if( idx[w] == -1 )  { call.push_back( { w, 0 } ); recursed = true; break; }
-                else if( onStk[w] ) low[v] = std::min( low[v], idx[w] );
+                else if( onStk[w] )
+                {
+                    low[v] = std::min( low[v], idx[w] );
+                }
             }
-            if( recursed ) continue;
+            if( recursed )
+            {
+                continue;
+            }
 
             if( low[v] == idx[v] )                                      // SCC root
             {
                 std::vector<std::uint32_t> comp;
-                for( ;; ) { const std::uint32_t w = stk.back(); stk.pop_back(); onStk[w] = 0; comp.push_back( w ); if( w == v ) break; }
-                if( comp.size() > 1 ) cycles.push_back( std::move( comp ) );
+                for( ;; )
+                {
+                    const std::uint32_t w = stk.back();
+                    stk.pop_back();
+                    onStk[w] = 0;
+                    comp.push_back( w );
+                    if( w == v )
+                    {
+                        break;
+                    }
+                }
+                if( comp.size() > 1 )
+                {
+                    cycles.push_back( std::move( comp ) );
+                }
             }
             call.pop_back();
-            if( !call.empty() ) low[ call.back().v ] = std::min( low[ call.back().v ], low[v] );
+            if( !call.empty() )
+            {
+                low[call.back().v] = std::min( low[call.back().v], low[v] );
+            }
         }
     }
     return cycles;
@@ -1971,7 +2686,14 @@ inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>
         while( !stack.empty() )
         {
             const std::uint32_t v = stack.back();  stack.pop_back();  ++reached;
-            for( std::uint32_t w : adj[v] ) if( seenEpoch[w] != epoch ) { seenEpoch[w] = epoch; stack.push_back( w ); }
+            for( std::uint32_t w : adj[v] )
+            {
+                if( seenEpoch[w] != epoch )
+                {
+                    seenEpoch[w] = epoch;
+                    stack.push_back( w );
+                }
+            }
         }
         h.transitive[s] = reached;   // includes self (Lakos convention)
         h.ccd += reached;
@@ -1999,7 +2721,9 @@ inline RestrictedDepHealth restrictDependencyHealth( const IngestResult& ing, co
     RestrictedDepHealth r;
     const std::size_t F = std::min( transitive.size(), ing.files.size() );
     for( std::size_t f = 0; f < F; ++f )
+    {
         if( dependencyCapable( langOfPath( ing.files[f] ) ) ) { r.ccd += transitive[f]; ++r.depFileCount; }
+    }
     const double N = double( r.depFileCount );
     r.acd  = r.depFileCount ? double( r.ccd ) / N : 0.0;
     const double btree = r.depFileCount > 1 ? ( ( N + 1.0 ) * std::log2( N + 1.0 ) - N ) : 1.0;
@@ -2013,10 +2737,22 @@ inline std::vector<float> diffTeleport( const IngestResult& ing, const std::vect
     const std::size_t N = ing.symbols.size();
     std::vector<float> p( N, N ? 1.0f / float( N ) : 0.f );
     std::size_t changed = 0;
-    for( const Symbol& s : ing.symbols ) if( fileChanged[ s.fileId ] ) ++changed;
-    if( changed == 0 || changed == N ) return p;            // degenerate → uniform
+    for( const Symbol& s : ing.symbols )
+    {
+        if( fileChanged[s.fileId] )
+        {
+            ++changed;
+        }
+    }
+    if( changed == 0 || changed == N )
+    {
+        return p; // degenerate → uniform
+    }
     const float a = beta / float( changed ), b = ( 1.0f - beta ) / float( N - changed );
-    for( const Symbol& s : ing.symbols ) p[ s.id ] = fileChanged[ s.fileId ] ? a : b;
+    for( const Symbol& s : ing.symbols )
+    {
+        p[s.id] = fileChanged[s.fileId] ? a : b;
+    }
     return p;
 }
 
@@ -2026,16 +2762,35 @@ inline std::vector<float> diffTeleport( const IngestResult& ing, const std::vect
 inline std::vector<NodeId> shortestPathAny( const Graph& g, const std::vector<NodeId>& srcs, const std::vector<NodeId>& dsts )
 {
     const std::size_t N = g.wOutDeg.size();
-    if( srcs.empty() || dsts.empty() ) return {};
+    if( srcs.empty() || dsts.empty() )
+    {
+        return {};
+    }
 
     std::vector<NodeId> prev( N, kNoNode );
     std::vector<char>   seen( N, 0 ), isDst( N, 0 );
-    for( NodeId d : dsts ) if( d < N ) isDst[d] = 1;
+    for( NodeId d : dsts )
+    {
+        if( d < N )
+        {
+            isDst[d] = 1;
+        }
+    }
 
     std::vector<NodeId> q;  q.reserve( 64 );
     NodeId              hit = kNoNode;
     for( NodeId s : srcs )
-        if( s < N && !seen[s] ) { seen[s] = 1;  q.push_back( s );  if( isDst[s] && hit == kNoNode ) hit = s; }
+    {
+        if( s < N && !seen[s] )
+        {
+            seen[s] = 1;
+            q.push_back( s );
+            if( isDst[s] && hit == kNoNode )
+            {
+                hit = s;
+            }
+        }
+    }
 
     for( std::size_t head = 0; head < q.size() && hit == kNoNode; ++head )
     {
@@ -2043,16 +2798,25 @@ inline std::vector<NodeId> shortestPathAny( const Graph& g, const std::vector<No
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
         {
             const NodeId v = g.outTargets[k];
-            if( seen[v] ) continue;
+            if( seen[v] )
+            {
+                continue;
+            }
             seen[v] = 1;  prev[v] = u;
             if( isDst[v] ) { hit = v; break; }
             q.push_back( v );
         }
     }
-    if( hit == kNoNode ) return {};
+    if( hit == kNoNode )
+    {
+        return {};
+    }
 
     std::vector<NodeId> path;
-    for( NodeId at = hit; at != kNoNode; at = prev[at] ) path.push_back( at );   // prev[seed] = kNoNode → stops
+    for( NodeId at = hit; at != kNoNode; at = prev[at] )
+    {
+        path.push_back( at ); // prev[seed] = kNoNode → stops
+    }
     std::reverse( path.begin(), path.end() );
     return path;
 }
@@ -2075,7 +2839,14 @@ inline std::vector<NodeId> transitiveCallers( const Graph& g, const std::vector<
     const std::size_t   N = g.wOutDeg.size();
     std::vector<char>   seen( N, 0 );
     std::vector<NodeId> q;
-    for( NodeId s : seeds ) if( s < N && !seen[s] ) { seen[s] = 1; q.push_back( s ); }
+    for( NodeId s : seeds )
+    {
+        if( s < N && !seen[s] )
+        {
+            seen[s] = 1;
+            q.push_back( s );
+        }
+    }
     const std::size_t nSeed = q.size();
     const auto*       ro    = g.inEdges.rowOffsets();
     const auto*       ci    = g.inEdges.colIndices();
@@ -2098,7 +2869,14 @@ inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>
     const std::size_t   N = g.wOutDeg.size();
     std::vector<char>   seen( N, 0 );
     std::vector<NodeId> q;
-    for( NodeId s : seeds ) if( s < N && !seen[s] ) { seen[s] = 1; q.push_back( s ); }
+    for( NodeId s : seeds )
+    {
+        if( s < N && !seen[s] )
+        {
+            seen[s] = 1;
+            q.push_back( s );
+        }
+    }
     for( std::size_t head = 0; head < q.size(); ++head )
     {
         const NodeId u = q[ head ];
@@ -2174,12 +2952,24 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
 
     // sanitize terminals: drop out-of-range ids, dedup, ascending; CLAMP to the cap (lowest ids win — a
     // deterministic degrade, since hostile input must never trip a VERIFY; the CLI enforces the usage error).
-    for( NodeId t : terminalSpecs ) if( t < N ) res.terminals.push_back( t );
+    for( NodeId t : terminalSpecs )
+    {
+        if( t < N )
+        {
+            res.terminals.push_back( t );
+        }
+    }
     std::sort( res.terminals.begin(), res.terminals.end() );
     res.terminals.erase( std::unique( res.terminals.begin(), res.terminals.end() ), res.terminals.end() );
-    if( res.terminals.size() > connectcfg::kMaxTerminals ) res.terminals.resize( connectcfg::kMaxTerminals );
+    if( res.terminals.size() > connectcfg::kMaxTerminals )
+    {
+        res.terminals.resize( connectcfg::kMaxTerminals );
+    }
     const std::size_t T = res.terminals.size();
-    if( T == 0 ) return res;                                   // empty terminals → empty result (honest degrade)
+    if( T == 0 )
+    {
+        return res; // empty terminals → empty result (honest degrade)
+    }
 
     // ── §2.2: one bounded BFS per terminal on the UNDIRECTED view (out-CSR + in-CSR). Visit order at each
     //    node: out-edges first, then in-edges, each ascending by id — so prev[] is the deterministic first-
@@ -2209,25 +2999,36 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
             {
                 const NodeId        u  = q[ head ];
                 const std::uint16_t du = dist[ti][ u ];
-                if( du >= res.radius ) continue;               // radius bound: never expand past R undirected hops
+                if( du >= res.radius )
+                {
+                    continue; // radius bound: never expand past R undirected hops
+                }
 
                 // out-edges first (ascending by construction — buildGraph stores targets ascending per source)
                 for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
                 {
                     const NodeId v = g.outTargets[ k ];
-                    if( v >= N || dist[ti][v] != connectcfg::kUnreachable ) continue;
+                    if( v >= N || dist[ti][v] != connectcfg::kUnreachable )
+                    {
+                        continue;
+                    }
                     dist[ti][v] = std::uint16_t( du + 1 );  prev[ti][v] = u;  prevViaOut[ti][v] = 1u;
                     q.push_back( v );
                 }
                 // then in-edges (row u's callers, ascending — the in-CSR fill preserves (from,to) sort order)
                 if( haveIn )
+                {
                     for( std::uint32_t k = inRo[u]; k < inRo[u + 1]; ++k )
                     {
                         const NodeId v = inCi[ k ];
-                        if( v >= N || dist[ti][v] != connectcfg::kUnreachable ) continue;
+                        if( v >= N || dist[ti][v] != connectcfg::kUnreachable )
+                        {
+                            continue;
+                        }
                         dist[ti][v] = std::uint16_t( du + 1 );  prev[ti][v] = u;  prevViaOut[ti][v] = 0u;
                         q.push_back( v );
                     }
+                }
             }
         }
     }
@@ -2236,8 +3037,15 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
     //    indices ascend with node ids (the list is sorted), so first-seen component ids are lowest-id ordered.
     UnionFind uf( T );
     for( std::size_t i = 0; i < T; ++i )
+    {
         for( std::size_t j = i + 1; j < T; ++j )
-            if( dist[i][ res.terminals[j] ] != connectcfg::kUnreachable ) uf.unite( std::uint32_t( i ), std::uint32_t( j ) );
+        {
+            if( dist[i][res.terminals[j]] != connectcfg::kUnreachable )
+            {
+                uf.unite( std::uint32_t( i ), std::uint32_t( j ) );
+            }
+        }
+    }
 
     res.componentOf.assign( T, 0u );
     std::vector<std::uint32_t> rootToComp( T, 0xFFFFFFFFu );
@@ -2245,7 +3053,10 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
     for( std::size_t ti = 0; ti < T; ++ti )
     {
         const std::uint32_t root = uf.find( std::uint32_t( ti ) );
-        if( rootToComp[ root ] == 0xFFFFFFFFu ) rootToComp[ root ] = compCount++;
+        if( rootToComp[root] == 0xFFFFFFFFu )
+        {
+            rootToComp[root] = compCount++;
+        }
         res.componentOf[ ti ] = rootToComp[ root ];
     }
 
@@ -2260,13 +3071,19 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
         bool                     dropped = false;
     };
     std::vector<std::vector<std::size_t>> members( compCount );          // component → terminal indices, ascending
-    for( std::size_t ti = 0; ti < T; ++ti ) members[ res.componentOf[ ti ] ].push_back( ti );
+    for( std::size_t ti = 0; ti < T; ++ti )
+    {
+        members[res.componentOf[ti]].push_back( ti );
+    }
     std::vector<std::vector<PathBuild>> groupPaths( compCount );
 
     for( std::uint32_t c = 0; c < compCount; ++c )
     {
         const std::vector<std::size_t>& m = members[ c ];
-        if( m.size() < 2 ) continue;                                      // a singleton group has no legs (— <unconnected>)
+        if( m.size() < 2 )
+        {
+            continue; // a singleton group has no legs (— <unconnected>)
+        }
 
         // Prim over the metric closure, seeded at the component's lowest terminal id (m[0] — ids ascend with index).
         std::vector<char> inTree( m.size(), 0 );
@@ -2278,14 +3095,23 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
             std::size_t   bestJ = m.size();
             for( std::size_t i = 0; i < m.size(); ++i )
             {
-                if( !inTree[ i ] ) continue;
+                if( !inTree[i] )
+                {
+                    continue;
+                }
                 for( std::size_t j = 0; j < m.size(); ++j )
                 {
-                    if( inTree[ j ] ) continue;
+                    if( inTree[j] )
+                    {
+                        continue;
+                    }
                     const std::size_t   lo = ( m[i] < m[j] ) ? m[i] : m[j];   // BFS/dist row of the lower-id endpoint
                     const std::size_t   hi = ( m[i] < m[j] ) ? m[j] : m[i];
                     const std::uint32_t d  = dist[ lo ][ res.terminals[ hi ] ];
-                    if( d == connectcfg::kUnreachable ) continue;             // finite by component membership eventually
+                    if( d == connectcfg::kUnreachable )
+                    {
+                        continue; // finite by component membership eventually
+                    }
                     const NodeId idMin = res.terminals[ lo ], idMax = res.terminals[ hi ];
                     const bool better = d != bestDist ? d < bestDist
                                       : idMin != bestMin ? idMin < bestMin
@@ -2293,23 +3119,42 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
                     if( better ) { bestDist = d;  bestMin = idMin;  bestMax = idMax;  bestJ = j; }
                 }
             }
-            if( bestJ == m.size() ) break;                                // defensive: no finite join left → stop (degrade, no spin)
+            if( bestJ == m.size() )
+            {
+                break; // defensive: no finite join left → stop (degrade, no spin)
+            }
             inTree[ bestJ ] = 1;
 
             // §2.4: reconstruct the leg from the LOWER-id endpoint's prev[] — walk from the higher-id terminal back.
             PathBuild pb;
             pb.meta = { bestMin, bestMax, bestDist };
             std::size_t loIdx = 0;
-            for( std::size_t i = 0; i < m.size(); ++i ) if( res.terminals[ m[i] ] == bestMin ) { loIdx = m[i]; break; }
+            for( std::size_t i = 0; i < m.size(); ++i )
+            {
+                if( res.terminals[m[i]] == bestMin )
+                {
+                    loIdx = m[i];
+                    break;
+                }
+            }
             NodeId cur = bestMax;
             pb.nodes.push_back( cur );
             while( cur != bestMin )
             {
                 const NodeId p = prev[ loIdx ][ cur ];
-                if( p == kNoNode ) break;                                  // defensive: broken chain → keep what we have
+                if( p == kNoNode )
+                {
+                    break; // defensive: broken chain → keep what we have
+                }
                 // discovery channel = the CSR truth: via-out means p CALLS cur; via-in means cur CALLS p.
-                if( prevViaOut[ loIdx ][ cur ] ) pb.edges.push_back( { p, cur } );
-                else                              pb.edges.push_back( { cur, p } );
+                if( prevViaOut[loIdx][cur] )
+                {
+                    pb.edges.push_back( { p, cur } );
+                }
+                else
+                {
+                    pb.edges.push_back( { cur, p } );
+                }
                 pb.nodes.push_back( p );
                 cur = p;
             }
@@ -2334,10 +3179,16 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
         {
             nodeScratch.clear();
             edgeScratch.clear();
-            for( std::size_t ti : members[ c ] ) nodeScratch.push_back( res.terminals[ ti ] );
+            for( std::size_t ti : members[c] )
+            {
+                nodeScratch.push_back( res.terminals[ti] );
+            }
             for( const PathBuild& pb : groupPaths[ c ] )
             {
-                if( pb.dropped ) continue;
+                if( pb.dropped )
+                {
+                    continue;
+                }
                 nodeScratch.insert( nodeScratch.end(), pb.nodes.begin(), pb.nodes.end() );
                 edgeScratch.insert( edgeScratch.end(), pb.edges.begin(), pb.edges.end() );
             }
@@ -2348,22 +3199,48 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
             nodeTotal += std::uint32_t( nodeScratch.size() );
             edgeTotal += std::uint32_t( edgeScratch.size() );
         }
-        if( nodeTotal <= connectcfg::kMaxNodes && edgeTotal <= connectcfg::kMaxEdges ) break;
+        if( nodeTotal <= connectcfg::kMaxNodes && edgeTotal <= connectcfg::kMaxEdges )
+        {
+            break;
+        }
 
         // drop victim: max (dist, then LOWEST (minId,maxId) first among equals) over every retained leg.
         PathBuild* victim = nullptr;
         for( std::uint32_t c = 0; c < compCount; ++c )
+        {
             for( PathBuild& pb : groupPaths[ c ] )
             {
-                if( pb.dropped ) continue;
+                if( pb.dropped )
+                {
+                    continue;
+                }
                 bool wins;
-                if( !victim )                                  wins = true;
-                else if( pb.meta.dist  != victim->meta.dist  ) wins = pb.meta.dist  > victim->meta.dist;   // longest first
-                else if( pb.meta.termA != victim->meta.termA ) wins = pb.meta.termA < victim->meta.termA;  // lower pair first
-                else                                           wins = pb.meta.termB < victim->meta.termB;
-                if( wins ) victim = &pb;
+                if( !victim )
+                {
+                    wins = true;
+                }
+                else if( pb.meta.dist != victim->meta.dist )
+                {
+                    wins = pb.meta.dist > victim->meta.dist; // longest first
+                }
+                else if( pb.meta.termA != victim->meta.termA )
+                {
+                    wins = pb.meta.termA < victim->meta.termA; // lower pair first
+                }
+                else
+                {
+                    wins = pb.meta.termB < victim->meta.termB;
+                }
+                if( wins )
+                {
+                    victim = &pb;
+                }
             }
-        if( !victim ) break;                                              // nothing left to drop → emit what remains
+        }
+        if( !victim )
+        {
+            break; // nothing left to drop → emit what remains
+        }
         victim->dropped = true;
         res.truncated   = true;
     }
@@ -2374,12 +3251,18 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
     for( std::uint32_t c = 0; c < compCount; ++c )
     {
         ConnectGroup& grp = res.groups[ c ];
-        for( std::size_t ti : members[ c ] ) grp.terminals.push_back( res.terminals[ ti ] );
+        for( std::size_t ti : members[c] )
+        {
+            grp.terminals.push_back( res.terminals[ti] );
+        }
 
         nodeScratch.clear();
         for( const PathBuild& pb : groupPaths[ c ] )
         {
-            if( pb.dropped ) continue;
+            if( pb.dropped )
+            {
+                continue;
+            }
             grp.paths.push_back( pb.meta );
             nodeScratch.insert( nodeScratch.end(), pb.nodes.begin(), pb.nodes.end() );
             grp.edges.insert( grp.edges.end(), pb.edges.begin(), pb.edges.end() );
@@ -2387,7 +3270,12 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
         std::sort( nodeScratch.begin(), nodeScratch.end() );
         nodeScratch.erase( std::unique( nodeScratch.begin(), nodeScratch.end() ), nodeScratch.end() );
         for( NodeId v : nodeScratch )
-            if( !std::binary_search( grp.terminals.begin(), grp.terminals.end(), v ) ) grp.steiner.push_back( v );
+        {
+            if( !std::binary_search( grp.terminals.begin(), grp.terminals.end(), v ) )
+            {
+                grp.steiner.push_back( v );
+            }
+        }
         std::sort( grp.edges.begin(), grp.edges.end(), edgeLess );
         grp.edges.erase( std::unique( grp.edges.begin(), grp.edges.end(), edgeEq ), grp.edges.end() );
     }
@@ -2415,7 +3303,10 @@ inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& ad
     const std::uint32_t N = std::uint32_t( adj.size() );
     Communities out;
     out.comm.assign( N, 0 );
-    if( N == 0 ) return out;
+    if( N == 0 )
+    {
+        return out;
+    }
 
     std::vector<std::uint32_t> comm( N );
     std::vector<double>        deg( N ), commTot( N );
@@ -2424,7 +3315,10 @@ inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& ad
     {
         comm[i] = i;
         double d = 0.0;
-        for( const WEdge& e : adj[i] ) d += e.w;
+        for( const WEdge& e : adj[i] )
+        {
+            d += e.w;
+        }
         deg[i] = d;  commTot[i] = d;  m2 += d;
     }
 
@@ -2434,11 +3328,17 @@ inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& ad
         bool improved = false;
         for( NodeId i = 0; i < N; ++i )
         {
-            if( adj[i].empty() ) continue;
+            if( adj[i].empty() )
+            {
+                continue;
+            }
             const std::uint32_t ci = comm[i];
             commTot[ ci ] -= deg[i];                                  // pull i out of its community
             linkTo.clear();
-            for( const WEdge& e : adj[i] ) linkTo[ comm[ e.to ] ] += e.w;
+            for( const WEdge& e : adj[i] )
+            {
+                linkTo[comm[e.to]] += e.w;
+            }
             // Louvain gain (weighted), constants dropped:  k_iin(C) − deg[i]·Σtot(C)/m2 ; maximize.
             std::uint32_t best     = ci;
             double        bestGain = ( linkTo.contains( ci ) ? linkTo[ci] : 0.0 ) - deg[i] * commTot[ci] / m2;
@@ -2450,9 +3350,15 @@ inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& ad
             }
             commTot[ best ] += deg[i];                                // place i in the chosen community
             comm[i] = best;
-            if( best != ci ) improved = true;
+            if( best != ci )
+            {
+                improved = true;
+            }
         }
-        if( !improved ) break;
+        if( !improved )
+        {
+            break;
+        }
     }
 
     // compact community ids to 0..K-1 in first-seen (node-id) order
@@ -2461,7 +3367,10 @@ inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& ad
     {
         const auto it = remap.find( comm[i] );
         if( it == remap.end() ) { const std::uint32_t nid = std::uint32_t( remap.size() ); remap.emplace( comm[i], nid ); out.comm[i] = nid; }
-        else                      out.comm[i] = it->second;
+        else
+        {
+            out.comm[i] = it->second;
+        }
     }
     out.count = std::uint32_t( remap.size() );
     return out;
@@ -2479,12 +3388,27 @@ inline std::vector<std::vector<WEdge>> symbolAdjacency( const Graph& g )
     for( NodeId u = 0; u < N; ++u )
     {
         nb.clear();
-        for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k ) if( g.outTargets[k] != u ) nb.push_back( g.outTargets[k] );
-        for( std::uint32_t k = inRo[u];     k < inRo[u + 1];     ++k ) if( inCi[k] != u )           nb.push_back( inCi[k] );
+        for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
+        {
+            if( g.outTargets[k] != u )
+            {
+                nb.push_back( g.outTargets[k] );
+            }
+        }
+        for( std::uint32_t k = inRo[u]; k < inRo[u + 1]; ++k )
+        {
+            if( inCi[k] != u )
+            {
+                nb.push_back( inCi[k] );
+            }
+        }
         std::sort( nb.begin(), nb.end() );
         nb.erase( std::unique( nb.begin(), nb.end() ), nb.end() );
         adj[u].reserve( nb.size() );
-        for( NodeId v : nb ) adj[u].push_back( { v, 1.0 } );
+        for( NodeId v : nb )
+        {
+            adj[u].push_back( { v, 1.0 } );
+        }
     }
     return adj;
 }
@@ -2528,8 +3452,14 @@ inline std::vector<std::vector<WEdge>> contractGraph( const std::vector<std::vec
         for( const WEdge& e : adj[u] )
         {
             const std::uint32_t cv = comm[ e.to ];
-            if( cu == cv ) continue;               // intra-group → folded into the super-node, not an edge
-            if( cu < cv ) sup[ ( std::uint64_t( cu ) << 32 ) | cv ] += e.w;   // count each undirected pair once
+            if( cu == cv )
+            {
+                continue; // intra-group → folded into the super-node, not an edge
+            }
+            if( cu < cv )
+            {
+                sup[( std::uint64_t( cu ) << 32 ) | cv] += e.w; // count each undirected pair once
+            }
         }
     }
     std::vector<std::vector<WEdge>> out( groups );
@@ -2540,7 +3470,9 @@ inline std::vector<std::vector<WEdge>> contractGraph( const std::vector<std::vec
         out[b].push_back( { a, w } );
     }
     for( std::vector<WEdge>& a : out )
+    {
         std::sort( a.begin(), a.end(), []( const WEdge& x, const WEdge& y ) { return x.to < y.to; } );
+    }
     return out;
 }
 
@@ -2554,7 +3486,10 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
     const Communities                     lvl0   = louvainLocalMoving( symAdj );
     h.levels.push_back( lvl0.comm );
     h.counts.push_back( lvl0.count );
-    if( N == 0 ) return h;
+    if( N == 0 )
+    {
+        return h;
+    }
 
     // INVARIANT held across the loop: `adj` is the weighted adjacency over the CURRENT super-node set
     // (`curCount` nodes), and `symToCur[symbolId]` is the current super-node each symbol maps into. We seed
@@ -2570,16 +3505,25 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
     for( std::uint32_t step = 0; step < maxLevels && curCount > maxTop && curCount > 1; ++step )
     {
         const Communities parent = louvainLocalMoving( adj );
-        if( parent.count >= curCount ) break;              // no coarsening achieved → stop (avoid a no-op level)
+        if( parent.count >= curCount )
+        {
+            break; // no coarsening achieved → stop (avoid a no-op level)
+        }
 
         std::vector<std::uint32_t> symGroup( N );          // lift super-node→parent grouping back to symbol ids
-        for( NodeId i = 0; i < N; ++i ) symGroup[i] = parent.comm[ symToCur[i] ];
+        for( NodeId i = 0; i < N; ++i )
+        {
+            symGroup[i] = parent.comm[symToCur[i]];
+        }
         h.parentOf.push_back( parent.comm );               // this level's super-node → the coarser level's group
         h.levels.push_back( symGroup );
         h.counts.push_back( parent.count );
 
         adj = contractGraph( adj, parent.comm, parent.count );   // coarsen the current super-node graph one step
-        for( NodeId i = 0; i < N; ++i ) symToCur[i] = parent.comm[ symToCur[i] ];
+        for( NodeId i = 0; i < N; ++i )
+        {
+            symToCur[i] = parent.comm[symToCur[i]];
+        }
         curCount = parent.count;
     }
     return h;

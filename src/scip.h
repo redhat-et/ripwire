@@ -60,7 +60,10 @@ namespace scipwire
             std::uint64_t v = 0;
             for( int shift = 0; shift < 64; shift += 7 )
             {
-                if( p >= end ) return false;                    // truncated
+                if( p >= end )
+                {
+                    return false; // truncated
+                }
                 const std::uint8_t b = *p++;
                 v |= std::uint64_t( b & 0x7F ) << shift;
                 if( ( b & 0x80 ) == 0 ) { out = v; return true; }
@@ -72,7 +75,10 @@ namespace scipwire
         bool tag( std::uint32_t& fieldNumber, std::uint32_t& wireType ) noexcept
         {
             std::uint64_t t = 0;
-            if( !varint( t ) ) return false;
+            if( !varint( t ) )
+            {
+                return false;
+            }
             fieldNumber = std::uint32_t( t >> 3 );
             wireType    = std::uint32_t( t & 0x7 );
             return true;
@@ -82,8 +88,14 @@ namespace scipwire
         bool lenDelim( const std::uint8_t*& q, std::size_t& len ) noexcept
         {
             std::uint64_t n = 0;
-            if( !varint( n ) ) return false;
-            if( n > std::uint64_t( end - p ) ) return false;    // length runs past the buffer → corrupt
+            if( !varint( n ) )
+            {
+                return false;
+            }
+            if( n > std::uint64_t( end - p ) )
+            {
+                return false; // length runs past the buffer → corrupt
+            }
             q   = p;
             len = std::size_t( n );
             p  += n;
@@ -97,8 +109,24 @@ namespace scipwire
             switch( wireType )
             {
                 case 0: { std::uint64_t v; return varint( v ); }                       // varint
-                case 1: { if( end - p < 8 ) return false; p += 8; return true; }       // i64
-                case 5: { if( end - p < 4 ) return false; p += 4; return true; }       // i32
+                case 1:
+                {
+                    if( end - p < 8 )
+                    {
+                        return false;
+                    }
+                    p += 8;
+                    return true;
+                } // i64
+                case 5:
+                {
+                    if( end - p < 4 )
+                    {
+                        return false;
+                    }
+                    p += 4;
+                    return true;
+                } // i32
                 case 2: { const std::uint8_t* q; std::size_t n; return lenDelim( q, n ); }   // length-delimited
                 default: return false;                                                 // 3/4 groups → corrupt
             }
@@ -128,7 +156,10 @@ inline std::int64_t scipDecodeRangeStart( const std::uint8_t* q, std::size_t len
 {
     scipwire::Reader r{ q, q + len };
     std::uint64_t    first = 0;
-    if( !r.varint( first ) ) return -1;
+    if( !r.varint( first ) )
+    {
+        return -1;
+    }
     return std::int64_t( first );
 }
 
@@ -139,30 +170,53 @@ inline bool scipDecodeOccurrence( const std::uint8_t* q, std::size_t len, ScipOc
     while( !r.atEnd() )
     {
         std::uint32_t field = 0, wire = 0;
-        if( !r.tag( field, wire ) ) return false;
+        if( !r.tag( field, wire ) )
+        {
+            return false;
+        }
         if( field == 1 && wire == 2 )                                   // range (packed int32)
         {
             const std::uint8_t* rp; std::size_t rn;
-            if( !r.lenDelim( rp, rn ) ) return false;
+            if( !r.lenDelim( rp, rn ) )
+            {
+                return false;
+            }
             occ.startLine = scipDecodeRangeStart( rp, rn );
         }
         else if( field == 1 && wire == 0 )                              // range (unpacked): first int = start line
         {
-            std::uint64_t v; if( !r.varint( v ) ) return false;
-            if( occ.startLine < 0 ) occ.startLine = std::int64_t( v );
+            std::uint64_t v;
+            if( !r.varint( v ) )
+            {
+                return false;
+            }
+            if( occ.startLine < 0 )
+            {
+                occ.startLine = std::int64_t( v );
+            }
         }
         else if( field == 2 && wire == 2 )                              // symbol (string)
         {
             const std::uint8_t* sp; std::size_t sn;
-            if( !r.lenDelim( sp, sn ) ) return false;
+            if( !r.lenDelim( sp, sn ) )
+            {
+                return false;
+            }
             occ.symbol.assign( reinterpret_cast<const char*>( sp ), sn );
         }
         else if( field == 3 && wire == 0 )                              // symbol_roles (int32)
         {
-            std::uint64_t v; if( !r.varint( v ) ) return false;
+            std::uint64_t v;
+            if( !r.varint( v ) )
+            {
+                return false;
+            }
             occ.roles = std::uint32_t( v );
         }
-        else if( !r.skip( wire ) ) return false;                        // any other field → skip
+        else if( !r.skip( wire ) )
+        {
+            return false; // any other field → skip
+        }
     }
     return true;
 }
@@ -174,22 +228,37 @@ inline bool scipDecodeDocument( const std::uint8_t* q, std::size_t len, ScipDocu
     while( !r.atEnd() )
     {
         std::uint32_t field = 0, wire = 0;
-        if( !r.tag( field, wire ) ) return false;
+        if( !r.tag( field, wire ) )
+        {
+            return false;
+        }
         if( field == 1 && wire == 2 )                                   // relative_path (string)
         {
             const std::uint8_t* sp; std::size_t sn;
-            if( !r.lenDelim( sp, sn ) ) return false;
+            if( !r.lenDelim( sp, sn ) )
+            {
+                return false;
+            }
             doc.relativePath.assign( reinterpret_cast<const char*>( sp ), sn );
         }
         else if( field == 2 && wire == 2 )                              // occurrences (repeated Occurrence)
         {
             const std::uint8_t* op; std::size_t on;
-            if( !r.lenDelim( op, on ) ) return false;
+            if( !r.lenDelim( op, on ) )
+            {
+                return false;
+            }
             ScipOccurrence occ;
-            if( !scipDecodeOccurrence( op, on, occ ) ) return false;
+            if( !scipDecodeOccurrence( op, on, occ ) )
+            {
+                return false;
+            }
             doc.occurrences.push_back( std::move( occ ) );
         }
-        else if( !r.skip( wire ) ) return false;                        // relative_path_bytes / symbols / text / … → skip
+        else if( !r.skip( wire ) )
+        {
+            return false; // relative_path_bytes / symbols / text / … → skip
+        }
     }
     return true;
 }
@@ -201,16 +270,28 @@ inline bool scipDecodeIndex( const std::uint8_t* data, std::size_t size, std::ve
     while( !r.atEnd() )
     {
         std::uint32_t field = 0, wire = 0;
-        if( !r.tag( field, wire ) ) return false;
+        if( !r.tag( field, wire ) )
+        {
+            return false;
+        }
         if( field == 2 && wire == 2 )                                   // documents (repeated Document)
         {
             const std::uint8_t* dp; std::size_t dn;
-            if( !r.lenDelim( dp, dn ) ) return false;
+            if( !r.lenDelim( dp, dn ) )
+            {
+                return false;
+            }
             ScipDocument doc;
-            if( !scipDecodeDocument( dp, dn, doc ) ) return false;
+            if( !scipDecodeDocument( dp, dn, doc ) )
+            {
+                return false;
+            }
             docs.push_back( std::move( doc ) );
         }
-        else if( !r.skip( wire ) ) return false;                        // metadata / external_symbols → skip
+        else if( !r.skip( wire ) )
+        {
+            return false; // metadata / external_symbols → skip
+        }
     }
     return true;
 }
@@ -222,7 +303,10 @@ inline std::vector<std::uint8_t> scipReadFile( const char* path )
 {
     std::vector<std::uint8_t> bytes;
     std::FILE* f = std::fopen( path, "rb" );
-    if( !f ) return bytes;
+    if( !f )
+    {
+        return bytes;
+    }
     if( std::fseek( f, 0, SEEK_END ) != 0 ) { std::fclose( f ); return bytes; }
     const long sz = std::ftell( f );
     if( sz <= 0 || sz > ( 256L << 20 ) ) { std::fclose( f ); return bytes; }
@@ -230,7 +314,10 @@ inline std::vector<std::uint8_t> scipReadFile( const char* path )
     bytes.resize( std::size_t( sz ) );
     const std::size_t got = std::fread( bytes.data(), 1, bytes.size(), f );
     std::fclose( f );
-    if( got != bytes.size() ) bytes.clear();
+    if( got != bytes.size() )
+    {
+        bytes.clear();
+    }
     return bytes;
 }
 
@@ -282,10 +369,17 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
     struct LineDef { std::uint32_t line; NodeId id; };
     std::vector<std::vector<LineDef>> defLines( ing.files.size() );
     for( const Symbol& s : ing.symbols )
-        if( s.fileId < defLines.size() ) defLines[ s.fileId ].push_back( { s.line, s.id } );
+    {
+        if( s.fileId < defLines.size() )
+        {
+            defLines[s.fileId].push_back( { s.line, s.id } );
+        }
+    }
     for( std::vector<LineDef>& v : defLines )
+    {
         std::sort( v.begin(), v.end(), []( const LineDef& a, const LineDef& b ) noexcept
                    { return a.line != b.line ? a.line < b.line : a.id < b.id; } );
+    }
 
     // (a) scipSymbolString → the ripwire def NodeId at (relative_path, startLine+1). A relative_path that
     // maps to no ripwire file, or a def line with no ripwire symbol, is skipped (subset semantics).
@@ -293,17 +387,28 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
     for( const ScipDocument& doc : docs )
     {
         const std::uint32_t fid = resolveFileSuffix( ing, doc.relativePath );
-        if( fid == UINT32_MAX ) continue;                                // covers a tree ripwire didn't map
+        if( fid == UINT32_MAX )
+        {
+            continue; // covers a tree ripwire didn't map
+        }
         for( const ScipOccurrence& occ : doc.occurrences )
         {
-            if( !( occ.roles & 0x1u ) || occ.startLine < 0 || occ.symbol.empty() ) continue;   // definitions only
+            if( !( occ.roles & 0x1u ) || occ.startLine < 0 || occ.symbol.empty() )
+            {
+                continue; // definitions only
+            }
             const std::uint32_t defLine1 = std::uint32_t( occ.startLine ) + 1;                  // 0-based → 1-based
             bool matched = false;
             for( const LineDef& ld : defLines[ fid ] )
+            {
                 if( ld.line == defLine1 ) { scipDef.emplace( occ.symbol, ld.id ); matched = true; break; }   // first def wins (id order)
+            }
             // a def occurrence whose exact line has no current symbol = the def MOVED (or the file changed):
             // a staleness signal. Count it (diagnostic only) so loadScipOverlay can surface the match ratio.
-            if( !matched ) ++ov.defsUnmatched;
+            if( !matched )
+            {
+                ++ov.defsUnmatched;
+            }
         }
     }
 
@@ -317,11 +422,20 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
     refEnclosing.reserve( ing.references.size() );
     for( const Reference& rf : ing.references )
     {
-        if( rf.fromSymbol == kNoNode ) continue;                                                 // file-scope ref: no enclosing symbol
+        if( rf.fromSymbol == kNoNode )
+        {
+            continue; // file-scope ref: no enclosing symbol
+        }
         const std::uint64_t key = ( std::uint64_t( rf.fileId ) << 32 ) | std::uint64_t( rf.line );
         const auto it = refEnclosing.find( key );
-        if( it == refEnclosing.end() ) refEnclosing.emplace( key, rf.fromSymbol );
-        else if( rf.fromSymbol < it->second ) it->second = rf.fromSymbol;                        // deterministic tie-break
+        if( it == refEnclosing.end() )
+        {
+            refEnclosing.emplace( key, rf.fromSymbol );
+        }
+        else if( rf.fromSymbol < it->second )
+        {
+            it->second = rf.fromSymbol; // deterministic tie-break
+        }
     }
 
     // (b) reference occurrences → precise edges. Enclosing symbol comes from ripwire's own parse at the
@@ -329,13 +443,22 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
     for( const ScipDocument& doc : docs )
     {
         const std::uint32_t fid = resolveFileSuffix( ing, doc.relativePath );
-        if( fid == UINT32_MAX ) continue;
+        if( fid == UINT32_MAX )
+        {
+            continue;
+        }
         for( const ScipOccurrence& occ : doc.occurrences )
         {
-            if( ( occ.roles & 0x1u ) || occ.startLine < 0 || occ.symbol.empty() ) continue;     // references only
+            if( ( occ.roles & 0x1u ) || occ.startLine < 0 || occ.symbol.empty() )
+            {
+                continue; // references only
+            }
             ++ov.refOccurrences;                                                                 // ALL ref occurrences seen (incl. external std::/library — diagnostic total, not the ratio denominator)
             const auto dit = scipDef.find( occ.symbol );
-            if( dit == scipDef.end() ) continue;                                                 // target not a known def (external) — excluded from the S5 denominator, not a staleness signal
+            if( dit == scipDef.end() )
+            {
+                continue; // target not a known def (external) — excluded from the S5 denominator, not a staleness signal
+            }
             const NodeId to = dit->second;
             ++internalOccurrences;                                                                // S5 denominator: occurrences the index claims point INTO this tree
 
@@ -345,9 +468,15 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
             const std::uint32_t refLine1 = std::uint32_t( occ.startLine ) + 1;
             const std::uint64_t key      = ( std::uint64_t( fid ) << 32 ) | std::uint64_t( refLine1 );
             const auto encIt = refEnclosing.find( key );
-            if( encIt == refEnclosing.end() ) continue;                                          // stale ref line → drop, never mis-attribute
+            if( encIt == refEnclosing.end() )
+            {
+                continue; // stale ref line → drop, never mis-attribute
+            }
             const NodeId from = encIt->second;
-            if( from == kNoNode || from == to ) continue;                                        // no enclosing / self-loop
+            if( from == kNoNode || from == to )
+            {
+                continue; // no enclosing / self-loop
+            }
             ++matchedOccurrencesPreDedup;                                                         // S5 numerator: matched PRE-dedup (one count per occurrence, not per unique edge)
 
             ov.coveredFrom.push_back( { from, ing.symbols[ to ].name, to } );                    // callee NAME + pinned target
@@ -356,8 +485,10 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
 
     // sort + dedup coveredFrom by (from, calleeName, to) — deterministic and O(log n) to look up.
     std::sort( ov.coveredFrom.begin(), ov.coveredFrom.end(), []( const ScipCover& a, const ScipCover& b ) noexcept
-               { if( a.from != b.from ) return a.from < b.from;
-                 if( a.calleeName != b.calleeName ) return a.calleeName < b.calleeName;
+               { if( a.from != b.from ) { return a.from < b.from;
+}
+                 if( a.calleeName != b.calleeName ) { return a.calleeName < b.calleeName;
+}
                  return a.to < b.to; } );
     ov.coveredFrom.erase( std::unique( ov.coveredFrom.begin(), ov.coveredFrom.end(),
                           []( const ScipCover& a, const ScipCover& b ) noexcept
@@ -366,7 +497,10 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
 
     // derive the (from,to)-sorted unique preciseEdges set (the provenance stamp source).
     ov.preciseEdges.reserve( ov.coveredFrom.size() );
-    for( const ScipCover& c : ov.coveredFrom ) ov.preciseEdges.push_back( { c.from, c.to } );
+    for( const ScipCover& c : ov.coveredFrom )
+    {
+        ov.preciseEdges.push_back( { c.from, c.to } );
+    }
     std::sort( ov.preciseEdges.begin(), ov.preciseEdges.end(), []( const ScipEdge& a, const ScipEdge& b ) noexcept
                { return a.from != b.from ? a.from < b.from : a.to < b.to; } );
     ov.preciseEdges.erase( std::unique( ov.preciseEdges.begin(), ov.preciseEdges.end(),

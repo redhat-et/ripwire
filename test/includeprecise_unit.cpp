@@ -19,8 +19,15 @@ using namespace rw;
 static int g_fail = 0;
 static void check( bool cond, const char* what )
 {
-    if( cond ) std::printf( "  PASS  %s\n", what );
-    else       { std::printf( "  FAIL  %s\n", what ); g_fail = 1; }
+    if( cond )
+    {
+        std::printf( "  PASS  %s\n", what );
+    }
+    else
+    {
+        std::printf( "  FAIL  %s\n", what );
+        g_fail = 1;
+    }
 }
 
 // find a fileId whose stored path ENDS WITH `suffix` (paths are `<root>/<rel>`); kNoFile if none / >1.
@@ -31,7 +38,9 @@ static std::uint32_t fileEndingWith( const IngestResult& ing, std::string_view s
     {
         std::string_view p = ing.files[f];
         if( p.size() >= suffix.size() && p.compare( p.size() - suffix.size(), suffix.size(), suffix ) == 0 )
+        {
             hit = ( hit == kNoFile ) ? f : 0xFFFFFFFEu;   // 0xFFFFFFFE = ambiguous-suffix marker
+        }
     }
     return hit;
 }
@@ -54,7 +63,10 @@ int main( int argc, char** argv )
 
     // build the path→fileId index the resolver uses (exact ing.files spelling)
     HashMap<std::string, std::uint32_t> fileIndex;
-    for( std::uint32_t f = 0; f < ing.files.size(); ++f ) fileIndex.emplace( ing.files[f], f );
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        fileIndex.emplace( ing.files[f], f );
+    }
 
     // ── (a) `#include "../geometry.h"` from sub/ resolves to the ROOT geometry.h, NOT the decoy ──
     const std::string consumerPath = ing.files[ consumer ];
@@ -80,7 +92,7 @@ int main( int argc, char** argv )
     const auto adj   = buildPreciseIncludeAdj( ing );
     const auto trans = transitiveIncludeSet( adj );
     const auto has   = []( const std::vector<NodeId>& v, std::uint32_t x )
-    { for( NodeId n : v ) if( n == x ) return true; return false; };
+    { for( NodeId n : v ) { if( n == x ) { return true; } } return false; };
 
     check( aH < trans.size() && has( trans[aH], bH ) && has( trans[aH], cH ),
            "transitive closure: a.h reaches BOTH b.h and c.h (3-file chain)" );
@@ -91,7 +103,10 @@ int main( int argc, char** argv )
     // ── determinism: build the set twice, identical ──────────────────────────────────────────────
     const auto trans2 = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );
     bool identical = ( trans.size() == trans2.size() );
-    for( std::size_t f = 0; identical && f < trans.size(); ++f ) identical = ( trans[f] == trans2[f] );
+    for( std::size_t f = 0; identical && f < trans.size(); ++f )
+    {
+        identical = ( trans[f] == trans2[f] );
+    }
     check( identical, "transitive closure deterministic (built twice, byte-identical)" );
 
     // ── lexicalNormalize edge cases (the sharp `.`/`..` collapsing) ──────────────────────────────

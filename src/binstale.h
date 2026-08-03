@@ -65,11 +65,20 @@ inline constexpr std::size_t kMaxTrackedFiles = 20000;
 inline bool looksBinary( const std::string& absPath )
 {
     std::ifstream f( absPath, std::ios::binary );
-    if( !f ) return false;
+    if( !f )
+    {
+        return false;
+    }
     char buf[ 8000 ];
     f.read( buf, sizeof( buf ) );
     const std::streamsize n = f.gcount();
-    for( std::streamsize i = 0; i < n; ++i ) if( buf[ i ] == '\0' ) return true;
+    for( std::streamsize i = 0; i < n; ++i )
+    {
+        if( buf[i] == '\0' )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -120,7 +129,10 @@ inline BinaryStaleResult computeBinaryStaleness( const std::string& root )
 
     const std::string lsOut = quality::popenTrimmed(
         "git -c core.quotepath=false -C " + shSingleQuote( root ) + " ls-files 2>/dev/null" );
-    if( lsOut.empty() ) return result;   // nothing tracked — degrade quietly, not a failure
+    if( lsOut.empty() )
+    {
+        return result; // nothing tracked — degrade quietly, not a failure
+    }
 
     std::vector<std::string> paths;
     {
@@ -128,8 +140,14 @@ inline BinaryStaleResult computeBinaryStaleness( const std::string& root )
         while( i < lsOut.size() )
         {
             std::size_t j = lsOut.find( '\n', i );
-            if( j == std::string::npos ) j = lsOut.size();
-            if( j > i ) paths.push_back( lsOut.substr( i, j - i ) );
+            if( j == std::string::npos )
+            {
+                j = lsOut.size();
+            }
+            if( j > i )
+            {
+                paths.push_back( lsOut.substr( i, j - i ) );
+            }
             i = j + 1;
         }
     }
@@ -139,7 +157,10 @@ inline BinaryStaleResult computeBinaryStaleness( const std::string& root )
     const auto absOf = [ & ]( const std::string& p )
     {
         std::string a = root;
-        if( !a.empty() && a.back() != '/' ) a += '/';
+        if( !a.empty() && a.back() != '/' )
+        {
+            a += '/';
+        }
         a += p;
         return a;
     };
@@ -151,7 +172,10 @@ inline BinaryStaleResult computeBinaryStaleness( const std::string& root )
     for( const std::string& p : paths )
     {
         byDir[ std::string( includerDir( p ) ) ].push_back( p );
-        if( looksBinary( absOf( p ) ) ) binaries.push_back( p );
+        if( looksBinary( absOf( p ) ) )
+        {
+            binaries.push_back( p );
+        }
     }
     result.binariesFound = binaries.size();
 
@@ -160,31 +184,51 @@ inline BinaryStaleResult computeBinaryStaleness( const std::string& root )
         const std::string_view dir  = includerDir( bin );
         const std::string_view stem = stemOf( baseNameOf( bin ) );
         const std::string      binCommit = lastTouchingCommit( root, bin );
-        if( binCommit.empty() ) continue;   // history lookup failed — degrade, skip rather than guess
+        if( binCommit.empty() )
+        {
+            continue; // history lookup failed — degrade, skip rather than guess
+        }
 
         const auto it = byDir.find( std::string( dir ) );
-        if( it == byDir.end() ) continue;
+        if( it == byDir.end() )
+        {
+            continue;
+        }
         for( const std::string& cand : it->second )
         {
-            if( cand == bin ) continue;
-            if( stemOf( baseNameOf( cand ) ) != stem ) continue;
-            if( looksBinary( absOf( cand ) ) ) continue;   // a same-stem binary sibling (foo.o/foo.a) — not a "source", cannot order meaningfully
+            if( cand == bin )
+            {
+                continue;
+            }
+            if( stemOf( baseNameOf( cand ) ) != stem )
+            {
+                continue;
+            }
+            if( looksBinary( absOf( cand ) ) )
+            {
+                continue; // a same-stem binary sibling (foo.o/foo.a) — not a "source", cannot order meaningfully
+            }
 
             const std::string srcCommit = lastTouchingCommit( root, cand );
-            if( srcCommit.empty() || srcCommit == binCommit ) continue;
+            if( srcCommit.empty() || srcCommit == binCommit )
+            {
+                continue;
+            }
 
             // STALE iff the binary's last commit is a STRICT ancestor of the source's last commit — the
             // source moved at/after a point the binary predates, and nothing recommitted the binary since.
             if( quality::gitIsAncestor( root, binCommit, srcCommit ) )
+            {
                 result.stale.push_back( StaleBinary{ bin, binCommit, cand, srcCommit } );
+            }
         }
     }
 
     std::sort( result.stale.begin(), result.stale.end(), []( const StaleBinary& a, const StaleBinary& b )
-    {
-        if( a.path != b.path ) return a.path < b.path;
-        return a.srcPath < b.srcPath;
-    } );
+               {
+        if( a.path != b.path ) { return a.path < b.path;
+}
+        return a.srcPath < b.srcPath; } );
     return result;
 }
 

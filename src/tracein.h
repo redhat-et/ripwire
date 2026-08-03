@@ -78,8 +78,17 @@ namespace detail
 
 inline bool isDigits( std::string_view s ) noexcept
 {
-    if( s.empty() ) return false;
-    for( const char c : s ) if( c < '0' || c > '9' ) return false;
+    if( s.empty() )
+    {
+        return false;
+    }
+    for( const char c : s )
+    {
+        if( c < '0' || c > '9' )
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -107,8 +116,14 @@ inline std::uint32_t toUint( std::string_view s, bool& overflowed ) noexcept
 inline std::string_view trim( std::string_view s ) noexcept
 {
     std::size_t a = 0, b = s.size();
-    while( a < b && ( s[a] == ' ' || s[a] == '\t' || s[a] == '\r' ) ) ++a;
-    while( b > a && ( s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r' ) ) --b;
+    while( a < b && ( s[a] == ' ' || s[a] == '\t' || s[a] == '\r' ) )
+    {
+        ++a;
+    }
+    while( b > a && ( s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r' ) )
+    {
+        --b;
+    }
     return s.substr( a, b - a );
 }
 
@@ -126,9 +141,15 @@ inline bool looksLikePath( std::string_view p ) noexcept
 inline bool splitPathLine( std::string_view s, std::string& path, std::uint32_t& line, bool& overflowed ) noexcept
 {
     const std::size_t c1 = s.rfind( ':' );
-    if( c1 == std::string_view::npos ) return false;
+    if( c1 == std::string_view::npos )
+    {
+        return false;
+    }
     const std::string_view tail1 = s.substr( c1 + 1 );
-    if( !isDigits( tail1 ) ) return false;
+    if( !isDigits( tail1 ) )
+    {
+        return false;
+    }
     const std::string_view head1 = s.substr( 0, c1 );
 
     // `path:line:col` → the second-from-right colon-group is the line, tail1 was the column
@@ -139,7 +160,10 @@ inline bool splitPathLine( std::string_view s, std::string& path, std::uint32_t&
         if( looksLikePath( head2 ) ) { path.assign( head2 ); line = toUint( head1.substr( c2 + 1 ), overflowed ); return true; }
     }
     // `path:line`
-    if( !looksLikePath( head1 ) ) return false;
+    if( !looksLikePath( head1 ) )
+    {
+        return false;
+    }
     path.assign( head1 );
     line = toUint( tail1, overflowed );
     return true;
@@ -149,23 +173,40 @@ inline bool splitPathLine( std::string_view s, std::string& path, std::uint32_t&
 inline std::optional<ParsedFrame> parsePython( std::string_view line )
 {
     const std::size_t f = line.find( "File \"" );
-    if( f == std::string_view::npos ) return std::nullopt;
+    if( f == std::string_view::npos )
+    {
+        return std::nullopt;
+    }
     const std::size_t q1 = f + 6;
     const std::size_t q2 = line.find( '"', q1 );
-    if( q2 == std::string_view::npos ) return std::nullopt;
+    if( q2 == std::string_view::npos )
+    {
+        return std::nullopt;
+    }
     const std::size_t ln = line.find( ", line ", q2 );
-    if( ln == std::string_view::npos ) return std::nullopt;
+    if( ln == std::string_view::npos )
+    {
+        return std::nullopt;
+    }
     std::size_t d = ln + 7;
     const std::size_t ds = d;
-    while( d < line.size() && line[d] >= '0' && line[d] <= '9' ) ++d;
-    if( d == ds ) return std::nullopt;
+    while( d < line.size() && line[d] >= '0' && line[d] <= '9' )
+    {
+        ++d;
+    }
+    if( d == ds )
+    {
+        return std::nullopt;
+    }
 
     ParsedFrame fr;
     fr.format = FrameFormat::Python;
     fr.path.assign( line.substr( q1, q2 - q1 ) );
     fr.line = toUint( line.substr( ds, d - ds ), fr.lineOverflowed );
     if( const std::size_t in = line.find( ", in ", d ); in != std::string_view::npos )
+    {
         fr.func.assign( trim( line.substr( in + 5 ) ) );
+    }
     return fr;
 }
 
@@ -173,9 +214,15 @@ inline std::optional<ParsedFrame> parsePython( std::string_view line )
 inline std::optional<ParsedFrame> parseAsan( std::string_view line )
 {
     const std::string_view t = trim( line );
-    if( t.size() < 2 || t[0] != '#' || t[1] < '0' || t[1] > '9' ) return std::nullopt;
+    if( t.size() < 2 || t[0] != '#' || t[1] < '0' || t[1] > '9' )
+    {
+        return std::nullopt;
+    }
     const std::size_t in = t.find( " in " );
-    if( in == std::string_view::npos ) return std::nullopt;
+    if( in == std::string_view::npos )
+    {
+        return std::nullopt;
+    }
     const std::string_view after = trim( t.substr( in + 4 ) );      // `doWork src/engine.cpp:5:8`
     ParsedFrame fr;
     fr.format = FrameFormat::Asan;
@@ -187,7 +234,10 @@ inline std::optional<ParsedFrame> parseAsan( std::string_view line )
     // non-location junk (a `(BuildId: …)` tail) just fails the probe and the scan steps left.
     for( std::size_t sp = after.rfind( ' ' ); sp != std::string_view::npos; sp = sp == 0 ? std::string_view::npos : after.rfind( ' ', sp - 1 ) )
     {
-        if( !splitPathLine( trim( after.substr( sp + 1 ) ), fr.path, fr.line, fr.lineOverflowed ) ) continue;
+        if( !splitPathLine( trim( after.substr( sp + 1 ) ), fr.path, fr.line, fr.lineOverflowed ) )
+        {
+            continue;
+        }
         fr.func.assign( trim( after.substr( 0, sp ) ) );
         return fr;
     }
@@ -198,19 +248,30 @@ inline std::optional<ParsedFrame> parseAsan( std::string_view line )
 inline std::optional<ParsedFrame> parseNode( std::string_view line )
 {
     const std::string_view t = trim( line );
-    if( t.size() < 3 || t.substr( 0, 3 ) != "at " ) return std::nullopt;
+    if( t.size() < 3 || t.substr( 0, 3 ) != "at " )
+    {
+        return std::nullopt;
+    }
     const std::string_view rest = trim( t.substr( 3 ) );
     ParsedFrame fr;
     fr.format = FrameFormat::Node;
     if( const std::size_t lp = rest.find( '(' ); lp != std::string_view::npos )
     {
         const std::size_t rp = rest.find( ')', lp );
-        if( rp == std::string_view::npos ) return std::nullopt;
-        if( !splitPathLine( trim( rest.substr( lp + 1, rp - lp - 1 ) ), fr.path, fr.line, fr.lineOverflowed ) ) return std::nullopt;
+        if( rp == std::string_view::npos )
+        {
+            return std::nullopt;
+        }
+        if( !splitPathLine( trim( rest.substr( lp + 1, rp - lp - 1 ) ), fr.path, fr.line, fr.lineOverflowed ) )
+        {
+            return std::nullopt;
+        }
         fr.func.assign( trim( rest.substr( 0, lp ) ) );
     }
     else if( !splitPathLine( rest, fr.path, fr.line, fr.lineOverflowed ) )
+    {
         return std::nullopt;
+    }
     return fr;
 }
 
@@ -220,14 +281,26 @@ inline std::optional<ParsedFrame> parseCompiler( std::string_view line )
 {
     const std::string_view t = trim( line );
     const std::size_t c1 = t.find( ':' );
-    if( c1 == std::string_view::npos ) return std::nullopt;
+    if( c1 == std::string_view::npos )
+    {
+        return std::nullopt;
+    }
     const std::string_view path = t.substr( 0, c1 );
-    if( !looksLikePath( path ) ) return std::nullopt;
+    if( !looksLikePath( path ) )
+    {
+        return std::nullopt;
+    }
 
     std::size_t p = c1 + 1;                                          // parse line digits
     const std::size_t ls = p;
-    while( p < t.size() && t[p] >= '0' && t[p] <= '9' ) ++p;
-    if( p == ls ) return std::nullopt;
+    while( p < t.size() && t[p] >= '0' && t[p] <= '9' )
+    {
+        ++p;
+    }
+    if( p == ls )
+    {
+        return std::nullopt;
+    }
     bool lineOverflowed = false;
     const std::uint32_t lineNo = toUint( t.substr( ls, p - ls ), lineOverflowed );
 
@@ -235,10 +308,19 @@ inline std::optional<ParsedFrame> parseCompiler( std::string_view line )
     {
         std::size_t q = p + 1;
         const std::size_t cs = q;
-        while( q < t.size() && t[q] >= '0' && t[q] <= '9' ) ++q;
-        if( q > cs ) p = q;                                         // consumed a column; p now sits on the trailing ':'
+        while( q < t.size() && t[q] >= '0' && t[q] <= '9' )
+        {
+            ++q;
+        }
+        if( q > cs )
+        {
+            p = q; // consumed a column; p now sits on the trailing ':'
+        }
     }
-    if( p >= t.size() || t[p] != ':' ) return std::nullopt;         // no trailing diagnostic colon → this is generic
+    if( p >= t.size() || t[p] != ':' )
+    {
+        return std::nullopt; // no trailing diagnostic colon → this is generic
+    }
 
     ParsedFrame fr;
     fr.format = FrameFormat::Compiler;
@@ -254,7 +336,10 @@ inline std::optional<ParsedFrame> parseGeneric( std::string_view line )
 {
     ParsedFrame fr;
     fr.format = FrameFormat::Generic;
-    if( !splitPathLine( trim( line ), fr.path, fr.line, fr.lineOverflowed ) ) return std::nullopt;
+    if( !splitPathLine( trim( line ), fr.path, fr.line, fr.lineOverflowed ) )
+    {
+        return std::nullopt;
+    }
     return fr;
 }
 
@@ -276,8 +361,14 @@ inline std::optional<ParsedFrame> parseGeneric( std::string_view line )
 inline bool isFrameShapedLine( std::string_view line ) noexcept
 {
     const std::string_view t = detail::trim( line );
-    if( t.size() >= 2 && t[0] == '#' && t[1] >= '0' && t[1] <= '9' ) return true;
-    if( t.size() >= 3 && t.substr( 0, 3 ) == "at " )                 return true;
+    if( t.size() >= 2 && t[0] == '#' && t[1] >= '0' && t[1] <= '9' )
+    {
+        return true;
+    }
+    if( t.size() >= 3 && t.substr( 0, 3 ) == "at " )
+    {
+        return true;
+    }
     return line.find( "File \"" ) != std::string_view::npos;
 }
 
@@ -302,17 +393,32 @@ inline FrameScan extractFrames( std::string_view text )
         start = ( nl == std::string_view::npos ) ? text.size() + 1 : nl + 1;
 
         std::optional<ParsedFrame> fr = detail::parsePython( line );
-        if( !fr ) fr = detail::parseAsan( line );
-        if( !fr ) fr = detail::parseNode( line );
-        if( !fr ) fr = detail::parseCompiler( line );
-        if( !fr ) fr = detail::parseGeneric( line );
+        if( !fr )
+        {
+            fr = detail::parseAsan( line );
+        }
+        if( !fr )
+        {
+            fr = detail::parseNode( line );
+        }
+        if( !fr )
+        {
+            fr = detail::parseCompiler( line );
+        }
+        if( !fr )
+        {
+            fr = detail::parseGeneric( line );
+        }
         if( fr )
         {
             fr->seq = std::uint32_t( scan.frames.size() );
             scan.frames.push_back( std::move( *fr ) );
             ++scan.frameShapedLines;                        // an extracted frame is frame-shaped by definition
         }
-        else if( isFrameShapedLine( line ) ) ++scan.frameShapedLines;
+        else if( isFrameShapedLine( line ) )
+        {
+            ++scan.frameShapedLines;
+        }
     }
     VERIFY( scan.frames.size() <= scan.frameShapedLines );
     return scan;
@@ -324,7 +430,10 @@ inline FrameFormat dominantFormat( const std::vector<ParsedFrame>& frames )
 {
     std::uint32_t count[ std::size_t( FrameFormat::Count ) ] = {};
     std::uint32_t firstSeq[ std::size_t( FrameFormat::Count ) ];
-    for( auto& v : firstSeq ) v = UINT32_MAX;
+    for( auto& v : firstSeq )
+    {
+        v = UINT32_MAX;
+    }
     for( const ParsedFrame& f : frames )
     {
         const std::size_t k = std::size_t( f.format );
@@ -336,7 +445,10 @@ inline FrameFormat dominantFormat( const std::vector<ParsedFrame>& frames )
     std::uint32_t bestFs = UINT32_MAX;
     for( std::size_t k = 0; k < std::size_t( FrameFormat::Count ); ++k )
     {
-        if( count[k] == 0 ) continue;
+        if( count[k] == 0 )
+        {
+            continue;
+        }
         if( count[k] > bestN || ( count[k] == bestN && firstSeq[k] < bestFs ) )
         {
             best   = FrameFormat( k );

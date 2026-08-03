@@ -50,19 +50,36 @@ inline std::uint32_t traceMatchFile( const IngestResult& ing, std::string_view r
     std::size_t p = 0;
     while( p < rawPath.size() )
     {
-        while( p < rawPath.size() && rawPath[p] == '/' ) ++p;
+        while( p < rawPath.size() && rawPath[p] == '/' )
+        {
+            ++p;
+        }
         const std::size_t s = p;
-        while( p < rawPath.size() && rawPath[p] != '/' ) ++p;
-        if( p > s ) segments.emplace_back( rawPath.substr( s, p - s ) );
+        while( p < rawPath.size() && rawPath[p] != '/' )
+        {
+            ++p;
+        }
+        if( p > s )
+        {
+            segments.emplace_back( rawPath.substr( s, p - s ) );
+        }
     }
-    if( segments.empty() ) return kNoTraceFile;
+    if( segments.empty() )
+    {
+        return kNoTraceFile;
+    }
 
     const std::uint32_t fileCount = std::uint32_t( ing.files.size() );
     for( std::size_t suffixLen = segments.size(); suffixLen >= 1; --suffixLen )
     {
         const std::vector<std::string> suffix( segments.end() - std::ptrdiff_t( suffixLen ), segments.end() );
         for( std::uint32_t f = 0; f < fileCount; ++f )
-            if( mention_detail::pathSuffixMatches( ing.files[f], suffix ) ) return f;
+        {
+            if( mention_detail::pathSuffixMatches( ing.files[f], suffix ) )
+            {
+                return f;
+            }
+        }
     }
     return kNoTraceFile;
 }
@@ -75,9 +92,15 @@ inline NodeId traceEnclosingSymbol( const IngestResult& ing, std::uint32_t fileI
     NodeId best = kNoNode;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.fileId != fileId || s.line == 0 || frameLine < s.line ) continue;
+        if( s.fileId != fileId || s.line == 0 || frameLine < s.line )
+        {
+            continue;
+        }
         const std::uint32_t endLine = s.line + ( s.loc > 0 ? s.loc - 1 : 0 );
-        if( frameLine > endLine ) continue;
+        if( frameLine > endLine )
+        {
+            continue;
+        }
         if( best == kNoNode ) { best = s.id; continue; }
 
         const Symbol&       b    = ing.symbols[ best ];
@@ -85,7 +108,10 @@ inline NodeId traceEnclosingSymbol( const IngestResult& ing, std::uint32_t fileI
         const bool deeper = s.line > b.line
             || ( s.line == b.line && ( endLine - s.line ) <  ( bEnd - b.line ) )
             || ( s.line == b.line && ( endLine - s.line ) == ( bEnd - b.line ) && s.id < b.id );
-        if( deeper ) best = s.id;
+        if( deeper )
+        {
+            best = s.id;
+        }
     }
     return best;
 }
@@ -110,7 +136,10 @@ using rw::namesplit::stripTrailingGroup;
 inline std::string_view stripCallSignature( std::string_view f ) noexcept
 {
     const std::size_t closeIndex = f.rfind( ')' );
-    if( closeIndex == std::string_view::npos ) return f;
+    if( closeIndex == std::string_view::npos )
+    {
+        return f;
+    }
 
     const std::string_view upToClose = f.substr( 0, closeIndex + 1 );
     const std::string_view head      = stripTrailingGroup( upToClose, '(', ')' );
@@ -131,16 +160,31 @@ inline std::vector<std::string> nameCandidates( std::string_view rawFunc )
     std::vector<std::string> candidates;
     const auto add = [ & ]( std::string_view c )
     {
-        if( c.empty() || candidates.size() >= kNameCandidateCap ) return;
-        for( const std::string& have : candidates ) if( have == c ) return;
+        if( c.empty() || candidates.size() >= kNameCandidateCap )
+        {
+            return;
+        }
+        for( const std::string& have : candidates )
+        {
+            if( have == c )
+            {
+                return;
+            }
+        }
         candidates.emplace_back( c );
     };
 
     add( clean );
     for( std::size_t i = 0; i + 1 < clean.size(); ++i )
     {
-        if( clean[i] == ':' && clean[i + 1] == ':' ) add( clean.substr( i + 2 ) );
-        else if( clean[i] == '.' )                   add( clean.substr( i + 1 ) );
+        if( clean[i] == ':' && clean[i + 1] == ':' )
+        {
+            add( clean.substr( i + 2 ) );
+        }
+        else if( clean[i] == '.' )
+        {
+            add( clean.substr( i + 1 ) );
+        }
     }
     return candidates;
 }
@@ -157,13 +201,29 @@ inline NodeId traceResolveByName( const IngestResult& ing, std::string_view rawF
     for( const std::string& candidate : tracelocus_detail::nameCandidates( rawFunc ) )
     {
         const std::vector<NodeId> defs = resolveAllByName( ing, candidate );
-        if( defs.size() == 1 ) return defs[0];
-        if( defs.size() < 2 ) continue;
+        if( defs.size() == 1 )
+        {
+            return defs[0];
+        }
+        if( defs.size() < 2 )
+        {
+            continue;
+        }
 
         NodeId      sameFileId    = kNoNode;
         std::size_t sameFileCount = 0;
-        for( const NodeId d : defs ) if( ing.symbols[d].fileId == fileId ) { sameFileId = d; ++sameFileCount; }
-        if( sameFileCount == 1 ) return sameFileId;
+        for( const NodeId d : defs )
+        {
+            if( ing.symbols[d].fileId == fileId )
+            {
+                sameFileId = d;
+                ++sameFileCount;
+            }
+        }
+        if( sameFileCount == 1 )
+        {
+            return sameFileId;
+        }
     }
     return kNoNode;
 }
@@ -227,7 +287,10 @@ inline TracePartition partitionTraceFrames( const IngestResult& ing, const std::
         sus.frame            = &fr;
         sus.symbolId         = chosen;
         sus.isResolvedByName = byName != kNoNode;
-        if( byName != kNoNode && byLine != kNoNode && byLine != byName ) sus.lineEnclosesId = byLine;
+        if( byName != kNoNode && byLine != kNoNode && byLine != byName )
+        {
+            sus.lineEnclosesId = byLine;
+        }
         part.suspects.push_back( sus );
     }
 
@@ -264,7 +327,9 @@ inline std::string renderTraceBlock( const IngestResult& ing, tracein::FrameForm
         // the name/line disagreement, disclosed inline: today's line sits in a DIFFERENT def than the frame names
         std::string encloses;
         if( sus.lineEnclosesId != kNoNode )
+        {
             encloses = " line_encloses=\"" + ex( ing.symbols[ sus.lineEnclosesId ].name ) + "\"";
+        }
 
         std::fprintf( m, "<frame rank=\"%zu\" n=\"%s\" t=\"%s\" p=\"%s:%u\" resolved_by=\"%s\"%s%s/>",
             i + 1, ex( s.name ).c_str(), symTag( s.kind ), ex( sus.frame->path ).c_str(), sus.frame->line,
@@ -273,11 +338,16 @@ inline std::string renderTraceBlock( const IngestResult& ing, tracein::FrameForm
     for( const tracein::ParsedFrame* ur : part.unresolved )
     {
         std::string named;
-        if( !ur->func.empty() ) named = " n=\"" + ex( ur->func ) + "\"";
+        if( !ur->func.empty() )
+        {
+            named = " n=\"" + ex( ur->func ) + "\"";
+        }
         std::fprintf( m, "<unresolved p=\"%s:%u\"%s/>", ex( ur->path ).c_str(), ur->line, named.c_str() );
     }
     for( const tracein::ParsedFrame* sk : part.skipped )
+    {
         std::fprintf( m, "<skipped p=\"%s\" line=\"%u\"/>", ex( sk->path ).c_str(), sk->line );
+    }
     std::fprintf( m, "</trace>" );
     std::fflush( m );  std::fclose( m );
     std::string out;
@@ -334,11 +404,21 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
     // it is free (one O(symbols) pass over the in-edge CSR that is already built).
     std::vector<std::uint32_t> localFanIn;
     FromTraceInputs            in = inArg;
-    if( !in.fanIn ) { localFanIn = fanInFromInEdges( ing, g );  if( !localFanIn.empty() ) in.fanIn = &localFanIn; }
+    if( !in.fanIn )
+    {
+        localFanIn = fanInFromInEdges( ing, g );
+        if( !localFanIn.empty() )
+        {
+            in.fanIn = &localFanIn;
+        }
+    }
 
     tracein::FrameScan                scan   = tracein::extractFrames( text );
     std::vector<tracein::ParsedFrame>& frames = scan.frames;
-    if( frames.empty() ) return res;   // ok=false — nothing parseable
+    if( frames.empty() )
+    {
+        return res; // ok=false — nothing parseable
+    }
 
     const tracein::FrameFormat dominant   = tracein::dominantFormat( frames );
     const std::size_t          frameCount = frames.size();
@@ -351,7 +431,10 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
     part.frameLinesSeen = scan.frameShapedLines;   // §B10: the outer denominator, from the only scope holding the raw text
 
     std::vector<float> rank( ing.symbols.size(), 0.0f );
-    for( std::size_t i = 0; i < part.suspects.size(); ++i ) rank[ part.suspects[i].symbolId ] = float( part.suspects.size() - i );
+    for( std::size_t i = 0; i < part.suspects.size(); ++i )
+    {
+        rank[part.suspects[i].symbolId] = float( part.suspects.size() - i );
+    }
 
     // W3FIX M3: srcNote is a FILENAME (or an MCP caller's own label), and a filename may legally contain a
     // newline on this platform — `--from-trace=$'…/tr\nace.txt'` put a raw newline both in this comment and in
@@ -383,7 +466,10 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         std::string h = ctxRootOpen( srcNoteIn, {} );
         h += "<!-- ripwire trace-to-locus for ";
         if( withSrcEcho ) { h += "\"";  h += srcNote;  h += "\""; }
-        else                h += "[src_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+        else
+        {
+            h += "[src_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+        }
         h += ": frames of a ";
         h += tracein::formatSpec( dominant ).label;
         h += " trace mapped onto indexed symbols, ranked INNERMOST-first. ";
@@ -455,7 +541,9 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             if( buf ) { whole.append( buf, sz );  std::free( buf ); }
         }
         else
+        {
             DEGRADED_PATH_ALERT( "from-trace: open_memstream failed — signature/body section skipped" );
+        }
     }
     whole += "</ctx>";
 
@@ -473,7 +561,10 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
                                                        headerStr, whole.size() - headerStr.size(),
                                                        ceilingAllowanceFromBudgetBytes( bundleBudget ),
                                                        /*hasRouteAttr=*/false, kNotes );
-        if( chosen != headerStr ) whole.replace( 0, headerStr.size(), chosen );
+        if( chosen != headerStr )
+        {
+            whole.replace( 0, headerStr.size(), chosen );
+        }
     }
 
     res.ok         = true;

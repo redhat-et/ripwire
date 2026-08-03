@@ -33,7 +33,10 @@ static int g_fail = 0;
 static void check( bool cond, const char* msg )
 {
     std::printf( "  %s  %s\n", cond ? "PASS" : "FAIL", msg );
-    if( !cond ) g_fail = 1;
+    if( !cond )
+    {
+        g_fail = 1;
+    }
 }
 
 // build a Graph from directed (caller, callee) pairs — the same CSR layout buildGraph produces:
@@ -47,8 +50,14 @@ static Graph makeGraph( std::size_t n, std::vector<std::pair<NodeId, NodeId>> ed
     Graph g;
     g.wOutDeg.assign( n, 0.f );
     g.outOff.assign( n + 1, 0 );
-    for( const auto& [ from, to ] : edges ) ++g.outOff[ from + 1 ];
-    for( std::size_t i = 0; i < n; ++i ) g.outOff[ i + 1 ] += g.outOff[ i ];
+    for( const auto& [from, to] : edges )
+    {
+        ++g.outOff[from + 1];
+    }
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        g.outOff[i + 1] += g.outOff[i];
+    }
     g.outTargets.resize( edges.size() );
     g.outVals.assign( edges.size(), 1.f );
     {
@@ -62,12 +71,18 @@ static Graph makeGraph( std::size_t n, std::vector<std::pair<NodeId, NodeId>> ed
 
     // in-edge CSR (row = callee), filled in (from,to) order so each row's callers ascend — as buildGraph does.
     std::vector<std::uint32_t> inDeg( n, 0 );
-    for( const auto& [ from, to ] : edges ) ++inDeg[ to ];
+    for( const auto& [from, to] : edges )
+    {
+        ++inDeg[to];
+    }
     g.inEdges = sparseCsr<float>( n, n, edges.size() );
     {
         auto* ro = g.inEdges.rowOffsets();  auto* ci = g.inEdges.colIndices();  auto* val = g.inEdges.values();
         ro[ 0 ] = 0;
-        for( std::size_t i = 0; i < n; ++i ) ro[ i + 1 ] = ro[ i ] + inDeg[ i ];
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            ro[i + 1] = ro[i] + inDeg[i];
+        }
         std::vector<std::uint32_t> cur( ro, ro + n );
         for( const auto& [ from, to ] : edges ) { const std::uint32_t pos = cur[ to ]++; ci[ pos ] = from; val[ pos ] = 1.f; }
     }
@@ -79,21 +94,38 @@ static std::string serialize( const ConnectResult& r )
 {
     std::string s = "radius=" + std::to_string( r.radius ) + " truncated=" + std::to_string( r.truncated ) + "\n";
     s += "terminals:";
-    for( NodeId t : r.terminals ) s += " " + std::to_string( t );
+    for( NodeId t : r.terminals )
+    {
+        s += " " + std::to_string( t );
+    }
     s += "\ncomponentOf:";
-    for( std::uint32_t c : r.componentOf ) s += " " + std::to_string( c );
+    for( std::uint32_t c : r.componentOf )
+    {
+        s += " " + std::to_string( c );
+    }
     s += "\n";
     for( const ConnectGroup& grp : r.groups )
     {
         s += "group t:";
-        for( NodeId t : grp.terminals ) s += " " + std::to_string( t );
+        for( NodeId t : grp.terminals )
+        {
+            s += " " + std::to_string( t );
+        }
         s += " s:";
-        for( NodeId v : grp.steiner ) s += " " + std::to_string( v );
+        for( NodeId v : grp.steiner )
+        {
+            s += " " + std::to_string( v );
+        }
         s += " e:";
-        for( const ConnectEdge& e : grp.edges ) s += " " + std::to_string( e.from ) + ">" + std::to_string( e.to );
+        for( const ConnectEdge& e : grp.edges )
+        {
+            s += " " + std::to_string( e.from ) + ">" + std::to_string( e.to );
+        }
         s += " p:";
         for( const ConnectPath& p : grp.paths )
+        {
             s += " " + std::to_string( p.termA ) + "-" + std::to_string( p.termB ) + "@" + std::to_string( p.dist );
+        }
         s += "\n";
     }
     return s;
@@ -101,12 +133,24 @@ static std::string serialize( const ConnectResult& r )
 
 static bool hasEdge( const ConnectGroup& grp, NodeId from, NodeId to )
 {
-    for( const ConnectEdge& e : grp.edges ) if( e.from == from && e.to == to ) return true;
+    for( const ConnectEdge& e : grp.edges )
+    {
+        if( e.from == from && e.to == to )
+        {
+            return true;
+        }
+    }
     return false;
 }
 static bool hasNode( const std::vector<NodeId>& v, NodeId x )
 {
-    for( NodeId n : v ) if( n == x ) return true;
+    for( NodeId n : v )
+    {
+        if( n == x )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -178,7 +222,10 @@ int main()
     // ── E: radius bound — a chain of 8 hops splits at R=6, reconnects at R=8; clamping is honest ─────────
     {
         std::vector<std::pair<NodeId, NodeId>> chain;
-        for( NodeId i = 0; i < 8; ++i ) chain.push_back( { i, NodeId( i + 1 ) } );
+        for( NodeId i = 0; i < 8; ++i )
+        {
+            chain.push_back( { i, NodeId( i + 1 ) } );
+        }
         const Graph g3 = makeGraph( 9, chain );
 
         const ConnectResult far = connectSubgraph( g3, { 0, 8 } );   // default radius 6 < 8 hops
@@ -222,7 +269,10 @@ int main()
         check( oob.terminals == std::vector<NodeId>{ 1 } && oob.groups.size() == 1,
                "H out-of-range terminal id dropped, the valid one kept" );
         std::vector<NodeId> many;
-        for( NodeId i = 0; i < 20; ++i ) many.push_back( i );
+        for( NodeId i = 0; i < 20; ++i )
+        {
+            many.push_back( i );
+        }
         const ConnectResult capped = connectSubgraph( makeGraph( 20, {} ), many );
         check( capped.terminals.size() == connectcfg::kMaxTerminals && capped.terminals.back() == 15,
                "H >16 terminals clamp to the 16 lowest ids (caller enforces the usage error)" );

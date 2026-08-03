@@ -34,9 +34,18 @@ namespace rw
 inline float recallAtK( const std::vector<std::uint32_t>& ranked, const std::vector<char>& gold,
                         std::size_t goldTotal, std::size_t k )
 {
-    if( goldTotal == 0 ) return 0.f;
+    if( goldTotal == 0 )
+    {
+        return 0.f;
+    }
     std::size_t hit = 0;
-    for( std::size_t i = 0; i < ranked.size() && i < k; ++i ) if( gold[ ranked[i] ] ) ++hit;
+    for( std::size_t i = 0; i < ranked.size() && i < k; ++i )
+    {
+        if( gold[ranked[i]] )
+        {
+            ++hit;
+        }
+    }
     return float( hit ) / float( goldTotal );
 }
 
@@ -44,7 +53,10 @@ inline float recallAtK( const std::vector<std::uint32_t>& ranked, const std::vec
 inline std::vector<std::uint32_t> rankFiles( const std::vector<float>& score )
 {
     std::vector<std::uint32_t> order( score.size() );
-    for( std::uint32_t f = 0; f < score.size(); ++f ) order[f] = f;
+    for( std::uint32_t f = 0; f < score.size(); ++f )
+    {
+        order[f] = f;
+    }
     std::sort( order.begin(), order.end(),
                [ & ]( std::uint32_t a, std::uint32_t b ) { return score[a] != score[b] ? score[a] > score[b] : a < b; } );
     return order;
@@ -71,7 +83,10 @@ inline std::vector<float> bm25Seeded( const std::vector<HashMap<std::string, int
         for( const auto& [ qt, qc ] : docs[ seed ] )
         {
             const auto it = docs[f].find( qt );
-            if( it == docs[f].end() ) continue;
+            if( it == docs[f].end() )
+            {
+                continue;
+            }
             const auto   di  = df.find( qt );
             const int    n   = ( di == df.end() ) ? 1 : di->second;
             const int    tf  = it->second;
@@ -95,19 +110,39 @@ inline std::vector<float> anchoredFileScore( const IngestResult& ing, const Grap
 {
     const std::uint32_t F = std::uint32_t( bScore.size() );
     std::vector<float>  lexSym( ing.symbols.size(), 0.f );
-    for( const Symbol& s : ing.symbols ) lexSym[ s.id ] = bScore[ s.fileId ];
+    for( const Symbol& s : ing.symbols )
+    {
+        lexSym[s.id] = bScore[s.fileId];
+    }
     const std::vector<float> aSym = anchoredLexicalRank( g, lexSym );
 
     float bmax = 0.f;
-    for( std::uint32_t f = 0; f < F; ++f ) if( bScore[f] > bmax ) bmax = bScore[f];
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( bScore[f] > bmax )
+        {
+            bmax = bScore[f];
+        }
+    }
     std::vector<float> aScore( F, 0.f );
     if( bmax > 0.f )
     {
-        for( std::uint32_t f = 0; f < F; ++f ) aScore[f] = ( 1.0f - anchorcfg::kGraphBlend ) * bScore[f] / bmax;
-        for( const Symbol& s : ing.symbols ) if( aSym[ s.id ] > aScore[ s.fileId ] ) aScore[ s.fileId ] = aSym[ s.id ];
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            aScore[f] = ( 1.0f - anchorcfg::kGraphBlend ) * bScore[f] / bmax;
+        }
+        for( const Symbol& s : ing.symbols )
+        {
+            if( aSym[s.id] > aScore[s.fileId] )
+            {
+                aScore[s.fileId] = aSym[s.id];
+            }
+        }
     }
     else
+    {
         aScore = bScore;                                          // degenerate lexical → anchored degrades to it
+    }
     aScore[ seed ] = -1.f;
     return aScore;
 }
@@ -144,15 +179,41 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
         toks.clear(); subtokens( name, toks );
         for( const std::string& t : toks ) { dS[f][t]++; dlS[f]++; }
     };
-    for( const Symbol&    s  : ing.symbols )    add( s.fileId,  s.name );
-    for( const Reference& rf : ing.references ) add( rf.fileId, rf.calleeName );
+    for( const Symbol& s : ing.symbols )
+    {
+        add( s.fileId, s.name );
+    }
+    for( const Reference& rf : ing.references )
+    {
+        add( rf.fileId, rf.calleeName );
+    }
 
     double avgW = 0, avgS = 0;
-    for( int d : dlW ) avgW += d;  avgW /= ( F ? F : 1 );
-    for( int d : dlS ) avgS += d;  avgS /= ( F ? F : 1 );
+    for( int d : dlW )
+    {
+        avgW += d;
+    }
+    avgW /= ( F ? F : 1 );
+    for( int d : dlS )
+    {
+        avgS += d;
+    }
+    avgS /= ( F ? F : 1 );
     HashMap<std::string, int> dfW, dfS;
-    for( const auto& d : dW ) for( const auto& [ t, c ] : d ) ++dfW[t];
-    for( const auto& d : dS ) for( const auto& [ t, c ] : d ) ++dfS[t];
+    for( const auto& d : dW )
+    {
+        for( const auto& [t, c] : d )
+        {
+            ++dfW[t];
+        }
+    }
+    for( const auto& d : dS )
+    {
+        for( const auto& [t, c] : d )
+        {
+            ++dfS[t];
+        }
+    }
 
     // dB = dS (subtoken names+callees, ~2× weighted) + WHOLE-FILE body subtokens — "does adding the file's
     // body vocabulary help relatedness?" (E#2 round 2; mirrors what lexicalScores actually indexes). One
@@ -162,15 +223,29 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
     for( std::uint32_t f = 0; f < F; ++f )
     {
         std::ifstream in( diskPath( ing, std::uint32_t( f ) ), std::ios::binary );
-        if( !in ) continue;
+        if( !in )
+        {
+            continue;
+        }
         std::ostringstream ss;  ss << in.rdbuf();
         const std::string body = ss.str();
         toks.clear(); subtokens( body, toks );
         for( const std::string& t : toks ) { dB[f][t]++; dlB[f]++; }
     }
-    double avgB = 0;  for( int d : dlB ) avgB += d;  avgB /= ( F ? F : 1 );
+    double avgB = 0;
+    for( int d : dlB )
+    {
+        avgB += d;
+    }
+    avgB /= ( F ? F : 1 );
     HashMap<std::string, int> dfB;
-    for( const auto& d : dB ) for( const auto& [ t, c ] : d ) ++dfB[t];
+    for( const auto& d : dB )
+    {
+        for( const auto& [t, c] : d )
+        {
+            ++dfB[t];
+        }
+    }
 
     // same-directory baseline: the cheapest real prior ("co-edited files often live together"). Beating it
     // is the bar any structural/lexical ranker must clear to be worth its complexity.
@@ -179,19 +254,37 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
     { const std::string& p = ing.files[f]; const std::size_t sl = p.rfind( '/' ); fileDir[f] = ( sl == std::string::npos ) ? std::string() : p.substr( 0, sl ); }
 
     std::vector<std::uint32_t> symCount( F, 0 );
-    for( const Symbol& s : ing.symbols ) ++symCount[ s.fileId ];
+    for( const Symbol& s : ing.symbols )
+    {
+        ++symCount[s.fileId];
+    }
 
     // ---- the benchmark sample: qualifying commit sets (>=2 files); current diff is the n=1 fallback ----
     std::vector<std::vector<std::uint32_t>> sets = gitCommitFileSets( root, ing, "36 months ago", 20 );
     std::vector<std::vector<std::uint32_t>> qual;
-    for( const auto& cs : sets ) if( cs.size() >= 2 ) qual.push_back( cs );
+    for( const auto& cs : sets )
+    {
+        if( cs.size() >= 2 )
+        {
+            qual.push_back( cs );
+        }
+    }
     constexpr std::size_t kMaxSample = 80;
-    if( qual.size() > kMaxSample ) qual.resize( kMaxSample );          // newest-first (git log order)
+    if( qual.size() > kMaxSample )
+    {
+        qual.resize( kMaxSample ); // newest-first (git log order)
+    }
     const bool historical = !qual.empty();
     if( !historical )
     {
         std::vector<std::uint32_t> cur;
-        for( std::uint32_t f = 0; f < F; ++f ) if( currentDiff[f] ) cur.push_back( f );
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            if( currentDiff[f] )
+            {
+                cur.push_back( f );
+            }
+        }
         if( cur.size() < 2 ) { std::fprintf( stderr, "ripwire --eval: no git-history sample and <2 changed files\n" ); return 1; }
         qual.push_back( cur );
     }
@@ -201,16 +294,35 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
     for( const auto& cs : qual )
     {
         std::uint32_t seed = cs.front();                              // seed = most-symbols file (tie → lowest id)
-        for( std::uint32_t f : cs ) if( symCount[f] > symCount[ seed ] ) seed = f;
+        for( std::uint32_t f : cs )
+        {
+            if( symCount[f] > symCount[seed] )
+            {
+                seed = f;
+            }
+        }
         std::vector<char> gold( F, 0 );
         std::size_t       goldTotal = 0;
-        for( std::uint32_t f : cs ) if( f != seed ) { gold[f] = 1; ++goldTotal; }
-        if( goldTotal == 0 ) continue;
+        for( std::uint32_t f : cs )
+        {
+            if( f != seed )
+            {
+                gold[f] = 1;
+                ++goldTotal;
+            }
+        }
+        if( goldTotal == 0 )
+        {
+            continue;
+        }
 
         std::vector<char> seedMask( F, 0 );  seedMask[ seed ] = 1;    // ripwire: PageRank teleported on the seed
         const std::vector<float> r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) );
         std::vector<float>       ctxScore( F, 0.f );
-        for( const Symbol& s : ing.symbols ) ctxScore[ s.fileId ] += r[ s.id ];
+        for( const Symbol& s : ing.symbols )
+        {
+            ctxScore[s.fileId] += r[s.id];
+        }
         ctxScore[ seed ] = -1.f;
 
         const std::vector<float> wScore = bm25Seeded( dW, dlW, avgW, dfW, F, seed );
@@ -228,7 +340,10 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
         addRecall( accA,   rankFiles( aScore ),   gold, goldTotal );
 
         std::vector<float> dScore( F, 0.f );   // same-directory baseline (1 if same dir as seed, else 0)
-        for( std::uint32_t f = 0; f < F; ++f ) dScore[f] = ( f != seed && fileDir[f] == fileDir[ seed ] ) ? 1.f : 0.f;
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            dScore[f] = ( f != seed && fileDir[f] == fileDir[seed] ) ? 1.f : 0.f;
+        }
         dScore[ seed ] = -1.f;
         addRecall( accDir, rankFiles( dScore ), gold, goldTotal );
         ++n;
@@ -273,7 +388,12 @@ inline std::size_t rankOfSymbol( const std::vector<float>& score, NodeId gold )
     const float g = score[ gold ];
     std::size_t better = 0;                                   // symbols strictly ahead of gold in (score desc, id asc)
     for( NodeId i = 0; i < score.size(); ++i )
-        if( score[i] > g || ( score[i] == g && i < gold ) ) ++better;
+    {
+        if( score[i] > g || ( score[i] == g && i < gold ) )
+        {
+            ++better;
+        }
+    }
     return better + 1;
 }
 
@@ -282,36 +402,73 @@ inline std::size_t rankOfSymbol( const std::vector<float>& score, NodeId gold )
 inline std::string docPhraseFirstLine( const std::string& src, std::size_t defStart )
 {
     const std::size_t ds = docCommentStart( src, defStart );
-    if( ds >= defStart ) return {};                           // no doc-comment above the def
+    if( ds >= defStart )
+    {
+        return {}; // no doc-comment above the def
+    }
     // walk lines [ds, defStart); take the FIRST that carries alphabetic content after stripping markers.
     std::size_t p = ds;
     while( p < defStart )
     {
         std::size_t e = p;
-        while( e < defStart && src[e] != '\n' ) ++e;
+        while( e < defStart && src[e] != '\n' )
+        {
+            ++e;
+        }
         std::string_view line( src.data() + p, e - p );
         // strip leading whitespace + comment markers (// , /// , /* , * , -- , # )
         std::size_t t = 0;
-        while( t < line.size() && ( line[t] == ' ' || line[t] == '\t' ) ) ++t;
-        while( t < line.size() && ( line[t] == '/' || line[t] == '*' || line[t] == '#' || line[t] == '-' ) ) ++t;
+        while( t < line.size() && ( line[t] == ' ' || line[t] == '\t' ) )
+        {
+            ++t;
+        }
+        while( t < line.size() && ( line[t] == '/' || line[t] == '*' || line[t] == '#' || line[t] == '-' ) )
+        {
+            ++t;
+        }
         std::string_view content = line.substr( t );
         // does it carry >=1 alphabetic word? build a stopworded phrase from it if so.
         std::string phrase;
         std::size_t ws = std::string_view::npos;
         const auto flush = [ & ]( std::size_t a, std::size_t b )
         {
-            if( a == std::string_view::npos ) return;
+            if( a == std::string_view::npos )
+            {
+                return;
+            }
             std::string w( content.substr( a, b - a ) );
-            for( char& c : w ) if( c >= 'A' && c <= 'Z' ) c = char( c - 'A' + 'a' );
-            if( w.size() >= 2 && !isRouteStopword( w ) ) { if( !phrase.empty() ) phrase += ' '; phrase += w; }
+            for( char& c : w )
+            {
+                if( c >= 'A' && c <= 'Z' )
+                {
+                    c = char( c - 'A' + 'a' );
+                }
+            }
+            if( w.size() >= 2 && !isRouteStopword( w ) )
+            {
+                if( !phrase.empty() )
+                {
+                    phrase += ' ';
+                }
+                phrase += w;
+            }
         };
         for( std::size_t k = 0; k <= content.size(); ++k )
         {
             const bool alpha = k < content.size() && ( ( content[k] >= 'a' && content[k] <= 'z' ) || ( content[k] >= 'A' && content[k] <= 'Z' ) );
-            if( alpha ) { if( ws == std::string_view::npos ) ws = k; }
+            if( alpha )
+            {
+                if( ws == std::string_view::npos )
+                {
+                    ws = k;
+                }
+            }
             else        { flush( ws, k ); ws = std::string_view::npos; }
         }
-        if( !phrase.empty() ) return phrase;                  // first content-bearing line wins
+        if( !phrase.empty() )
+        {
+            return phrase; // first content-bearing line wins
+        }
         p = e + 1;
     }
     return {};
@@ -321,9 +478,18 @@ struct RetrievalAcc { double mrr = 0; std::size_t r1 = 0, r5 = 0, r10 = 0, n = 0
 inline void addRetrieval( RetrievalAcc& a, std::size_t rank )
 {
     a.mrr += 1.0 / double( rank );
-    if( rank <= 1 )  ++a.r1;
-    if( rank <= 5 )  ++a.r5;
-    if( rank <= 10 ) ++a.r10;
+    if( rank <= 1 )
+    {
+        ++a.r1;
+    }
+    if( rank <= 5 )
+    {
+        ++a.r5;
+    }
+    if( rank <= 10 )
+    {
+        ++a.r10;
+    }
     ++a.n;
 }
 
@@ -338,7 +504,10 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
     {
         const auto it = contents.find( fid );
-        if( it != contents.end() ) return it->second;
+        if( it != contents.end() )
+        {
+            return it->second;
+        }
         std::string s;
         if( fid < ing.files.size() )
         { std::ifstream in( diskPath( ing, fid ), std::ios::binary ); if( in ) { std::ostringstream ss; ss << in.rdbuf(); s = ss.str(); } }
@@ -350,11 +519,20 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     for( NodeId id = 0; id < ing.symbols.size() && sample.size() < kMaxSample; ++id )
     {
         const Symbol& s = ing.symbols[id];
-        if( s.name.size() < 3 ) continue;                     // a 1-2 char name is a degenerate query — skip
+        if( s.name.size() < 3 )
+        {
+            continue; // a 1-2 char name is a degenerate query — skip
+        }
         const std::string& src = contentOf( s.fileId );
-        if( src.empty() ) continue;
+        if( src.empty() )
+        {
+            continue;
+        }
         std::string phrase = docPhraseFirstLine( src, s.sigStartByte );
-        if( phrase.empty() ) continue;
+        if( phrase.empty() )
+        {
+            continue;
+        }
         sample.push_back( { id, s.name, std::move( phrase ) } );
     }
     if( sample.empty() ) { std::fprintf( stderr, "ripwire --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
@@ -375,7 +553,10 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
             const std::vector<float> an  = anchoredLexicalRank( g, sub );
             const RouteChoice        rc  = chooseForRanker( ing, sm.name );
             const std::vector<float>& rt = ( rc.which == LexMode::NameExact ) ? ex : sub;
-            if( rc.which == LexMode::NameExact ) ++routedNameExactPicks;
+            if( rc.which == LexMode::NameExact )
+            {
+                ++routedNameExactPicks;
+            }
             addRetrieval( subN, scoreAndRank( sub, sm.gold ) );
             addRetrieval( exN,  scoreAndRank( ex,  sm.gold ) );
             addRetrieval( anN,  scoreAndRank( an,  sm.gold ) );
@@ -459,7 +640,10 @@ namespace minedjson
     // where the MCP side needs npos to detect truncation. Same walk, two documented adaptations.
     inline std::size_t skipString( const std::string& s, std::size_t pos )
     {
-        if( pos >= s.size() || s[pos] != '"' ) return pos;
+        if( pos >= s.size() || s[pos] != '"' )
+        {
+            return pos;
+        }
         const std::size_t close = rw::jsonStringEnd( s, pos );
         return ( close != std::string::npos ) ? close + 1 : s.size();
     }
@@ -469,11 +653,17 @@ namespace minedjson
     inline std::string unescape( const std::string& s, std::size_t pos, std::size_t end )
     {
         std::string out;
-        if( end == std::string::npos || end <= pos + 1 || end > s.size() ) return out;
+        if( end == std::string::npos || end <= pos + 1 || end > s.size() )
+        {
+            return out;
+        }
         for( std::size_t i = pos + 1; i + 1 < end; ++i )
         {
             if( s[i] != '\\' ) { out += s[i]; continue; }
-            if( i + 1 >= end ) break;
+            if( i + 1 >= end )
+            {
+                break;
+            }
             const char e = s[ ++i ];
             switch( e )
             {
@@ -487,7 +677,10 @@ namespace minedjson
                 case 'f':  out += '\f'; break;
                 case 'u':
                 {
-                    if( i + 4 >= end ) break;
+                    if( i + 4 >= end )
+                    {
+                        break;
+                    }
                     const auto hex4 = [ & ]( std::size_t at ) -> unsigned
                     {
                         unsigned v = 0;
@@ -495,9 +688,18 @@ namespace minedjson
                         {
                             const char h = s[ at + k ];
                             v <<= 4;
-                            if( h >= '0' && h <= '9' )      v |= unsigned( h - '0' );
-                            else if( h >= 'a' && h <= 'f' )  v |= unsigned( h - 'a' + 10 );
-                            else if( h >= 'A' && h <= 'F' )  v |= unsigned( h - 'A' + 10 );
+                            if( h >= '0' && h <= '9' )
+                            {
+                                v |= unsigned( h - '0' );
+                            }
+                            else if( h >= 'a' && h <= 'f' )
+                            {
+                                v |= unsigned( h - 'a' + 10 );
+                            }
+                            else if( h >= 'A' && h <= 'F' )
+                            {
+                                v |= unsigned( h - 'A' + 10 );
+                            }
                         }
                         return v;
                     };
@@ -508,8 +710,15 @@ namespace minedjson
                         const unsigned lo = hex4( i + 3 );
                         if( lo >= 0xDC00 && lo <= 0xDFFF ) { cp = 0x10000u + ( ( cp - 0xD800u ) << 10 ) + ( lo - 0xDC00u ); i += 6; }
                     }
-                    if( cp < 0x80 )        out += char( cp );
-                    else if( cp < 0x800 )  { out += char( 0xC0 | ( cp >> 6 ) ); out += char( 0x80 | ( cp & 0x3F ) ); }
+                    if( cp < 0x80 )
+                    {
+                        out += char( cp );
+                    }
+                    else if( cp < 0x800 )
+                    {
+                        out += char( 0xC0 | ( cp >> 6 ) );
+                        out += char( 0x80 | ( cp & 0x3F ) );
+                    }
                     else if( cp < 0x10000 ){ out += char( 0xE0 | ( cp >> 12 ) ); out += char( 0x80 | ( ( cp >> 6 ) & 0x3F ) ); out += char( 0x80 | ( cp & 0x3F ) ); }
                     else                   { out += char( 0xF0 | ( cp >> 18 ) ); out += char( 0x80 | ( ( cp >> 12 ) & 0x3F ) ); out += char( 0x80 | ( ( cp >> 6 ) & 0x3F ) ); out += char( 0x80 | ( cp & 0x3F ) ); }
                     break;
@@ -525,12 +734,24 @@ namespace minedjson
     {
         const std::string needle = std::string( "\"" ) + key + "\"";
         const std::size_t k = s.find( needle, from );
-        if( k == std::string::npos ) return false;
+        if( k == std::string::npos )
+        {
+            return false;
+        }
         const std::size_t c = s.find( ':', k + needle.size() );
-        if( c == std::string::npos ) return false;
+        if( c == std::string::npos )
+        {
+            return false;
+        }
         std::size_t q = c + 1;
-        while( q < s.size() && ( s[q] == ' ' || s[q] == '\t' ) ) ++q;
-        if( q >= s.size() || s[q] != '"' ) return false;
+        while( q < s.size() && ( s[q] == ' ' || s[q] == '\t' ) )
+        {
+            ++q;
+        }
+        if( q >= s.size() || s[q] != '"' )
+        {
+            return false;
+        }
         vs = q; ve = skipString( s, q );
         return true;
     }
@@ -539,11 +760,20 @@ namespace minedjson
     {
         const std::string needle = std::string( "\"" ) + key + "\"";
         const std::size_t k = s.find( needle, from );
-        if( k == std::string::npos ) return false;
+        if( k == std::string::npos )
+        {
+            return false;
+        }
         const std::size_t c = s.find( ':', k + needle.size() );
-        if( c == std::string::npos ) return false;
+        if( c == std::string::npos )
+        {
+            return false;
+        }
         std::size_t q = c + 1;
-        while( q < s.size() && ( s[q] == ' ' || s[q] == '\t' ) ) ++q;
+        while( q < s.size() && ( s[q] == ' ' || s[q] == '\t' ) )
+        {
+            ++q;
+        }
         if( s.compare( q, 4, "true" ) == 0 )  { val = true;  return true; }
         if( s.compare( q, 5, "false" ) == 0 ) { val = false; return true; }
         return false;
@@ -556,7 +786,10 @@ inline bool parseMinedLine( const std::string& line, MinedPair& out )
 {
     out = MinedPair{};
     std::size_t qs, qe;
-    if( !minedjson::findStringValue( line, "query", 0, qs, qe ) ) return false;
+    if( !minedjson::findStringValue( line, "query", 0, qs, qe ) )
+    {
+        return false;
+    }
     out.query = minedjson::unescape( line, qs, qe );
 
     bool assisted = false;
@@ -564,14 +797,23 @@ inline bool parseMinedLine( const std::string& line, MinedPair& out )
     out.assisted = assisted;
 
     const std::size_t gf = line.find( "\"gold_files\"" );
-    if( gf == std::string::npos ) return false;
+    if( gf == std::string::npos )
+    {
+        return false;
+    }
     const std::size_t arrEnd = line.find( ']', gf );
     std::size_t pos = gf;
     for( ;; )
     {
         std::size_t ps, pe;
-        if( !minedjson::findStringValue( line, "path", pos, ps, pe ) ) break;
-        if( arrEnd != std::string::npos && ps > arrEnd ) break;      // past the gold_files array close
+        if( !minedjson::findStringValue( line, "path", pos, ps, pe ) )
+        {
+            break;
+        }
+        if( arrEnd != std::string::npos && ps > arrEnd )
+        {
+            break; // past the gold_files array close
+        }
         out.goldPaths.push_back( minedjson::unescape( line, ps, pe ) );
         pos = pe;
     }
@@ -585,16 +827,30 @@ inline std::vector<float> maxPoolToFiles( const IngestResult& ing, const std::ve
 {
     std::vector<float> fileScore( F, 0.f );
     for( const Symbol& s : ing.symbols )
-        if( s.id < symScore.size() && symScore[ s.id ] > fileScore[ s.fileId ] ) fileScore[ s.fileId ] = symScore[ s.id ];
+    {
+        if( s.id < symScore.size() && symScore[s.id] > fileScore[s.fileId] )
+        {
+            fileScore[s.fileId] = symScore[s.id];
+        }
+    }
     return fileScore;
 }
 
 // strict Acc@k (bench/locbench's definition): ALL gold files land within the top-k, not just some.
 inline bool allGoldWithinK( const std::vector<std::uint32_t>& ranked, const std::vector<char>& gold, std::size_t goldTotal, std::size_t k )
 {
-    if( goldTotal == 0 ) return false;
+    if( goldTotal == 0 )
+    {
+        return false;
+    }
     std::size_t hit = 0;
-    for( std::size_t i = 0; i < ranked.size() && i < k; ++i ) if( gold[ ranked[i] ] ) ++hit;
+    for( std::size_t i = 0; i < ranked.size() && i < k; ++i )
+    {
+        if( gold[ranked[i]] )
+        {
+            ++hit;
+        }
+    }
     return hit == goldTotal;
 }
 
@@ -602,7 +858,13 @@ inline bool allGoldWithinK( const std::vector<std::uint32_t>& ranked, const std:
 // contribution — standard "first relevant hit" MRR for a multi-relevant gold set).
 inline std::size_t firstGoldRank( const std::vector<std::uint32_t>& ranked, const std::vector<char>& gold )
 {
-    for( std::size_t i = 0; i < ranked.size(); ++i ) if( gold[ ranked[i] ] ) return i + 1;
+    for( std::size_t i = 0; i < ranked.size(); ++i )
+    {
+        if( gold[ranked[i]] )
+        {
+            return i + 1;
+        }
+    }
     return ranked.size() + 1;
 }
 
@@ -616,9 +878,18 @@ struct MinedAcc
 inline void addMinedRow( MinedAcc& a, const std::vector<std::uint32_t>& ranked, const std::vector<char>& gold, std::size_t goldTotal )
 {
     addRecall( a.recall, ranked, gold, goldTotal );
-    if( allGoldWithinK( ranked, gold, goldTotal, 5 ) )  a.acc5  += 1;
-    if( allGoldWithinK( ranked, gold, goldTotal, 10 ) ) a.acc10 += 1;
-    if( allGoldWithinK( ranked, gold, goldTotal, 20 ) ) a.acc20 += 1;
+    if( allGoldWithinK( ranked, gold, goldTotal, 5 ) )
+    {
+        a.acc5 += 1;
+    }
+    if( allGoldWithinK( ranked, gold, goldTotal, 10 ) )
+    {
+        a.acc10 += 1;
+    }
+    if( allGoldWithinK( ranked, gold, goldTotal, 20 ) )
+    {
+        a.acc20 += 1;
+    }
     a.mrr += 1.0 / double( firstGoldRank( ranked, gold ) );
     ++a.n;
 }
@@ -639,9 +910,10 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     for( std::uint32_t f = 0; f < F; ++f )
     {
         pathToFile[ ing.files[f] ] = f;
-        if( !rootPrefix.empty() && ing.files[f].size() > rootPrefix.size()
-            && ing.files[f].compare( 0, rootPrefix.size(), rootPrefix ) == 0 )
+        if( !rootPrefix.empty() && ing.files[f].size() > rootPrefix.size() && ing.files[f].compare( 0, rootPrefix.size(), rootPrefix ) == 0 )
+        {
             pathToFile[ ing.files[f].substr( rootPrefix.size() ) ] = f;
+        }
     }
 
     MinedAcc    forA[2], queryA[2], anchorA[2];                    // [0]=unassisted, [1]=assisted (§3.2)
@@ -650,7 +922,10 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     std::string line;
     while( std::getline( in, line ) )
     {
-        if( line.empty() ) continue;
+        if( line.empty() )
+        {
+            continue;
+        }
         MinedPair p;
         if( !parseMinedLine( line, p ) ) { ++skipped; continue; }
 
@@ -715,8 +990,10 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     printTable( "assisted (ripwire_assisted=true — the session had already seen ripwire's own output; NOT independent evidence)",
                forA[1], queryA[1], anchorA[1], nPairs[1] );
     if( skipped || underqualified )
+    {
         std::fprintf( stderr, "ripwire --eval-mined: skipped %zu malformed line(s), %zu under-qualified pair(s) (<2 in-corpus gold files)\n",
                      skipped, underqualified );
+    }
     return 0;
 }
 

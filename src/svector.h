@@ -38,9 +38,16 @@ class svector
     const T* buf() const noexcept { return heap_ ? heap_ : inl_; }
     void grow( std::uint32_t need )
     {
-        std::uint32_t nc = cap_ * 2;  if( nc < need ) nc = need;
+        std::uint32_t nc = cap_ * 2;
+        if( nc < need )
+        {
+            nc = need;
+        }
         T* nh = new T[ nc ];
-        for( std::uint32_t i = 0; i < sz_; ++i ) nh[i] = std::move( buf()[i] );
+        for( std::uint32_t i = 0; i < sz_; ++i )
+        {
+            nh[i] = std::move( buf()[i] );
+        }
         delete[] heap_;  heap_ = nh;  cap_ = nc;
     }
 
@@ -48,29 +55,72 @@ public:
     svector() noexcept = default;
     ~svector() { delete[] heap_; }
 
-    svector( const svector& o ) { reserve( o.sz_ ); for( std::uint32_t i = 0; i < o.sz_; ++i ) buf()[i] = o.buf()[i]; sz_ = o.sz_; }
+    svector( const svector& o )
+    {
+        reserve( o.sz_ );
+        for( std::uint32_t i = 0; i < o.sz_; ++i )
+        {
+            buf()[i] = o.buf()[i];
+        }
+        sz_ = o.sz_;
+    }
     svector( svector&& o ) noexcept
     {
         if( o.heap_ ) { heap_ = o.heap_; cap_ = o.cap_; sz_ = o.sz_; o.heap_ = nullptr; o.cap_ = N; o.sz_ = 0; }
-        else          { for( std::uint32_t i = 0; i < o.sz_; ++i ) inl_[i] = std::move( o.inl_[i] ); sz_ = o.sz_; o.sz_ = 0; }
+        else
+        {
+            for( std::uint32_t i = 0; i < o.sz_; ++i )
+            {
+                inl_[i] = std::move( o.inl_[i] );
+            }
+            sz_ = o.sz_;
+            o.sz_ = 0;
+        }
     }
     svector& operator=( svector&& o ) noexcept
     {
-        if( this == &o ) return *this;
+        if( this == &o )
+        {
+            return *this;
+        }
         delete[] heap_;
         if( o.heap_ ) { heap_ = o.heap_; cap_ = o.cap_; sz_ = o.sz_; o.heap_ = nullptr; o.cap_ = N; o.sz_ = 0; }
-        else          { heap_ = nullptr; cap_ = N; sz_ = o.sz_; for( std::uint32_t i = 0; i < o.sz_; ++i ) inl_[i] = std::move( o.inl_[i] ); o.sz_ = 0; }
+        else
+        {
+            heap_ = nullptr;
+            cap_ = N;
+            sz_ = o.sz_;
+            for( std::uint32_t i = 0; i < o.sz_; ++i )
+            {
+                inl_[i] = std::move( o.inl_[i] );
+            }
+            o.sz_ = 0;
+        }
         return *this;
     }
     svector& operator=( const svector& o )
     {
-        if( this == &o ) return *this;
+        if( this == &o )
+        {
+            return *this;
+        }
         delete[] heap_;  heap_ = nullptr;  cap_ = N;  sz_ = 0;
-        reserve( o.sz_ );  for( std::uint32_t i = 0; i < o.sz_; ++i ) buf()[i] = o.buf()[i];  sz_ = o.sz_;
+        reserve( o.sz_ );
+        for( std::uint32_t i = 0; i < o.sz_; ++i )
+        {
+            buf()[i] = o.buf()[i];
+        }
+        sz_ = o.sz_;
         return *this;
     }
 
-    void          reserve( std::uint32_t need ) { if( need > cap_ ) grow( need ); }
+    void reserve( std::uint32_t need )
+    {
+        if( need > cap_ )
+        {
+            grow( need );
+        }
+    }
     // self-alias safe: if v points into this vector, grow() would free the old heap before the copy —
     // save a local copy first on the grow path (the common non-growing path stays a single assignment).
     void          push_back( const T& v ) { if( sz_ == cap_ ) { T saved = v; grow( sz_ + 1 ); buf()[ sz_++ ] = std::move( saved ); return; } buf()[ sz_++ ] = v; }

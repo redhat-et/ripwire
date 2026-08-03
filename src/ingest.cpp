@@ -152,7 +152,9 @@ const LangEntry* lookupLang( std::string_view ext ) noexcept
     for( const LangEntry& e : kLangTable )
     {
         if( e.ext == ext )
+        {
             return &e;
+        }
     }
     return nullptr;
 }
@@ -163,12 +165,16 @@ std::string lowerExtensionOf( std::string_view path )
     const std::size_t base  = ( slash == std::string_view::npos ) ? 0 : slash + 1;
     const std::size_t dot   = path.find_last_of( '.' );
     if( dot == std::string_view::npos || dot <= base )
+    {
         return {};
+    }
 
     std::string ext;
     ext.reserve( path.size() - dot );
     for( std::size_t i = dot; i < path.size(); ++i )
+    {
         ext.push_back( static_cast<char>( std::tolower( static_cast<unsigned char>( path[i] ) ) ) );
+    }
     return ext;
 }
 
@@ -178,17 +184,50 @@ enum class CapRole : std::uint8_t { Ignore, NameOnly, Def, Ref };
 // Map the part AFTER "definition."/"reference." to a SymKind. Falls back to Other.
 SymKind defKind( std::string_view tail ) noexcept
 {
-    if( tail == "function" )  return SymKind::Function;
-    if( tail == "method" )    return SymKind::Method;
-    if( tail == "class" )     return SymKind::Class;
-    if( tail == "struct" )    return SymKind::Struct;
-    if( tail == "interface" ) return SymKind::Interface;
-    if( tail == "var" )       return SymKind::Var;
-    if( tail == "constant" )  return SymKind::Var;
-    if( tail == "module" )    return SymKind::Other;
-    if( tail == "macro" )     return SymKind::Function;
-    if( tail == "type" )      return SymKind::Struct;   // typedef/alias/enum bucket
-    if( tail == "section" )   return SymKind::Section;  // JSON object keys (t="sec"), same kind as markdown headings
+    if( tail == "function" )
+    {
+        return SymKind::Function;
+    }
+    if( tail == "method" )
+    {
+        return SymKind::Method;
+    }
+    if( tail == "class" )
+    {
+        return SymKind::Class;
+    }
+    if( tail == "struct" )
+    {
+        return SymKind::Struct;
+    }
+    if( tail == "interface" )
+    {
+        return SymKind::Interface;
+    }
+    if( tail == "var" )
+    {
+        return SymKind::Var;
+    }
+    if( tail == "constant" )
+    {
+        return SymKind::Var;
+    }
+    if( tail == "module" )
+    {
+        return SymKind::Other;
+    }
+    if( tail == "macro" )
+    {
+        return SymKind::Function;
+    }
+    if( tail == "type" )
+    {
+        return SymKind::Struct; // typedef/alias/enum bucket
+    }
+    if( tail == "section" )
+    {
+        return SymKind::Section; // JSON object keys (t="sec"), same kind as markdown headings
+    }
     return SymKind::Other;
 }
 
@@ -198,7 +237,9 @@ CapRole roleOf( std::string_view cap, SymKind& kindOut ) noexcept
     constexpr std::string_view kRef = "reference.";
 
     if( cap == "name" )
+    {
         return CapRole::NameOnly;
+    }
 
     if( cap.size() > kDef.size() && cap.substr( 0, kDef.size() ) == kDef )
     {
@@ -206,7 +247,9 @@ CapRole roleOf( std::string_view cap, SymKind& kindOut ) noexcept
         return CapRole::Def;
     }
     if( cap.size() > kRef.size() && cap.substr( 0, kRef.size() ) == kRef )
+    {
         return CapRole::Ref;
+    }
 
     return CapRole::Ignore;   // @doc, @local.scope, etc.
 }
@@ -227,7 +270,9 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
         const bool isOpToken = after >= raw.size()
                             || !( std::isalnum( static_cast<unsigned char>( raw[ after ] ) ) || raw[ after ] == '_' );
         if( atSegStart && isOpToken )
+        {
             return std::string( raw.substr( op ) );   // `operator<<`, `operator bool`, etc. — verbatim
+        }
     }
 
     // FIX #1 (generic base/impl): drop a type-argument list before ANYTHING else. A base/impl name
@@ -237,20 +282,28 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
     // legitimately contains a bare '<' (only a type-argument list opens one), so truncating at the FIRST
     // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical).
     if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos )
+    {
         raw = raw.substr( 0, lt );
+    }
 
     // already a bare identifier in nearly all cases; defensive split on '.' and "::".
     std::size_t pos = raw.rfind( "::" );
     if( pos != std::string_view::npos )
+    {
         raw = raw.substr( pos + 2 );
+    }
     pos = raw.rfind( '.' );
     if( pos != std::string_view::npos )
+    {
         raw = raw.substr( pos + 1 );
+    }
 
     // trim trailing whitespace a `Base <String>` / `Wrapper <T>` spacing left behind (grammars usually
     // hand back tight text, but a space before the '<' would otherwise leave `Base ` after the strip).
     while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' ) )
+    {
         raw.remove_suffix( 1 );
+    }
     return std::string( raw );
 }
 
@@ -262,11 +315,26 @@ bool isDenylistedName( std::string_view name ) noexcept
         return name.size() >= suf.size() && name.substr( name.size() - suf.size() ) == suf;
     };
 
-    if( name == "package-lock.json" )  return true;   // npm lockfile — huge, machine-generated, zero config value
-    if( name == "npm-shrinkwrap.json" ) return true;  // npm lockfile variant (same shape/size as package-lock)
-    if( endsWith( ".min.js" ) )        return true;
-    if( endsWith( "_pb2.py" ) )        return true;
-    if( endsWith( ".pb.go" ) )         return true;
+    if( name == "package-lock.json" )
+    {
+        return true; // npm lockfile — huge, machine-generated, zero config value
+    }
+    if( name == "npm-shrinkwrap.json" )
+    {
+        return true; // npm lockfile variant (same shape/size as package-lock)
+    }
+    if( endsWith( ".min.js" ) )
+    {
+        return true;
+    }
+    if( endsWith( "_pb2.py" ) )
+    {
+        return true;
+    }
+    if( endsWith( ".pb.go" ) )
+    {
+        return true;
+    }
     return false;
 }
 
@@ -290,14 +358,35 @@ bool jsonNestsTooDeep( std::string_view bytes ) noexcept
     {
         if( inString )
         {
-            if( escaped )          escaped = false;
-            else if( c == '\\' )   escaped = true;
-            else if( c == '"' )    inString = false;
+            if( escaped )
+            {
+                escaped = false;
+            }
+            else if( c == '\\' )
+            {
+                escaped = true;
+            }
+            else if( c == '"' )
+            {
+                inString = false;
+            }
             continue;
         }
         if( c == '"' )                       { inString = true; }
-        else if( c == '[' || c == '{' )      { if( ++depth > kMaxJsonNestDepth ) return true; }
-        else if( c == ']' || c == '}' )      { if( depth > 0 ) --depth; }
+        else if( c == '[' || c == '{' )
+        {
+            if( ++depth > kMaxJsonNestDepth )
+            {
+                return true;
+            }
+        }
+        else if( c == ']' || c == '}' )
+        {
+            if( depth > 0 )
+            {
+                --depth;
+            }
+        }
     }
     return false;
 }
@@ -358,7 +447,9 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         const auto fullPath = [ & ]() -> const std::string&
         {
             if( full.empty() )
+            {
                 full = p.string();
+            }
             return full;
         };
 
@@ -377,7 +468,9 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 matchPath = labeledBuf;
             }
             for( const std::string& ex : excludeSubstr )
+            {
                 if( !ex.empty() && matchPath.find( ex ) != std::string_view::npos ) { excluded = true; break; }
+            }
         }
 
         // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
@@ -387,28 +480,40 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             // CMake walk prunes exactly the same subtrees — see the note there.
             bool skip = excluded;
             if( !skip )
+            {
                 skip = isSkippedCrawlDir( p.filename().string() );
+            }
             // skip any dir that contains a CMakeCache.txt — it's a build output tree
             if( !skip )
             {
                 const fs::path cache_sentinel = p / "CMakeCache.txt";
                 if( fs::exists( cache_sentinel, ec ) )
+                {
                     skip = true;
+                }
                 ec.clear();
             }
             if( skip )
+            {
                 it.disable_recursion_pending();
+            }
             continue;
         }
 
         if( excluded )
+        {
             continue;
+        }
         if( !it->is_regular_file( ec ) )
+        {
             continue;
+        }
 
         const std::string name = p.filename().string();
         if( isDenylistedName( name ) )
+        {
             continue;
+        }
 
         // extension must be a known source language OR a doc format (P1-B: notebooks/html/csv are collected
         // like code so they get a fileId; they're skipped by the tree-sitter parse loop and handled in the
@@ -416,12 +521,17 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         // full path; materialize the full path only after the extension survives.
         std::string ext = lowerExtensionOf( name );
         if( lookupLang( ext ) == nullptr && !docparse::isDocExtension( ext ) )
+        {
             continue;
+        }
 
         const std::uintmax_t sz = it->file_size( ec );
         if( ec || sz > maxFileBytes )
         {
-            if( !ec && sz > maxFileBytes ) ++oversizeSkippedCount;   // §P0.5d: a size drop is reportable, not invisible
+            if( !ec && sz > maxFileBytes )
+            {
+                ++oversizeSkippedCount; // §P0.5d: a size drop is reportable, not invisible
+            }
             ec.clear();
             continue;
         }
@@ -467,7 +577,9 @@ bool readFile( const std::string& path, std::string& out )
 
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
     if( fp == nullptr )
+    {
         return false;
+    }
 
     if( std::fseek( fp, 0, SEEK_END ) != 0 )
     {
@@ -490,7 +602,10 @@ bool readFile( const std::string& path, std::string& out )
     const std::size_t want = out.size();
     const std::size_t got  = want == 0 ? 0 : std::fread( out.data(), 1, want, fp );
     const bool ok = ( got == want ) && ( std::fclose( fp ) == 0 );
-    if( !ok ) out.clear();
+    if( !ok )
+    {
+        out.clear();
+    }
     return ok;
 }
 
@@ -500,7 +615,9 @@ bool readFilePrefix( const std::string& path, std::string& out, std::size_t maxB
 
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
     if( fp == nullptr )
+    {
         return false;
+    }
 
     out.resize( maxBytes );
     const std::size_t got = maxBytes == 0 ? 0 : std::fread( out.data(), 1, maxBytes, fp );
@@ -528,7 +645,9 @@ inline StatInfo statSizeMtime( const std::string& path ) noexcept
 {
     struct stat st;
     if( ::stat( path.c_str(), &st ) != 0 )
+    {
         return { -1, -1 };
+    }
 #if defined( __APPLE__ )
     const long long m = (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
 #elif defined( __linux__ )
@@ -570,7 +689,9 @@ inline bool isReadableCacheBlob( const std::string& path ) noexcept
 {
     const PathShape shape = shapeOfPath( path );
     if( shape == PathShape::Other )
+    {
         DEGRADED_PATH_ALERT( "ingest: cache path is not a regular file (directory/device/fifo) — cache treated as corrupt (full reparse)" );
+    }
     return shape == PathShape::RegularFile;
 }
 
@@ -627,8 +748,12 @@ struct CompiledQueryCache
     ~CompiledQueryCache()
     {
         for( const auto& entry : byGrammar )
+        {
             if( entry.second != nullptr )
+            {
                 ts_query_delete( entry.second );
+            }
+        }
     }
 };
 
@@ -648,7 +773,9 @@ struct QueryReadyGate
 void waitForQueryPrewarm( const QueryReadyGate* gate )
 {
     if( gate == nullptr || gate->isReady == nullptr || gate->isReady->load( std::memory_order_acquire ) )
+    {
         return;
+    }
 
     std::unique_lock<std::mutex> lock( *gate->mutex );
     gate->cv->wait( lock, [ gate ]() { return gate->isReady->load( std::memory_order_acquire ); } );
@@ -660,27 +787,37 @@ void waitForQueryPrewarm( const QueryReadyGate* gate )
 TSQuery* compileQueryStandalone( const LangEntry& le )
 {
     if( le.grammar == nullptr )
+    {
         return nullptr;                                  // markdown — no grammar/query
+    }
     const std::string_view scm = queryFor( le.querySub );
     if( scm.empty() )
+    {
         return nullptr;
+    }
     std::uint32_t errOff  = 0;
     TSQueryError  errType = TSQueryErrorNone;
     TSQuery*      q       = ts_query_new( le.grammar(), scm.data(), static_cast<std::uint32_t>( scm.size() ), &errOff, &errType );
     if( q == nullptr )
+    {
         std::fprintf( stderr, "[ripwire] tags.scm compile error for %s at byte %u (err %d) — skipping language\n",
                       std::string( le.querySub ).c_str(), errOff, (int)errType );
+    }
     return q;
 }
 
 TSQuery* compiledQueryFor( const LangEntry& le )
 {
     if( le.grammar == nullptr )
+    {
         return nullptr;                                  // markdown — no grammar/query
+    }
     const TSLanguage* lang  = le.grammar();
     auto&             cache = compiledQueryCache();
     if( const auto it = cache.find( lang ); it != cache.end() )
+    {
         return it->second;
+    }
 
     // not prewarmed — a transient readFile failure can make the prewarm miss-detection skip a grammar the
     // pool later needs. Compiling here would WRITE the shared cache from a worker thread (data race on the
@@ -920,7 +1057,10 @@ inline std::uint32_t parserVerFor( bool captureValueUses ) noexcept
 inline std::uint64_t contentHash64( std::string_view s ) noexcept
 {
     std::uint64_t h = 1469598103934665603ull;
-    for( const char c : s ) h = hashutil::fnv1aAbsorb( h, c );
+    for( const char c : s )
+    {
+        h = hashutil::fnv1aAbsorb( h, c );
+    }
     return h;
 }
 
@@ -936,8 +1076,10 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
     const unsigned char* p = reinterpret_cast<const unsigned char*>( s.data() );
     const std::size_t    n = s.size();
     std::size_t          i = 0;
-    for( ; i + 8 <= n; i += 8 )                                  // 8 lanes advance in lockstep — no cross-lane dependency
+    for( ; i + 8 <= n; i += 8 )
+    { // 8 lanes advance in lockstep — no cross-lane dependency
         for( int k = 0; k < 8; ++k ) { lane[ k ] ^= p[ i + k ]; lane[ k ] = hashutil::fnv1aMultiply( lane[ k ] ); }
+    }
     for( int k = 0; i < n; ++i, ++k ) { lane[ k ] ^= p[ i ]; lane[ k ] = hashutil::fnv1aMultiply( lane[ k ] ); }   // tail (< 8 bytes)
 
     std::uint64_t h = 1469598103934665603ull;                   // fold the 8 lanes into one 64-bit digest
@@ -958,7 +1100,13 @@ struct ByteW
     void u32( std::uint32_t v ) { b.append( reinterpret_cast<const char*>( &v ), 4 ); }
     void u64( std::uint64_t v ) { b.append( reinterpret_cast<const char*>( &v ), 8 ); }
     void str( std::string_view s ) { u32( std::uint32_t( s.size() ) ); b.append( s ); }
-    void raw( const void* p, std::size_t n ) { if( n ) b.append( reinterpret_cast<const char*>( p ), n ); }   // B0.2: bulk array append (memcpy-speed (de)serialize)
+    void raw( const void* p, std::size_t n )
+    {
+        if( n )
+        {
+            b.append( reinterpret_cast<const char*>( p ), n );
+        }
+    } // B0.2: bulk array append (memcpy-speed (de)serialize)
     // H3 (v10): bulk row extension — one resize + raw-pointer fill instead of a bounds-checked push_back
     // per byte (the postings rows are ~3 B × millions of pairs — this seam is the saveCache hot loop).
     // The narrow ints written through it are explicit little-endian (see writeDef), so the width-packed
@@ -997,7 +1145,13 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         w.u32( d.lex.dlWeighted );
         w.u32( std::uint32_t( d.lex.tokenHashes.size() ) );
         std::uint32_t maxTf = 0;
-        for( const std::uint32_t tf : d.lex.tokenTfs ) if( tf > maxTf ) maxTf = tf;
+        for( const std::uint32_t tf : d.lex.tokenTfs )
+        {
+            if( tf > maxTf )
+            {
+                maxTf = tf;
+            }
+        }
         const unsigned tfWidth  = maxTf <= 0xFFu ? 1u : maxTf <= 0xFFFFu ? 2u : 4u;   // exact-preserving by construction
         const unsigned idxWidth = lexDictIndexWidth( fileDictCount );
         w.u8( std::uint8_t( tfWidth ) );
@@ -1006,13 +1160,65 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         // specialized fill loops per width — no per-byte push_back on this multi-million-pair seam.
         const std::size_t count = d.lex.tokenTfs.size();
         char*             p     = w.extend( count * ( idxWidth + tfWidth ) );
-        if( idxWidth == 1 )      for( std::size_t k = 0; k < count; ++k ) *p++ = char( rowDictIndex[k] );
-        else if( idxWidth == 2 ) for( std::size_t k = 0; k < count; ++k ) { const std::uint32_t v = rowDictIndex[k]; p[0] = char( v ); p[1] = char( v >> 8 ); p += 2; }
-        else                     for( std::size_t k = 0; k < count; ++k ) { const std::uint32_t v = rowDictIndex[k]; p[0] = char( v ); p[1] = char( v >> 8 ); p[2] = char( v >> 16 ); p[3] = char( v >> 24 ); p += 4; }
+        if( idxWidth == 1 )
+        {
+            for( std::size_t k = 0; k < count; ++k )
+            {
+                *p++ = char( rowDictIndex[k] );
+            }
+        }
+        else if( idxWidth == 2 )
+        {
+            for( std::size_t k = 0; k < count; ++k )
+            {
+                const std::uint32_t v = rowDictIndex[k];
+                p[0] = char( v );
+                p[1] = char( v >> 8 );
+                p += 2;
+            }
+        }
+        else
+        {
+            for( std::size_t k = 0; k < count; ++k )
+            {
+                const std::uint32_t v = rowDictIndex[k];
+                p[0] = char( v );
+                p[1] = char( v >> 8 );
+                p[2] = char( v >> 16 );
+                p[3] = char( v >> 24 );
+                p += 4;
+            }
+        }
         const std::uint32_t* tfs = d.lex.tokenTfs.data();
-        if( tfWidth == 1 )      for( std::size_t k = 0; k < count; ++k ) *p++ = char( tfs[k] );
-        else if( tfWidth == 2 ) for( std::size_t k = 0; k < count; ++k ) { const std::uint32_t v = tfs[k]; p[0] = char( v ); p[1] = char( v >> 8 ); p += 2; }
-        else                    for( std::size_t k = 0; k < count; ++k ) { const std::uint32_t v = tfs[k]; p[0] = char( v ); p[1] = char( v >> 8 ); p[2] = char( v >> 16 ); p[3] = char( v >> 24 ); p += 4; }
+        if( tfWidth == 1 )
+        {
+            for( std::size_t k = 0; k < count; ++k )
+            {
+                *p++ = char( tfs[k] );
+            }
+        }
+        else if( tfWidth == 2 )
+        {
+            for( std::size_t k = 0; k < count; ++k )
+            {
+                const std::uint32_t v = tfs[k];
+                p[0] = char( v );
+                p[1] = char( v >> 8 );
+                p += 2;
+            }
+        }
+        else
+        {
+            for( std::size_t k = 0; k < count; ++k )
+            {
+                const std::uint32_t v = tfs[k];
+                p[0] = char( v );
+                p[1] = char( v >> 8 );
+                p[2] = char( v >> 16 );
+                p[3] = char( v >> 24 );
+                p += 4;
+            }
+        }
     }
 }
 inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); }
@@ -1090,14 +1296,46 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
                 prevIndex  = dictIndex;
             }
         };
-        if( idxWidth == 1 )      decodeIndexRun( [ & ]() noexcept { return std::uint32_t( *q++ ); } );
-        else if( idxWidth == 2 ) decodeIndexRun( [ & ]() noexcept { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8; q += 2; return v; } );
-        else                     decodeIndexRun( [ & ]() noexcept { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24; q += 4; return v; } );
+        if( idxWidth == 1 )
+        {
+            decodeIndexRun( [ & ]() noexcept
+                            { return std::uint32_t( *q++ ); } );
+        }
+        else if( idxWidth == 2 )
+        {
+            decodeIndexRun( [ & ]() noexcept
+                            { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8; q += 2; return v; } );
+        }
+        else
+        {
+            decodeIndexRun( [ & ]() noexcept
+                            { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24; q += 4; return v; } );
+        }
         if( !rowOk ) { r.ok = false; return d; }
         std::uint32_t* tfOut = d.lex.tokenTfs.data();
-        if( tfWidth == 1 )      for( std::uint32_t k = 0; k < tokenCount; ++k ) tfOut[k] = *q++;
-        else if( tfWidth == 2 ) for( std::uint32_t k = 0; k < tokenCount; ++k ) { tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8; q += 2; }
-        else                    for( std::uint32_t k = 0; k < tokenCount; ++k ) { tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24; q += 4; }
+        if( tfWidth == 1 )
+        {
+            for( std::uint32_t k = 0; k < tokenCount; ++k )
+            {
+                tfOut[k] = *q++;
+            }
+        }
+        else if( tfWidth == 2 )
+        {
+            for( std::uint32_t k = 0; k < tokenCount; ++k )
+            {
+                tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8;
+                q += 2;
+            }
+        }
+        else
+        {
+            for( std::uint32_t k = 0; k < tokenCount; ++k )
+            {
+                tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24;
+                q += 4;
+            }
+        }
         r.p += needBytes;
     }
     return d;
@@ -1121,8 +1359,14 @@ inline RawRouteUse readRouteUse( ByteR& r ) { RawRouteUse u; u.startByte = r.u32
 inline std::string reAbsolutize( std::string_view rel, std::string_view root )
 {
     std::string_view rootTrim = root;
-    while( rootTrim.size() > 1 && rootTrim.back() == '/' ) rootTrim.remove_suffix( 1 );
-    if( rootTrim.empty() ) rootTrim = ".";   // empty root ⇒ same "." spelling collectSources' fs::path("") would give
+    while( rootTrim.size() > 1 && rootTrim.back() == '/' )
+    {
+        rootTrim.remove_suffix( 1 );
+    }
+    if( rootTrim.empty() )
+    {
+        rootTrim = "."; // empty root ⇒ same "." spelling collectSources' fs::path("") would give
+    }
     std::string out;
     out.reserve( rootTrim.size() + 1 + rel.size() );
     out.append( rootTrim );
@@ -1154,12 +1398,18 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     // L1: only a REGULAR file may reach readFile below — on Linux a directory opens cleanly and takes its
     // resize() down with it. Any other shape self-heals into a full reparse, exactly like a checksum
     // mismatch (see isReadableCacheBlob); blobWriteNsOut stays -1 ⇒ the caller cold-parses.
-    if( !isReadableCacheBlob( path ) ) return out;
+    if( !isReadableCacheBlob( path ) )
+    {
+        return out;
+    }
 
     std::string blob;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: read cache blob" );
-        if( !readFile( path, blob ) ) return out;
+        if( !readFile( path, blob ) )
+        {
+            return out;
+        }
     }
 
     // BONUS (S): whole-blob FNV-1a checksum trailer (last 8 bytes). saveCache appends fnv1a64(payload) so a
@@ -1167,7 +1417,10 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     // is caught here → treat as corrupt → self-healing full reparse. A blob too short to hold magic+trailer
     // is corrupt too. Reader `r` is bounded to the PAYLOAD (blob minus the 8-byte trailer).
     constexpr std::size_t kTrailerBytes = 8;
-    if( blob.size() < 21 + kTrailerBytes ) return out;                        // 3×u32 + u8 arch + u64 blobWriteNs header + trailer minimum
+    if( blob.size() < 21 + kTrailerBytes )
+    {
+        return out; // 3×u32 + u8 arch + u64 blobWriteNs header + trailer minimum
+    }
     const std::size_t payloadLen = blob.size() - kTrailerBytes;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: checksum trailer" );
@@ -1188,7 +1441,10 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
         // mismatch → out stays empty, blobWriteNsOut stays -1 → the caller cold-parses (self-heal).
         // Left-to-right && short-circuit means the u8() read only happens once magic/version/parserVer
         // have matched, keeping the byte-stream cursor consistent on the accepted path.
-        if( r.u32() != kCacheMagic || r.u32() != kCacheVersion || r.u32() != parserVerFor( captureValueUses ) || r.u8() != kArtifactArch ) return out;
+        if( r.u32() != kCacheMagic || r.u32() != kCacheVersion || r.u32() != parserVerFor( captureValueUses ) || r.u8() != kArtifactArch )
+        {
+            return out;
+        }
         (void)r.u64();   // legacy wall-clock write stamp — kept in the wire format for diagnostics, no longer
                           // the racy-rule reference (F3/X5: see blobWriteNsOut below); must still be consumed
                           // to keep the byte-stream cursor aligned with the record count that follows.
@@ -1214,7 +1470,10 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     const std::size_t kMinFileRecordBytes = 52 + ( captureValueUses ? 4 : 0 );   // path str + hash + sizeBytes + mtimeNs + six record counts, all empty (v6: +2×u64; v10 rich: + dict count u32; v12/B6.3: +2×u32 route counts)
     const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes ) noexcept
     {
-        if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes ) return true;
+        if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes )
+        {
+            return true;
+        }
         DEGRADED_PATH_ALERT( "ingest: cache record count exceeds remaining bytes — cache treated as corrupt" );
         r.ok = false;
         return false;
@@ -1224,7 +1483,10 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: file count + reserve" );
         nf = r.u32();
-        if( !countFits( nf, kMinFileRecordBytes ) ) return out;
+        if( !countFits( nf, kMinFileRecordBytes ) )
+        {
+            return out;
+        }
         out.reserve( nf );
     }
     {
@@ -1246,29 +1508,110 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
                 // strictly ascending (readDef's sorted-row invariant hangs on it); anything else is
                 // corrupt → the same self-healing full-reparse path as a truncated blob.
                 const std::uint32_t dictCount = r.u32();
-                if( !countFits( dictCount, sizeof( std::uint64_t ) ) ) break;
+                if( !countFits( dictCount, sizeof( std::uint64_t ) ) )
+                {
+                    break;
+                }
                 fileDict.resize( dictCount );
-                if( !r.rawInto( fileDict.data(), std::size_t( dictCount ) * sizeof( std::uint64_t ) ) ) break;
+                if( !r.rawInto( fileDict.data(), std::size_t( dictCount ) * sizeof( std::uint64_t ) ) )
+                {
+                    break;
+                }
                 for( std::size_t k = 1; k < fileDict.size(); ++k )
+                {
                     if( fileDict[k] <= fileDict[ k - 1 ] )
                     {
                         DEGRADED_PATH_ALERT( "ingest: cache file dictionary not strictly ascending — cache treated as corrupt" );
                         r.ok = false;
                         break;
                     }
-                if( !r.ok ) break;
+                }
+                if( !r.ok )
+                {
+                    break;
+                }
             }
-            const std::uint32_t nd = r.u32();  if( !countFits( nd, kMinDefRecordBytes ) )  break;  ff.defs.reserve( nd );   for( std::uint32_t j = 0; j < nd && r.ok; ++j ) ff.defs.push_back( readDef( r, captureValueUses, fileDict ) );
-            const std::uint32_t nr = r.u32();  if( !countFits( nr, kMinRefRecordBytes ) )  break;  ff.refs.reserve( nr );   for( std::uint32_t j = 0; j < nr && r.ok; ++j ) ff.refs.push_back( readRef( r ) );
-            const std::uint32_t ni = r.u32();  if( !countFits( ni, kMinIncRecordBytes ) )  break;  ff.incs.reserve( ni );   for( std::uint32_t j = 0; j < ni && r.ok; ++j ) { const bool isAngle = r.u8() != 0; ff.incs.push_back( Include{ 0, isAngle, r.str() } ); }
-            const std::uint32_t nb = r.u32();  if( !countFits( nb, kMinBindRecordBytes ) ) break;  ff.binds.reserve( nb );  for( std::uint32_t j = 0; j < nb && r.ok; ++j ) ff.binds.push_back( readBind( r ) );
-            const std::uint32_t na = r.u32();  if( !countFits( na, kMinFfiRecordBytes ) )  break;  ff.ffis.reserve( na );   for( std::uint32_t j = 0; j < na && r.ok; ++j ) ff.ffis.push_back( readFfi( r ) );
-            const std::uint32_t nrd = r.u32(); if( !countFits( nrd, kMinRouteDefRecordBytes ) ) break; ff.routeDefs.reserve( nrd ); for( std::uint32_t j = 0; j < nrd && r.ok; ++j ) ff.routeDefs.push_back( readRouteDef( r ) );   // B6.3
-            const std::uint32_t nru = r.u32(); if( !countFits( nru, kMinRouteUseRecordBytes ) ) break; ff.routeUses.reserve( nru ); for( std::uint32_t j = 0; j < nru && r.ok; ++j ) ff.routeUses.push_back( readRouteUse( r ) );   // B6.3
-            if( r.ok ) out.emplace( std::move( key ), std::move( ff ) );
+            const std::uint32_t nd = r.u32();
+            if( !countFits( nd, kMinDefRecordBytes ) )
+            {
+                break;
+            }
+            ff.defs.reserve( nd );
+            for( std::uint32_t j = 0; j < nd && r.ok; ++j )
+            {
+                ff.defs.push_back( readDef( r, captureValueUses, fileDict ) );
+            }
+            const std::uint32_t nr = r.u32();
+            if( !countFits( nr, kMinRefRecordBytes ) )
+            {
+                break;
+            }
+            ff.refs.reserve( nr );
+            for( std::uint32_t j = 0; j < nr && r.ok; ++j )
+            {
+                ff.refs.push_back( readRef( r ) );
+            }
+            const std::uint32_t ni = r.u32();
+            if( !countFits( ni, kMinIncRecordBytes ) )
+            {
+                break;
+            }
+            ff.incs.reserve( ni );
+            for( std::uint32_t j = 0; j < ni && r.ok; ++j )
+            {
+                const bool isAngle = r.u8() != 0;
+                ff.incs.push_back( Include { 0, isAngle, r.str() } );
+            }
+            const std::uint32_t nb = r.u32();
+            if( !countFits( nb, kMinBindRecordBytes ) )
+            {
+                break;
+            }
+            ff.binds.reserve( nb );
+            for( std::uint32_t j = 0; j < nb && r.ok; ++j )
+            {
+                ff.binds.push_back( readBind( r ) );
+            }
+            const std::uint32_t na = r.u32();
+            if( !countFits( na, kMinFfiRecordBytes ) )
+            {
+                break;
+            }
+            ff.ffis.reserve( na );
+            for( std::uint32_t j = 0; j < na && r.ok; ++j )
+            {
+                ff.ffis.push_back( readFfi( r ) );
+            }
+            const std::uint32_t nrd = r.u32();
+            if( !countFits( nrd, kMinRouteDefRecordBytes ) )
+            {
+                break;
+            }
+            ff.routeDefs.reserve( nrd );
+            for( std::uint32_t j = 0; j < nrd && r.ok; ++j )
+            {
+                ff.routeDefs.push_back( readRouteDef( r ) ); // B6.3
+            }
+            const std::uint32_t nru = r.u32();
+            if( !countFits( nru, kMinRouteUseRecordBytes ) )
+            {
+                break;
+            }
+            ff.routeUses.reserve( nru );
+            for( std::uint32_t j = 0; j < nru && r.ok; ++j )
+            {
+                ff.routeUses.push_back( readRouteUse( r ) ); // B6.3
+            }
+            if( r.ok )
+            {
+                out.emplace( std::move( key ), std::move( ff ) );
+            }
         }
     }
-    if( !r.ok ) out.clear();   // truncated/corrupt → ignore (full reparse; self-healing)
+    if( !r.ok )
+    {
+        out.clear(); // truncated/corrupt → ignore (full reparse; self-healing)
+    }
     return out;
 }
 
@@ -1295,13 +1638,55 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
 
     const std::size_t F = files.size();
     std::vector<std::vector<std::uint32_t>> dIdx( F ), rIdx( F ), iIdx( F ), bIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
-    for( std::uint32_t i = 0; i < defs.size();  ++i ) if( defs[i].fileId  < F ) dIdx[ defs[i].fileId  ].push_back( i );
-    for( std::uint32_t i = 0; i < refs.size();  ++i ) if( refs[i].fileId  < F ) rIdx[ refs[i].fileId  ].push_back( i );
-    for( std::uint32_t i = 0; i < incs.size();  ++i ) if( incs[i].fileId  < F ) iIdx[ incs[i].fileId  ].push_back( i );
-    for( std::uint32_t i = 0; i < binds.size(); ++i ) if( binds[i].fileId < F ) bIdx[ binds[i].fileId ].push_back( i );
-    for( std::uint32_t i = 0; i < ffis.size();  ++i ) if( ffis[i].fileId  < F ) aIdx[ ffis[i].fileId  ].push_back( i );
-    for( std::uint32_t i = 0; i < routeDefs.size(); ++i ) if( routeDefs[i].fileId < F ) rdIdx[ routeDefs[i].fileId ].push_back( i );   // B6.3
-    for( std::uint32_t i = 0; i < routeUses.size(); ++i ) if( routeUses[i].fileId < F ) ruIdx[ routeUses[i].fileId ].push_back( i );   // B6.3
+    for( std::uint32_t i = 0; i < defs.size(); ++i )
+    {
+        if( defs[i].fileId < F )
+        {
+            dIdx[defs[i].fileId].push_back( i );
+        }
+    }
+    for( std::uint32_t i = 0; i < refs.size(); ++i )
+    {
+        if( refs[i].fileId < F )
+        {
+            rIdx[refs[i].fileId].push_back( i );
+        }
+    }
+    for( std::uint32_t i = 0; i < incs.size(); ++i )
+    {
+        if( incs[i].fileId < F )
+        {
+            iIdx[incs[i].fileId].push_back( i );
+        }
+    }
+    for( std::uint32_t i = 0; i < binds.size(); ++i )
+    {
+        if( binds[i].fileId < F )
+        {
+            bIdx[binds[i].fileId].push_back( i );
+        }
+    }
+    for( std::uint32_t i = 0; i < ffis.size(); ++i )
+    {
+        if( ffis[i].fileId < F )
+        {
+            aIdx[ffis[i].fileId].push_back( i );
+        }
+    }
+    for( std::uint32_t i = 0; i < routeDefs.size(); ++i )
+    {
+        if( routeDefs[i].fileId < F )
+        {
+            rdIdx[routeDefs[i].fileId].push_back( i ); // B6.3
+        }
+    }
+    for( std::uint32_t i = 0; i < routeUses.size(); ++i )
+    {
+        if( routeUses[i].fileId < F )
+        {
+            ruIdx[routeUses[i].fileId].push_back( i ); // B6.3
+        }
+    }
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -1314,93 +1699,136 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     ByteW w;
     // A1 (team-index): kArtifactArch byte sits in the header right after parserVer so loadCache's guard
     // rejects a foreign-arch (endian/pointer-width) blob before trusting any raw-int record bytes.
-    w.u32( kCacheMagic ); w.u32( kCacheVersion ); w.u32( parserVerFor( captureValueUses ) ); w.u8( kArtifactArch ); w.u64( (std::uint64_t)blobWriteNs ); w.u32( std::uint32_t( F ) );
+    w.u32( kCacheMagic );
+    w.u32( kCacheVersion );
+    w.u32( parserVerFor( captureValueUses ) );
+    w.u8( kArtifactArch );
+    w.u64( (std::uint64_t)blobWriteNs );
+    w.u32( std::uint32_t( F ) );
     {
-    PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
-    using LexPair = std::pair<std::uint64_t, std::uint32_t>;               // H3 (v10): (hash, global pair slot within the file)
-    std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
-    std::vector<LexPair>       mergeA, mergeB;                             // ping-pong buffers of the balanced run-merge, reused
-    std::vector<std::size_t>   runOffsets, nextRunOffsets;                 // sorted-run bounds inside the ping-pong buffer
-    std::vector<std::uint32_t> pairDictIndex;                              // pair slot → dict index, in def-row order
-    for( std::uint32_t f = 0; f < F; ++f )
-    {
-        w.str( relForHash( files[f], rootDir ) ); w.u64( f < fileHash.size() ? fileHash[f] : 0 );
-        w.u64( f < fileSize.size()  ? (std::uint64_t)fileSize[f]  : (std::uint64_t)-1 );   // A4-P7 stat-gate: size at hash time (-1 ⇒ unknown → gate re-hashes)
-        w.u64( f < fileMtime.size() ? (std::uint64_t)fileMtime[f] : (std::uint64_t)-1 );   // A4-P7 stat-gate: mtimeNs at hash time (-1 ⇒ unknown)
-        if( captureValueUses )
+        PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
+        using LexPair = std::pair<std::uint64_t, std::uint32_t>;               // H3 (v10): (hash, global pair slot within the file)
+        std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
+        std::vector<LexPair>       mergeA, mergeB;                             // ping-pong buffers of the balanced run-merge, reused
+        std::vector<std::size_t>   runOffsets, nextRunOffsets;                 // sorted-run bounds inside the ping-pong buffer
+        std::vector<std::uint32_t> pairDictIndex;                              // pair slot → dict index, in def-row order
+        for( std::uint32_t f = 0; f < F; ++f )
         {
-            // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a
-            // file's defs (nested spans re-tokenize the same text), so hoisting each distinct hash into
-            // ONE per-file dictionary and storing narrow indices per row shrinks the rich blob's
-            // postings from 12 B/pair to ~dictShare×8 + idxWidth + tfWidth bytes. Every row is ALREADY
-            // sorted (lexindex.h buildDefLexStats), so the dict is a BALANCED PAIRWISE MERGE over the
-            // rows (P·log2(rows) sequential std::merge steps — measured cheaper than both a flat
-            // O(P log P) sort and a per-element k-way heap), and the final merged (hash, slot) order
-            // assigns every row position's dict index in one walk. Deterministic: equal hashes all land
-            // on the same dict entry regardless of slot order. This is the --index-out / prime hot path.
-            fileDict.clear();
-            mergeA.clear();
-            runOffsets.clear();
-            runOffsets.push_back( 0 );
-            std::uint32_t slotCount = 0;
-            for( const std::uint32_t i : dIdx[f] )
+            w.str( relForHash( files[f], rootDir ) );
+            w.u64( f < fileHash.size() ? fileHash[f] : 0 );
+            w.u64( f < fileSize.size() ? (std::uint64_t)fileSize[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: size at hash time (-1 ⇒ unknown → gate re-hashes)
+            w.u64( f < fileMtime.size() ? (std::uint64_t)fileMtime[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: mtimeNs at hash time (-1 ⇒ unknown)
+            if( captureValueUses )
             {
-                const std::vector<std::uint64_t>& row = defs[i].lex.tokenHashes;
-                for( const std::uint64_t hash : row ) mergeA.emplace_back( hash, slotCount++ );
-                if( !row.empty() ) runOffsets.push_back( mergeA.size() );
-            }
-            std::vector<LexPair>* src = &mergeA;
-            std::vector<LexPair>* dst = &mergeB;
-            while( runOffsets.size() > 2 )                                // > 1 run left → one merge pass
-            {
-                dst->resize( src->size() );                               // exact pass size — merges write via raw pointers,
-                nextRunOffsets.clear();                                   //   no per-element back_inserter capacity branch
-                nextRunOffsets.push_back( 0 );
-                LexPair* writeCursor = dst->data();
-                for( std::size_t runIndex = 0; runIndex + 1 < runOffsets.size(); runIndex += 2 )
+                // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a
+                // file's defs (nested spans re-tokenize the same text), so hoisting each distinct hash into
+                // ONE per-file dictionary and storing narrow indices per row shrinks the rich blob's
+                // postings from 12 B/pair to ~dictShare×8 + idxWidth + tfWidth bytes. Every row is ALREADY
+                // sorted (lexindex.h buildDefLexStats), so the dict is a BALANCED PAIRWISE MERGE over the
+                // rows (P·log2(rows) sequential std::merge steps — measured cheaper than both a flat
+                // O(P log P) sort and a per-element k-way heap), and the final merged (hash, slot) order
+                // assigns every row position's dict index in one walk. Deterministic: equal hashes all land
+                // on the same dict entry regardless of slot order. This is the --index-out / prime hot path.
+                fileDict.clear();
+                mergeA.clear();
+                runOffsets.clear();
+                runOffsets.push_back( 0 );
+                std::uint32_t slotCount = 0;
+                for( const std::uint32_t i : dIdx[f] )
                 {
-                    const std::size_t lo  = runOffsets[ runIndex ];
-                    const std::size_t mid = runOffsets[ runIndex + 1 ];
-                    if( runIndex + 2 < runOffsets.size() )                // a full pair of runs → merge them
+                    const std::vector<std::uint64_t>& row = defs[i].lex.tokenHashes;
+                    for( const std::uint64_t hash : row )
                     {
-                        const std::size_t hi = runOffsets[ runIndex + 2 ];
-                        writeCursor = std::merge( src->data() + lo, src->data() + mid, src->data() + mid, src->data() + hi, writeCursor );
+                        mergeA.emplace_back( hash, slotCount++ );
                     }
-                    else                                                  // odd tail run: carry over
+                    if( !row.empty() )
                     {
-                        std::memcpy( writeCursor, src->data() + lo, ( mid - lo ) * sizeof( LexPair ) );
-                        writeCursor += mid - lo;
+                        runOffsets.push_back( mergeA.size() );
                     }
-                    nextRunOffsets.push_back( std::size_t( writeCursor - dst->data() ) );
                 }
-                runOffsets.swap( nextRunOffsets );
-                std::swap( src, dst );
+                std::vector<LexPair>* src = &mergeA;
+                std::vector<LexPair>* dst = &mergeB;
+                while( runOffsets.size() > 2 ) // > 1 run left → one merge pass
+                {
+                    dst->resize( src->size() ); // exact pass size — merges write via raw pointers,
+                    nextRunOffsets.clear(); //   no per-element back_inserter capacity branch
+                    nextRunOffsets.push_back( 0 );
+                    LexPair* writeCursor = dst->data();
+                    for( std::size_t runIndex = 0; runIndex + 1 < runOffsets.size(); runIndex += 2 )
+                    {
+                        const std::size_t lo = runOffsets[runIndex];
+                        const std::size_t mid = runOffsets[runIndex + 1];
+                        if( runIndex + 2 < runOffsets.size() ) // a full pair of runs → merge them
+                        {
+                            const std::size_t hi = runOffsets[runIndex + 2];
+                            writeCursor = std::merge( src->data() + lo, src->data() + mid, src->data() + mid, src->data() + hi, writeCursor );
+                        }
+                        else // odd tail run: carry over
+                        {
+                            std::memcpy( writeCursor, src->data() + lo, ( mid - lo ) * sizeof( LexPair ) );
+                            writeCursor += mid - lo;
+                        }
+                        nextRunOffsets.push_back( std::size_t( writeCursor - dst->data() ) );
+                    }
+                    runOffsets.swap( nextRunOffsets );
+                    std::swap( src, dst );
+                }
+                pairDictIndex.resize( slotCount );
+                for( const auto& [hash, slot] : *src )
+                {
+                    if( fileDict.empty() || fileDict.back() != hash )
+                    {
+                        fileDict.push_back( hash );
+                    }
+                    pairDictIndex[slot] = std::uint32_t( fileDict.size() - 1 );
+                }
+                w.u32( std::uint32_t( fileDict.size() ) );
+                w.raw( fileDict.data(), fileDict.size() * sizeof( std::uint64_t ) );
             }
-            pairDictIndex.resize( slotCount );
-            for( const auto& [ hash, slot ] : *src )
+            w.u32( std::uint32_t( dIdx[f].size() ) );
             {
-                if( fileDict.empty() || fileDict.back() != hash ) fileDict.push_back( hash );
-                pairDictIndex[ slot ] = std::uint32_t( fileDict.size() - 1 );
+                std::size_t rowOffset = 0; // running slot offset into pairDictIndex
+                for( std::uint32_t i : dIdx[f] )
+                {
+                    writeDef( w, defs[i], captureValueUses, fileDict.size(), pairDictIndex.data() + rowOffset );
+                    if( captureValueUses )
+                    {
+                        rowOffset += defs[i].lex.tokenHashes.size();
+                    }
+                }
             }
-            w.u32( std::uint32_t( fileDict.size() ) );
-            w.raw( fileDict.data(), fileDict.size() * sizeof( std::uint64_t ) );
-        }
-        w.u32( std::uint32_t( dIdx[f].size() ) );
-        {
-            std::size_t rowOffset = 0;                                    // running slot offset into pairDictIndex
-            for( std::uint32_t i : dIdx[f] )
+            w.u32( std::uint32_t( rIdx[f].size() ) );
+            for( std::uint32_t i : rIdx[f] )
             {
-                writeDef( w, defs[i], captureValueUses, fileDict.size(), pairDictIndex.data() + rowOffset );
-                if( captureValueUses ) rowOffset += defs[i].lex.tokenHashes.size();
+                writeRef( w, refs[i] );
+            }
+            w.u32( std::uint32_t( iIdx[f].size() ) );
+            for( std::uint32_t i : iIdx[f] )
+            {
+                w.u8( incs[i].isAngle ? 1 : 0 );
+                w.str( incs[i].target );
+            }
+            w.u32( std::uint32_t( bIdx[f].size() ) );
+            for( std::uint32_t i : bIdx[f] )
+            {
+                writeBind( w, binds[i] );
+            }
+            w.u32( std::uint32_t( aIdx[f].size() ) );
+            for( std::uint32_t i : aIdx[f] )
+            {
+                writeFfi( w, ffis[i] );
+            }
+            w.u32( std::uint32_t( rdIdx[f].size() ) );
+            for( std::uint32_t i : rdIdx[f] )
+            {
+                writeRouteDef( w, routeDefs[i] ); // B6.3
+            }
+            w.u32( std::uint32_t( ruIdx[f].size() ) );
+            for( std::uint32_t i : ruIdx[f] )
+            {
+                writeRouteUse( w, routeUses[i] ); // B6.3
             }
         }
-        w.u32( std::uint32_t( rIdx[f].size() ) ); for( std::uint32_t i : rIdx[f] ) writeRef( w, refs[i] );
-        w.u32( std::uint32_t( iIdx[f].size() ) ); for( std::uint32_t i : iIdx[f] ) { w.u8( incs[i].isAngle ? 1 : 0 ); w.str( incs[i].target ); }
-        w.u32( std::uint32_t( bIdx[f].size() ) ); for( std::uint32_t i : bIdx[f] ) writeBind( w, binds[i] );
-        w.u32( std::uint32_t( aIdx[f].size() ) ); for( std::uint32_t i : aIdx[f] ) writeFfi( w, ffis[i] );
-        w.u32( std::uint32_t( rdIdx[f].size() ) ); for( std::uint32_t i : rdIdx[f] ) writeRouteDef( w, routeDefs[i] );   // B6.3
-        w.u32( std::uint32_t( ruIdx[f].size() ) ); for( std::uint32_t i : ruIdx[f] ) writeRouteUse( w, routeUses[i] );   // B6.3
-    }
     }   // symmetric bare scope: serialize-records profiling span
 
     // BONUS (S): append the whole-payload checksum so loadCache can catch a silent bit-flip inside a cached
@@ -1529,9 +1957,15 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
 inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
 {
     const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
-    if( ts_node_is_null( op ) ) return {};
+    if( ts_node_is_null( op ) )
+    {
+        return {};
+    }
     const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
-    if( b > src.size() || b <= a ) return {};
+    if( b > src.size() || b <= a )
+    {
+        return {};
+    }
     const std::string_view o = src.substr( a, b - a );
     return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
 }
@@ -1560,7 +1994,9 @@ inline void collectChildren( TSNode n, TSTreeCursor& cur, std::vector<TSNode>& o
     if( ts_tree_cursor_goto_first_child( &cur ) )
     {
         do
+        {
             out.push_back( ts_tree_cursor_current_node( &cur ) );
+        }
         while( ts_tree_cursor_goto_next_sibling( &cur ) );
     }
 }
@@ -1584,7 +2020,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
     {
         const CcFrame frame = stack.back();
         stack.pop_back();
-        if( frame.depth > 512 ) continue;   // pathological-AST guard (file size is already capped at 1 MB)
+        if( frame.depth > 512 )
+        {
+            continue; // pathological-AST guard (file size is already capped at 1 MB)
+        }
         const TSNode        n          = frame.node;
         const std::uint32_t nesting    = frame.nesting;
         const std::uint16_t childDepth = static_cast<std::uint16_t>( frame.depth + 1 );
@@ -1598,14 +2037,24 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const bool isNamed = ts_node_is_named( n );
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
-        if( isNamed && isDecisionType( t ) ) ++cyclo;
+        if( isNamed && isDecisionType( t ) )
+        {
+            ++cyclo;
+        }
         else if( std::strcmp( t, "binary_expression" ) == 0 )
         {
             const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
             if( !ts_node_is_null( op ) )
             {
                 const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
-                if( b <= src.size() && b - a == 2 ) { const std::string_view o = src.substr( a, 2 ); if( o == "&&" || o == "||" ) ++cyclo; }
+                if( b <= src.size() && b - a == 2 )
+                {
+                    const std::string_view o = src.substr( a, 2 );
+                    if( o == "&&" || o == "||" )
+                    {
+                        ++cyclo;
+                    }
+                }
             }
         }
 
@@ -1617,9 +2066,15 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                                   && ( std::strcmp( ts_node_type( p ), "if_statement" ) == 0 || std::strcmp( ts_node_type( p ), "if_expression" ) == 0 );
             const std::uint32_t childNest = elseIf ? nesting : nesting + 1;   // else-if doesn't deepen
             cog += elseIf ? 1u : ( 1u + nesting );                           // flat +1 for else-if, else +1+nesting
-            if( childNest > maxNest ) maxNest = childNest;                    // Q4: deepest control nesting reached
+            if( childNest > maxNest )
+            {
+                maxNest = childNest; // Q4: deepest control nesting reached
+            }
             collectChildren( n, cursor.cur, kids );
-            for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], childNest, childDepth } );
+            for( std::size_t i = kids.size(); i > 0; --i )
+            {
+                stack.push_back( { kids[i - 1], childNest, childDepth } );
+            }
             continue;
         }
         if( isNamed && ( std::strcmp( t, "elif_clause" ) == 0 || std::strcmp( t, "else_clause" ) == 0
@@ -1637,11 +2092,17 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                     // fresh control — but cyclomatic still counts that `if` as a decision (parity with the old walk).
                     ++cyclo;
                     collectChildren( c, cursor.cur, elifKids );   // NOT kids — that iteration is still live
-                    for( std::size_t j = elifKids.size(); j > 0; --j ) stack.push_back( { elifKids[ j - 1 ], nesting, childDepth } );
+                    for( std::size_t j = elifKids.size(); j > 0; --j )
+                    {
+                        stack.push_back( { elifKids[j - 1], nesting, childDepth } );
+                    }
                 }
                 else
                 {
-                    if( nesting + 1 > maxNest ) maxNest = nesting + 1;    // Q4: else/elif body deepens by one
+                    if( nesting + 1 > maxNest )
+                    {
+                        maxNest = nesting + 1; // Q4: else/elif body deepens by one
+                    }
                     stack.push_back( { c, nesting + 1, childDepth } );   // else/elif body deepens by one
                 }
             }
@@ -1649,16 +2110,28 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
         if( cc_isNestingOnly( t ) )
         {
-            if( nesting + 1 > maxNest ) maxNest = nesting + 1;            // Q4: a lambda/closure body deepens nesting
+            if( nesting + 1 > maxNest )
+            {
+                maxNest = nesting + 1; // Q4: a lambda/closure body deepens nesting
+            }
             collectChildren( n, cursor.cur, kids );
-            for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], nesting + 1, childDepth } );
+            for( std::size_t i = kids.size(); i > 0; --i )
+            {
+                stack.push_back( { kids[i - 1], nesting + 1, childDepth } );
+            }
             continue;
         }
         const std::string_view bop = cc_boolOp( n, src );
-        if( !bop.empty() && cc_boolOp( ts_node_parent( n ), src ) != bop ) ++cog;   // new boolean run (cognitive)
+        if( !bop.empty() && cc_boolOp( ts_node_parent( n ), src ) != bop )
+        {
+            ++cog; // new boolean run (cognitive)
+        }
 
         collectChildren( n, cursor.cur, kids );
-        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], nesting, childDepth } );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( { kids[i - 1], nesting, childDepth } );
+        }
     }
 }
 struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; };
@@ -1669,7 +2142,10 @@ inline Complexity complexityOf( TSNode root, std::string_view src )   // one fus
     std::vector<TSNode> kids;
     kids.reserve( 64 );
     collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
-    for( const TSNode c : kids ) cc_walk( c, 0, src, cog, cyclo, maxNest, 0 );
+    for( const TSNode c : kids )
+    {
+        cc_walk( c, 0, src, cog, cyclo, maxNest, 0 );
+    }
     return { 1u + cyclo, cog, maxNest };   // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting
 }
 
@@ -1706,7 +2182,10 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
     {
         const PF f = stack.back();
         stack.pop_back();
-        if( f.depth > 12 ) continue;                        // params live near the signature; bound the search
+        if( f.depth > 12 )
+        {
+            continue; // params live near the signature; bound the search
+        }
         const char* t = ts_node_type( f.n );
         collectChildren( f.n, cursor.cur, kids );           // one collection serves both arms below
         if( f.n.id != defNode.id && cc_isParamList( t ) )   // don't treat the def node itself as a param list
@@ -1714,14 +2193,23 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
             std::uint16_t count = 0;
             for( const TSNode c : kids )
             {
-                if( !ts_node_is_named( c ) ) continue;       // skip '(', ')', ',' separators
+                if( !ts_node_is_named( c ) )
+                {
+                    continue; // skip '(', ')', ',' separators
+                }
                 const char* ct = ts_node_type( c );
-                if( std::strcmp( ct, "comment" ) == 0 ) continue;   // a comment inside the list is not a parameter
+                if( std::strcmp( ct, "comment" ) == 0 )
+                {
+                    continue; // a comment inside the list is not a parameter
+                }
                 ++count;
             }
             return count;
         }
-        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], std::uint16_t( f.depth + 1 ) } );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( { kids[i - 1], std::uint16_t( f.depth + 1 ) } );
+        }
     }
     return 0;
 }
@@ -1755,8 +2243,14 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
     // language / kind gate — see the header. Only these emit a filterable point arity.
     const bool langOk =    lang == Lang::Cpp || lang == Lang::Java || lang == Lang::Swift
                         || lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Python;
-    if( !langOk ) return false;
-    if( ( lang == Lang::Python || lang == Lang::Ruby ) && kind == SymKind::Method ) return false;   // implicit self/cls
+    if( !langOk )
+    {
+        return false;
+    }
+    if( ( lang == Lang::Python || lang == Lang::Ruby ) && kind == SymKind::Method )
+    {
+        return false; // implicit self/cls
+    }
 
     // an "elastic" (variadic / default / optional) node kind or token makes the arity a RANGE → not filterable.
     const auto isElastic = []( const char* t ) noexcept
@@ -1778,7 +2272,10 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
     {
         const PF f = stack.back();
         stack.pop_back();
-        if( f.depth > 12 ) continue;
+        if( f.depth > 12 )
+        {
+            continue;
+        }
         const char* t = ts_node_type( f.n );
         if( f.n.id != defNode.id && cc_isParamList( t ) )       // the FIRST parameter list — scan it for elastic forms
         {
@@ -1790,15 +2287,27 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
             {
                 const QF g = q.back();
                 q.pop_back();
-                if( g.depth > 6 ) continue;                     // param forms live shallow inside the list
-                if( g.n.id != f.n.id && isElastic( ts_node_type( g.n ) ) ) return false;
+                if( g.depth > 6 )
+                {
+                    continue; // param forms live shallow inside the list
+                }
+                if( g.n.id != f.n.id && isElastic( ts_node_type( g.n ) ) )
+                {
+                    return false;
+                }
                 collectChildren( g.n, cursor.cur, kids );
-                for( const TSNode c : kids ) q.push_back( { c, std::uint16_t( g.depth + 1 ) } );
+                for( const TSNode c : kids )
+                {
+                    q.push_back( { c, std::uint16_t( g.depth + 1 ) } );
+                }
             }
             return true;                                        // a real parameter list, no elastic form → fixed arity
         }
         collectChildren( f.n, cursor.cur, kids );
-        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], std::uint16_t( f.depth + 1 ) } );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( { kids[i - 1], std::uint16_t( f.depth + 1 ) } );
+        }
     }
     return false;   // no parameter-list node found at all → can't be sure → not filterable (safe)
 }
@@ -1817,7 +2326,10 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
     for( int hop = 0; hop < 4 && !ts_node_is_null( n ); ++hop )
     {
         const TSNode p = ts_node_parent( n );
-        if( ts_node_is_null( p ) ) break;
+        if( ts_node_is_null( p ) )
+        {
+            break;
+        }
         const char* pt = ts_node_type( p );
         if(    std::strcmp( pt, "call_expression" )       == 0     // C++/TS/JS/Swift
             || std::strcmp( pt, "call" )                  == 0     // Python
@@ -1826,7 +2338,10 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
         { call = p; found = true; break; }
         n = p;
     }
-    if( !found ) return { 0, false };
+    if( !found )
+    {
+        return { 0, false };
+    }
 
     // find the argument container: the `arguments` field, else the first child of a known list type.
     TSNode args = ts_node_child_by_field_name( call, "arguments", 9 );
@@ -1842,7 +2357,10 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
             { args = c; break; }
         }
     }
-    if( ts_node_is_null( args ) ) return { 0, false };
+    if( ts_node_is_null( args ) )
+    {
+        return { 0, false };
+    }
 
     // count NAMED argument children; a spread / splat / apply argument makes the count unreliable → not known.
     std::uint16_t count = 0;
@@ -1850,12 +2368,19 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
     for( std::uint32_t i = 0; i < an; ++i )
     {
         const TSNode c = ts_node_child( args, i );
-        if( !ts_node_is_named( c ) ) continue;                    // skip '(' ')' ',' separators
+        if( !ts_node_is_named( c ) )
+        {
+            continue; // skip '(' ')' ',' separators
+        }
         const char* ct = ts_node_type( c );
-        if( std::strcmp( ct, "comment" ) == 0 ) continue;
-        if(    std::strstr( ct, "splat" )  != nullptr || std::strstr( ct, "spread" ) != nullptr
-            || std::strcmp( ct, "..." ) == 0 )
+        if( std::strcmp( ct, "comment" ) == 0 )
+        {
+            continue;
+        }
+        if( std::strstr( ct, "splat" ) != nullptr || std::strstr( ct, "spread" ) != nullptr || std::strcmp( ct, "..." ) == 0 )
+        {
             return { 0, false };                                  // `f(*args)` / `f(...xs)` → unreliable
+        }
         ++count;
     }
     (void)lang;
@@ -1866,7 +2391,13 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
 struct ParserGuard
 {
     TSParser* p = ts_parser_new();
-    ~ParserGuard() { if( p ) ts_parser_delete( p ); }
+    ~ParserGuard()
+    {
+        if( p )
+        {
+            ts_parser_delete( p );
+        }
+    }
 };
 
 // Verify the grammar's ABI is in range for the linked core. v0.26.9 renamed the
@@ -1891,7 +2422,13 @@ inline bool isBaseTypeNode( const char* nt ) noexcept
         "generic_name",           // C# `class Foo : IList<T>` — final segment is still the raw name
         "qualified_name",         // C# `class Foo : Ns.Base` — dotted base/interface name
     };
-    for( const char* k : kBaseTypeKinds ) if( std::strcmp( nt, k ) == 0 ) return true;
+    for( const char* k : kBaseTypeKinds )
+    {
+        if( std::strcmp( nt, k ) == 0 )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -1900,7 +2437,10 @@ inline bool isBaseTypeNode( const char* nt ) noexcept
 inline void emitBaseRef( TSNode typeNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
 {
     const uint32_t a = ts_node_start_byte( typeNode ), b = ts_node_end_byte( typeNode );
-    if( a >= b || b > src.size() ) return;
+    if( a >= b || b > src.size() )
+    {
+        return;
+    }
     RawRef r;
     r.fileId    = fileId;
     r.startByte = a;                       // inside the class header → attributes to the derived class
@@ -1943,7 +2483,10 @@ void captureBases( TSNode classNode, std::uint32_t fileId, Lang lang, std::strin
                                 || std::strcmp( ct, "super_interfaces" ) == 0      // Java   implements I, J   (wraps type_list)
                                 || std::strcmp( ct, "inheritance_specifier" ) == 0 // Swift  : Protocol
                                 || std::strcmp( ct, "base_list" ) == 0;            // C#     : Base, IBar
-        if( !isClause ) continue;
+        if( !isClause )
+        {
+            continue;
+        }
 
         const uint32_t bc = ts_node_child_count( clause );
         for( uint32_t j = 0; j < bc; ++j )
@@ -1962,7 +2505,9 @@ void captureBases( TSNode classNode, std::uint32_t fileId, Lang lang, std::strin
             {
                 const TSNode wn = ts_node_child( bn, w );
                 if( isBaseTypeNode( ts_node_type( wn ) ) )
+                {
                     emitBaseRef( wn, fileId, lang, src, refs );
+                }
             }
         }
     }
@@ -2014,7 +2559,9 @@ void captureRustImpls( TSNode root, std::uint32_t fileId, std::string_view src, 
     }
     collectChildren( node, cursor.cur, kids );
     for( std::size_t i = kids.size(); i > 0; --i )
+    {
         stack.push_back( kids[ i - 1 ] );
+    }
     }
 }
 
@@ -2027,7 +2574,10 @@ void captureRustImpls( TSNode root, std::uint32_t fileId, std::string_view src, 
 // Graph::composeEdges for the <compose> block in --for and --around. C++ only (priority per PLAN).
 void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
 {
-    if( lang != Lang::Cpp ) return;   // C++ only for S5-E; extend for Python/TS later
+    if( lang != Lang::Cpp )
+    {
+        return; // C++ only for S5-E; extend for Python/TS later
+    }
 
     ChildCursor         cursor( classNode );
     std::vector<TSNode> kids;       kids.reserve( 32 );
@@ -2038,19 +2588,28 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
         const char* ct = ts_node_type( child );
 
         // C++ class body is under field_declaration_list
-        if( std::strcmp( ct, "field_declaration_list" ) != 0 ) continue;
+        if( std::strcmp( ct, "field_declaration_list" ) != 0 )
+        {
+            continue;
+        }
 
         collectChildren( child, cursor.cur, fieldKids );
         for( const TSNode fdecl : fieldKids )
         {
-            if( std::strcmp( ts_node_type( fdecl ), "field_declaration" ) != 0 ) continue;
+            if( std::strcmp( ts_node_type( fdecl ), "field_declaration" ) != 0 )
+            {
+                continue;
+            }
 
             // The "type" field of a field_declaration. We look for:
             //   type_identifier — a plain class name (SpherePool)
             //   type_descriptor — a reference/pointer type containing a type_identifier
             // We consider type_identifier directly under type= as the declared type.
             const TSNode typeNode = ts_node_child_by_field_name( fdecl, "type", 4 );
-            if( ts_node_is_null( typeNode ) ) continue;
+            if( ts_node_is_null( typeNode ) )
+            {
+                continue;
+            }
 
             const char* tnType = ts_node_type( typeNode );
 
@@ -2062,7 +2621,10 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
             {
                 // `SpherePool m_pool;` — plain value member
                 const uint32_t ta = ts_node_start_byte( typeNode ), tb = ts_node_end_byte( typeNode );
-                if( ta >= tb || tb > src.size() ) continue;
+                if( ta >= tb || tb > src.size() )
+                {
+                    continue;
+                }
                 typeName = std::string( src.substr( ta, tb - ta ) );
                 isRefOrPtr = false;
             }
@@ -2090,12 +2652,18 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
                         if( ta < tb && tb <= src.size() ) { typeName = std::string( src.substr( ta, tb - ta ) ); found = true; }
                     }
                 }
-                if( !found ) continue;
+                if( !found )
+                {
+                    continue;
+                }
                 // If the type node is type_specifier or similar, presume value unless declarator says otherwise.
                 isRefOrPtr = false;
             }
 
-            if( typeName.empty() ) continue;
+            if( typeName.empty() )
+            {
+                continue;
+            }
 
             // Now find the declarator field to extract the member name and confirm reference/pointer.
             // A C++ field_declaration declarator may be:
@@ -2103,7 +2671,10 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
             //   reference_declarator > field_identifier — reference field: `SoundEngine& m_sound;`
             //   pointer_declarator   > field_identifier — pointer field:   `Foo* m_foo;`
             const TSNode decl = ts_node_child_by_field_name( fdecl, "declarator", 10 );
-            if( ts_node_is_null( decl ) ) continue;
+            if( ts_node_is_null( decl ) )
+            {
+                continue;
+            }
 
             const char* dt = ts_node_type( decl );
 
@@ -2114,7 +2685,10 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
             {
                 // plain value member
                 const uint32_t da = ts_node_start_byte( decl ), db = ts_node_end_byte( decl );
-                if( da >= db || db > src.size() ) continue;
+                if( da >= db || db > src.size() )
+                {
+                    continue;
+                }
                 fieldName = std::string( src.substr( da, db - da ) );
                 declIsRefOrPtr = false;
             }
@@ -2139,7 +2713,10 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
                 continue;
             }
 
-            if( fieldName.empty() ) continue;
+            if( fieldName.empty() )
+            {
+                continue;
+            }
 
             // Build the compose RawRef. startByte is set to the start of the field_declaration so the
             // enclosing symbol attribution puts fromSymbol = the containing class (same logic as captureBases).
@@ -2165,11 +2742,16 @@ inline std::string importName( std::string_view target )
     const std::size_t sl = target.rfind( '/' );
     std::string_view  seg = ( sl == std::string_view::npos ) ? target : target.substr( sl + 1 );
     const std::size_t dot = seg.rfind( '.' );
-    if( dot != std::string_view::npos && dot > 0 ) seg = seg.substr( 0, dot );   // strip ".h"/".hpp"/… (not a leading dot)
+    if( dot != std::string_view::npos && dot > 0 )
+    {
+        seg = seg.substr( 0, dot ); // strip ".h"/".hpp"/… (not a leading dot)
+    }
     // keep only a leading identifier run (Python `pkg import x`, Rust `a::b` etc. → first token / segment)
     std::size_t e = 0;
-    while( e < seg.size() && ( ( seg[e] >= 'A' && seg[e] <= 'Z' ) || ( seg[e] >= 'a' && seg[e] <= 'z' )
-                              || ( seg[e] >= '0' && seg[e] <= '9' ) || seg[e] == '_' ) ) ++e;
+    while( e < seg.size() && ( ( seg[e] >= 'A' && seg[e] <= 'Z' ) || ( seg[e] >= 'a' && seg[e] <= 'z' ) || ( seg[e] >= '0' && seg[e] <= '9' ) || seg[e] == '_' ) )
+    {
+        ++e;
+    }
     return std::string( seg.substr( 0, e ) );
 }
 
@@ -2181,13 +2763,17 @@ inline std::string importName( std::string_view target )
 inline std::string importSpecifierText( TSNode node, std::string_view src )
 {
     const uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
-    if( a >= b || b > src.size() ) return {};
+    if( a >= b || b > src.size() )
+    {
+        return {};
+    }
     std::string_view s = src.substr( a, b - a );
 
     // TS/JS specifier is a `string` node whose text includes the quote delimiters; strip exactly one pair.
-    if( std::strcmp( ts_node_type( node ), "string" ) == 0
-        && s.size() >= 2 && ( s.front() == '\'' || s.front() == '"' ) && s.back() == s.front() )
+    if( std::strcmp( ts_node_type( node ), "string" ) == 0 && s.size() >= 2 && ( s.front() == '\'' || s.front() == '"' ) && s.back() == s.front() )
+    {
         s = s.substr( 1, s.size() - 2 );
+    }
 
     return std::string( s );
 }
@@ -2210,19 +2796,23 @@ inline std::string importSpecifierText( TSNode node, std::string_view src )
 inline std::string csharpUsingTarget( TSNode usingNode, std::string_view src )
 {
     if( const TSNode aliasType = ts_node_child_by_field_name( usingNode, "type", 4 ); !ts_node_is_null( aliasType ) )
+    {
         return importSpecifierText( aliasType, src );
+    }
 
     const uint32_t cc = ts_node_child_count( usingNode );
     for( uint32_t k = 0; k < cc; ++k )
     {
         const TSNode c = ts_node_child( usingNode, k );
-        if( !ts_node_is_named( c ) ) continue;
+        if( !ts_node_is_named( c ) )
+        {
+            continue;
+        }
         const char* ct = ts_node_type( c );
-        if(    std::strcmp( ct, "qualified_name" )       == 0
-            || std::strcmp( ct, "identifier" )            == 0
-            || std::strcmp( ct, "generic_name" )          == 0
-            || std::strcmp( ct, "alias_qualified_name" )  == 0 )
+        if( std::strcmp( ct, "qualified_name" ) == 0 || std::strcmp( ct, "identifier" ) == 0 || std::strcmp( ct, "generic_name" ) == 0 || std::strcmp( ct, "alias_qualified_name" ) == 0 )
+        {
             return importSpecifierText( c, src );
+        }
     }
     return {};
 }
@@ -2239,13 +2829,17 @@ inline std::string csharpUsingTarget( TSNode usingNode, std::string_view src )
 std::string includePathOf( std::string_view spelling, bool& isAngleOut )
 {
     if( spelling.size() < 2 || ( spelling.front() != '"' && spelling.front() != '<' ) )
+    {
         return std::string( spelling );
+    }
 
     isAngleOut = ( spelling.front() == '<' );
     const char closer = isAngleOut ? '>' : '"';
     const std::size_t end = spelling.find( closer, 1 );
     if( end == std::string_view::npos )
+    {
         return std::string( spelling.substr( 1 ) );   // unterminated — degrade to "everything after the opener"
+    }
     return std::string( spelling.substr( 1, end - 1 ) );
 }
 
@@ -2279,7 +2873,9 @@ void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, s
             {
                 const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
                 if( a < b && b <= src.size() )
+                {
                     target = includePathOf( src.substr( a, b - a ), isAngle );
+                }
             }
         }
         else if( std::strcmp( t, "preproc_call" ) == 0 )                     // C++-grammar `#import "x.h"` (ObjC/Metal spelling)
@@ -2299,7 +2895,9 @@ void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, s
                 const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
                 const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
                 if( da < db && db <= src.size() && aa < ab && ab <= src.size() && src.substr( da, db - da ) == "#import" )
+                {
                     target = includePathOf( src.substr( aa, ab - aa ), isAngle );   // trailing comment ends at the closing delimiter
+                }
             }
         }
         else if( std::strcmp( t, "import_statement" ) == 0 )                 // Python `import a` / TS `import … from 'x'`
@@ -2311,23 +2909,31 @@ void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, s
             // ts_node_child_by_field_name returns null for the language that lacks the field, so a single
             // capture covers both grammars without a per-language branch.
             if( const TSNode src_ = ts_node_child_by_field_name( n, "source", 6 );  !ts_node_is_null( src_ ) )
+            {
                 target = importSpecifierText( src_, src );                    // TS/JS: strip the surrounding quotes
+            }
             else if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );  !ts_node_is_null( nm ) )
+            {
                 target = importSpecifierText( nm, src );                      // Python: the dotted module head
+            }
         }
         else if( std::strcmp( t, "import_from_statement" ) == 0 )            // Python `from pkg.mod import Z`
         {
             // module_name:(dotted_name)  → `pkg.mod`;  module_name:(relative_import)  → `.rel` / `..up` (leading
             // dots preserved so the resolver can resolve relative-to-file). The imported-names clause is dropped.
             if( const TSNode mn = ts_node_child_by_field_name( n, "module_name", 11 );  !ts_node_is_null( mn ) )
+            {
                 target = importSpecifierText( mn, src );
+            }
         }
         else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
         {
             // argument:(scoped_identifier|scoped_use_list|identifier|…)  → `crate::a::b`. A brace group
             // `crate::{a, b}` is kept verbatim; the resolver degrades on it (no unique single-file hit).
             if( const TSNode arg = ts_node_child_by_field_name( n, "argument", 8 );  !ts_node_is_null( arg ) )
+            {
                 target = importSpecifierText( arg, src );
+            }
         }
         else if( std::strcmp( t, "mod_item" ) == 0 )                        // Rust `mod x;` (module-file declaration)
         {
@@ -2335,11 +2941,15 @@ void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, s
             // with a body is INLINE (no file) → skip it. Prefix `mod:` so the Rust resolver applies the
             // module-file rule, distinct from a bare `use x;`. name:(identifier) → `x`.
             if( ts_node_is_null( ts_node_child_by_field_name( n, "body", 4 ) ) )
+            {
                 if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );  !ts_node_is_null( nm ) )
                 {
                     if( std::string bare = importSpecifierText( nm, src );  !bare.empty() )
+                    {
                         target = "mod:" + bare;
+                    }
                 }
+            }
         }
         else if(    std::strcmp( t, "import_declaration" ) == 0 )            // Go / Swift — captured but NOT precise-resolved
         {
@@ -2350,14 +2960,21 @@ void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, s
             {
                 std::string_view s  = src.substr( a, b - a );
                 const std::size_t sp = s.find( ' ' );                        // drop the leading keyword
-                if( sp != std::string_view::npos ) s = s.substr( sp + 1 );
+                if( sp != std::string_view::npos )
+                {
+                    s = s.substr( sp + 1 );
+                }
                 target.assign( s.data(), s.size() < 96 ? s.size() : 96 );
                 while( !target.empty() && ( target.back() == ';' || target.back() == ' ' || target.back() == '\n' || target.back() == '\r' ) )
+                {
                     target.pop_back();
+                }
             }
         }
-        else if( std::strcmp( t, "using_directive" ) == 0 )                  // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
+        else if( std::strcmp( t, "using_directive" ) == 0 )
+        { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
             target = csharpUsingTarget( n, src );                            // see csharpUsingTarget for the shape rationale
+        }
         if( !target.empty() )
         {
             // import-role use-site ref: name = the importable final segment (skip when the target has no
@@ -2401,30 +3018,57 @@ void extractMarkdown( std::uint32_t fileId, std::string_view src, std::string_vi
     {
         const std::size_t lineStart = i;
         std::size_t       j         = i;
-        while( j < src.size() && src[j] != '\n' ) ++j;            // [lineStart, j) = this line, no newline
+        while( j < src.size() && src[j] != '\n' )
+        {
+            ++j; // [lineStart, j) = this line, no newline
+        }
         std::string_view line = src.substr( lineStart, j - lineStart );
-        if( !line.empty() && line.back() == '\r' ) line.remove_suffix( 1 );   // CRLF: drop the trailing CR — else it corrupts the heading name attr AND breaks LF/CRLF byte-identity
+        if( !line.empty() && line.back() == '\r' )
+        {
+            line.remove_suffix( 1 ); // CRLF: drop the trailing CR — else it corrupts the heading name attr AND breaks LF/CRLF byte-identity
+        }
 
         // leading indent
         std::size_t s = 0;
-        while( s < line.size() && ( line[s] == ' ' || line[s] == '\t' ) ) ++s;
+        while( s < line.size() && ( line[s] == ' ' || line[s] == '\t' ) )
+        {
+            ++s;
+        }
 
         // fenced-code toggle: ``` or ~~~ (CommonMark allows ≤3 leading spaces)
         if( s <= 3 && line.size() - s >= 3 && ( line.compare( s, 3, "```" ) == 0 || line.compare( s, 3, "~~~" ) == 0 ) )
+        {
             inFence = !inFence;
+        }
         else if( !inFence && s <= 3 )
         {
             std::size_t h = s;
-            while( h < line.size() && line[h] == '#' ) ++h;
+            while( h < line.size() && line[h] == '#' )
+            {
+                ++h;
+            }
             const std::size_t level = h - s;
             // ATX heading: 1..6 '#', then at least one space/tab, then text
             if( level >= 1 && level <= 6 && h < line.size() && ( line[h] == ' ' || line[h] == '\t' ) )
             {
-                std::size_t a = h;  while( a < line.size() && ( line[a] == ' ' || line[a] == '\t' ) ) ++a;   // text start
+                std::size_t a = h;
+                while( a < line.size() && ( line[a] == ' ' || line[a] == '\t' ) )
+                {
+                    ++a; // text start
+                }
                 std::size_t e = line.size();                                                                  // strip trailing
-                while( e > a && ( line[e - 1] == ' ' || line[e - 1] == '\t' ) ) --e;
-                while( e > a && line[e - 1] == '#' )                            --e;                           //   closing #'s
-                while( e > a && ( line[e - 1] == ' ' || line[e - 1] == '\t' ) ) --e;
+                while( e > a && ( line[e - 1] == ' ' || line[e - 1] == '\t' ) )
+                {
+                    --e;
+                }
+                while( e > a && line[e - 1] == '#' )
+                {
+                    --e; //   closing #'s
+                }
+                while( e > a && ( line[e - 1] == ' ' || line[e - 1] == '\t' ) )
+                {
+                    --e;
+                }
                 if( e > a )
                 {
                     RawDef d;
@@ -2450,11 +3094,23 @@ void extractMarkdown( std::uint32_t fileId, std::string_view src, std::string_vi
             {
                 if( line[b] != '`' ) { ++b; continue; }
                 std::size_t e = b + 1;
-                while( e < line.size() && line[e] != '`' ) ++e;
-                if( e >= line.size() ) break;                                  // unclosed backtick on this line
+                while( e < line.size() && line[e] != '`' )
+                {
+                    ++e;
+                }
+                if( e >= line.size() )
+                {
+                    break; // unclosed backtick on this line
+                }
                 std::string_view span = line.substr( b + 1, e - b - 1 );
-                if( const std::size_t p = span.find( '(' );  p != std::string_view::npos ) span = span.substr( 0, p );    // `foo()` → foo
-                if( const std::size_t c = span.rfind( "::" ); c != std::string_view::npos ) span = span.substr( c + 2 );  // `A::b` → b
+                if( const std::size_t p = span.find( '(' ); p != std::string_view::npos )
+                {
+                    span = span.substr( 0, p ); // `foo()` → foo
+                }
+                if( const std::size_t c = span.rfind( "::" ); c != std::string_view::npos )
+                {
+                    span = span.substr( c + 2 ); // `A::b` → b
+                }
                 bool ok = span.size() >= 3 && ( ( span.front() >= 'A' && span.front() <= 'Z' ) || ( span.front() >= 'a' && span.front() <= 'z' ) || span.front() == '_' );
                 for( std::size_t k = 0; ok && k < span.size(); ++k )
                 { const char ch = span[k]; ok = ( ch >= 'A' && ch <= 'Z' ) || ( ch >= 'a' && ch <= 'z' ) || ( ch >= '0' && ch <= '9' ) || ch == '_'; }
@@ -2469,22 +3125,49 @@ void extractMarkdown( std::uint32_t fileId, std::string_view src, std::string_vi
             }
         }
 
-        if( j < src.size() ) { i = j + 1; ++lineNo; } else i = j;
+        if( j < src.size() )
+        {
+            i = j + 1;
+            ++lineNo;
+        }
+        else
+        {
+            i = j;
+        }
     }
 
     // (3) [[wikilink]] edges: [[slug]] / [[slug|text]] / [[slug#sec]] → a ref from this file's node to the
     // node named `slug`. The resolver makes it a same-dir file→file edge; unresolved (dangling) links drop.
     for( std::size_t i = 0; i + 1 < src.size(); ++i )
     {
-        if( src[i] != '[' || src[ i + 1 ] != '[' ) continue;
+        if( src[i] != '[' || src[i + 1] != '[' )
+        {
+            continue;
+        }
         const std::size_t open = i + 2;
         std::size_t       e    = open;
-        while( e + 1 < src.size() && src[e] != '\n' && !( src[e] == ']' && src[ e + 1 ] == ']' ) ) ++e;
+        while( e + 1 < src.size() && src[e] != '\n' && !( src[e] == ']' && src[e + 1] == ']' ) )
+        {
+            ++e;
+        }
         if( e + 1 >= src.size() || src[e] != ']' || src[ e + 1 ] != ']' ) { i = e; continue; }   // no closing ]] on this line
         std::string_view slug = src.substr( open, e - open );
-        for( std::size_t k = 0; k < slug.size(); ++k ) if( slug[k] == '|' || slug[k] == '#' ) { slug = slug.substr( 0, k ); break; }
-        while( !slug.empty() && slug.front() == ' ' ) slug.remove_prefix( 1 );
-        while( !slug.empty() && slug.back()  == ' ' ) slug.remove_suffix( 1 );
+        for( std::size_t k = 0; k < slug.size(); ++k )
+        {
+            if( slug[k] == '|' || slug[k] == '#' )
+            {
+                slug = slug.substr( 0, k );
+                break;
+            }
+        }
+        while( !slug.empty() && slug.front() == ' ' )
+        {
+            slug.remove_prefix( 1 );
+        }
+        while( !slug.empty() && slug.back() == ' ' )
+        {
+            slug.remove_suffix( 1 );
+        }
         if( !slug.empty() )
         {
             RawRef r;
@@ -2557,23 +3240,40 @@ inline std::size_t operatorNameStart( std::string_view text ) noexcept
     constexpr std::string_view kOperatorPunct = "+-*/%^&|~!=<>()[],";   // every char a C++ operator name may use
 
     const std::size_t op = text.rfind( kOperator );
-    if( op == std::string_view::npos ) return std::string_view::npos;
+    if( op == std::string_view::npos )
+    {
+        return std::string_view::npos;
+    }
 
     const bool atSegmentStart = ( op == 0 ) || ( text[ op - 1 ] == ':' ) || ( text[ op - 1 ] == '.' );
-    if( !atSegmentStart ) return std::string_view::npos;
+    if( !atSegmentStart )
+    {
+        return std::string_view::npos;
+    }
 
     // `operator` must be a whole token: `operatorId` is a plain identifier that merely starts with it.
     const std::size_t after = op + kOperator.size();                    // one-past `operator`
-    if( after >= text.size() ) return op;                               // the bare keyword ends the text
+    if( after >= text.size() )
+    {
+        return op; // the bare keyword ends the text
+    }
     if( std::isalnum( static_cast<unsigned char>( text[ after ] ) ) || text[ after ] == '_' )
+    {
         return std::string_view::npos;
+    }
 
     // `operator <type>` — the type half owns the rest of the text, `::` and all.
-    if( std::isspace( static_cast<unsigned char>( text[ after ] ) ) ) return op;
+    if( std::isspace( static_cast<unsigned char>( text[after] ) ) )
+    {
+        return op;
+    }
 
     // symbolic: the punctuation run IS the name, and it must run to the end or this is not the tail.
     std::size_t punctEnd = after;
-    while( punctEnd < text.size() && kOperatorPunct.find( text[ punctEnd ] ) != std::string_view::npos ) ++punctEnd;
+    while( punctEnd < text.size() && kOperatorPunct.find( text[punctEnd] ) != std::string_view::npos )
+    {
+        ++punctEnd;
+    }
     return punctEnd == text.size() ? op : std::string_view::npos;
 }
 
@@ -2595,10 +3295,18 @@ inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
     {
         const std::size_t charIndex = cursor - 1;
         const char        c         = text[ charIndex ];
-        if( c == '>' )                                            ++angleDepth;
-        else if( c == '<' && angleDepth > 0 )                     --angleDepth;
+        if( c == '>' )
+        {
+            ++angleDepth;
+        }
+        else if( c == '<' && angleDepth > 0 )
+        {
+            --angleDepth;
+        }
         else if( c == ':' && angleDepth == 0 && charIndex > 0 && text[ charIndex - 1 ] == ':' )
+        {
             return charIndex - 1;                                 // index of the FIRST ':' of the pair
+        }
     }
     return std::string_view::npos;
 }
@@ -2617,17 +3325,28 @@ inline bool hasPhantomScopeSeparator( TSNode qualified ) noexcept
     {
         const TSNode child = ts_node_child( qualified, childIndex );
         if( std::strcmp( ts_node_type( child ), "::" ) == 0 )
+        {
             return ts_node_is_missing( child );
+        }
     }
     return false;   // no separator child at all → leave the pre-existing behaviour untouched
 }
 inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
-    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "qualified_identifier" ) != 0 ) return {};
-    if( hasPhantomScopeSeparator( parent ) ) return {};   // error-recovery artefact, not a written qualification
+    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "qualified_identifier" ) != 0 )
+    {
+        return {};
+    }
+    if( hasPhantomScopeSeparator( parent ) )
+    {
+        return {}; // error-recovery artefact, not a written qualification
+    }
     const TSNode scope = ts_node_child_by_field_name( parent, "scope", 5 );
-    if( ts_node_is_null( scope ) ) return {};
+    if( ts_node_is_null( scope ) )
+    {
+        return {};
+    }
     const std::uint32_t a = ts_node_start_byte( scope ), b = ts_node_end_byte( scope );
     return ( a <= b && b <= src.size() ) ? immediateScope( src.substr( a, b - a ) ) : std::string{};
 }
@@ -2644,7 +3363,10 @@ inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 // --quality-delta flagged as a clone when the Rust helpers open-coded it), so it lives once, here.
 inline std::string_view nodeTextOf( TSNode node, std::string_view src ) noexcept
 {
-    if( ts_node_is_null( node ) ) return {};
+    if( ts_node_is_null( node ) )
+    {
+        return {};
+    }
     const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
     return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
 }
@@ -2655,9 +3377,17 @@ inline std::string_view nodeTextOf( TSNode node, std::string_view src ) noexcept
 // fallback. Cheap, and it keeps garbage out of a lookup table.
 inline bool isRustIdentifier( std::string_view s ) noexcept
 {
-    if( s.empty() || ( s[0] >= '0' && s[0] <= '9' ) ) return false;
+    if( s.empty() || ( s[0] >= '0' && s[0] <= '9' ) )
+    {
+        return false;
+    }
     for( const char c : s )
-        if( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' ) ) return false;
+    {
+        if( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' ) )
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -2675,8 +3405,10 @@ inline bool isRustIdentifier( std::string_view s ) noexcept
 inline std::string rustPathSegment( std::string_view pathText ) noexcept
 {
     std::string_view text = namesplit::stripTemplateArgs( pathText );          // `Vec::<u32>` → `Vec::`
-    if( text.size() >= 2 && text.substr( text.size() - 2 ) == "::" )           // the turbofish `::<` separator
+    if( text.size() >= 2 && text.substr( text.size() - 2 ) == "::" )
+    { // the turbofish `::<` separator
         text.remove_suffix( 2 );
+    }
     const std::size_t sep = lastTopLevelScopeSep( text );
     const std::string_view seg = ( sep == std::string_view::npos ) ? text : text.substr( sep + 2 );
     return isRustIdentifier( seg ) ? std::string( seg ) : std::string{};
@@ -2698,7 +3430,10 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
         const bool  isImpl  = std::strcmp( t, "impl_item" )  == 0;
         const bool  isTrait = std::strcmp( t, "trait_item" ) == 0;
         const bool  isMod   = includeModules && std::strcmp( t, "mod_item" ) == 0;
-        if( !isImpl && !isTrait && !isMod ) continue;
+        if( !isImpl && !isTrait && !isMod )
+        {
+            continue;
+        }
 
         // impl carries the implementor under `type:`; trait/mod carry their own `name:`. Anonymous/ill-formed
         // (empty text) yields "" — no usable scope — which is the same degrade as "no owner above".
@@ -2707,7 +3442,10 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
         // the first ancestor found is the module itself and `util` would be published as `util::util` (likewise
         // `Shape::Shape`) — a self-scope in the canonical-id space, which is what ids are keyed on. Keep walking
         // to the NEXT owner instead, so a nested `mod deep` inside `mod util` still scopes to "util".
-        if( !ts_node_is_null( owner ) && ts_node_eq( owner, node ) ) continue;
+        if( !ts_node_is_null( owner ) && ts_node_eq( owner, node ) )
+        {
+            continue;
+        }
         return rustPathSegment( nodeTextOf( owner, src ) );                      // `Foo<T>` → "Foo"; `a::B` → "B"
     }
     return {};
@@ -2723,13 +3461,19 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
 inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
-    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "scoped_identifier" ) != 0 ) return {};
+    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "scoped_identifier" ) != 0 )
+    {
+        return {};
+    }
 
     std::string qualifier = rustPathSegment( nodeTextOf( ts_node_child_by_field_name( parent, "path", 4 ), src ) );
     // `Self::helper()` — resolve `Self` to the ENCLOSING impl/trait type at EXTRACTION time, so the ref keys
     // the same canonical entry the def side wrote (`Widget::helper`). Precedent: captureRustImpls already
     // reads an impl header's `type:` for inherit refs. Falls back to bare-name when there is no impl above.
-    if( qualifier == "Self" ) qualifier = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/false );
+    if( qualifier == "Self" )
+    {
+        qualifier = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/false );
+    }
     return qualifier;
 }
 
@@ -2747,7 +3491,10 @@ inline std::string enclosingScopeOf( TSNode node, std::string_view src )
         if( scopeOwner )
         {
             const TSNode nm = ts_node_child_by_field_name( p, "name", 4 );
-            if( ts_node_is_null( nm ) ) return {};                               // anonymous → no usable scope
+            if( ts_node_is_null( nm ) )
+            {
+                return {}; // anonymous → no usable scope
+            }
             const std::uint32_t a = ts_node_start_byte( nm ), b = ts_node_end_byte( nm );
             return ( a <= b && b <= src.size() ) ? std::string( src.substr( a, b - a ) ) : std::string{};
         }
@@ -2770,11 +3517,14 @@ inline bool isSwiftLocalBinding( TSNode declNode ) noexcept
     {
         const char* t = ts_node_type( p );
         if( std::strcmp( t, "statements" ) == 0 )
+        {
             return true;                                             // inside an executable block → local binding
+        }
         // a member property's wrappers — reaching one first means it is NOT a local.
-        if(    std::strcmp( t, "class_body" )      == 0 || std::strcmp( t, "enum_class_body" ) == 0
-            || std::strcmp( t, "protocol_body" )   == 0 || std::strcmp( t, "source_file" )     == 0 )
+        if( std::strcmp( t, "class_body" ) == 0 || std::strcmp( t, "enum_class_body" ) == 0 || std::strcmp( t, "protocol_body" ) == 0 || std::strcmp( t, "source_file" ) == 0 )
+        {
             return false;
+        }
     }
     return false;
 }
@@ -2790,27 +3540,45 @@ inline bool isSwiftLocalBinding( TSNode declNode ) noexcept
 inline std::pair<RecvKind, std::string> receiverOf( TSNode nameNode, Lang lang, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
-    if( ts_node_is_null( parent ) ) return { RecvKind::None, {} };
+    if( ts_node_is_null( parent ) )
+    {
+        return { RecvKind::None, {} };
+    }
     const char* pt = ts_node_type( parent );
 
     // the member-access node whose receiver we want
     const bool isCppField = ( lang == Lang::Cpp || lang == Lang::ObjC ) && std::strcmp( pt, "field_expression" ) == 0;
     const bool isPyAttr   = ( lang == Lang::Python )                    && std::strcmp( pt, "attribute" ) == 0;
-    if( !isCppField && !isPyAttr ) return { RecvKind::None, {} };
+    if( !isCppField && !isPyAttr )
+    {
+        return { RecvKind::None, {} };
+    }
 
     const TSNode recvNode = isCppField ? ts_node_child_by_field_name( parent, "argument", 8 )
                                        : ts_node_child_by_field_name( parent, "object",   6 );
-    if( ts_node_is_null( recvNode ) ) return { RecvKind::None, {} };
+    if( ts_node_is_null( recvNode ) )
+    {
+        return { RecvKind::None, {} };
+    }
 
     const char* rt = ts_node_type( recvNode );
-    if( std::strcmp( rt, "this" ) == 0 ) return { RecvKind::ThisObj, {} };   // C++ `this->m()`
+    if( std::strcmp( rt, "this" ) == 0 )
+    {
+        return { RecvKind::ThisObj, {} }; // C++ `this->m()`
+    }
 
     if( std::strcmp( rt, "identifier" ) == 0 )
     {
         const std::uint32_t a = ts_node_start_byte( recvNode ), b = ts_node_end_byte( recvNode );
-        if( a > b || b > src.size() ) return { RecvKind::None, {} };
+        if( a > b || b > src.size() )
+        {
+            return { RecvKind::None, {} };
+        }
         std::string_view v = src.substr( a, b - a );
-        if( lang == Lang::Python && v == "self" ) return { RecvKind::ThisObj, {} };   // Python `self.m()`
+        if( lang == Lang::Python && v == "self" )
+        {
+            return { RecvKind::ThisObj, {} }; // Python `self.m()`
+        }
         return { RecvKind::NamedVar, std::string( v ) };                              // `x->m()` / `x.m()` — Rule 2 fuel
     }
     return { RecvKind::None, {} };   // chained / parenthesized / subscripted receiver → not one-hop
@@ -2840,7 +3608,10 @@ inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
         }
         // unwrap a pointer/reference/parenthesized declarator to its inner `declarator` child
         const TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
-        if( ts_node_is_null( inner ) ) return {};
+        if( ts_node_is_null( inner ) )
+        {
+            return {};
+        }
         decl = inner;
     }
     return {};
@@ -2852,17 +3623,29 @@ inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
 // and the class-name filter in buildGraph is what makes that safe).
 inline std::string ctorTypeOf( TSNode value, std::string_view src )
 {
-    if( ts_node_is_null( value ) ) return {};
+    if( ts_node_is_null( value ) )
+    {
+        return {};
+    }
     const char* vt = ts_node_type( value );
     TSNode      idn {};
-    if( std::strcmp( vt, "call_expression" ) == 0 )                                   // C++/TS `Foo()`
+    if( std::strcmp( vt, "call_expression" ) == 0 )
+    { // C++/TS `Foo()`
         idn = ts_node_child_by_field_name( value, "function", 8 );
-    else if( std::strcmp( vt, "new_expression" ) == 0 )                               // C++/TS `new Foo()`
+    }
+    else if( std::strcmp( vt, "new_expression" ) == 0 )
+    { // C++/TS `new Foo()`
         idn = ts_node_child_by_field_name( value, "constructor", 11 );
-    if( ts_node_is_null( idn ) ) return {};
+    }
+    if( ts_node_is_null( idn ) )
+    {
+        return {};
+    }
     const char* it = ts_node_type( idn );
-    if( std::strcmp( it, "identifier" ) != 0 && std::strcmp( it, "type_identifier" ) != 0
-        && std::strcmp( it, "qualified_identifier" ) != 0 && std::strcmp( it, "scoped_identifier" ) != 0 ) return {};
+    if( std::strcmp( it, "identifier" ) != 0 && std::strcmp( it, "type_identifier" ) != 0 && std::strcmp( it, "qualified_identifier" ) != 0 && std::strcmp( it, "scoped_identifier" ) != 0 )
+    {
+        return {};
+    }
     const std::uint32_t a = ts_node_start_byte( idn ), b = ts_node_end_byte( idn );
     return ( a <= b && b <= src.size() ) ? finalSegment( src.substr( a, b - a ) ) : std::string{};
 }
@@ -2871,7 +3654,10 @@ inline std::string ctorTypeOf( TSNode value, std::string_view src )
 // `auto`/`placeholder_type_specifier`/templated/decltype types — those fall back to constructor inference.
 inline std::string writtenTypeOf( TSNode typeNode, std::string_view src )
 {
-    if( ts_node_is_null( typeNode ) ) return {};
+    if( ts_node_is_null( typeNode ) )
+    {
+        return {};
+    }
     const char* tt = ts_node_type( typeNode );
     if( std::strcmp( tt, "type_identifier" ) == 0 || std::strcmp( tt, "qualified_identifier" ) == 0
         || std::strcmp( tt, "scoped_type_identifier" ) == 0 )
@@ -2887,7 +3673,10 @@ inline std::string writtenTypeOf( TSNode typeNode, std::string_view src )
 inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
                       std::uint32_t startByte, std::vector<RawBind>& binds )
 {
-    if( var.empty() || typeName.empty() ) return;
+    if( var.empty() || typeName.empty() )
+    {
+        return;
+    }
     RawBind b;
     b.fileId    = fileId;
     b.startByte = startByte;
@@ -2914,7 +3703,10 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     {
     const BindFrame frame = stack.back();
     stack.pop_back();
-    if( frame.depth > 256 ) continue;                          // pathological-AST guard (file already ≤ 1 MB)
+    if( frame.depth > 256 )
+    {
+        continue; // pathological-AST guard (file already ≤ 1 MB)
+    }
     const TSNode n = frame.node;
     const char* t = ts_node_type( n );
 
@@ -2928,8 +3720,14 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
         for( std::uint32_t i = 0; i < cc; ++i )
         {
             const TSNode c  = ts_node_child( n, i );
-            if( ts_node_field_name_for_child( n, i ) == nullptr ) continue;
-            if( std::strcmp( ts_node_field_name_for_child( n, i ), "declarator" ) != 0 ) continue;
+            if( ts_node_field_name_for_child( n, i ) == nullptr )
+            {
+                continue;
+            }
+            if( std::strcmp( ts_node_field_name_for_child( n, i ), "declarator" ) != 0 )
+            {
+                continue;
+            }
             const char* ct = ts_node_type( c );
             // `init_declarator`: name lives in its `declarator`, the RHS in its `value` (for auto inference)
             if( std::strcmp( ct, "init_declarator" ) == 0 )
@@ -2953,7 +3751,9 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
         {
             const std::uint32_t a = ts_node_start_byte( lhs ), b = ts_node_end_byte( lhs );
             if( a <= b && b <= src.size() )
+            {
                 emitBind( fileId, lang, src.substr( a, b - a ), ctorTypeOf( rhs, src ), ts_node_start_byte( n ), binds );
+            }
         }
     }
     // Python `x = Foo()` — assignment with a bare-identifier LHS and a constructor-call RHS.
@@ -2974,7 +3774,10 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
                     if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "identifier" ) == 0 )
                     {
                         const std::uint32_t fa = ts_node_start_byte( fn ), fb = ts_node_end_byte( fn );
-                        if( fa <= fb && fb <= src.size() ) type = finalSegment( src.substr( fa, fb - fa ) );
+                        if( fa <= fb && fb <= src.size() )
+                        {
+                            type = finalSegment( src.substr( fa, fb - fa ) );
+                        }
                     }
                 }
                 emitBind( fileId, lang, src.substr( a, b - a ), std::move( type ), ts_node_start_byte( n ), binds );
@@ -3004,14 +3807,20 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
                           if( ta <= tb && tb <= src.size() ) { type = finalSegment( src.substr( ta, tb - ta ) ); } break; }
                     }
                 }
-                if( type.empty() ) type = ctorTypeOf( ts_node_child_by_field_name( n, "value", 5 ), src );
+                if( type.empty() )
+                {
+                    type = ctorTypeOf( ts_node_child_by_field_name( n, "value", 5 ), src );
+                }
                 emitBind( fileId, lang, src.substr( a, b - a ), std::move( type ), ts_node_start_byte( n ), binds );
             }
         }
     }
 
     collectChildren( n, cursor.cur, kids );
-    for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+    for( std::size_t i = kids.size(); i > 0; --i )
+    {
+        stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+    }
     }
 }
 
@@ -3024,7 +3833,9 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
 inline std::string ffiUnquote( std::string_view s )   // strip one layer of "..." / '...'; leaves interior verbatim
 {
     if( s.size() >= 2 && ( s.front() == '"' || s.front() == '\'' ) && s.back() == s.front() )
+    {
         return std::string( s.substr( 1, s.size() - 2 ) );
+    }
     return std::string( s );
 }
 
@@ -3033,7 +3844,10 @@ inline std::string ffiUnquote( std::string_view s )   // strip one layer of "...
 inline std::pair<std::string, std::string> ffiSplitScopeName( std::string_view text )
 {
     const std::size_t sep = text.rfind( "::" );
-    if( sep == std::string_view::npos ) return { std::string(), finalSegment( text ) };
+    if( sep == std::string_view::npos )
+    {
+        return { std::string(), finalSegment( text ) };
+    }
     return { finalSegment( text.substr( 0, sep ) ), finalSegment( text.substr( sep + 2 ) ) };
 }
 
@@ -3041,14 +3855,20 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
 {
     const bool cish = ( lang == Lang::Cpp || lang == Lang::ObjC );
     const bool py   = ( lang == Lang::Python );
-    if( !cish && !py ) return;
+    if( !cish && !py )
+    {
+        return;
+    }
     // pybind is gated on a cheap file-level signal so ordinary `.def(` calls in non-pybind C++ never capture.
     const bool hasPybind = cish && ( src.find( "pybind11" ) != std::string_view::npos
                                   || src.find( "PYBIND11" ) != std::string_view::npos );
 
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view
     {
-        if( ts_node_is_null( nn ) ) return {};
+        if( ts_node_is_null( nn ) )
+        {
+            return {};
+        }
         const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
         return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
     };
@@ -3064,7 +3884,10 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
     {
         const FfiFrame frame = stack.back();
         stack.pop_back();
-        if( frame.depth > 256 ) continue;
+        if( frame.depth > 256 )
+        {
+            continue;
+        }
         const TSNode n = frame.node;
         const char*  t = ts_node_type( n );
 
@@ -3083,16 +3906,25 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
                     for( std::uint32_t i = 0; i < cc; ++i )
                     {
                         const TSNode c = ts_node_child( args, i );
-                        if( !ts_node_is_named( c ) ) continue;                  // skip '(' ',' ')'
+                        if( !ts_node_is_named( c ) )
+                        {
+                            continue; // skip '(' ',' ')'
+                        }
                         const std::string_view ct = ts_node_type( c );
-                        if( alias.empty() && ct == "string_literal" )      alias = ffiUnquote( nodeSrc( c ) );
+                        if( alias.empty() && ct == "string_literal" )
+                        {
+                            alias = ffiUnquote( nodeSrc( c ) );
+                        }
                         else if( tgt.empty() )
                         {
                             std::string_view txt = nodeSrc( c );               // `&target` / `&Scope::method`
                             if( !txt.empty() && txt.front() == '&' )
                             {
                                 txt.remove_prefix( 1 );
-                                while( !txt.empty() && ( txt.front() == ' ' || txt.front() == '\t' ) ) txt.remove_prefix( 1 );
+                                while( !txt.empty() && ( txt.front() == ' ' || txt.front() == '\t' ) )
+                                {
+                                    txt.remove_prefix( 1 );
+                                }
                                 tgt = std::string( txt );
                             }
                         }
@@ -3101,7 +3933,9 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
                     {
                         auto [ scope, name ] = ffiSplitScopeName( tgt );
                         if( !name.empty() )
+                        {
                             ffis.push_back( BindingAlias{ fileId, BindKind::Pybind, false, std::move( alias ), std::move( name ), std::move( scope ) } );
+                        }
                     }
                 }
             }
@@ -3136,12 +3970,17 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
                             {
                                 std::string nm = finalSegment( nodeSrc( decl ) );
                                 if( !nm.empty() )
+                                {
                                     ffis.push_back( BindingAlias{ fileId, BindKind::ExternC, true, nm, nm, std::string() } );
+                                }
                             }
                         }
                     }
                     const std::uint32_t mc = ts_node_child_count( m );
-                    for( std::uint32_t i = 0; i < mc; ++i ) inner.push_back( ts_node_child( m, i ) );
+                    for( std::uint32_t i = 0; i < mc; ++i )
+                    {
+                        inner.push_back( ts_node_child( m, i ) );
+                    }
                 }
             }
         }
@@ -3161,13 +4000,18 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
                 {
                     std::string var( nodeSrc( lhs ) );
                     if( !var.empty() )
+                    {
                         ffis.push_back( BindingAlias{ fileId, BindKind::CtypesHandle, true, std::move( var ), std::string(), std::string() } );
+                    }
                 }
             }
         }
 
         collectChildren( n, cursor.cur, kids );
-        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        }
     }
 }
 
@@ -3187,13 +4031,25 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
 // identifier, no args): a dynamic path is a deliberate non-detection, never a guess.
 inline std::string firstPathStringArg( TSNode argsNode, std::string_view src )
 {
-    if( ts_node_is_null( argsNode ) || ts_node_named_child_count( argsNode ) == 0 ) return {};
+    if( ts_node_is_null( argsNode ) || ts_node_named_child_count( argsNode ) == 0 )
+    {
+        return {};
+    }
     const TSNode first = ts_node_named_child( argsNode, 0 );
-    if( std::strcmp( ts_node_type( first ), "string" ) != 0 ) return {};   // template_string/f-string/identifier → skip
+    if( std::strcmp( ts_node_type( first ), "string" ) != 0 )
+    {
+        return {}; // template_string/f-string/identifier → skip
+    }
     const std::uint32_t a = ts_node_start_byte( first ), b = ts_node_end_byte( first );
-    if( a > b || b > src.size() ) return {};
+    if( a > b || b > src.size() )
+    {
+        return {};
+    }
     std::string path = ffiUnquote( src.substr( a, b - a ) );
-    if( path.empty() || path.front() != '/' ) return {};
+    if( path.empty() || path.front() != '/' )
+    {
+        return {};
+    }
     return path;
 }
 
@@ -3202,9 +4058,15 @@ inline std::string firstPathStringArg( TSNode argsNode, std::string_view src )
 // the DEF fact is still recorded; buildGraph just can never attach an edge to it).
 inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
 {
-    if( ts_node_is_null( argsNode ) ) return {};
+    if( ts_node_is_null( argsNode ) )
+    {
+        return {};
+    }
     const std::uint32_t nc = ts_node_named_child_count( argsNode );
-    if( nc == 0 ) return {};
+    if( nc == 0 )
+    {
+        return {};
+    }
     const TSNode last = ts_node_named_child( argsNode, nc - 1 );
     const char*  lt   = ts_node_type( last );
     const auto   text = [ & ]( TSNode nn ) -> std::string_view
@@ -3212,11 +4074,17 @@ inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
         const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
         return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
     };
-    if( std::strcmp( lt, "identifier" ) == 0 ) return finalSegment( text( last ) );
+    if( std::strcmp( lt, "identifier" ) == 0 )
+    {
+        return finalSegment( text( last ) );
+    }
     if( std::strcmp( lt, "member_expression" ) == 0 )
     {
         const TSNode prop = ts_node_child_by_field_name( last, "property", 8 );
-        if( !ts_node_is_null( prop ) ) return finalSegment( text( prop ) );
+        if( !ts_node_is_null( prop ) )
+        {
+            return finalSegment( text( prop ) );
+        }
     }
     return {};   // arrow_function / function_expression / anything else → inline, no name
 }
@@ -3228,31 +4096,58 @@ inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
 // a plain string literal (never guess).
 inline HttpMethod stringNodeToMethod( TSNode strNode, std::string_view src )
 {
-    if( ts_node_is_null( strNode ) || std::strcmp( ts_node_type( strNode ), "string" ) != 0 ) return HttpMethod::Unknown;
+    if( ts_node_is_null( strNode ) || std::strcmp( ts_node_type( strNode ), "string" ) != 0 )
+    {
+        return HttpMethod::Unknown;
+    }
     const std::uint32_t a = ts_node_start_byte( strNode ), b = ts_node_end_byte( strNode );
-    if( a > b || b > src.size() ) return HttpMethod::Unknown;
+    if( a > b || b > src.size() )
+    {
+        return HttpMethod::Unknown;
+    }
     std::string verb = ffiUnquote( src.substr( a, b - a ) );
-    for( char& ch : verb ) ch = char( std::tolower( static_cast<unsigned char>( ch ) ) );
+    for( char& ch : verb )
+    {
+        ch = char( std::tolower( static_cast<unsigned char>( ch ) ) );
+    }
     return httpMethodFromName( verb );
 }
 
 inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool& hasKeyword )
 {
     hasKeyword = false;
-    if( ts_node_is_null( argsNode ) ) return HttpMethod::Unknown;
+    if( ts_node_is_null( argsNode ) )
+    {
+        return HttpMethod::Unknown;
+    }
     const std::uint32_t nc = ts_node_named_child_count( argsNode );
     for( std::uint32_t i = 0; i < nc; ++i )
     {
         const TSNode c = ts_node_named_child( argsNode, i );
-        if( std::strcmp( ts_node_type( c ), "keyword_argument" ) != 0 ) continue;
+        if( std::strcmp( ts_node_type( c ), "keyword_argument" ) != 0 )
+        {
+            continue;
+        }
         const TSNode nameN = ts_node_child_by_field_name( c, "name", 4 );
-        if( ts_node_is_null( nameN ) ) continue;
+        if( ts_node_is_null( nameN ) )
+        {
+            continue;
+        }
         const std::uint32_t na = ts_node_start_byte( nameN ), nb = ts_node_end_byte( nameN );
-        if( na > nb || nb > src.size() || src.substr( na, nb - na ) != "methods" ) continue;
+        if( na > nb || nb > src.size() || src.substr( na, nb - na ) != "methods" )
+        {
+            continue;
+        }
         hasKeyword = true;
         const TSNode valueN = ts_node_child_by_field_name( c, "value", 5 );
-        if( ts_node_is_null( valueN ) || std::strcmp( ts_node_type( valueN ), "list" ) != 0 ) return HttpMethod::Unknown;
-        if( ts_node_named_child_count( valueN ) != 1 ) return HttpMethod::Unknown;   // 0 or >1 verbs → ambiguous, path-only match
+        if( ts_node_is_null( valueN ) || std::strcmp( ts_node_type( valueN ), "list" ) != 0 )
+        {
+            return HttpMethod::Unknown;
+        }
+        if( ts_node_named_child_count( valueN ) != 1 )
+        {
+            return HttpMethod::Unknown; // 0 or >1 verbs → ambiguous, path-only match
+        }
         return stringNodeToMethod( ts_node_named_child( valueN, 0 ), src );
     }
     return HttpMethod::Unknown;
@@ -3263,22 +4158,46 @@ inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool&
 // method per routematch::methodsCompatible in graph.h).
 inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
 {
-    if( ts_node_is_null( objNode ) || std::strcmp( ts_node_type( objNode ), "object" ) != 0 ) return HttpMethod::Unknown;
+    if( ts_node_is_null( objNode ) || std::strcmp( ts_node_type( objNode ), "object" ) != 0 )
+    {
+        return HttpMethod::Unknown;
+    }
     const std::uint32_t nc = ts_node_named_child_count( objNode );
     for( std::uint32_t i = 0; i < nc; ++i )
     {
         const TSNode c = ts_node_named_child( objNode, i );
-        if( std::strcmp( ts_node_type( c ), "pair" ) != 0 ) continue;
+        if( std::strcmp( ts_node_type( c ), "pair" ) != 0 )
+        {
+            continue;
+        }
         const TSNode keyN = ts_node_child_by_field_name( c, "key", 3 );
-        if( ts_node_is_null( keyN ) ) continue;
+        if( ts_node_is_null( keyN ) )
+        {
+            continue;
+        }
         const char* kt = ts_node_type( keyN );
         const std::uint32_t ka = ts_node_start_byte( keyN ), kb = ts_node_end_byte( keyN );
-        if( ka > kb || kb > src.size() ) continue;
+        if( ka > kb || kb > src.size() )
+        {
+            continue;
+        }
         std::string key;
-        if( std::strcmp( kt, "property_identifier" ) == 0 ) key = std::string( src.substr( ka, kb - ka ) );
-        else if( std::strcmp( kt, "string" ) == 0 )          key = ffiUnquote( src.substr( ka, kb - ka ) );
-        else continue;
-        if( key != "method" ) continue;
+        if( std::strcmp( kt, "property_identifier" ) == 0 )
+        {
+            key = std::string( src.substr( ka, kb - ka ) );
+        }
+        else if( std::strcmp( kt, "string" ) == 0 )
+        {
+            key = ffiUnquote( src.substr( ka, kb - ka ) );
+        }
+        else
+        {
+            continue;
+        }
+        if( key != "method" )
+        {
+            continue;
+        }
         return stringNodeToMethod( ts_node_child_by_field_name( c, "value", 5 ), src );
     }
     return HttpMethod::Unknown;
@@ -3289,7 +4208,10 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
 {
     const bool py = ( lang == Lang::Python );
     const bool js = ( lang == Lang::TypeScript || lang == Lang::JavaScript );
-    if( !py && !js ) return;
+    if( !py && !js )
+    {
+        return;
+    }
 
     const bool pyServerGated = py && ( src.find( "fastapi" ) != std::string_view::npos || src.find( "FastAPI" ) != std::string_view::npos
                                      || src.find( "flask" )   != std::string_view::npos || src.find( "Flask" )   != std::string_view::npos );
@@ -3297,7 +4219,10 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
 
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view
     {
-        if( ts_node_is_null( nn ) ) return {};
+        if( ts_node_is_null( nn ) )
+        {
+            return {};
+        }
         const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
         return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
     };
@@ -3313,7 +4238,10 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
     {
         const RouteFrame frame = stack.back();
         stack.pop_back();
-        if( frame.depth > 256 ) continue;
+        if( frame.depth > 256 )
+        {
+            continue;
+        }
         const TSNode n = frame.node;
         const char*  t = ts_node_type( n );
 
@@ -3325,21 +4253,36 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
             if( !ts_node_is_null( defNode ) && std::strcmp( ts_node_type( defNode ), "function_definition" ) == 0 )
             {
                 const TSNode nameNode = ts_node_child_by_field_name( defNode, "name", 4 );
-                if( !ts_node_is_null( nameNode ) ) handlerName.assign( nodeSrc( nameNode ) );
+                if( !ts_node_is_null( nameNode ) )
+                {
+                    handlerName.assign( nodeSrc( nameNode ) );
+                }
             }
             const std::uint32_t cc = ts_node_child_count( n );
             for( std::uint32_t i = 0; i < cc; ++i )
             {
                 const TSNode dec = ts_node_child( n, i );
-                if( std::strcmp( ts_node_type( dec ), "decorator" ) != 0 ) continue;
+                if( std::strcmp( ts_node_type( dec ), "decorator" ) != 0 )
+                {
+                    continue;
+                }
                 const TSNode expr = ts_node_named_child( dec, 0 );
-                if( ts_node_is_null( expr ) || std::strcmp( ts_node_type( expr ), "call" ) != 0 ) continue;
+                if( ts_node_is_null( expr ) || std::strcmp( ts_node_type( expr ), "call" ) != 0 )
+                {
+                    continue;
+                }
                 const TSNode fn = ts_node_child_by_field_name( expr, "function", 8 );
-                if( ts_node_is_null( fn ) || std::strcmp( ts_node_type( fn ), "attribute" ) != 0 ) continue;
+                if( ts_node_is_null( fn ) || std::strcmp( ts_node_type( fn ), "attribute" ) != 0 )
+                {
+                    continue;
+                }
                 const std::string_view attrName = nodeSrc( ts_node_child_by_field_name( fn, "attribute", 9 ) );
                 const TSNode argsNode = ts_node_child_by_field_name( expr, "arguments", 9 );
                 const std::string path = firstPathStringArg( argsNode, src );
-                if( path.empty() ) continue;
+                if( path.empty() )
+                {
+                    continue;
+                }
 
                 HttpMethod method = HttpMethod::Unknown;
                 if( attrName == "route" )
@@ -3351,7 +4294,10 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
                 else
                 {
                     method = httpMethodFromName( attrName );
-                    if( method == HttpMethod::Unknown ) continue;         // not a recognized verb shortcut (e.g. .on_event)
+                    if( method == HttpMethod::Unknown )
+                    {
+                        continue; // not a recognized verb shortcut (e.g. .on_event)
+                    }
                 }
                 routeDefs.push_back( RouteDef{ fileId, ts_node_start_point( n ).row + 1, method, path, handlerName } );
             }
@@ -3376,7 +4322,9 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
                 {
                     HttpMethod method = HttpMethod::Get;   // fetch's documented default when no options object
                     if( ts_node_named_child_count( argsNode ) >= 2 )
+                    {
                         method = jsMethodProperty( ts_node_named_child( argsNode, 1 ), src );
+                    }
                     routeUses.push_back( RawRouteUse{ fileId, ts_node_start_byte( n ), ts_node_start_point( n ).row + 1, method, path } );
                 }
                 handled = true;   // "fetch(...)" is never ALSO a server registrar shape
@@ -3393,7 +4341,9 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
                         const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
                         const std::string path = firstPathStringArg( argsNode, src );
                         if( !path.empty() )
+                        {
                             routeUses.push_back( RawRouteUse{ fileId, ts_node_start_byte( n ), ts_node_start_point( n ).row + 1, method, path } );
+                        }
                     }
                     handled = true;   // "axios.<verb>(...)" is never ALSO a server registrar shape
                 }
@@ -3434,14 +4384,19 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
                         const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
                         const std::string path = firstPathStringArg( argsNode, src );
                         if( !path.empty() )
+                        {
                             routeUses.push_back( RawRouteUse{ fileId, ts_node_start_byte( n ), ts_node_start_point( n ).row + 1, method, path } );
+                        }
                     }
                 }
             }
         }
 
         collectChildren( n, cursor.cur, kids );
-        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        }
     }
 }
 
@@ -3481,17 +4436,24 @@ inline bool isWriteTarget( TSNode id ) noexcept
                                         || std::strcmp( ut, "subscript" ) == 0               // Python `a[i]`
                                         || std::strcmp( ut, "attribute" ) == 0;              // Python `a.b`
         if( !( isSubscriptOrField && ts_node_start_byte( up ) == ts_node_start_byte( node ) ) )
+        {
             break;                              // `id` is the index/member, or the chain ended → stop climbing
+        }
         node = up;                              // `id` is the base object → it inherits the whole a[i]/p->f target-ness
     }
 
     const TSNode parent = ts_node_parent( node );
-    if( ts_node_is_null( parent ) ) return false;
+    if( ts_node_is_null( parent ) )
+    {
+        return false;
+    }
     const char* pt = ts_node_type( parent );
 
     // C++ `x++` / `--x` and Python aug targets handled via update_expression (the operand is the target).
     if( std::strcmp( pt, "update_expression" ) == 0 )
+    {
         return true;
+    }
 
     // direct LHS of an assignment: parent is the assignment node and `node` sits in its `left` field.
     const bool isAssign =    std::strcmp( pt, "assignment_expression" ) == 0       // C++ `=` `+=` `-=` …
@@ -3509,7 +4471,10 @@ inline bool isWriteTarget( TSNode id ) noexcept
 inline bool isCallCallee( TSNode id ) noexcept
 {
     const TSNode parent = ts_node_parent( id );
-    if( ts_node_is_null( parent ) ) return false;
+    if( ts_node_is_null( parent ) )
+    {
+        return false;
+    }
     const char* pt = ts_node_type( parent );
 
     // bare call `foo()` — the function field is the identifier itself.
@@ -3526,11 +4491,20 @@ inline bool isCallCallee( TSNode id ) noexcept
         const TSNode attrNode  = ts_node_child_by_field_name( parent, "attribute", 9 );
         const bool   isField   = ( !ts_node_is_null( fieldNode ) && sameSpan( fieldNode, id ) )
                               || ( !ts_node_is_null( attrNode )  && sameSpan( attrNode,  id ) );
-        if( !isField ) return false;
+        if( !isField )
+        {
+            return false;
+        }
         const TSNode gp = ts_node_parent( parent );   // the field-access is the callee only when its parent is a call whose `function` is it
-        if( ts_node_is_null( gp ) ) return false;
+        if( ts_node_is_null( gp ) )
+        {
+            return false;
+        }
         const char* gt = ts_node_type( gp );
-        if( std::strcmp( gt, "call_expression" ) != 0 && std::strcmp( gt, "call" ) != 0 ) return false;
+        if( std::strcmp( gt, "call_expression" ) != 0 && std::strcmp( gt, "call" ) != 0 )
+        {
+            return false;
+        }
         const TSNode fn = ts_node_child_by_field_name( gp, "function", 8 );
         return !ts_node_is_null( fn ) && sameSpan( fn, parent );
     }
@@ -3544,16 +4518,19 @@ inline bool isCallCallee( TSNode id ) noexcept
 inline bool isNonValueContext( TSNode id ) noexcept
 {
     const TSNode parent = ts_node_parent( id );
-    if( ts_node_is_null( parent ) ) return false;
+    if( ts_node_is_null( parent ) )
+    {
+        return false;
+    }
     const char* pt = ts_node_type( parent );
 
     // (1) part of a qualified / scoped NAME (`A::process` def name, `A::b()` qualified call name, `ns::T`
     //     type, `A::kConst` qualified value): the segment is not a plain value identifier. Calls/defs of
     //     this shape are captured by the tags query; qualified value reads are intentionally out of scope.
-    if(    std::strcmp( pt, "qualified_identifier" ) == 0      || std::strcmp( pt, "scoped_identifier" ) == 0
-        || std::strcmp( pt, "scoped_type_identifier" ) == 0   || std::strcmp( pt, "qualified_type_identifier" ) == 0
-        || std::strcmp( pt, "template_function" ) == 0        || std::strcmp( pt, "template_type" ) == 0 )
+    if( std::strcmp( pt, "qualified_identifier" ) == 0 || std::strcmp( pt, "scoped_identifier" ) == 0 || std::strcmp( pt, "scoped_type_identifier" ) == 0 || std::strcmp( pt, "qualified_type_identifier" ) == 0 || std::strcmp( pt, "template_function" ) == 0 || std::strcmp( pt, "template_type" ) == 0 )
+    {
         return true;
+    }
 
     // (2) a declarator's NAME (a DEF/declaration, not a use): `int x;`, `void f()`, `Foo* p`, parameters.
     if(    std::strcmp( pt, "function_declarator" ) == 0 || std::strcmp( pt, "init_declarator" ) == 0
@@ -3561,7 +4538,10 @@ inline bool isNonValueContext( TSNode id ) noexcept
         || std::strcmp( pt, "reference_declarator" ) == 0  || std::strcmp( pt, "array_declarator" ) == 0 )
     {
         const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
-        if( !ts_node_is_null( decl ) && sameSpan( decl, id ) ) return true;
+        if( !ts_node_is_null( decl ) && sameSpan( decl, id ) )
+        {
+            return true;
+        }
     }
     // (3) Python function / parameter NAME field (a DEF/param, not a use).
     if( std::strcmp( pt, "function_definition" ) == 0 || std::strcmp( pt, "parameters" ) == 0
@@ -3569,9 +4549,10 @@ inline bool isNonValueContext( TSNode id ) noexcept
         || std::strcmp( pt, "lambda_parameters" ) == 0 )
     {
         const TSNode nm = ts_node_child_by_field_name( parent, "name", 4 );
-        if( ( !ts_node_is_null( nm ) && sameSpan( nm, id ) )
-            || std::strcmp( pt, "parameters" ) == 0 || std::strcmp( pt, "lambda_parameters" ) == 0 )
+        if( ( !ts_node_is_null( nm ) && sameSpan( nm, id ) ) || std::strcmp( pt, "parameters" ) == 0 || std::strcmp( pt, "lambda_parameters" ) == 0 )
+        {
             return true;   // every direct child of a parameter list is a param NAME, not a use
+        }
     }
     return false;
 }
@@ -3592,7 +4573,10 @@ void captureUses( TSNode root, std::uint32_t fileId, Lang lang, std::string_view
     {
     const UseFrame frame = stack.back();
     stack.pop_back();
-    if( frame.depth > 512 ) continue;                          // pathological-AST guard (file already ≤ 1 MB)
+    if( frame.depth > 512 )
+    {
+        continue; // pathological-AST guard (file already ≤ 1 MB)
+    }
     const TSNode n = frame.node;
     const char* t = ts_node_type( n );
 
@@ -3619,7 +4603,10 @@ void captureUses( TSNode root, std::uint32_t fileId, Lang lang, std::string_view
     }
 
     collectChildren( n, cursor.cur, kids );
-    for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+    for( std::size_t i = kids.size(); i > 0; --i )
+    {
+        stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+    }
     }
 }
 
@@ -3627,7 +4614,9 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
 {
     const TSLanguage* lang = le.grammar();
     if( lang == nullptr )
+    {
         return false;
+    }
 
     if( !ts_parser_set_language( parser, lang ) || !grammarAbiOk( lang ) )
     {
@@ -3662,7 +4651,9 @@ struct TreeGuard
         if( this != &other )
         {
             if( tree != nullptr )
+            {
                 ts_tree_delete( tree );
+            }
             tree = other.tree;
             other.tree = nullptr;
         }
@@ -3671,7 +4662,9 @@ struct TreeGuard
     ~TreeGuard()
     {
         if( tree != nullptr )
+        {
             ts_tree_delete( tree );
+        }
     }
     TSTree* get() const noexcept { return tree; }
     TSTree* release() noexcept
@@ -3703,18 +4696,24 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         // Rust IS-A: `impl Trait for T` is a top-level impl_item (sibling of the struct), unreachable from the
         // struct's def-walk — a separate root pass. Derived type name rides `qualifier` (name-resolved in buildGraph).
         if( le.lang == Lang::Rust )
+        {
             captureRustImpls( root, fileId, src, refs );
+        }
 
         // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-variable narrowing. C++/ObjC/Python/TS
         // (the languages whose receiver shape `receiverOf` captures as a recvVar) — others have no consumer yet.
         if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript )
+        {
             captureBindings( root, fileId, le.lang, src, binds, 0 );
+        }
 
         // ABS-3: read/write use-site capture (bare value identifiers + assignment targets). C++/ObjC/Python —
         // the languages whose assignment/update grammar shapes isWriteTarget knows. role=Read/Write refs NEVER
         // enter the call graph (buildGraph skips role != Call), so PageRank and the default map are unchanged.
         if( captureValueUses && ( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python ) )
+        {
             captureUses( root, fileId, le.lang, src, refs, 0 );
+        }
     }
 }
 
@@ -3722,11 +4721,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {
     if( cursor == nullptr )
+    {
         return;
+    }
 
     TSQuery* query = compiledQueryFor( le );   // shared immutable query, compiled once per grammar (pre-warmed) — do NOT delete
     if( query == nullptr )
+    {
         return;
+    }
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
@@ -3793,7 +4796,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                             if( !ts_node_is_null( typeNode ) )
                             {
                                 const uint32_t typeEnd = ts_node_end_byte( typeNode );
-                                if( typeEnd > a && typeEnd <= b ) b = typeEnd;
+                                if( typeEnd > a && typeEnd <= b )
+                                {
+                                    b = typeEnd;
+                                }
                             }
                         }
 
@@ -3814,20 +4820,26 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
 
             if( !haveName )
+            {
                 continue;
+            }
 
             // Some patterns (e.g. a bare (identifier) @name) carry no @definition/@reference
             // wrapper. Treat a wrapper-less @name as a reference fallback only when the pattern
             // had a role; otherwise skip (avoids turning every identifier into an edge).
             if( !haveRole )
+            {
                 continue;
+            }
 
             // F5: drop Swift function-local `let`/`var` bindings — they are not module symbols and, left in,
             // they steal the enclosing function's call edges (the last local binding above the call sites
             // becomes the nearest enclosing symbol). roleNode is the `property_declaration`; a `statements`
             // ancestor marks it as local. Real stored/computed members (class/struct/enum/top-level) survive.
             if( isDef && kind == SymKind::Var && le.lang == Lang::Swift && isSwiftLocalBinding( roleNode ) )
+            {
                 continue;
+            }
 
             if( isDef )
             {
@@ -3870,7 +4882,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         // TYPE is included (not just the declarator), WITHOUT grabbing the class body.
                         const char* ct = ts_node_type( child );
                         if( std::strcmp( ct, "field_declaration" ) == 0 || std::strcmp( ct, "declaration" ) == 0 )
+                        {
                             defNode = child;
+                        }
                         break;
                     }
                     const TSNode pb = ts_node_child_by_field_name( p, "body", 4 );
@@ -3933,12 +4947,19 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );
-                if( d.scope.empty() ) d.scope = enclosingScopeOf( nameNode, src );
+                if( d.scope.empty() )
+                {
+                    d.scope = enclosingScopeOf( nameNode, src );
+                }
             }
-            else if( le.lang == Lang::Python )                      // P2-D Rule 1: enclosing class of a Python method → `self.m()` narrows to Class::m
+            else if( le.lang == Lang::Python )
+            { // P2-D Rule 1: enclosing class of a Python method → `self.m()` narrows to Class::m
                 d.scope = enclosingScopeOf( nameNode, src );
-            else if( le.lang == Lang::Rust )                        // H4: `impl Widget { fn new() }` → "Widget" — see rustEnclosingScopeOf
+            }
+            else if( le.lang == Lang::Rust )
+            { // H4: `impl Widget { fn new() }` → "Widget" — see rustEnclosingScopeOf
                 d.scope = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/true );
+            }
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
             {
@@ -3950,7 +4971,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 // H4: a C++ cast keyword is not a call — see isCppCastKeyword. Valid input, skipped, no alert.
                 if( le.lang == Lang::Cpp && isCppCastKeyword( nameTxt ) )
+                {
                     continue;
+                }
 
                 RawRef r;
                 r.fileId    = fileId;
@@ -3959,8 +4982,14 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.lang      = le.lang;
                 r.role      = RefRole::Call;   // ABS-3: @reference.call from the tags query is a call use-site
                 r.name      = finalSegment( nameTxt );
-                if( le.lang == Lang::Cpp ) r.qualifier = qualifierOf( nameNode, src );   // `A::b()` → "A" (E#4 canonical resolve)
-                else if( le.lang == Lang::Rust ) r.qualifier = rustQualifierOf( nameNode, src );   // H4: `Widget::new()` → "Widget"
+                if( le.lang == Lang::Cpp )
+                {
+                    r.qualifier = qualifierOf( nameNode, src ); // `A::b()` → "A" (E#4 canonical resolve)
+                }
+                else if( le.lang == Lang::Rust )
+                {
+                    r.qualifier = rustQualifierOf( nameNode, src ); // H4: `Widget::new()` → "Widget"
+                }
 
                 // H4 RE-SPLIT: the widened qualified-call pattern binds the INNER node, so a 3+-segment call's
                 // captured text still carries scope (`inner::targetFn`). Recover the pair the canonical tier
@@ -4029,7 +5058,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     // a zero/absurd ceiling would silently crawl nothing — clamp to the default (degrade, never trap).
     if( maxFileBytes == 0 )
+    {
         maxFileBytes = kDefaultMaxFileBytes;
+    }
 
     // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space)
     {
@@ -4127,7 +5158,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             {
                 const LangEntry* le = fileLang[ fi ];
                 if( le == nullptr || le->grammar == nullptr )
+                {
                     continue;   // doc extensions / markdown — no grammar needed
+                }
 
                 present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
                 if( le->ext == ".h" )
@@ -4135,7 +5168,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                     // With no cache, every header is a parse miss. Mark ObjC too so a header that reroutes
                     // after the parse pool's content sniff never blocks on an uncompiled query.
                     if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                    {
                         present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
+                    }
                 }
             }
         }
@@ -4144,7 +5179,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: detect cache misses" );
 
             unsigned hwHash = std::thread::hardware_concurrency();
-            if( hwHash == 0 ) hwHash = 1;
+            if( hwHash == 0 )
+            {
+                hwHash = 1;
+            }
             const unsigned nHashThreads = static_cast<unsigned>( std::min<std::size_t>( hwHash, std::max<std::size_t>( nfilesEarly, 1 ) ) );
             std::atomic<std::size_t> nextIdx{ 0 };
             std::vector<std::thread> hashPool;
@@ -4159,13 +5197,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                     for( ;; )
                     {
                         const std::size_t fi = nextIdx.fetch_add( 1, std::memory_order_relaxed );
-                        if( fi >= nfilesEarly ) break;
+                        if( fi >= nfilesEarly )
+                        {
+                            break;
+                        }
                         try   // per-file degrade — a throw escaping a worker thread would std::terminate
                         {
                             const std::string& f = result.files[ fi ];
                             const LangEntry* le = fileLang[ fi ];
                             if( le == nullptr )
+                            {
                                 continue;   // doc extensions — never cached (the doc post-pass re-extracts)
+                            }
                             // B0: grammar-less languages (markdown) still flow through the cache stat-gate /
                             // read+hash below so an UNCHANGED .md warm-hits without any read (previously the
                             // early grammar skip left fileHash=0 and the parse pool re-read every .md every
@@ -4203,7 +5246,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                                     }
 
                                     if( !readFile( f, bytes ) )
+                                    {
                                         continue;   // unreadable — worker will skip it too (not a miss to compile for)
+                                    }
                                     hasFullBytes = true;
                                     const std::uint64_t h = contentHash64( bytes );
                                     fileHash[ fi ] = h;   // pre-fill so the parse pool can skip the re-read on a cache hit
@@ -4211,13 +5256,17 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                                     fileStatSize[ fi ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
                                     fileStatMtime[ fi ] = si.mtimeNs;
                                     if( ff.hash == h )
+                                    {
                                         continue;   // cache hit — parse skipped → grammar NOT needed for this file
+                                    }
                                 }
                                 // else: path not in cache → miss (fall through)
                             }
 
                             if( le->grammar == nullptr )
+                            {
                                 continue;   // markdown: hash prefill only — no grammar to compile, no miss to mark
+                            }
 
                             if( le->ext == ".h" )
                             {
@@ -4235,7 +5284,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                                     isUnknownHeaderMiss[ fi ] = 1;
                                 }
                                 if( !headerBytes.empty() && looksObjC( headerBytes ) )
+                                {
                                     isObjCHeaderMiss[ fi ] = 1;
+                                }
                             }
                             isMiss[ fi ] = 1;   // cache empty, path-absent, or hash-changed → grammar needed
                         }
@@ -4247,36 +5298,52 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 } );
             }
             for( std::thread& th : hashPool )
+            {
                 th.join();
+            }
             // serial grammar-mark reduction over the per-index results (order-independent: pure boolean OR).
             {
                 PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: reduce grammar set" );
 
                 for( std::size_t fi = 0; fi < nfilesEarly; ++fi )
                 {
-                    if( !isMiss[ fi ] ) continue;
+                    if( !isMiss[fi] )
+                    {
+                        continue;
+                    }
                     const LangEntry* le = fileLang[ fi ];
-                    if( le == nullptr ) continue;                       // defensive (isMiss only set for grammar-bearing files)
+                    if( le == nullptr )
+                    {
+                        continue; // defensive (isMiss only set for grammar-bearing files)
+                    }
                     if( le->ext == ".h" )
                     {
                         if( isObjCHeaderMiss[ fi ] )
                         {
                             if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                            {
                                 present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
+                            }
                         }
                         else
                         {
                             present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
                             if( isUnknownHeaderMiss[ fi ] )
+                            {
                                 anyUnknownHeaderMiss = true;
+                            }
                         }
                         continue;
                     }
                     present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
                 }
                 if( anyUnknownHeaderMiss )
+                {
                     if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                    {
                         present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
+                    }
+                }
             }
         }
 
@@ -4288,12 +5355,23 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             {
                 const LangEntry& e = kLangTable[ i ];
                 if( e.grammar == nullptr || !present[ i ] )
+                {
                     continue;
+                }
                 const TSLanguage* lang = e.grammar();
                 bool seen = false;
-                for( const LangEntry* c : toCompile ) if( c->grammar() == lang ) { seen = true; break; }
+                for( const LangEntry* c : toCompile )
+                {
+                    if( c->grammar() == lang )
+                    {
+                        seen = true;
+                        break;
+                    }
+                }
                 if( !seen )
+                {
                     toCompile.push_back( &e );
+                }
             }
         }
 
@@ -4306,7 +5384,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: launch ts_query_new async" );
 
             for( std::size_t i = 0; i < toCompile.size(); ++i )
+            {
                 queryCompilePool.emplace_back( [ &compiledQueries, &toCompile, i ]() { compiledQueries[ i ] = compileQueryStandalone( *toCompile[ i ] ); } );
+            }
         }
     }
 
@@ -4331,7 +5411,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // there) stay as-is. Workers fill the remaining 0-valued entries for files they process.
         VERIFY( fileHash.size() == nfiles );
         unsigned hw = std::thread::hardware_concurrency();
-        if( hw == 0 ) hw = 1;
+        if( hw == 0 )
+        {
+            hw = 1;
+        }
         const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
 
         std::vector<std::vector<RawDef>>  tDefs( nthreads );
@@ -4352,9 +5435,15 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             {
                 const std::uint64_t h = fileHash[ fileId ];
                 const auto it = cache.find( result.files[ fileId ] );
-                if( it == cache.end() ) continue;
+                if( it == cache.end() )
+                {
+                    continue;
+                }
                 cacheCandidateFacts[ fileId ] = &it->second;
-                if( it->second.hash != h ) continue;
+                if( it->second.hash != h )
+                {
+                    continue;
+                }
                 cacheHitFacts[ fileId ] = &it->second;
                 hitDefs  += it->second.defs.size();
                 hitRefs  += it->second.refs.size();
@@ -4394,16 +5483,23 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 {
                     ec.clear();
                     fileByteSize[ fileId ] = fs::file_size( result.files[ fileId ], ec );
-                    if( ec ) fileByteSize[ fileId ] = 0;
+                    if( ec )
+                    {
+                        fileByteSize[fileId] = 0;
+                    }
                 }
 
                 const auto parsePriority = [ & ]( std::size_t fileId ) noexcept
                 {
                     const LangEntry* le = fileLang[ fileId ];
                     if( le == nullptr || le->grammar == nullptr )
+                    {
                         return 0;   // docs/markdown and unknowns do not consume the tags-query barrier
+                    }
                     if( !cache.empty() && cacheHitFacts[ fileId ] != nullptr )
+                    {
                         return 1;   // warm cache hit: cheap copy, no parse/query work
+                    }
                     return 2;       // cache miss/no-cache: full parse + tags query
                 };
                 std::stable_sort( parseOrder.begin(), parseOrder.end(),
@@ -4411,8 +5507,14 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                                   {
                                       const int pa = parsePriority( a );
                                       const int pb = parsePriority( b );
-                                      if( pa != pb ) return pa > pb;
-                                      if( fileByteSize[ a ] != fileByteSize[ b ] ) return fileByteSize[ a ] > fileByteSize[ b ];
+                                      if( pa != pb )
+                                      {
+                                          return pa > pb;
+                                      }
+                                      if( fileByteSize[a] != fileByteSize[b] )
+                                      {
+                                          return fileByteSize[a] > fileByteSize[b];
+                                      }
                                       return a < b;
                                   } );
             }
@@ -4441,12 +5543,20 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 // stats (lexindex.h). Rich ingests only; a def's stats ride the RawDef through dedup/sort/cache
                 // so alignment with the eventual Symbol is free. scratch is reused across defs (no rehash churn).
                 HashMap<std::uint64_t, std::uint32_t> lexScratch;
-                if( captureValueUses ) lexScratch.reserve( 1024 );
+                if( captureValueUses )
+                {
+                    lexScratch.reserve( 1024 );
+                }
                 const auto buildLexForNewDefs = [ & ]( std::vector<RawDef>& defs, std::size_t firstNewDefIndex, const std::string& fileBytes )
                 {
-                    if( !captureValueUses ) return;
+                    if( !captureValueUses )
+                    {
+                        return;
+                    }
                     for( std::size_t defIndex = firstNewDefIndex; defIndex < defs.size(); ++defIndex )
+                    {
                         buildDefLexStats( fileBytes, defs[ defIndex ].startByte, defs[ defIndex ].endByte, lexScratch, defs[ defIndex ].lex );
+                    }
                 };
 
                 struct PendingParsedFile
@@ -4472,7 +5582,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         if( this != &other )
                         {
                             if( tree != nullptr )
+                            {
                                 ts_tree_delete( tree );
+                            }
                             fileId = other.fileId;
                             le     = other.le;
                             bytes  = std::move( other.bytes );
@@ -4484,7 +5596,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                     ~PendingParsedFile()
                     {
                         if( tree != nullptr )
+                        {
                             ts_tree_delete( tree );
+                        }
                     }
                 };
 
@@ -4496,7 +5610,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 const auto flushPendingParsed = [ & ]()
                 {
                     if( pendingParsed.empty() )
+                    {
                         return;
+                    }
 
                     {
                         PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: flush pending parsed tags" );
@@ -4504,7 +5620,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         for( PendingParsedFile& pending : pendingParsed )
                         {
                             if( pending.le == nullptr || pending.tree == nullptr )
+                            {
                                 continue;
+                            }
                             const TSNode root = ts_tree_root_node( pending.tree );
                             const std::size_t firstNewDefIndex = tDefs[ t ].size();
                             captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, tDefs[ t ], tRefs[ t ] );
@@ -4521,10 +5639,15 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 for( ;; )   // lock-free work-stealing: grab the next file via the atomic counter (balances the big-file tail)
                 {
                     if( queryPrewarmReady.load( std::memory_order_acquire ) && !pendingParsed.empty() )
+                    {
                         flushPendingParsed();
+                    }
 
                     const std::size_t orderIndex = nextFile.fetch_add( 1, std::memory_order_relaxed );
-                    if( orderIndex >= nfiles ) break;
+                    if( orderIndex >= nfiles )
+                    {
+                        break;
+                    }
                     const std::size_t fileId = parseOrder.empty() ? orderIndex : parseOrder[ orderIndex ];
                     // per-file try/catch: a throw (bad_alloc, filesystem_error, …) escaping a
                     // std::thread entry would std::terminate the whole process. Degrade per file,
@@ -4534,7 +5657,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         const std::string& path = result.files[ fileId ];
 
                         const LangEntry* le = fileLang[ fileId ];
-                        if( le == nullptr )            continue;   // defensive (filtered in crawl)
+                        if( le == nullptr )
+                        {
+                            continue; // defensive (filtered in crawl)
+                        }
 
                         // If the prewarm miss-detection pass already read+hashed this file, the hash
                         // is already in fileHash[fileId] — skip the re-read for the hash check.
@@ -4544,10 +5670,21 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         if( h == 0 )
                         {
                             // Not pre-hashed: read the file now (first time we see it in the pool)
-                            if( !readFile( path, bytes ) ) continue;
-                            if( looksBinary( bytes ) )     continue;
+                            if( !readFile( path, bytes ) )
+                            {
+                                continue;
+                            }
+                            if( looksBinary( bytes ) )
+                            {
+                                continue;
+                            }
                             if( le->ext == ".h" && looksObjC( bytes ) )
-                                if( const LangEntry* objcLe = lookupLang( ".m" ) ) le = objcLe;
+                            {
+                                if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                                {
+                                    le = objcLe;
+                                }
+                            }
                             if( needsCacheHash )
                             {
                                 h = contentHash64( bytes );
@@ -4568,7 +5705,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             {
                                 FileFacts* candidate = cacheCandidateFacts[ fileId ];
                                 if( candidate != nullptr && candidate->hash == h )
+                                {
                                     hit = candidate;
+                                }
                             }
                             if( hit != nullptr )   // unchanged → reuse cached facts, skip parse
                             {
@@ -4618,10 +5757,21 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         // ensure bytes are loaded (may have been pre-hashed without loading the body)
                         if( !bytesLoaded )
                         {
-                            if( !readFile( path, bytes ) ) continue;
-                            if( looksBinary( bytes ) )     continue;
+                            if( !readFile( path, bytes ) )
+                            {
+                                continue;
+                            }
+                            if( looksBinary( bytes ) )
+                            {
+                                continue;
+                            }
                             if( le->ext == ".h" && looksObjC( bytes ) )
-                                if( const LangEntry* objcLe = lookupLang( ".m" ) ) le = objcLe;
+                            {
+                                if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                                {
+                                    le = objcLe;
+                                }
+                            }
                         }
 
                         // hostile/degenerate JSON guard — must run BEFORE the parse (that is the whole point);
@@ -4643,11 +5793,15 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         else
                         {
                             if( !prepareParserFor( pg.p, *le ) )
+                            {
                                 continue;
+                            }
 
                             TreeGuard tree( parseTree( pg.p, bytes ) );
                             if( tree.get() == nullptr )
+                            {
                                 continue;
+                            }
 
                             const TSNode root = ts_tree_root_node( tree.get() );
                             captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, tRefs[ t ], tIncs[ t ], tBinds[ t ], tFfis[ t ], tRouteDefs[ t ], tRouteUses[ t ], captureValueUses );
@@ -4685,7 +5839,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: wait/install async" );
 
             for( std::thread& th : queryCompilePool )
+            {
                 th.join();
+            }
             // Install compiled queries single-threaded (workers are still gated). Installing TRANSFERS
             // ownership to CompiledQueryCache, which frees whatever is still resident at process teardown
             // (N2). A652: on an in-process re-ingest (long-lived MCP server) the same grammar can already
@@ -4696,7 +5852,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             {
                 const TSLanguage* grammar = toCompile[ i ]->grammar();
                 if( auto it = cache.find( grammar ); it != cache.end() && it->second != nullptr && it->second != compiledQueries[ i ] )
+                {
                     ts_query_delete( it->second );
+                }
                 cache[ grammar ] = compiledQueries[ i ];
             }
             // A4-F1: publish readiness UNDER queryPrewarmMutex, then notify. Workers wait via
@@ -4710,7 +5868,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         queryPrewarmCv.notify_all();
 
         for( std::thread& th : pool )
+        {
             th.join();
+        }
 
         // merge per-thread results (cross-thread order is irrelevant — sorted below)
         std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0;
@@ -4733,13 +5893,34 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         rawRouteUses.reserve( totRouteUses );
         for( unsigned t = 0; t < nthreads; ++t )
         {
-            for( RawDef& d  : tDefs[ t ] ) rawDefs.push_back( std::move( d ) );
-            for( RawRef& r  : tRefs[ t ] ) rawRefs.push_back( std::move( r ) );
-            for( Include& in : tIncs[ t ] ) rawIncs.push_back( std::move( in ) );
-            for( RawBind& b : tBinds[ t ] ) rawBinds.push_back( std::move( b ) );
-            for( BindingAlias& a : tFfis[ t ] ) rawFfis.push_back( std::move( a ) );
-            for( RouteDef& rd : tRouteDefs[ t ] ) rawRouteDefs.push_back( std::move( rd ) );
-            for( RawRouteUse& ru : tRouteUses[ t ] ) rawRouteUses.push_back( std::move( ru ) );
+            for( RawDef& d : tDefs[t] )
+            {
+                rawDefs.push_back( std::move( d ) );
+            }
+            for( RawRef& r : tRefs[t] )
+            {
+                rawRefs.push_back( std::move( r ) );
+            }
+            for( Include& in : tIncs[t] )
+            {
+                rawIncs.push_back( std::move( in ) );
+            }
+            for( RawBind& b : tBinds[t] )
+            {
+                rawBinds.push_back( std::move( b ) );
+            }
+            for( BindingAlias& a : tFfis[t] )
+            {
+                rawFfis.push_back( std::move( a ) );
+            }
+            for( RouteDef& rd : tRouteDefs[t] )
+            {
+                rawRouteDefs.push_back( std::move( rd ) );
+            }
+            for( RawRouteUse& ru : tRouteUses[t] )
+            {
+                rawRouteUses.push_back( std::move( ru ) );
+            }
         }
 
         // A1 (team-index) — drift-proportional observable: report how many files re-parsed vs reused,
@@ -4756,7 +5937,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // Win 2: rewrite cache only when at least one file changed (dirty flag set by workers above).
         // Skips the ~11ms / 7 MB serialization+write on a no-change warm run.
         if( !cacheFile.empty() && dirty.load() )
+        {
             saveCache( std::string( cacheFile ), rootDir, result.files, fileHash, fileStatSize, fileStatMtime, rawDefs, rawRefs, rawIncs, rawBinds, rawFfis, rawRouteDefs, rawRouteUses, captureValueUses );
+        }
     }
 
     // ── doc post-pass (P1-B): for every collected document file (notebook/html/csv/…), extract its text and
@@ -4775,8 +5958,12 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // 1) collect the doc files (cheap sequential scan) — indices stay ascending, so the merge is ordered.
         std::vector<std::uint32_t> docIds;
         for( std::uint32_t fid = 0; fid < result.files.size(); ++fid )
+        {
             if( docparse::isDocExtension( lowerExtensionOf( result.files[ fid ] ) ) )
+            {
                 docIds.push_back( fid );
+            }
+        }
 
         // 2) extract in parallel, storing each result at its OWN slot (no cross-thread sharing of a slot →
         //    order-independent). A per-doc `hasText` gate distinguishes "not extractable" (skip) from empty.
@@ -4787,7 +5974,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         if( ndocs > 0 )
         {
             unsigned hwDoc = std::thread::hardware_concurrency();
-            if( hwDoc == 0 ) hwDoc = 1;
+            if( hwDoc == 0 )
+            {
+                hwDoc = 1;
+            }
             const unsigned nDocThreads = static_cast<unsigned>( std::min<std::size_t>( hwDoc, ndocs ) );
             std::atomic<std::size_t> nextDoc{ 0 };
             std::vector<std::thread> docPool;
@@ -4800,11 +5990,17 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                     // stats come from that text — computed here, in the worker that owns the slot, so the
                     // stats path never needs docText at query time either. Pure function of the bytes.
                     HashMap<std::uint64_t, std::uint32_t> docLexScratch;
-                    if( captureValueUses ) docLexScratch.reserve( 1024 );
+                    if( captureValueUses )
+                    {
+                        docLexScratch.reserve( 1024 );
+                    }
                     for( ;; )
                     {
                         const std::size_t di = nextDoc.fetch_add( 1, std::memory_order_relaxed );
-                        if( di >= ndocs ) break;
+                        if( di >= ndocs )
+                        {
+                            break;
+                        }
                         try   // per-file degrade — a throw escaping a worker thread would std::terminate
                         {
                             const std::uint32_t fid = docIds[ di ];
@@ -4812,8 +6008,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             std::string text = docparse::parseDocFile( result.files[ fid ], ext );
                             if( !text.empty() )
                             {
-                                if( captureValueUses )   // whole-file Section span [0, len) — same span the RawDef gets below
+                                if( captureValueUses )
+                                { // whole-file Section span [0, len) — same span the RawDef gets below
                                     buildDefLexStats( text, 0, std::uint32_t( text.size() ), docLexScratch, docLex[ di ] );
+                                }
                                 docTextOut[ di ] = std::move( text );
                                 docHasText[ di ] = 1;
                             }
@@ -4826,14 +6024,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 } );
             }
             for( std::thread& th : docPool )
+            {
                 th.join();
+            }
         }
 
         // 3) deterministic merge in ascending-fileId order (docIds is already ascending).
         for( std::size_t di = 0; di < ndocs; ++di )
         {
-            if( !docHasText[ di ] )                              // not extractable (e.g. markitdown absent) → skip
+            if( !docHasText[di] )
+            { // not extractable (e.g. markitdown absent) → skip
                 continue;
+            }
             const std::uint32_t fid = docIds[ di ];
             const std::uint32_t len = static_cast<std::uint32_t>( docTextOut[ di ].size() );
             result.docText[ fid ] = std::move( docTextOut[ di ] );
@@ -4884,15 +6086,27 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         std::sort( rawDefs.begin(), rawDefs.end(),
                    [ &specificity ]( const RawDef& a, const RawDef& b ) noexcept
                    {
-                       if( a.fileId   != b.fileId )   return a.fileId   < b.fileId;
-                       if( a.nameByte != b.nameByte ) return a.nameByte < b.nameByte;
+                       if( a.fileId != b.fileId )
+                       {
+                           return a.fileId < b.fileId;
+                       }
+                       if( a.nameByte != b.nameByte )
+                       {
+                           return a.nameByte < b.nameByte;
+                       }
                        // same identity: most-specific kind first so unique() keeps it
                        const int specificityA = specificity( a.kind ), specificityB = specificity( b.kind );
-                       if( specificityA != specificityB ) return specificityA > specificityB;
+                       if( specificityA != specificityB )
+                       {
+                           return specificityA > specificityB;
+                       }
                        // same identity AND same specificity with DIFFERENT spans (Go: `type Foo struct{}` fires
                        // two capture rows): finish the total order on span — startByte ascending, endByte
                        // DESCENDING (widest span first) — so the unique() survivor is input-order independent.
-                       if( a.startByte != b.startByte ) return a.startByte < b.startByte;
+                       if( a.startByte != b.startByte )
+                       {
+                           return a.startByte < b.startByte;
+                       }
                        return a.endByte > b.endByte;
                    } );
 
@@ -4945,10 +6159,16 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         };
         for( const RawDef& d : rawDefs )
         {
-            if( d.lang != Lang::ObjC ) continue;                      // C++/Python/… never participate (SCOPE + overload-safety)
+            if( d.lang != Lang::ObjC )
+            {
+                continue; // C++/Python/… never participate (SCOPE + overload-safety)
+            }
             const std::string_view k = makeKey( d );
             const auto [ it, inserted ] = groupHasDef.try_emplace( std::string( k ), hasBody( d ) );
-            if( !inserted && hasBody( d ) ) it->second = true;
+            if( !inserted && hasBody( d ) )
+            {
+                it->second = true;
+            }
         }
 
         // keep a def group's DEFS only; keep a decl-only group whole (escape hatch). Stable: preserves order.
@@ -4960,7 +6180,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             {
                 const auto it = groupHasDef.find( std::string( makeKey( d ) ) );
                 const bool groupDef = ( it != groupHasDef.end() ) && it->second;
-                if( groupDef && !hasBody( d ) ) continue;             // a decl shadowed by a same-file ObjC def → drop
+                if( groupDef && !hasBody( d ) )
+                {
+                    continue; // a decl shadowed by a same-file ObjC def → drop
+                }
             }
             kept.push_back( std::move( d ) );
         }
@@ -4974,9 +6197,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         std::sort( rawDefs.begin(), rawDefs.end(),
                    []( const RawDef& a, const RawDef& b ) noexcept
                    {
-                       if( a.fileId != b.fileId ) return a.fileId < b.fileId;
-                       if( a.line   != b.line )   return a.line   < b.line;
-                       if( a.name   != b.name )   return a.name   < b.name;
+                       if( a.fileId != b.fileId )
+                       {
+                           return a.fileId < b.fileId;
+                       }
+                       if( a.line != b.line )
+                       {
+                           return a.line < b.line;
+                       }
+                       if( a.name != b.name )
+                       {
+                           return a.name < b.name;
+                       }
                        return a.startByte < b.startByte;   // stable last-resort tiebreak
                    } );
 
@@ -5014,7 +6246,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
             const std::size_t symbolCount = result.symbols.size();
             std::size_t       pairCount   = 0;
-            for( const RawDef& d : rawDefs ) pairCount += d.lex.tokenHashes.size();
+            for( const RawDef& d : rawDefs )
+            {
+                pairCount += d.lex.tokenHashes.size();
+            }
 
             result.hasLexStats = true;
             result.lexDocBodyDl.resize( symbolCount );
@@ -5036,7 +6271,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 if( fileId < result.files.size() )
                 {
                     std::uint64_t* const sig = result.lexFileSig.data() + std::size_t( fileId ) * kLexFileSigWords;
-                    for( const std::uint64_t hash : lx.tokenHashes ) sig[ lexSigWord( hash ) ] |= lexSigBit( hash );
+                    for( const std::uint64_t hash : lx.tokenHashes )
+                    {
+                        sig[lexSigWord( hash )] |= lexSigBit( hash );
+                    }
                 }
             }
         }
@@ -5061,9 +6299,13 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
         fileSpanStart.assign( result.files.size() + 1, 0 );
         for( const RawDef& d : rawDefs )
+        {
             ++fileSpanStart[ d.fileId + 1 ];
+        }
         for( std::size_t fileId = 1; fileId < fileSpanStart.size(); ++fileId )
+        {
             fileSpanStart[ fileId ] += fileSpanStart[ fileId - 1 ];
+        }
 
         defSpans.resize( rawDefs.size() );
         std::vector<std::size_t> fileSpanWrite = fileSpanStart;
@@ -5084,8 +6326,14 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             std::sort( defSpans.begin() + begin, defSpans.begin() + end,
                        []( const DefSpan& a, const DefSpan& b ) noexcept
                        {
-                           if( a.startByte != b.startByte ) return a.startByte < b.startByte;
-                           if( a.endByte != b.endByte )     return a.endByte > b.endByte;
+                           if( a.startByte != b.startByte )
+                           {
+                               return a.startByte < b.startByte;
+                           }
+                           if( a.endByte != b.endByte )
+                           {
+                               return a.endByte > b.endByte;
+                           }
                            return a.id < b.id;
                        } );
         }
@@ -5115,9 +6363,13 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             }
 
             while( nextSpanIndex < endSpanIndex && spans[ nextSpanIndex ].startByte <= pos )
+            {
                 activeSpanIndices.push_back( nextSpanIndex++ );
+            }
             while( !activeSpanIndices.empty() && spans[ activeSpanIndices.back() ].endByte <= pos )
+            {
                 activeSpanIndices.pop_back();
+            }
 
             return activeSpanIndices.empty() ? kNoNode : spans[ activeSpanIndices.back() ].id;
         }
@@ -5133,13 +6385,19 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
         std::vector<std::size_t> refStartByFile( result.files.size() + 1, 0 );
         for( const RawRef& r : rawRefs )
+        {
             ++refStartByFile[ r.fileId + 1 ];
+        }
         for( std::size_t fileId = 1; fileId < refStartByFile.size(); ++fileId )
+        {
             refStartByFile[ fileId ] += refStartByFile[ fileId - 1 ];
+        }
 
         std::vector<std::size_t> refWriteByFile = refStartByFile;
         for( std::uint32_t i = 0; i < rawRefs.size(); ++i )
+        {
             refOrder[ refWriteByFile[ rawRefs[ i ].fileId ]++ ] = i;
+        }
 
         std::vector<std::uint32_t> refScratch( rawRefs.size() );
         // A4-F23b: (startByte,name) is NOT a total order — Python `class A(Foo)` captures `Foo` twice at one
@@ -5147,15 +6405,24 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // dependent. Extend the key with role then isInherit for a total, cross-platform-stable ordering.
         const auto lessRefResidual = [ &rawRefs ]( const RawRef& a, const RawRef& b ) noexcept
         {
-            if( a.name != b.name )         return a.name < b.name;
-            if( a.role != b.role )         return static_cast<std::uint8_t>( a.role ) < static_cast<std::uint8_t>( b.role );
+            if( a.name != b.name )
+            {
+                return a.name < b.name;
+            }
+            if( a.role != b.role )
+            {
+                return static_cast<std::uint8_t>( a.role ) < static_cast<std::uint8_t>( b.role );
+            }
             return static_cast<int>( a.isInherit ) < static_cast<int>( b.isInherit );
         };
         const auto lessRefByByteName = [ &rawRefs, &lessRefResidual ]( std::uint32_t ia, std::uint32_t ib ) noexcept
         {
             const RawRef& a = rawRefs[ ia ];
             const RawRef& b = rawRefs[ ib ];
-            if( a.startByte != b.startByte ) return a.startByte < b.startByte;
+            if( a.startByte != b.startByte )
+            {
+                return a.startByte < b.startByte;
+            }
             return lessRefResidual( a, b );
         };
         const auto lessRefByName = [ &rawRefs, &lessRefResidual ]( std::uint32_t ia, std::uint32_t ib ) noexcept
@@ -5174,13 +6441,17 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
             bool isAlreadySorted = true;
             for( std::size_t i = begin + 1; i < end; ++i )
+            {
                 if( lessRefByByteName( refOrder[ i ], refOrder[ i - 1 ] ) )
                 {
                     isAlreadySorted = false;
                     break;
                 }
+            }
             if( isAlreadySorted )
+            {
                 return;
+            }
 
             std::uint32_t* src = refOrder.data() + begin;
             std::uint32_t* dst = refScratch.data() + begin;
@@ -5190,13 +6461,19 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             {
                 std::uint32_t hist[ 256 ] = {};
                 for( std::size_t i = 0; i < count; ++i )
+                {
                     ++hist[ ( rawRefs[ src[ i ] ].startByte >> shift ) & 0xffu ];
+                }
 
                 bool singleBucket = false;
                 for( std::uint32_t h : hist )
+                {
                     if( h == count ) { singleBucket = true; break; }
+                }
                 if( singleBucket )
+                {
                     continue;
+                }
 
                 std::uint32_t offsets[ 256 ];
                 std::uint32_t sum = 0;
@@ -5216,7 +6493,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             }
 
             if( inScratch )
+            {
                 std::copy( src, src + count, refOrder.data() + begin );
+            }
 
             std::size_t tieBegin = begin;
             while( tieBegin < end )
@@ -5224,9 +6503,13 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 std::size_t tieEnd = tieBegin + 1;
                 const std::uint32_t byte = rawRefs[ refOrder[ tieBegin ] ].startByte;
                 while( tieEnd < end && rawRefs[ refOrder[ tieEnd ] ].startByte == byte )
+                {
                     ++tieEnd;
+                }
                 if( tieEnd - tieBegin > 1 )
+                {
                     std::sort( refOrder.begin() + tieBegin, refOrder.begin() + tieEnd, lessRefByName );
+                }
                 tieBegin = tieEnd;
             }
         };
@@ -5278,8 +6561,14 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         std::sort( rawBinds.begin(), rawBinds.end(),
                    []( const RawBind& a, const RawBind& b ) noexcept
                    {
-                       if( a.fileId    != b.fileId )    return a.fileId    < b.fileId;
-                       if( a.startByte != b.startByte ) return a.startByte < b.startByte;
+                       if( a.fileId != b.fileId )
+                       {
+                           return a.fileId < b.fileId;
+                       }
+                       if( a.startByte != b.startByte )
+                       {
+                           return a.startByte < b.startByte;
+                       }
                        return a.var < b.var;
                    } );
         result.bindings.resize( rawBinds.size() );
@@ -5302,10 +6591,22 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     std::sort( rawFfis.begin(), rawFfis.end(),
                []( const BindingAlias& a, const BindingAlias& b ) noexcept
                {
-                   if( a.fileId != b.fileId )           return a.fileId < b.fileId;
-                   if( a.kind   != b.kind )             return a.kind   < b.kind;
-                   if( a.aliasName != b.aliasName )     return a.aliasName < b.aliasName;
-                   if( a.targetScope != b.targetScope ) return a.targetScope < b.targetScope;
+                   if( a.fileId != b.fileId )
+                   {
+                       return a.fileId < b.fileId;
+                   }
+                   if( a.kind != b.kind )
+                   {
+                       return a.kind < b.kind;
+                   }
+                   if( a.aliasName != b.aliasName )
+                   {
+                       return a.aliasName < b.aliasName;
+                   }
+                   if( a.targetScope != b.targetScope )
+                   {
+                       return a.targetScope < b.targetScope;
+                   }
                    return a.targetName < b.targetName;
                } );
     result.bindingAliases = std::move( rawFfis );
@@ -5315,9 +6616,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     std::sort( rawRouteDefs.begin(), rawRouteDefs.end(),
                []( const RouteDef& a, const RouteDef& b ) noexcept
                {
-                   if( a.fileId != b.fileId ) return a.fileId < b.fileId;
-                   if( a.line   != b.line   ) return a.line   < b.line;
-                   if( a.method != b.method ) return a.method < b.method;
+                   if( a.fileId != b.fileId )
+                   {
+                       return a.fileId < b.fileId;
+                   }
+                   if( a.line != b.line )
+                   {
+                       return a.line < b.line;
+                   }
+                   if( a.method != b.method )
+                   {
+                       return a.method < b.method;
+                   }
                    return a.path < b.path;
                } );
     result.routeDefs = std::move( rawRouteDefs );
@@ -5331,8 +6641,14 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         std::sort( rawRouteUses.begin(), rawRouteUses.end(),
                    []( const RawRouteUse& a, const RawRouteUse& b ) noexcept
                    {
-                       if( a.fileId    != b.fileId )    return a.fileId    < b.fileId;
-                       if( a.startByte != b.startByte ) return a.startByte < b.startByte;
+                       if( a.fileId != b.fileId )
+                       {
+                           return a.fileId < b.fileId;
+                       }
+                       if( a.startByte != b.startByte )
+                       {
+                           return a.startByte < b.startByte;
+                       }
                        return a.path < b.path;
                    } );
         result.routeUses.resize( rawRouteUses.size() );
@@ -5356,6 +6672,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 inline bool captureText( const TSQueryMatch& m, std::uint32_t capIndex, std::string_view src, std::string& out )
 {
     for( std::uint16_t i = 0; i < m.capture_count; ++i )
+    {
         if( m.captures[i].index == capIndex )
         {
             const TSNode n = m.captures[i].node;
@@ -5363,6 +6680,7 @@ inline bool captureText( const TSQueryMatch& m, std::uint32_t capIndex, std::str
             if( a <= b && b <= src.size() ) { out = std::string( src.substr( a, b - a ) ); return true; }
             return false;
         }
+    }
     return false;
 }
 
@@ -5374,17 +6692,31 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
     const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern( q, m.pattern_index, &pc );
     const auto argText = [ & ]( const TSQueryPredicateStep& s, std::string& out ) -> bool
     {
-        if( s.type == TSQueryPredicateStepTypeCapture ) return captureText( m, s.value_id, src, out );
+        if( s.type == TSQueryPredicateStepTypeCapture )
+        {
+            return captureText( m, s.value_id, src, out );
+        }
         if( s.type == TSQueryPredicateStepTypeString )
-        { std::uint32_t l = 0; const char* v = ts_query_string_value_for_id( q, s.value_id, &l ); out.assign( v, l ); return true; }
+        {
+            std::uint32_t l = 0;
+            const char* v = ts_query_string_value_for_id( q, s.value_id, &l );
+            out.assign( v, l );
+            return true;
+        }
         return false;
     };
     for( std::uint32_t i = 0; i < pc; )
     {
         std::vector<TSQueryPredicateStep> pr;
-        for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i ) pr.push_back( steps[i] );
+        for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i )
+        {
+            pr.push_back( steps[i] );
+        }
         ++i;                                                            // skip the Done step
-        if( pr.size() < 3 || pr[0].type != TSQueryPredicateStepTypeString ) continue;
+        if( pr.size() < 3 || pr[0].type != TSQueryPredicateStepTypeString )
+        {
+            continue;
+        }
         // TWO statements, deliberately. Written as ONE — `string_view( f( …, &nl ), nl )` — the length
         // argument `nl` and the call that WRITES it are two arguments of the SAME call, and the order in
         // which a call's arguments are evaluated is UNSPECIFIED. GCC on x86-64 evaluates them right-to-left,
@@ -5396,16 +6728,31 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
         // len=6. Sequencing the write before the read IS the fix; do not re-inline these two lines.
         std::uint32_t nl     = 0;
         const char*   opText = ts_query_string_value_for_id( q, pr[0].value_id, &nl );
-        if( opText == nullptr ) continue;                               // no operator name ⇒ can't evaluate ⇒ don't filter
+        if( opText == nullptr )
+        {
+            continue; // no operator name ⇒ can't evaluate ⇒ don't filter
+        }
         const std::string_view op( opText, nl );
         std::string lhs, rhs;
-        if( !argText( pr[1], lhs ) || !argText( pr[2], rhs ) ) continue;   // can't evaluate → don't filter
+        if( !argText( pr[1], lhs ) || !argText( pr[2], rhs ) )
+        {
+            continue; // can't evaluate → don't filter
+        }
         bool ok = true;
-        if(      op == "eq?" )       ok = ( lhs == rhs );
-        else if( op == "not-eq?" )   ok = ( lhs != rhs );
+        if( op == "eq?" )
+        {
+            ok = ( lhs == rhs );
+        }
+        else if( op == "not-eq?" )
+        {
+            ok = ( lhs != rhs );
+        }
         else if( op == "match?" || op == "not-match?" )
         { try { const bool mm = std::regex_search( lhs, std::regex( rhs ) ); ok = ( op == "match?" ) ? mm : !mm; } catch( ... ) { ok = true; } }
-        if( !ok ) return false;
+        if( !ok )
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -5418,7 +6765,12 @@ inline std::vector<std::uint32_t> buildNewlineOffsets( std::string_view src )
 {
     std::vector<std::uint32_t> off;
     for( std::uint32_t i = 0; i < src.size(); ++i )
-        if( src[i] == '\n' ) off.push_back( i );
+    {
+        if( src[i] == '\n' )
+        {
+            off.push_back( i );
+        }
+    }
     return off;
 }
 inline std::uint32_t lineAtByte( const std::vector<std::uint32_t>& nlOffsets, std::uint32_t bytePos ) noexcept
@@ -5431,38 +6783,70 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
                                 std::vector<std::string>* uncompiledOut )
 {
     std::vector<AstMatch> out;
-    if( specs.empty() || ing.files.empty() ) return out;
+    if( specs.empty() || ing.files.empty() )
+    {
+        return out;
+    }
 
     // Compile each spec against every DISTINCT grammar it is valid for (up front, single-threaded). Queries
     // are immutable after creation → shared read-only across workers; only the cursor is per-thread.
     HashMap<const TSLanguage*, std::vector<std::pair<TSQuery*, std::string>>> byGrammar;
     for( const LangEntry& e : kLangTable )
     {
-        if( e.grammar == nullptr ) continue;          // markdown — no tree-sitter grammar (calling the null fn ptr = SIGSEGV)
+        if( e.grammar == nullptr )
+        {
+            continue; // markdown — no tree-sitter grammar (calling the null fn ptr = SIGSEGV)
+        }
         const TSLanguage* g = e.grammar();
-        if( byGrammar.find( g ) != byGrammar.end() ) continue;
+        if( byGrammar.find( g ) != byGrammar.end() )
+        {
+            continue;
+        }
         std::vector<std::pair<TSQuery*, std::string>> compiled;
         for( const AstQuerySpec& spec : specs )
         {
             std::uint32_t off = 0;  TSQueryError err = TSQueryErrorNone;
             if( TSQuery* q = ts_query_new( g, spec.query.data(), static_cast<std::uint32_t>( spec.query.size() ), &off, &err ) )
+            {
                 compiled.emplace_back( q, spec.tag );
+            }
         }
         byGrammar.emplace( g, std::move( compiled ) );
     }
     for( const AstQuerySpec& spec : specs )   // warn once if a spec compiled for NO grammar (malformed query)
     {
         bool any = false;
-        for( const auto& [g, qs] : byGrammar ) { for( const auto& [q, tag] : qs ) if( tag == spec.tag ) { any = true; break; } if( any ) break; }
+        for( const auto& [g, qs] : byGrammar )
+        {
+            for( const auto& [q, tag] : qs )
+            {
+                if( tag == spec.tag )
+                {
+                    any = true;
+                    break;
+                }
+            }
+            if( any )
+            {
+                break;
+            }
+        }
         if( !any )
         {
             std::fprintf( stderr, "ripwire: AST query did not compile for any grammar: %.*s\n", int( spec.query.size() ), spec.query.data() );
-            if( uncompiledOut ) uncompiledOut->push_back( spec.query );
+            if( uncompiledOut )
+            {
+                uncompiledOut->push_back( spec.query );
+            }
         }
     }
 
     const std::size_t nfiles = ing.files.size();
-    unsigned hw = std::thread::hardware_concurrency();  if( hw == 0 ) hw = 1;
+    unsigned hw = std::thread::hardware_concurrency();
+    if( hw == 0 )
+    {
+        hw = 1;
+    }
     const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
 
     // NO mid-flight global cap: a shared match counter raced by workers makes WHICH matches survive the
@@ -5478,31 +6862,63 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
         pool.emplace_back( [ &, t ]()
         {
             ParserGuard pg;
-            if( pg.p == nullptr ) return;
+            if( pg.p == nullptr )
+            {
+                return;
+            }
             TSQueryCursor* cur = ts_query_cursor_new();
             std::string    bytes;
             for( ;; )
             {
                 const std::size_t fileId = nextFile.fetch_add( 1, std::memory_order_relaxed );
-                if( fileId >= nfiles ) break;
+                if( fileId >= nfiles )
+                {
+                    break;
+                }
                 try
                 {
                     const std::string& path = diskPath( ing, std::uint32_t( fileId ) );   // multi-root: labeled ing.files → on-disk path
                     const std::string ext = lowerExtensionOf( path );
                     const LangEntry* le = lookupLang( ext );
-                    if( le == nullptr )            continue;
-                    if( !readFile( path, bytes ) ) continue;
-                    if( looksBinary( bytes ) )     continue;
+                    if( le == nullptr )
+                    {
+                        continue;
+                    }
+                    if( !readFile( path, bytes ) )
+                    {
+                        continue;
+                    }
+                    if( looksBinary( bytes ) )
+                    {
+                        continue;
+                    }
                     if( ext == ".h" && looksObjC( bytes ) )
-                        if( const LangEntry* objcLe = lookupLang( ".m" ) ) le = objcLe;
+                    {
+                        if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                        {
+                            le = objcLe;
+                        }
+                    }
 
-                    if( le->grammar == nullptr )   continue;   // markdown — no grammar (would deref a null fn ptr)
+                    if( le->grammar == nullptr )
+                    {
+                        continue; // markdown — no grammar (would deref a null fn ptr)
+                    }
                     const TSLanguage* g  = le->grammar();
                     const auto        it = byGrammar.find( g );
-                    if( it == byGrammar.end() || it->second.empty() ) continue;       // no spec applies to this grammar
-                    if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) ) continue;
+                    if( it == byGrammar.end() || it->second.empty() )
+                    {
+                        continue; // no spec applies to this grammar
+                    }
+                    if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
+                    {
+                        continue;
+                    }
                     TSTree* tree = ts_parser_parse_string( pg.p, nullptr, bytes.data(), static_cast<std::uint32_t>( bytes.size() ) );
-                    if( !tree ) continue;
+                    if( !tree )
+                    {
+                        continue;
+                    }
                     const TSNode root = ts_tree_root_node( tree );
                     const std::vector<std::uint32_t> nlOffsets = buildNewlineOffsets( bytes );   // one pass, then binary-search per capture
                     for( const auto& [q, tag] : it->second )
@@ -5511,18 +6927,35 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
                         TSQueryMatch m;
                         while( ts_query_cursor_next_match( cur, &m ) )
                         {
-                            if( !passesPredicates( q, m, bytes ) ) continue;   // honour #eq? / #match? etc.
+                            if( !passesPredicates( q, m, bytes ) )
+                            {
+                                continue; // honour #eq? / #match? etc.
+                            }
                             for( std::uint16_t c = 0; c < m.capture_count; ++c )
                             {
                                 const TSNode        n = m.captures[c].node;
                                 const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
-                                if( a >= b || b > bytes.size() ) continue;
+                                if( a >= b || b > bytes.size() )
+                                {
+                                    continue;
+                                }
                                 const std::uint32_t line = lineAtByte( nlOffsets, a );
                                 std::size_t cutLen = std::min<std::size_t>( b - a, 120u );
-                                if( cutLen < b - a )   // truncated mid-text → back off UTF-8 continuation bytes so the cut never splits a codepoint (same pattern as serialize.h packSource)
-                                    while( cutLen > 0 && ( static_cast<unsigned char>( bytes[ a + cutLen ] ) & 0xC0 ) == 0x80 ) --cutLen;
+                                if( cutLen < b - a )
+                                { // truncated mid-text → back off UTF-8 continuation bytes so the cut never splits a codepoint (same pattern as serialize.h packSource)
+                                    while( cutLen > 0 && ( static_cast<unsigned char>( bytes[a + cutLen] ) & 0xC0 ) == 0x80 )
+                                    {
+                                        --cutLen;
+                                    }
+                                }
                                 std::string text = bytes.substr( a, cutLen );
-                                for( char& ch : text ) if( ch == '\n' || ch == '\r' || ch == '\t' ) ch = ' ';
+                                for( char& ch : text )
+                                {
+                                    if( ch == '\n' || ch == '\r' || ch == '\t' )
+                                    {
+                                        ch = ' ';
+                                    }
+                                }
                                 tHits[t].push_back( { std::uint32_t( fileId ), a, b, line, tag, std::move( text ) } );
                             }
                         }
@@ -5534,20 +6967,48 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
             ts_query_cursor_delete( cur );
         } );
     }
-    for( std::thread& th : pool ) th.join();
-
-    for( auto& [g, qs] : byGrammar ) for( auto& [q, tag] : qs ) ts_query_delete( q );
-
-    std::size_t tot = 0;  for( const auto& v : tHits ) tot += v.size();
-    out.reserve( tot );
-    for( auto& v : tHits ) for( auto& m : v ) out.push_back( std::move( m ) );
-    std::sort( out.begin(), out.end(), [ & ]( const AstMatch& x, const AstMatch& y )   // deterministic order
+    for( std::thread& th : pool )
     {
-        if( ing.files[x.fileId] != ing.files[y.fileId] ) return ing.files[x.fileId] < ing.files[y.fileId];
-        if( x.startByte != y.startByte ) return x.startByte < y.startByte;
-        if( x.endByte   != y.endByte   ) return x.endByte   < y.endByte;     // nested same-start captures (outer+inner call at one byte) need this or std::sort leaks thread arrival order
-        return x.tag < y.tag;                                                // equal keys ⇒ identical records (text derives from [start,end)) — order among them can't affect output
-    } );
+        th.join();
+    }
+
+    for( auto& [g, qs] : byGrammar )
+    {
+        for( auto& [q, tag] : qs )
+        {
+            ts_query_delete( q );
+        }
+    }
+
+    std::size_t tot = 0;
+    for( const auto& v : tHits )
+    {
+        tot += v.size();
+    }
+    out.reserve( tot );
+    for( auto& v : tHits )
+    {
+        for( auto& m : v )
+        {
+            out.push_back( std::move( m ) );
+        }
+    }
+    std::sort( out.begin(), out.end(), [ & ]( const AstMatch& x, const AstMatch& y ) // deterministic order
+               {
+                   if( ing.files[x.fileId] != ing.files[y.fileId] )
+                   {
+                       return ing.files[x.fileId] < ing.files[y.fileId];
+                   }
+                   if( x.startByte != y.startByte )
+                   {
+                       return x.startByte < y.startByte;
+                   }
+                   if( x.endByte != y.endByte )
+                   {
+                       return x.endByte < y.endByte; // nested same-start captures (outer+inner call at one byte) need this or std::sort leaks thread arrival order
+                   }
+                   return x.tag < y.tag;                                                // equal keys ⇒ identical records (text derives from [start,end)) — order among them can't affect output
+               } );
 
     // ── deterministic PER-SPEC cap (§P0.2), applied AFTER the sort so the survivors are a pure function of
     // the input. One POOLED budget let the noisiest query eat it: `(number_literal)` alone filled 5000, the
@@ -5569,7 +7030,10 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
         const auto slotIt = tagSlot.find( m.tag );
         VERIFY( slotIt != tagSlot.end() );                              // every emitted tag came from a spec
         std::size_t& keptCount = keptPerTag[ slotIt->second ];
-        if( keptCount >= maxMatches ) continue;                         // this spec's own budget is spent — never another's
+        if( keptCount >= maxMatches )
+        {
+            continue; // this spec's own budget is spent — never another's
+        }
         ++keptCount;
         keep.push_back( std::move( m ) );
     }
@@ -5608,7 +7072,10 @@ inline bool ur_isTerminator( const char* t ) noexcept
 // exposes comments as named siblings inside a block; a comment after `return` is not dead CODE.
 inline bool ur_isSkippableSibling( TSNode n ) noexcept
 {
-    if( !ts_node_is_named( n ) ) return true;                // '{', '}', ';', ':' punctuation tokens
+    if( !ts_node_is_named( n ) )
+    {
+        return true; // '{', '}', ';', ':' punctuation tokens
+    }
     const char* t = ts_node_type( n );
     return std::strcmp( t, "comment" ) == 0;
 }
@@ -5642,7 +7109,10 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
     {
         const UrFrame frame = stack.back();
         stack.pop_back();
-        if( frame.depth > 512 ) continue;                    // pathological-AST guard (file capped at 1 MB)
+        if( frame.depth > 512 )
+        {
+            continue; // pathological-AST guard (file capped at 1 MB)
+        }
         const TSNode        n          = frame.node;
         const std::uint16_t childDepth = static_cast<std::uint16_t>( frame.depth + 1 );
         const char*         t          = ts_node_type( n );
@@ -5658,26 +7128,47 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
 
                 if( sawTerminator )
                 {
-                    if( ur_isSkippableSibling( c ) ) continue;      // comment / punctuation → not code, keep looking
-                    if( ur_isJumpTarget( ct ) )      break;         // label/case → reachable out-of-line → stop, no flag
+                    if( ur_isSkippableSibling( c ) )
+                    {
+                        continue; // comment / punctuation → not code, keep looking
+                    }
+                    if( ur_isJumpTarget( ct ) )
+                    {
+                        break; // label/case → reachable out-of-line → stop, no flag
+                    }
                     // First real statement after an unconditional exit in this block → UNREACHABLE.
                     const std::uint32_t a = ts_node_start_byte( c ), b = ts_node_end_byte( c );
                     if( a < b && b <= src.size() )
                     {
                         const std::uint32_t line = lineAtByte( nlOffsets, a );
                         std::size_t cutLen = std::min<std::size_t>( b - a, 120u );
-                        if( cutLen < b - a )                        // UTF-8-safe truncation (serialize.h/astQuery pattern)
-                            while( cutLen > 0 && ( static_cast<unsigned char>( src[ a + cutLen ] ) & 0xC0 ) == 0x80 ) --cutLen;
+                        if( cutLen < b - a )
+                        { // UTF-8-safe truncation (serialize.h/astQuery pattern)
+                            while( cutLen > 0 && ( static_cast<unsigned char>( src[a + cutLen] ) & 0xC0 ) == 0x80 )
+                            {
+                                --cutLen;
+                            }
+                        }
                         std::string text( src.substr( a, cutLen ) );
-                        for( char& ch : text ) if( ch == '\n' || ch == '\r' || ch == '\t' ) ch = ' ';
+                        for( char& ch : text )
+                        {
+                            if( ch == '\n' || ch == '\r' || ch == '\t' )
+                            {
+                                ch = ' ';
+                            }
+                        }
                         hits.push_back( { fileId, a, b, line, std::string( "unreachable-code" ), std::move( text ) } );
                     }
                     break;   // one finding per block — the first dead statement; the rest are consequential noise
                 }
                 else if( ur_isSkippableSibling( c ) )
+                {
                     continue;                                       // comments/punctuation don't set the terminator flag
+                }
                 else if( ur_isTerminator( ct ) )
+                {
                     sawTerminator = true;                           // arm: the NEXT real sibling is unreachable
+                }
                 // else: an ordinary statement — reachable; a terminator inside it (nested block/branch)
                 //       is handled when we descend into that child's own block, never at THIS level.
             }
@@ -5686,17 +7177,26 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
         // Descend into every child (blocks nest — a function body holds inner blocks, and non-block
         // statements like if/for CONTAIN blocks we must still reach). Push in reverse for L-to-R order.
         for( std::size_t i = kids.size(); i > 0; --i )
+        {
             stack.push_back( { kids[ i - 1 ], childDepth } );
+        }
     }
 }
 
 std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t maxMatches )
 {
     std::vector<AstMatch> out;
-    if( ing.files.empty() ) return out;
+    if( ing.files.empty() )
+    {
+        return out;
+    }
 
     const std::size_t nfiles = ing.files.size();
-    unsigned hw = std::thread::hardware_concurrency();  if( hw == 0 ) hw = 1;
+    unsigned hw = std::thread::hardware_concurrency();
+    if( hw == 0 )
+    {
+        hw = 1;
+    }
     const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
 
     // Per-thread hit buckets, merged + sorted after the join (same determinism discipline as astQuery:
@@ -5710,28 +7210,57 @@ std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t max
         pool.emplace_back( [ &, t ]()
         {
             ParserGuard pg;
-            if( pg.p == nullptr ) return;
+            if( pg.p == nullptr )
+            {
+                return;
+            }
             std::string bytes;
             for( ;; )
             {
                 const std::size_t fileId = nextFile.fetch_add( 1, std::memory_order_relaxed );
-                if( fileId >= nfiles ) break;
+                if( fileId >= nfiles )
+                {
+                    break;
+                }
                 try
                 {
                     const std::string& path = diskPath( ing, std::uint32_t( fileId ) );   // multi-root: labeled ing.files → on-disk path
                     const std::string ext = lowerExtensionOf( path );
                     const LangEntry* le = lookupLang( ext );
-                    if( le == nullptr )            continue;
-                    if( !readFile( path, bytes ) ) continue;
-                    if( looksBinary( bytes ) )     continue;
+                    if( le == nullptr )
+                    {
+                        continue;
+                    }
+                    if( !readFile( path, bytes ) )
+                    {
+                        continue;
+                    }
+                    if( looksBinary( bytes ) )
+                    {
+                        continue;
+                    }
                     if( ext == ".h" && looksObjC( bytes ) )
-                        if( const LangEntry* objcLe = lookupLang( ".m" ) ) le = objcLe;
-                    if( le->grammar == nullptr )   continue;   // markdown — no grammar
+                    {
+                        if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                        {
+                            le = objcLe;
+                        }
+                    }
+                    if( le->grammar == nullptr )
+                    {
+                        continue; // markdown — no grammar
+                    }
 
                     const TSLanguage* g = le->grammar();
-                    if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) ) continue;
+                    if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
+                    {
+                        continue;
+                    }
                     TSTree* tree = ts_parser_parse_string( pg.p, nullptr, bytes.data(), static_cast<std::uint32_t>( bytes.size() ) );
-                    if( !tree ) continue;
+                    if( !tree )
+                    {
+                        continue;
+                    }
                     const std::vector<std::uint32_t> nlOffsets = buildNewlineOffsets( bytes );   // one pass; ur_walkTree binary-searches it
                     ur_walkTree( ts_tree_root_node( tree ), std::uint32_t( fileId ), bytes, nlOffsets, tHits[t] );
                     ts_tree_delete( tree );
@@ -5740,20 +7269,37 @@ std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t max
             }
         } );
     }
-    for( std::thread& th : pool ) th.join();
-
-    std::size_t tot = 0;  for( const auto& v : tHits ) tot += v.size();
-    out.reserve( tot );
-    for( auto& v : tHits ) for( auto& m : v ) out.push_back( std::move( m ) );
-    std::sort( out.begin(), out.end(), [ & ]( const AstMatch& x, const AstMatch& y )   // deterministic order
+    for( std::thread& th : pool )
     {
-        if( ing.files[x.fileId] != ing.files[y.fileId] ) return ing.files[x.fileId] < ing.files[y.fileId];
-        if( x.startByte != y.startByte ) return x.startByte < y.startByte;
-        if( x.endByte   != y.endByte   ) return x.endByte   < y.endByte;     // same total tie-break as astQuery — same-start ties must not leak thread arrival order
-        return x.tag < y.tag;
-    } );
+        th.join();
+    }
+
+    std::size_t tot = 0;
+    for( const auto& v : tHits )
+    {
+        tot += v.size();
+    }
+    out.reserve( tot );
+    for( auto& v : tHits )
+    {
+        for( auto& m : v )
+        {
+            out.push_back( std::move( m ) );
+        }
+    }
+    std::sort( out.begin(), out.end(), [ & ]( const AstMatch& x, const AstMatch& y ) // deterministic order
+               {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
+}
+        if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
+}
+        if( x.endByte   != y.endByte   ) { return x.endByte   < y.endByte;     // same total tie-break as astQuery — same-start ties must not leak thread arrival order
+}
+        return x.tag < y.tag; } );
     if( out.size() > maxMatches )
+    {
         out.resize( maxMatches );
+    }
     return out;
 }
 

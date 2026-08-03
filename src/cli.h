@@ -328,7 +328,10 @@ inline bool parsePosInt( const char* s, int& out ) noexcept
 {
     char*      end = nullptr;
     const long v   = std::strtol( s, &end, 10 );
-    if( end == s || *end != '\0' || v < 1 || v > 1000000000 ) return false;
+    if( end == s || *end != '\0' || v < 1 || v > 1000000000 )
+    {
+        return false;
+    }
     out = int( v );
     return true;
 }
@@ -337,10 +340,16 @@ inline bool parsePosInt( const char* s, int& out ) noexcept
 // negative / overflow. Kept separate so --limit / --top-k stay strictly positive (0 = "emit all" trap).
 inline bool parseNonNegInt( const char* s, int& out ) noexcept
 {
-    if( s[0] < '0' || s[0] > '9' ) return false;              // reject "-1"/"" (strtol would wrap/accept)
+    if( s[0] < '0' || s[0] > '9' )
+    {
+        return false; // reject "-1"/"" (strtol would wrap/accept)
+    }
     char*      end = nullptr;
     const long v   = std::strtol( s, &end, 10 );
-    if( end == s || *end != '\0' || v < 0 || v > 1000000000 ) return false;
+    if( end == s || *end != '\0' || v < 0 || v > 1000000000 )
+    {
+        return false;
+    }
     out = int( v );
     return true;
 }
@@ -430,11 +439,17 @@ inline void refuseEmptyValue( std::string_view flag, const char* needs, const ch
 // `=abc` no longer silently becomes 0). First char must be a digit — strtoull would accept "-1" by wrapping.
 inline bool parsePosU64( const char* s, std::size_t& out ) noexcept
 {
-    if( s[0] < '0' || s[0] > '9' ) return false;
+    if( s[0] < '0' || s[0] > '9' )
+    {
+        return false;
+    }
     char* end = nullptr;
     errno     = 0;
     const unsigned long long v = std::strtoull( s, &end, 10 );
-    if( end == s || *end != '\0' || v < 1 || errno == ERANGE ) return false;
+    if( end == s || *end != '\0' || v < 1 || errno == ERANGE )
+    {
+        return false;
+    }
     out = std::size_t( v );
     return true;
 }
@@ -444,11 +459,17 @@ inline bool parsePosU64( const char* s, std::size_t& out ) noexcept
 // rules as parsePosU64 (empty / signed / zero / bad-suffix / overflow). Used by --max-file-size.
 inline bool parseByteSize( const char* s, std::size_t& out ) noexcept
 {
-    if( s[0] < '0' || s[0] > '9' ) return false;
+    if( s[0] < '0' || s[0] > '9' )
+    {
+        return false;
+    }
     char* end = nullptr;
     errno     = 0;
     const unsigned long long v = std::strtoull( s, &end, 10 );
-    if( end == s || v < 1 || errno == ERANGE ) return false;
+    if( end == s || v < 1 || errno == ERANGE )
+    {
+        return false;
+    }
 
     std::size_t mult = 1;
     if( *end != '\0' )                                        // an optional K/M/G scale suffix
@@ -461,10 +482,19 @@ inline bool parseByteSize( const char* s, std::size_t& out ) noexcept
             default:            return false;
         }
         ++end;
-        if( *end == 'b' || *end == 'B' ) ++end;              // tolerate the "B" of KB/MB/GB
-        if( *end != '\0' ) return false;
+        if( *end == 'b' || *end == 'B' )
+        {
+            ++end; // tolerate the "B" of KB/MB/GB
+        }
+        if( *end != '\0' )
+        {
+            return false;
+        }
     }
-    if( v > static_cast<unsigned long long>( SIZE_MAX / mult ) ) return false;   // overflow guard
+    if( v > static_cast<unsigned long long>( SIZE_MAX / mult ) )
+    {
+        return false; // overflow guard
+    }
     out = std::size_t( v ) * mult;
     return true;
 }
@@ -1534,8 +1564,14 @@ consteval bool viewFlagEmptyPolicyIsWellFormed() noexcept
     for( const ViewFlag& vf : kViewFlags )
     {
         const bool hasSentence = vf.needs != nullptr && vf.example != nullptr;
-        if( ( vf.onEmpty == EmptyValue::Refuse ) != hasSentence ) return false;
-        if( ( vf.needs == nullptr ) != ( vf.example == nullptr ) ) return false;   // never half a sentence
+        if( ( vf.onEmpty == EmptyValue::Refuse ) != hasSentence )
+        {
+            return false;
+        }
+        if( ( vf.needs == nullptr ) != ( vf.example == nullptr ) )
+        {
+            return false; // never half a sentence
+        }
     }
     return true;
 }
@@ -1653,7 +1689,10 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
 {
     for( const ViewFlag& vf : kViewFlags )
     {
-        if( !startsWith( arg, vf.prefix ) ) continue;
+        if( !startsWith( arg, vf.prefix ) )
+        {
+            continue;
+        }
         const std::string_view value = arg.substr( vf.prefix.size() );
         // §B5: the EMPTY-value decision is the row's, never this loop's. Refuse prints here; Meaningful and
         // HandlerRefuses both fall through to the assignment — the difference between them is which code
@@ -1665,8 +1704,14 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
         // §B5: the companion bools the migrated arms used to set by hand — `--owners=SYM` selects the verb
         // AND narrows it, and a table that could only assign the value would have had to leave those 23 arms
         // outside it. Mirrors kIntFlags' isSetFlag column exactly.
-        if( vf.isSetFlag     != nullptr ) c.*vf.isSetFlag     = true;
-        if( vf.isSetFlagAlso != nullptr ) c.*vf.isSetFlagAlso = true;
+        if( vf.isSetFlag != nullptr )
+        {
+            c.*vf.isSetFlag = true;
+        }
+        if( vf.isSetFlagAlso != nullptr )
+        {
+            c.*vf.isSetFlagAlso = true;
+        }
         return ViewFlagMatch::Assigned;
     }
     return ViewFlagMatch::NoMatch;
@@ -1683,7 +1728,10 @@ inline IntFlagMatch applyIntFlag( std::string_view arg, Config& c )
 {
     for( const IntFlag& f : kIntFlags )
     {
-        if( !startsWith( arg, f.prefix ) ) continue;
+        if( !startsWith( arg, f.prefix ) )
+        {
+            continue;
+        }
 
         const char* value   = arg.data() + f.prefix.size();
         int         parsed  = 0;
@@ -1700,9 +1748,18 @@ inline IntFlagMatch applyIntFlag( std::string_view arg, Config& c )
         }
 
         c.*f.member = parsed;
-        if( f.memberAlso != nullptr ) c.*f.memberAlso = parsed;
-        if( f.isSetFlag  != nullptr ) c.*f.isSetFlag  = true;
-        if( f.deprecation != nullptr ) std::fprintf( stderr, "%s", f.deprecation );
+        if( f.memberAlso != nullptr )
+        {
+            c.*f.memberAlso = parsed;
+        }
+        if( f.isSetFlag != nullptr )
+        {
+            c.*f.isSetFlag = true;
+        }
+        if( f.deprecation != nullptr )
+        {
+            std::fprintf( stderr, "%s", f.deprecation );
+        }
         return IntFlagMatch::Assigned;
     }
     return IntFlagMatch::NoMatch;
@@ -1739,7 +1796,10 @@ inline void validatePlanLanes( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --brief=FILE is the input to --plan-lanes — pass both (e.g. ripwire <dir> --plan-lanes --brief=tasks.md)\n" );
         c.ok = false;
     }
-    if( !c.planLanesFlag ) return;                     // nothing below is meaningful without the verb itself
+    if( !c.planLanesFlag )
+    {
+        return; // nothing below is meaningful without the verb itself
+    }
 
     if( c.laneTask.empty() && c.laneBrief.empty() )
     {
@@ -1848,21 +1908,35 @@ inline bool honorsPaging( const Config& c ) noexcept
 // Returns nullptr when the refusal has no mode cause (the ordinary "this verb pages nothing" case).
 inline const char* pagingDisablingMode( const Config& c ) noexcept
 {
-    if( c.strayContent && c.landingPlan ) return "--plan";
-    if( c.strayContent && c.abiFlag )     return "--abi";
-    if( c.zoom && c.mermaid )             return "--mermaid";
+    if( c.strayContent && c.landingPlan )
+    {
+        return "--plan";
+    }
+    if( c.strayContent && c.abiFlag )
+    {
+        return "--abi";
+    }
+    if( c.zoom && c.mermaid )
+    {
+        return "--mermaid";
+    }
     return nullptr;
 }
 
 inline void validatePagingHonored( Config& c ) noexcept
 {
-    if( ( c.pageLimit <= 0 && c.pageOffset <= 0 ) || c.mcp || honorsPaging( c ) ) return;
+    if( ( c.pageLimit <= 0 && c.pageOffset <= 0 ) || c.mcp || honorsPaging( c ) )
+    {
+        return;
+    }
 
     // §B11.6: name the MODE first when one is what disabled paging — the honoring list below is otherwise
     // read as self-contradicting, and the remedy ("drop the mode flag") is not derivable from it.
     if( const char* mode = pagingDisablingMode( c ) )
+    {
         std::fprintf( stderr, "ripwire: %s turns this run into a fixed report, so --limit/--offset have nothing to "
                               "window — the base verb pages, this mode does not. Drop %s to page it.\n", mode, mode );
+    }
     std::fprintf( stderr, "ripwire: --limit/--offset are honored only by: %s. The default map is bounded by --top-k=N "
                           "(or --max-tokens=N) and --recall by --top-k=N, not --limit; the rest emit a fixed report with "
                           "no page to walk\n",
@@ -1883,8 +1957,14 @@ inline void validatePagingHonored( Config& c ) noexcept
 // unsupported verb, which is the honest state of the feature.
 inline void validateColumnarVerb( Config& c ) noexcept
 {
-    if( !c.columnar ) return;
-    if( !c.callers.empty() || !c.callees.empty() || !c.usesSym.empty() || !c.impactSym.empty() ) return;
+    if( !c.columnar )
+    {
+        return;
+    }
+    if( !c.callers.empty() || !c.callees.empty() || !c.usesSym.empty() || !c.impactSym.empty() )
+    {
+        return;
+    }
 
     std::fprintf( stderr, "ripwire: --format=columnar re-serializes the FLAT symbol-row verbs only — supported: "
                           "--callers/--callees/--uses/--impact (e.g. ripwire <dir> --callers=SYM --format=columnar). "
@@ -1976,11 +2056,23 @@ inline void refusePagingFamilyFlag( Config& c, const PagingFamilyFlagGuard& g ) 
 // is a live argvdiff vector). It is the order the three separate calls ran in, preserved deliberately.
 inline void validateShapingFlagsHonored( Config& c ) noexcept
 {
-    if( c.mcp || !honorsPaging( c ) ) return;
+    if( c.mcp || !honorsPaging( c ) )
+    {
+        return;
+    }
 
-    if( c.topKExplicit && !honorsTopK( c ) ) refusePagingFamilyFlag( c, kTopKGuard );
-    if( c.maxTokens    > 0 )                 refusePagingFamilyFlag( c, kMaxTokensGuard );
-    if( c.tokenBudget != 0 )                 refusePagingFamilyFlag( c, kTokenBudgetGuard );
+    if( c.topKExplicit && !honorsTopK( c ) )
+    {
+        refusePagingFamilyFlag( c, kTopKGuard );
+    }
+    if( c.maxTokens > 0 )
+    {
+        refusePagingFamilyFlag( c, kMaxTokensGuard );
+    }
+    if( c.tokenBudget != 0 )
+    {
+        refusePagingFamilyFlag( c, kTokenBudgetGuard );
+    }
 }
 
 // §B9.2 (capture-audit-4, wave 3) — the shaping flags on verbs OUTSIDE the report/paging family.
@@ -2072,33 +2164,49 @@ inline const ShapingVerb* selectedShapingVerb( const Config& c ) noexcept
         const bool isSelected = v.isSelectedFlag  != nullptr ? c.*v.isSelectedFlag
                               : v.isSelectedValue != nullptr ? !( c.*v.isSelectedValue ).empty()
                                                              : false;
-        if( isSelected ) return &v;
+        if( isSelected )
+        {
+            return &v;
+        }
     }
     return nullptr;
 }
 
 inline void noticeShapingFlagIgnored( const Config& c ) noexcept
 {
-    if( c.mcp || honorsPaging( c ) ) return;                 // that family REFUSES; two messages would be noise
-    if( c.topKExplicit == false && c.maxTokens <= 0 && c.tokenBudget == 0 ) return;
+    if( c.mcp || honorsPaging( c ) )
+    {
+        return; // that family REFUSES; two messages would be noise
+    }
+    if( c.topKExplicit == false && c.maxTokens <= 0 && c.tokenBudget == 0 )
+    {
+        return;
+    }
 
     const ShapingVerb* const verb = selectedShapingVerb( c );
-    if( verb == nullptr ) return;                            // the default map (and its riders) honour both
+    if( verb == nullptr )
+    {
+        return; // the default map (and its riders) honour both
+    }
 
     if( c.topKExplicit && !verb->honorsTopK )
+    {
         std::fprintf( stderr, "ripwire: --top-k is not read by %.*s — it shapes the default map, --query, "
                               "--format=candidates, --recall and --graph-query. %.*s emitted its full result "
                               "(nothing was dropped); narrow it with the verb's own arguments instead\n",
                       int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
+    }
 
     // the --detail carve-out: `--for --detail=N` DOES bound its bodies with --max-tokens, so a note there
     // would be false. Stated as a condition rather than a table column because it is the one cross-flag case.
     const bool isForDetailBudget = !c.forTask.empty() && c.detail > 0;
     if( c.maxTokens > 0 && !verb->honorsMaxTokens && !isForDetailBudget )
+    {
         std::fprintf( stderr, "ripwire: --max-tokens is not read by %.*s — it shapes the default map, --recall, "
                               "--connect, --pr-context, --from-trace and --for --detail=N. %.*s emitted its full "
                               "result (nothing was dropped)\n",
                       int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
+    }
 
     // §H4 / V3 M-4: the third budget flag reaches the same rows. --edit-check is the graph-count verb this
     // arm actually covers (the other five are inside honorsPaging and REFUSE), and its warn-and-emit is
@@ -2106,10 +2214,12 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
     // §B9.2/R12 settled DISCLOSE-not-refuse out here because refusing would break `--for=X --max-tokens=5000`,
     // a shape that has exited 0 for the tool's whole life. Same treatment, same reason.
     if( c.tokenBudget > 0 && !verb->honorsTokenBudget )
+    {
         std::fprintf( stderr, "ripwire: --token-budget is not read by %.*s — it gates the default map and bounds "
                               "--for, --pack-task, --recall and --from-trace. %.*s emitted its full result "
                               "(nothing was withheld)\n",
                       int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
+    }
 }
 
 inline void validateModifierGuards( Config& c ) noexcept
@@ -2321,16 +2431,18 @@ inline void validateConfig( Config& c ) noexcept
     // unrelated addition as thrash. `if( A ) if( B )` short-circuits identically to `if( A && B )` (no dangling
     // else below to worry about) — the line it guards is otherwise completely unmodified.
     if( !c.owners )
-    // --detail=N (RESEARCH lever 3) folds full bodies onto the --for lens; alone it does nothing — refuse loudly.
-    // The cross-branch verbs (--stray-content/--whereis) reuse it for the SAME meaning — "lift the display cap, show the
-    // rows the ranked head elided" — so they join --for as a legal companion rather than growing a second
-    // spelling of "show me more". --flags/--flip belongs in that list for the same reason and always did:
-    // its handler has read cfg.detail since it shipped (the per-gate site cap), but the guard here never
-    // admitted it, so that branch was unreachable and `--flags --detail=N` refused instead of widening.
-    if( c.detail > 0 && c.forTask.empty() && !c.strayContent && !c.whereisFlag && !c.docDrift && !c.darkFlags )
     {
-        std::fprintf( stderr, "ripwire: --detail=N modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --detail=3)\n" );
-        c.ok = false;
+        // --detail=N (RESEARCH lever 3) folds full bodies onto the --for lens; alone it does nothing — refuse loudly.
+        // The cross-branch verbs (--stray-content/--whereis) reuse it for the SAME meaning — "lift the display cap, show the
+        // rows the ranked head elided" — so they join --for as a legal companion rather than growing a second
+        // spelling of "show me more". --flags/--flip belongs in that list for the same reason and always did:
+        // its handler has read cfg.detail since it shipped (the per-gate site cap), but the guard here never
+        // admitted it, so that branch was unreachable and `--flags --detail=N` refused instead of widening.
+        if( c.detail > 0 && c.forTask.empty() && !c.strayContent && !c.whereisFlag && !c.docDrift && !c.darkFlags )
+        {
+            std::fprintf( stderr, "ripwire: --detail=N modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --detail=3)\n" );
+            c.ok = false;
+        }
     }
 
     // --partition=N SPLITS a --pack-task bundle; there is nothing else in the tool it could
@@ -2431,7 +2543,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
     bool orderDeprecWarned = false;
     auto deprecatedOrderFlag = [&]( const char* oldFlag, const char* newValue ) noexcept
     {
-        if( orderDeprecWarned ) return;
+        if( orderDeprecWarned )
+        {
+            return;
+        }
         orderDeprecWarned = true;
         std::fprintf( stderr, "ripwire: %s is deprecated — use --order=%s instead\n", oldFlag, newValue );
     };
@@ -2459,7 +2574,9 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // the next argv element so the chain underneath is reached only by the arms a table cannot hold.
             bool isTableFlag = false;
             for( const BoolFlag& bf : kBoolFlags )
+            {
                 if( a == bf.lit )                  { c.*bf.member = true;                        isTableFlag = true;  break; }
+            }
             if( !isTableFlag )
             {
                 const ViewFlagMatch vm = applyViewFlag( a, c );          // §A9 V1-4: also owns the empty-value refusal
@@ -2472,15 +2589,32 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 if( im == IntFlagMatch::Refused )  { c.ok = false;  return c; }
                 isTableFlag = ( im == IntFlagMatch::Assigned );
             }
-            if( isTableFlag ) continue;
+            if( isTableFlag )
+            {
+                continue;
+            }
 
             if( startsWith( a, "--order=" ) )
             {
                 const std::string_view v = a.substr( 8 );
-                if(      v == "stable" )            c.stable            = true;
-                else if( v == "important-last" )    c.mostImportantLast = true;
-                else if( v == "important-first" )   c.noAutoOrder       = true;
-                else { std::fprintf( stderr, "ripwire: --order: unknown value '%.*s' (supported: stable|important-first|important-last)\n", int( v.size() ), v.data() ); c.ok = false; return c; }
+                if( v == "stable" )
+                {
+                    c.stable = true;
+                }
+                else if( v == "important-last" )
+                {
+                    c.mostImportantLast = true;
+                }
+                else if( v == "important-first" )
+                {
+                    c.noAutoOrder = true;
+                }
+                else
+                {
+                    std::fprintf( stderr, "ripwire: --order: unknown value '%.*s' (supported: stable|important-first|important-last)\n", int( v.size() ), v.data() );
+                    c.ok = false;
+                    return c;
+                }
             }
             else if( a == "--most-important-last" )       { deprecatedOrderFlag( "--most-important-last", "important-last" );  c.mostImportantLast = true; }
             else if( a == "--stable" )                    { deprecatedOrderFlag( "--stable", "stable" );                       c.stable            = true; }
@@ -2511,29 +2645,69 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             else if( startsWith( a, "--max-file-size=" ) )
             { if( !parseByteSize( a.data() + 16, c.maxFileBytes ) )
               { refuseFlagValue( "--max-file-size", "a positive byte size, plain or with a K/M/G suffix", a.data() + 16, "--max-file-size=10MB" );  c.ok = false; return c; } }
-            else if( startsWith( a, "--exclude=" ) )          c.excludes.push_back( std::string( a.substr( 10 ) ) );
-            // r27-emitters T5: a BAD VALUE is not an unknown FLAG. `--rank-by=bogus` used to fall through the
-            // exact-match chain to the generic "unknown flag" arm, which told the agent the flag itself does not
-            // exist — a fabrication the agent then believes. `--order=`/`--export=` already name the value and
-            // list the supported set; these two now do the same.
+            else if( startsWith( a, "--exclude=" ) )
+            {
+                c.excludes.push_back( std::string( a.substr( 10 ) ) );
+                // r27-emitters T5: a BAD VALUE is not an unknown FLAG. `--rank-by=bogus` used to fall through the
+                // exact-match chain to the generic "unknown flag" arm, which told the agent the flag itself does not
+                // exist — a fabrication the agent then believes. `--order=`/`--export=` already name the value and
+                // list the supported set; these two now do the same.
+            }
             else if( startsWith( a, "--rank-by=" ) )
             {
                 const std::string_view v = a.substr( 10 );
-                if(      v == "pagerank" )    c.rankBy = RankBy::PageRank;
-                else if( v == "authority" )   c.rankBy = RankBy::Authority;
-                else if( v == "hub" )         c.rankBy = RankBy::Hub;
-                else if( v == "rrf" )         c.rankBy = RankBy::Rrf;
-                else if( v == "churn" )       c.rankBy = RankBy::Churn;
-                else { std::fprintf( stderr, "ripwire: --rank-by: unknown value '%.*s' (supported: pagerank|authority|hub|rrf|churn)\n", int( v.size() ), v.data() ); c.ok = false; return c; }
+                if( v == "pagerank" )
+                {
+                    c.rankBy = RankBy::PageRank;
+                }
+                else if( v == "authority" )
+                {
+                    c.rankBy = RankBy::Authority;
+                }
+                else if( v == "hub" )
+                {
+                    c.rankBy = RankBy::Hub;
+                }
+                else if( v == "rrf" )
+                {
+                    c.rankBy = RankBy::Rrf;
+                }
+                else if( v == "churn" )
+                {
+                    c.rankBy = RankBy::Churn;
+                }
+                else
+                {
+                    std::fprintf( stderr, "ripwire: --rank-by: unknown value '%.*s' (supported: pagerank|authority|hub|rrf|churn)\n", int( v.size() ), v.data() );
+                    c.ok = false;
+                    return c;
+                }
             }
             else if( startsWith( a, "--format=" ) )
             {
                 const std::string_view v = a.substr( 9 );
-                if(      v == "columnar" )    c.columnar   = true;
-                else if( v == "rows" )        c.columnar   = true;    // alias
-                else if( v == "xml" )         c.columnar   = false;   // explicit default (byte-identical)
-                else if( v == "candidates" )  c.candidates = true;    // R6: flat top-K export for external rerankers
-                else { std::fprintf( stderr, "ripwire: --format: unknown value '%.*s' (supported: xml|columnar|rows|candidates)\n", int( v.size() ), v.data() ); c.ok = false; return c; }
+                if( v == "columnar" )
+                {
+                    c.columnar = true;
+                }
+                else if( v == "rows" )
+                {
+                    c.columnar = true; // alias
+                }
+                else if( v == "xml" )
+                {
+                    c.columnar = false; // explicit default (byte-identical)
+                }
+                else if( v == "candidates" )
+                {
+                    c.candidates = true; // R6: flat top-K export for external rerankers
+                }
+                else
+                {
+                    std::fprintf( stderr, "ripwire: --format: unknown value '%.*s' (supported: xml|columnar|rows|candidates)\n", int( v.size() ), v.data() );
+                    c.ok = false;
+                    return c;
+                }
             }
             // §A9 V1-4 / §B5: --expand and --outline stay hand-written because they SPLIT A COMMA LIST into a
             // vector<string> — the one shape kViewFlags cannot hold (--regex= moved into it once the table
@@ -2549,8 +2723,14 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 for( std::size_t start = 0; start < v.size(); )
                 {
                     std::size_t comma = v.find( ',', start );
-                    if( comma == std::string_view::npos ) comma = v.size();
-                    if( comma > start ) c.expand.push_back( std::string( v.substr( start, comma - start ) ) );
+                    if( comma == std::string_view::npos )
+                    {
+                        comma = v.size();
+                    }
+                    if( comma > start )
+                    {
+                        c.expand.push_back( std::string( v.substr( start, comma - start ) ) );
+                    }
                     start = comma + 1;
                 }
             }
@@ -2561,8 +2741,14 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 for( std::size_t start = 0; start < v.size(); )
                 {
                     std::size_t comma = v.find( ',', start );
-                    if( comma == std::string_view::npos ) comma = v.size();
-                    if( comma > start ) c.outline.push_back( std::string( v.substr( start, comma - start ) ) );
+                    if( comma == std::string_view::npos )
+                    {
+                        comma = v.size();
+                    }
+                    if( comma > start )
+                    {
+                        c.outline.push_back( std::string( v.substr( start, comma - start ) ) );
+                    }
                     start = comma + 1;
                 }
             }
@@ -2588,7 +2774,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 std::fprintf( stderr, "ripwire: too many roots (max %zu): '%.*s'\n", kMaxWorkspaceRoots, int( a.size() ), a.data() );
                 c.ok = false;  return c;
             }
-            if( c.rootPath.empty() ) c.rootPath = a;   // roots[0] alias (A1)
+            if( c.rootPath.empty() )
+            {
+                c.rootPath = a; // roots[0] alias (A1)
+            }
             c.roots.push_back( a );
         }
     }
@@ -2597,7 +2786,9 @@ inline Config parseArgs( int argc, char** argv ) noexcept
     // the flag — so --mcp turns --stable ON by default, opt out with --no-stable. This is a DEFAULT, not a
     // validation: it must stay on THIS side of the validateConfig boundary (see that function's header).
     if( c.mcp && !c.noStable )
+    {
         c.stable = true;
+    }
 
     validateConfig( c );
     return c;

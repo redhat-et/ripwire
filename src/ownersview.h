@@ -22,7 +22,12 @@ inline std::size_t countUniformOwnership( const std::vector<FileOwnership>& owne
 {
     std::size_t n = 0;
     for( int i = 0; i < cap && i < int( ownerships.size() ); ++i )
-        if( !ownerships[i].authors.empty() && ownerships[i].uniqueAuthors == 1 ) ++n;
+    {
+        if( !ownerships[i].authors.empty() && ownerships[i].uniqueAuthors == 1 )
+        {
+            ++n;
+        }
+    }
     return n;
 }
 
@@ -33,7 +38,12 @@ inline std::vector<std::size_t> ownershipRowsToPrint( const std::vector<FileOwne
 {
     std::vector<std::size_t> rows;
     for( int i = 0; i < cap && i < int( ownerships.size() ); ++i )
-        if( !ownerships[i].authors.empty() && ( detail || ownerships[i].uniqueAuthors != 1 ) ) rows.push_back( std::size_t( i ) );
+    {
+        if( !ownerships[i].authors.empty() && ( detail || ownerships[i].uniqueAuthors != 1 ) )
+        {
+            rows.push_back( std::size_t( i ) );
+        }
+    }
     return rows;
 }
 

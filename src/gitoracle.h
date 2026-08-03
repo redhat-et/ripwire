@@ -165,9 +165,15 @@ struct HistoryIndex
     // so the choke point is the only place the rule cannot be forgotten.
     NameFate fateOf( const std::string& name ) const
     {
-        if( !ok || name.size() < kMinNameLen || name.size() > kMaxNameLen ) return NameFate{};   // Unknown
+        if( !ok || name.size() < kMinNameLen || name.size() > kMaxNameLen )
+        {
+            return NameFate {}; // Unknown
+        }
         const auto it = removed.find( name );
-        if( it != removed.end() ) return it->second;
+        if( it != removed.end() )
+        {
+            return it->second;
+        }
         NameFate miss;
         miss.fate = truncated ? Fate::Unknown : Fate::Never;
         return miss;
@@ -188,9 +194,15 @@ inline void forEachIdentifier( std::string_view line, OnName onName )
     {
         if( !( std::isalpha( (unsigned char)line[i] ) || line[i] == '_' ) ) { ++i; continue; }
         const std::size_t start = i;
-        while( i < line.size() && identByte( (unsigned char)line[i] ) ) ++i;
+        while( i < line.size() && identByte( (unsigned char)line[i] ) )
+        {
+            ++i;
+        }
         const std::size_t len = i - start;
-        if( len >= kMinNameLen && len <= kMaxNameLen ) onName( line.substr( start, len ) );
+        if( len >= kMinNameLen && len <= kMaxNameLen )
+        {
+            onName( line.substr( start, len ) );
+        }
     }
 }
 
@@ -325,28 +337,49 @@ inline bool loadOracleCache( const std::string& path, HistoryIndex& idx )
     std::string bytes;
     {
         std::FILE* fp = std::fopen( path.c_str(), "rb" );
-        if( !fp ) return false;                                        // a plain miss, not a degrade
+        if( !fp )
+        {
+            return false; // a plain miss, not a degrade
+        }
         char        buf[ 65536 ];
         std::size_t n = 0;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 ) bytes.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
+        {
+            bytes.append( buf, n );
+        }
         std::fclose( fp );
     }
-    if( bytes.size() < sizeof( std::uint64_t ) + 17 ) return false;
+    if( bytes.size() < sizeof( std::uint64_t ) + 17 )
+    {
+        return false;
+    }
 
     const std::size_t payload = bytes.size() - sizeof( std::uint64_t );
     std::uint64_t     stored  = 0;
     std::memcpy( &stored, bytes.data() + payload, sizeof( stored ) );
-    if( stored != fnv1a64( std::string_view( bytes.data(), payload ) ) ) return false;   // corrupt/foreign — recompute
+    if( stored != fnv1a64( std::string_view( bytes.data(), payload ) ) )
+    {
+        return false; // corrupt/foreign — recompute
+    }
 
     Reader r{ bytes.data(), bytes.data() + payload, false };
-    if( r.pod<std::uint32_t>() != kOracleCacheMagic )  return false;
-    if( r.pod<std::uint32_t>() != kOracleCacheScheme ) return false;
+    if( r.pod<std::uint32_t>() != kOracleCacheMagic )
+    {
+        return false;
+    }
+    if( r.pod<std::uint32_t>() != kOracleCacheScheme )
+    {
+        return false;
+    }
 
     HistoryIndex loaded;
     loaded.truncated     = r.pod<std::uint8_t>() != 0;
     loaded.commitsWalked = r.pod<std::uint32_t>();
     const std::uint32_t nameCount = r.pod<std::uint32_t>();
-    if( r.bad || nameCount > kMaxNamesTracked ) return false;
+    if( r.bad || nameCount > kMaxNamesTracked )
+    {
+        return false;
+    }
 
     loaded.removed.reserve( nameCount );
     for( std::uint32_t i = 0; i < nameCount; ++i )
@@ -361,11 +394,20 @@ inline bool loadOracleCache( const std::string& path, HistoryIndex& idx )
         // table, or a Removed with no commit to name are all "this is not our blob" — a clean MISS that
         // recomputes, never a partially-trusted index. (This is also what keeps writeNameFate's VERIFY an
         // invariant rather than something a crafted cache file could trip; fuzzed in the gate.)
-        if( r.bad || name.empty() || std::size_t( f.fate ) >= std::size( kFateTable ) ) return false;
-        if( f.fate == Fate::Removed && f.commit.empty() ) return false;
+        if( r.bad || name.empty() || std::size_t( f.fate ) >= std::size( kFateTable ) )
+        {
+            return false;
+        }
+        if( f.fate == Fate::Removed && f.commit.empty() )
+        {
+            return false;
+        }
         loaded.removed.emplace( std::move( name ), std::move( f ) );
     }
-    if( r.bad || r.p != r.end ) return false;                          // trailing garbage ⇒ not our blob
+    if( r.bad || r.p != r.end )
+    {
+        return false; // trailing garbage ⇒ not our blob
+    }
 
     loaded.ok = true;
     idx       = std::move( loaded );
@@ -414,7 +456,10 @@ inline void recordRemoval( HistoryIndex& idx, std::string_view name, const Remov
         idx.removed.emplace( std::string( name ), std::move( f ) );
         return;
     }
-    if( site.isProse || !isProsePath( it->second.path ) ) return;      // already the best evidence we will get
+    if( site.isProse || !isProsePath( it->second.path ) )
+    {
+        return; // already the best evidence we will get
+    }
     it->second.commit = site.commit;                                   // upgrade prose-site → code-site, once
     it->second.date   = site.date;
     it->second.path   = site.path;
@@ -439,10 +484,16 @@ inline void foldPatchLine( std::string_view raw, RemovalSite& site, HistoryIndex
     // 2) "--- a/<path>" names the side removals come FROM, and 3) the other file headers are skipped. Both
     //    MUST be tested before the single-'-' test below, or every "---" header is read as a removed line.
     if( raw.size() > 6 && raw.compare( 0, 6, "--- a/" ) == 0 ) { site.setPath( raw.substr( 6 ) ); return; }
-    if( raw.size() >= 3 && ( raw.compare( 0, 3, "---" ) == 0 || raw.compare( 0, 3, "+++" ) == 0 ) ) return;
+    if( raw.size() >= 3 && ( raw.compare( 0, 3, "---" ) == 0 || raw.compare( 0, 3, "+++" ) == 0 ) )
+    {
+        return;
+    }
 
     // 4) a removed line: every identifier on it left the tree in `site`'s commit
-    if( raw.empty() || raw.front() != '-' ) return;
+    if( raw.empty() || raw.front() != '-' )
+    {
+        return;
+    }
     forEachIdentifier( raw.substr( 1 ), [ & ]( std::string_view name ) { recordRemoval( idx, name, site ); } );
 }
 
@@ -489,7 +540,10 @@ inline HistoryIndex runProbe( const std::string& root )
     while( idx.commitsWalked <= kMaxProbeCommits && bytesRead < kMaxProbeBytes )
     {
         const std::size_t got = std::fread( chunk.data(), 1, chunk.size(), pipe );
-        if( got == 0 ) break;
+        if( got == 0 )
+        {
+            break;
+        }
         bytesRead += got;
 
         std::size_t at = 0;
@@ -498,12 +552,23 @@ inline HistoryIndex runProbe( const std::string& root )
             const void* nl = std::memchr( chunk.data() + at, '\n', got - at );
             if( !nl ) { line.append( chunk.data() + at, got - at ); break; }
             const std::size_t e = std::size_t( static_cast<const char*>( nl ) - chunk.data() );
-            if( line.empty() ) onLine( std::string_view( chunk.data() + at, e - at ) );
-            else               { line.append( chunk.data() + at, e - at ); onLine( line ); line.clear(); }
+            if( line.empty() )
+            {
+                onLine( std::string_view( chunk.data() + at, e - at ) );
+            }
+            else
+            {
+                line.append( chunk.data() + at, e - at );
+                onLine( line );
+                line.clear();
+            }
             at = e + 1;
         }
     }
-    if( !line.empty() ) onLine( line );
+    if( !line.empty() )
+    {
+        onLine( line );
+    }
 
     // A bound hit is not a failure — it is an answer of a different STRENGTH, and saying so is the whole
     // difference between this oracle and a guess. Drain rather than SIGPIPE git mid-write.
@@ -564,7 +629,10 @@ inline HistoryIndex probeNameHistory( const std::string& root )
 
     HistoryIndex fresh = runProbe( root );
     fresh.headSha      = idx.headSha;
-    if( fresh.ok ) saveOracleCache( cachePath, fresh );
+    if( fresh.ok )
+    {
+        saveOracleCache( cachePath, fresh );
+    }
     return fresh;
 }
 
@@ -599,8 +667,10 @@ inline void writeNameFate( std::FILE* out, const std::string& name, const NameFa
 
     std::fprintf( out, "<fate sym=\"%s\" v=\"%s\"", escape( name ).c_str(), fateTag( f.fate ) );
     if( f.fate == Fate::Removed )
+    {
         std::fprintf( out, " commit=\"%.9s\" date=\"%s\" p=\"%s\"",
                       f.commit.c_str(), escape( f.date ).c_str(), escape( f.path ).c_str() );
+    }
     std::fprintf( out, " note=\"%s\"/>", escape( kFateTable[ std::size_t( f.fate ) ].note ).c_str() );
 }
 

@@ -117,7 +117,10 @@ inline std::string joinClauses( const std::vector<std::string_view>& parts, std:
     std::string out;
     for( std::size_t i = 0; i < parts.size(); ++i )
     {
-        if( i ) out += sep;
+        if( i )
+        {
+            out += sep;
+        }
         out += parts[i];
     }
     return out;
@@ -142,18 +145,33 @@ inline std::string missingFieldRefusal( std::string_view verb, PresentFn isPrese
 
     for( const McpFieldSpec& row : kMcpRequiredFields )
     {
-        if( verb != row.verb ) continue;
-        if( row.rule == FieldRule::Optional ) continue;   // in the table for its hint/needs columns, never required
+        if( verb != row.verb )
+        {
+            continue;
+        }
+        if( row.rule == FieldRule::Optional )
+        {
+            continue; // in the table for its hint/needs columns, never required
+        }
         if( row.rule == FieldRule::AnyOf )
         {
             hasAnyOf = true;
             anyNames.push_back( row.field );
             anyNeeds.push_back( row.needs );
-            if( anyExample.empty() ) anyExample = row.example;
-            if( isPresent( row.field ) ) anyOfSatisfied = true;
+            if( anyExample.empty() )
+            {
+                anyExample = row.example;
+            }
+            if( isPresent( row.field ) )
+            {
+                anyOfSatisfied = true;
+            }
             continue;
         }
-        if( isPresent( row.field ) ) continue;
+        if( isPresent( row.field ) )
+        {
+            continue;
+        }
         names.push_back( row.field );
         needs.push_back( row.needs );
         examples.push_back( row.example );
@@ -161,10 +179,15 @@ inline std::string missingFieldRefusal( std::string_view verb, PresentFn isPrese
 
     // a verb whose AnyOf group is entirely absent reports the group, not one arbitrary member of it.
     if( hasAnyOf && !anyOfSatisfied && names.empty() )
+    {
         return "missing required field: " + joinClauses( anyNames, " or " ) + " — " + std::string( verb )
              + " needs " + joinClauses( anyNeeds, " or " ) + ", e.g. " + std::string( anyExample );
+    }
 
-    if( names.empty() ) return {};
+    if( names.empty() )
+    {
+        return {};
+    }
 
     return std::string( "missing required field" ) + ( names.size() > 1 ? "s" : "" ) + ": "
          + joinClauses( names, ", " ) + " — " + std::string( verb ) + " needs " + joinClauses( needs, " and " )
@@ -185,7 +208,12 @@ inline std::string missingFieldRefusal( std::string_view verb )
 inline std::string_view notFoundHintFor( std::string_view verb, std::string_view field )
 {
     for( const McpFieldSpec& row : kMcpRequiredFields )
-        if( verb == row.verb && field == row.field && row.notFoundHint ) return row.notFoundHint;
+    {
+        if( verb == row.verb && field == row.field && row.notFoundHint )
+        {
+            return row.notFoundHint;
+        }
+    }
     return {};
 }
 
@@ -289,10 +317,16 @@ inline constexpr std::size_t kMcpEchoMaxBytes = 160;
 
 inline std::string cappedEcho( std::string_view got )
 {
-    if( got.size() <= kMcpEchoMaxBytes ) return std::string( got );
+    if( got.size() <= kMcpEchoMaxBytes )
+    {
+        return std::string( got );
+    }
 
     std::size_t cut = kMcpEchoMaxBytes;
-    while( cut > 0 && ( static_cast<unsigned char>( got[cut] ) & 0xC0 ) == 0x80 ) --cut;   // mid-sequence continuation byte
+    while( cut > 0 && ( static_cast<unsigned char>( got[cut] ) & 0xC0 ) == 0x80 )
+    {
+        --cut; // mid-sequence continuation byte
+    }
     return std::string( got.substr( 0, cut ) ) + "…";
 }
 
@@ -311,8 +345,12 @@ inline std::string cappedEcho( std::string_view got )
 inline constexpr std::string_view editPayloadField( std::string_view verb )
 {
     for( const McpFieldSpec& row : kMcpRequiredFields )
+    {
         if( verb == std::string_view( row.verb ) && std::string_view( row.field ) != "symbol" )
+        {
             return row.field;
+        }
+    }
     return {};
 }
 
@@ -329,7 +367,12 @@ inline constexpr McpPayloadNoun kMcpPayloadNouns[] = {
 inline constexpr std::string_view payloadNoun( std::string_view field )
 {
     for( const McpPayloadNoun& row : kMcpPayloadNouns )
-        if( field == std::string_view( row.field ) ) return row.noun;
+    {
+        if( field == std::string_view( row.field ) )
+        {
+            return row.noun;
+        }
+    }
     return "content";   // a field with no row still gets a true sentence, just a generic noun
 }
 
@@ -342,14 +385,28 @@ consteval bool mcpPayloadTablesAreComplete()
     for( std::string_view verb : { "replace_symbol_body", "insert_before_symbol", "insert_after_symbol" } )
     {
         const std::string_view field = editPayloadField( verb );
-        if( field.empty() )                 return false;
-        if( payloadNoun( field ) == "content" ) return false;   // no noun row ⇒ the generic fallback ⇒ incomplete
+        if( field.empty() )
+        {
+            return false;
+        }
+        if( payloadNoun( field ) == "content" )
+        {
+            return false; // no noun row ⇒ the generic fallback ⇒ incomplete
+        }
 
         // exactly ONE non-`symbol` required row per edit verb (else the ternary's replacement is ambiguous)
         int payloadRows = 0;
         for( const McpFieldSpec& row : kMcpRequiredFields )
-            if( verb == std::string_view( row.verb ) && std::string_view( row.field ) != "symbol" ) ++payloadRows;
-        if( payloadRows != 1 ) return false;
+        {
+            if( verb == std::string_view( row.verb ) && std::string_view( row.field ) != "symbol" )
+            {
+                ++payloadRows;
+            }
+        }
+        if( payloadRows != 1 )
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -365,7 +422,10 @@ static_assert( mcpPayloadTablesAreComplete(),
 // how the §H2-ruled equivalence of an omitted payload and `new_body:""` stays byte-identical.
 inline std::string blankPayloadClause( std::size_t codePointCount, std::string_view spelling, std::string_view field )
 {
-    if( spelling.empty() || codePointCount == 0 ) return {};
+    if( spelling.empty() || codePointCount == 0 )
+    {
+        return {};
+    }
 
     // "invisible code point(s)" rather than a relative clause, so the sentence needs no verb agreement — one
     // wording that reads correctly at 1 and at 4000, instead of two spellings and a plural bug.
@@ -382,12 +442,14 @@ inline std::string badValueRefusal( std::string_view field, std::string_view got
     const std::string echo = cappedEcho( got );
     std::string       msg  = "invalid value for field: " + std::string( field );
     for( const McpValueSpec& row : kMcpValueFields )
+    {
         if( field == row.field )
         {
             msg += std::string( " — needs " ) + row.needs;
             msg += " — got '" + echo + "', e.g. " + row.example;
             return msg;
         }
+    }
     msg += " — got '" + echo + "'";
     return msg;
 }
@@ -409,9 +471,13 @@ inline std::string missingPathRefusal()
 inline std::string missingEnvelopeField( std::string_view field )
 {
     for( const McpValueSpec& row : kMcpValueFields )
+    {
         if( field == row.field )
+        {
             return "missing required field: " + std::string( field ) + " — a JSON-RPC request needs "
                  + row.needs + ", e.g. " + row.example;
+        }
+    }
     return "missing required field: " + std::string( field );
 }
 
@@ -478,9 +544,15 @@ inline McpFrameRefusal frameRefusal( mcpdetail::FrameShape shape, std::string_vi
 {
     for( const McpFrameSpec& row : kMcpFrameFaults )
     {
-        if( row.shape != shape ) continue;
+        if( row.shape != shape )
+        {
+            continue;
+        }
         std::string msg = row.problem;
-        if( !got.empty() ) msg += " — got '" + cappedEcho( got ) + "'";
+        if( !got.empty() )
+        {
+            msg += " — got '" + cappedEcho( got ) + "'";
+        }
         msg += " — ";
         msg += row.fix;
         return { row.code, std::move( msg ) };
@@ -584,7 +656,12 @@ inline constexpr McpSingleRootVerb kMcpSingleRootVerbs[] = {
 inline std::string_view singleRootReason( std::string_view verb )
 {
     for( const McpSingleRootVerb& row : kMcpSingleRootVerbs )
-        if( verb == std::string_view( row.verb ) ) return row.because;
+    {
+        if( verb == std::string_view( row.verb ) )
+        {
+            return row.because;
+        }
+    }
     return {};
 }
 
@@ -602,7 +679,10 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
 {
     std::string msg = std::string( noun ) + " not found: '" + cappedEcho( spelling ) + "'";
     const std::string near = didYouMean( ing, spelling );
-    if( !near.empty() && near != spelling ) msg += " (did you mean '" + near + "'?)";
+    if( !near.empty() && near != spelling )
+    {
+        msg += " (did you mean '" + near + "'?)";
+    }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
     return msg;
 }
@@ -625,13 +705,19 @@ inline std::string fileNotFound( const IngestResult& ing, std::string_view spell
     for( const std::string& f : ing.files )
     {
         const int dist = boundedEditDistance( baseName( f ), typedBase, kMaxEditDistance );
-        if( dist > kMaxEditDistance ) continue;
+        if( dist > kMaxEditDistance )
+        {
+            continue;
+        }
         if( dist < bestDist || ( dist == bestDist && ( best.empty() || f < best ) ) )   // deterministic tie-break
         { bestDist = dist; best = f; }
     }
 
     std::string msg = "file not found: '" + cappedEcho( spelling ) + "'";
-    if( !best.empty() && best != spelling ) msg += " (did you mean '" + std::string( best ) + "'?)";
+    if( !best.empty() && best != spelling )
+    {
+        msg += " (did you mean '" + std::string( best ) + "'?)";
+    }
     msg += " — a path SUFFIX is enough";
     return msg;
 }
@@ -651,7 +737,10 @@ inline std::string nearestName( std::span<const std::string_view> known, std::st
     for( std::string_view candidate : known )
     {
         const int dist = boundedEditDistance( candidate, typed, kMaxEditDistance );
-        if( dist > kMaxEditDistance ) continue;
+        if( dist > kMaxEditDistance )
+        {
+            continue;
+        }
         if( dist < bestDist || ( dist == bestDist && ( best.empty() || candidate < best ) ) )
         { bestDist = dist; best = candidate; }
     }
@@ -739,35 +828,59 @@ inline constexpr std::string_view kMcpToleratedFields[] = { "name", "arguments",
 inline std::vector<std::string_view> declaredFieldsFor( std::string_view verb )
 {
     for( const McpVerbAlias& alias : kMcpVerbAliases )
+    {
         if( verb == alias.alias ) { verb = alias.target; break; }
+    }
 
     std::vector<std::string_view> out;
     for( const McpVerbFields& row : kMcpVerbFields )
     {
-        if( verb != row.verb ) continue;
+        if( verb != row.verb )
+        {
+            continue;
+        }
         const std::string_view all = row.fields;
         for( std::size_t start = 0; start < all.size(); )
         {
             const std::size_t space = all.find( ' ', start );
             out.push_back( all.substr( start, space == std::string_view::npos ? std::string_view::npos : space - start ) );
-            if( space == std::string_view::npos ) break;
+            if( space == std::string_view::npos )
+            {
+                break;
+            }
             start = space + 1;
         }
         break;
     }
-    if( out.empty() ) return out;                      // unknown tool — say nothing about its fields
+    if( out.empty() )
+    {
+        return out; // unknown tool — say nothing about its fields
+    }
 
     for( const std::string_view universal : kMcpUniversalFields )
-        if( std::find( out.begin(), out.end(), universal ) == out.end() ) out.push_back( universal );
+    {
+        if( std::find( out.begin(), out.end(), universal ) == out.end() )
+        {
+            out.push_back( universal );
+        }
+    }
     return out;
 }
 
 // is `field` one this verb accepts (declared, universal or a tolerated protocol key)?
 inline bool isFieldAccepted( std::span<const std::string_view> declared, std::string_view field )
 {
-    if( std::find( declared.begin(), declared.end(), field ) != declared.end() ) return true;
+    if( std::find( declared.begin(), declared.end(), field ) != declared.end() )
+    {
+        return true;
+    }
     for( const std::string_view tolerated : kMcpToleratedFields )
-        if( field == tolerated ) return true;
+    {
+        if( field == tolerated )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -786,7 +899,9 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
     std::string       msg  = "unknown field: '" + cappedEcho( field ) + "'";
     const std::string near = nearestName( declared, field );
     if( !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )
+    {
         msg += " (did you mean '" + near + "'?)";
+    }
     msg += " — " + std::string( verb ) + " accepts: " + joinClauses(
                std::vector<std::string_view>( declared.begin(), declared.end() ), ", " );
     return msg;
@@ -812,8 +927,13 @@ consteval bool mcpSingleRootVerbsAreKnown()
     {
         bool found = false;
         for( const McpVerbFields& known : kMcpVerbFields )
+        {
             if( std::string_view( row.verb ) == std::string_view( known.verb ) ) { found = true; break; }
-        if( !found ) return false;
+        }
+        if( !found )
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -851,10 +971,13 @@ static_assert( mcpSingleRootVerbsAreKnown(),
 inline std::string jsonTypeFragmentFor( std::string_view field )
 {
     for( const McpValueSpec& row : kMcpValueFields )
+    {
         if( field == std::string_view( row.field ) )
         {
             if( std::string_view( row.jsonType ) != "array" )
+            {
                 return std::string( "\"type\":\"" ) + row.jsonType + "\"";
+            }
 
             // `queries` is the one array of OBJECTS, and its item schema is the sub-query field list —
             // kBatchSubQueryFields, the list runBatchSub actually validates against.
@@ -864,7 +987,10 @@ inline std::string jsonTypeFragmentFor( std::string_view field )
                 bool        first = true;
                 for( const std::string_view sub : kBatchSubQueryFields )
                 {
-                    if( !first ) items += ",";
+                    if( !first )
+                    {
+                        items += ",";
+                    }
                     first = false;
                     items += "\"" + std::string( sub ) + "\":{" + jsonTypeFragmentFor( sub ) + "}";
                 }
@@ -872,6 +998,7 @@ inline std::string jsonTypeFragmentFor( std::string_view field )
             }
             return "\"type\":\"array\",\"items\":{\"type\":\"string\"}";
         }
+    }
     return "\"type\":\"string\"";   // a field with no row is a string by default — the historic shape
 }
 
@@ -880,12 +1007,24 @@ inline std::string jsonTypeFragmentFor( std::string_view field )
 inline std::string_view fieldDescriptionFor( std::string_view verb, std::string_view field )
 {
     for( const McpVerbAlias& alias : kMcpVerbAliases )
+    {
         if( verb == alias.alias ) { verb = alias.target; break; }
+    }
 
     for( const McpFieldSpec& row : kMcpRequiredFields )
-        if( verb == std::string_view( row.verb ) && field == std::string_view( row.field ) ) return row.needs;
+    {
+        if( verb == std::string_view( row.verb ) && field == std::string_view( row.field ) )
+        {
+            return row.needs;
+        }
+    }
     for( const McpValueSpec& row : kMcpValueFields )
-        if( field == std::string_view( row.field ) ) return row.needs;
+    {
+        if( field == std::string_view( row.field ) )
+        {
+            return row.needs;
+        }
+    }
     return {};
 }
 
@@ -903,11 +1042,17 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
     bool        first = true;
     for( const std::string_view field : fields )
     {
-        if( !first ) out += ",";
+        if( !first )
+        {
+            out += ",";
+        }
         first = false;
         out += "\"" + std::string( field ) + "\":{" + jsonTypeFragmentFor( field );
         const std::string_view desc = fieldDescriptionFor( verb, field );
-        if( !desc.empty() ) out += ",\"description\":\"" + schemaEscape( desc ) + "\"";
+        if( !desc.empty() )
+        {
+            out += ",\"description\":\"" + schemaEscape( desc ) + "\"";
+        }
         out += "}";
     }
     out += "},\"required\":[";
@@ -915,23 +1060,40 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
     bool firstReq = true;
     const auto req = [ & ]( std::string_view f )
     {
-        if( !firstReq ) out += ",";
+        if( !firstReq )
+        {
+            out += ",";
+        }
         firstReq = false;
         out += "\"" + std::string( f ) + "\"";
     };
     // M4: `path` first when this server cannot supply one itself.
-    if( pathIsRequired ) req( "path" );
+    if( pathIsRequired )
+    {
+        req( "path" );
+    }
 
     std::string_view resolved = verb;
     for( const McpVerbAlias& alias : kMcpVerbAliases )
+    {
         if( resolved == alias.alias ) { resolved = alias.target; break; }
+    }
 
     std::vector<std::string_view> anyOf;
     for( const McpFieldSpec& row : kMcpRequiredFields )
     {
-        if( resolved != std::string_view( row.verb ) ) continue;
-        if( row.rule == FieldRule::Required ) req( row.field );
-        else if( row.rule == FieldRule::AnyOf ) anyOf.push_back( row.field );
+        if( resolved != std::string_view( row.verb ) )
+        {
+            continue;
+        }
+        if( row.rule == FieldRule::Required )
+        {
+            req( row.field );
+        }
+        else if( row.rule == FieldRule::AnyOf )
+        {
+            anyOf.push_back( row.field );
+        }
     }
     out += "]";
 
@@ -941,7 +1103,10 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
         out += ",\"anyOf\":[";
         for( std::size_t i = 0; i < anyOf.size(); ++i )
         {
-            if( i ) out += ",";
+            if( i )
+            {
+                out += ",";
+            }
             out += "{\"required\":[\"" + std::string( anyOf[i] ) + "\"]}";
         }
         out += "]";
@@ -959,12 +1124,17 @@ inline std::string unknownVerbRefusal( std::span<const std::string_view> known, 
                                        std::size_t advertisedCount = 0 )
 {
     if( typed.empty() )
+    {
         return "missing required field: name — tools/call params must name a tool, e.g. name=\"analyze\" "
                "(call tools/list for the available tools)";
+    }
 
     std::string msg = "unknown tool: '" + cappedEcho( typed ) + "'";
     const std::string near = nearestName( known, typed );
-    if( !near.empty() ) msg += " (did you mean '" + near + "'?)";
+    if( !near.empty() )
+    {
+        msg += " (did you mean '" + near + "'?)";
+    }
     msg += " — call tools/list for the " + std::to_string( advertisedCount ? advertisedCount : known.size() )
          + " available tools";
     return msg;

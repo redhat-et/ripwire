@@ -157,30 +157,60 @@ inline std::size_t nextNormToken( std::string_view src, std::size_t i, std::vect
     static constexpr std::string_view kNum = "$N", kStr = "$S";
     const std::size_t n = src.size();
 
-    if( std::isspace( (unsigned char)src[i] ) )                                     return i + 1;
+    if( std::isspace( (unsigned char)src[i] ) )
+    {
+        return i + 1;
+    }
     if( src[i] == '/' && i + 1 < n && src[i + 1] == '/' )
-    { i += 2; while( i < n && src[i] != '\n' ) ++i; return i; }
+    {
+        i += 2;
+        while( i < n && src[i] != '\n' )
+        {
+            ++i;
+        }
+        return i;
+    }
     if( src[i] == '/' && i + 1 < n && src[i + 1] == '*' )
-    { i += 2; while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) ) ++i; return std::min( n, i + 2 ); }
+    {
+        i += 2;
+        while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
+        {
+            ++i;
+        }
+        return std::min( n, i + 2 );
+    }
     if( src[i] == '"' || src[i] == '\'' )
     {
         const char q = src[i];
         std::size_t j = i + 1;
-        while( j < n && src[j] != q ) { if( src[j] == '\\' ) ++j; ++j; }
+        while( j < n && src[j] != q )
+        {
+            if( src[j] == '\\' )
+            {
+                ++j;
+            }
+            ++j;
+        }
         out.push_back( kStr );
         return std::min( n, j + 1 );
     }
     if( std::isdigit( (unsigned char)src[i] ) )
     {
         std::size_t j = i;
-        while( j < n && ( isIdentByte( (unsigned char)src[j] ) || src[j] == '.' ) ) ++j;
+        while( j < n && ( isIdentByte( (unsigned char)src[j] ) || src[j] == '.' ) )
+        {
+            ++j;
+        }
         out.push_back( kNum );
         return j;
     }
     if( std::isalpha( (unsigned char)src[i] ) || src[i] == '_' )
     {
         std::size_t j = i;
-        while( j < n && isIdentByte( (unsigned char)src[j] ) ) ++j;
+        while( j < n && isIdentByte( (unsigned char)src[j] ) )
+        {
+            ++j;
+        }
         out.push_back( src.substr( i, j - i ) );      // identifier KEPT — the semantic fingerprint
         return j;
     }
@@ -192,7 +222,10 @@ inline std::vector<std::string_view> normalizeTokens( std::string_view src )
 {
     std::vector<std::string_view> out;
     out.reserve( src.size() / 4 + 1 );
-    for( std::size_t i = 0; i < src.size(); ) i = nextNormToken( src, i, out );
+    for( std::size_t i = 0; i < src.size(); )
+    {
+        i = nextNormToken( src, i, out );
+    }
     return out;
 }
 
@@ -208,7 +241,10 @@ inline std::vector<std::uint64_t> minhashSketch( std::string_view src )
     if( tok.size() < kShingleTokens )
     {
         all.reserve( tok.size() );
-        for( std::string_view t : tok ) all.push_back( fnv1a64( t ) );
+        for( std::string_view t : tok )
+        {
+            all.push_back( fnv1a64( t ) );
+        }
     }
     else
     {
@@ -231,7 +267,10 @@ inline std::vector<std::uint64_t> minhashSketch( std::string_view src )
 
     std::sort( all.begin(), all.end() );
     all.erase( std::unique( all.begin(), all.end() ), all.end() );
-    if( all.size() > kSketchSize ) all.resize( kSketchSize );                // bottom-k
+    if( all.size() > kSketchSize )
+    {
+        all.resize( kSketchSize ); // bottom-k
+    }
     return all;
 }
 
@@ -249,9 +288,20 @@ inline std::size_t sortedIntersectSize( const std::vector<std::uint64_t>& a, con
     std::size_t hit = 0, i = 0, j = 0;
     while( i < a.size() && j < b.size() )
     {
-        if     ( a[i] < b[j] ) ++i;
-        else if( b[j] < a[i] ) ++j;
-        else                   { ++hit; ++i; ++j; }
+        if( a[i] < b[j] )
+        {
+            ++i;
+        }
+        else if( b[j] < a[i] )
+        {
+            ++j;
+        }
+        else
+        {
+            ++hit;
+            ++i;
+            ++j;
+        }
     }
     return hit;
 }
@@ -261,7 +311,10 @@ inline std::size_t sortedIntersectSize( const std::vector<std::uint64_t>& a, con
 // for no reason. Empty `a` ⇒ 0 (nothing to be contained; never a divide-by-zero).
 inline float sketchContainment( const std::vector<std::uint64_t>& a, const std::vector<std::uint64_t>& b )
 {
-    if( a.empty() || b.empty() ) return 0.0f;
+    if( a.empty() || b.empty() )
+    {
+        return 0.0f;
+    }
     return float( sortedIntersectSize( a, b ) ) / float( a.size() );
 }
 
@@ -276,11 +329,23 @@ inline std::vector<std::uint64_t> lineMultiset( std::string_view src )
     while( i < src.size() )
     {
         std::size_t e = src.find( '\n', i );
-        if( e == std::string_view::npos ) e = src.size();
+        if( e == std::string_view::npos )
+        {
+            e = src.size();
+        }
         std::size_t a = i, b = e;
-        while( a < b && std::isspace( (unsigned char)src[a] ) )     ++a;
-        while( b > a && std::isspace( (unsigned char)src[b - 1] ) ) --b;
-        if( b > a ) out.push_back( fnv1a64( src.substr( a, b - a ) ) );
+        while( a < b && std::isspace( (unsigned char)src[a] ) )
+        {
+            ++a;
+        }
+        while( b > a && std::isspace( (unsigned char)src[b - 1] ) )
+        {
+            --b;
+        }
+        if( b > a )
+        {
+            out.push_back( fnv1a64( src.substr( a, b - a ) ) );
+        }
         i = e + 1;
     }
     std::sort( out.begin(), out.end() );
@@ -297,9 +362,19 @@ inline std::vector<std::uint64_t> msetDiff( const std::vector<std::uint64_t>& a,
     std::size_t                i = 0, j = 0;
     while( i < a.size() )
     {
-        if     ( j >= b.size() || a[i] < b[j] ) out.push_back( a[i++] );
-        else if( b[j] < a[i] )                  ++j;
-        else                                    { ++i; ++j; }
+        if( j >= b.size() || a[i] < b[j] )
+        {
+            out.push_back( a[i++] );
+        }
+        else if( b[j] < a[i] )
+        {
+            ++j;
+        }
+        else
+        {
+            ++i;
+            ++j;
+        }
     }
     return out;
 }
@@ -311,7 +386,12 @@ inline std::size_t countAbsent( const std::vector<std::uint64_t>& a, const std::
 {
     std::size_t miss = 0;
     for( std::uint64_t h : a )
-        if( !std::binary_search( b.begin(), b.end(), h ) ) ++miss;
+    {
+        if( !std::binary_search( b.begin(), b.end(), h ) )
+        {
+            ++miss;
+        }
+    }
     return miss;
 }
 
@@ -361,7 +441,10 @@ inline bool isRevisionToken( std::string_view s ) noexcept
 template<class OnBlob>
 inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob )
 {
-    if( shas.empty() ) return;
+    if( shas.empty() )
+    {
+        return;
+    }
 
     const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-" + std::to_string( ::getpid() ) + ".shas";
     {
@@ -371,7 +454,10 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
             DEGRADED_PATH_ALERT( "crossref: cannot write the blob-batch list — cross-branch content unavailable" );
             return;
         }
-        for( const std::string& s : shas ) std::fprintf( lf, "%s\n", s.c_str() );
+        for( const std::string& s : shas )
+        {
+            std::fprintf( lf, "%s\n", s.c_str() );
+        }
         std::fclose( lf );
     }
 
@@ -391,8 +477,14 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
     {
         // header: "<oid> <type> <size>\n", or "<oid> missing\n" for an unreadable object
         header.clear();
-        for( int c = std::fgetc( pipe ); c != EOF && c != '\n'; c = std::fgetc( pipe ) ) header.push_back( char( c ) );
-        if( header.empty() ) break;                                          // pipe ended early — degrade quietly
+        for( int c = std::fgetc( pipe ); c != EOF && c != '\n'; c = std::fgetc( pipe ) )
+        {
+            header.push_back( char( c ) );
+        }
+        if( header.empty() )
+        {
+            break; // pipe ended early — degrade quietly
+        }
 
         const std::size_t sp2 = header.rfind( ' ' );
         const std::size_t sp1 = ( sp2 == std::string::npos ) ? std::string::npos : header.rfind( ' ', sp2 - 1 );
@@ -415,7 +507,10 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
             while( left > 0 )
             {
                 const std::size_t n = std::fread( sink, 1, std::min( left, sizeof( sink ) ), pipe );
-                if( n == 0 ) break;
+                if( n == 0 )
+                {
+                    break;
+                }
                 left -= n;
                 got  += n;
             }
@@ -439,8 +534,14 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
 
         const std::string_view bytes( body.data(), tooBig ? 0 : got );
         const bool             binary = bytes.substr( 0, std::min( bytes.size(), kBinaryProbe ) ).find( '\0' ) != std::string_view::npos;
-        if( tooBig || binary ) onBlob( shas[ served ], std::string_view{}, false );
-        else                   onBlob( shas[ served ], bytes,              true  );
+        if( tooBig || binary )
+        {
+            onBlob( shas[served], std::string_view {}, false );
+        }
+        else
+        {
+            onBlob( shas[served], bytes, true );
+        }
     }
 
     pclose( pipe );
@@ -457,21 +558,35 @@ public:
 
     void want( const std::string& sha )
     {
-        if( sha.empty() || isNullSha( sha ) || !isBlobSha( sha ) ) return;
-        if( facts_.find( sha ) != facts_.end() )                   return;
+        if( sha.empty() || isNullSha( sha ) || !isBlobSha( sha ) )
+        {
+            return;
+        }
+        if( facts_.find( sha ) != facts_.end() )
+        {
+            return;
+        }
         pending_.push_back( sha );
     }
 
     void fill()
     {
-        if( pending_.empty() ) return;
+        if( pending_.empty() )
+        {
+            return;
+        }
         std::sort( pending_.begin(), pending_.end() );                       // determinism: batch order is sha order
         pending_.erase( std::unique( pending_.begin(), pending_.end() ), pending_.end() );
 
         std::vector<std::string> todo;
         todo.reserve( pending_.size() );
         for( const std::string& s : pending_ )
-            if( facts_.find( s ) == facts_.end() ) todo.push_back( s );
+        {
+            if( facts_.find( s ) == facts_.end() )
+            {
+                todo.push_back( s );
+            }
+        }
         pending_.clear();
 
         streamBlobs( root_, todo, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
@@ -547,14 +662,23 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
         // fields are git-generated and pipe-free by construction (an object name is hex, a short committer
         // date is YYYY-MM-DD), so everything before the second-to-last '|' is the name, whatever it contains.
         const std::size_t lastPipe = line.rfind( '|' );
-        if( lastPipe == std::string_view::npos || lastPipe == 0 ) continue;
+        if( lastPipe == std::string_view::npos || lastPipe == 0 )
+        {
+            continue;
+        }
         const std::size_t firstPipe = line.rfind( '|', lastPipe - 1 );
-        if( firstPipe == std::string_view::npos || firstPipe >= lastPipe ) continue;
+        if( firstPipe == std::string_view::npos || firstPipe >= lastPipe )
+        {
+            continue;
+        }
 
         const std::string_view name = line.substr( 0, firstPipe );
         const std::string_view tip  = line.substr( firstPipe + 1, lastPipe - firstPipe - 1 );
         const std::string_view date = line.substr( lastPipe + 1 );
-        if( name.empty() || tip == headSha ) continue;                        // the ref HEAD is on
+        if( name.empty() || tip == headSha )
+        {
+            continue; // the ref HEAD is on
+        }
         if( !isRevisionToken( tip ) )
         {
             // %(objectname) is always a full object name, so this cannot fire on well-formed output — which
@@ -563,7 +687,10 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
             DEGRADED_PATH_ALERT( "crossref: for-each-ref yielded a ref whose tip is not an object name — skipping it" );
             continue;
         }
-        if( !filter.empty() && name.find( filter ) == std::string_view::npos ) continue;
+        if( !filter.empty() && name.find( filter ) == std::string_view::npos )
+        {
+            continue;
+        }
         out.push_back( RefInfo{ std::string( name ), std::string( tip ), std::string( date ) } );
     }
     return out;
@@ -596,12 +723,24 @@ inline std::vector<RawRow> diffRaw( const std::string& root, const std::string& 
     std::vector<RawRow> out;
     for( std::string_view line : splitLines( raw ) )
     {
-        if( line.empty() || line[0] != ':' ) continue;
+        if( line.empty() || line[0] != ':' )
+        {
+            continue;
+        }
         const std::size_t tab = line.find( '\t' );
-        if( tab == std::string_view::npos ) continue;
+        if( tab == std::string_view::npos )
+        {
+            continue;
+        }
         const std::vector<std::string_view> f = wsdetail::segmentsOf( line.substr( 1, tab - 1 ), ' ' );
-        if( f.size() < 4 ) continue;
-        if( !isBlobSha( f[2] ) || !isBlobSha( f[3] ) ) continue;              // malformed row — skip, never splice
+        if( f.size() < 4 )
+        {
+            continue;
+        }
+        if( !isBlobSha( f[2] ) || !isBlobSha( f[3] ) )
+        {
+            continue; // malformed row — skip, never splice
+        }
         out.push_back( RawRow{ std::string( line.substr( tab + 1 ) ), std::string( f[2] ), std::string( f[3] ) } );
     }
     std::sort( out.begin(), out.end(), []( const RawRow& x, const RawRow& y ) { return x.path < y.path; } );
@@ -625,27 +764,52 @@ constexpr std::uint32_t kNoPair        = 0xFFFFFFFFu; // "this ref needs no diff
 template<class Body>
 inline void parallelIndexed( std::size_t count, Body body )
 {
-    if( count == 0 ) return;
+    if( count == 0 )
+    {
+        return;
+    }
 
     std::size_t hwThreadCount = std::thread::hardware_concurrency();
-    if( hwThreadCount == 0 ) hwThreadCount = 1;
+    if( hwThreadCount == 0 )
+    {
+        hwThreadCount = 1;
+    }
     const std::size_t workerCount = std::min( { hwThreadCount, count, kMaxGitWorkers } );
-    if( workerCount <= 1 ) { for( std::size_t i = 0; i < count; ++i ) body( i ); return; }
+    if( workerCount <= 1 )
+    {
+        for( std::size_t i = 0; i < count; ++i )
+        {
+            body( i );
+        }
+        return;
+    }
 
     std::atomic<std::size_t> nextIndex{ 0 };
     const auto               worker = [ & ]()
     {
         // A throw escaping a std::thread entry is std::terminate — degrade to partial coverage instead. Only
         // the allocation seam can throw here (popen/parse), and a short answer beats killing the process.
-        try   { for( std::size_t i = nextIndex.fetch_add( 1 ); i < count; i = nextIndex.fetch_add( 1 ) ) body( i ); }
+        try
+        {
+            for( std::size_t i = nextIndex.fetch_add( 1 ); i < count; i = nextIndex.fetch_add( 1 ) )
+            {
+                body( i );
+            }
+        }
         catch( ... ) { DEGRADED_PATH_ALERT( "crossref: a git worker threw — this shard of the sweep is incomplete" ); }
     };
 
     {   // symmetric bare scope: the workers live exactly as long as the pass they serve
         std::vector<std::thread> workers;
         workers.reserve( workerCount );
-        for( std::size_t w = 0; w < workerCount; ++w ) workers.emplace_back( worker );
-        for( std::thread& worker_ : workers ) worker_.join();
+        for( std::size_t w = 0; w < workerCount; ++w )
+        {
+            workers.emplace_back( worker );
+        }
+        for( std::thread& worker_ : workers )
+        {
+            worker_.join();
+        }
     }
 }
 
@@ -684,7 +848,10 @@ public:
     const std::vector<RawRow>& rows( std::uint32_t pairIndex ) const
     {
         static const std::vector<RawRow> kEmpty{};
-        if( pairIndex == kNoPair || std::size_t( pairIndex ) >= rows_.size() ) return kEmpty;
+        if( pairIndex == kNoPair || std::size_t( pairIndex ) >= rows_.size() )
+        {
+            return kEmpty;
+        }
         return rows_[ pairIndex ];
     }
 
@@ -769,7 +936,10 @@ inline Verdict classifyFile( const FileRow& r )
     // multiset walk, and it would push redoDel above 1.0 and silently mark the file superseded.
     VERIFY( r.redone <= r.deleted );
 
-    if( r.strayLines == 0 ) return Verdict::Merged;
+    if( r.strayLines == 0 )
+    {
+        return Verdict::Merged;
+    }
 
     if( r.deleted > 0 )
     {
@@ -779,7 +949,10 @@ inline Verdict classifyFile( const FileRow& r )
 
     // Pure addition: no deletion site to compare, so the only remaining evidence that the live line already
     // holds this content is a HIGH minhash containment over a body big enough for that to mean something.
-    if( r.headTouched && r.sim >= kSimSupersede && r.strayLines >= kSimMinStray ) return Verdict::Superseded;
+    if( r.headTouched && r.sim >= kSimSupersede && r.strayLines >= kSimMinStray )
+    {
+        return Verdict::Superseded;
+    }
     return Verdict::Unmerged;
 }
 
@@ -860,7 +1033,10 @@ inline RefRow analyzeRef( const RefInfo& ref, const RefPlumbing& plumb, const st
         const auto        hIt        = headBlobAt.find( r.path );
         const bool        headTouched = hIt != headBlobAt.end();
         const std::string headSide   = headTouched ? hIt->second : r.aSha;    // unchanged by HEAD ⇒ still the base blob
-        if( r.bSha == headSide ) continue;                                     // byte-identical on the live line
+        if( r.bSha == headSide )
+        {
+            continue; // byte-identical on the live line
+        }
 
         const BlobFacts& base = blobs.get( r.aSha );
         const BlobFacts& mine = blobs.get( r.bSha );
@@ -890,10 +1066,16 @@ inline RefRow analyzeRef( const RefInfo& ref, const RefPlumbing& plumb, const st
         f.sim        = sketchContainment( mine.sketch, live.sketch );
         f.verdict    = classifyFile( f );
 
-        if( f.verdict == Verdict::Merged ) continue;                          // the live line has this work
+        if( f.verdict == Verdict::Merged )
+        {
+            continue; // the live line has this work
+        }
 
         row.strayLines += f.strayLines;
-        if( f.verdict == Verdict::Superseded ) row.supersededLines += f.strayLines;
+        if( f.verdict == Verdict::Superseded )
+        {
+            row.supersededLines += f.strayLines;
+        }
         ++row.strayFiles;
         row.files.push_back( std::move( f ) );
     }
@@ -904,9 +1086,18 @@ inline RefRow analyzeRef( const RefInfo& ref, const RefPlumbing& plumb, const st
     // Ref verdict: the stray-LINE-weighted share that the live line has demonstrably revisited. Weighting by
     // lines (not by file count) is what stops one coincidentally-shared deleted line in a mostly-additive
     // file from vouching for the hundreds of added lines around it.
-    if( row.strayLines == 0 )                                                              row.verdict = Verdict::Merged;
-    else if( float( row.supersededLines ) / float( row.strayLines ) >= kRefSupersedeMin )  row.verdict = Verdict::Superseded;
-    else                                                                                    row.verdict = Verdict::Unmerged;
+    if( row.strayLines == 0 )
+    {
+        row.verdict = Verdict::Merged;
+    }
+    else if( float( row.supersededLines ) / float( row.strayLines ) >= kRefSupersedeMin )
+    {
+        row.verdict = Verdict::Superseded;
+    }
+    else
+    {
+        row.verdict = Verdict::Unmerged;
+    }
     return row;
 }
 
@@ -921,7 +1112,10 @@ inline DiffPairTable gatherRefDiffs( const std::string& root, const std::vector<
     DiffPairTable diffs;
     for( std::size_t i = 0; i < refs.size(); ++i )
     {
-        if( !plumbing[i].ok || plumbing[i].isAncestor ) continue;
+        if( !plumbing[i].ok || plumbing[i].isAncestor )
+        {
+            continue;
+        }
         plumbing[i].refDiffPair  = diffs.want( plumbing[i].base, refs[i].tip );
         plumbing[i].headDiffPair = diffs.want( plumbing[i].base, headSha );
     }
@@ -936,9 +1130,15 @@ inline void registerSweepBlobs( const DiffPairTable& diffs, std::vector<RefPlumb
 {
     for( RefPlumbing& plumb : plumbing )
     {
-        if( !plumb.ok || plumb.isAncestor ) continue;
+        if( !plumb.ok || plumb.isAncestor )
+        {
+            continue;
+        }
 
-        for( const RawRow& h : diffs.rows( plumb.headDiffPair ) ) plumb.headBlobAt.emplace( h.path, h.bSha );
+        for( const RawRow& h : diffs.rows( plumb.headDiffPair ) )
+        {
+            plumb.headBlobAt.emplace( h.path, h.bSha );
+        }
         for( const RawRow& r : diffs.rows( plumb.refDiffPair ) )
         {
             blobs.want( r.aSha );
@@ -1048,8 +1248,14 @@ struct WhereResult
 // Whole-word occurrence: SYM not flanked by identifier bytes (so `foo` never matches `foobar`/`myfoo`).
 inline bool wholeWordAt( std::string_view hay, std::size_t at, std::size_t len ) noexcept
 {
-    if( at > 0 && isIdentByte( (unsigned char)hay[ at - 1 ] ) )               return false;
-    if( at + len < hay.size() && isIdentByte( (unsigned char)hay[ at + len ] ) ) return false;
+    if( at > 0 && isIdentByte( (unsigned char)hay[at - 1] ) )
+    {
+        return false;
+    }
+    if( at + len < hay.size() && isIdentByte( (unsigned char)hay[at + len] ) )
+    {
+        return false;
+    }
     return true;
 }
 
@@ -1068,20 +1274,32 @@ inline std::size_t declaratorEnd( std::string_view line ) noexcept
         "= default", "= delete",
     };
     std::size_t e = line.size();
-    while( e > 0 && std::isspace( (unsigned char)line[ e - 1 ] ) ) --e;
+    while( e > 0 && std::isspace( (unsigned char)line[e - 1] ) )
+    {
+        --e;
+    }
 
     for( bool stripped = true; stripped; )                                    // several may stack: `) const noexcept override`
     {
         stripped = false;
         for( std::string_view sp : kTrailingSpecifiers )
         {
-            if( e < sp.size() || line.compare( e - sp.size(), sp.size(), sp ) != 0 ) continue;
+            if( e < sp.size() || line.compare( e - sp.size(), sp.size(), sp ) != 0 )
+            {
+                continue;
+            }
             const std::size_t before = e - sp.size();
             // a whole WORD only, so `myconst` / `isFinal` never lose their tail (the operator forms are
             // punctuation and need no boundary).
-            if( isIdentByte( (unsigned char)sp.front() ) && before > 0 && isIdentByte( (unsigned char)line[ before - 1 ] ) ) continue;
+            if( isIdentByte( (unsigned char)sp.front() ) && before > 0 && isIdentByte( (unsigned char)line[before - 1] ) )
+            {
+                continue;
+            }
             e = before;
-            while( e > 0 && std::isspace( (unsigned char)line[ e - 1 ] ) ) --e;
+            while( e > 0 && std::isspace( (unsigned char)line[e - 1] ) )
+            {
+                --e;
+            }
             stripped = true;
         }
     }
@@ -1090,8 +1308,14 @@ inline std::size_t declaratorEnd( std::string_view line ) noexcept
     if( const std::size_t arrow = line.rfind( "->", e ); arrow != std::string_view::npos )
     {
         std::size_t beforeArrow = arrow;
-        while( beforeArrow > 0 && std::isspace( (unsigned char)line[ beforeArrow - 1 ] ) ) --beforeArrow;
-        if( beforeArrow > 0 && line[ beforeArrow - 1 ] == ')' ) e = beforeArrow;
+        while( beforeArrow > 0 && std::isspace( (unsigned char)line[beforeArrow - 1] ) )
+        {
+            --beforeArrow;
+        }
+        if( beforeArrow > 0 && line[beforeArrow - 1] == ')' )
+        {
+            e = beforeArrow;
+        }
     }
     return e;
 }
@@ -1104,8 +1328,14 @@ inline bool insideArgumentList( std::string_view line, std::size_t at ) noexcept
     int depth = 0;
     for( std::size_t i = 0; i < at; ++i )
     {
-        if( line[i] == '(' ) ++depth;
-        else if( line[i] == ')' && depth > 0 ) --depth;
+        if( line[i] == '(' )
+        {
+            ++depth;
+        }
+        else if( line[i] == ')' && depth > 0 )
+        {
+            --depth;
+        }
     }
     return depth > 0;
 }
@@ -1123,7 +1353,12 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
         "def ", "func ", "fn ", "function ", "type ", "typedef ", "using ", "template", "extension ",
     };
     for( std::string_view m : kDeclMarkers )
-        if( line.find( m ) != std::string_view::npos && line.find( m ) < at ) return true;
+    {
+        if( line.find( m ) != std::string_view::npos && line.find( m ) < at )
+        {
+            return true;
+        }
+    }
 
     // A C-family definition: the name is immediately followed by '(', something precedes it on the line (the
     // return type / qualified scope), it is not a member call on a receiver, it is not itself an ARGUMENT
@@ -1141,7 +1376,10 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
         return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at );
     }
     // ObjC method: "- (ret) sym" / "+ (ret) sym"
-    if( !line.empty() && ( line[0] == '-' || line[0] == '+' ) && line.find( ')' ) < at ) return true;
+    if( !line.empty() && ( line[0] == '-' || line[0] == '+' ) && line.find( ')' ) < at )
+    {
+        return true;
+    }
     return false;
 }
 
@@ -1153,10 +1391,19 @@ inline void scanLineForSymbol( std::string_view line, std::string_view sym, cons
 {
     for( std::size_t at = line.find( sym ); at != std::string_view::npos; at = line.find( sym, at + 1 ) )
     {
-        if( !wholeWordAt( line, at, sym.size() ) ) continue;
+        if( !wholeWordAt( line, at, sym.size() ) )
+        {
+            continue;
+        }
         std::size_t a = 0, b = line.size();
-        while( a < b && std::isspace( (unsigned char)line[a] ) )     ++a;
-        while( b > a && std::isspace( (unsigned char)line[b - 1] ) ) --b;
+        while( a < b && std::isspace( (unsigned char)line[a] ) )
+        {
+            ++a;
+        }
+        while( b > a && std::isspace( (unsigned char)line[b - 1] ) )
+        {
+            --b;
+        }
         out.push_back( WhereHit{ ref.name, ref.tip, ref.date, path, lineNo,
                                  definitionShaped( line, sym, at ), std::string( line.substr( a, b - a ) ) } );
         return;                                                               // one hit per line — the line IS the evidence
@@ -1178,11 +1425,17 @@ inline void scanBlobForSymbol( std::string_view bytes, std::string_view sym,
     {
         std::size_t  end     = bytes.find( '\n', lineStart );
         const bool   isFinal = ( end == std::string_view::npos );
-        if( isFinal ) end = bytes.size();
+        if( isFinal )
+        {
+            end = bytes.size();
+        }
 
         scanLineForSymbol( bytes.substr( lineStart, end - lineStart ), sym, ref, path, lineNo, out );
 
-        if( isFinal ) break;
+        if( isFinal )
+        {
+            break;
+        }
         lineStart = end + 1;
         ++lineNo;
     }
@@ -1202,9 +1455,15 @@ inline std::vector<RawRow> lsTree( const std::string& root, const std::string& r
     for( std::string_view line : splitLines( raw ) )
     {
         const std::size_t tab = line.find( '\t' );
-        if( tab == std::string_view::npos ) continue;
+        if( tab == std::string_view::npos )
+        {
+            continue;
+        }
         const std::vector<std::string_view> f = wsdetail::segmentsOf( line.substr( 0, tab ), ' ' );
-        if( f.size() < 3 || f[1] != "blob" || !isBlobSha( f[2] ) ) continue;
+        if( f.size() < 3 || f[1] != "blob" || !isBlobSha( f[2] ) )
+        {
+            continue;
+        }
         out.push_back( RawRow{ std::string( line.substr( tab + 1 ) ), std::string{}, std::string( f[2] ) } );
     }
     return out;
@@ -1215,8 +1474,14 @@ inline std::vector<RawRow> lsTree( const std::string& root, const std::string& r
 // boundary. Never a realpath (determinism, same reasoning as arch.h::relForHash).
 inline bool sameTreePath( std::string_view gitPath, std::string_view indexRelPath ) noexcept
 {
-    if( gitPath == indexRelPath )                                     return true;
-    if( indexRelPath.empty() || gitPath.size() <= indexRelPath.size() ) return false;
+    if( gitPath == indexRelPath )
+    {
+        return true;
+    }
+    if( indexRelPath.empty() || gitPath.size() <= indexRelPath.size() )
+    {
+        return false;
+    }
     return gitPath.compare( gitPath.size() - indexRelPath.size(), indexRelPath.size(), indexRelPath ) == 0
         && gitPath[ gitPath.size() - indexRelPath.size() - 1 ] == '/';
 }
@@ -1242,7 +1507,10 @@ constexpr std::uint32_t kHeadDefLineBelow = 3;    // …and below it (a signatur
 
 inline bool relabelHeadHitsFromIndex( std::vector<WhereHit>& hits, std::span<const IndexDefSite> indexDefs )
 {
-    if( indexDefs.empty() ) return false;
+    if( indexDefs.empty() )
+    {
+        return false;
+    }
 
     std::vector<char> promoted( hits.size(), 0 );
     for( const IndexDefSite& def : indexDefs )
@@ -1252,12 +1520,21 @@ inline bool relabelHeadHitsFromIndex( std::vector<WhereHit>& hits, std::span<con
         for( std::size_t hitIndex = 0; hitIndex < hits.size(); ++hitIndex )
         {
             const WhereHit& h = hits[ hitIndex ];
-            if( h.ref != "HEAD" || !sameTreePath( h.path, def.path ) )                               continue;
-            if( h.line + kHeadDefLineAbove < def.line || h.line > def.line + kHeadDefLineBelow )     continue;
+            if( h.ref != "HEAD" || !sameTreePath( h.path, def.path ) )
+            {
+                continue;
+            }
+            if( h.line + kHeadDefLineAbove < def.line || h.line > def.line + kHeadDefLineBelow )
+            {
+                continue;
+            }
             const std::uint32_t dist = ( h.line > def.line ) ? h.line - def.line : def.line - h.line;
             if( bestHit == hits.size() || dist < bestDist ) { bestHit = hitIndex; bestDist = dist; }
         }
-        if( bestHit != hits.size() ) promoted[ bestHit ] = 1;
+        if( bestHit != hits.size() )
+        {
+            promoted[bestHit] = 1;
+        }
     }
 
     const bool anyPromoted = std::find( promoted.begin(), promoted.end(), 1 ) != promoted.end();
@@ -1267,7 +1544,12 @@ inline bool relabelHeadHitsFromIndex( std::vector<WhereHit>& hits, std::span<con
         return false;
     }
     for( std::size_t hitIndex = 0; hitIndex < hits.size(); ++hitIndex )
-        if( hits[ hitIndex ].ref == "HEAD" ) hits[ hitIndex ].isDef = promoted[ hitIndex ] != 0;
+    {
+        if( hits[hitIndex].ref == "HEAD" )
+        {
+            hits[hitIndex].isDef = promoted[hitIndex] != 0;
+        }
+    }
     return true;
 }
 
@@ -1296,7 +1578,10 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
 
     result.headSha = quality::gitHeadSha( root );
     result.history = evidence.history;
-    if( evidence.history != nullptr ) result.fate = evidence.history->fateOf( result.sym );
+    if( evidence.history != nullptr )
+    {
+        result.fate = evidence.history->fateOf( result.sym );
+    }
 
     std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha );
     refs.insert( refs.begin(), RefInfo{ "HEAD", result.headSha, quality::gitCommitterDateIso( root ) } );
@@ -1306,8 +1591,12 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     struct Site { std::uint32_t refIndex; std::string path; };
     gtl::btree_map<std::string, std::vector<Site>> sites;
     for( std::uint32_t i = 0; i < refs.size(); ++i )
+    {
         for( const RawRow& r : lsTree( root, refs[i].tip ) )
+        {
             sites[ r.bSha ].push_back( Site{ i, r.path } );
+        }
+    }
 
     std::vector<std::string> shas;
     shas.reserve( sites.size() );
@@ -1317,16 +1606,18 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     result.refsScanned   = refs.size() - 1;                                   // HEAD is not one of the swept refs
 
     streamBlobs( root, shas, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
-    {
-        if( !isText || bytes.find( sym ) == std::string_view::npos ) return;   // cheap reject before the line walk
+                 {
+        if( !isText || bytes.find( sym ) == std::string_view::npos ) { return;   // cheap reject before the line walk
+}
         const auto it = sites.find( sha );
-        if( it == sites.end() ) return;
+        if( it == sites.end() ) { return;
+}
         for( const Site& s : it->second )
         {
-            if( refs[ s.refIndex ].name == "HEAD" ) result.onHead = true;
+            if( refs[ s.refIndex ].name == "HEAD" ) { result.onHead = true;
+}
             scanBlobForSymbol( bytes, sym, refs[ s.refIndex ], s.path, result.hits );
-        }
-    } );
+        } } );
 
     // §A7: HEAD's rows are the INDEX's answer, not the shape test's — before the sort, because "definitions
     // before references" is a sort key and a wrong label re-orders the first screen.
@@ -1337,12 +1628,27 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     std::sort( result.hits.begin(), result.hits.end(), []( const WhereHit& a, const WhereHit& b )
     {
         const bool ah = a.ref == "HEAD", bh = b.ref == "HEAD";
-        if( ah != bh )         return ah;
-        if( a.ref != b.ref )   return a.ref < b.ref;
+        if( ah != bh )
+        {
+            return ah;
+        }
+        if( a.ref != b.ref )
+        {
+            return a.ref < b.ref;
+        }
         const PathTier at = pathTierOf( a.path ), bt = pathTierOf( b.path );
-        if( at != bt )         return at < bt;
-        if( a.isDef != b.isDef ) return a.isDef;
-        if( a.path != b.path ) return a.path < b.path;
+        if( at != bt )
+        {
+            return at < bt;
+        }
+        if( a.isDef != b.isDef )
+        {
+            return a.isDef;
+        }
+        if( a.path != b.path )
+        {
+            return a.path < b.path;
+        }
         return a.line < b.line;
     } );
     return result;
@@ -1381,7 +1687,10 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
         if( !fp ) { rep.ok = false; return rep; }
         char        buf[ 65536 ];
         std::size_t n = 0;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 ) bytes.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
+        {
+            bytes.append( buf, n );
+        }
         std::fclose( fp );
     }
 
@@ -1391,21 +1700,36 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
     // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
     // omits those), so an absent ref scores as `merged` rather than as a miss.
     gtl::btree_map<std::string, Verdict> got;
-    for( const RefRow& r : res.refs ) got.emplace( r.ref.name, r.verdict );
+    for( const RefRow& r : res.refs )
+    {
+        got.emplace( r.ref.name, r.verdict );
+    }
 
     for( std::string_view line : splitLines( bytes ) )
     {
-        if( line.empty() || line[0] == '#' ) continue;
+        if( line.empty() || line[0] == '#' )
+        {
+            continue;
+        }
         const std::size_t tab = line.find( '\t' );
-        if( tab == std::string_view::npos ) continue;
+        if( tab == std::string_view::npos )
+        {
+            continue;
+        }
         EvalCase c;
         c.ref = std::string( line.substr( 0, tab ) );
-        if( !parseVerdict( line.substr( tab + 1 ), c.expected ) ) continue;
+        if( !parseVerdict( line.substr( tab + 1 ), c.expected ) )
+        {
+            continue;
+        }
 
         const auto it = got.find( c.ref );
         c.found = it != got.end();
         c.got   = c.found ? it->second : Verdict::Merged;
-        if( c.got == c.expected ) ++rep.correct;
+        if( c.got == c.expected )
+        {
+            ++rep.correct;
+        }
         rep.cases.push_back( std::move( c ) );
     }
     return rep;
@@ -1424,9 +1748,11 @@ inline void writeStrayEval( std::FILE* out, const EvalReport& rep )
                        "this to MEASURE a threshold change instead of eyeballing it. -->" );
     std::fprintf( out, "<stray-eval cases=\"%zu\" correct=\"%u\" accuracy=\"%.1f\">", n, rep.correct, acc );
     for( const EvalCase& c : rep.cases )
+    {
         std::fprintf( out, "<case ref=\"%s\" want=\"%s\" got=\"%s\" hit=\"%d\" reported=\"%d\"/>",
                       ex( c.ref ).c_str(), verdictTag( c.expected ), verdictTag( c.got ),
                       c.got == c.expected ? 1 : 0, c.found ? 1 : 0 );
+    }
     std::fprintf( out, "</stray-eval>" );
 }
 
@@ -1459,13 +1785,18 @@ inline void writeStrayRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex
     std::size_t shownCount = 0;
     for( const FileRow& f : r.files )
     {
-        if( shownCount >= maxFiles ) break;
+        if( shownCount >= maxFiles )
+        {
+            break;
+        }
         ++shownCount;
         writeStrayFile( out, f, ex );
     }
     VERIFY( shownCount == std::min( r.files.size(), maxFiles ) );
     if( r.files.size() > maxFiles )
+    {
         std::fprintf( out, "<more files=\"%zu\"/>", r.files.size() - maxFiles );
+    }
     std::fprintf( out, "</ref>" );
 }
 
@@ -1485,9 +1816,18 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
     std::uint32_t unmerged = 0, superseded = 0, unknown = 0;
     for( const RefRow& r : res.refs )
     {
-        if     ( !r.ok || r.verdict == Verdict::Unknown ) ++unknown;
-        else if( r.verdict == Verdict::Unmerged )         ++unmerged;
-        else if( r.verdict == Verdict::Superseded )       ++superseded;
+        if( !r.ok || r.verdict == Verdict::Unknown )
+        {
+            ++unknown;
+        }
+        else if( r.verdict == Verdict::Unmerged )
+        {
+            ++unmerged;
+        }
+        else if( r.verdict == Verdict::Superseded )
+        {
+            ++superseded;
+        }
     }
     VERIFY( std::size_t( unmerged ) + superseded + unknown + res.mergedRefs == res.refsScanned );
 
@@ -1528,7 +1868,10 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
     std::fprintf( out, "<stray-content head=\"%.9s\" head_ref=\"%s\" refs=\"%zu\" blobs=\"%zu\" unmerged=\"%u\" superseded=\"%u\" merged=\"%u\" unknown=\"%u\"%s>",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.distinctBlobs, unmerged, superseded, res.mergedRefs, unknown,
                   pageDisclosure( srab, sizeof( srab ), refPage.end - refPage.begin, res.refs.size(), refPage.end, pageLimit, pageOffset, false ) );
-    for( std::size_t refIndex = refPage.begin; refIndex < refPage.end; ++refIndex ) writeStrayRef( out, res.refs[ refIndex ], ex, maxFiles );
+    for( std::size_t refIndex = refPage.begin; refIndex < refPage.end; ++refIndex )
+    {
+        writeStrayRef( out, res.refs[refIndex], ex, maxFiles );
+    }
     std::fprintf( out, "</stray-content>" );
 }
 
@@ -1557,20 +1900,35 @@ inline void writeStrayContent( std::FILE* out, const StrayResult& res, std::size
 // (`doThing:withOther:`) and every unusual name answerable exactly as before.
 inline bool whereisSpecIsFileQualified( std::string_view spec )
 {
-    if( spec.find( "::" ) != std::string_view::npos ) return false;
+    if( spec.find( "::" ) != std::string_view::npos )
+    {
+        return false;
+    }
 
     const std::size_t lastColon = spec.rfind( ':' );
-    if( lastColon == std::string_view::npos || lastColon == 0 || lastColon + 1 >= spec.size() ) return false;
+    if( lastColon == std::string_view::npos || lastColon == 0 || lastColon + 1 >= spec.size() )
+    {
+        return false;
+    }
 
     const std::string_view fileHalf = spec.substr( 0, lastColon );
-    if( fileHalf.find( '/' ) != std::string_view::npos ) return true;             // a path, unambiguously
+    if( fileHalf.find( '/' ) != std::string_view::npos )
+    {
+        return true; // a path, unambiguously
+    }
 
     // a bare file NAME with an extension ("engine.cpp:computeBudget"): the dot must sit inside the half and be
     // followed by a short all-alphanumeric run, so an ordinary identifier can never trip it.
     const std::size_t dot = fileHalf.rfind( '.' );
-    if( dot == std::string_view::npos || dot == 0 || dot + 1 >= fileHalf.size() ) return false;
+    if( dot == std::string_view::npos || dot == 0 || dot + 1 >= fileHalf.size() )
+    {
+        return false;
+    }
     const std::string_view ext = fileHalf.substr( dot + 1 );
-    if( ext.size() > 8 ) return false;
+    if( ext.size() > 8 )
+    {
+        return false;
+    }
     return std::all_of( ext.begin(), ext.end(), []( unsigned char c ) { return std::isalnum( c ) != 0; } );
 }
 
@@ -1658,14 +2016,19 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // history lane, so it is the first thing after the root on the one shape where it fires: hits="0" AND a
     // file-qualified selector. It never appears beside a nonzero hit list, so it cannot dilute a real answer.
     if( res.hits.empty() && whereisSpecIsFileQualified( res.sym ) )
+    {
         std::fprintf( out, "<selector-note r=\"qualified-selector\" spec=\"%s\" retry=\"%s\"/>",
                       ex( res.sym ).c_str(), ex( whereisBareNameOf( res.sym ) ).c_str() );
+    }
 
     // The history lane, when it was asked for: what the probe did, then this symbol's own verdict.
     if( res.history != nullptr )
     {
         gitoracle::writeHistoryProbe( out, *res.history, ex );
-        if( res.history->ok ) gitoracle::writeNameFate( out, res.sym, res.fate, ex );
+        if( res.history->ok )
+        {
+            gitoracle::writeNameFate( out, res.sym, res.fate, ex );
+        }
     }
 
     // The <more/> contract, restated because it was false here: shown + dropped == hits=, ALWAYS. The count
@@ -1686,7 +2049,10 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // <more hits="N"/> = the rows AFTER this page, so shown + more == the rows from this page's offset on.
     // Un-paginated that is the historic "hits= minus the 60 printed"; paged it is what the NEXT page holds
     // (and next_offset= on the root says where to ask for it).
-    if( hitPage.end < res.hits.size() ) std::fprintf( out, "<more hits=\"%zu\"/>", res.hits.size() - hitPage.end );
+    if( hitPage.end < res.hits.size() )
+    {
+        std::fprintf( out, "<more hits=\"%zu\"/>", res.hits.size() - hitPage.end );
+    }
     std::fprintf( out, "</whereis>" );
 }
 

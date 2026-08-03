@@ -25,16 +25,31 @@ namespace mcpdetail
     // 4 hex digits at s[p..p+3] → v; false if out of bounds or not hex.
     inline bool hex4( const std::string& s, std::size_t p, std::uint32_t& v )
     {
-        if( p + 4 > s.size() ) return false;
+        if( p + 4 > s.size() )
+        {
+            return false;
+        }
         v = 0;
         for( std::size_t i = 0; i < 4; ++i )
         {
             const char c = s[ p + i ];
             v <<= 4;
-            if(      c >= '0' && c <= '9' ) v |= std::uint32_t( c - '0' );
-            else if( c >= 'a' && c <= 'f' ) v |= std::uint32_t( c - 'a' + 10 );
-            else if( c >= 'A' && c <= 'F' ) v |= std::uint32_t( c - 'A' + 10 );
-            else return false;
+            if( c >= '0' && c <= '9' )
+            {
+                v |= std::uint32_t( c - '0' );
+            }
+            else if( c >= 'a' && c <= 'f' )
+            {
+                v |= std::uint32_t( c - 'a' + 10 );
+            }
+            else if( c >= 'A' && c <= 'F' )
+            {
+                v |= std::uint32_t( c - 'A' + 10 );
+            }
+            else
+            {
+                return false;
+            }
         }
         return true;
     }
@@ -43,7 +58,9 @@ namespace mcpdetail
     inline void appendUtf8( std::string& out, std::uint32_t cp )
     {
         if( cp < 0x80 )
+        {
             out += char( cp );
+        }
         else if( cp < 0x800 )
         { out += char( 0xC0 | ( cp >> 6 ) );  out += char( 0x80 | ( cp & 0x3F ) ); }
         else if( cp < 0x10000 )
@@ -120,25 +137,46 @@ namespace mcpdetail
             const char c = s[p];
             if( c == '{' || c == '[' ) { ++depth;  continue; }
             if( c == '}' || c == ']' ) { --depth;  continue; }
-            if( c != '"' ) continue;
+            if( c != '"' )
+            {
+                continue;
+            }
 
             // a JSON string starts here — walk to its closing quote, escape-aware (a `\"` never ends it).
             const std::size_t textStart = p + 1;
             const std::size_t q         = stringEnd( s, p );
-            if( q == std::string::npos ) return;                          // unterminated string ⇒ nothing past it parses
+            if( q == std::string::npos )
+            {
+                return; // unterminated string ⇒ nothing past it parses
+            }
 
             // KEY position iff the next non-whitespace byte is ':' — otherwise it is a VALUE or an array element.
             std::size_t colon = q + 1;
-            while( colon < s.size() && isWs( s[colon] ) ) ++colon;
+            while( colon < s.size() && isWs( s[colon] ) )
+            {
+                ++colon;
+            }
             const bool isKey = ( colon < s.size() && s[colon] == ':' );
 
             p = isKey ? colon : q;                                        // resume after the ':' / after the closing quote
-            if( !isKey ) continue;
-            if( depth != 1 ) continue;                                    // a nested object's/array's key, not this span's
+            if( !isKey )
+            {
+                continue;
+            }
+            if( depth != 1 )
+            {
+                continue; // a nested object's/array's key, not this span's
+            }
 
             std::size_t v = colon + 1;
-            while( v < s.size() && isWs( s[v] ) ) ++v;
-            if( onKey( std::string_view( s ).substr( textStart, q - textStart ), v ) ) return;
+            while( v < s.size() && isWs( s[v] ) )
+            {
+                ++v;
+            }
+            if( onKey( std::string_view( s ).substr( textStart, q - textStart ), v ) )
+            {
+                return;
+            }
         }
     }
 
@@ -146,11 +184,14 @@ namespace mcpdetail
     {
         std::size_t found = std::string::npos;
         forEachTopLevelKey( s, from, [ & ]( std::string_view k, std::size_t valuePos )
-        {
-            if( k != key ) return false;
-            found = valuePos < s.size() ? valuePos : std::string::npos;
-            return true;                                                  // FIRST-WINS (see the header above)
-        } );
+                            {
+                                if( k != key )
+                                {
+                                    return false;
+                                }
+                                found = valuePos < s.size() ? valuePos : std::string::npos;
+                                return true;                                                  // FIRST-WINS (see the header above)
+                            } );
         return found;
     }
 
@@ -175,7 +216,10 @@ namespace mcpdetail
     // the same position it decodes) reads the same bytes the plain lookup would, with no second scan.
     inline std::string decodeStringAt( const std::string& s, std::size_t at )
     {
-        if( at >= s.size() || s[at] != '"' ) return {};
+        if( at >= s.size() || s[at] != '"' )
+        {
+            return {};
+        }
         std::size_t p = at + 1;
         std::string out;
         for( ; p < s.size() && s[p] != '"'; ++p )
@@ -246,7 +290,10 @@ namespace mcpdetail
     // shape or the container is unterminated. Never throws. (A3-F6 / A4-R3.)
     inline std::string containerSpanAt( const std::string& s, std::size_t at, char openCh, char closeCh )
     {
-        if( at >= s.size() || s[at] != openCh ) return {};                 // not this container shape
+        if( at >= s.size() || s[at] != openCh )
+        {
+            return {}; // not this container shape
+        }
 
         int depth = 0;
         for( std::size_t p = at; p < s.size(); ++p )
@@ -255,15 +302,24 @@ namespace mcpdetail
             if( c == '"' )                                              // skip the string interior via the ONE walk
             {
                 const std::size_t close = stringEnd( s, p );
-                if( close == std::string::npos ) return {};              // unterminated string ⇒ unterminated container
+                if( close == std::string::npos )
+                {
+                    return {}; // unterminated string ⇒ unterminated container
+                }
                 p = close;
                 continue;
             }
-            if( c == openCh ) ++depth;
+            if( c == openCh )
+            {
+                ++depth;
+            }
             else if( c == closeCh )
             {
                 --depth;
-                if( depth == 0 ) return s.substr( at, p - at + 1 );      // inclusive of the closing delimiter
+                if( depth == 0 )
+                {
+                    return s.substr( at, p - at + 1 ); // inclusive of the closing delimiter
+                }
             }
         }
         return {};                                                       // unterminated container
@@ -298,9 +354,25 @@ namespace mcpdetail
         for( std::size_t p = 0; p < arr.size(); ++p )
         {
             const char ch = arr[p];
-            if( !inStr ) { if( ch == '"' ) inStr = true;  continue; }
+            if( !inStr )
+            {
+                if( ch == '"' )
+                {
+                    inStr = true;
+                }
+                continue;
+            }
             if( ch == '\\' && p + 1 < arr.size() ) { cur.push_back( arr[ ++p ] ); continue; }
-            if( ch == '"' ) { inStr = false;  if( !cur.empty() ) out.push_back( cur );  cur.clear();  continue; }
+            if( ch == '"' )
+            {
+                inStr = false;
+                if( !cur.empty() )
+                {
+                    out.push_back( cur );
+                }
+                cur.clear();
+                continue;
+            }
             cur.push_back( ch );
         }
         return out;
@@ -322,15 +394,28 @@ namespace mcpdetail
             if( c == '"' )                                              // skip the string interior via the ONE walk
             {
                 const std::size_t close = stringEnd( arr, p );
-                if( close == std::string::npos ) break;                  // unterminated element string ⇒ nothing past it parses
+                if( close == std::string::npos )
+                {
+                    break; // unterminated element string ⇒ nothing past it parses
+                }
                 p = close;
                 continue;
             }
-            if( c == '{' ) { if( objDepth == 0 ) objStart = p; ++objDepth; }
+            if( c == '{' )
+            {
+                if( objDepth == 0 )
+                {
+                    objStart = p;
+                }
+                ++objDepth;
+            }
             else if( c == '}' && objDepth > 0 )
             {
                 --objDepth;
-                if( objDepth == 0 ) out.push_back( arr.substr( objStart, p - objStart + 1 ) );
+                if( objDepth == 0 )
+                {
+                    out.push_back( arr.substr( objStart, p - objStart + 1 ) );
+                }
             }
         }
         return out;
@@ -386,12 +471,20 @@ namespace mcpdetail
         const auto isWs = []( char c ) { return isJsonWs( c ); };   // W2-M0: RFC 8259 §2, one home (jsonesc.h)
 
         std::size_t start = 0;
-        while( start < s.size() && isWs( s[start] ) ) ++start;
-        if( start >= s.size() ) return { FrameShape::Blank, {} };
+        while( start < s.size() && isWs( s[start] ) )
+        {
+            ++start;
+        }
+        if( start >= s.size() )
+        {
+            return { FrameShape::Blank, {} };
+        }
 
         const bool isArrayFrame = s[start] == '[';
         if( s[start] != '{' && !isArrayFrame )
+        {
             return { FrameShape::NotObject, s.substr( start, kFrameEchoCaptureBytes ) };
+        }
 
         // ONE pass. `openers` is the stack of containers still waiting for their closer — its SIZE is the depth,
         // and its BACK is what the next closer must match. Empty again ⇒ the first top-level value ended here.
@@ -403,24 +496,42 @@ namespace mcpdetail
             if( c == '"' )
             {
                 const std::size_t close = stringEnd( s, p );
-                if( close == std::string::npos ) return { FrameShape::Incomplete, {} };   // string never closed
+                if( close == std::string::npos )
+                {
+                    return { FrameShape::Incomplete, {} }; // string never closed
+                }
                 p = close;
                 continue;
             }
             if( c == '{' || c == '[' ) { openers.push_back( c );  continue; }
-            if( c != '}' && c != ']' ) continue;
+            if( c != '}' && c != ']' )
+            {
+                continue;
+            }
             // a closer with NO opener is unreachable by construction (the first byte pushed one, and the loop
             // breaks the moment the stack empties) — but this is untrusted input and an empty-stack back() would
             // be UB, so the impossible case is spelled as the truthful verdict rather than assumed away.
-            if( openers.empty() || openers.back() != ( c == '}' ? '{' : '[' ) ) return { FrameShape::Mismatched, {} };
+            if( openers.empty() || openers.back() != ( c == '}' ? '{' : '[' ) )
+            {
+                return { FrameShape::Mismatched, {} };
+            }
             openers.pop_back();
             if( openers.empty() ) { endIndex = p;  break; }
         }
-        if( endIndex == std::string::npos ) return { FrameShape::Incomplete, {} };        // container never closed
+        if( endIndex == std::string::npos )
+        {
+            return { FrameShape::Incomplete, {} }; // container never closed
+        }
 
         std::size_t after = endIndex + 1;
-        while( after < s.size() && isWs( s[after] ) ) ++after;
-        if( after < s.size() ) return { FrameShape::Trailing, s.substr( after, kFrameEchoCaptureBytes ) };
+        while( after < s.size() && isWs( s[after] ) )
+        {
+            ++after;
+        }
+        if( after < s.size() )
+        {
+            return { FrameShape::Trailing, s.substr( after, kFrameEchoCaptureBytes ) };
+        }
 
         return { isArrayFrame ? FrameShape::BatchArray : FrameShape::Object, {} };
     }
@@ -453,7 +564,10 @@ namespace mcpdetail
     inline RawValue findRawValue( const std::string& s, const char* key )
     {
         const std::size_t p = findKeyValuePos( s, key );
-        if( p == std::string::npos ) return {};
+        if( p == std::string::npos )
+        {
+            return {};
+        }
 
         // a STRING value: escape-aware scan to the closing quote (a `\"` inside never ends it early).
         if( s[p] == '"' )
@@ -465,20 +579,35 @@ namespace mcpdetail
             for( std::size_t q = p + 1; q < s.size(); ++q )
             {
                 if( s[q] == '\\' && q + 1 < s.size() ) { out.text.push_back( s[++q] ); continue; }
-                if( s[q] == '"' ) break;
+                if( s[q] == '"' )
+                {
+                    break;
+                }
                 out.text.push_back( s[q] );
             }
             return out;
         }
 
         // a CONTAINER value: the whole span, so an echo shows the array the caller passed, not its first element.
-        if( s[p] == '[' ) return { containerSpanAt( s, p, '[', ']' ), true, false, true,  p };
-        if( s[p] == '{' ) return { containerSpanAt( s, p, '{', '}' ), true, false, false, p };
+        if( s[p] == '[' )
+        {
+            return { containerSpanAt( s, p, '[', ']' ), true, false, true, p };
+        }
+        if( s[p] == '{' )
+        {
+            return { containerSpanAt( s, p, '{', '}' ), true, false, false, p };
+        }
 
         // a BARE token (number / true / false / null): up to the element or container terminator.
         std::size_t       q     = p;
-        while( q < s.size() && s[q] != ',' && s[q] != '}' && s[q] != ']' && !isJsonWs( s[q] ) ) ++q;   // W2-M0
-        if( q == p ) return {};
+        while( q < s.size() && s[q] != ',' && s[q] != '}' && s[q] != ']' && !isJsonWs( s[q] ) )
+        {
+            ++q; // W2-M0
+        }
+        if( q == p )
+        {
+            return {};
+        }
         return { s.substr( p, q - p ), true, false, false, p };
     }
 
@@ -489,18 +618,33 @@ namespace mcpdetail
     // wearing a plausible number. Returns false for an empty token, a lone sign, junk, or overflow.
     inline bool parseWholeInt( std::string_view token, long long& out ) noexcept
     {
-        if( token.empty() ) return false;
+        if( token.empty() )
+        {
+            return false;
+        }
         std::size_t i = 0;
         const bool  isNeg = token[0] == '-';
-        if( isNeg || token[0] == '+' ) ++i;
-        if( i >= token.size() ) return false;
+        if( isNeg || token[0] == '+' )
+        {
+            ++i;
+        }
+        if( i >= token.size() )
+        {
+            return false;
+        }
 
         long long v = 0;
         for( ; i < token.size(); ++i )
         {
-            if( token[i] < '0' || token[i] > '9' ) return false;                        // '.', 'e', a unit suffix — not an integer
+            if( token[i] < '0' || token[i] > '9' )
+            {
+                return false; // '.', 'e', a unit suffix — not an integer
+            }
             const int d = token[i] - '0';
-            if( v > ( std::numeric_limits<long long>::max() - d ) / 10 ) return false;   // overflow ⇒ refuse, never wrap
+            if( v > ( std::numeric_limits<long long>::max() - d ) / 10 )
+            {
+                return false; // overflow ⇒ refuse, never wrap
+            }
             v = v * 10 + d;
         }
         out = isNeg ? -v : v;
@@ -552,18 +696,29 @@ namespace mcpdetail
     inline RawId findRawId( const std::string& s )
     {
         std::size_t p = findKeyValuePos( s, "id" );
-        if( p == std::string::npos ) return {};
+        if( p == std::string::npos )
+        {
+            return {};
+        }
         std::size_t e = p;
         if( p < s.size() && s[p] == '"' )
         {
             // the shared escape-aware walk: an escaped \" inside the id must not terminate the token
             // (id "a\"b" would otherwise truncate to `"a\"` and be spliced verbatim into every response).
             const std::size_t close = stringEnd( s, p );
-            if( close == std::string::npos ) return { true, "null" };   // unterminated string id → degrade to null
+            if( close == std::string::npos )
+            {
+                return { true, "null" }; // unterminated string id → degrade to null
+            }
             e = close + 1;                                             // include the closing quote
         }
         else
-        { while( e < s.size() && s[e] != ',' && s[e] != '}' && s[e] != ' ' ) ++e; }
+        {
+            while( e < s.size() && s[e] != ',' && s[e] != '}' && s[e] != ' ' )
+            {
+                ++e;
+            }
+        }
 
         // VALIDATE before the caller echoes it verbatim — a malformed id must never corrupt the response.
         //
@@ -576,30 +731,58 @@ namespace mcpdetail
         // determined. `null` itself stays echoable: it is a legal id, and the RawId.hasId flag (not the token)
         // is what distinguishes a notification from a request that really sent id:null.
         const std::string tok = s.substr( p, e - p );
-        if( tok == "null" ) return { true, tok };
-        if( tok == "true" || tok == "false" ) return { true, "null" };
+        if( tok == "null" )
+        {
+            return { true, tok };
+        }
+        if( tok == "true" || tok == "false" )
+        {
+            return { true, "null" };
+        }
 
         // §B6 M5 (ruling + reproduction in the header above): well-formed UTF-8, or the id is not echoable.
         for( std::size_t i = 0; i < tok.size(); )
         {
             const int len = jsonesc::utf8SeqLen( tok.data(), i, tok.size() );
-            if( len == 0 ) return { true, "null" };
+            if( len == 0 )
+            {
+                return { true, "null" };
+            }
             i += std::size_t( len );
         }
 
         if( !tok.empty() && tok.front() == '"' )
         {
-            if( tok.size() < 2 || tok.back() != '"' ) return { true, "null" };   // require closing quote
+            if( tok.size() < 2 || tok.back() != '"' )
+            {
+                return { true, "null" }; // require closing quote
+            }
             for( std::size_t i = 1; i + 1 < tok.size(); ++i )                    // interior must stay a sane JSON string
             {
                 const unsigned char c = (unsigned char)tok[i];
-                if( c < 0x20 ) return { true, "null" };                          // raw control byte → reject
-                if( c != '\\' ) continue;
+                if( c < 0x20 )
+                {
+                    return { true, "null" }; // raw control byte → reject
+                }
+                if( c != '\\' )
+                {
+                    continue;
+                }
                 ++i;
-                if( i + 1 >= tok.size() ) return { true, "null" };               // backslash right before the closing quote
+                if( i + 1 >= tok.size() )
+                {
+                    return { true, "null" }; // backslash right before the closing quote
+                }
                 const char esc = tok[i];
                 if( esc == 'u' )
-                { std::uint32_t v = 0; if( !hex4( tok, i + 1, v ) ) return { true, "null" }; i += 4; }
+                {
+                    std::uint32_t v = 0;
+                    if( !hex4( tok, i + 1, v ) )
+                    {
+                        return { true, "null" };
+                    }
+                    i += 4;
+                }
                 else if( esc != '"' && esc != '\\' && esc != '/' && esc != 'b' && esc != 'f' && esc != 'n' && esc != 'r' && esc != 't' )
                 { return { true, "null" }; }                                     // not a JSON escape → reject
             }
@@ -607,7 +790,10 @@ namespace mcpdetail
         }
         char* endp = nullptr;
         std::strtod( tok.c_str(), &endp );
-        if( !tok.empty() && endp == tok.c_str() + tok.size() ) return { true, tok };   // a clean JSON number
+        if( !tok.empty() && endp == tok.c_str() + tok.size() )
+        {
+            return { true, tok }; // a clean JSON number
+        }
         return { true, "null" };
     }
 

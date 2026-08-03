@@ -58,7 +58,9 @@ if bools is None or views is None or ints is None:
 ok( "read the tables from source: %d exact-match rows, %d + %d prefix-match rows" % ( len( bools ), len( views ), len( ints ) ) )
 
 # ── the hand-written arms still in parseArgs, with their real matcher ─────────────────────────────────
-start = next( k for k, l in enumerate( L ) if "if( isTableFlag ) continue;" in l )
+# The anchor is the braced Allman form (the always-braces style landed 2026-08-03): the `continue` sits on
+# its own line below, so the bare condition line is the stable, unique marker for where the table scan ends.
+start = next( k for k, l in enumerate( L ) if l.strip() == "if( isTableFlag )" )
 end   = next( k for k, l in enumerate( L ) if "unknown flag '%.*s'" in l )
 hand  = []
 for l in L[ start : end + 1 ]:

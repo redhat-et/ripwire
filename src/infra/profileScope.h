@@ -169,8 +169,12 @@ constexpr const char* basename( const char* path ) noexcept
 {
     const char* base = path;
     for( const char* p = path; *p != '\0'; ++p )
+    {
         if( *p == '/' )
+        {
             base = p + 1;
+        }
+    }
     return base;
 }
 
@@ -180,22 +184,34 @@ inline std::size_t param_paren( const char* s, std::size_t n ) noexcept
     for( std::size_t i = 0; i < n; ++i )
     {
         if( s[ i ] != '(' )
+        {
             continue;
+        }
 
         std::size_t j = i;
         while( j > 0 && s[ j - 1 ] == ' ' )
+        {
             --j;
+        }
 
         const bool isOperator = j >= 8 && std::strncmp( s + j - 8, "operator", 8 ) == 0;
         if( !isOperator )
+        {
             return i;
+        }
 
         // skip the operator's own parens, then keep scanning for the real list
         int depth = 0;
         for( ; i < n; ++i )
         {
-            if( s[ i ] == '(' )           ++depth;
-            else if( s[ i ] == ')' && --depth == 0 ) break;
+            if( s[i] == '(' )
+            {
+                ++depth;
+            }
+            else if( s[i] == ')' && --depth == 0 )
+            {
+                break;
+            }
         }
     }
     return n;
@@ -213,14 +229,26 @@ inline void trim_pretty( const char* pretty, char* out, std::size_t outsz ) noex
     for( std::size_t k = paren; k-- > 0; )
     {
         const char c = pretty[ k ];
-        if( c == ')' || c == '>' )            ++depth;
-        else if( c == '(' || c == '<' )       --depth;
-        else if( c == ' ' && depth == 0 ) { start = k + 1; break; }
+        if( c == ')' || c == '>' )
+        {
+            ++depth;
+        }
+        else if( c == '(' || c == '<' )
+        {
+            --depth;
+        }
+        else if( c == ' ' && depth == 0 )
+        {
+            start = k + 1;
+            break;
+        }
     }
 
     std::size_t len = paren - start;
     if( len >= outsz )
+    {
         len = outsz - 1;
+    }
     std::memcpy( out, pretty + start, len );
     out[ len ] = '\0';
 }
@@ -268,14 +296,18 @@ struct Record
 
     ALWAYS_INLINE void enter( uint64_t t ) noexcept
     {
-        if( depth++ == 0 )                           // only the outermost frame times
+        if( depth++ == 0 )
+        { // only the outermost frame times
             startTicks = t;
+        }
     }
 
     ALWAYS_INLINE void leave( uint64_t t ) noexcept
     {
         if( --depth != 0 )
+        {
             return;
+        }
 
         const uint64_t d = t - startTicks;
         calls   .store( calls.load( rlx ) + 1, rlx );
@@ -290,7 +322,9 @@ struct Record
     ALWAYS_INLINE void addEvents( const prof::pmc::Snapshot& end ) noexcept
     {
         for( unsigned i = 0; i < prof::pmc::kMaxEvents; ++i )
+        {
             events[ i ].store( events[ i ].load( rlx ) + ( end.values[ i ] - startEvents.values[ i ] ), rlx );
+        }
     }
 #endif
 };
@@ -309,7 +343,9 @@ public:
     ~RecordArena()
     {
         for( Block* b : m_blocks )
+        {
             delete b;
+        }
     }
 
     Record* alloc()
@@ -465,7 +501,9 @@ public:
         for( ThreadData*& d : m_threads )
         {
             if( d == nullptr || d->isMain )
+            {
                 continue;
+            }
 
             if( d->retired.load( std::memory_order_acquire ) )
             {
@@ -569,7 +607,9 @@ public:
         m_prev = tls_current;
         tls_current = rec;
         if( m_prev != rec )
+        {
             rec->parent.store( m_prev ? m_prev->site : nullptr, rlx );
+        }
 #endif
 #if PROFILE_PMC
         // counters read BEFORE the (tight) start tick, so the tick interval excludes
@@ -577,12 +617,16 @@ public:
         const bool          pmc = prof::pmc::active();
         prof::pmc::Snapshot s;
         if( pmc )
+        {
             s = prof::pmc::read();
+        }
 #endif
         rec->enter( detail::now_ticks() );
 #if PROFILE_PMC
         if( pmc && rec->depth == 1 )
+        {
             rec->startEvents = s;
+        }
 #endif
     }
 
@@ -595,12 +639,16 @@ public:
 #if PROFILE_PMC
         prof::pmc::Snapshot e;
         if( outer )
+        {
             e = prof::pmc::read();
+        }
 #endif
         m_rec->leave( t );
 #if PROFILE_PMC
         if( outer )
+        {
             m_rec->addEvents( e );
+        }
 #endif
 #if PROFILE_TREE
         tls_current = m_prev;
@@ -734,11 +782,26 @@ inline unsigned events_shown() noexcept
 // humanize a big counter total so the (wide) PMC columns stay narrow + scannable
 inline void fmt_count( char* buf, std::size_t sz, uint64_t v ) noexcept
 {
-    if(      v < 1000ull )           std::snprintf( buf, sz, "%llu",  (unsigned long long) v );
-    else if( v < 1000000ull )        std::snprintf( buf, sz, "%.2fk", double( v ) * 1e-3  );
-    else if( v < 1000000000ull )     std::snprintf( buf, sz, "%.2fM", double( v ) * 1e-6  );
-    else if( v < 1000000000000ull )  std::snprintf( buf, sz, "%.2fG", double( v ) * 1e-9  );
-    else                             std::snprintf( buf, sz, "%.2fT", double( v ) * 1e-12 );
+    if( v < 1000ull )
+    {
+        std::snprintf( buf, sz, "%llu", (unsigned long long)v );
+    }
+    else if( v < 1000000ull )
+    {
+        std::snprintf( buf, sz, "%.2fk", double( v ) * 1e-3 );
+    }
+    else if( v < 1000000000ull )
+    {
+        std::snprintf( buf, sz, "%.2fM", double( v ) * 1e-6 );
+    }
+    else if( v < 1000000000000ull )
+    {
+        std::snprintf( buf, sz, "%.2fG", double( v ) * 1e-9 );
+    }
+    else
+    {
+        std::snprintf( buf, sz, "%.2fT", double( v ) * 1e-12 );
+    }
 }
 
 // shared column header — TIME block first (total/avg/min/max [+ %thread]), then
@@ -749,7 +812,9 @@ inline void print_header( bool tree )
     std::printf( " %7s", tree ? "%thread" : "" );
     std::printf( " %12s", "calls" );
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
+    {
         std::printf( " %10s", prof::pmc::event_label( e ) );
+    }
     std::printf( "  %-40s %s\n", "scope", "(file:line)" );
 }
 
@@ -763,8 +828,14 @@ inline void print_row( const char* indentedName, const char* loc,
 
     // time block first
     std::printf( "%12.3f %10.3f %10.3f %10.3f", totalMs, avgUs, minUs, maxUs );
-    if( pctParent >= 0.0 ) std::printf( " %6.1f%%", pctParent );
-    else                   std::printf( " %7s", "" );
+    if( pctParent >= 0.0 )
+    {
+        std::printf( " %6.1f%%", pctParent );
+    }
+    else
+    {
+        std::printf( " %7s", "" );
+    }
 
     // then the count block: calls, then per-scope PMC totals (humanized)
     std::printf( " %12llu", (unsigned long long) r.calls );
@@ -786,19 +857,29 @@ inline void name_and_loc( const Row& r, char* nameBuf, std::size_t nameSz,
     char fn[ 96 ];
     trim_pretty( r.site->pretty, fn, sizeof( fn ) );
     if( r.site->description )
+    {
         std::snprintf( nameBuf, nameSz, "%s [%s]", fn, r.site->description );
+    }
     else
+    {
         std::snprintf( nameBuf, nameSz, "%s", fn );
+    }
     std::snprintf( locBuf, locSz, "%s:%d", r.site->file, r.site->line );
 }
 
 inline int index_of_site( const ThreadSnap& s, const Site* site )
 {
     if( site == nullptr )
+    {
         return -1;
+    }
     for( std::size_t i = 0; i < s.rows.size(); ++i )
+    {
         if( s.rows[ i ].site == site )
+        {
             return int( i );
+        }
+    }
     return -1;
 }
 
@@ -807,7 +888,9 @@ inline void print_tree_node( const ThreadSnap& s, const std::vector<std::vector<
                              uint64_t parentTotal, std::vector<char>& visited )
 {
     if( depth > 64 || visited[ i ] )
+    {
         return;
+    }
     visited[ i ] = 1;
 
     const Row& r = s.rows[ i ];
@@ -833,7 +916,9 @@ inline void print_tree_node( const ThreadSnap& s, const std::vector<std::vector<
     print_row( indented, loc, r, nspt, pct );
 
     for( int c : kids[ i ] )
+    {
         print_tree_node( s, kids, c, depth + 1, nspt, threadTotal, r.total, visited );
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -851,19 +936,31 @@ inline std::vector<Row> aggregate_by_site( const std::vector<ThreadSnap>& snaps 
 {
     std::vector<Row> agg;
     for( const ThreadSnap& s : snaps )
+    {
         for( const Row& r : s.rows )
         {
             Row* dst = nullptr;
-            for( Row& a : agg ) if( a.site == r.site ) { dst = &a; break; }
+            for( Row& a : agg )
+            {
+                if( a.site == r.site )
+                {
+                    dst = &a;
+                    break;
+                }
+            }
             if( !dst ) { agg.push_back( r ); agg.back().parent = nullptr; continue; }
             dst->calls += r.calls;
             dst->total += r.total;
             dst->minT   = fastmath::min( dst->minT, r.minT );
             dst->maxT   = fastmath::max( dst->maxT, r.maxT );
 #if PROFILE_PMC
-            for( unsigned e = 0; e < prof::pmc::kMaxEvents; ++e ) dst->events[ e ] += r.events[ e ];
+            for( unsigned e = 0; e < prof::pmc::kMaxEvents; ++e )
+            {
+                dst->events[e] += r.events[e];
+            }
 #endif
         }
+    }
     std::sort( agg.begin(), agg.end(),
                []( const Row& a, const Row& b ) { return a.total > b.total; } );
     return agg;
@@ -875,7 +972,12 @@ inline int event_index( const char* alias )
 {
 #if PROFILE_PMC
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
-        if( std::strcmp( prof::pmc::event_name( e ), alias ) == 0 ) return ( int ) e;
+    {
+        if( std::strcmp( prof::pmc::event_name( e ), alias ) == 0 )
+        {
+            return (int)e;
+        }
+    }
 #endif
     ( void ) alias;
     return -1;
@@ -902,11 +1004,22 @@ inline Derived resolve_derived()
 inline void print_agg_header( const Derived& d )
 {
     std::printf( "%12s %6s %12s", "total ms", "%tot", "calls" );
-    if( d.ipc()     ) std::printf( " %6s", "IPC" );
-    if( d.l1dMpki() ) std::printf( " %8s", "l1dMPKI" );
-    if( d.brMpki()  ) std::printf( " %8s", "brMPKI" );
+    if( d.ipc() )
+    {
+        std::printf( " %6s", "IPC" );
+    }
+    if( d.l1dMpki() )
+    {
+        std::printf( " %8s", "l1dMPKI" );
+    }
+    if( d.brMpki() )
+    {
+        std::printf( " %8s", "brMPKI" );
+    }
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
+    {
         std::printf( " %10s", prof::pmc::event_label( e ) );
+    }
     std::printf( "  %-40s %s\n", "scope", "(file:line)" );
 }
 
@@ -918,8 +1031,14 @@ inline void print_agg_row( const Row& r, double nspt, double pctTotal, const Der
     const double inst = ( d.inst >= 0 ) ? double( r.events[ d.inst ] ) : 0.0;
     if( d.ipc() )     { const double c = double( r.events[ d.cyc ] );
                         std::printf( " %6.2f", c > 0.0 ? inst / c : 0.0 ); }
-    if( d.l1dMpki() )   std::printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[ d.l1d ] ) / inst : 0.0 );
-    if( d.brMpki() )    std::printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[ d.br  ] ) / inst : 0.0 );
+    if( d.l1dMpki() )
+    {
+        std::printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[d.l1d] ) / inst : 0.0 );
+    }
+    if( d.brMpki() )
+    {
+        std::printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[d.br] ) / inst : 0.0 );
+    }
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
     { char b[ 16 ]; fmt_count( b, sizeof( b ), r.events[ e ] ); std::printf( " %10s", b ); }
 #else
@@ -937,11 +1056,22 @@ inline void print_tsv( const std::vector<Row>& agg, double nspt, const Derived& 
 {
     std::printf( "\n#PROF_TSV_BEGIN\tone row per scope, aggregated across threads; counters are RAW integers\n" );
     std::printf( "scope\tfile\tline\tcalls\ttotal_ms" );
-    if( d.ipc()     ) std::printf( "\tipc" );
-    if( d.l1dMpki() ) std::printf( "\tl1d_mpki" );
-    if( d.brMpki()  ) std::printf( "\tbr_mpki" );
+    if( d.ipc() )
+    {
+        std::printf( "\tipc" );
+    }
+    if( d.l1dMpki() )
+    {
+        std::printf( "\tl1d_mpki" );
+    }
+    if( d.brMpki() )
+    {
+        std::printf( "\tbr_mpki" );
+    }
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
+    {
         std::printf( "\t%s", prof::pmc::event_name( e ) );
+    }
     std::printf( "\n" );
 
     for( const Row& r : agg )
@@ -954,10 +1084,18 @@ inline void print_tsv( const std::vector<Row>& agg, double nspt, const Derived& 
         const double inst = ( d.inst >= 0 ) ? double( r.events[ d.inst ] ) : 0.0;
         if( d.ipc() )     { const double c = double( r.events[ d.cyc ] );
                             std::printf( "\t%.3f", c > 0.0 ? inst / c : 0.0 ); }
-        if( d.l1dMpki() )   std::printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[ d.l1d ] ) / inst : 0.0 );
-        if( d.brMpki() )    std::printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[ d.br  ] ) / inst : 0.0 );
+        if( d.l1dMpki() )
+        {
+            std::printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[d.l1d] ) / inst : 0.0 );
+        }
+        if( d.brMpki() )
+        {
+            std::printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[d.br] ) / inst : 0.0 );
+        }
         for( unsigned e = 0, n = events_shown(); e < n; ++e )
+        {
             std::printf( "\t%llu", (unsigned long long) r.events[ e ] );
+        }
 #else
         ( void ) d;
 #endif
@@ -989,7 +1127,9 @@ inline void report()
                       r->minTicks.load( rlx ), r->maxTicks.load( rlx ) };
 #if PROFILE_PMC
             for( unsigned e = 0; e < prof::pmc::kMaxEvents; ++e )
+            {
                 row.events[ e ] = r->events[ e ].load( rlx );
+            }
 #endif
             s.rows.push_back( row );
         }
@@ -1003,20 +1143,28 @@ inline void report()
     std::printf( "clock %.3f MHz (%.3f ns/tick = counter resolution)   threads %zu\n",
                  double( tick_hz() ) * 1e-6, nspt, snaps.size() );
     if( oh )
+    {
         std::printf( "measurement overhead ~%.1f ns/scope (subtract from short scopes)\n", double( oh ) * nspt );
+    }
     else
+    {
         std::printf( "measurement overhead below counter resolution (<= %.1f ns/scope)\n", nspt );
+    }
 
 #if PROFILE_PMC
     if( prof::pmc::active() )
     {
         std::printf( "PMC (per-scope HW counters, inclusive totals): " );
         for( unsigned e = 0, n = prof::pmc::event_count(); e < n; ++e )
+        {
             std::printf( "%s%s", e ? ", " : "", prof::pmc::event_name( e ) );
+        }
         std::printf( "\n" );
     }
     else
+    {
         std::printf( "PMC: unavailable (run privileged for HW counters; -DPROFILE_PMC=0 to compile out)\n" );
+    }
 #endif
 
     // ---- aggregated (per-site, across threads) flat view + machine block ----
@@ -1029,11 +1177,16 @@ inline void report()
     // %tot denominator; inclusive child scopes share that fixed bound.
     uint64_t grandTotal = 0;
     for( const ThreadSnap& s : snaps )
+    {
         for( std::size_t i = 0; i < s.rows.size(); ++i )
         {
             const int p = index_of_site( s, s.rows[ i ].parent );
-            if( p < 0 || p == ( int ) i ) grandTotal += s.rows[ i ].total;   // a root
+            if( p < 0 || p == (int)i )
+            {
+                grandTotal += s.rows[i].total; // a root
+            }
         }
+    }
 
     const std::vector<Row> agg = aggregate_by_site( snaps );
 
@@ -1071,24 +1224,34 @@ inline void report()
         {
             const int p = index_of_site( s, s.rows[ i ].parent );
             if( p >= 0 && p != int( i ) )
+            {
                 kids[ p ].push_back( int( i ) );
+            }
             else
+            {
                 roots.push_back( int( i ) );
+            }
         }
 
         auto byTotal = [ & ]( int a, int b ) { return s.rows[ a ].total > s.rows[ b ].total; };
         std::sort( roots.begin(), roots.end(), byTotal );
         for( auto& k : kids )
+        {
             std::sort( k.begin(), k.end(), byTotal );
+        }
 
         // fixed per-thread denominator: the sum of top-level scopes' time
         uint64_t threadTotal = 0;
         for( int r : roots )
+        {
             threadTotal += s.rows[ r ].total;
+        }
 
         std::vector<char> visited( n, 0 );
         for( int r : roots )
+        {
             print_tree_node( s, kids, r, 0, nspt, threadTotal, 0, visited );
+        }
     }
 
     std::printf( "================================================================================\n\n" );

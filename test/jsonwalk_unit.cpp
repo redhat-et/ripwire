@@ -42,16 +42,24 @@ std::size_t legacyStringEnd( const std::string& s, std::size_t quotePos ) noexce
 {
     std::size_t q = quotePos + 1;
     while( q < s.size() && s[q] != '"' )
+    {
         q += ( s[q] == '\\' && q + 1 < s.size() ) ? 2 : 1;
+    }
     return q < s.size() ? q : std::string::npos;
 }
 
 // eval.h:454-460 as it stood before the hoist.
 std::size_t legacySkipString( const std::string& s, std::size_t pos )
 {
-    if( pos >= s.size() || s[pos] != '"' ) return pos;
+    if( pos >= s.size() || s[pos] != '"' )
+    {
+        return pos;
+    }
     std::size_t i = pos + 1;
-    while( i < s.size() && s[i] != '"' ) i += ( s[i] == '\\' && i + 1 < s.size() ) ? 2 : 1;
+    while( i < s.size() && s[i] != '"' )
+    {
+        i += ( s[i] == '\\' && i + 1 < s.size() ) ? 2 : 1;
+    }
     return ( i < s.size() ) ? i + 1 : s.size();
 }
 
@@ -59,7 +67,15 @@ std::size_t legacySkipString( const std::string& s, std::size_t pos )
 std::string show( const std::string& s )
 {
     std::string out = "\"";
-    for( char c : s ) { if( c == '\\' ) out += "\\\\"; else if( c == '"' ) out += "\\\""; else out += c; }
+    for( char c : s )
+    {
+        if( c == '\\' ) { out += "\\\\"; }
+        else if( c == '"' ) { out += "\\\""; }
+        else
+        {
+            out += c;
+        }
+    }
     out += "\"";
     return out;
 }
@@ -108,7 +124,7 @@ int main()
 
         for( int len = 0; len <= 8 && clean; ++len )
         {
-            const long total = [ & ]{ long t = 1; for( int k = 0; k < len; ++k ) t *= 3; return t; }();
+            const long total = [ & ] { long t = 1; for( int k = 0; k < len; ++k ) { t *= 3; } return t; }();
             for( long code = 0; code < total && clean; ++code )
             {
                 std::string s;
@@ -119,7 +135,12 @@ int main()
 
                 // every start offset, plus one PAST the end (both wrappers must stay in bounds)
                 for( std::size_t pos = 0; pos <= s.size() && clean; ++pos )
-                    if( !probe( s, pos, why ) ) clean = false;
+                {
+                    if( !probe( s, pos, why ) )
+                    {
+                        clean = false;
+                    }
+                }
             }
         }
 
@@ -132,7 +153,9 @@ int main()
             ok( msg );
         }
         else
+        {
             no( why.c_str() );
+        }
     }
 
     // ── arm 2: the named shapes, spelled out so a reader can see what is covered ────────────────────
@@ -159,12 +182,17 @@ int main()
         bool        clean = true;
         std::string why;
         for( const Shape& sh : shapes )
+        {
             if( !probe( sh.s, sh.pos, why ) )
             {
                 no( ( std::string( "named shape '" ) + sh.name + "': " + why ).c_str() );
                 clean = false;
             }
-        if( clean ) ok( "15 named shapes (unterminated / trailing-backslash / NUL / high bytes / past-end)" );
+        }
+        if( clean )
+        {
+            ok( "15 named shapes (unterminated / trailing-backslash / NUL / high bytes / past-end)" );
+        }
     }
 
     // ── arm 3: the two CONVENTIONS are the documented ones, not accidentally unified ────────────────
@@ -179,7 +207,10 @@ int main()
         if( rw::mcpdetail::stringEnd( unterminated, 0 ) != std::string::npos ){ no( "stringEnd: npos on an unterminated string (H3 truncation detector)" ); clean = false; }
         if( rw::minedjson::skipString( unterminated, 0 ) != unterminated.size() ) { no( "skipString: clamps to size() on an unterminated string" ); clean = false; }
         if( rw::minedjson::skipString( "abc", 1 ) != 1 )                      { no( "skipString: not-a-quote precondition returns pos unchanged" ); clean = false; }
-        if( clean ) ok( "the two return conventions are preserved and distinct (npos vs clamp; index vs one-past)" );
+        if( clean )
+        {
+            ok( "the two return conventions are preserved and distinct (npos vs clamp; index vs one-past)" );
+        }
     }
 
     // ── arm 4: isJsonWs is RFC 8259 §2 exactly — the folded clone family's contract ─────────────────
@@ -201,7 +232,10 @@ int main()
         // the bytes JSON does NOT call whitespace, named explicitly (the std::isspace trap)
         if( clean && ( rw::isJsonWs( '\v' ) || rw::isJsonWs( '\f' ) ) )
         { no( "isJsonWs must reject VT/FF — std::isspace accepts them, JSON does not" ); clean = false; }
-        if( clean ) ok( "isJsonWs == RFC 8259 §2 over all 256 bytes (VT/FF rejected)" );
+        if( clean )
+        {
+            ok( "isJsonWs == RFC 8259 §2 over all 256 bytes (VT/FF rejected)" );
+        }
     }
 
     if( failCount == 0 ) { std::printf( "UNIT ALL PASS\n" ); return 0; }

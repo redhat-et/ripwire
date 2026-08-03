@@ -155,7 +155,13 @@ using KindFlag = bool KindPolicy::*;
 
 inline std::size_t kindIndex( std::string_view tag ) noexcept
 {
-    for( std::size_t i = 0; i < kKindCount; ++i ) if( tag == kKindPolicy[i].tag ) return i;
+    for( std::size_t i = 0; i < kKindCount; ++i )
+    {
+        if( tag == kKindPolicy[i].tag )
+        {
+            return i;
+        }
+    }
     return kKindCount;                                        // caller VERIFYs; no kind reaches here unnamed
 }
 
@@ -173,12 +179,21 @@ struct KindCounts
     {
         const std::size_t i = kindIndex( tag );
         VERIFY( i < kKindCount );
-        if( i < kKindCount ) ++n[i];
+        if( i < kKindCount )
+        {
+            ++n[i];
+        }
     }
     std::uint32_t sumWhere( KindFlag col ) const noexcept
     {
         std::uint32_t t = 0;
-        for( std::size_t i = 0; i < kKindCount; ++i ) if( kKindPolicy[i].*col ) t += n[i];
+        for( std::size_t i = 0; i < kKindCount; ++i )
+        {
+            if( kKindPolicy[i].*col )
+            {
+                t += n[i];
+            }
+        }
         return t;
     }
     std::uint32_t total()    const noexcept { return std::accumulate( std::begin( n ), std::end( n ), std::uint32_t( 0 ) ); }
@@ -239,7 +254,13 @@ struct AbiResult
 // is a report, not a gate — exactly layout::layoutContractBroken's reasoning, restated for the cross-ref case.
 inline bool abiContractBroken( const AbiResult& r ) noexcept
 {
-    for( const RefRow& rr : r.refs ) if( rr.counts.breaks() > 0 ) return true;
+    for( const RefRow& rr : r.refs )
+    {
+        if( rr.counts.breaks() > 0 )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -270,25 +291,42 @@ inline gtl::btree_map<std::string, std::vector<Candidate>> buildCandidates( layo
 
     for( const Symbol& s : ctx.ing.symbols )
     {
-        if( s.kind != SymKind::Struct && s.kind != SymKind::Class && s.kind != SymKind::Interface ) continue;
-        if( !layout::isCFamilyPath( ctx.ing.files[ s.fileId ] ) ) continue;
+        if( s.kind != SymKind::Struct && s.kind != SymKind::Class && s.kind != SymKind::Interface )
+        {
+            continue;
+        }
+        if( !layout::isCFamilyPath( ctx.ing.files[s.fileId] ) )
+        {
+            continue;
+        }
 
         const std::string& src = layout::fileBytes( ctx, s.fileId );
-        if( src.empty() ) continue;
+        if( src.empty() )
+        {
+            continue;
+        }
 
         layout::DefSite site;
-        if( !layout::findDefBody( src, s.name, s.sigStartByte, site ) ) continue;
+        if( !layout::findDefBody( src, s.name, s.sigStartByte, site ) )
+        {
+            continue;
+        }
         site.fileId = s.fileId;
 
         const std::uint64_t key = ( std::uint64_t( s.fileId ) << 32 ) | std::uint64_t( site.braceStart & 0xFFFFFFFFull );
-        if( seenSite.find( key ) != seenSite.end() ) continue;
+        if( seenSite.find( key ) != seenSite.end() )
+        {
+            continue;
+        }
         seenSite.emplace( key, true );
 
         const std::string relPath( relForHash( ctx.ing.files[ s.fileId ], root ) );
         byPath[ relPath ].push_back( Candidate{ s.name, site } );
     }
     for( auto& [ path, cands ] : byPath )
+    {
         std::sort( cands.begin(), cands.end(), []( const Candidate& a, const Candidate& b ) { return a.name < b.name; } );
+    }
     return byPath;
 }
 
@@ -299,7 +337,10 @@ inline const layout::LayoutDef& headDefFor( layout::ModelCtx& ctx, const Candida
 {
     const std::uint64_t key = ( std::uint64_t( c.site.fileId ) << 32 ) | std::uint64_t( c.site.braceStart & 0xFFFFFFFFull );
     const auto           it = cache.find( key );
-    if( it != cache.end() ) return it->second;
+    if( it != cache.end() )
+    {
+        return it->second;
+    }
     return cache.emplace( key, layout::modelDef( ctx, c.site.fileId, c.site, c.name ) ).first->second;
 }
 
@@ -375,9 +416,15 @@ struct SweepState
     // leaves every slot present=false, which the classifier reads as "absent on that side".
     void wantBlob( const std::string& sha, const std::string& path, std::size_t candCount )
     {
-        if( sha.empty() || crossref::isNullSha( sha ) || !crossref::isBlobSha( sha ) ) return;
+        if( sha.empty() || crossref::isNullSha( sha ) || !crossref::isBlobSha( sha ) )
+        {
+            return;
+        }
         const std::string key = modelKey( sha, path );
-        if( models.find( key ) != models.end() ) return;
+        if( models.find( key ) != models.end() )
+        {
+            return;
+        }
         models.emplace( key, std::vector<DefSlot>( candCount ) );
         shaPaths[ sha ].push_back( path );
     }
@@ -393,13 +440,22 @@ inline const std::vector<std::string>& headChangedPaths( const std::string& root
                                                          const std::string& base, const PathIndex& byPath, PathMemo& memo )
 {
     auto hit = memo.find( base );
-    if( hit != memo.end() ) return hit->second;
+    if( hit != memo.end() )
+    {
+        return hit->second;
+    }
 
     std::vector<std::string> paths;
     for( const crossref::RawRow& r : crossref::diffRaw( root, base, headSha ) )
     {
-        if( r.aSha == r.bSha )                      continue;
-        if( byPath.find( r.path ) == byPath.end() )  continue;
+        if( r.aSha == r.bSha )
+        {
+            continue;
+        }
+        if( byPath.find( r.path ) == byPath.end() )
+        {
+            continue;
+        }
         paths.push_back( r.path );
     }
     return memo.emplace( base, std::move( paths ) ).first->second;
@@ -427,9 +483,15 @@ inline void collectAuthoredSites( const std::string& root, const std::vector<cro
         gtl::btree_map<std::string, bool> authoredPaths;
         for( const crossref::RawRow& r : crossref::diffRaw( root, base, refs[i].tip ) )
         {
-            if( r.aSha == r.bSha )                      continue;   // mode-only change; content is identical
+            if( r.aSha == r.bSha )
+            {
+                continue; // mode-only change; content is identical
+            }
             const auto pit = byPath.find( r.path );
-            if( pit == byPath.end() )                   continue;   // HEAD declares no locatable struct here
+            if( pit == byPath.end() )
+            {
+                continue; // HEAD declares no locatable struct here
+            }
             authoredPaths.emplace( r.path, true );
             sw.pathSites.push_back( PathSite{ i, r.path, r.aSha, r.bSha } );
             sw.wantBlob( r.aSha, r.path, pit->second.size() );
@@ -441,9 +503,15 @@ inline void collectAuthoredSites( const std::string& root, const std::vector<cro
         // introduced — but it is counted here rather than vanishing.
         for( const std::string& p : headChangedPaths( root, result.headSha, base, byPath, headPathsByBase ) )
         {
-            if( authoredPaths.find( p ) != authoredPaths.end() ) continue;
+            if( authoredPaths.find( p ) != authoredPaths.end() )
+            {
+                continue;
+            }
             const auto pit = byPath.find( p );
-            if( pit == byPath.end() ) continue;
+            if( pit == byPath.end() )
+            {
+                continue;
+            }
             rows[i].headOnly += std::uint32_t( pit->second.size() );
         }
         result.headOnly += rows[i].headOnly;
@@ -463,8 +531,14 @@ inline void modelRefBlobs( const std::string& root, layout::ModelCtx& ctx, const
     crossref::streamBlobs( root, shas, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
     {
         const auto sit = sw.shaPaths.find( sha );
-        if( sit == sw.shaPaths.end() ) return;
-        if( !isText ) return;                          // binary/oversized: every slot stays present=false
+        if( sit == sw.shaPaths.end() )
+        {
+            return;
+        }
+        if( !isText )
+        {
+            return; // binary/oversized: every slot stays present=false
+        }
 
         // The comment-strip + constant harvest is per BLOB, not per (path,candidate) — several candidate
         // structs in the same file share one pass, same as layout.h's own per-file cache.
@@ -475,14 +549,20 @@ inline void modelRefBlobs( const std::string& root, layout::ModelCtx& ctx, const
         {
             const auto pit = byPath.find( path );
             const auto mit = sw.models.find( modelKey( sha, path ) );
-            if( pit == byPath.end() || mit == sw.models.end() ) continue;
+            if( pit == byPath.end() || mit == sw.models.end() )
+            {
+                continue;
+            }
             VERIFY( mit->second.size() == pit->second.size() );
 
             for( std::size_t ci = 0; ci < pit->second.size() && ci < mit->second.size(); ++ci )
             {
                 const Candidate& c = pit->second[ ci ];
                 layout::DefSite  refSite;
-                if( !layout::findTopLevelDef( bytes, c.name, refSite ) ) continue;   // absent in these bytes
+                if( !layout::findTopLevelDef( bytes, c.name, refSite ) )
+                {
+                    continue; // absent in these bytes
+                }
                 mit->second[ ci ].def     = layout::modelDefFromSource( ctx, bytes, stripped, consts, c.site.fileId, refSite, c.name );
                 mit->second[ ci ].present = true;
             }
@@ -506,7 +586,10 @@ inline void classifyCandidate( ClassifyCtx cc, const Candidate& c, const PathSit
 
     const bool tipPresent  = tip  != nullptr && tip->present;
     const bool basePresent = base != nullptr && base->present;
-    if( tipPresent && tip->def.spellShape == headDef.spellShape ) return;        // matches HEAD: quiet
+    if( tipPresent && tip->def.spellShape == headDef.spellShape )
+    {
+        return; // matches HEAD: quiet
+    }
 
     StructRow srow;
     srow.name        = c.name;
@@ -544,17 +627,31 @@ inline void classifyCandidate( ClassifyCtx cc, const Candidate& c, const PathSit
         // "these slots, different names") and lands here too. It is listed under --detail with its field
         // diff, never silently merged into "same".
         if( std::string_view( shapeKind ) == "drift" && headDef.slotShape == tip->def.slotShape )
+        {
             shapeKind = "rename";
+        }
 
         srow.sizeDiffers = srow.headSize != srow.refSize;
         srow.sizeDelta   = ( srow.headSize > srow.refSize ) ? srow.headSize - srow.refSize
                                                             : srow.refSize - srow.headSize;
     }
 
-    if( sameAsBase )              srow.kind = "head-moved";
-    else if( !tipPresent )        srow.kind = "absent";
-    else if( !tip->def.modeled )  srow.kind = "unknown";                         // NEVER "same"
-    else                          srow.kind = shapeKind;
+    if( sameAsBase )
+    {
+        srow.kind = "head-moved";
+    }
+    else if( !tipPresent )
+    {
+        srow.kind = "absent";
+    }
+    else if( !tip->def.modeled )
+    {
+        srow.kind = "unknown"; // NEVER "same"
+    }
+    else
+    {
+        srow.kind = shapeKind;
+    }
 
     rr.counts.add( srow.kind );
     result.counts.add( srow.kind );
@@ -565,15 +662,24 @@ inline void classifyPathSite( ClassifyCtx cc, const PathIndex& byPath, const Swe
                               const PathSite& ps, RefRow& rr )
 {
     const auto pit = byPath.find( ps.path );
-    if( pit == byPath.end() ) return;
+    if( pit == byPath.end() )
+    {
+        return;
+    }
     const auto tipIt  = sw.models.find( modelKey( ps.tipSha,  ps.path ) );
     const auto baseIt = sw.models.find( modelKey( ps.baseSha, ps.path ) );
 
     for( std::size_t ci = 0; ci < pit->second.size(); ++ci )
     {
         RefSides sides;
-        if( tipIt  != sw.models.end() && ci < tipIt->second.size()  ) sides.tip  = &tipIt->second[ ci ];
-        if( baseIt != sw.models.end() && ci < baseIt->second.size() ) sides.base = &baseIt->second[ ci ];
+        if( tipIt != sw.models.end() && ci < tipIt->second.size() )
+        {
+            sides.tip = &tipIt->second[ci];
+        }
+        if( baseIt != sw.models.end() && ci < baseIt->second.size() )
+        {
+            sides.base = &baseIt->second[ci];
+        }
         classifyCandidate( cc, pit->second[ ci ], ps, sides, rr );
     }
 }
@@ -599,15 +705,20 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
 
     HeadCache           headCache;
     std::vector<RefRow> rows( refs.size() );
-    for( std::size_t i = 0; i < refs.size(); ++i ) rows[i].ref = refs[i];
+    for( std::size_t i = 0; i < refs.size(); ++i )
+    {
+        rows[i].ref = refs[i];
+    }
 
     SweepState sw;
     collectAuthoredSites( root, refs, byPath, sw, Tally{ rows, result } );   // WHERE each ref's own work reaches
     modelRefBlobs( root, ctx, byPath, sw, result );                          // one cat-file batch for both sides
 
     const ClassifyCtx cc{ ctx, headCache, result };
-    for( const PathSite& ps : sw.pathSites )                                 // the verdict per candidate
+    for( const PathSite& ps : sw.pathSites )
+    { // the verdict per candidate
         classifyPathSite( cc, byPath, sw, ps, rows[ ps.refIndex ] );
+    }
 
     // ── rank: the biggest contract break leads ───────────────────────────────────────────────────────────
     // Breaks before reports, then by SIZE DELTA descending (a struct that grew 200 bytes outranks one that
@@ -618,12 +729,27 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
         std::sort( r.structs.begin(), r.structs.end(), []( const StructRow& a, const StructRow& b )
         {
             const bool ab = kindIsBreak( a.kind ), bb = kindIsBreak( b.kind );
-            if( ab != bb )                     return ab;
+            if( ab != bb )
+            {
+                return ab;
+            }
             const bool al = kindListed( a.kind ), bl = kindListed( b.kind );
-            if( al != bl )                     return al;
-            if( a.sizeDelta != b.sizeDelta )   return a.sizeDelta > b.sizeDelta;
-            if( a.headSize  != b.headSize )    return a.headSize  > b.headSize;
-            if( a.path != b.path )             return a.path < b.path;
+            if( al != bl )
+            {
+                return al;
+            }
+            if( a.sizeDelta != b.sizeDelta )
+            {
+                return a.sizeDelta > b.sizeDelta;
+            }
+            if( a.headSize != b.headSize )
+            {
+                return a.headSize > b.headSize;
+            }
+            if( a.path != b.path )
+            {
+                return a.path < b.path;
+            }
             return a.name < b.name;
         } );
         // A ref with NO rows at all is genuinely quiet and folds into quiet=. A ref whose every row is an
@@ -635,7 +761,10 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
     std::sort( result.refs.begin(), result.refs.end(), []( const RefRow& a, const RefRow& b )
     {
         const std::uint32_t ad = a.counts.breaks(), bd = b.counts.breaks();
-        if( ad != bd ) return ad > bd;
+        if( ad != bd )
+        {
+            return ad > bd;
+        }
         return a.ref.name < b.ref.name;
     } );
     return result;
@@ -648,7 +777,9 @@ using XmlEscaper = std::function<std::string( std::string_view )>;
 inline void writeAbiCaveats( std::FILE* out, const char* tag, const std::vector<layout::Caveat>& cs, const XmlEscaper& ex )
 {
     for( const layout::Caveat& c : cs )
+    {
         std::fprintf( out, "<%s k=\"%s\" d=\"%s\"/>", tag, ex( c.kind ).c_str(), ex( c.detail ).c_str() );
+    }
 }
 
 inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper& ex )
@@ -659,11 +790,16 @@ inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper
     // the honesty contract exists to prevent). Omitted rather than printed as a misleading 0.
     std::fprintf( out, "<struct n=\"%s\" p=\"%s\" l=\"%u\" kind=\"%s\" head_size=\"%u\"",
                   ex( s.name ).c_str(), ex( s.path ).c_str(), s.headLine, s.kind, s.headSize );
-    if( s.refSized ) std::fprintf( out, " ref_size=\"%u\" size_differs=\"%d\" size_delta=\"%u\"",
-                                   s.refSize, s.sizeDiffers ? 1 : 0, s.sizeDelta );
+    if( s.refSized )
+    {
+        std::fprintf( out, " ref_size=\"%u\" size_differs=\"%d\" size_delta=\"%u\"",
+                      s.refSize, s.sizeDiffers ? 1 : 0, s.sizeDelta );
+    }
     std::fprintf( out, ">" );
     for( const layout::FieldDiff& f : s.fields )
+    {
         std::fprintf( out, "<d n=\"%s\" a=\"%s\" b=\"%s\"/>", ex( f.name ).c_str(), ex( f.inA ).c_str(), ex( f.inB ).c_str() );
+    }
     writeAbiCaveats( out, "head_caveat", s.headCaveats, ex );
     writeAbiCaveats( out, "ref_caveat",  s.refCaveats,  ex );
     std::fprintf( out, "</struct>" );
@@ -674,7 +810,12 @@ inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper
 inline void writeKindAttrs( std::FILE* out, const KindCounts& k )
 {
     for( std::size_t i = 0; i < kKindCount; ++i )
-        if( k.n[i] ) std::fprintf( out, " %s=\"%u\"", kKindPolicy[i].tag, k.n[i] );
+    {
+        if( k.n[i] )
+        {
+            std::fprintf( out, " %s=\"%u\"", kKindPolicy[i].tag, k.n[i] );
+        }
+    }
 }
 
 // How many of a ref's rows THIS view would print, before the per-ref display cap. One definition, read by
@@ -682,7 +823,13 @@ inline void writeKindAttrs( std::FILE* out, const KindCounts& k )
 inline std::size_t eligibleRows( const RefRow& r, bool listAll ) noexcept
 {
     std::size_t n = 0;
-    for( const StructRow& s : r.structs ) if( listAll || kindListed( s.kind ) ) ++n;
+    for( const StructRow& s : r.structs )
+    {
+        if( listAll || kindListed( s.kind ) )
+        {
+            ++n;
+        }
+    }
     return n;
 }
 
@@ -704,11 +851,20 @@ inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, 
     std::size_t shown = 0;
     for( const StructRow& s : r.structs )
     {
-        if( !listAll && !kindListed( s.kind ) ) continue;
-        if( shown++ >= maxStructs ) break;
+        if( !listAll && !kindListed( s.kind ) )
+        {
+            continue;
+        }
+        if( shown++ >= maxStructs )
+        {
+            break;
+        }
         writeAbiStruct( out, s, ex );
     }
-    if( eligible > shownCount ) std::fprintf( out, "<more structs=\"%zu\"/>", eligible - shownCount );
+    if( eligible > shownCount )
+    {
+        std::fprintf( out, "<more structs=\"%zu\"/>", eligible - shownCount );
+    }
     std::fprintf( out, "</ref>" );
 }
 
@@ -725,7 +881,10 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
     std::uint32_t brokenRefs = 0, shownRows = 0, droppedRows = 0, excludedRefs = 0;
     for( const RefRow& r : res.refs )
     {
-        if( r.counts.breaks() > 0 ) ++brokenRefs;
+        if( r.counts.breaks() > 0 )
+        {
+            ++brokenRefs;
+        }
         const std::uint32_t eligible = std::uint32_t( eligibleRows( r, listAll ) );
         if( eligible == 0 ) { ++excludedRefs; continue; }
         const std::uint32_t shown = std::uint32_t( std::min<std::size_t>( eligible, maxStructs ) );
@@ -771,8 +930,12 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
     writeKindAttrs( out, res.counts );
     std::fprintf( out, ">" );
     for( const RefRow& r : res.refs )
-        if( eligibleRows( r, listAll ) > 0 )           // rows but none this view lists -> counted in excluded_refs=
+    {
+        if( eligibleRows( r, listAll ) > 0 )
+        { // rows but none this view lists -> counted in excluded_refs=
             writeAbiRef( out, r, ex, maxStructs, listAll );
+        }
+    }
     std::fprintf( out, "</abi>" );
 }
 

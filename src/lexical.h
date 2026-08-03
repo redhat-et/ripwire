@@ -33,7 +33,7 @@ namespace rw
 inline void subtokens( std::string_view id, std::vector<std::string>& out )
 {
     std::string cur;
-    const auto  flush = [ & ] { if( cur.size() >= 2 ) out.push_back( cur ); cur.clear(); };
+    const auto flush = [ & ] { if( cur.size() >= 2 ) { out.push_back( cur ); } cur.clear(); };
     // EXPLICIT narrowing: `char` is signed on x86-64/macOS, so an IMPLICIT `unsigned char c : id` trips G1's
     // implicit-integer-sign-change on any byte ≥ 0x80 (a UTF-8 identifier). hashutil.h owns the full note.
     for( const char ch : id )
@@ -43,7 +43,10 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
         const bool lower = c >= 'a' && c <= 'z';
         const bool digit = c >= '0' && c <= '9';
         if( !upper && !lower && !digit ) { flush(); continue; }                       // separator
-        if( upper && !cur.empty() && !( cur.back() >= 'A' && cur.back() <= 'Z' ) ) flush();   // camel boundary
+        if( upper && !cur.empty() && !( cur.back() >= 'A' && cur.back() <= 'Z' ) )
+        {
+            flush(); // camel boundary
+        }
         cur.push_back( char( upper ? c - 'A' + 'a' : c ) );
     }
     flush();
@@ -106,7 +109,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // an empty query scores exactly 0 everywhere (0.0 survives the Section down-weight unchanged)
     std::vector<std::string> qToks;
     subtokens( query, qToks );
-    if( qToks.empty() ) return std::vector<float>( S, 0.f );
+    if( qToks.empty() )
+    {
+        return std::vector<float>( S, 0.f );
+    }
 
     // dedupe to the unique terms whose statistics we need — a duplicated query word must not double-count
     // tf, but still contributes once PER OCCURRENCE in the scoring loop (uniqueIndexOfQtok maps back)
@@ -116,7 +122,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     {
         const auto found      = std::find( uniqueToks.begin(), uniqueToks.end(), qToks[qi] );
         uniqueIndexOfQtok[qi] = std::size_t( found - uniqueToks.begin() );
-        if( found == uniqueToks.end() ) uniqueToks.push_back( qToks[qi] );
+        if( found == uniqueToks.end() )
+        {
+            uniqueToks.push_back( qToks[qi] );
+        }
     }
     const std::size_t uniqueCount = uniqueToks.size();
 
@@ -145,7 +154,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         forEachLexSubtoken( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
         {
             const std::size_t tokLen = tokEndByte - tokStartByte;
-            if( tokLen < 2 ) return;
+            if( tokLen < 2 )
+            {
+                return;
+            }
             fieldTokenWt += w;
             const char* tok  = text.data() + tokStartByte;
             const char  head = ( tok[0] >= 'A' && tok[0] <= 'Z' ) ? char( tok[0] - 'A' + 'a' ) : tok[0];
@@ -167,7 +179,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     {
         scanField( i, ing.symbols[i].name, kwName );
         for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
+        {
             scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee );
+        }
     }
 
     // pass 2 — doc-comment (×kwDoc) + body (×kwBody) evidence.
@@ -183,7 +197,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
         // dl first: BM25 length normalization needs EVERY doc's weighted length whether or not it matches
         // the query (avgdl sums them all), so this runs unconditionally — exact stored integers.
-        for( std::size_t i = 0; i < S; ++i ) dl[i] += int( ing.lexDocBodyDl[i] );
+        for( std::size_t i = 0; i < S; ++i )
+        {
+            dl[i] += int( ing.lexDocBodyDl[i] );
+        }
 
         // query-token hashes — the same normalized-lowercase hash index time used. try_emplace keeps the
         // FIRST unique index on the astronomically-unlikely 64-bit collision between two DISTINCT query
@@ -208,7 +225,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             const std::uint32_t rowBegin = ing.lexTokenRowOffsets[i];
             const std::uint32_t rowEnd   = ing.lexTokenRowOffsets[ i + 1 ];
-            if( rowBegin == rowEnd ) continue;                             // no doc/body tokens → nothing to transfer
+            if( rowBegin == rowEnd )
+            {
+                continue; // no doc/body tokens → nothing to transfer
+            }
 
             // one membership probe per FILE against the query's subtoken bits (B0.1)
             if( const std::uint32_t f = ing.symbols[i].fileId; useFileSig && f < ing.files.size() )
@@ -219,9 +239,17 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     lastFileMayMatch = false;
                     const std::uint64_t* sig = ing.lexFileSig.data() + std::size_t( f ) * kLexFileSigWords;
                     for( std::size_t u = 0; u < uniqueCount && !lastFileMayMatch; ++u )
-                        if( sig[ lexSigWord( uniqueHash[u] ) ] & lexSigBit( uniqueHash[u] ) ) lastFileMayMatch = true;
+                    {
+                        if( sig[lexSigWord( uniqueHash[u] )] & lexSigBit( uniqueHash[u] ) )
+                        {
+                            lastFileMayMatch = true;
+                        }
+                    }
                 }
-                if( !lastFileMayMatch ) continue;
+                if( !lastFileMayMatch )
+                {
+                    continue;
+                }
             }
 
             // exact tf transfer — walk whichever side is smaller: probe the query map per stored token, or
@@ -232,8 +260,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             if( std::size_t( rowEnd - rowBegin ) <= uniqueCount * 8 )      // ~log2(row) probes vs one map probe per entry
             {
                 for( std::uint32_t e = rowBegin; e < rowEnd; ++e )
+                {
                     if( const auto it = uniqueIndexOfHash.find( rowHash[e] ); it != uniqueIndexOfHash.end() )
+                    {
                         tfRow[ it->second ] += int( ing.lexTokenTfs[e] );
+                    }
+                }
             }
             else
             {
@@ -242,7 +274,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     const std::uint64_t* lo = rowHash + rowBegin;
                     const std::uint64_t* hi = rowHash + rowEnd;
                     if( const std::uint64_t* it = std::lower_bound( lo, hi, hash ); it != hi && *it == hash )
+                    {
                         tfRow[u] += int( ing.lexTokenTfs[ std::size_t( it - rowHash ) ] );
+                    }
                 }
             }
         }
@@ -256,13 +290,26 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         const std::size_t          fileCount = ing.files.size();
         std::vector<std::uint32_t> fileRowOffsets( fileCount + 1, 0 );
         for( std::size_t i = 0; i < S; ++i )
-            if( ing.symbols[i].fileId < fileCount ) ++fileRowOffsets[ ing.symbols[i].fileId + 1 ];
-        for( std::size_t f = 0; f < fileCount; ++f ) fileRowOffsets[ f + 1 ] += fileRowOffsets[f];
+        {
+            if( ing.symbols[i].fileId < fileCount )
+            {
+                ++fileRowOffsets[ing.symbols[i].fileId + 1];
+            }
+        }
+        for( std::size_t f = 0; f < fileCount; ++f )
+        {
+            fileRowOffsets[f + 1] += fileRowOffsets[f];
+        }
         std::vector<std::uint32_t> fileSymbolIds( fileRowOffsets[ fileCount ] );
         {
             std::vector<std::uint32_t> writeCursor( fileRowOffsets.begin(), fileRowOffsets.end() - 1 );
             for( std::size_t i = 0; i < S; ++i )
-                if( ing.symbols[i].fileId < fileCount ) fileSymbolIds[ writeCursor[ ing.symbols[i].fileId ]++ ] = std::uint32_t( i );
+            {
+                if( ing.symbols[i].fileId < fileCount )
+                {
+                    fileSymbolIds[writeCursor[ing.symbols[i].fileId]++] = std::uint32_t( i );
+                }
+            }
         }
         // Files stream across a small worker pool: each worker holds ONE file's text at a time, and a file's
         // symbols are touched only by the worker that claimed the file — every dl[i] / tfFlat row has exactly
@@ -279,8 +326,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const std::size_t bodyStart = std::min<std::size_t>( s.sigStartByte, src.size() );
                 const std::size_t end       = std::min<std::size_t>( s.endByte, src.size() );
                 const std::size_t docStart  = docCommentStart( src, bodyStart );
-                if( bodyStart > docStart ) scanField( i, sv.substr( docStart, bodyStart - docStart ), kwDoc );
-                if( end > bodyStart )      scanField( i, sv.substr( bodyStart, end - bodyStart ), kwBody );
+                if( bodyStart > docStart )
+                {
+                    scanField( i, sv.substr( docStart, bodyStart - docStart ), kwDoc );
+                }
+                if( end > bodyStart )
+                {
+                    scanField( i, sv.substr( bodyStart, end - bodyStart ), kwBody );
+                }
             }
         };
         std::atomic<std::size_t> nextFileIndex { 0 };
@@ -291,19 +344,28 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 std::string loadedText;
                 for( std::size_t f = nextFileIndex.fetch_add( 1 ); f < fileCount; f = nextFileIndex.fetch_add( 1 ) )
                 {
-                    if( fileRowOffsets[f] == fileRowOffsets[ f + 1 ] ) continue;   // no symbols in this file → skip
+                    if( fileRowOffsets[f] == fileRowOffsets[f + 1] )
+                    {
+                        continue; // no symbols in this file → skip
+                    }
                     // P1-B: a document file (notebook/html/csv) is indexed by its EXTRACTED text, not its raw
                     // bytes, so a query matches the notebook's prose/code, not its JSON envelope (read-only
                     // lookup — docText is never written here, so concurrent finds are safe).
                     if( const auto it = ing.docText.find( std::uint32_t( f ) ); it != ing.docText.end() )
                     {
-                        if( !it->second.empty() ) scanFileSymbols( f, it->second );
+                        if( !it->second.empty() )
+                        {
+                            scanFileSymbols( f, it->second );
+                        }
                         continue;
                     }
                     loadedText.clear();
                     std::ifstream in( diskPath( ing, std::uint32_t( f ) ), std::ios::binary );
                     if( in ) { std::ostringstream ss; ss << in.rdbuf(); loadedText = ss.str(); }
-                    if( !loadedText.empty() ) scanFileSymbols( f, loadedText );    // unreadable/empty → degrade (skip), as before
+                    if( !loadedText.empty() )
+                    {
+                        scanFileSymbols( f, loadedText ); // unreadable/empty → degrade (skip), as before
+                    }
                 }
             }
             catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial counts instead
@@ -313,20 +375,34 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         };
         const std::size_t hwThreadCount = std::thread::hardware_concurrency();
         const std::size_t workerCount   = std::min( { hwThreadCount ? hwThreadCount : 1, fileCount ? fileCount : 1, std::size_t( 16 ) } );
-        if( workerCount <= 1 ) fileWorker();
+        if( workerCount <= 1 )
+        {
+            fileWorker();
+        }
         else
         {
             // symmetric bare scope: workers live exactly as long as the pooled scan
             std::vector<std::thread> workers;
             workers.reserve( workerCount );
-            for( std::size_t w = 0; w < workerCount; ++w ) workers.emplace_back( fileWorker );
-            for( std::thread& worker : workers ) worker.join();
+            for( std::size_t w = 0; w < workerCount; ++w )
+            {
+                workers.emplace_back( fileWorker );
+            }
+            for( std::thread& worker : workers )
+            {
+                worker.join();
+            }
         }
     }
 
     // corpus stats — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =
     // number of docs containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it)
-    double avgdl = 0; for( int d : dl ) avgdl += d;  avgdl /= double( S ? S : 1 );
+    double avgdl = 0;
+    for( int d : dl )
+    {
+        avgdl += d;
+    }
+    avgdl /= double( S ? S : 1 );
 
     constexpr double   k1 = 1.5, b = 0.75;
     std::vector<float> score( S, 0.f );
@@ -347,8 +423,21 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* tfRow = tfFlat.data() + i * uniqueCount;
             bool       any   = false;
             for( std::size_t u = 0; u < uniqueCount; ++u )
-                if( tfRow[u] > 0 ) { ++dfreq[u]; if( tfRow[u] > tfMaxOf[u] ) tfMaxOf[u] = tfRow[u]; any = true; }
-            if( any ) candidateIds.push_back( std::uint32_t( i ) );
+            {
+                if( tfRow[u] > 0 )
+                {
+                    ++dfreq[u];
+                    if( tfRow[u] > tfMaxOf[u] )
+                    {
+                        tfMaxOf[u] = tfRow[u];
+                    }
+                    any = true;
+                }
+            }
+            if( any )
+            {
+                candidateIds.push_back( std::uint32_t( i ) );
+            }
         }
 
         // ── the PROVABLY-SAFE per-term impact bound (the MaxScore "max contribution") ────────────────
@@ -366,10 +455,16 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         std::vector<double> capOcc( uniqueCount, 0.0 );
         {
             std::vector<int> occCount( uniqueCount, 0 );
-            for( std::size_t qi = 0; qi < qToks.size(); ++qi ) ++occCount[ uniqueIndexOfQtok[qi] ];
+            for( std::size_t qi = 0; qi < qToks.size(); ++qi )
+            {
+                ++occCount[uniqueIndexOfQtok[qi]];
+            }
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                if( dfreq[u] == 0 ) continue;                    // never contributes anywhere
+                if( dfreq[u] == 0 )
+                {
+                    continue; // never contributes anywhere
+                }
                 const int    n    = dfreq[u];
                 const double idf  = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
                 const double T    = double( tfMaxOf[u] );
@@ -392,9 +487,17 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             // cheap upper bound: adds only, fixed u-ascending order (deterministic)
             double ub = 0.0;
             for( std::size_t u = 0; u < uniqueCount; ++u )
-                if( tfRow[u] > 0 ) ub += capOcc[u];
+            {
+                if( tfRow[u] > 0 )
+                {
+                    ub += capOcc[u];
+                }
+            }
             const bool mustScore = alwaysExact && i < alwaysExact->size() && (*alwaysExact)[i] != 0;
-            if( !mustScore && ub < theta ) continue;             // provably cannot enter the top-K → skip
+            if( !mustScore && ub < theta )
+            {
+                continue; // provably cannot enter the top-K → skip
+            }
 
             // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
             double sc = 0;
@@ -402,20 +505,32 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 const std::size_t u  = uniqueIndexOfQtok[qi];
                 const int         tf = tfRow[u];
-                if( tf == 0 ) continue;
+                if( tf == 0 )
+                {
+                    continue;
+                }
                 const int    n   = dfreq[u];
                 const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
                 sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
             }
-            if( ing.symbols[i].kind == SymKind::Section ) sc *= 0.30;
-            if( symbolScoreMul && i < symbolScoreMul->size() ) sc *= double( (*symbolScoreMul)[i] );   // §P4 tier down-weight — shrink-only, bound-safe
+            if( ing.symbols[i].kind == SymKind::Section )
+            {
+                sc *= 0.30;
+            }
+            if( symbolScoreMul && i < symbolScoreMul->size() )
+            {
+                sc *= double( ( *symbolScoreMul )[i] ); // §P4 tier down-weight — shrink-only, bound-safe
+            }
             score[i] = float( sc );
 
             if( heap.size() < pruneTopK )
             {
                 heap.push_back( sc );
                 std::push_heap( heap.begin(), heap.end(), std::greater<double>{} );
-                if( heap.size() == pruneTopK ) theta = heap.front();
+                if( heap.size() == pruneTopK )
+                {
+                    theta = heap.front();
+                }
             }
             else if( sc > heap.front() )
             {
@@ -430,8 +545,15 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
+    {
         for( std::size_t u = 0; u < uniqueCount; ++u )
-            if( tfFlat[ i * uniqueCount + u ] > 0 ) ++dfreq[u];
+        {
+            if( tfFlat[i * uniqueCount + u] > 0 )
+            {
+                ++dfreq[u];
+            }
+        }
+    }
 
     for( std::size_t i = 0; i < S; ++i )
     {
@@ -440,15 +562,24 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             const std::size_t u  = uniqueIndexOfQtok[qi];
             const int         tf = tfFlat[ i * uniqueCount + u ];
-            if( tf == 0 ) continue;                       // old: docs[i].find( qt ) == end
+            if( tf == 0 )
+            {
+                continue; // old: docs[i].find( qt ) == end
+            }
             const int    n   = dfreq[u];
             const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
         // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
         // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).
-        if( ing.symbols[i].kind == SymKind::Section ) sc *= 0.30;
-        if( symbolScoreMul && i < symbolScoreMul->size() ) sc *= double( (*symbolScoreMul)[i] );   // §P4 tier down-weight (same factor as the pruned branch)
+        if( ing.symbols[i].kind == SymKind::Section )
+        {
+            sc *= 0.30;
+        }
+        if( symbolScoreMul && i < symbolScoreMul->size() )
+        {
+            sc *= double( ( *symbolScoreMul )[i] ); // §P4 tier down-weight (same factor as the pruned branch)
+        }
         score[i] = float( sc );
     }
     return score;
@@ -491,7 +622,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     std::vector<std::string> qToks;
     {
         std::string cur;
-        const auto  flush = [ & ] { if( cur.size() >= 2 ) qToks.push_back( cur ); cur.clear(); };
+        const auto flush = [ & ] { if( cur.size() >= 2 ) { qToks.push_back( cur ); } cur.clear(); };
         for( const char ch : query )   // EXPLICIT narrowing — see subtokens() above / hashutil.h
         {
             const unsigned char c = static_cast<unsigned char>( ch );
@@ -500,7 +631,10 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
         flush();
     }
-    if( qToks.empty() ) return std::vector<float>( S, 0.f );
+    if( qToks.empty() )
+    {
+        return std::vector<float>( S, 0.f );
+    }
 
     // dedupe to unique terms (one df/tf statistic each); each occurrence still contributes in the loop
     std::vector<std::string> uniqueToks;
@@ -509,7 +643,10 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     {
         const auto found      = std::find( uniqueToks.begin(), uniqueToks.end(), qToks[qi] );
         uniqueIndexOfQtok[qi] = std::size_t( found - uniqueToks.begin() );
-        if( found == uniqueToks.end() ) uniqueToks.push_back( qToks[qi] );
+        if( found == uniqueToks.end() )
+        {
+            uniqueToks.push_back( qToks[qi] );
+        }
     }
     const std::size_t uniqueCount = uniqueToks.size();
 
@@ -520,21 +657,34 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     // lowercase-compare a symbol's whole name (one token) against every unique query token
     const auto matchWholeName = [ & ]( std::size_t i, std::string_view name )
     {
-        if( name.size() < 2 ) return;                         // mirror the ≥2 drop
+        if( name.size() < 2 )
+        {
+            return; // mirror the ≥2 drop
+        }
         int* const tfRow = tfFlat.data() + i * uniqueCount;
         ++dl[i];
         for( std::size_t u = 0; u < uniqueCount; ++u )
         {
             const std::string& q = uniqueToks[u];
-            if( q.size() != name.size() ) continue;
+            if( q.size() != name.size() )
+            {
+                continue;
+            }
             bool eq = true;
             for( std::size_t k = 0; k < name.size() && eq; ++k )
             {
                 const unsigned char nc = static_cast<unsigned char>( name[k] );
                 const char          lc = ( nc >= 'A' && nc <= 'Z' ) ? char( nc - 'A' + 'a' ) : char( nc );
-                if( lc != q[k] ) eq = false;
+                if( lc != q[k] )
+                {
+                    eq = false;
+                }
             }
-            if( eq ) { ++tfRow[u]; break; }                   // unique tokens distinct → at most one match
+            if( eq )
+            {
+                ++tfRow[u];
+                break;
+            } // unique tokens distinct → at most one match
         }
     };
 
@@ -553,11 +703,23 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     }
 
     // corpus stats (same doc order → identical doubles); dfreq[u] = #docs containing unique token u
-    double avgdl = 0; for( int d : dl ) avgdl += d;  avgdl /= double( S ? S : 1 );
+    double avgdl = 0;
+    for( int d : dl )
+    {
+        avgdl += d;
+    }
+    avgdl /= double( S ? S : 1 );
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
+    {
         for( std::size_t u = 0; u < uniqueCount; ++u )
-            if( tfFlat[ i * uniqueCount + u ] > 0 ) ++dfreq[u];
+        {
+            if( tfFlat[i * uniqueCount + u] > 0 )
+            {
+                ++dfreq[u];
+            }
+        }
+    }
 
     constexpr double   k1 = 1.5, b = 0.75;
     std::vector<float> score( S, 0.f );
@@ -568,13 +730,22 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         {
             const std::size_t u  = uniqueIndexOfQtok[qi];
             const int         tf = tfFlat[ i * uniqueCount + u ];
-            if( tf == 0 ) continue;
+            if( tf == 0 )
+            {
+                continue;
+            }
             const int    n   = dfreq[u];
             const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
-        if( ing.symbols[i].kind == SymKind::Section ) sc *= 0.30;   // same prose down-weight as lexicalScores
-        if( symbolScoreMul && i < symbolScoreMul->size() ) sc *= double( (*symbolScoreMul)[i] );   // §P4 tier down-weight
+        if( ing.symbols[i].kind == SymKind::Section )
+        {
+            sc *= 0.30; // same prose down-weight as lexicalScores
+        }
+        if( symbolScoreMul && i < symbolScoreMul->size() )
+        {
+            sc *= double( ( *symbolScoreMul )[i] ); // §P4 tier down-weight
+        }
         score[i] = float( sc );
     }
     return score;
@@ -625,7 +796,13 @@ inline bool isRouteStopword( std::string_view w ) noexcept
     static constexpr std::string_view kStop[] = {
         "the", "a", "an", "is", "are", "to", "of", "in", "for", "how",
         "does", "do", "where", "what", "which", "on", "with" };
-    for( std::string_view s : kStop ) if( w == s ) return true;
+    for( std::string_view s : kStop )
+    {
+        if( w == s )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -633,7 +810,13 @@ inline bool isRouteStopword( std::string_view w ) noexcept
 inline std::string routeLower( std::string_view w )
 {
     std::string out( w );
-    for( char& c : out ) if( c >= 'A' && c <= 'Z' ) c = char( c - 'A' + 'a' );
+    for( char& c : out )
+    {
+        if( c >= 'A' && c <= 'Z' )
+        {
+            c = char( c - 'A' + 'a' );
+        }
+    }
     return out;
 }
 
@@ -647,7 +830,10 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         {
             const bool sep = k == query.size() || query[k] == ' ' || query[k] == '\t' || query[k] == '\n' || query[k] == '\r';
             if( sep ) { if( start != std::string_view::npos ) { words.push_back( query.substr( start, k - start ) ); start = std::string_view::npos; } }
-            else if( start == std::string_view::npos ) start = k;
+            else if( start == std::string_view::npos )
+            {
+                start = k;
+            }
         }
     }
 
@@ -671,12 +857,17 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     ankerl::unordered_dense::set<std::string> lowerSymbolNames;
     lowerSymbolNames.reserve( ing.symbols.size() );
     for( const Symbol& s : ing.symbols )
+    {
         lowerSymbolNames.insert( routeLower( s.name ) );
+    }
 
     for( std::string_view w : words )
     {
         const std::string lw = routeLower( w );
-        if( isRouteStopword( lw ) ) continue;
+        if( isRouteStopword( lw ) )
+        {
+            continue;
+        }
         ++nWords;
 
         // camelCase / snake_case shape: an interior uppercase (aB) or an interior underscore (a_b)
@@ -684,13 +875,22 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         for( std::size_t k = 1; k < w.size(); ++k )
         {
             const char c = w[k];
-            if( c >= 'A' && c <= 'Z' && w[k - 1] >= 'a' && w[k - 1] <= 'z' ) camel = true;
-            if( c == '_' && k + 1 < w.size() ) snake = true;
+            if( c >= 'A' && c <= 'Z' && w[k - 1] >= 'a' && w[k - 1] <= 'z' )
+            {
+                camel = true;
+            }
+            if( c == '_' && k + 1 < w.size() )
+            {
+                snake = true;
+            }
         }
         if( camel || snake )
         {
             hasCamelSnake = true;
-            if( identifierHit.empty() ) identifierHit = std::string( w );
+            if( identifierHit.empty() )
+            {
+                identifierHit = std::string( w );
+            }
             ++wholeNameHits;                                   // explicit identifier syntax also counts toward "all words name symbols"
             continue;
         }
@@ -699,7 +899,10 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         if( lowerSymbolNames.find( lw ) != lowerSymbolNames.end() )
         {
             ++wholeNameHits;
-            if( identifierHit.empty() ) identifierHit = std::string( w );
+            if( identifierHit.empty() )
+            {
+                identifierHit = std::string( w );
+            }
         }
     }
 
@@ -769,7 +972,13 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
     // positive scores only, sorted DESC (id tie-break is irrelevant to the gap analysis — pure magnitudes).
     std::vector<float> pos;
     pos.reserve( scores.size() );
-    for( float s : scores ) if( s > 0.f ) pos.push_back( s );
+    for( float s : scores )
+    {
+        if( s > 0.f )
+        {
+            pos.push_back( s );
+        }
+    }
     sortutil::radixSortNonNegativeFloatsDesc( pos );
 
     // clamp the working ceiling to what actually has positive score (a query with few hits can't keep more).
@@ -777,7 +986,10 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
     cut.positiveHits = avail;
     if( avail == 0 ) { cut.kept = std::min( floorK, ceilingK ); cut.cliffRank = cut.kept; cut.hitCeiling = true; return cut; }
     std::size_t hardCeil = std::min( ceilingK, avail );
-    if( hardCeil < floorK ) hardCeil = std::min( floorK, avail );   // floor may exceed the few available hits
+    if( hardCeil < floorK )
+    {
+        hardCeil = std::min( floorK, avail ); // floor may exceed the few available hits
+    }
     const std::size_t f = std::min( floorK, hardCeil );
 
     // How far to scan for the cliff: bounded at the ceiling by default (--query), or across the FULL raw
@@ -829,7 +1041,10 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
         cut.dropPct    = ( bestDrop >= kMinCliffDrop ) ? int( bestDrop * 100.0 + 0.5 ) : 0;
         cut.hitCeiling = true;
     }
-    if( cut.kept < f )  cut.kept = f;   // floor guard (never below the floor)
+    if( cut.kept < f )
+    {
+        cut.kept = f; // floor guard (never below the floor)
+    }
     return cut;
 }
 

@@ -62,7 +62,13 @@ struct LintRule
 inline constexpr std::array<std::string_view, 3> kLintSeverities = { "info", "warn", "error" };
 inline bool isValidSeverity( std::string_view s ) noexcept
 {
-    for( std::string_view v : kLintSeverities ) if( v == s ) return true;
+    for( std::string_view v : kLintSeverities )
+    {
+        if( v == s )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -86,7 +92,14 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
         { "csharp",     Lang::CSharp     },
         { "c",          Lang::C          },
     } };
-    for( const Row& r : kMap ) if( r.name == tok ) { out = r.lang; return true; }
+    for( const Row& r : kMap )
+    {
+        if( r.name == tok )
+        {
+            out = r.lang;
+            return true;
+        }
+    }
     return false;
 }
 
@@ -98,9 +111,15 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 inline Lang langOfPath( std::string_view path ) noexcept
 {
     const std::size_t dot = path.rfind( '.' );
-    if( dot == std::string_view::npos ) return Lang::Unknown;
+    if( dot == std::string_view::npos )
+    {
+        return Lang::Unknown;
+    }
     std::string ext( path.substr( dot ) );
-    for( char& c : ext ) c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+    for( char& c : ext )
+    {
+        c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+    }
 
     struct Row { std::string_view ext; Lang lang; };
     static const std::array<Row, 28> kExt = { {
@@ -118,7 +137,13 @@ inline Lang langOfPath( std::string_view path ) noexcept
         { ".rb", Lang::Ruby },
         { ".cs", Lang::CSharp },
     } };
-    for( const Row& r : kExt ) if( r.ext == ext ) return r.lang;
+    for( const Row& r : kExt )
+    {
+        if( r.ext == ext )
+        {
+            return r.lang;
+        }
+    }
     return Lang::Unknown;
 }
 
@@ -156,7 +181,9 @@ inline std::vector<char> dependencyCapableMask( const IngestResult& ing )
 {
     std::vector<char> mask( ing.files.size(), 0 );
     for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
         mask[f] = dependencyCapable( langOfPath( ing.files[f] ) ) ? 1 : 0;
+    }
     return mask;
 }
 
@@ -166,12 +193,18 @@ namespace lintdetail
 
 inline std::string_view rtrim( std::string_view s ) noexcept
 {
-    while( !s.empty() && ( s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n' ) ) s.remove_suffix( 1 );
+    while( !s.empty() && ( s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n' ) )
+    {
+        s.remove_suffix( 1 );
+    }
     return s;
 }
 inline std::string_view ltrim( std::string_view s ) noexcept
 {
-    while( !s.empty() && ( s.front() == ' ' || s.front() == '\t' ) ) s.remove_prefix( 1 );
+    while( !s.empty() && ( s.front() == ' ' || s.front() == '\t' ) )
+    {
+        s.remove_prefix( 1 );
+    }
     return s;
 }
 inline std::string_view trim( std::string_view s ) noexcept { return rtrim( ltrim( s ) ); }
@@ -181,7 +214,10 @@ inline std::string_view trim( std::string_view s ) noexcept { return rtrim( ltri
 inline std::size_t indentOf( std::string_view line ) noexcept
 {
     std::size_t n = 0;
-    while( n < line.size() && ( line[n] == ' ' || line[n] == '\t' ) ) ++n;
+    while( n < line.size() && ( line[n] == ' ' || line[n] == '\t' ) )
+    {
+        ++n;
+    }
     return n;
 }
 
@@ -190,7 +226,9 @@ inline std::size_t indentOf( std::string_view line ) noexcept
 inline std::string_view unquote( std::string_view v ) noexcept
 {
     if( v.size() >= 2 && ( ( v.front() == '"' && v.back() == '"' ) || ( v.front() == '\'' && v.back() == '\'' ) ) )
+    {
         return v.substr( 1, v.size() - 2 );
+    }
     return v;
 }
 
@@ -218,7 +256,9 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
     {
         std::size_t start = 0;
         for( std::size_t i = 0; i <= src.size(); ++i )
+        {
             if( i == src.size() || src[i] == '\n' ) { lines.emplace_back( src.data() + start, i - start ); start = i + 1; }
+        }
     }
 
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
@@ -238,8 +278,15 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
 
     const auto flushQuery = [ & ]()
     {
-        if( cur && inQuery && queryDest ) *queryDest = rtrim( queryBuf );   // trailing newline trimmed; interior preserved
-        inQuery = false;  sawQueryLine = false;  queryIndent = 0;  queryBuf.clear();  queryDest = nullptr;
+        if( cur && inQuery && queryDest )
+        {
+            *queryDest = rtrim( queryBuf ); // trailing newline trimmed; interior preserved
+        }
+        inQuery = false;
+        sawQueryLine = false;
+        queryIndent = 0;
+        queryBuf.clear();
+        queryDest = nullptr;
     };
 
     for( std::size_t li = 0; li < lines.size(); ++li )
@@ -259,7 +306,9 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
                 // strip exactly the block's base indent from each body line; keep deeper indent (nested s-exprs)
                 std::string_view body = raw;
                 for( std::size_t k = 0; k < queryIndent && !body.empty() && ( body.front() == ' ' || body.front() == '\t' ); ++k )
+                {
                     body.remove_prefix( 1 );
+                }
                 queryBuf.append( body );
                 queryBuf.push_back( '\n' );
                 continue;
@@ -268,8 +317,14 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
         }
 
         const std::string_view content = trim( raw );
-        if( content.empty() ) continue;                 // blank line between items — ignore
-        if( content.front() == '#' ) continue;          // full-line comment — ignore
+        if( content.empty() )
+        {
+            continue; // blank line between items — ignore
+        }
+        if( content.front() == '#' )
+        {
+            continue; // full-line comment — ignore
+        }
 
         // A new rule opens with "- " at column 0 (no leading indent).
         const std::size_t ind = indentOf( raw );
@@ -290,13 +345,19 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
         }
         else
         {
-            if( cur == nullptr ) return badLine( li, "content before any '- ' list item" );
+            if( cur == nullptr )
+            {
+                return badLine( li, "content before any '- ' list item" );
+            }
             keyPart = content;                           // an item field line ("key: value")
         }
 
         // keyPart is "key: value" (value may be empty, or "|" to open a block scalar).
         const std::size_t colon = keyPart.find( ':' );
-        if( colon == std::string_view::npos ) return badLine( li, "expected 'key: value'" );
+        if( colon == std::string_view::npos )
+        {
+            return badLine( li, "expected 'key: value'" );
+        }
         const std::string_view key = trim( keyPart.substr( 0, colon ) );
         const std::string_view val = trim( keyPart.substr( colon + 1 ) );
 
@@ -310,38 +371,71 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
                 inQuery = true;  sawQueryLine = false;  queryIndent = 0;  queryBuf.clear();
                 queryDest = dest;  cur->queryKeyIndent = ind;
             }
-            else if( !val.empty() ) *dest = std::string( val );   // single-line inline query
-            else return badLine( li, whatNeedsValue );
+            else if( !val.empty() )
+            {
+                *dest = std::string( val ); // single-line inline query
+            }
+            else
+            {
+                return badLine( li, whatNeedsValue );
+            }
             return true;
         };
 
-        if( key == "id" )            cur->id       = std::string( unquote( val ) );
-        else if( key == "severity" ) cur->severity = std::string( unquote( val ) );
-        else if( key == "message" )  cur->message  = std::string( unquote( val ) );
+        if( key == "id" )
+        {
+            cur->id = std::string( unquote( val ) );
+        }
+        else if( key == "severity" )
+        {
+            cur->severity = std::string( unquote( val ) );
+        }
+        else if( key == "message" )
+        {
+            cur->message = std::string( unquote( val ) );
+        }
         else if( key == "language" )
         {
-            if( !langFromToken( unquote( val ), cur->lang ) ) return badLine( li, "unknown 'language' (want cpp|python|typescript|go|rust|swift|objc)" );
+            if( !langFromToken( unquote( val ), cur->lang ) )
+            {
+                return badLine( li, "unknown 'language' (want cpp|python|typescript|go|rust|swift|objc)" );
+            }
         }
         else if( key == "query" )
         {
-            if( !takeQuery( &cur->query, "'query:' needs a value or a '|' block" ) ) return false;
+            if( !takeQuery( &cur->query, "'query:' needs a value or a '|' block" ) )
+            {
+                return false;
+            }
         }
         else if( key == "inside" )
         {
             cur->inside.emplace_back();                                  // repeated key → AND (new slot each time)
-            if( !takeQuery( &cur->inside.back(), "'inside:' needs a value or a '|' block" ) ) return false;
+            if( !takeQuery( &cur->inside.back(), "'inside:' needs a value or a '|' block" ) )
+            {
+                return false;
+            }
         }
         else if( key == "not-inside" )
         {
             cur->notInside.emplace_back();                              // repeated key → OR (new slot each time)
-            if( !takeQuery( &cur->notInside.back(), "'not-inside:' needs a value or a '|' block" ) ) return false;
+            if( !takeQuery( &cur->notInside.back(), "'not-inside:' needs a value or a '|' block" ) )
+            {
+                return false;
+            }
         }
         else if( key == "not-matches" )
         {
             cur->notMatches.emplace_back();                            // repeated key → OR (new slot each time)
-            if( !takeQuery( &cur->notMatches.back(), "'not-matches:' needs a value or a '|' block" ) ) return false;
+            if( !takeQuery( &cur->notMatches.back(), "'not-matches:' needs a value or a '|' block" ) )
+            {
+                return false;
+            }
         }
-        else return badLine( li, "unknown key (want id|language|severity|message|query|inside|not-inside|not-matches)" );
+        else
+        {
+            return badLine( li, "unknown key (want id|language|severity|message|query|inside|not-inside|not-matches)" );
+        }
     }
     flushQuery();
 
@@ -349,15 +443,45 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
     for( std::size_t ri = 0; ri < parsed.size(); ++ri )
     {
         LintRule& r = parsed[ri];
-        if( r.id.empty() )    return badLine( 0, "a rule is missing 'id'" );
-        if( r.query.empty() ) return badLine( 0, "rule has no 'query'" );
-        if( r.severity.empty() ) r.severity = "warn";
-        if( !isValidSeverity( r.severity ) ) return badLine( 0, "invalid 'severity' (want info|warn|error)" );
+        if( r.id.empty() )
+        {
+            return badLine( 0, "a rule is missing 'id'" );
+        }
+        if( r.query.empty() )
+        {
+            return badLine( 0, "rule has no 'query'" );
+        }
+        if( r.severity.empty() )
+        {
+            r.severity = "warn";
+        }
+        if( !isValidSeverity( r.severity ) )
+        {
+            return badLine( 0, "invalid 'severity' (want info|warn|error)" );
+        }
         // A combinator block that opened with '|' but got no body is malformed — empty constraint queries would
         // silently no-op (inside → drop everything, not-inside/not-matches → filter nothing); refuse the file.
-        for( const std::string& q : r.inside )     if( q.empty() ) return badLine( 0, "empty 'inside' query" );
-        for( const std::string& q : r.notInside )  if( q.empty() ) return badLine( 0, "empty 'not-inside' query" );
-        for( const std::string& q : r.notMatches ) if( q.empty() ) return badLine( 0, "empty 'not-matches' query" );
+        for( const std::string& q : r.inside )
+        {
+            if( q.empty() )
+            {
+                return badLine( 0, "empty 'inside' query" );
+            }
+        }
+        for( const std::string& q : r.notInside )
+        {
+            if( q.empty() )
+            {
+                return badLine( 0, "empty 'not-inside' query" );
+            }
+        }
+        for( const std::string& q : r.notMatches )
+        {
+            if( q.empty() )
+            {
+                return badLine( 0, "empty 'not-matches' query" );
+            }
+        }
     }
 
     // Commit — assign globally-unique synthetic routing tags now that the file is known clean.
@@ -389,11 +513,23 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     std::vector<std::string> files;
     for( fs::directory_iterator it( dir, ec ), end; !ec && it != end; it.increment( ec ) )
     {
-        if( ec ) break;
-        if( !it->is_regular_file( ec ) || ec ) continue;
+        if( ec )
+        {
+            break;
+        }
+        if( !it->is_regular_file( ec ) || ec )
+        {
+            continue;
+        }
         std::string ext = it->path().extension().string();
-        for( char& c : ext ) c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
-        if( ext == ".yml" || ext == ".yaml" ) files.push_back( it->path().string() );
+        for( char& c : ext )
+        {
+            c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+        }
+        if( ext == ".yml" || ext == ".yaml" )
+        {
+            files.push_back( it->path().string() );
+        }
     }
     std::sort( files.begin(), files.end() );
 
@@ -407,13 +543,22 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
             std::fseek( fp, 0, SEEK_END );
             const long sz = std::ftell( fp );
             std::fseek( fp, 0, SEEK_SET );
-            if( sz > 0 ) { buf.resize( std::size_t( sz ) ); if( std::fread( buf.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) ) buf.clear(); }
+            if( sz > 0 )
+            {
+                buf.resize( std::size_t( sz ) );
+                if( std::fread( buf.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+                {
+                    buf.clear();
+                }
+            }
             std::fclose( fp );
         }
 
         const std::size_t before = rules.size();
         if( !parseLintRuleFile( path, buf, rules ) )
+        {
             rules.resize( before );   // roll back any rules this file half-committed (parse commits atomically, but be safe)
+        }
     }
     return rules;
 }
@@ -453,25 +598,52 @@ struct Span
 inline void collapseEnclosed( std::vector<Span>& spans )
 {
     std::sort( spans.begin(), spans.end(), []( const Span& a, const Span& b )
-    {
-        if( a.group != b.group )         return a.group < b.group;
-        if( a.fileId != b.fileId )       return a.fileId < b.fileId;
-        if( a.startByte != b.startByte ) return a.startByte < b.startByte;   // outer (smaller start) first
-        return a.endByte > b.endByte;                                        // ...and widest span first
-    } );
+               {
+                   if( a.group != b.group )
+                   {
+                       return a.group < b.group;
+                   }
+                   if( a.fileId != b.fileId )
+                   {
+                       return a.fileId < b.fileId;
+                   }
+                   if( a.startByte != b.startByte )
+                   {
+                       return a.startByte < b.startByte; // outer (smaller start) first
+                   }
+                   return a.endByte > b.endByte;                                        // ...and widest span first
+               } );
     std::vector<char> keep( spans.size(), 1 );
     for( std::size_t i = 0; i < spans.size(); ++i )
     {
-        if( !keep[i] ) continue;
+        if( !keep[i] )
+        {
+            continue;
+        }
         for( std::size_t j = i + 1; j < spans.size(); ++j )
         {
-            if( spans[j].group != spans[i].group || spans[j].fileId != spans[i].fileId ) break;
-            if( spans[j].startByte >= spans[i].endByte ) break;              // past the enclosing span
-            if( spans[j].endByte   <= spans[i].endByte ) keep[j] = 0;        // fully contained (or equal) → inner/dup
+            if( spans[j].group != spans[i].group || spans[j].fileId != spans[i].fileId )
+            {
+                break;
+            }
+            if( spans[j].startByte >= spans[i].endByte )
+            {
+                break; // past the enclosing span
+            }
+            if( spans[j].endByte <= spans[i].endByte )
+            {
+                keep[j] = 0; // fully contained (or equal) → inner/dup
+            }
         }
     }
     std::size_t w = 0;
-    for( std::size_t i = 0; i < spans.size(); ++i ) if( keep[i] ) spans[w++] = spans[i];
+    for( std::size_t i = 0; i < spans.size(); ++i )
+    {
+        if( keep[i] )
+        {
+            spans[w++] = spans[i];
+        }
+    }
     spans.resize( w );
 }
 
@@ -528,7 +700,10 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
     using namespace lintdetail;
     std::vector<LintFinding> out;
     std::vector<std::string> saturatedRuleIds;
-    if( rules.empty() || ing.files.empty() ) return { std::move( out ), std::move( saturatedRuleIds ) };
+    if( rules.empty() || ing.files.empty() )
+    {
+        return { std::move( out ), std::move( saturatedRuleIds ) };
+    }
 
     // Constraint-group encoding: pack (ruleIdx, kind, slot) into one std::size_t `group` distinct from any
     // candidate group (a bare ruleIdx). kind ∈ {1:inside, 2:not-inside, 3:not-matches}; slot = block index.
@@ -571,8 +746,17 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
     for( const LintRule& r : rules )    // saturation is measured on the RAW candidate stream, before the combinators thin it
     {
         std::size_t rawForRule = 0;
-        for( const AstMatch& m : ms ) if( m.tag == r.tag ) ++rawForRule;
-        if( rawForRule >= kLintMaxPerRule ) saturatedRuleIds.push_back( r.id );
+        for( const AstMatch& m : ms )
+        {
+            if( m.tag == r.tag )
+            {
+                ++rawForRule;
+            }
+        }
+        if( rawForRule >= kLintMaxPerRule )
+        {
+            saturatedRuleIds.push_back( r.id );
+        }
     }
 
     // Split matches into candidate spans (main query, keyed by rule index) and constraint spans (combinator
@@ -585,13 +769,19 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
         if( const auto it = tagToRule.find( m.tag ); it != tagToRule.end() )
         {
             const LintRule& r = rules[ it->second ];
-            if( langOfPath( ing.files[ m.fileId ] ) != r.lang ) continue;
+            if( langOfPath( ing.files[m.fileId] ) != r.lang )
+            {
+                continue;
+            }
             candidates.push_back( { m.fileId, m.startByte, m.endByte, m.line, it->second } );
         }
         else if( const auto jt = tagToGroup.find( m.tag ); jt != tagToGroup.end() )
         {
             const std::size_t ruleIdx = jt->second >> 8;
-            if( langOfPath( ing.files[ m.fileId ] ) != rules[ruleIdx].lang ) continue;
+            if( langOfPath( ing.files[m.fileId] ) != rules[ruleIdx].lang )
+            {
+                continue;
+            }
             constraints.push_back( { m.fileId, m.startByte, m.endByte, m.line, jt->second } );
         }
     }
@@ -608,7 +798,10 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
     for( std::size_t i = 0; i < constraints.size(); )
     {
         std::size_t j = i + 1;
-        while( j < constraints.size() && constraints[j].group == constraints[i].group && constraints[j].fileId == constraints[i].fileId ) ++j;
+        while( j < constraints.size() && constraints[j].group == constraints[i].group && constraints[j].fileId == constraints[i].fileId )
+        {
+            ++j;
+        }
         const std::uint64_t key = ( std::uint64_t( constraints[i].group ) << 32 ) | constraints[i].fileId;
         constraintIndex.emplace( key, Range{ i, j } );
         i = j;
@@ -633,10 +826,18 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
             const Range rg = lookup( constraintGroup( ruleIdx, kindInside, slot ), cand.fileId );
             bool anyContains = false;
             for( std::size_t k = rg.begin; k < rg.end && !anyContains; ++k )
-                if( contains( constraints[k], cand ) ) anyContains = true;
+            {
+                if( contains( constraints[k], cand ) )
+                {
+                    anyContains = true;
+                }
+            }
             keptByInside = anyContains;                                 // this block unsatisfied ⇒ candidate dropped
         }
-        if( !keptByInside ) continue;
+        if( !keptByInside )
+        {
+            continue;
+        }
 
         // not-inside: OR across blocks — dropped if contained in ≥1 span of ANY not-inside query.
         bool droppedByNotInside = false;
@@ -644,9 +845,14 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
         {
             const Range rg = lookup( constraintGroup( ruleIdx, kindNotInside, slot ), cand.fileId );
             for( std::size_t k = rg.begin; k < rg.end; ++k )
+            {
                 if( contains( constraints[k], cand ) ) { droppedByNotInside = true; break; }
+            }
         }
-        if( droppedByNotInside ) continue;
+        if( droppedByNotInside )
+        {
+            continue;
+        }
 
         // not-matches: OR across blocks — dropped if some constraint span equals/covers the candidate.
         bool droppedByNotMatches = false;
@@ -654,20 +860,26 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
         {
             const Range rg = lookup( constraintGroup( ruleIdx, kindNotMatches, slot ), cand.fileId );
             for( std::size_t k = rg.begin; k < rg.end; ++k )
+            {
                 if( coversOrEquals( constraints[k], cand ) ) { droppedByNotMatches = true; break; }
+            }
         }
-        if( droppedByNotMatches ) continue;
+        if( droppedByNotMatches )
+        {
+            continue;
+        }
 
         out.push_back( { cand.fileId, cand.startByte, cand.line, r.id, r.severity, r.message } );
     }
 
     // Deterministic final order: by (file path, startByte, id) — identical discipline to the built-ins.
     std::sort( out.begin(), out.end(), [ & ]( const LintFinding& a, const LintFinding& b )
-    {
-        if( ing.files[a.fileId] != ing.files[b.fileId] ) return ing.files[a.fileId] < ing.files[b.fileId];
-        if( a.startByte != b.startByte ) return a.startByte < b.startByte;
-        return a.id < b.id;
-    } );
+               {
+        if( ing.files[a.fileId] != ing.files[b.fileId] ) { return ing.files[a.fileId] < ing.files[b.fileId];
+}
+        if( a.startByte != b.startByte ) { return a.startByte < b.startByte;
+}
+        return a.id < b.id; } );
     return { std::move( out ), std::move( saturatedRuleIds ) };
 }
 
@@ -711,7 +923,13 @@ inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
 inline bool errorMaskBlockIsEmpty( std::string_view collapsed ) noexcept
 {
     std::string stripped;
-    for( char c : collapsed ) if( c != ' ' && c != '\t' && c != '\n' && c != '\r' ) stripped.push_back( c );
+    for( char c : collapsed )
+    {
+        if( c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+        {
+            stripped.push_back( c );
+        }
+    }
     return stripped == "{}";
 }
 
@@ -732,13 +950,18 @@ struct ErrorMaskHit
 inline std::vector<ErrorMaskHit> findErrorMasking( const IngestResult& ing )
 {
     std::vector<ErrorMaskHit> out;
-    if( ing.files.empty() ) return out;
+    if( ing.files.empty() )
+    {
+        return out;
+    }
 
     // Build one astQuery spec per rule, tagging with the rule index so the empty-block gate routes back.
     std::vector<AstQuerySpec> specs;
     specs.reserve( kErrorMaskRules.size() );
     for( std::size_t r = 0; r < kErrorMaskRules.size(); ++r )
+    {
         specs.push_back( { std::string( kErrorMaskRules[r].query ), std::to_string( r ) } );
+    }
 
     // The @m block capture is the WIDEST node in each match (it encloses the inner @p property id), so it is
     // the span astQuery reports for that match's block. But a match with a #eq? predicate also captures @p;
@@ -749,21 +972,38 @@ inline std::vector<ErrorMaskHit> findErrorMasking( const IngestResult& ing )
     for( const AstMatch& m : astQuery( ing, specs ) )
     {
         std::size_t r = 0;
-        { std::uint64_t v = 0; for( char c : m.tag ) if( c >= '0' && c <= '9' ) v = v * 10 + std::uint64_t( c - '0' ); r = std::size_t( v ); }
-        if( r >= kErrorMaskRules.size() ) continue;
+        {
+            std::uint64_t v = 0;
+            for( char c : m.tag )
+            {
+                if( c >= '0' && c <= '9' )
+                {
+                    v = v * 10 + std::uint64_t( c - '0' );
+                }
+            }
+            r = std::size_t( v );
+        }
+        if( r >= kErrorMaskRules.size() )
+        {
+            continue;
+        }
         const ErrorMaskRule& rule = kErrorMaskRules[r];
-        if( rule.emptyOnly && !errorMaskBlockIsEmpty( m.text ) ) continue;   // the @p identifier capture is dropped here too (never "{}")
+        if( rule.emptyOnly && !errorMaskBlockIsEmpty( m.text ) )
+        {
+            continue; // the @p identifier capture is dropped here too (never "{}")
+        }
         out.push_back( { m.fileId, m.startByte, m.line, std::string( rule.id ) } );
     }
 
     // Deterministic order: (file path, startByte, id). astQuery already sorts (file, startByte, tag); re-sort
     // on the final key so the id tiebreak is the rule id, not its numeric tag.
     std::sort( out.begin(), out.end(), [ & ]( const ErrorMaskHit& a, const ErrorMaskHit& b )
-    {
-        if( ing.files[a.fileId] != ing.files[b.fileId] ) return ing.files[a.fileId] < ing.files[b.fileId];
-        if( a.startByte != b.startByte ) return a.startByte < b.startByte;
-        return a.id < b.id;
-    } );
+               {
+        if( ing.files[a.fileId] != ing.files[b.fileId] ) { return ing.files[a.fileId] < ing.files[b.fileId];
+}
+        if( a.startByte != b.startByte ) { return a.startByte < b.startByte;
+}
+        return a.id < b.id; } );
     return out;
 }
 

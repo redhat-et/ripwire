@@ -86,7 +86,10 @@ inline std::string lexicalNormalize( std::string_view path )
     {
         // consume one '/'-delimited segment [i, j)
         std::size_t j = i;
-        while( j < path.size() && path[j] != '/' ) ++j;
+        while( j < path.size() && path[j] != '/' )
+        {
+            ++j;
+        }
         const std::string_view seg = path.substr( i, j - i );
 
         if( seg.empty() || seg == "." )
@@ -95,22 +98,36 @@ inline std::string lexicalNormalize( std::string_view path )
         }
         else if( seg == ".." )
         {
-            if( !segs.empty() && segs.back() != ".." ) segs.pop_back();   // pop the previous real segment
+            if( !segs.empty() && segs.back() != ".." )
+            {
+                segs.pop_back(); // pop the previous real segment
+            }
             else if( isAbsolute )                       { /* `..` at the filesystem root is a no-op */ }
-            else                                        return {};        // relative `..` escaping above the base → unsound
+            else
+            {
+                return {}; // relative `..` escaping above the base → unsound
+            }
         }
         else
+        {
             segs.push_back( seg );
+        }
 
         i = ( j < path.size() ) ? j + 1 : j;             // skip the '/'
     }
 
     // reassemble
     std::string out;
-    if( isAbsolute ) out.push_back( '/' );
+    if( isAbsolute )
+    {
+        out.push_back( '/' );
+    }
     for( std::size_t k = 0; k < segs.size(); ++k )
     {
-        if( k ) out.push_back( '/' );
+        if( k )
+        {
+            out.push_back( '/' );
+        }
         out.append( segs[k] );
     }
     return out;
@@ -157,9 +174,18 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
         // visibility; it just never narrows an ambiguous call the way a C++ `#include`/Python `import` can.
     };
     const std::size_t dot = path.rfind( '.' );
-    if( dot == std::string_view::npos ) return IncludeLang::Other;
+    if( dot == std::string_view::npos )
+    {
+        return IncludeLang::Other;
+    }
     const std::string_view ext = path.substr( dot );
-    for( const ExtLang& e : kExtLang ) if( e.ext == ext ) return e.lang;
+    for( const ExtLang& e : kExtLang )
+    {
+        if( e.ext == ext )
+        {
+            return e.lang;
+        }
+    }
     return IncludeLang::Other;
 }
 
@@ -241,14 +267,25 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
         const auto it = fileIndex.find( candidate );
         if( it != fileIndex.end() )
         {
-            if( !ws ) return it->second;                                     // single root — unchanged
+            if( !ws )
+            {
+                return it->second; // single root — unchanged
+            }
             // rule 1: same-root hits are sound as today; a cross-root labeled hit is NOT evidence.
-            if( incRoot != 0xFFFFFFFFu && ( *ws->fileRoot )[ it->second ] == incRoot ) return it->second;
+            if( incRoot != 0xFFFFFFFFu && ( *ws->fileRoot )[it->second] == incRoot )
+            {
+                return it->second;
+            }
         }
         else if( !ws )
+        {
             return kNoFile;
+        }
     }
-    if( !ws || incRoot == 0xFFFFFFFFu ) return kNoFile;   // `..`-escape above the crawl root → unresolved (single root)
+    if( !ws || incRoot == 0xFFFFFFFFu )
+    {
+        return kNoFile; // `..`-escape above the crawl root → unresolved (single root)
+    }
 
     // rule 3 (§3.1a): the DISK-shape probe. Reconstruct the includer's absolute base directory from its
     // root realpath + its labeled dir minus the label, join, normalize, and look up the absolute index.
@@ -257,7 +294,10 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
     if( relBase.size() >= label.size() && relBase.compare( 0, label.size(), label ) == 0 )
     {
         relBase.remove_prefix( label.size() );
-        if( !relBase.empty() && relBase.front() == '/' ) relBase.remove_prefix( 1 );
+        if( !relBase.empty() && relBase.front() == '/' )
+        {
+            relBase.remove_prefix( 1 );
+        }
     }
     std::string absJoined;
     absJoined.reserve( ws->rootAbs[ incRoot ].size() + relBase.size() + rel.size() + 2 );
@@ -266,7 +306,10 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
     absJoined.push_back( '/' );  absJoined.append( rel );
 
     const std::string absCandidate = lexicalNormalize( absJoined );
-    if( absCandidate.empty() ) return kNoFile;
+    if( absCandidate.empty() )
+    {
+        return kNoFile;
+    }
     const auto ait = ws->absIndex.find( absCandidate );
     return ( ait == ws->absIndex.end() ) ? kNoFile : ait->second;
 }
@@ -282,22 +325,34 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
                                           const HashMap<std::string, std::uint32_t>& fileIndex,
                                           const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
 {
-    if( target.empty() ) return kNoFile;
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
 
     // Split leading dots (relative import): each leading '.' is a directory step. `.`  → this dir;
     // `..` → parent; `.rel` → this dir + `rel`. The remaining dotted tail maps '.'→'/'.
     std::size_t nDots = 0;
-    while( nDots < target.size() && target[ nDots ] == '.' ) ++nDots;
+    while( nDots < target.size() && target[nDots] == '.' )
+    {
+        ++nDots;
+    }
     const std::string_view tail = target.substr( nDots );   // dotted module tail after the leading dots
 
     // dotted tail → slash path (`pkg.mod` → `pkg/mod`). A trailing/empty tail (bare `from . import x`) is fine.
     std::string modPath;
     modPath.reserve( tail.size() );
-    for( char c : tail ) modPath.push_back( c == '.' ? '/' : c );
+    for( char c : tail )
+    {
+        modPath.push_back( c == '.' ? '/' : c );
+    }
 
     // leading-dot prefix as path steps: `.`→"" (this dir), N dots → (N-1) × "../".
     std::string relPrefix;
-    for( std::size_t k = 1; k < nDots; ++k ) relPrefix.append( "../" );   // first dot = current dir, rest = parents
+    for( std::size_t k = 1; k < nDots; ++k )
+    {
+        relPrefix.append( "../" ); // first dot = current dir, rest = parents
+    }
 
     const bool             isRelative = ( nDots > 0 );
     const std::string_view dir        = includerDir( includerPath );
@@ -310,16 +365,31 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
     std::uint32_t hit = kNoFile;
     const auto probe = [ & ]( std::string_view base, std::string_view rel )
     {
-        if( rel.empty() ) return;
+        if( rel.empty() )
+        {
+            return;
+        }
         const std::uint32_t f = joinNormalizeLookup( base, rel, fileIndex, ws, includerFileId );
-        if( f == kNoFile ) return;
-        if( hit == kNoFile )   hit = f;                  // first distinct hit
-        else if( f != hit )    hit = kNoFile - 1;        // a SECOND distinct file → ambiguous marker (≠ any real id)
+        if( f == kNoFile )
+        {
+            return;
+        }
+        if( hit == kNoFile )
+        {
+            hit = f; // first distinct hit
+        }
+        else if( f != hit )
+        {
+            hit = kNoFile - 1; // a SECOND distinct file → ambiguous marker (≠ any real id)
+        }
     };
     for( const std::string& c : cand )
     {
         probe( dir, c );                                 // relative-to-file (always; the only mode for a relative import)
-        if( !isRelative ) probe( std::string_view{}, c );// relative-to-repo-root (absolute import only)
+        if( !isRelative )
+        {
+            probe( std::string_view {}, c ); // relative-to-repo-root (absolute import only)
+        }
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
 }
@@ -332,7 +402,10 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
                                       const HashMap<std::string, std::uint32_t>& fileIndex,
                                       const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
 {
-    if( target.empty() ) return kNoFile;
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
 
     static constexpr std::string_view kFileExt[]  = { ".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mjs", ".cjs" };
     static constexpr std::string_view kIndexRel[] = { "/index.ts", "/index.tsx", "/index.js", "/index.jsx" };
@@ -344,39 +417,71 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
     if( target.front() != '.' )
     {
         if( !ws || ws->configAliases.empty() || includerFileId == kNoFile || includerFileId >= ws->fileRoot->size() )
+        {
             return kNoFile;
+        }
         const std::uint32_t incRoot = ( *ws->fileRoot )[ includerFileId ];
         std::uint32_t       hit     = kNoFile;
         const auto consider = [ & ]( std::uint32_t f )
         {
-            if( f == kNoFile )     return;
-            if( hit == kNoFile )   hit = f;
-            else if( f != hit )    hit = kNoFile - 1;                    // a SECOND distinct file → ambiguous → degrade
+            if( f == kNoFile )
+            {
+                return;
+            }
+            if( hit == kNoFile )
+            {
+                hit = f;
+            }
+            else if( f != hit )
+            {
+                hit = kNoFile - 1; // a SECOND distinct file → ambiguous → degrade
+            }
         };
         const auto probeAbs = [ & ]( const std::string& cand )
         {
             const std::string norm = lexicalNormalize( cand );
-            if( norm.empty() ) return;
+            if( norm.empty() )
+            {
+                return;
+            }
             const auto it = ws->absIndex.find( norm );
-            if( it != ws->absIndex.end() ) consider( it->second );
+            if( it != ws->absIndex.end() )
+            {
+                consider( it->second );
+            }
         };
         for( const ConfigAlias& al : ws->configAliases )
         {
-            if( al.isGo || al.fromRoot != incRoot ) continue;
+            if( al.isGo || al.fromRoot != incRoot )
+            {
+                continue;
+            }
             std::string absBase;
             if( al.wildcard )
             {
-                if( target.size() < al.spec.size() || target.compare( 0, al.spec.size(), al.spec ) != 0 ) continue;
+                if( target.size() < al.spec.size() || target.compare( 0, al.spec.size(), al.spec ) != 0 )
+                {
+                    continue;
+                }
                 absBase = al.absDest + "/" + std::string( target.substr( al.spec.size() ) );
             }
             else
             {
-                if( target != al.spec ) continue;
+                if( target != al.spec )
+                {
+                    continue;
+                }
                 absBase = al.absDest;
             }
             probeAbs( absBase );                                        // exact (specifier already carried an extension)
-            for( std::string_view e : kFileExt )  probeAbs( absBase + std::string( e ) );
-            for( std::string_view e : kIndexRel ) probeAbs( absBase + std::string( e ) );
+            for( std::string_view e : kFileExt )
+            {
+                probeAbs( absBase + std::string( e ) );
+            }
+            for( std::string_view e : kIndexRel )
+            {
+                probeAbs( absBase + std::string( e ) );
+            }
         }
         return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
     }
@@ -386,14 +491,29 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
     const auto probe = [ & ]( const std::string& rel )
     {
         const std::uint32_t f = joinNormalizeLookup( dir, rel, fileIndex, ws, includerFileId );
-        if( f == kNoFile ) return;
-        if( hit == kNoFile )   hit = f;
-        else if( f != hit )    hit = kNoFile - 1;        // second distinct file → ambiguous
+        if( f == kNoFile )
+        {
+            return;
+        }
+        if( hit == kNoFile )
+        {
+            hit = f;
+        }
+        else if( f != hit )
+        {
+            hit = kNoFile - 1; // second distinct file → ambiguous
+        }
     };
     // FIRST an exact hit (specifier already has an extension, e.g. `./x.js`), then extension-appended, then index.
     probe( std::string( target ) );
-    for( std::string_view e : kFileExt )  probe( std::string( target ) + std::string( e ) );
-    for( std::string_view e : kIndexRel ) probe( std::string( target ) + std::string( e ) );
+    for( std::string_view e : kFileExt )
+    {
+        probe( std::string( target ) + std::string( e ) );
+    }
+    for( std::string_view e : kIndexRel )
+    {
+        probe( std::string( target ) + std::string( e ) );
+    }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
 }
 
@@ -410,23 +530,38 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
                                         std::string_view crateRootDir, bool hasCrateRoot,
                                         const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
 {
-    if( target.empty() ) return kNoFile;
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
     const std::string_view dir = includerDir( includerPath );
 
     std::uint32_t hit = kNoFile;
     const auto probe = [ & ]( std::string_view base, const std::string& rel )
     {
         const std::uint32_t f = joinNormalizeLookup( base, rel, fileIndex, ws, includerFileId );
-        if( f == kNoFile ) return;
-        if( hit == kNoFile )   hit = f;
-        else if( f != hit )    hit = kNoFile - 1;
+        if( f == kNoFile )
+        {
+            return;
+        }
+        if( hit == kNoFile )
+        {
+            hit = f;
+        }
+        else if( f != hit )
+        {
+            hit = kNoFile - 1;
+        }
     };
 
     // `mod x;` (body-less module-file declaration) → `x.rs` / `x/mod.rs` relative-to-includer.
     if( target.rfind( "mod:", 0 ) == 0 )
     {
         const std::string_view mod = target.substr( 4 );
-        if( mod.empty() || mod.find( ':' ) != std::string_view::npos ) return kNoFile;
+        if( mod.empty() || mod.find( ':' ) != std::string_view::npos )
+        {
+            return kNoFile;
+        }
         probe( dir, std::string( mod ) + ".rs" );
         probe( dir, std::string( mod ) + "/mod.rs" );
         return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
@@ -435,7 +570,10 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
     // `use …` — split the `::`-path into head + trailing segments. Only crate-anchored / relative uses
     // (`crate::`, `super::`, `self::`) map to a repo path; a bare `use std::…` / external crate does not.
     // A brace group (`crate::{a, b}`) never resolves to one file → degrade (the `{`/`,` guard).
-    if( target.find_first_of( "{}, " ) != std::string_view::npos ) return kNoFile;
+    if( target.find_first_of( "{}, " ) != std::string_view::npos )
+    {
+        return kNoFile;
+    }
 
     // split on `::` into segments.
     std::vector<std::string_view> seg;
@@ -444,35 +582,57 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
         while( i < target.size() )
         {
             std::size_t j = target.find( "::", i );
-            if( j == std::string_view::npos ) j = target.size();
+            if( j == std::string_view::npos )
+            {
+                j = target.size();
+            }
             seg.push_back( target.substr( i, j - i ) );
             i = ( j < target.size() ) ? j + 2 : j;
         }
     }
-    if( seg.empty() ) return kNoFile;
+    if( seg.empty() )
+    {
+        return kNoFile;
+    }
 
     // Determine the anchor + the path segments AFTER it.
     std::string           base;      // directory to resolve relative to
     std::size_t           first = 0; // index of the first path segment after the anchor
     if( seg[0] == "crate" )
     {
-        if( !hasCrateRoot ) return kNoFile;              // workspace member w/o a locatable crate root → degrade
+        if( !hasCrateRoot )
+        {
+            return kNoFile; // workspace member w/o a locatable crate root → degrade
+        }
         base  = std::string( crateRootDir );
         first = 1;
     }
     else if( seg[0] == "self" )  { base = std::string( dir ); first = 1; }
     else if( seg[0] == "super" ) { base = std::string( dir ) + "/.."; first = 1; }
-    else return kNoFile;                                  // `std::…` / external crate / bare → external → unresolved
+    else
+    {
+        return kNoFile; // `std::…` / external crate / bare → external → unresolved
+    }
 
     // path segments after the anchor (drop the final item candidate variants).
     std::vector<std::string_view> path( seg.begin() + std::ptrdiff_t( first ), seg.end() );
-    if( path.empty() ) return kNoFile;
+    if( path.empty() )
+    {
+        return kNoFile;
+    }
 
     // build `a/b` from all-but-last, and `a` from all-but-two, for the module-vs-item degrade-safe probe.
     const auto joinSegs = [ & ]( std::size_t upto ) -> std::string
     {
         std::string p;
-        for( std::size_t k = 0; k < upto; ++k ) { if( k ) p.push_back( '/' ); p.append( path[k] ); }
+        for( std::size_t k = 0; k < upto; ++k )
+        {
+            if( k )
+            {
+                p.push_back( '/' );
+            }
+            p.append( path[k] );
+        }
         return p;
     };
 
@@ -503,7 +663,10 @@ inline std::string readConfigBytes( const std::string& path )
 {
     std::string out;
     std::FILE*  f = std::fopen( path.c_str(), "rb" );
-    if( !f ) return out;
+    if( !f )
+    {
+        return out;
+    }
     std::fseek( f, 0, SEEK_END );
     const long sz = std::ftell( f );
     if( sz > 0 && sz <= ( 1 << 20 ) )                                   // cap 1 MiB — config files are tiny; ignore junk
@@ -521,15 +684,24 @@ inline std::string readConfigBytes( const std::string& path )
 // (a cross-root alias) — an intra-root alias stays external exactly as a bare specifier is single-root.
 inline bool pathIsUnder( std::string_view abs, std::string_view root ) noexcept
 {
-    if( abs == root ) return true;
+    if( abs == root )
+    {
+        return true;
+    }
     return abs.size() > root.size() && abs.compare( 0, root.size(), root ) == 0 && abs[ root.size() ] == '/';
 }
 
 // trim ASCII whitespace from both ends of a view (no allocation).
 inline std::string_view trimWs( std::string_view s ) noexcept
 {
-    while( !s.empty() && ( s.front() == ' ' || s.front() == '\t' || s.front() == '\r' ) ) s.remove_prefix( 1 );
-    while( !s.empty() && ( s.back()  == ' ' || s.back()  == '\t' || s.back()  == '\r' ) ) s.remove_suffix( 1 );
+    while( !s.empty() && ( s.front() == ' ' || s.front() == '\t' || s.front() == '\r' ) )
+    {
+        s.remove_prefix( 1 );
+    }
+    while( !s.empty() && ( s.back() == ' ' || s.back() == '\t' || s.back() == '\r' ) )
+    {
+        s.remove_suffix( 1 );
+    }
     return s;
 }
 
@@ -550,10 +722,16 @@ inline void parseGoModReplaces( const std::string& bytes, std::uint32_t fromRoot
     while( i < bytes.size() )
     {
         std::size_t e = bytes.find( '\n', i );
-        if( e == std::string::npos ) e = bytes.size();
+        if( e == std::string::npos )
+        {
+            e = bytes.size();
+        }
         std::string_view t = trimWs( std::string_view( bytes.data() + i, e - i ) );
         i = e + 1;
-        if( t.empty() || t.substr( 0, 2 ) == "//" ) continue;          // blank / comment
+        if( t.empty() || t.substr( 0, 2 ) == "//" )
+        {
+            continue; // blank / comment
+        }
         std::string_view body;
         if( inGroup )
         {
@@ -563,21 +741,47 @@ inline void parseGoModReplaces( const std::string& bytes, std::uint32_t fromRoot
         else if( t.substr( 0, 7 ) == "replace" )
         {
             std::string_view rest = trimWs( t.substr( 7 ) );
-            if( rest.empty() ) continue;
-            if( rest.front() == '(' ) { inGroup = true; rest = trimWs( rest.substr( 1 ) ); if( rest.empty() ) continue; }
+            if( rest.empty() )
+            {
+                continue;
+            }
+            if( rest.front() == '(' )
+            {
+                inGroup = true;
+                rest = trimWs( rest.substr( 1 ) );
+                if( rest.empty() )
+                {
+                    continue;
+                }
+            }
             body = rest;
         }
-        else continue;
+        else
+        {
+            continue;
+        }
 
         const std::size_t arrow = body.find( "=>" );
-        if( arrow == std::string_view::npos ) continue;
+        if( arrow == std::string_view::npos )
+        {
+            continue;
+        }
         const std::string_view mod = firstTok( trimWs( body.substr( 0, arrow ) ) );
         const std::string_view tgt = firstTok( trimWs( body.substr( arrow + 2 ) ) );
-        if( mod.empty() || tgt.empty() ) continue;
-        if( tgt.front() != '.' && tgt.front() != '/' ) continue;        // not a filesystem replace → registry/version
+        if( mod.empty() || tgt.empty() )
+        {
+            continue;
+        }
+        if( tgt.front() != '.' && tgt.front() != '/' )
+        {
+            continue; // not a filesystem replace → registry/version
+        }
         std::string abs = ( tgt.front() == '/' ) ? std::string( tgt )
                                                   : lexicalNormalize( rootReal + "/" + std::string( tgt ) );
-        if( abs.empty() || pathIsUnder( abs, rootReal ) ) continue;     // must ESCAPE this root (cross-root only)
+        if( abs.empty() || pathIsUnder( abs, rootReal ) )
+        {
+            continue; // must ESCAPE this root (cross-root only)
+        }
         out.push_back( ConfigAlias{ fromRoot, std::string( mod ), std::move( abs ), true, true } );
     }
 }
@@ -601,21 +805,34 @@ inline void parseTsconfigPaths( const std::string& bytes, std::uint32_t fromRoot
             s.push_back( bytes[ q ] );
             ++q;
         }
-        if( q < bytes.size() ) ++q;                                     // past the closing quote
+        if( q < bytes.size() )
+        {
+            ++q; // past the closing quote
+        }
         return s;
     };
 
     // baseUrl (default "."), resolved to an absolute base the `paths` targets hang off.
     std::string baseUrl = ".";
     if( const std::size_t bp = bytes.find( "\"baseUrl\"" ); bp != std::string::npos )
+    {
         if( const std::size_t c = bytes.find( ':', bp ); c != std::string::npos )
+        {
             if( const std::size_t q = bytes.find( '"', c ); q != std::string::npos ) { std::size_t p = q; baseUrl = readQuoted( p ); }
+        }
+    }
     const std::string baseAbs = lexicalNormalize( rootReal + "/" + baseUrl );
 
     const std::size_t pp = bytes.find( "\"paths\"" );
-    if( pp == std::string::npos ) return;
+    if( pp == std::string::npos )
+    {
+        return;
+    }
     std::size_t p = bytes.find( '{', pp );
-    if( p == std::string::npos ) return;
+    if( p == std::string::npos )
+    {
+        return;
+    }
     ++p;
     int depth = 1;
     while( p < bytes.size() && depth > 0 )
@@ -639,10 +856,19 @@ inline void parseTsconfigPaths( const std::string& bytes, std::uint32_t fromRoot
         const auto stripStar = [ & ]( std::string& s ) { if( !s.empty() && s.back() == '*' ) { wild = true; s.pop_back(); } };
         stripStar( key );
         stripStar( val );
-        if( key.empty() || val.empty() ) continue;
+        if( key.empty() || val.empty() )
+        {
+            continue;
+        }
         std::string abs = lexicalNormalize( baseAbs + "/" + val );
-        while( !abs.empty() && abs.back() == '/' ) abs.pop_back();
-        if( abs.empty() || pathIsUnder( abs, rootReal ) ) continue;     // cross-root only
+        while( !abs.empty() && abs.back() == '/' )
+        {
+            abs.pop_back();
+        }
+        if( abs.empty() || pathIsUnder( abs, rootReal ) )
+        {
+            continue; // cross-root only
+        }
         out.push_back( ConfigAlias{ fromRoot, std::move( key ), std::move( abs ), wild, false } );
     }
 }
@@ -654,7 +880,9 @@ inline void parseTsconfigPaths( const std::string& bytes, std::uint32_t fromRoot
 inline std::uint32_t resolveGoImport( std::string_view target, const WsIncludeCtx* ws, std::uint32_t includerFileId )
 {
     if( !ws || ws->configAliases.empty() || includerFileId == kNoFile || includerFileId >= ws->fileRoot->size() )
+    {
         return kNoFile;
+    }
 
     // the import path — the first quoted token (a single-line `import "x"`); grouped imports collapse to one
     // node upstream and are left unresolved (honest — no reliable per-spec split without a grammar change).
@@ -662,41 +890,79 @@ inline std::uint32_t resolveGoImport( std::string_view target, const WsIncludeCt
     if( const std::size_t q0 = imp.find( '"' ); q0 != std::string_view::npos )
     {
         const std::size_t q1 = imp.find( '"', q0 + 1 );
-        if( q1 != std::string_view::npos ) imp = imp.substr( q0 + 1, q1 - q0 - 1 );
-        else return kNoFile;
+        if( q1 != std::string_view::npos )
+        {
+            imp = imp.substr( q0 + 1, q1 - q0 - 1 );
+        }
+        else
+        {
+            return kNoFile;
+        }
     }
-    if( imp.empty() ) return kNoFile;
+    if( imp.empty() )
+    {
+        return kNoFile;
+    }
 
     const std::uint32_t incRoot = ( *ws->fileRoot )[ includerFileId ];
     std::uint32_t       hit     = kNoFile;
     const auto consider = [ & ]( std::uint32_t f )
     {
-        if( f == kNoFile )   return;
-        if( hit == kNoFile ) hit = f;
-        else if( f != hit )  hit = kNoFile - 1;                         // second distinct file → ambiguous → degrade
+        if( f == kNoFile )
+        {
+            return;
+        }
+        if( hit == kNoFile )
+        {
+            hit = f;
+        }
+        else if( f != hit )
+        {
+            hit = kNoFile - 1; // second distinct file → ambiguous → degrade
+        }
     };
     for( const ConfigAlias& al : ws->configAliases )
     {
-        if( !al.isGo || al.fromRoot != incRoot ) continue;
+        if( !al.isGo || al.fromRoot != incRoot )
+        {
+            continue;
+        }
         std::string_view tail;
         if( imp == al.spec ) { /* the module root package */ }
         else if( imp.size() > al.spec.size() && imp.compare( 0, al.spec.size(), al.spec ) == 0 && imp[ al.spec.size() ] == '/' )
+        {
             tail = imp.substr( al.spec.size() + 1 );
-        else continue;
+        }
+        else
+        {
+            continue;
+        }
 
         std::string dir = al.absDest;
         if( !tail.empty() ) { dir.push_back( '/' ); dir.append( tail ); }
         dir = lexicalNormalize( dir );
-        if( dir.empty() ) continue;
+        if( dir.empty() )
+        {
+            continue;
+        }
 
         // the single `.go` file DIRECTLY inside `dir` (a package = a directory). Counting distinct fileIds
         // is order-independent, so iterating the (unordered) absIndex still yields a deterministic result.
         const std::string prefix = dir + "/";
         for( const auto& [ apath, fid ] : ws->absIndex )
         {
-            if( apath.size() <= prefix.size() || apath.compare( 0, prefix.size(), prefix ) != 0 ) continue;
-            if( apath.find( '/', prefix.size() ) != std::string::npos ) continue;   // not a direct child (deeper package)
-            if( apath.size() < 3 || apath.compare( apath.size() - 3, 3, ".go" ) != 0 ) continue;
+            if( apath.size() <= prefix.size() || apath.compare( 0, prefix.size(), prefix ) != 0 )
+            {
+                continue;
+            }
+            if( apath.find( '/', prefix.size() ) != std::string::npos )
+            {
+                continue; // not a direct child (deeper package)
+            }
+            if( apath.size() < 3 || apath.compare( apath.size() - 3, 3, ".go" ) != 0 )
+            {
+                continue;
+            }
             consider( fid );
         }
     }
@@ -717,7 +983,10 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                                             std::string_view crateRootDir = {}, bool hasCrateRoot = false,
                                             const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
 {
-    if( target.empty() ) return kNoFile;
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
     switch( includeLangOf( includerPath ) )
     {
         case IncludeLang::CFamily:
@@ -728,23 +997,47 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                 // EXACT path match, in TWO written forms — `<label>/<rel>` (the labeled key directly) and
                 // `<rel>` (prefixed with each other root's label). Unique-or-degrade across the whole
                 // workspace: ≥2 distinct hits ⇒ kNoFile. Never basename, never suffix-matching.
-                if( !ws || includerFileId == kNoFile || includerFileId >= ws->fileRoot->size() ) return kNoFile;
+                if( !ws || includerFileId == kNoFile || includerFileId >= ws->fileRoot->size() )
+                {
+                    return kNoFile;
+                }
                 const std::uint32_t incRoot = ( *ws->fileRoot )[ includerFileId ];
                 const std::string   norm    = lexicalNormalize( target );
-                if( norm.empty() ) return kNoFile;
+                if( norm.empty() )
+                {
+                    return kNoFile;
+                }
                 std::uint32_t hit = kNoFile;
                 const auto consider = [ & ]( std::uint32_t f )
                 {
-                    if( f == kNoFile || ( *ws->fileRoot )[ f ] == incRoot ) return;   // other roots only
-                    if( hit == kNoFile )   hit = f;
-                    else if( f != hit )    hit = kNoFile - 1;                          // ambiguous → degrade
+                    if( f == kNoFile || ( *ws->fileRoot )[f] == incRoot )
+                    {
+                        return; // other roots only
+                    }
+                    if( hit == kNoFile )
+                    {
+                        hit = f;
+                    }
+                    else if( f != hit )
+                    {
+                        hit = kNoFile - 1; // ambiguous → degrade
+                    }
                 };
-                if( const auto it = fileIndex.find( norm ); it != fileIndex.end() ) consider( it->second );   // `<label>/<rel>` form
+                if( const auto it = fileIndex.find( norm ); it != fileIndex.end() )
+                {
+                    consider( it->second ); // `<label>/<rel>` form
+                }
                 for( std::uint32_t r = 0; r < ws->rootLabels.size(); ++r )                                    // `<rel>` form per other root
                 {
-                    if( r == incRoot ) continue;
+                    if( r == incRoot )
+                    {
+                        continue;
+                    }
                     const auto it = fileIndex.find( ws->rootLabels[ r ] + "/" + norm );
-                    if( it != fileIndex.end() ) consider( it->second );
+                    if( it != fileIndex.end() )
+                    {
+                        consider( it->second );
+                    }
                 }
                 return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
             }
@@ -772,7 +1065,10 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     std::vector<std::vector<std::uint32_t>> adj( F );
-    if( ing.includes.empty() ) return adj;
+    if( ing.includes.empty() )
+    {
+        return adj;
+    }
 
     // path → fileId over the canonical (sorted) file list. The KEY is the LEXICALLY-NORMALIZED file path,
     // NOT the raw ing.files spelling: a crawl rooted at `.` stores paths with a leading `./` (`./test/main.cpp`),
@@ -782,7 +1078,10 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
     // rule makes them agree with no re-rooting. Pure + deterministic (lexicalNormalize is I/O-free).
     HashMap<std::string, std::uint32_t> fileIndex;
     fileIndex.reserve( F );
-    for( std::uint32_t f = 0; f < F; ++f ) fileIndex.emplace( lexicalNormalize( ing.files[f] ), f );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        fileIndex.emplace( lexicalNormalize( ing.files[f] ), f );
+    }
 
     // ── Multi-root workspace context (§3.1): built ONLY for a merged workspace ingest — nullptr on every
     // single-root run, so the resolution below is byte-identical to today. Per-root pieces:
@@ -805,7 +1104,10 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
             if( rel.size() >= label.size() && rel.compare( 0, label.size(), label ) == 0 )
             {
                 rel.remove_prefix( label.size() );
-                if( !rel.empty() && rel.front() == '/' ) rel.remove_prefix( 1 );
+                if( !rel.empty() && rel.front() == '/' )
+                {
+                    rel.remove_prefix( 1 );
+                }
             }
             std::string abs = ing.rootReals[ r ];
             if( !rel.empty() ) { abs.push_back( '/' );  abs.append( rel ); }
@@ -818,9 +1120,13 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
         for( std::uint32_t r = 0; r < ing.rootReals.size(); ++r )
         {
             if( const std::string gomod = readConfigBytes( ing.rootReals[ r ] + "/go.mod" ); !gomod.empty() )
+            {
                 parseGoModReplaces( gomod, r, ing.rootReals[ r ], wsCtx.configAliases );
+            }
             if( const std::string tscfg = readConfigBytes( ing.rootReals[ r ] + "/tsconfig.json" ); !tscfg.empty() )
+            {
                 parseTsconfigPaths( tscfg, r, ing.rootReals[ r ], wsCtx.configAliases );
+            }
         }
         ws = &wsCtx;
     }
@@ -843,7 +1149,10 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
         const std::string_view p = ing.files[f];
         const bool isLib  = ( p == "lib.rs"  || ( p.size() >= 7 && p.substr( p.size() - 7 ) == "/lib.rs"  ) );
         const bool isMain = ( p == "main.rs" || ( p.size() >= 8 && p.substr( p.size() - 8 ) == "/main.rs" ) );
-        if( !( isLib || isMain ) ) continue;
+        if( !( isLib || isMain ) )
+        {
+            continue;
+        }
         if( isWorkspace )
         {
             const std::uint32_t r = ing.fileRoot[ f ];
@@ -854,13 +1163,23 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
 
     std::vector<std::uint32_t> includeCountByFile( F, 0 );
     for( const Include& inc : ing.includes )
-        if( inc.fileId < F ) ++includeCountByFile[ inc.fileId ];
+    {
+        if( inc.fileId < F )
+        {
+            ++includeCountByFile[inc.fileId];
+        }
+    }
     for( std::uint32_t f = 0; f < F; ++f )
+    {
         adj[ f ].reserve( includeCountByFile[ f ] );
+    }
 
     for( const Include& inc : ing.includes )
     {
-        if( inc.fileId >= F ) continue;
+        if( inc.fileId >= F )
+        {
+            continue;
+        }
         std::string_view crd    = crateRootDir;
         bool             hasCrd = hasCrateRoot;
         if( isWorkspace )
@@ -871,15 +1190,20 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
         }
         const std::uint32_t to = resolvePreciseInclude( ing.files[ inc.fileId ], inc.target, inc.isAngle,
                                                          fileIndex, crd, hasCrd, ws, inc.fileId );
-        if( to == kNoFile || to == inc.fileId ) continue;   // unresolved or self-include → contributes nothing
+        if( to == kNoFile || to == inc.fileId )
+        {
+            continue; // unresolved or self-include → contributes nothing
+        }
         adj[ inc.fileId ].push_back( to );
     }
     if( dedup )
+    {
         for( std::vector<std::uint32_t>& v : adj )
         {
             std::sort( v.begin(), v.end() );
             v.erase( std::unique( v.begin(), v.end() ), v.end() );
         }
+    }
     return adj;
 }
 
@@ -902,7 +1226,15 @@ inline std::vector<std::vector<NodeId>> transitiveIncludeSet( const std::vector<
         while( !stack.empty() )
         {
             const std::uint32_t v = stack.back();  stack.pop_back();
-            for( std::uint32_t w : adj[v] ) if( seenEpoch[w] != epoch ) { seenEpoch[w] = epoch; stack.push_back( w ); trans[s].push_back( w ); }
+            for( std::uint32_t w : adj[v] )
+            {
+                if( seenEpoch[w] != epoch )
+                {
+                    seenEpoch[w] = epoch;
+                    stack.push_back( w );
+                    trans[s].push_back( w );
+                }
+            }
         }
         // …trans[s] already excludes s (never pushed as a reachable target). Sort+dedup for binary search.
         std::sort( trans[s].begin(), trans[s].end() );
@@ -925,7 +1257,10 @@ inline std::vector<std::vector<NodeId>> transitiveIncludeSet( const std::vector<
 // Deterministic + allocation-disciplined: a pure string function of (path, scope, name); no map, no state.
 inline std::string canonicalId( std::string_view path, std::string_view scope, std::string_view name )
 {
-    if( scope.empty() ) return std::string( name );            // free function / no enclosing scope → bare name (id == name; not emitted)
+    if( scope.empty() )
+    {
+        return std::string( name ); // free function / no enclosing scope → bare name (id == name; not emitted)
+    }
     std::string id;
     id.reserve( path.size() + scope.size() + name.size() + 4 );
     id.append( path ).append( "::" ).append( scope ).append( "::" ).append( name );
@@ -977,10 +1312,15 @@ inline std::size_t sharedLocality( std::string_view a, std::string_view b ) noex
             cut = i;
         }
         else
+        {
             ++i;
+        }
     }
     // both ids consumed entirely with every byte equal → the final segment matched too → the whole string counts.
-    if( i == a.size() && i == b.size() ) cut = i;
+    if( i == a.size() && i == b.size() )
+    {
+        cut = i;
+    }
     return cut;
 }
 
@@ -1042,13 +1382,22 @@ struct Narrower
     // so it can never invent a target the bare ladder couldn't reach — it only PICKS the right one earlier.
     const rw::svector<NodeId, 2>* rule1ClassMember( const Reference& r, const std::string& callerScope ) const
     {
-        if( callerScope.empty() ) return nullptr;             // caller's enclosing class/namespace unknown → no narrow
-        if( !r.qualifier.empty() ) return nullptr;            // an explicit `A::m()` is handled by E#4 canonical resolve, not here
+        if( callerScope.empty() )
+        {
+            return nullptr; // caller's enclosing class/namespace unknown → no narrow
+        }
+        if( !r.qualifier.empty() )
+        {
+            return nullptr; // an explicit `A::m()` is handled by E#4 canonical resolve, not here
+        }
 
         const bool isThisSelf = ( r.recv == RecvKind::ThisObj );
         const bool isCish      = ( r.lang == Lang::Cpp || r.lang == Lang::ObjC );
         const bool bareCish    = isCish && ( r.recv == RecvKind::None );   // C++ unqualified member-or-namespace lookup
-        if( !isThisSelf && !bareCish ) return nullptr;        // `x.m()` (NamedVar) is Rule 2 territory (deferred) → §2a
+        if( !isThisSelf && !bareCish )
+        {
+            return nullptr; // `x.m()` (NamedVar) is Rule 2 territory (deferred) → §2a
+        }
 
         // resolve against the enclosing scope. canonByName holds DEFS only, so a hit is a real same-scope
         // definition — resolve straight to it, skipping the cross-class/cross-file ambiguity. Key built in
@@ -1056,7 +1405,10 @@ struct Narrower
         keyScope.clear();
         keyScope.append( callerScope ).append( "::" ).append( r.calleeName );
         const auto it = canonByName.find( keyScope );
-        if( it == canonByName.end() || it->second.size() == 0 ) return nullptr;
+        if( it == canonByName.end() || it->second.size() == 0 )
+        {
+            return nullptr;
+        }
         return &it->second;   // 1+ defs in the enclosing scope (overloads stay split 1/k, but only within the scope)
     }
 
@@ -1072,9 +1424,18 @@ struct Narrower
     // honest ambiguity via §2a, never a guess. Deterministic: canonByName insertion order = symbol-id order.
     const rw::svector<NodeId, 2>* rule2RecvVarType( const Reference& r ) const
     {
-        if( r.recv != RecvKind::NamedVar || r.recvVar.empty() ) return nullptr;   // not a named-receiver call
-        if( !r.qualifier.empty() )                              return nullptr;   // explicit `A::m()` → E#4 canonical, not here
-        if( r.fromSymbol == kNoNode )                           return nullptr;   // file-scope call: no per-def binding scope
+        if( r.recv != RecvKind::NamedVar || r.recvVar.empty() )
+        {
+            return nullptr; // not a named-receiver call
+        }
+        if( !r.qualifier.empty() )
+        {
+            return nullptr; // explicit `A::m()` → E#4 canonical, not here
+        }
+        if( r.fromSymbol == kNoNode )
+        {
+            return nullptr; // file-scope call: no per-def binding scope
+        }
 
         // the var's resolved type in THIS scope. Empty value = tombstone (ambiguous var) → no narrow. Key built
         // in the reused buffer (identical bytes to `std::to_string( r.fromSymbol ) + "#" + r.recvVar`).
@@ -1083,14 +1444,20 @@ struct Narrower
         keyBind.push_back( '#' );
         keyBind.append( r.recvVar );
         const auto vit = varType.find( keyBind );
-        if( vit == varType.end() || vit->second.empty() ) return nullptr;
+        if( vit == varType.end() || vit->second.empty() )
+        {
+            return nullptr;
+        }
 
         // resolve `m` against the bound type's own methods (defs only). Miss ⇒ degrade to §2a. Reused buffer,
         // identical bytes to `vit->second + "::" + r.calleeName`.
         keyScope.clear();
         keyScope.append( vit->second ).append( "::" ).append( r.calleeName );
         const auto it = canonByName.find( keyScope );
-        if( it == canonByName.end() || it->second.size() == 0 ) return nullptr;
+        if( it == canonByName.end() || it->second.size() == 0 )
+        {
+            return nullptr;
+        }
         return &it->second;   // real `Foo::m` definition(s) — overloads stay split 1/k, but only within the type
     }
 
@@ -1101,9 +1468,14 @@ struct Narrower
     // NOT run CHA-lite. Read-only over the same maps Rule 1/2 use; NEVER a guess (a tombstoned var ⇒ "").
     std::string_view receiverStaticType( const Reference& r, const std::string& callerScope ) const
     {
-        if( !r.qualifier.empty() ) return {};                    // explicit `A::m()` → canonical, not a receiver-typed call
-        if( r.recv == RecvKind::ThisObj )                        // `this`/`self` → the enclosing class is the static type
+        if( !r.qualifier.empty() )
+        {
+            return {}; // explicit `A::m()` → canonical, not a receiver-typed call
+        }
+        if( r.recv == RecvKind::ThisObj )
+        { // `this`/`self` → the enclosing class is the static type
             return callerScope.empty() ? std::string_view{} : std::string_view( callerScope );
+        }
         if( r.recv == RecvKind::NamedVar && !r.recvVar.empty() && r.fromSymbol != kNoNode )
         {
             keyBind.clear();
@@ -1111,7 +1483,10 @@ struct Narrower
             keyBind.push_back( '#' );
             keyBind.append( r.recvVar );
             const auto vit = varType.find( keyBind );
-            if( vit == varType.end() || vit->second.empty() ) return {};   // unbound or tombstoned (ambiguous) → no type
+            if( vit == varType.end() || vit->second.empty() )
+            {
+                return {}; // unbound or tombstoned (ambiguous) → no type
+            }
             return std::string_view( vit->second );
         }
         return {};
@@ -1137,17 +1512,34 @@ struct Narrower
     bool rule3IncludeFile( const rw::svector<NodeId, 2>& cands, std::uint32_t callerFileId,
                            std::vector<NodeId>& out ) const
     {
-        if( callerFileId >= fileIncludes.size() ) return false;              // no per-file include set → no narrow
+        if( callerFileId >= fileIncludes.size() )
+        {
+            return false; // no per-file include set → no narrow
+        }
         const std::vector<NodeId>& inc = fileIncludes[ callerFileId ];
-        if( inc.empty() ) return false;                                     // caller includes nothing → no narrow
-        if( cands.size() < 2 ) return false;                               // already unambiguous → nothing for Rule 3 to do
+        if( inc.empty() )
+        {
+            return false; // caller includes nothing → no narrow
+        }
+        if( cands.size() < 2 )
+        {
+            return false; // already unambiguous → nothing for Rule 3 to do
+        }
 
         // included-file membership test: `inc` is sorted+deduped, so a binary search is the deterministic O(log)
         // check (no allocation, no state). A candidate in the caller's OWN file short-circuits the whole rule.
         const auto includes = [ & ]( std::uint32_t f ) noexcept
         {
             std::size_t lo = 0, hi = inc.size();
-            while( lo < hi ) { const std::size_t mid = ( lo + hi ) >> 1; if( inc[ mid ] < f ) lo = mid + 1; else hi = mid; }
+            while( lo < hi )
+            {
+                const std::size_t mid = ( lo + hi ) >> 1;
+                if( inc[mid] < f ) { lo = mid + 1; }
+                else
+                {
+                    hi = mid;
+                }
+            }
             return lo < inc.size() && inc[ lo ] == f;
         };
 
@@ -1155,19 +1547,39 @@ struct Narrower
         bool          multiFile  = false;         // ≥2 distinct included files hold candidates → ambiguous → bail
         for( NodeId c : cands )
         {
-            if( c >= symFileId.size() ) continue;
+            if( c >= symFileId.size() )
+            {
+                continue;
+            }
             const std::uint32_t cf = symFileId[ c ];
-            if( cf == callerFileId ) return false;                          // (2) same-file candidate → leave to §2a
-            if( !includes( cf ) ) continue;                                // candidate not in an included file → ignore
-            if( chosenFile == 0xFFFFFFFFu )      chosenFile = cf;           // first included file with a candidate
+            if( cf == callerFileId )
+            {
+                return false; // (2) same-file candidate → leave to §2a
+            }
+            if( !includes( cf ) )
+            {
+                continue; // candidate not in an included file → ignore
+            }
+            if( chosenFile == 0xFFFFFFFFu )
+            {
+                chosenFile = cf; // first included file with a candidate
+            }
             else if( cf != chosenFile )        { multiFile = true; }        // a SECOND distinct included file → ambiguous
         }
-        if( multiFile || chosenFile == 0xFFFFFFFFu ) return false;          // (3) 0 or ≥2 included files → degrade to §2a
+        if( multiFile || chosenFile == 0xFFFFFFFFu )
+        {
+            return false; // (3) 0 or ≥2 included files → degrade to §2a
+        }
 
         // narrow: keep exactly the candidates from the one chosen included file (id order preserved from `cands`).
         out.clear();
         for( NodeId c : cands )
-            if( c < symFileId.size() && symFileId[ c ] == chosenFile ) out.push_back( c );
+        {
+            if( c < symFileId.size() && symFileId[c] == chosenFile )
+            {
+                out.push_back( c );
+            }
+        }
         return !out.empty();
     }
 };

@@ -157,7 +157,10 @@ inline std::string flattenSpace( std::string_view s, std::size_t cap )
     bool pendingSpace = false;
     for( char c : s )
     {
-        if( out.size() >= cap ) break;
+        if( out.size() >= cap )
+        {
+            break;
+        }
         if( std::isspace( (unsigned char)c ) != 0 ) { pendingSpace = !out.empty(); continue; }
         if( pendingSpace ) { out.push_back( ' ' ); pendingSpace = false; }
         out.push_back( c );
@@ -169,7 +172,12 @@ inline std::uint32_t lineOf( std::string_view src, std::size_t at )
 {
     std::uint32_t line = 1;
     for( std::size_t i = 0; i < at && i < src.size(); ++i )
-        if( src[i] == '\n' ) ++line;
+    {
+        if( src[i] == '\n' )
+        {
+            ++line;
+        }
+    }
     return line;
 }
 
@@ -182,20 +190,33 @@ inline std::size_t skipInert( std::string_view src, std::size_t i )
     if( i + 1 < n && src[i] == '/' && src[ i + 1 ] == '/' )
     {
         i += 2;
-        while( i < n && src[i] != '\n' ) ++i;
+        while( i < n && src[i] != '\n' )
+        {
+            ++i;
+        }
         return i;
     }
     if( i + 1 < n && src[i] == '/' && src[ i + 1 ] == '*' )
     {
         i += 2;
-        while( i + 1 < n && !( src[i] == '*' && src[ i + 1 ] == '/' ) ) ++i;
+        while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
+        {
+            ++i;
+        }
         return std::min( n, i + 2 );
     }
     if( src[i] == '"' || src[i] == '\'' )
     {
         const char  q = src[i];
         std::size_t j = i + 1;
-        while( j < n && src[j] != q ) { if( src[j] == '\\' ) ++j; ++j; }
+        while( j < n && src[j] != q )
+        {
+            if( src[j] == '\\' )
+            {
+                ++j;
+            }
+            ++j;
+        }
         return std::min( n, j + 1 );
     }
     return i;
@@ -214,13 +235,22 @@ inline std::string withoutComments( std::string_view s )
     {
         const std::size_t j = skipInert( s, i );
         if( j == i ) { out.push_back( s[i] ); ++i; continue; }
-        if( s[i] == '"' || s[i] == '\'' ) out.append( s.substr( i, j - i ) );   // a literal is content
+        if( s[i] == '"' || s[i] == '\'' )
+        {
+            out.append( s.substr( i, j - i ) ); // a literal is content
+        }
         else
         {
             // A comment becomes one space plus its OWN newlines: the line structure has to survive, or a
             // block comment straddling two lines would splice a `#define` onto whatever followed it.
             out.push_back( ' ' );
-            for( char c : s.substr( i, j - i ) ) if( c == '\n' ) out.push_back( '\n' );
+            for( char c : s.substr( i, j - i ) )
+            {
+                if( c == '\n' )
+                {
+                    out.push_back( '\n' );
+                }
+            }
         }
         i = j;
     }
@@ -237,8 +267,18 @@ inline std::size_t matchBracket( std::string_view src, std::size_t from, char op
     {
         const std::size_t skipped = skipInert( src, i );
         if( skipped != i ) { i = skipped; continue; }
-        if     ( src[i] == open )  ++depth;
-        else if( src[i] == close ) { --depth; if( depth == 0 ) return i + 1; }
+        if( src[i] == open )
+        {
+            ++depth;
+        }
+        else if( src[i] == close )
+        {
+            --depth;
+            if( depth == 0 )
+            {
+                return i + 1;
+            }
+        }
         ++i;
     }
     return std::string_view::npos;
@@ -253,12 +293,24 @@ inline void forEachKeywordCall( std::string_view text, std::string_view keyword,
 {
     for( std::size_t at = text.find( keyword ); at != std::string_view::npos; at = text.find( keyword, at + 1 ) )
     {
-        if( !wholeWordAt( text, at, keyword.size() ) ) continue;
+        if( !wholeWordAt( text, at, keyword.size() ) )
+        {
+            continue;
+        }
         std::size_t p = at + keyword.size();
-        while( p < text.size() && std::isspace( (unsigned char)text[p] ) != 0 ) ++p;
-        if( p >= text.size() || text[p] != '(' ) continue;
+        while( p < text.size() && std::isspace( (unsigned char)text[p] ) != 0 )
+        {
+            ++p;
+        }
+        if( p >= text.size() || text[p] != '(' )
+        {
+            continue;
+        }
         const std::size_t close = matchBracket( text, p, '(', ')' );
-        if( close == std::string_view::npos ) continue;
+        if( close == std::string_view::npos )
+        {
+            continue;
+        }
         onCall( at, close, text.substr( p + 1, close - p - 2 ) );
     }
 }
@@ -268,7 +320,10 @@ inline void forEachKeywordCall( std::string_view text, std::string_view keyword,
 // declarator rule "the last identifier is the field name" pick `uint8_t` as the name.
 inline std::string_view takeQualifiedIdent( std::string_view src, std::size_t& i )
 {
-    while( i < src.size() && !identByte( (unsigned char)src[i] ) ) ++i;
+    while( i < src.size() && !identByte( (unsigned char)src[i] ) )
+    {
+        ++i;
+    }
     const std::size_t start = i;
     while( i < src.size() )
     {
@@ -285,9 +340,18 @@ inline bool isCFamilyPath( std::string_view path )
     static constexpr std::string_view kExt[] = { ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
                                                  ".inl", ".ipp", ".m", ".mm", ".metal" };
     const std::size_t dot = path.rfind( '.' );
-    if( dot == std::string_view::npos ) return false;
+    if( dot == std::string_view::npos )
+    {
+        return false;
+    }
     const std::string_view ext = path.substr( dot );
-    for( std::string_view e : kExt ) if( ext == e ) return true;
+    for( std::string_view e : kExt )
+    {
+        if( ext == e )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -310,10 +374,18 @@ using ConstTable = gtl::btree_map<std::string, std::vector<std::string>>;
 inline void addConst( ConstTable& table, std::string_view name, std::string_view value )
 {
     const std::string_view v = trimView( value );
-    if( name.empty() || v.empty() ) return;
+    if( name.empty() || v.empty() )
+    {
+        return;
+    }
     std::vector<std::string>& slot = table[ std::string( name ) ];
     for( const std::string& existing : slot )
-        if( existing == v ) return;                                   // the same spelling twice ⇒ one entry
+    {
+        if( existing == v )
+        {
+            return; // the same spelling twice ⇒ one entry
+        }
+    }
     slot.emplace_back( v );
 }
 
@@ -322,15 +394,24 @@ inline void addConst( ConstTable& table, std::string_view name, std::string_view
 inline void harvestObjectMacro( ConstTable& table, std::string_view line )
 {
     const std::string_view d = trimView( line.substr( 1 ) );
-    if( d.rfind( "define", 0 ) != 0 || d.size() <= 6 || identByte( (unsigned char)d[6] ) ) return;
+    if( d.rfind( "define", 0 ) != 0 || d.size() <= 6 || identByte( (unsigned char)d[6] ) )
+    {
+        return;
+    }
     std::size_t            k    = 6;
     const std::string_view name = takeQualifiedIdent( d, k );
-    if( name.empty() || ( k < d.size() && d[k] == '(' ) ) return;
+    if( name.empty() || ( k < d.size() && d[k] == '(' ) )
+    {
+        return;
+    }
 
     // The replacement stops at a trailing comment: `#define F 0  // dark` defines F as "0", not "0 // dark".
     std::string_view  rep = d.substr( std::min( k, d.size() ) );
     const std::size_t cmt = std::min( rep.find( "//" ), rep.find( "/*" ) );
-    if( cmt != std::string_view::npos ) rep = rep.substr( 0, cmt );
+    if( cmt != std::string_view::npos )
+    {
+        rep = rep.substr( 0, cmt );
+    }
     addConst( table, name, rep );
 }
 
@@ -339,24 +420,45 @@ inline void harvestObjectMacro( ConstTable& table, std::string_view line )
 inline void harvestValueConstant( ConstTable& table, std::string_view line )
 {
     const std::size_t eq = line.find( '=' );
-    if( eq == std::string_view::npos || eq == 0 )                                  return;
-    if( eq + 1 < line.size() && line[ eq + 1 ] == '=' )                            return;
+    if( eq == std::string_view::npos || eq == 0 )
+    {
+        return;
+    }
+    if( eq + 1 < line.size() && line[eq + 1] == '=' )
+    {
+        return;
+    }
     static constexpr std::string_view kNotAssignment = "=!<>+-*/&|^%";             // ==, !=, <=, +=, … are comparisons/compounds
-    if( kNotAssignment.find( line[ eq - 1 ] ) != std::string_view::npos )          return;
+    if( kNotAssignment.find( line[eq - 1] ) != std::string_view::npos )
+    {
+        return;
+    }
 
     const std::string_view lhs     = line.substr( 0, eq );
     const bool             isDecl  = containsWord( lhs, "constexpr" ) || containsWord( lhs, "const" );
     std::size_t            nameEnd = eq;
-    while( nameEnd > 0 && std::isspace( (unsigned char)line[ nameEnd - 1 ] ) != 0 ) --nameEnd;
+    while( nameEnd > 0 && std::isspace( (unsigned char)line[nameEnd - 1] ) != 0 )
+    {
+        --nameEnd;
+    }
     std::size_t nameStart = nameEnd;
-    while( nameStart > 0 && identByte( (unsigned char)line[ nameStart - 1 ] ) ) --nameStart;
+    while( nameStart > 0 && identByte( (unsigned char)line[nameStart - 1] ) )
+    {
+        --nameStart;
+    }
     const bool isEnumerator = nameStart == 0 && !isDecl;               // a bare `NAME = 3,` line inside an enum
-    if( nameStart == nameEnd || !( isDecl || isEnumerator ) ) return;
+    if( nameStart == nameEnd || !( isDecl || isEnumerator ) )
+    {
+        return;
+    }
 
     std::string_view  value = line.substr( eq + 1 );
     const std::size_t stop  = std::min( std::min( value.find( ';' ), value.find( ',' ) ),
                                         std::min( value.find( "//" ), value.find( "/*" ) ) );
-    if( stop != std::string_view::npos ) value = value.substr( 0, stop );
+    if( stop != std::string_view::npos )
+    {
+        value = value.substr( 0, stop );
+    }
     addConst( table, line.substr( nameStart, nameEnd - nameStart ), value );
 }
 
@@ -374,19 +476,31 @@ inline void harvestEnumUnderlying( ConstTable& table, std::string_view line )
     std::size_t      k      = 4;
     std::string_view word   = takeQualifiedIdent( line, k );
     const bool       scoped = ( word == "class" || word == "struct" );
-    if( scoped ) word = takeQualifiedIdent( line, k );
-    if( word.empty() ) return;
+    if( scoped )
+    {
+        word = takeQualifiedIdent( line, k );
+    }
+    if( word.empty() )
+    {
+        return;
+    }
 
     const std::size_t colon = line.find( ':', k );
     const std::size_t brace = line.find( '{', k );
     if( colon == std::string_view::npos || ( brace != std::string_view::npos && brace < colon ) )
     {
-        if( scoped ) addConst( table, word, "int" );
+        if( scoped )
+        {
+            addConst( table, word, "int" );
+        }
         return;
     }
     std::string_view  underlying = line.substr( colon + 1 );
     const std::size_t stop       = std::min( underlying.find( '{' ), underlying.find( ';' ) );
-    if( stop != std::string_view::npos ) underlying = underlying.substr( 0, stop );
+    if( stop != std::string_view::npos )
+    {
+        underlying = underlying.substr( 0, stop );
+    }
     addConst( table, word, underlying );
 }
 
@@ -395,15 +509,27 @@ inline void harvestEnumUnderlying( ConstTable& table, std::string_view line )
 inline void harvestUsingAlias( ConstTable& table, std::string_view line )
 {
     const std::size_t eq = line.find( '=' );
-    if( eq == std::string_view::npos ) return;
+    if( eq == std::string_view::npos )
+    {
+        return;
+    }
     std::size_t            k    = 5;
     const std::string_view name = takeQualifiedIdent( line, k );
-    if( name.empty() || k > eq ) return;
+    if( name.empty() || k > eq )
+    {
+        return;
+    }
 
     std::string_view  spelling = line.substr( eq + 1 );
     const std::size_t stop     = spelling.find( ';' );
-    if( stop != std::string_view::npos ) spelling = spelling.substr( 0, stop );
-    if( trimView( spelling ) != name ) addConst( table, name, spelling );
+    if( stop != std::string_view::npos )
+    {
+        spelling = spelling.substr( 0, stop );
+    }
+    if( trimView( spelling ) != name )
+    {
+        addConst( table, name, spelling );
+    }
 }
 
 // `typedef SPELLING NAME;` — the simple one-line form only. A `{` means it is a typedef of an aggregate
@@ -411,19 +537,37 @@ inline void harvestUsingAlias( ConstTable& table, std::string_view line )
 inline void harvestTypedefAlias( ConstTable& table, std::string_view line )
 {
     const std::size_t semi = line.find( ';' );
-    if( semi == std::string_view::npos ) return;
-    if( line.find( '{' ) != std::string_view::npos || line.find( '(' ) != std::string_view::npos ) return;
+    if( semi == std::string_view::npos )
+    {
+        return;
+    }
+    if( line.find( '{' ) != std::string_view::npos || line.find( '(' ) != std::string_view::npos )
+    {
+        return;
+    }
 
     const std::string_view body    = trimView( line.substr( 7, semi - 7 ) );
     std::size_t            nameEnd = body.size();
-    while( nameEnd > 0 && !identByte( (unsigned char)body[ nameEnd - 1 ] ) ) --nameEnd;
+    while( nameEnd > 0 && !identByte( (unsigned char)body[nameEnd - 1] ) )
+    {
+        --nameEnd;
+    }
     std::size_t nameStart = nameEnd;
-    while( nameStart > 0 && identByte( (unsigned char)body[ nameStart - 1 ] ) ) --nameStart;
-    if( nameStart == nameEnd || nameEnd != body.size() ) return;
+    while( nameStart > 0 && identByte( (unsigned char)body[nameStart - 1] ) )
+    {
+        --nameStart;
+    }
+    if( nameStart == nameEnd || nameEnd != body.size() )
+    {
+        return;
+    }
 
     const std::string_view name     = body.substr( nameStart, nameEnd - nameStart );
     const std::string_view spelling = trimView( body.substr( 0, nameStart ) );
-    if( !spelling.empty() && spelling != name ) addConst( table, name, spelling );
+    if( !spelling.empty() && spelling != name )
+    {
+        addConst( table, name, spelling );
+    }
 }
 
 // The three TYPE-alias lanes, dispatched by leading keyword so harvestConstants stays one readable loop.
@@ -443,14 +587,33 @@ inline ConstTable harvestConstants( std::string_view src )
     while( lineStart <= src.size() )
     {
         std::size_t e = src.find( '\n', lineStart );
-        if( e == std::string_view::npos ) e = src.size();
+        if( e == std::string_view::npos )
+        {
+            e = src.size();
+        }
         const std::string_view line = trimView( src.substr( lineStart, e - lineStart ) );
         const bool             last = e >= src.size();
         lineStart = e + 1;
-        if( line.empty() ) { if( last ) break; else continue; }
-        if( line[0] == '#' ) harvestObjectMacro( table, line );
-        else if( !harvestTypeAlias( table, line ) ) harvestValueConstant( table, line );
-        if( last ) break;
+        if( line.empty() )
+        {
+            if( last ) { break; }
+            else
+            {
+                continue;
+            }
+        }
+        if( line[0] == '#' )
+        {
+            harvestObjectMacro( table, line );
+        }
+        else if( !harvestTypeAlias( table, line ) )
+        {
+            harvestValueConstant( table, line );
+        }
+        if( last )
+        {
+            break;
+        }
     }
     return table;
 }
@@ -470,7 +633,10 @@ struct IntEval
         std::size_t        i = 0;
         const std::int64_t v = level( s, i, 0 );
         skipWs( s, i );
-        if( i != s.size() ) ok = false;
+        if( i != s.size() )
+        {
+            ok = false;
+        }
         return v;
     }
 
@@ -480,7 +646,13 @@ private:
     // Rank 0 is `+ -`, rank 1 is `* /`, rank 2 falls through to atom().
     static constexpr std::string_view kOpsAtRank[] = { "+-", "*/" };
 
-    static void skipWs( std::string_view s, std::size_t& i ) { while( i < s.size() && std::isspace( (unsigned char)s[i] ) != 0 ) ++i; }
+    static void skipWs( std::string_view s, std::size_t& i )
+    {
+        while( i < s.size() && std::isspace( (unsigned char)s[i] ) != 0 )
+        {
+            ++i;
+        }
+    }
 
     std::int64_t apply( char op, std::int64_t a, std::int64_t b )
     {
@@ -496,7 +668,10 @@ private:
 
     std::int64_t level( std::string_view s, std::size_t& i, std::size_t rank )
     {
-        if( rank >= std::size( kOpsAtRank ) ) return atom( s, i );
+        if( rank >= std::size( kOpsAtRank ) )
+        {
+            return atom( s, i );
+        }
         const std::string_view ops = kOpsAtRank[ rank ];
         std::int64_t           v   = level( s, i, rank + 1 );
         for( skipWs( s, i ); ok && i < s.size() && ops.find( s[i] ) != std::string_view::npos; skipWs( s, i ) )
@@ -516,7 +691,11 @@ private:
             ++i;
             const std::int64_t v = level( s, i, 0 );
             skipWs( s, i );
-            if( i < s.size() && s[i] == ')' ) ++i; else ok = false;
+            if( i < s.size() && s[i] == ')' ) { ++i; }
+            else
+            {
+                ok = false;
+            }
             return v;
         }
         if( std::isdigit( (unsigned char)s[i] ) != 0 )
@@ -527,7 +706,10 @@ private:
                 if( v > ( 1ll << 40 ) ) { ok = false; return 0; }      // absurd literal — refuse, never wrap
                 v = v * 10 + ( s[ i++ ] - '0' );
             }
-            while( i < s.size() && ( s[i] == 'u' || s[i] == 'U' || s[i] == 'l' || s[i] == 'L' ) ) ++i;
+            while( i < s.size() && ( s[i] == 'u' || s[i] == 'U' || s[i] == 'l' || s[i] == 'L' ) )
+            {
+                ++i;
+            }
             return v;
         }
         if( !identByte( (unsigned char)s[i] ) ) { ok = false; return 0; }
@@ -544,8 +726,15 @@ private:
             IntEval            inner{ table, depth + 1, true };
             const std::int64_t v = inner.parse( it->second[k] );
             if( !inner.ok ) { ok = false; return 0; }
-            if( k == 0 ) first = v;
-            else if( v != first ) { ok = false; return 0; }
+            if( k == 0 )
+            {
+                first = v;
+            }
+            else if( v != first )
+            {
+                ok = false;
+                return 0;
+            }
         }
         return first;
     }
@@ -555,7 +744,10 @@ inline bool evalExtent( const ConstTable& table, std::string_view expr, std::uin
 {
     IntEval            ev{ table, 0, true };
     const std::int64_t v = ev.parse( expr );
-    if( !ev.ok || v <= 0 || v > std::int64_t( kMaxArrayElems ) ) return false;
+    if( !ev.ok || v <= 0 || v > std::int64_t( kMaxArrayElems ) )
+    {
+        return false;
+    }
     out = std::uint32_t( v );
     return true;
 }
@@ -577,18 +769,51 @@ inline bool intFamilySize( const std::vector<std::string_view>& words, TypeSize&
     int  longCount = 0;
     for( std::string_view w : words )
     {
-        if     ( w == "char"  ) hasChar  = true;
-        else if( w == "short" ) hasShort = true;
-        else if( w == "int"   ) hasInt   = true;
-        else if( w == "long"  ) ++longCount;
-        else if( w == "signed" || w == "unsigned" ) hasSign = true;
-        else return false;                                             // a word outside the family
+        if( w == "char" )
+        {
+            hasChar = true;
+        }
+        else if( w == "short" )
+        {
+            hasShort = true;
+        }
+        else if( w == "int" )
+        {
+            hasInt = true;
+        }
+        else if( w == "long" )
+        {
+            ++longCount;
+        }
+        else if( w == "signed" || w == "unsigned" )
+        {
+            hasSign = true;
+        }
+        else
+        {
+            return false; // a word outside the family
+        }
     }
-    if( !hasChar && !hasShort && !hasInt && longCount == 0 && !hasSign ) return false;
-    if     ( hasChar       ) out = TypeSize{ 1, 1, true };
-    else if( hasShort      ) out = TypeSize{ 2, 2, true };
-    else if( longCount > 0 ) out = TypeSize{ 8, 8, true };
-    else                     out = TypeSize{ 4, 4, true };
+    if( !hasChar && !hasShort && !hasInt && longCount == 0 && !hasSign )
+    {
+        return false;
+    }
+    if( hasChar )
+    {
+        out = TypeSize { 1, 1, true };
+    }
+    else if( hasShort )
+    {
+        out = TypeSize { 2, 2, true };
+    }
+    else if( longCount > 0 )
+    {
+        out = TypeSize { 8, 8, true };
+    }
+    else
+    {
+        out = TypeSize { 4, 4, true };
+    }
     return true;
 }
 
@@ -604,14 +829,36 @@ inline std::vector<std::string_view> typeWords( std::string_view spec, bool& saw
     {
         if( !identByte( (unsigned char)spec[i] ) ) { ++i; continue; }
         std::string_view w = takeQualifiedIdent( spec, i );
-        if( w.empty() ) break;
+        if( w.empty() )
+        {
+            break;
+        }
         if( w == "enum" ) { sawEnumKeyword = true; continue; }
         bool noise = false;
-        for( std::string_view k : kNoise ) if( w == k ) { noise = true; break; }
-        if( noise ) continue;
-        if( w.rfind( "std::", 0 ) == 0 ) w = w.substr( 5 );
-        while( w.rfind( "::", 0 ) == 0 ) w = w.substr( 2 );
-        if( !w.empty() ) out.push_back( w );
+        for( std::string_view k : kNoise )
+        {
+            if( w == k )
+            {
+                noise = true;
+                break;
+            }
+        }
+        if( noise )
+        {
+            continue;
+        }
+        if( w.rfind( "std::", 0 ) == 0 )
+        {
+            w = w.substr( 5 );
+        }
+        while( w.rfind( "::", 0 ) == 0 )
+        {
+            w = w.substr( 2 );
+        }
+        if( !w.empty() )
+        {
+            out.push_back( w );
+        }
     }
     return out;
 }
@@ -627,8 +874,12 @@ inline std::string_view lastSegment( std::string_view s )
 inline bool primLookup( std::string_view spelling, TypeSize& out )
 {
     for( std::string_view probe : { spelling, lastSegment( spelling ) } )
+    {
         for( const PrimType& p : kPrimTable )
+        {
             if( p.spelling == probe ) { out = TypeSize{ p.size, p.align, true }; return true; }
+        }
+    }
     return false;
 }
 
@@ -754,7 +1005,13 @@ struct LayoutResult
 // populated definitions, or a tripwire the computed size contradicts) is.
 inline bool layoutContractBroken( const LayoutResult& r ) noexcept
 {
-    for( const MirrorDiff& m : r.mirrors ) if( std::string_view( m.kind ) == "drift" ) return true;
+    for( const MirrorDiff& m : r.mirrors )
+    {
+        if( std::string_view( m.kind ) == "drift" )
+        {
+            return true;
+        }
+    }
     return r.assertConflicts > 0;
 }
 
@@ -778,7 +1035,10 @@ struct DefSite
 // Survivors are deduped by (fileId, braceStart) at the call site, so the two never become two "mirrors".
 inline bool findDefBody( std::string_view src, std::string_view name, std::size_t from, DefSite& out )
 {
-    if( from >= src.size() ) return false;
+    if( from >= src.size() )
+    {
+        return false;
+    }
     const std::size_t limit = std::min( src.size(), from + kMaxDefScan );
 
     std::size_t i = from;
@@ -786,14 +1046,26 @@ inline bool findDefBody( std::string_view src, std::string_view name, std::size_
     {
         const std::size_t skipped = skipInert( src, i );
         if( skipped != i ) { i = skipped; continue; }
-        if( src[i] == '{' ) break;
-        if( src[i] == ';' ) return false;                              // a declaration / typedef alias, not a body
+        if( src[i] == '{' )
+        {
+            break;
+        }
+        if( src[i] == ';' )
+        {
+            return false; // a declaration / typedef alias, not a body
+        }
         ++i;
     }
-    if( i >= limit || src[i] != '{' ) return false;
+    if( i >= limit || src[i] != '{' )
+    {
+        return false;
+    }
 
     const std::size_t end = matchBracket( src, i, '{', '}' );
-    if( end == std::string_view::npos ) return false;
+    if( end == std::string_view::npos )
+    {
+        return false;
+    }
 
     const std::string_view head = src.substr( from, i - from );
 
@@ -805,18 +1077,29 @@ inline bool findDefBody( std::string_view src, std::string_view name, std::size_
     if( containsWord( head, "enum" ) ) { out.isEnum = true; return false; }
 
     if( !containsWord( head, "struct" ) && !containsWord( head, "class" ) && !containsWord( head, "union" ) )
+    {
         return false;
+    }
     if( !containsWord( head, name ) )
     {
         // The ANONYMOUS-with-typedef idiom `typedef struct { … } PointLight;` — the name is not in the head
         // at all, it is on the far side of the closing brace. Common in GPU headers, so it is accepted
         // when (and only when) the head really is a bare `typedef struct` and the trailing declarator
         // before the `;` really is this name. Anything else means the brace belongs to something else.
-        if( !containsWord( head, "typedef" ) ) return false;
+        if( !containsWord( head, "typedef" ) )
+        {
+            return false;
+        }
         const std::size_t      semi = src.find( ';', end );
-        if( semi == std::string_view::npos ) return false;
+        if( semi == std::string_view::npos )
+        {
+            return false;
+        }
         const std::string_view tail = src.substr( end, semi - end );
-        if( !containsWord( tail, name ) ) return false;
+        if( !containsWord( tail, name ) )
+        {
+            return false;
+        }
     }
 
     out.headStart  = from;
@@ -839,12 +1122,30 @@ inline std::vector<std::string_view> splitDeclarators( std::string_view stmt )
         const std::size_t skipped = skipInert( stmt, i );
         if( skipped != i ) { i = skipped; continue; }
         const char c = stmt[i];
-        if     ( c == '(' ) ++paren;
-        else if( c == ')' ) --paren;
-        else if( c == '[' ) ++square;
-        else if( c == ']' ) --square;
-        else if( c == '<' ) ++angle;
-        else if( c == '>' && angle > 0 ) --angle;
+        if( c == '(' )
+        {
+            ++paren;
+        }
+        else if( c == ')' )
+        {
+            --paren;
+        }
+        else if( c == '[' )
+        {
+            ++square;
+        }
+        else if( c == ']' )
+        {
+            --square;
+        }
+        else if( c == '<' )
+        {
+            ++angle;
+        }
+        else if( c == '>' && angle > 0 )
+        {
+            --angle;
+        }
         else if( c == ',' && paren == 0 && square == 0 && angle == 0 )
         {
             out.push_back( stmt.substr( start, i - start ) );
@@ -877,7 +1178,10 @@ inline bool cutAtTopLevel( std::string_view& s, std::string_view stops )
     {
         const std::size_t skipped = skipInert( s, i );
         if( skipped != i ) { i = ( skipped > 0 ) ? skipped - 1 : 0; continue; }
-        if( stops.find( s[i] ) == std::string_view::npos ) continue;
+        if( stops.find( s[i] ) == std::string_view::npos )
+        {
+            continue;
+        }
         if( s[i] == ':' && ( ( i + 1 < s.size() && s[ i + 1 ] == ':' ) || ( i > 0 && s[ i - 1 ] == ':' ) ) ) { ++i; continue; }
         s = trimView( s.substr( 0, i ) );
         return true;
@@ -892,15 +1196,32 @@ inline std::vector<std::string_view> peelExtents( std::string_view& s )
     for( ;; )
     {
         s = trimView( s );
-        if( s.empty() || s.back() != ']' ) break;
+        if( s.empty() || s.back() != ']' )
+        {
+            break;
+        }
         int         depth = 0;
         std::size_t open  = std::string_view::npos;
         for( std::size_t i = s.size(); i-- > 0; )
         {
-            if     ( s[i] == ']' ) ++depth;
-            else if( s[i] == '[' ) { --depth; if( depth == 0 ) { open = i; break; } }
+            if( s[i] == ']' )
+            {
+                ++depth;
+            }
+            else if( s[i] == '[' )
+            {
+                --depth;
+                if( depth == 0 )
+                {
+                    open = i;
+                    break;
+                }
+            }
         }
-        if( open == std::string_view::npos ) break;
+        if( open == std::string_view::npos )
+        {
+            break;
+        }
         reversed.push_back( trimView( s.substr( open + 1, s.size() - open - 2 ) ) );
         s = s.substr( 0, open );
     }
@@ -911,36 +1232,69 @@ inline Declarator parseDeclarator( std::string_view text )
 {
     Declarator       d;
     std::string_view s = trimView( text );
-    if( s.empty() ) return d;
+    if( s.empty() )
+    {
+        return d;
+    }
 
     d.isBitfield = cutAtTopLevel( s, ":" );        // a bitfield WIDTH — refused later, but recognised here
     cutAtTopLevel( s, "={" );                      // a default member initializer (`= 0`, `= {}`, `{0}`)
-    if( s.empty() ) return d;
+    if( s.empty() )
+    {
+        return d;
+    }
 
     d.extents = peelExtents( s );
     s = trimView( s );
-    if( s.empty() ) return d;
+    if( s.empty() )
+    {
+        return d;
+    }
 
     // The name is the LAST identifier; everything to its left is the type spec, and any `*` / `&` between
     // the two makes THIS declarator a pointer/reference whatever the shared base type is.
     std::size_t nameEnd = s.size();
-    while( nameEnd > 0 && !identByte( (unsigned char)s[ nameEnd - 1 ] ) ) --nameEnd;
+    while( nameEnd > 0 && !identByte( (unsigned char)s[nameEnd - 1] ) )
+    {
+        --nameEnd;
+    }
     std::size_t nameStart = nameEnd;
-    while( nameStart > 0 && identByte( (unsigned char)s[ nameStart - 1 ] ) ) --nameStart;
-    if( nameStart == nameEnd ) return d;
+    while( nameStart > 0 && identByte( (unsigned char)s[nameStart - 1] ) )
+    {
+        --nameStart;
+    }
+    if( nameStart == nameEnd )
+    {
+        return d;
+    }
 
     const std::string_view tail = trimView( s.substr( nameEnd ) );
-    if( !tail.empty() && tail != "*" && tail != "&" ) return d;        // trailing junk ⇒ not a plain field
+    if( !tail.empty() && tail != "*" && tail != "&" )
+    {
+        return d; // trailing junk ⇒ not a plain field
+    }
 
     d.name     = s.substr( nameStart, nameEnd - nameStart );
     d.typeSpec = trimView( s.substr( 0, nameStart ) );
     for( char c : s.substr( 0, nameStart ) )
     {
-        if( c == '*' ) d.isPointer = true;
-        if( c == '&' ) d.isRef     = true;
+        if( c == '*' )
+        {
+            d.isPointer = true;
+        }
+        if( c == '&' )
+        {
+            d.isRef = true;
+        }
     }
-    if( tail == "*" ) d.isPointer = true;
-    if( tail == "&" ) d.isRef     = true;
+    if( tail == "*" )
+    {
+        d.isPointer = true;
+    }
+    if( tail == "&" )
+    {
+        d.isRef = true;
+    }
     // An EMPTY typeSpec is fine here and only here: a follow-on declarator in `uint16_t x, y, z, w;`
     // inherits the first one's type. modelStatement is what rejects an empty type on declarator 0.
     d.ok = true;
@@ -958,8 +1312,12 @@ inline AggIndex buildAggIndex( const IngestResult& ing )
 {
     AggIndex byName;
     for( const Symbol& s : ing.symbols )
+    {
         if( s.kind == SymKind::Struct || s.kind == SymKind::Class || s.kind == SymKind::Interface )
+        {
             byName[ s.name ].push_back( s.id );
+        }
+    }
     return byName;
 }
 
@@ -987,11 +1345,17 @@ struct ModelCtx
 // carries a second copy of the load-once dance.
 inline bool ensureFileLoaded( ModelCtx& ctx, std::uint32_t fileId )
 {
-    if( fileId >= ctx.bytes.size() ) return false;
+    if( fileId >= ctx.bytes.size() )
+    {
+        return false;
+    }
     if( !ctx.bytesLoaded[ fileId ] )
     {
         ctx.bytesLoaded[ fileId ] = 1;
-        if( !darkflags::readWhole( diskPath( ctx.ing, fileId ), ctx.bytes[ fileId ] ) ) ctx.bytes[ fileId ].clear();
+        if( !darkflags::readWhole( diskPath( ctx.ing, fileId ), ctx.bytes[fileId] ) )
+        {
+            ctx.bytes[fileId].clear();
+        }
         ctx.stripped[ fileId ] = withoutComments( ctx.bytes[ fileId ] );
         ctx.consts[ fileId ]   = harvestConstants( ctx.stripped[ fileId ] );
     }
@@ -1029,10 +1393,15 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
     TypeSize out;
     if( ctx.depth >= kMaxNestDepth ) { note = "nest-depth"; return out; }
     for( const std::string& active : ctx.inProgress )
+    {
         if( active == typeName ) { note = "recursive-type"; return out; }
+    }
 
     const auto it = ctx.byName.find( std::string( typeName ) );
-    if( it == ctx.byName.end() ) return out;
+    if( it == ctx.byName.end() )
+    {
+        return out;
+    }
 
     // Prefer a definition in the SAME file (the dual-compile header's own slot type), so a same-file
     // reader and this model compute the same number.
@@ -1050,15 +1419,24 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
     for( NodeId id : order )
     {
         const Symbol& s = ctx.ing.symbols[ id ];
-        if( !isCFamilyPath( ctx.ing.files[ s.fileId ] ) ) continue;    // only a C-family aggregate has a byte layout
+        if( !isCFamilyPath( ctx.ing.files[s.fileId] ) )
+        {
+            continue; // only a C-family aggregate has a byte layout
+        }
         DefSite       site;
         {
             const std::string& src = fileBytes( ctx, s.fileId );
-            if( src.empty() || !findDefBody( src, typeName, s.sigStartByte, site ) ) continue;
+            if( src.empty() || !findDefBody( src, typeName, s.sigStartByte, site ) )
+            {
+                continue;
+            }
         }
         site.fileId = s.fileId;
         const std::uint64_t key = ( std::uint64_t( s.fileId ) << 32 ) | std::uint64_t( site.braceStart & 0xFFFFFFFFull );
-        if( seenSite.find( key ) != seenSite.end() ) continue;
+        if( seenSite.find( key ) != seenSite.end() )
+        {
+            continue;
+        }
         seenSite.emplace( key, true );
 
         const LayoutDef d = modelDef( ctx, s.fileId, site, typeName );
@@ -1098,9 +1476,15 @@ inline ResolvedType resolveFieldType( const TypeScope& scope, std::string_view s
 
 inline bool resolveThroughAlias( const TypeScope& scope, std::string_view single, std::size_t macroDepth, ResolvedType& out )
 {
-    if( macroDepth >= kMaxMacroDepth ) return false;
+    if( macroDepth >= kMaxMacroDepth )
+    {
+        return false;
+    }
     const auto m = scope.consts.find( std::string( single ) );
-    if( m == scope.consts.end() || m->second.empty() ) return false;
+    if( m == scope.consts.end() || m->second.empty() )
+    {
+        return false;
+    }
 
     bool        first = true;
     TypeSize    agreed;
@@ -1108,7 +1492,10 @@ inline bool resolveThroughAlias( const TypeScope& scope, std::string_view single
     for( const std::string& replacement : m->second )
     {
         const ResolvedType inner = resolveFieldType( scope, replacement, false, false, macroDepth + 1 );
-        if( !inner.size.known ) return false;
+        if( !inner.size.known )
+        {
+            return false;
+        }
         if( first ) { agreed = inner.size; firstSpelling = replacement; first = false; }
         else if( inner.size.size != agreed.size || inner.size.align != agreed.align )
         { out.note = "macro-type-ambiguous"; return false; }
@@ -1126,20 +1513,34 @@ inline ResolvedType resolveFieldType( const TypeScope& scope, std::string_view s
 
     bool                          sawEnum = false;
     std::vector<std::string_view> words   = typeWords( spec, sawEnum );
-    if( words.empty() ) return out;
-    if( intFamilySize( words, out.size ) ) return out;
+    if( words.empty() )
+    {
+        return out;
+    }
+    if( intFamilySize( words, out.size ) )
+    {
+        return out;
+    }
 
     if( words.size() != 1 )                                { out.note = "compound-type"; return out; }
     if( spec.find( '<' ) != std::string_view::npos )       { out.note = "template-type"; return out; }
 
     const std::string_view single = words.front();
-    if( primLookup( single, out.size ) )       return out;
-    if( resolveThroughAlias( scope, single, macroDepth, out ) ) return out;
+    if( primLookup( single, out.size ) )
+    {
+        return out;
+    }
+    if( resolveThroughAlias( scope, single, macroDepth, out ) )
+    {
+        return out;
+    }
     out.size = TypeSize{};                                             // a failed alias lane leaves no number
 
     TypeSize nested = sizeNestedAggregate( scope.ctx, single, scope.fileId, out.note );
     if( !nested.known && single != lastSegment( single ) )
+    {
         nested = sizeNestedAggregate( scope.ctx, lastSegment( single ), scope.fileId, out.note );
+    }
     if( nested.known ) { out.size = nested; return out; }
 
     // A written `enum X` keyword is the one place a 4-byte assumption beats silence: the field is reported
@@ -1151,7 +1552,9 @@ inline ResolvedType resolveFieldType( const TypeScope& scope, std::string_view s
 inline void addCaveat( LayoutDef& def, std::string kind, std::string detail )
 {
     for( Caveat& c : def.caveats )
+    {
         if( c.kind == kind ) { ++c.count; return; }   // one ROW per kind (still a report, not a log) — but
+    }
                                                         // count now discloses how many sites hit it, instead
                                                         // of silently dropping every site after the first
     def.caveats.push_back( Caveat{ std::move( kind ), std::move( detail ), 1 } );
@@ -1165,20 +1568,35 @@ inline void readDeclaredAlign( LayoutDef& def, std::string_view head )
     static constexpr std::string_view kKeywords[] = { "alignas", "aligned" };
     const ConstTable                  noConsts;                        // a literal only — no file constants here
     for( std::string_view kw : kKeywords )
+    {
         forEachKeywordCall( head, kw, [ & ]( std::size_t, std::size_t, std::string_view inner )
         {
             const std::string_view arg = trimView( inner );
             std::uint32_t          n   = 0;
-            if( evalExtent( noConsts, arg, n ) && ( n & ( n - 1 ) ) == 0 ) def.declaredAlign = std::max( def.declaredAlign, n );
-            else { def.modeled = false; addCaveat( def, "unparsed-alignas", flattenSpace( arg, 80 ) ); }
+            if( evalExtent( noConsts, arg, n ) && ( n & ( n - 1 ) ) == 0 )
+            {
+                def.declaredAlign = std::max( def.declaredAlign, n );
+            }
+            else
+            {
+                def.modeled = false;
+                addCaveat( def, "unparsed-alignas", flattenSpace( arg, 80 ) );
+            }
         } );
+    }
 }
 
 // Read the attributes the aggregate's HEAD text carries (everything from the def start to its `{`).
 inline void readHeadAttributes( LayoutDef& def, std::string_view head, std::string_view name )
 {
-    if     ( containsWord( head, "union" ) ) def.aggregate = "union";
-    else if( containsWord( head, "class" ) ) def.aggregate = "class";
+    if( containsWord( head, "union" ) )
+    {
+        def.aggregate = "union";
+    }
+    else if( containsWord( head, "class" ) )
+    {
+        def.aggregate = "class";
+    }
     if( containsWord( head, "template" ) )
     {
         def.modeled = false;
@@ -1188,15 +1606,23 @@ inline void readHeadAttributes( LayoutDef& def, std::string_view head, std::stri
     readDeclaredAlign( def, head );
 
     if( head.find( "packed" ) != std::string_view::npos && head.find( "__attribute__" ) != std::string_view::npos )
+    {
         def.packedAttr = true;
+    }
 
     // A base-class list: a top-level `:` after the name that is not part of a `::`. The base subobject's
     // size and placement are not in this declaration, so the arithmetic has no starting offset.
     const std::size_t nameAt = head.find( name );
-    if( nameAt == std::string_view::npos ) return;
+    if( nameAt == std::string_view::npos )
+    {
+        return;
+    }
     for( std::size_t i = nameAt + name.size(); i < head.size(); ++i )
     {
-        if( head[i] != ':' ) continue;
+        if( head[i] != ':' )
+        {
+            continue;
+        }
         if( ( i + 1 < head.size() && head[ i + 1 ] == ':' ) || ( i > 0 && head[ i - 1 ] == ':' ) ) { ++i; continue; }
         def.modeled = false;
         addCaveat( def, "base-class", "a base subobject's size and placement are not in this declaration" );
@@ -1235,15 +1661,27 @@ inline void appendField( BodyWalk& w, const Declarator& d, std::string_view type
     FieldRow f;
     f.name = std::string( d.name );
     f.type = flattenSpace( typeSpec, 160 );
-    if( d.isPointer ) f.type += "*";
-    if( d.isRef )     f.type += "&";
+    if( d.isPointer )
+    {
+        f.type += "*";
+    }
+    if( d.isRef )
+    {
+        f.type += "&";
+    }
 
     const TypeScope    scope{ w.ctx, w.consts, w.fileId };
     const ResolvedType r = resolveFieldType( scope, typeSpec, d.isPointer, d.isRef );
     TypeSize           t = r.size;
     f.resolved = flattenSpace( r.resolved, 160 );
-    if( !r.note.empty() ) addCaveat( w.def, r.note, f.name + ": " + f.type );
-    if( d.isRef )         addCaveat( w.def, "reference-member", f.name + ": a reference member's storage is unspecified" );
+    if( !r.note.empty() )
+    {
+        addCaveat( w.def, r.note, f.name + ": " + f.type );
+    }
+    if( d.isRef )
+    {
+        addCaveat( w.def, "reference-member", f.name + ": a reference member's storage is unspecified" );
+    }
 
     for( std::string_view e : d.extents )
     {
@@ -1257,7 +1695,10 @@ inline void appendField( BodyWalk& w, const Declarator& d, std::string_view type
         f.elems *= n;
     }
 
-    if( w.def.packedAttr && t.known ) t.align = 1;
+    if( w.def.packedAttr && t.known )
+    {
+        t.align = 1;
+    }
 
     f.sized = t.known;
     if( !t.known )
@@ -1295,7 +1736,10 @@ inline bool modelNonFieldStatement( BodyWalk& w, std::string_view s )
     // layout, which is worth naming even though Clang/GCC still place members in declaration order.
     if( s == "public:" || s == "private:" || s == "protected:" )
     {
-        if( s != "public:" ) addCaveat( w.def, "mixed-access", "non-public members make this non-standard-layout" );
+        if( s != "public:" )
+        {
+            addCaveat( w.def, "mixed-access", "non-public members make this non-standard-layout" );
+        }
         return true;
     }
 
@@ -1303,9 +1747,18 @@ inline bool modelNonFieldStatement( BodyWalk& w, std::string_view s )
                                                          "_Static_assert", "public", "private", "protected", "return" };
     std::size_t            k     = 0;
     const std::string_view first = takeQualifiedIdent( s, k );
-    for( std::string_view lead : kSkipLeaders ) if( first == lead ) return true;
+    for( std::string_view lead : kSkipLeaders )
+    {
+        if( first == lead )
+        {
+            return true;
+        }
+    }
 
-    if( containsWord( s, "static" ) ) return true;                     // a static data member has no layout slot
+    if( containsWord( s, "static" ) )
+    {
+        return true; // a static data member has no layout slot
+    }
     if( containsWord( s, "virtual" ) )
     {
         // A vtable pointer sits at offset 0, so it invalidates the fields ALREADY placed above it too —
@@ -1320,9 +1773,15 @@ inline bool modelNonFieldStatement( BodyWalk& w, std::string_view s )
     // MEMBER function is 16 bytes, not 8, and the two are not reliably distinguishable here, so the
     // aggregate withdraws its numbers rather than pick.
     const std::size_t paren = s.find( '(' );
-    if( paren == std::string_view::npos ) return false;
+    if( paren == std::string_view::npos )
+    {
+        return false;
+    }
     const std::string_view afterParen = trimView( s.substr( paren + 1 ) );
-    if( afterParen.empty() || ( afterParen[0] != '*' && afterParen[0] != '&' ) ) return true;
+    if( afterParen.empty() || ( afterParen[0] != '*' && afterParen[0] != '&' ) )
+    {
+        return true;
+    }
     w.refuse( "function-pointer", flattenSpace( s, 160 ) );
     return true;
 }
@@ -1331,7 +1790,10 @@ inline bool modelNonFieldStatement( BodyWalk& w, std::string_view s )
 inline void modelStatement( BodyWalk& w, std::string_view stmt )
 {
     const std::string_view s = trimView( stmt );
-    if( s.empty() || modelNonFieldStatement( w, s ) ) return;
+    if( s.empty() || modelNonFieldStatement( w, s ) )
+    {
+        return;
+    }
 
     const std::vector<std::string_view> parts = splitDeclarators( s );
     std::string_view                    baseType;
@@ -1343,7 +1805,10 @@ inline void modelStatement( BodyWalk& w, std::string_view stmt )
         if( !d.ok || ( i == 0 && d.typeSpec.empty() ) )
         { w.refuse( "unparsed-member", flattenSpace( parts[i], 160 ) ); return; }
 
-        if( i == 0 ) baseType = d.typeSpec;
+        if( i == 0 )
+        {
+            baseType = d.typeSpec;
+        }
         appendField( w, d, ( i == 0 ) ? d.typeSpec : baseType );
     }
 }
@@ -1353,8 +1818,14 @@ inline bool atDirectiveStart( std::string_view body, std::size_t at )
 {
     for( std::size_t i = at; i-- > 0; )
     {
-        if( body[i] == '\n' ) return true;
-        if( std::isspace( (unsigned char)body[i] ) == 0 ) return false;
+        if( body[i] == '\n' )
+        {
+            return true;
+        }
+        if( std::isspace( (unsigned char)body[i] ) == 0 )
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -1366,17 +1837,25 @@ inline std::size_t walkDirective( BodyWalk& w, std::size_t at )
     static constexpr std::string_view kConditional[] = { "if", "ifdef", "ifndef", "else", "elif", "endif" };
 
     std::size_t end = at;
-    while( end < w.body.size() && w.body[ end ] != '\n' ) ++end;
+    while( end < w.body.size() && w.body[end] != '\n' )
+    {
+        ++end;
+    }
     const std::string_view d = trimView( w.body.substr( at + 1, end - at - 1 ) );
     for( std::string_view c : kConditional )
+    {
         if( d.rfind( c, 0 ) == 0 && ( d.size() == c.size() || !identByte( (unsigned char)d[ c.size() ] ) ) )
         {
             w.refuse( "conditional-members", "a preprocessor conditional inside the body can add or remove fields" );
             break;
         }
+    }
 
     const std::size_t next = std::min( end + 1, w.body.size() );
-    if( trimView( w.body.substr( w.stmtStart, ( next > w.stmtStart ) ? next - w.stmtStart : 0 ) ).empty() ) w.stmtStart = next;
+    if( trimView( w.body.substr( w.stmtStart, ( next > w.stmtStart ) ? next - w.stmtStart : 0 ) ).empty() )
+    {
+        w.stmtStart = next;
+    }
     return next;
 }
 
@@ -1395,18 +1874,30 @@ inline std::size_t walkBrace( BodyWalk& w, std::size_t at )
     {
         w.refuse( "nested-aggregate", "a nested or anonymous aggregate member is not modelled" );
         std::size_t i = after;
-        while( i < w.body.size() && w.body[i] != ';' ) ++i;
-        if( i < w.body.size() ) ++i;
+        while( i < w.body.size() && w.body[i] != ';' )
+        {
+            ++i;
+        }
+        if( i < w.body.size() )
+        {
+            ++i;
+        }
         w.stmtStart = i;
         return i;
     }
 
     const bool isInitializer = !pending.empty() && ( pending.back() == '=' || pending.back() == ']'
                                                      || identByte( (unsigned char)pending.back() ) );
-    if( isInitializer ) return after;
+    if( isInitializer )
+    {
+        return after;
+    }
 
     std::size_t i = after;
-    if( i < w.body.size() && w.body[i] == ';' ) ++i;
+    if( i < w.body.size() && w.body[i] == ';' )
+    {
+        ++i;
+    }
     w.stmtStart = i;
     return i;
 }
@@ -1445,11 +1936,17 @@ inline void finalizeLayout( BodyWalk& w )
     if( std::string_view( def.aggregate ) == "union" )
     {
         natural = 0;
-        for( const FieldRow& f : def.fields ) natural = std::max( natural, f.size );
+        for( const FieldRow& f : def.fields )
+        {
+            natural = std::max( natural, f.size );
+        }
     }
 
     def.align = std::max( def.packedAttr ? 1u : w.maxAlign, def.declaredAlign );
-    if( def.align == 0 ) def.align = 1;
+    if( def.align == 0 )
+    {
+        def.align = 1;
+    }
     if( !w.placeable || !def.modeled ) { def.modeled = false; return; }
 
     natural = std::max( natural, 1u );                                 // an empty aggregate still occupies 1 byte
@@ -1473,7 +1970,9 @@ inline void computeShapes( LayoutDef& def )
     const auto foldAll = [ & ]( std::uint64_t part ) { fold( byteHash, part ); fold( spellHash, part ); fold( slotHash, part ); };
 
     for( std::uint64_t part : { std::uint64_t( def.size ), std::uint64_t( def.align ), std::uint64_t( def.modeled ? 1 : 0 ) } )
+    {
         foldAll( part );
+    }
     for( const FieldRow& f : def.fields )
     {
         fold( byteHash, fnv1a64( f.name ) );
@@ -1481,10 +1980,15 @@ inline void computeShapes( LayoutDef& def )
 
         for( std::uint64_t part : { std::uint64_t( f.elems ), std::uint64_t( f.sized ? f.size : 0u ),
                                     std::uint64_t( f.align ), std::uint64_t( f.placed ? f.offset + 1u : 0u ) } )
+        {
             foldAll( part );
+        }
 
         const std::uint64_t spelling = fnv1a64( f.resolved.empty() ? f.type : f.resolved );
-        if( !f.sized ) fold( byteHash, spelling );
+        if( !f.sized )
+        {
+            fold( byteHash, spelling );
+        }
         fold( spellHash, spelling );
         fold( slotHash,  spelling );                                // a retype at a fixed offset is NOT a rename
     }
@@ -1557,7 +2061,10 @@ inline bool findTopLevelDef( std::string_view src, std::string_view name, DefSit
         if( skipped != i ) { i = skipped; continue; }
         if( src[i] == '{' )
         {
-            if( findDefBody( src, name, stmtStart, out ) ) return true;
+            if( findDefBody( src, name, stmtStart, out ) )
+            {
+                return true;
+            }
             if( containsWord( src.substr( stmtStart, i - stmtStart ), "namespace" ) ) { stmtStart = i + 1; ++i; continue; }
             const std::size_t close = matchBracket( src, i, '{', '}' );
             i         = ( close == std::string_view::npos ) ? src.size() : close;
@@ -1584,7 +2091,12 @@ inline std::string squeeze( std::string_view s )
     std::string out;
     out.reserve( s.size() );
     for( char c : s )
-        if( std::isspace( (unsigned char)c ) == 0 ) out.push_back( c );
+    {
+        if( std::isspace( (unsigned char)c ) == 0 )
+        {
+            out.push_back( c );
+        }
+    }
     return out;
 }
 
@@ -1593,15 +2105,24 @@ inline std::string squeeze( std::string_view s )
 // conflict — so an unterminated literal is a refusal, not a partial answer.
 inline bool wholeIntLiteral( std::string_view compact, std::size_t from, std::size_t stop, std::uint32_t& out )
 {
-    if( from >= stop || std::isdigit( (unsigned char)compact[ from ] ) == 0 ) return false;
+    if( from >= stop || std::isdigit( (unsigned char)compact[from] ) == 0 )
+    {
+        return false;
+    }
     std::uint64_t v = 0;
     std::size_t   j = from;
     while( j < stop && std::isdigit( (unsigned char)compact[j] ) != 0 )
     {
         v = v * 10 + std::uint64_t( compact[ j++ ] - '0' );
-        if( v > 0xFFFFFFFFull ) return false;
+        if( v > 0xFFFFFFFFull )
+        {
+            return false;
+        }
     }
-    if( j != stop ) return false;
+    if( j != stop )
+    {
+        return false;
+    }
     out = std::uint32_t( v );
     return true;
 }
@@ -1616,22 +2137,34 @@ inline bool extractSizeAssert( std::string_view compact, std::string_view fn, st
     for( const std::string& probe : { bare, elabS, elabC } )
     {
         const std::size_t at = compact.find( probe );
-        if( at == std::string_view::npos ) continue;
+        if( at == std::string_view::npos )
+        {
+            continue;
+        }
 
         // `sizeof(X)==N` — the literal runs to the next `,` or `)`, or to the end of the argument.
         const std::size_t after = at + probe.size();
         if( compact.compare( after, 2, "==" ) == 0 )
         {
             const std::size_t stop = std::min( std::min( compact.find( ',', after ), compact.find( ')', after ) ), compact.size() );
-            if( wholeIntLiteral( compact, after + 2, stop, out ) ) return true;
+            if( wholeIntLiteral( compact, after + 2, stop, out ) )
+            {
+                return true;
+            }
         }
 
         // `N==sizeof(X)` — the same comparison written the other way round.
         if( at >= 3 && compact.compare( at - 2, 2, "==" ) == 0 )
         {
             std::size_t start = at - 2;
-            while( start > 0 && std::isdigit( (unsigned char)compact[ start - 1 ] ) != 0 ) --start;
-            if( wholeIntLiteral( compact, start, at - 2, out ) ) return true;
+            while( start > 0 && std::isdigit( (unsigned char)compact[start - 1] ) != 0 )
+            {
+                --start;
+            }
+            if( wholeIntLiteral( compact, start, at - 2, out ) )
+            {
+                return true;
+            }
         }
     }
     return false;
@@ -1643,9 +2176,11 @@ inline void scanFileForAsserts( std::string_view src, const std::string& path, s
 {
     static constexpr std::string_view kKeywords[] = { "static_assert", "_Static_assert" };
     for( std::string_view kw : kKeywords )
+    {
         forEachKeywordCall( src, kw, [ & ]( std::size_t at, std::size_t close, std::string_view inner )
-        {
-            if( !containsWord( inner, name ) ) return;
+                            {
+            if( !containsWord( inner, name ) ) { return;
+}
 
             AssertRow row;
             row.path = path;
@@ -1655,8 +2190,8 @@ inline void scanFileForAsserts( std::string_view src, const std::string& path, s
             const std::string compact = squeeze( inner );
             if     ( extractSizeAssert( compact, "sizeof",  name, row.want ) ) { row.kind = "sizeof";  row.hasWant = true; }
             else if( extractSizeAssert( compact, "alignof", name, row.want ) ) { row.kind = "alignof"; row.hasWant = true; }
-            rows.push_back( std::move( row ) );
-        } );
+            rows.push_back( std::move( row ) ); } );
+    }
 }
 
 inline std::vector<AssertRow> collectAsserts( const IngestResult& ing, std::string_view name, std::size_t& filesScanned )
@@ -1665,10 +2200,19 @@ inline std::vector<AssertRow> collectAsserts( const IngestResult& ing, std::stri
     std::string            bytes;
     for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
     {
-        if( !isCFamilyPath( ing.files[ fileId ] ) ) continue;
-        if( !darkflags::readWhole( diskPath( ing, fileId ), bytes ) ) continue;
+        if( !isCFamilyPath( ing.files[fileId] ) )
+        {
+            continue;
+        }
+        if( !darkflags::readWhole( diskPath( ing, fileId ), bytes ) )
+        {
+            continue;
+        }
         ++filesScanned;
-        if( bytes.find( name ) == std::string::npos ) continue;        // cheap reject before the keyword walk
+        if( bytes.find( name ) == std::string::npos )
+        {
+            continue; // cheap reject before the keyword walk
+        }
         scanFileForAsserts( bytes, ing.files[ fileId ], name, rows );
     }
 
@@ -1682,8 +2226,14 @@ inline std::vector<AssertRow> collectAsserts( const IngestResult& ing, std::stri
 inline std::string fieldSpell( const FieldRow& f )
 {
     std::string s = f.resolved.empty() ? f.type : f.resolved;
-    if( f.elems != 1 ) s += " x" + std::to_string( f.elems );
-    if( f.placed )     s += "@" + std::to_string( f.offset );
+    if( f.elems != 1 )
+    {
+        s += " x" + std::to_string( f.elems );
+    }
+    if( f.placed )
+    {
+        s += "@" + std::to_string( f.offset );
+    }
     return s;
 }
 
@@ -1705,7 +2255,10 @@ inline MirrorDiff diffDefs( const LayoutDef& a, const LayoutDef& b )
                                                       : "drift";
 
     gtl::btree_map<std::string, const FieldRow*> byNameB;
-    for( const FieldRow& f : b.fields ) byNameB.emplace( f.name, &f );
+    for( const FieldRow& f : b.fields )
+    {
+        byNameB.emplace( f.name, &f );
+    }
 
     gtl::btree_map<std::string, bool> seen;
     for( const FieldRow& fa : a.fields )
@@ -1714,11 +2267,18 @@ inline MirrorDiff diffDefs( const LayoutDef& a, const LayoutDef& b )
         const auto it = byNameB.find( fa.name );
         if( it == byNameB.end() ) { diff.fields.push_back( FieldDiff{ fa.name, fieldSpell( fa ), "absent" } ); continue; }
         const std::string sa = fieldSpell( fa ), sb = fieldSpell( *it->second );
-        if( sa != sb ) diff.fields.push_back( FieldDiff{ fa.name, sa, sb } );
+        if( sa != sb )
+        {
+            diff.fields.push_back( FieldDiff { fa.name, sa, sb } );
+        }
     }
     for( const FieldRow& fb : b.fields )
+    {
         if( seen.find( fb.name ) == seen.end() )
+        {
             diff.fields.push_back( FieldDiff{ fb.name, "absent", fieldSpell( fb ) } );
+        }
+    }
     return diff;
 }
 
@@ -1735,18 +2295,36 @@ inline const LayoutDef* defForAssert( const LayoutResult& result, const AssertRo
     bool sameFile = false;
     for( const LayoutDef& d : result.defs )
     {
-        if( d.path != row.path ) continue;
+        if( d.path != row.path )
+        {
+            continue;
+        }
         sameFile = true;
-        if( d.modeled ) return &d;
+        if( d.modeled )
+        {
+            return &d;
+        }
     }
-    if( sameFile ) return nullptr;
+    if( sameFile )
+    {
+        return nullptr;
+    }
 
     const LayoutDef* only = nullptr;
     for( const LayoutDef& d : result.defs )
     {
-        if( !d.modeled ) continue;
-        if( only == nullptr )                                            only = &d;
-        else if( only->size != d.size || only->align != d.align )        return nullptr;   // no single answer
+        if( !d.modeled )
+        {
+            continue;
+        }
+        if( only == nullptr )
+        {
+            only = &d;
+        }
+        else if( only->size != d.size || only->align != d.align )
+        {
+            return nullptr; // no single answer
+        }
     }
     return only;
 }
@@ -1755,14 +2333,23 @@ inline void scoreAsserts( LayoutResult& result )
 {
     for( AssertRow& row : result.asserts )
     {
-        if( !row.hasWant ) continue;
+        if( !row.hasWant )
+        {
+            continue;
+        }
         const LayoutDef* pick = defForAssert( result, row );
-        if( pick == nullptr ) continue;
+        if( pick == nullptr )
+        {
+            continue;
+        }
 
         row.got      = ( std::string_view( row.kind ) == "alignof" ) ? pick->align : pick->size;
         row.compared = true;
         row.agree    = row.got == row.want;
-        if( !row.agree ) ++result.assertConflicts;
+        if( !row.agree )
+        {
+            ++result.assertConflicts;
+        }
     }
 }
 
@@ -1772,18 +2359,27 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
     std::string_view fileFilter, name;
     splitQualifiedSpec( spec, fileFilter, name );
     result.sym = std::string( name );
-    if( name.empty() ) return result;
+    if( name.empty() )
+    {
+        return result;
+    }
 
     const AggIndex byName = buildAggIndex( ing );
     const auto     hit    = byName.find( std::string( name ) );
-    if( hit == byName.end() ) return result;
+    if( hit == byName.end() )
+    {
+        return result;
+    }
 
     ModelCtx                            ctx( ing, byName );
     gtl::btree_map<std::uint64_t, bool> seenSite;                      // (fileId, braceStart) — the typedef twin
     for( NodeId id : hit->second )
     {
         const Symbol& s = ing.symbols[ id ];
-        if( !fileFilter.empty() && ing.files[ s.fileId ].find( fileFilter ) == std::string::npos ) continue;
+        if( !fileFilter.empty() && ing.files[s.fileId].find( fileFilter ) == std::string::npos )
+        {
+            continue;
+        }
 
         // Only a C-family aggregate HAS a byte layout. A TypeScript / Swift / Java `class Cat {` opens a
         // brace after the word `class` and would otherwise be modelled as a C++ struct — and then compared
@@ -1801,20 +2397,33 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
             }
             if( !findDefBody( src, name, s.sigStartByte, site ) )
             {
-                if( site.isEnum ) ++result.enumCandidates; else ++result.bodilessCandidates;
+                if( site.isEnum ) { ++result.enumCandidates; }
+                else
+                {
+                    ++result.bodilessCandidates;
+                }
                 continue;
             }
         }
         site.fileId = s.fileId;
         const std::uint64_t key = ( std::uint64_t( s.fileId ) << 32 ) | std::uint64_t( site.braceStart & 0xFFFFFFFFull );
-        if( seenSite.find( key ) != seenSite.end() ) continue;
+        if( seenSite.find( key ) != seenSite.end() )
+        {
+            continue;
+        }
         seenSite.emplace( key, true );
 
         result.found = true;
         ++result.defsFound;
-        if( result.defs.size() < kMaxDefsShown ) result.defs.push_back( modelDef( ctx, s.fileId, site, name ) );
+        if( result.defs.size() < kMaxDefsShown )
+        {
+            result.defs.push_back( modelDef( ctx, s.fileId, site, name ) );
+        }
     }
-    if( !result.found ) return result;
+    if( !result.found )
+    {
+        return result;
+    }
 
     std::sort( result.defs.begin(), result.defs.end(), []( const LayoutDef& a, const LayoutDef& b )
                { return ( a.path != b.path ) ? ( a.path < b.path ) : ( a.line < b.line ); } );
@@ -1825,7 +2434,10 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
     {
         const LayoutDef& a = result.defs.front();
         const LayoutDef& b = result.defs[i];
-        if( a.spellShape == b.spellShape ) continue;
+        if( a.spellShape == b.spellShape )
+        {
+            continue;
+        }
         result.mirrors.push_back( diffDefs( a, b ) );
     }
 
@@ -1842,27 +2454,60 @@ inline void writeLayoutDef( std::FILE* out, const LayoutDef& def, const XmlEscap
 {
     std::fprintf( out, "<def p=\"%s\" l=\"%u\" agg=\"%s\" modeled=\"%d\" fields=\"%zu\"",
                   ex( def.path ).c_str(), def.line, def.aggregate, def.modeled ? 1 : 0, def.fields.size() );
-    if( def.modeled ) std::fprintf( out, " size=\"%u\" align=\"%u\" tail_pad=\"%u\"", def.size, def.align, def.tailPad );
-    if( def.declaredAlign ) std::fprintf( out, " alignas=\"%u\"", def.declaredAlign );
-    if( def.packedAttr )    std::fprintf( out, " packed=\"1\"" );
+    if( def.modeled )
+    {
+        std::fprintf( out, " size=\"%u\" align=\"%u\" tail_pad=\"%u\"", def.size, def.align, def.tailPad );
+    }
+    if( def.declaredAlign )
+    {
+        std::fprintf( out, " alignas=\"%u\"", def.declaredAlign );
+    }
+    if( def.packedAttr )
+    {
+        std::fprintf( out, " packed=\"1\"" );
+    }
     std::fprintf( out, ">" );
 
     for( const FieldRow& f : def.fields )
     {
-        if( f.padBefore ) std::fprintf( out, "<pad bytes=\"%u\"/>", f.padBefore );
+        if( f.padBefore )
+        {
+            std::fprintf( out, "<pad bytes=\"%u\"/>", f.padBefore );
+        }
         std::fprintf( out, "<f n=\"%s\" ty=\"%s\"", ex( f.name ).c_str(), ex( f.type ).c_str() );
-        if( !f.resolved.empty() ) std::fprintf( out, " as=\"%s\"", ex( f.resolved ).c_str() );
-        if( f.elems != 1 )        std::fprintf( out, " x=\"%u\"", f.elems );
-        if( f.sized )             std::fprintf( out, " sz=\"%u\" al=\"%u\"", f.size, f.align );
-        else                      std::fprintf( out, " sized=\"0\"" );
-        if( f.placed )            std::fprintf( out, " off=\"%u\"", f.offset );
+        if( !f.resolved.empty() )
+        {
+            std::fprintf( out, " as=\"%s\"", ex( f.resolved ).c_str() );
+        }
+        if( f.elems != 1 )
+        {
+            std::fprintf( out, " x=\"%u\"", f.elems );
+        }
+        if( f.sized )
+        {
+            std::fprintf( out, " sz=\"%u\" al=\"%u\"", f.size, f.align );
+        }
+        else
+        {
+            std::fprintf( out, " sized=\"0\"" );
+        }
+        if( f.placed )
+        {
+            std::fprintf( out, " off=\"%u\"", f.offset );
+        }
         std::fprintf( out, "/>" );
     }
-    if( def.modeled && def.tailPad ) std::fprintf( out, "<pad tail=\"%u\"/>", def.tailPad );
+    if( def.modeled && def.tailPad )
+    {
+        std::fprintf( out, "<pad tail=\"%u\"/>", def.tailPad );
+    }
     for( const Caveat& c : def.caveats )
     {
         std::fprintf( out, "<caveat k=\"%s\" d=\"%s\"", ex( c.kind ).c_str(), ex( c.detail ).c_str() );
-        if( c.count > 1 ) std::fprintf( out, " count=\"%u\"", c.count );   // §P6.12: how many sites this ONE row stands for
+        if( c.count > 1 )
+        {
+            std::fprintf( out, " count=\"%u\"", c.count ); // §P6.12: how many sites this ONE row stands for
+        }
         std::fprintf( out, "/>" );
     }
     std::fprintf( out, "</def>" );
@@ -1877,9 +2522,18 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
     for( const MirrorDiff& m : res.mirrors )
     {
         const std::string_view k = m.kind;
-        if     ( k == "drift" )    drift    = true;
-        else if( k == "stub" )     stub     = true;
-        else                       spelling = true;
+        if( k == "drift" )
+        {
+            drift = true;
+        }
+        else if( k == "stub" )
+        {
+            stub = true;
+        }
+        else
+        {
+            spelling = true;
+        }
     }
     const char* mirror = drift    ? "mismatch"
                        : stub     ? "stub"
@@ -1902,9 +2556,14 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
                   ex( res.sym ).c_str(), res.found ? 1 : 0, res.defsFound, mirror, res.asserts.size(),
                   res.assertConflicts, res.filesScanned );
 
-    for( const LayoutDef& d : res.defs ) writeLayoutDef( out, d, ex );
+    for( const LayoutDef& d : res.defs )
+    {
+        writeLayoutDef( out, d, ex );
+    }
     if( res.defsFound > res.defs.size() )
+    {
         std::fprintf( out, "<more defs=\"%zu\"/>", res.defsFound - res.defs.size() );
+    }
 
     for( const MirrorDiff& m : res.mirrors )
     {
@@ -1912,15 +2571,23 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
                       m.kind, ex( m.a ).c_str(), ex( m.b ).c_str(),
                       m.sizeA, m.sizeB, m.sizeDiffers ? 1 : 0, m.fields.size() );
         for( const FieldDiff& f : m.fields )
+        {
             std::fprintf( out, "<d n=\"%s\" a=\"%s\" b=\"%s\"/>", ex( f.name ).c_str(), ex( f.inA ).c_str(), ex( f.inB ).c_str() );
+        }
         std::fprintf( out, "</mismatch>" );
     }
 
     for( const AssertRow& a : res.asserts )
     {
         std::fprintf( out, "<assert p=\"%s\" l=\"%u\" kind=\"%s\"", ex( a.path ).c_str(), a.line, a.kind );
-        if( a.hasWant )  std::fprintf( out, " want=\"%u\"", a.want );
-        if( a.compared ) std::fprintf( out, " got=\"%u\" agree=\"%d\"", a.got, a.agree ? 1 : 0 );
+        if( a.hasWant )
+        {
+            std::fprintf( out, " want=\"%u\"", a.want );
+        }
+        if( a.compared )
+        {
+            std::fprintf( out, " got=\"%u\" agree=\"%d\"", a.got, a.agree ? 1 : 0 );
+        }
         std::fprintf( out, " t=\"%s\"/>", ex( a.text ).c_str() );
     }
     std::fprintf( out, "</layout>" );

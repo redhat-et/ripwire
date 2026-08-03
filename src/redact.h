@@ -61,7 +61,10 @@ struct RedactCounts
     std::uint32_t total() const noexcept
     {
         std::uint32_t t = 0;
-        for( std::uint32_t v : byKind ) t += v;
+        for( std::uint32_t v : byKind )
+        {
+            t += v;
+        }
         return t;
     }
 
@@ -160,41 +163,76 @@ inline bool lineNamesCredential( std::string_view line ) noexcept
     { return ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : c; };
     const auto caseEq = [ & ]( std::string_view line_, std::size_t i, std::string_view kw ) noexcept -> bool
     {
-        if( i + kw.size() > line_.size() ) return false;
+        if( i + kw.size() > line_.size() )
+        {
+            return false;
+        }
         for( std::size_t j = 0; j < kw.size(); ++j )
-            if( lower( line_[ i + j ] ) != kw[j] ) return false;
+        {
+            if( lower( line_[i + j] ) != kw[j] )
+            {
+                return false;
+            }
+        }
         return true;
     };
 
     for( std::string_view kw : kLooseKeywords )
     {
-        if( line.size() < kw.size() ) continue;
+        if( line.size() < kw.size() )
+        {
+            continue;
+        }
         for( std::size_t i = 0; i + kw.size() <= line.size(); ++i )
         {
-            if( !caseEq( line, i, kw ) ) continue;
+            if( !caseEq( line, i, kw ) )
+            {
+                continue;
+            }
 
             // after the keyword: ':'/'=' (possibly through spaces) counts, same as the strict rule; OR at
             // least one space/tab followed by more content on the line (the bare "Bearer <token>" shape).
             std::size_t p = i + kw.size();
             std::size_t q = p;
-            while( q < line.size() && ( line[q] == ' ' || line[q] == '\t' ) ) ++q;
-            if( q < line.size() && ( line[q] == ':' || line[q] == '=' ) ) return true;
-            if( q > p && q < line.size() ) return true;   // whitespace-then-token
+            while( q < line.size() && ( line[q] == ' ' || line[q] == '\t' ) )
+            {
+                ++q;
+            }
+            if( q < line.size() && ( line[q] == ':' || line[q] == '=' ) )
+            {
+                return true;
+            }
+            if( q > p && q < line.size() )
+            {
+                return true; // whitespace-then-token
+            }
         }
     }
 
     for( std::string_view kw : kKeywords )
     {
         // scan for a case-insensitive occurrence of kw
-        if( line.size() < kw.size() ) continue;
+        if( line.size() < kw.size() )
+        {
+            continue;
+        }
         for( std::size_t i = 0; i + kw.size() <= line.size(); ++i )
         {
-            if( !caseEq( line, i, kw ) ) continue;
+            if( !caseEq( line, i, kw ) )
+            {
+                continue;
+            }
 
             // after the keyword, allow spaces/tabs, then require ':' or '=' (the assignment tell)
             std::size_t p = i + kw.size();
-            while( p < line.size() && ( line[p] == ' ' || line[p] == '\t' ) ) ++p;
-            if( p < line.size() && ( line[p] == ':' || line[p] == '=' ) ) return true;
+            while( p < line.size() && ( line[p] == ' ' || line[p] == '\t' ) )
+            {
+                ++p;
+            }
+            if( p < line.size() && ( line[p] == ':' || line[p] == '=' ) )
+            {
+                return true;
+            }
         }
     }
     return false;
@@ -205,9 +243,15 @@ inline bool lineNamesCredential( std::string_view line ) noexcept
 inline std::string_view enclosingLine( std::string_view s, std::size_t pos ) noexcept
 {
     std::size_t a = pos;
-    while( a > 0 && s[ a - 1 ] != '\n' ) --a;
+    while( a > 0 && s[a - 1] != '\n' )
+    {
+        --a;
+    }
     std::size_t b = pos;
-    while( b < s.size() && s[b] != '\n' ) ++b;
+    while( b < s.size() && s[b] != '\n' )
+    {
+        ++b;
+    }
     return s.substr( a, b - a );
 }
 
@@ -225,7 +269,10 @@ inline std::array<std::uint16_t, 256> buildFirstByteRuleMask() noexcept
 
     const auto addRule = [ & ]( std::size_t ruleIndex, std::initializer_list<unsigned char> bytes )
     {
-        for( unsigned char b : bytes ) mask[b] = std::uint16_t( mask[b] | std::uint16_t( 1u << ruleIndex ) );
+        for( unsigned char b : bytes )
+        {
+            mask[b] = std::uint16_t( mask[b] | std::uint16_t( 1u << ruleIndex ) );
+        }
     };
 
     // rule 0: AKIA[0-9A-Z]{16}                        — literal prefix "AKIA" → 'A'
@@ -248,9 +295,18 @@ inline std::array<std::uint16_t, 256> buildFirstByteRuleMask() noexcept
     addRule( 8, { 'e' } );
     // rule 9 (GenericAssigned): [A-Za-z0-9+/=_\-]{32,} — NO fixed literal prefix; a match can start at any
     // byte in the character class itself, so its first-byte set IS that class.
-    for( unsigned char c = 'A'; c <= 'Z'; ++c ) addRule( 9, { c } );
-    for( unsigned char c = 'a'; c <= 'z'; ++c ) addRule( 9, { c } );
-    for( unsigned char c = '0'; c <= '9'; ++c ) addRule( 9, { c } );
+    for( unsigned char c = 'A'; c <= 'Z'; ++c )
+    {
+        addRule( 9, { c } );
+    }
+    for( unsigned char c = 'a'; c <= 'z'; ++c )
+    {
+        addRule( 9, { c } );
+    }
+    for( unsigned char c = '0'; c <= '9'; ++c )
+    {
+        addRule( 9, { c } );
+    }
     addRule( 9, { '+', '/', '=', '_', '-' } );
 
     return mask;
@@ -275,7 +331,9 @@ inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& 
     static const std::array<std::regex, kRedactRules.size()> kCompiled = [] {
         std::array<std::regex, kRedactRules.size()> a{};
         for( std::size_t i = 0; i < kRedactRules.size(); ++i )
+        {
             a[i] = std::regex( kRedactRules[i].pattern, std::regex::ECMAScript | std::regex::optimize );
+        }
         return a;
     }();
 
@@ -302,17 +360,25 @@ inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& 
 
         for( std::size_t r = 0; candidateRules != 0 && r < kRedactRules.size(); ++r )
         {
-            if( !( candidateRules & std::uint16_t( 1u << r ) ) ) continue;
+            if( !( candidateRules & std::uint16_t( 1u << r ) ) )
+            {
+                continue;
+            }
 
             std::cmatch m;
             // match_continuous: the regex must match STARTING AT the cursor (not later in the string), so the
             // sweep advances one candidate position at a time and rule priority (table order) is honoured.
             if( !std::regex_search( base + i, base + N, m, kCompiled[r],
                                     std::regex_constants::match_continuous ) )
+            {
                 continue;
+            }
 
             const std::size_t len = std::size_t( m.length( 0 ) );
-            if( len == 0 ) continue;   // never make zero-progress on an empty match (defensive)
+            if( len == 0 )
+            {
+                continue; // never make zero-progress on an empty match (defensive)
+            }
 
             const RedactRule& rule = kRedactRules[r];
 
@@ -323,7 +389,9 @@ inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& 
             if( rule.kind == SecretKind::GenericAssigned )
             {
                 if( !redactdetail::lineNamesCredential( redactdetail::enclosingLine( in, i ) ) )
+                {
                     continue;   // not keyword-gated → not a secret → let the verbatim-copy path keep it
+                }
             }
 
             // splice: keepPrefix original bytes + "…" (U+2026, 3 UTF-8 bytes) + the fixed marker. Deterministic,
@@ -355,10 +423,15 @@ inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& 
 // Every body-emission seam calls this on its body text just before CDATA-encoding / writing.
 inline void redactInPlace( std::string& body, RedactCounts* counts )
 {
-    if( counts == nullptr ) return;                 // --no-redact: pass source through verbatim
+    if( counts == nullptr )
+    {
+        return; // --no-redact: pass source through verbatim
+    }
     std::string redacted;
-    if( redactSecrets( body, redacted, *counts ) )  // only swap when a secret was actually found
+    if( redactSecrets( body, redacted, *counts ) )
+    { // only swap when a secret was actually found
         body = std::move( redacted );
+    }
 }
 
 // ── §B10.2: THE TALLY IS PER-DOCUMENT, NOT PER-SERIALIZATION ─────────────────────────────────────────────
@@ -381,7 +454,13 @@ struct RedactTallyFreeze
 
     explicit RedactTallyFreeze( RedactCounts* counts ) noexcept
         : m_counts( counts ), m_atEntry( counts ? *counts : RedactCounts{} ) {}
-    ~RedactTallyFreeze() { if( m_counts ) *m_counts = m_atEntry; }
+    ~RedactTallyFreeze()
+    {
+        if( m_counts )
+        {
+            *m_counts = m_atEntry;
+        }
+    }
 
     RedactTallyFreeze( const RedactTallyFreeze& )            = delete;
     RedactTallyFreeze& operator=( const RedactTallyFreeze& ) = delete;
@@ -393,7 +472,10 @@ struct RedactTallyFreeze
 inline void reportRedactions( std::FILE* err, const RedactCounts& counts )
 {
     const std::uint32_t total = counts.total();
-    if( total == 0 ) return;
+    if( total == 0 )
+    {
+        return;
+    }
 
     // fixed kind→label table, iterated in enum order for a deterministic summary line
     static constexpr std::array<const char*, std::size_t( SecretKind::kCount )> kLabel = {
@@ -406,7 +488,10 @@ inline void reportRedactions( std::FILE* err, const RedactCounts& counts )
     bool first = true;
     for( std::size_t k = 0; k < std::size_t( SecretKind::kCount ); ++k )
     {
-        if( counts.byKind[k] == 0 ) continue;
+        if( counts.byKind[k] == 0 )
+        {
+            continue;
+        }
         std::fprintf( err, "%s%s=%u", first ? "" : " ", kLabel[k], counts.byKind[k] );
         first = false;
     }

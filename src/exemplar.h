@@ -79,11 +79,17 @@ constexpr float       kExemplarConfMinShare  = 0.4f;
 // case-insensitive equality of a path component against an already-lower-cased fixture token (allocation-free).
 inline bool eqLowerAscii( std::string_view comp, std::string_view lowerToken ) noexcept
 {
-    if( comp.size() != lowerToken.size() ) return false;
+    if( comp.size() != lowerToken.size() )
+    {
+        return false;
+    }
     for( std::size_t k = 0; k < comp.size(); ++k )
     {
         const char c = ( comp[k] >= 'A' && comp[k] <= 'Z' ) ? char( comp[k] - 'A' + 'a' ) : comp[k];
-        if( c != lowerToken[k] ) return false;
+        if( c != lowerToken[k] )
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -94,7 +100,12 @@ inline bool isFixtureComponent( std::string_view comp ) noexcept
 {
     static constexpr std::string_view kFixtureComponents[] = { "test", "tests", "fixture", "fixtures", "testdata" };
     for( std::string_view fx : kFixtureComponents )
-        if( eqLowerAscii( comp, fx ) ) return true;
+    {
+        if( eqLowerAscii( comp, fx ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -105,8 +116,14 @@ inline bool isFixturePath( std::string_view path ) noexcept
     for( std::size_t i = 0; i <= path.size(); ++i )
     {
         const bool boundary = ( i == path.size() || path[i] == '/' );
-        if( !boundary ) continue;
-        if( isFixtureComponent( path.substr( start, i - start ) ) ) return true;
+        if( !boundary )
+        {
+            continue;
+        }
+        if( isFixtureComponent( path.substr( start, i - start ) ) )
+        {
+            return true;
+        }
         start = i + 1;
     }
     return false;
@@ -116,12 +133,30 @@ inline bool isFixturePath( std::string_view path ) noexcept
 // arg returns Other → the caller treats it as a task string.
 inline SymKind exemplarKindFromToken( std::string_view t ) noexcept
 {
-    if( t == "fn"     || t == "function" )  return SymKind::Function;
-    if( t == "method" )                     return SymKind::Method;
-    if( t == "cls"    || t == "class" )     return SymKind::Class;
-    if( t == "struct" )                     return SymKind::Struct;
-    if( t == "iface"  || t == "interface" ) return SymKind::Interface;
-    if( t == "var" )                        return SymKind::Var;
+    if( t == "fn" || t == "function" )
+    {
+        return SymKind::Function;
+    }
+    if( t == "method" )
+    {
+        return SymKind::Method;
+    }
+    if( t == "cls" || t == "class" )
+    {
+        return SymKind::Class;
+    }
+    if( t == "struct" )
+    {
+        return SymKind::Struct;
+    }
+    if( t == "iface" || t == "interface" )
+    {
+        return SymKind::Interface;
+    }
+    if( t == "var" )
+    {
+        return SymKind::Var;
+    }
     return SymKind::Other;   // sentinel: not a kind token → treat the arg as a task
 }
 
@@ -156,12 +191,22 @@ struct ExemplarPick
 // does the winner's NAME share at least one subtoken with the task? (INVARIANT 3 confidence gate.)
 inline bool shareNameSubtoken( std::string_view name, const std::vector<std::string>& taskToks )
 {
-    if( taskToks.empty() ) return false;
+    if( taskToks.empty() )
+    {
+        return false;
+    }
     std::vector<std::string> nameToks;
     subtokens( name, nameToks );
     for( const std::string& nt : nameToks )
+    {
         for( const std::string& qt : taskToks )
-            if( nt == qt ) return true;
+        {
+            if( nt == qt )
+            {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -172,7 +217,10 @@ inline bool shareNameSubtoken( std::string_view name, const std::vector<std::str
 inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::string_view kindOrTask, ExemplarPick& pick )
 {
     pick.targetKind = exemplarKindFromToken( kindOrTask );
-    if( pick.targetKind != SymKind::Other ) return true;   // a kind token — done
+    if( pick.targetKind != SymKind::Other )
+    {
+        return true; // a kind token — done
+    }
 
     // TASK path: rank lexically, then sort the eligible symbols by (score DESC, id ASC) — a byte-stable
     // total order, so both the top-1 pick and the confidence window below are deterministic.
@@ -183,10 +231,16 @@ inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::s
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const SymKind k = ing.symbols[i].kind;
-        if( k == SymKind::Section || k == SymKind::Other ) continue;   // never exemplify a doc heading / unknown
+        if( k == SymKind::Section || k == SymKind::Other )
+        {
+            continue; // never exemplify a doc heading / unknown
+        }
         ranked.emplace_back( lensRank[i], i );
     }
-    if( ranked.empty() ) return false;   // no exemplifiable symbol in the whole corpus
+    if( ranked.empty() )
+    {
+        return false; // no exemplifiable symbol in the whole corpus
+    }
     std::sort( ranked.begin(), ranked.end(), []( const auto& a, const auto& b )
     {
         return ( a.first != b.first ) ? ( a.first > b.first ) : ( a.second < b.second );
@@ -203,7 +257,12 @@ inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::s
     const std::size_t window = std::min( kExemplarConfWindow, ranked.size() );
     std::size_t corroborating = 0;
     for( std::size_t j = 0; j < window; ++j )
-        if( shareNameSubtoken( ing.symbols[ ranked[j].second ].name, taskToks ) ) ++corroborating;
+    {
+        if( shareNameSubtoken( ing.symbols[ranked[j].second].name, taskToks ) )
+        {
+            ++corroborating;
+        }
+    }
     const float shareOfWindow = window ? float( corroborating ) / float( window ) : 0.f;
     const bool  trustworthy   = bestScore > 0.f && shareOfWindow > kExemplarConfMinShare;
 
@@ -241,9 +300,15 @@ inline void pickWinnerOfKind( const IngestResult& ing, const std::vector<std::ui
     {
         const bool ofKind    = ing.symbols[i].kind == pick.targetKind;
         const bool ineligible = eligibleOnly && ing.symbols[i].ccx > kExemplarCcxCeiling;   // INVARIANT 1
-        if( !ofKind || ineligible ) continue;
+        if( !ofKind || ineligible )
+        {
+            continue;
+        }
         ++pick.candidateCount;
-        if( pick.winner == kNoNode || better( i, pick.winner ) ) pick.winner = i;
+        if( pick.winner == kNoNode || better( i, pick.winner ) )
+        {
+            pick.winner = i;
+        }
     }
 }
 
@@ -258,7 +323,10 @@ inline ExemplarPick selectExemplar( const IngestResult& ing, const Graph& g,
                                     std::string_view                  kindOrTask )
 {
     ExemplarPick pick;
-    if( !resolveExemplarKind( ing, g, kindOrTask, pick ) ) return pick;   // winner stays kNoNode → not-found
+    if( !resolveExemplarKind( ing, g, kindOrTask, pick ) )
+    {
+        return pick; // winner stays kNoNode → not-found
+    }
 
     pickWinnerOfKind( ing, fanIn, tested, /*eligibleOnly=*/true, pick );   // pass A: under the ccx ceiling
     if( pick.winner == kNoNode )

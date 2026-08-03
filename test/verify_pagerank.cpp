@@ -31,7 +31,9 @@ bool isProbabilityVector( std::span<const double> rank )
     for( const double value : rank )
     {
         if( !std::isfinite( value ) || value < 0.0 )
+        {
             return false;
+        }
         mass += value;
     }
     return std::fabs( mass - 1.0 ) <= 1e-9;
@@ -42,11 +44,11 @@ std::vector<std::uint32_t> topOrder( std::span<const double> rank )
     std::vector<std::uint32_t> order( rank.size() );
     std::iota( order.begin(), order.end(), 0u );
     std::sort( order.begin(), order.end(), [ rank ]( std::uint32_t a, std::uint32_t b )
-    {
-        if( rank[ a ] != rank[ b ] )
+               {
+        if( rank[ a ] != rank[ b ] ) {
             return rank[ a ] > rank[ b ];
-        return a < b;
-    } );
+}
+        return a < b; } );
     return order;
 }
 
@@ -92,8 +94,10 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
         rw::pageRankDouble( csr, weightedOutDegree, teleport, rank, preciseConfig );
         CHECK_MESSAGE( isProbabilityVector( rank ), "all-dangling PageRank lost probability mass" );
         for( std::size_t nodeIndex = 0; nodeIndex < rank.size(); ++nodeIndex )
+        {
             CHECK_MESSAGE( std::fabs( rank[ nodeIndex ] - teleport[ nodeIndex ] ) <= 1e-12,
                            "all-dangling PageRank differs from teleport distribution" );
+        }
     }
 
     // Fractional edge weights use a double out-degree accumulated from the same promoted float edges.
@@ -129,9 +133,13 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
             const std::vector<std::uint32_t> order = topOrder( rank );
             CHECK_MESSAGE( std::equal( order.begin(), order.end(), expectedOrder.begin() ), "star PageRank top-K order is wrong" );
             if( runIndex == 0 )
+            {
                 firstOrder = order;
+            }
             else
+            {
                 CHECK_MESSAGE( order == firstOrder, "PageRank top-K order changed between identical runs" );
+            }
         }
     }
 }

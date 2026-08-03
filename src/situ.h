@@ -70,8 +70,18 @@ inline std::vector<char> changedMaskFromList( const IngestResult& ing, std::stri
     for( std::size_t start = 0; start < csv.size(); )
     {
         std::size_t c = csv.find( ',', start );
-        if( c == std::string_view::npos ) c = csv.size();
-        if( c > start ) { const std::uint32_t f = resolveFileSuffix( ing, stripLineLocator( csv.substr( start, c - start ) ) ); if( f != UINT32_MAX ) mask[f] = 1; }
+        if( c == std::string_view::npos )
+        {
+            c = csv.size();
+        }
+        if( c > start )
+        {
+            const std::uint32_t f = resolveFileSuffix( ing, stripLineLocator( csv.substr( start, c - start ) ) );
+            if( f != UINT32_MAX )
+            {
+                mask[f] = 1;
+            }
+        }
         start = c + 1;
     }
     return mask;
@@ -87,7 +97,10 @@ inline constexpr std::size_t kSituPartnerRowsShown = 8;   // section [3] — co-
 
 inline std::string situShowingNote( std::size_t shownCap, std::size_t rowTotal, const char* rowNoun )
 {
-    if( rowTotal <= shownCap ) return {};
+    if( rowTotal <= shownCap )
+    {
+        return {};
+    }
     return " (showing " + std::to_string( shownCap ) + " of " + std::to_string( rowTotal ) + " " + rowNoun + ")";
 }
 
@@ -99,9 +112,21 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
     std::uint32_t       nChanged = 0;
-    for( std::uint32_t f = 0; f < F; ++f ) if( changedFile[f] ) ++nChanged;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( changedFile[f] )
+        {
+            ++nChanged;
+        }
+    }
     std::vector<NodeId> changedSyms;
-    for( NodeId i = 0; i < N; ++i ) if( changedFile[ ing.symbols[i].fileId ] ) changedSyms.push_back( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        if( changedFile[ing.symbols[i].fileId] )
+        {
+            changedSyms.push_back( i );
+        }
+    }
 
     std::fprintf( out, "ripwire situational-awareness — %u changed file(s), %zu symbols in them\n", nChanged, changedSyms.size() );
     if( changedSyms.empty() )
@@ -110,9 +135,21 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // (1) blast radius — transitive callers (everything that reaches the changed symbols), per non-changed file
     const std::vector<NodeId>  reach = transitiveCallers( g, changedSyms );
     std::vector<std::uint32_t> fileReachers( F, 0 );
-    for( NodeId n : reach ) if( !changedFile[ ing.symbols[n].fileId ] ) ++fileReachers[ ing.symbols[n].fileId ];
+    for( NodeId n : reach )
+    {
+        if( !changedFile[ing.symbols[n].fileId] )
+        {
+            ++fileReachers[ing.symbols[n].fileId];
+        }
+    }
     std::vector<std::uint32_t> affected;
-    for( std::uint32_t f = 0; f < F; ++f ) if( fileReachers[f] ) affected.push_back( f );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( fileReachers[f] )
+        {
+            affected.push_back( f );
+        }
+    }
     std::sort( affected.begin(), affected.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                { return fileReachers[a] != fileReachers[b] ? fileReachers[a] > fileReachers[b] : ing.files[a] < ing.files[b]; } );
     // §A3b: the row list below stays capped at 8 — --situ is a fixed report,
@@ -126,15 +163,26 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // to 59 of the stated 69 symbols had no way to tell whether 8 counted files, symbols or something else.
     // "showing 8 of 17 files" self-explains the gap without a second sentence.
     std::string blastNote = situShowingNote( kSituBlastFilesShown, affected.size(), "files" );
-    if( !blastNote.empty() ) blastNote.insert( blastNote.size() - 1, "; --pr-context's own per-file blast-radius list is also capped, at 20" );
+    if( !blastNote.empty() )
+    {
+        blastNote.insert( blastNote.size() - 1, "; --pr-context's own per-file blast-radius list is also capped, at 20" );
+    }
     std::fprintf( out, "  [1] blast radius: %zu symbols across %zu files transitively depend on these changes%s\n",
                   reach.size(), affected.size(), blastNote.c_str() );
     for( std::size_t i = 0; i < affected.size() && i < kSituBlastFilesShown; ++i )
+    {
         std::fprintf( out, "        %s  (%u dependent symbols)\n", ing.files[ affected[i] ].c_str(), fileReachers[ affected[i] ] );
+    }
 
     // (2) tests to run — the test files among the dependents (the --affected set)
     std::vector<std::uint32_t> tests;
-    for( std::uint32_t f : affected ) if( isTestPath( ing.files[f] ) ) tests.push_back( f );
+    for( std::uint32_t f : affected )
+    {
+        if( isTestPath( ing.files[f] ) )
+        {
+            tests.push_back( f );
+        }
+    }
     // §H6 (W3FIX): this header printed the FULL count then listed at most 25 rows, silently — on the one
     // section whose sibling --test-gate calls its <t> rows "the COMPLETE obligation".
     std::fprintf( out, "  [2] tests to run (%zu)%s%s", tests.size(), situShowingNote( kSituTestRowsShown, tests.size(), "tests" ).c_str(),
@@ -143,7 +191,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // where one is DERIVABLE and omitted where it is not — see testmap.h; a guessed command is worse than none.
     const TestRunnerIndex situRunners( ing );
     for( std::size_t i = 0; i < tests.size() && i < kSituTestRowsShown; ++i )
+    {
         std::fprintf( out, "        %s%s\n", ing.files[ tests[i] ].c_str(), runSuffixText( situRunners, tests[i] ).c_str() );
+    }
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
     // named above, however much of the change it exercises. Same number, same counter as --affected's
@@ -161,12 +211,24 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     std::uint32_t                  probed = 0;
     for( std::uint32_t f = 0; f < F && probed < 20; ++f )
     {
-        if( !changedFile[f] ) continue;
+        if( !changedFile[f] )
+        {
+            continue;
+        }
         ++probed;
         std::uint32_t                commits = 0;
         const std::vector<CoPartner> ps      = cochangePartners( ing, ing.files[f], commits, coSets );
         for( const CoPartner& p : ps )
-            if( !changedFile[ p.fileId ] ) { double& d = partnerDeg[ p.fileId ]; if( p.deg > d ) d = p.deg; }
+        {
+            if( !changedFile[p.fileId] )
+            {
+                double& d = partnerDeg[p.fileId];
+                if( p.deg > d )
+                {
+                    d = p.deg;
+                }
+            }
+        }
     }
     std::vector<std::pair<std::uint32_t, double>> partners( partnerDeg.begin(), partnerDeg.end() );
     std::sort( partners.begin(), partners.end(), [ & ]( const auto& a, const auto& b )
@@ -174,9 +236,14 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // §H6 (W3FIX): same undisclosed cap as [2] — 18 partners, 8 rows on this repo's own src/graph.h probe.
     std::fprintf( out, "  [3] co-change — usually edited with these but NOT in your diff (%zu)%s:\n",
                   partners.size(), situShowingNote( kSituPartnerRowsShown, partners.size(), "files" ).c_str() );
-    if( partners.empty() ) std::fprintf( out, "        (none, or no git history)\n" );
+    if( partners.empty() )
+    {
+        std::fprintf( out, "        (none, or no git history)\n" );
+    }
     for( std::size_t i = 0; i < partners.size() && i < kSituPartnerRowsShown; ++i )
+    {
         std::fprintf( out, "        %s  (co-edited in %.0f%% of commits)\n", ing.files[ partners[i].first ].c_str(), partners[i].second * 100.0 );
+    }
 }
 
 // ---- structured situational awareness for a DIFF (S5-D) — the same analyses as writeSituation, returned as
@@ -206,31 +273,67 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
     SituationFacts facts;
 
-    for( std::uint32_t f = 0; f < F; ++f ) if( changedFile[f] ) facts.changed.push_back( f );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( changedFile[f] )
+        {
+            facts.changed.push_back( f );
+        }
+    }
 
     std::vector<NodeId> changedSyms;
-    for( NodeId i = 0; i < N; ++i ) if( changedFile[ ing.symbols[i].fileId ] ) changedSyms.push_back( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        if( changedFile[ing.symbols[i].fileId] )
+        {
+            changedSyms.push_back( i );
+        }
+    }
 
     // (1) blast radius — files (non-changed) with ≥1 symbol transitively reaching the changed set, ranked by
     //     dependent-symbol count then path. (2) tests — the test files among them.
     const std::vector<NodeId>  reach = transitiveCallers( g, changedSyms );
     std::vector<std::uint32_t> fileReachers( F, 0 );
-    for( NodeId n : reach ) if( !changedFile[ ing.symbols[n].fileId ] ) ++fileReachers[ ing.symbols[n].fileId ];
-    for( std::uint32_t f = 0; f < F; ++f ) if( fileReachers[f] ) facts.blastRadius.push_back( f );
+    for( NodeId n : reach )
+    {
+        if( !changedFile[ing.symbols[n].fileId] )
+        {
+            ++fileReachers[ing.symbols[n].fileId];
+        }
+    }
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( fileReachers[f] )
+        {
+            facts.blastRadius.push_back( f );
+        }
+    }
     std::sort( facts.blastRadius.begin(), facts.blastRadius.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                { return fileReachers[a] != fileReachers[b] ? fileReachers[a] > fileReachers[b] : ing.files[a] < ing.files[b]; } );
     // §B6 M11: the magnitude behind that ordering, captured in blastRadius order (so index i of the two
     // vectors is the same file). Filled AFTER the sort — never before it, or the pairing silently rotates.
     facts.blastDependents.reserve( facts.blastRadius.size() );
-    for( std::uint32_t f : facts.blastRadius ) facts.blastDependents.push_back( fileReachers[f] );
+    for( std::uint32_t f : facts.blastRadius )
+    {
+        facts.blastDependents.push_back( fileReachers[f] );
+    }
     VERIFY( facts.blastDependents.size() == facts.blastRadius.size() );
 
-    for( std::uint32_t f : facts.blastRadius ) if( isTestPath( ing.files[f] ) ) facts.tests.push_back( f );
+    for( std::uint32_t f : facts.blastRadius )
+    {
+        if( isTestPath( ing.files[f] ) )
+        {
+            facts.tests.push_back( f );
+        }
+    }
     std::sort( facts.tests.begin(), facts.tests.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
     // Σ cognitive complexity per changed file (the complexity axis of the hotspot signal).
     std::vector<std::uint64_t> ccxSum( F, 0 );
-    for( NodeId i = 0; i < N; ++i ) ccxSum[ ing.symbols[i].fileId ] += ing.symbols[i].ccx;
+    for( NodeId i = 0; i < N; ++i )
+    {
+        ccxSum[ing.symbols[i].fileId] += ing.symbols[i].ccx;
+    }
 
     // (3) forgotten — co-change partners NOT in the diff; (4) hotspots — changed files with high cx×churn.
     //     Both reuse cochangePartners (its outCommits = the file's churn, the second hotspot axis). Probe each
@@ -242,14 +345,29 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     std::uint32_t                  probed = 0;
     for( std::uint32_t f = 0; f < F && probed < 40; ++f )
     {
-        if( !changedFile[f] ) continue;
+        if( !changedFile[f] )
+        {
+            continue;
+        }
         ++probed;
         std::uint32_t                commits = 0;
         const std::vector<CoPartner> ps      = cochangePartners( ing, ing.files[f], commits, coSets );
         for( const CoPartner& p : ps )
-            if( !changedFile[ p.fileId ] ) { double& d = partnerDeg[ p.fileId ]; if( p.deg > d ) d = p.deg; }
+        {
+            if( !changedFile[p.fileId] )
+            {
+                double& d = partnerDeg[p.fileId];
+                if( p.deg > d )
+                {
+                    d = p.deg;
+                }
+            }
+        }
         const std::uint64_t score = ccxSum[f] * std::uint64_t( commits );      // hotspot = complexity × churn
-        if( score > 0 ) facts.hotspots.push_back( { f, score } );
+        if( score > 0 )
+        {
+            facts.hotspots.push_back( { f, score } );
+        }
     }
     facts.forgotten.assign( partnerDeg.begin(), partnerDeg.end() );
     std::sort( facts.forgotten.begin(), facts.forgotten.end(), [ & ]( const auto& a, const auto& b )
@@ -263,13 +381,18 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     //     the root (no subdir) yields its bare filename's parent, i.e. "(root)".
     {
         std::string rootPrefix = root;
-        while( rootPrefix.size() > 1 && rootPrefix.back() == '/' ) rootPrefix.pop_back();   // normalize trailing '/'
+        while( rootPrefix.size() > 1 && rootPrefix.back() == '/' )
+        {
+            rootPrefix.pop_back(); // normalize trailing '/'
+        }
         std::vector<std::string> mods;
         for( std::uint32_t f : facts.changed )
         {
             std::string_view p = ing.files[f];
             if( p.size() > rootPrefix.size() + 1 && p.compare( 0, rootPrefix.size(), rootPrefix ) == 0 && p[ rootPrefix.size() ] == '/' )
+            {
                 p = p.substr( rootPrefix.size() + 1 );        // → path relative to root
+            }
             const std::size_t sl = p.find( '/' );
             mods.emplace_back( sl == std::string_view::npos ? std::string( "(root)" ) : std::string( p.substr( 0, sl ) ) );
         }
@@ -311,7 +434,12 @@ inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Gr
 {
     std::vector<NodeId> testSeeds;
     for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
-        if( isTestPath( ing.files[ ing.symbols[i].fileId ] ) ) testSeeds.push_back( i );
+    {
+        if( isTestPath( ing.files[ing.symbols[i].fileId] ) )
+        {
+            testSeeds.push_back( i );
+        }
+    }
     return forwardReach( g, testSeeds );
 }
 
@@ -328,7 +456,10 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     TestGateResult      r;
     r.changedFiles = changedFileCount;
-    if( changedSyms.empty() ) return r;   // no indexed symbols in the change set → no obligations
+    if( changedSyms.empty() )
+    {
+        return r; // no indexed symbols in the change set → no obligations
+    }
 
     // blast radius — the ONE traversal (reused, not re-implemented): everything that transitively reaches the
     // changed symbols. Coverage — the forward dual from every test-file symbol (what the tests transitively call).
@@ -343,7 +474,10 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
     for( NodeId n : reach )
     {
         const std::uint32_t f = ing.symbols[n].fileId;
-        if( isChangedSym[n] ) continue;                // the changed symbols are the change, not its radius
+        if( isChangedSym[n] )
+        {
+            continue; // the changed symbols are the change, not its radius
+        }
         ++r.impactedSymbols;
         if( isTestPath( ing.files[f] ) ) { if( !testFileSeen[f] ) { testFileSeen[f] = 1; r.tests.push_back( f ); } }
         else if( !testReach[n] )         { r.untested.push_back( n ); }
@@ -351,10 +485,20 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
     std::sort( r.tests.begin(), r.tests.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
     std::sort( r.untested.begin(), r.untested.end(), [ & ]( NodeId a, NodeId b )
                {
-                   if( ing.symbols[a].ccx != ing.symbols[b].ccx ) return ing.symbols[a].ccx > ing.symbols[b].ccx;     // riskiest first
-                   const std::string& fa = ing.files[ ing.symbols[a].fileId ]; const std::string& fb = ing.files[ ing.symbols[b].fileId ];
-                   if( fa != fb ) return fa < fb;
-                   if( ing.symbols[a].name != ing.symbols[b].name ) return ing.symbols[a].name < ing.symbols[b].name;
+                   if( ing.symbols[a].ccx != ing.symbols[b].ccx )
+                   {
+                       return ing.symbols[a].ccx > ing.symbols[b].ccx; // riskiest first
+                   }
+                   const std::string& fa = ing.files[ing.symbols[a].fileId];
+                   const std::string& fb = ing.files[ing.symbols[b].fileId];
+                   if( fa != fb )
+                   {
+                       return fa < fb;
+                   }
+                   if( ing.symbols[a].name != ing.symbols[b].name )
+                   {
+                       return ing.symbols[a].name < ing.symbols[b].name;
+                   }
                    return a < b;                                                                                       // total order
                } );
     r.hasObligations = !r.tests.empty() || !r.untested.empty();
@@ -370,11 +514,24 @@ inline TestGateResult computeTestGate( const IngestResult& ing, const Graph& g, 
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
     std::uint32_t changedFileCount = 0;
-    for( std::uint32_t f = 0; f < F; ++f ) if( changedFile[f] ) ++changedFileCount;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( changedFile[f] )
+        {
+            ++changedFileCount;
+        }
+    }
 
     std::vector<char>   isChangedSym( N, 0 );
     std::vector<NodeId> changedSyms;
-    for( NodeId i = 0; i < N; ++i ) if( changedFile[ ing.symbols[i].fileId ] ) { isChangedSym[i] = 1; changedSyms.push_back( i ); }
+    for( NodeId i = 0; i < N; ++i )
+    {
+        if( changedFile[ing.symbols[i].fileId] )
+        {
+            isChangedSym[i] = 1;
+            changedSyms.push_back( i );
+        }
+    }
 
     return computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, nullptr );
 }
@@ -390,7 +547,10 @@ inline TestGateResult computeTestGateForSymbols( const IngestResult& ing, const 
     std::uint32_t       changedFileCount = 0;
     for( NodeId n : changedSyms )
     {
-        if( n >= N ) continue;                                   // out-of-range id → skip, never index past the end
+        if( n >= N )
+        {
+            continue; // out-of-range id → skip, never index past the end
+        }
         isChangedSym[n] = 1;
         const std::uint32_t f = ing.symbols[n].fileId;
         if( f < fileSeen.size() && !fileSeen[f] ) { fileSeen[f] = 1; ++changedFileCount; }
@@ -487,7 +647,9 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
     const TestRunnerIndex gateRunners( ing );
     for( std::uint32_t f : r.tests )
+    {
         std::fprintf( out, "<t p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), runAttr( gateRunners, f, ex ).c_str() );
+    }
     walkUntestedRows( ing, r, uw, [ & ]( std::size_t, const Symbol& s, const std::string& path )
     {
         std::fprintf( out, "<u sym=\"%s\" p=\"%s\" ccx=\"%u\"/>", ex( s.name ).c_str(), ex( path ).c_str(), s.ccx );
@@ -527,8 +689,10 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };
     for( std::size_t i = 0; i < r.tests.size(); ++i )
+    {
         std::fprintf( out, "%s{\"p\":\"%s\"%s}", i == 0 ? "" : ",", jsonStr( ing.files[ r.tests[i] ] ).c_str(),
                       runFieldJson( gateRunners, r.tests[i], jesc ).c_str() );
+    }
     std::fprintf( out, "],\"untested_blast_radius\":[" );
     walkUntestedRows( ing, r, uw, [ & ]( std::size_t i, const Symbol& s, const std::string& path )
     {

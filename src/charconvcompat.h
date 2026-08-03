@@ -97,18 +97,26 @@ template<class T> requires std::is_floating_point_v<T>
 template<class T> requires std::is_floating_point_v<T>
 inline std::from_chars_result parseFloatingViaStrtox( const char* first, const char* last, T& value ) noexcept
 {
-    if( first >= last ) return { first, std::errc::invalid_argument };
+    if( first >= last )
+    {
+        return { first, std::errc::invalid_argument };
+    }
 
     // The two leading characters strtod would swallow and from_chars refuses. Rejecting them here
     // keeps `ptr` on the first unconsumed character in exactly the cases the std path would.
-    if( std::isspace( static_cast<unsigned char>( *first ) ) || *first == '+' ) return { first, std::errc::invalid_argument };
+    if( std::isspace( static_cast<unsigned char>( *first ) ) || *first == '+' )
+    {
+        return { first, std::errc::invalid_argument };
+    }
 
     // A hex float is strtod-only: from_chars(general) matches just the leading "[-]0" and reports the
     // 'x' as the stop. Trim the range so strtod sees the same characters instead of the whole literal.
     const char* afterSign = first + ( *first == '-' ? 1 : 0 );
     const char* scanLast  = last;
     if( last - afterSign >= 2 && afterSign[ 0 ] == '0' && ( afterSign[ 1 ] == 'x' || afterSign[ 1 ] == 'X' ) )
+    {
         scanLast = afterSign + 1;
+    }
 
     // strtod needs a NUL terminator and [first,last) is a view into a larger buffer; one small copy.
     const std::string nullTerminated( first, scanLast );
@@ -117,13 +125,19 @@ inline std::from_chars_result parseFloatingViaStrtox( const char* first, const c
     const T parsed = static_cast<T>( callStrtox( nullTerminated.c_str(), &parseEnd, static_cast<T*>( nullptr ) ) );
 
     const std::size_t consumedCount = static_cast<std::size_t>( parseEnd - nullTerminated.c_str() );
-    if( consumedCount == 0 ) return { first, std::errc::invalid_argument };            // no pattern matched at all
+    if( consumedCount == 0 )
+    {
+        return { first, std::errc::invalid_argument }; // no pattern matched at all
+    }
 
     // ERANGE alone does NOT mean out-of-range: strtod raises it for a gradual underflow to a SUBNORMAL,
     // which from_chars reports as a plain success. Only ±inf (overflow) and a flushed 0 (total
     // underflow) are genuinely unrepresentable — and there `value` stays untouched, per the standard.
     const bool isUnrepresentable = ( errno == ERANGE ) && ( parsed == T( 0 ) || isInfiniteBits( parsed ) );
-    if( isUnrepresentable ) return { first + consumedCount, std::errc::result_out_of_range };
+    if( isUnrepresentable )
+    {
+        return { first + consumedCount, std::errc::result_out_of_range };
+    }
 
     value = parsed;
     return { first + consumedCount, std::errc{} };
@@ -137,8 +151,14 @@ inline std::from_chars_result parseFloatingViaStrtox( const char* first, const c
 template<class T> requires std::is_floating_point_v<T>
 [[nodiscard]] inline std::from_chars_result parseFloating( const char* first, const char* last, T& value ) noexcept
 {
-    if constexpr( charconvdetail::HasStdFloatingFromChars<T> ) return std::from_chars( first, last, value );
-    else                                                       return charconvdetail::parseFloatingViaStrtox( first, last, value );
+    if constexpr( charconvdetail::HasStdFloatingFromChars<T> )
+    {
+        return std::from_chars( first, last, value );
+    }
+    else
+    {
+        return charconvdetail::parseFloatingViaStrtox( first, last, value );
+    }
 }
 
 } // namespace rw

@@ -28,7 +28,10 @@ static int g_fail = 0;
 static void check( bool cond, const char* msg )
 {
     std::printf( "  %s  %s\n", cond ? "PASS" : "FAIL", msg );
-    if( !cond ) g_fail = 1;
+    if( !cond )
+    {
+        g_fail = 1;
+    }
 }
 
 // write `src` to dir/name, return its absolute path + byte size.
@@ -70,9 +73,18 @@ static void addWholeFileFn( IngestResult& ing, const std::string& path, std::uin
 static std::string capBody( int nBlocks )
 {
     std::string s = "int f( int a, int b, int c, int d )\n{\n    int acc = 0;\n";
-    for( int k = 0; k < 12; ++k ) s += "    acc = acc + a * b - c + d;\n";                        // large common core
-    for( int i = 0; i < nBlocks; ++i ) s += "    if( acc > a ) { acc = acc - b; } else { acc = acc + c; }\n";   // n identical blocks
-    for( int k = 0; k < 12; ++k ) s += "    acc = acc * d + a - b;\n";                            // more common core
+    for( int k = 0; k < 12; ++k )
+    {
+        s += "    acc = acc + a * b - c + d;\n"; // large common core
+    }
+    for( int i = 0; i < nBlocks; ++i )
+    {
+        s += "    if( acc > a ) { acc = acc - b; } else { acc = acc + c; }\n"; // n identical blocks
+    }
+    for( int k = 0; k < 12; ++k )
+    {
+        s += "    acc = acc * d + a - b;\n"; // more common core
+    }
     s += "    return acc;\n}\n";
     return s;
 }
@@ -103,16 +115,23 @@ static int runCapFixture( const std::string& dir )
 
     bool orderOk = ( t3.size() == expectN );
     for( std::size_t i = 0; orderOk && i < t3.size(); ++i )
+    {
         orderOk = ( t3[i].members.size() == 2 && t3[i].members[0] == canon[i].first && t3[i].members[1] == canon[i].second );
+    }
     check( orderOk, "CAP) emitted pairs are exactly the first-N of the deterministic id-ordered enumeration (which survive / which drop)" );
 
     bool detOk = ( t3.size() == t3b.size() );
     for( std::size_t i = 0; detOk && i < t3.size(); ++i )
+    {
         detOk = ( t3[i].members == t3b[i].members && t3[i].similarity == t3b[i].similarity );
+    }
     check( detOk, "CAP) capped output is deterministic run-to-run (the dropped set is fixed by the bucket walk)" );
 
     bool bandOk = true;
-    for( const CloneGroup& cg : t3 ) bandOk &= ( cg.type == 3 && cg.similarity >= kType3MinSimilarity && cg.similarity < 1.0f );
+    for( const CloneGroup& cg : t3 )
+    {
+        bandOk &= ( cg.type == 3 && cg.similarity >= kType3MinSimilarity && cg.similarity < 1.0f );
+    }
     check( bandOk, "CAP) every emitted pair is a real Type-3 near-miss (type=3, similarity in [min,1)) — not a vacuous pass" );
 
     std::printf( g_fail ? "TYPE3 CAP FIXTURE: FAIL\n" : "TYPE3 CAP FIXTURE: OK\n" );
@@ -180,9 +199,15 @@ int main( int argc, char** argv )
         check( cg.similarity >= kType3MinSimilarity && cg.similarity < 1.0f, "B) similarity in [min,1) band" );
         const NodeId x = cg.members[0], y = cg.members[1];
         if( ( x == 0 && y == 1 ) ) { foundAB = true; simAB = cg.similarity; }
-        if( x == 3 || y == 3 ) sawC = true;
+        if( x == 3 || y == 3 )
+        {
+            sawC = true;
+        }
         // A(0) and A'(2) are EXACT (sim==1) → must never appear as a Type-3 pair.
-        if( ( x == 0 && y == 2 ) ) sawExactAsT3 = true;
+        if( ( x == 0 && y == 2 ) )
+        {
+            sawExactAsT3 = true;
+        }
     }
     check( foundAB, "B) inserted-stmt pair {A,B} detected as Type-3" );
     check( !sawC, "C) dissimilar body C produces no Type-3 pair (no false positive)" );
@@ -193,7 +218,9 @@ int main( int argc, char** argv )
     const std::vector<CloneGroup> t3b = findClonesType3( ing, minTokens );
     bool detOk = ( t3.size() == t3b.size() );
     for( std::size_t i = 0; detOk && i < t3.size(); ++i )
+    {
         detOk = ( t3[i].members == t3b[i].members && t3[i].type == t3b[i].type && t3[i].similarity == t3b[i].similarity );
+    }
     check( detOk, "D) Type-3 output is deterministic (byte-identical run-to-run)" );
 
     // ── E) MUTATION gate: a threshold strictly ABOVE the measured (A,B) similarity must drop {A,B}. This is the
@@ -204,7 +231,13 @@ int main( int argc, char** argv )
         // emulate a raised threshold: recompute and require NO pair survives a cutoff above simAB.
         const float raised = simAB + 0.02f;
         int survivors = 0;
-        for( const CloneGroup& cg : t3 ) if( cg.similarity >= raised ) ++survivors;
+        for( const CloneGroup& cg : t3 )
+        {
+            if( cg.similarity >= raised )
+            {
+                ++survivors;
+            }
+        }
         // {A,B} (the only near-miss) sits below `raised` ⇒ it must NOT survive; a too-loose implementation that
         // reported dissimilar pairs at sim≈1 would leave survivors here.
         check( survivors == 0, "E) mutation: raising the threshold above sim(A,B) drops the only near-miss pair" );

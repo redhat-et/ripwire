@@ -43,7 +43,10 @@ namespace rw { namespace gitstamp
 inline std::string stampAt( const std::string& root )
 {
     const std::string sha = quality::gitHeadSha( root );
-    if( sha.empty() ) return {};                                                     // not a git repo / no HEAD
+    if( sha.empty() )
+    {
+        return {}; // not a git repo / no HEAD
+    }
     const bool dirty = !quality::gitOneLine( root, "status --porcelain 2>/dev/null" ).empty();
     return sha.substr( 0, 9 ) + ( dirty ? "+dirty" : "" );
 }

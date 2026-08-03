@@ -66,13 +66,18 @@ struct McpIntArg
 inline McpIntArg mcpIntArg( const std::string& scope, const char* field, long long least, long long most )
 {
     const mcpdetail::RawValue raw = mcpdetail::findRawValue( scope, field );
-    if( !raw.isPresent ) return {};                       // absent ⇒ the verb's default, untouched
+    if( !raw.isPresent )
+    {
+        return {}; // absent ⇒ the verb's default, untouched
+    }
 
     long long v = 0;
     // a QUOTED integer still parses (findInt has always accepted "3", and a client that stringifies its
     // numbers is not asking a different question); a quoted NON-integer falls through to the refusal.
     if( !mcpdetail::parseWholeInt( raw.text, v ) || v < least || v > most )
+    {
         return { 0, true, mcprefuse::badValueRefusal( field, raw.text ) };
+    }
     return { v, true, {} };
 }
 
@@ -94,8 +99,14 @@ struct McpStringArg { std::string value; std::string refusal; };
 inline McpStringArg mcpStringArg( const std::string& scope, const char* field )
 {
     const mcpdetail::RawValue raw = mcpdetail::findRawValue( scope, field );
-    if( !raw.isPresent ) return {};
-    if( !raw.isQuoted )  return { {}, mcprefuse::badValueRefusal( field, raw.text ) };
+    if( !raw.isPresent )
+    {
+        return {};
+    }
+    if( !raw.isQuoted )
+    {
+        return { {}, mcprefuse::badValueRefusal( field, raw.text ) };
+    }
     return { mcpdetail::decodeStringAt( scope, raw.valuePos ), {} };
 }
 
@@ -120,14 +131,19 @@ inline McpArrayArg mcpArrayArg( const std::string& scope, const char* field, boo
                                 std::size_t leastCount = 0, std::size_t mostCount = ~std::size_t( 0 ) )
 {
     const mcpdetail::RawValue raw = mcpdetail::findRawValue( scope, field );
-    if( !raw.isPresent ) return {};
+    if( !raw.isPresent )
+    {
+        return {};
+    }
 
     McpArrayArg out;
     out.span      = raw.text;
     out.isPresent = true;
 
     if( raw.isArray )
+    {
         out.strings = mcpdetail::arrayStrings( scope, field );
+    }
     else if( acceptsCsv && raw.isQuoted )
     {
         // the documented lenient form: "a,b,c" → {a,b,c}. Empty fragments are dropped, not passed on as
@@ -137,16 +153,26 @@ inline McpArrayArg mcpArrayArg( const std::string& scope, const char* field, boo
         {
             const std::size_t comma = csv.find( ',', start );
             const std::string tok   = csv.substr( start, comma == std::string::npos ? std::string::npos : comma - start );
-            if( !tok.empty() ) out.strings.push_back( tok );
-            if( comma == std::string::npos ) break;
+            if( !tok.empty() )
+            {
+                out.strings.push_back( tok );
+            }
+            if( comma == std::string::npos )
+            {
+                break;
+            }
             start = comma + 1;
         }
     }
     else
+    {
         return { raw.text, {}, true, mcprefuse::badValueRefusal( field, raw.text ) };
+    }
 
     if( out.strings.size() < leastCount || out.strings.size() > mostCount )
+    {
         out.refusal = mcprefuse::badValueRefusal( field, raw.text );
+    }
     return out;
 }
 
@@ -172,10 +198,18 @@ struct McpObjectArg
 inline McpObjectArg mcpObjectArg( const std::string& scope, const char* field )
 {
     const mcpdetail::RawValue raw = mcpdetail::findRawValue( scope, field );
-    if( !raw.isPresent ) return {};
-    if( !raw.isQuoted && !raw.isArray && raw.text == "null" ) return {};                    // "no parameters" — absent
+    if( !raw.isPresent )
+    {
+        return {};
+    }
+    if( !raw.isQuoted && !raw.isArray && raw.text == "null" )
+    {
+        return {}; // "no parameters" — absent
+    }
     if( raw.isQuoted || raw.isArray || raw.text.empty() || raw.text.front() != '{' )
+    {
         return { {}, false, mcprefuse::badValueRefusal( field, raw.text ) };
+    }
     return { mcpdetail::containerSpanAt( scope, raw.valuePos, '{', '}' ), true, {} };
 }
 
@@ -195,8 +229,14 @@ inline std::string mcpRootDirRefusal( const std::string& dir )
 {
     std::error_code                     ec;
     const std::filesystem::file_status  st = std::filesystem::status( std::filesystem::path( dir ), ec );
-    if( ec || !std::filesystem::exists( st ) )      return mcprefuse::rootRefusal( mcprefuse::RootFault::Missing, dir );
-    if( !std::filesystem::is_directory( st ) )      return mcprefuse::rootRefusal( mcprefuse::RootFault::NotADirectory, dir );
+    if( ec || !std::filesystem::exists( st ) )
+    {
+        return mcprefuse::rootRefusal( mcprefuse::RootFault::Missing, dir );
+    }
+    if( !std::filesystem::is_directory( st ) )
+    {
+        return mcprefuse::rootRefusal( mcprefuse::RootFault::NotADirectory, dir );
+    }
     return {};
 }
 
@@ -214,7 +254,12 @@ inline std::string mcpRootRefusal( const std::string& path )
     if( it != mcpWorkspaceRegistry().end() && it->second.size() >= 2 )
     {
         for( const WorkspaceRoot& r : it->second )
-            if( const std::string rootErr = mcpRootDirRefusal( r.arg ); !rootErr.empty() ) return rootErr;
+        {
+            if( const std::string rootErr = mcpRootDirRefusal( r.arg ); !rootErr.empty() )
+            {
+                return rootErr;
+            }
+        }
         return {};
     }
     return mcpRootDirRefusal( path );
@@ -237,10 +282,16 @@ inline constexpr long long kMcpRecallTopKMax = 1000;
 inline McpPageParse mcpPageArgs( const std::string& scope )
 {
     const McpIntArg limitArg = mcpIntArg( scope, "limit", 1, kMcpPageValueMax );
-    if( !limitArg.refusal.empty() ) return { {}, limitArg.refusal };
+    if( !limitArg.refusal.empty() )
+    {
+        return { {}, limitArg.refusal };
+    }
 
     const McpIntArg offsetArg = mcpIntArg( scope, "offset", 0, kMcpPageValueMax );
-    if( !offsetArg.refusal.empty() ) return { {}, offsetArg.refusal };
+    if( !offsetArg.refusal.empty() )
+    {
+        return { {}, offsetArg.refusal };
+    }
 
     return { { int( limitArg.value ), int( offsetArg.value ) }, {} };   // absent ⇒ 0 ⇒ the un-paged window
 }
@@ -260,11 +311,18 @@ inline McpPageParse mcpPageArgs( const std::string& scope )
 inline std::string mcpUnknownFieldRefusal( const std::string& scope, std::string_view verb,
                                            std::span<const std::string_view> declared )
 {
-    if( declared.empty() ) return {};   // an unadvertised name — the unknown-TOOL refusal owns that request
+    if( declared.empty() )
+    {
+        return {}; // an unadvertised name — the unknown-TOOL refusal owns that request
+    }
 
     for( const std::string& field : mcpdetail::objectKeys( scope ) )
+    {
         if( !mcprefuse::isFieldAccepted( declared, field ) )
+        {
             return mcprefuse::unknownFieldRefusal( verb, field, declared );
+        }
+    }
     return {};
 }
 
@@ -275,7 +333,10 @@ inline std::string captureXml( const std::function<void( std::FILE* )>& render )
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};                                   // alloc failure → empty, never deref NULL
+    if( !mem )
+    {
+        return {}; // alloc failure → empty, never deref NULL
+    }
     render( mem );
     std::fflush( mem );
     std::fclose( mem );
@@ -345,7 +406,10 @@ inline std::string whereisText( const std::string& root, const std::string& symb
                                 std::size_t maxHits, McpPageArgs page = {} )
 {
     const crossref::WhereResult res = crossref::computeWhereis( root, symbol, filter );
-    if( !res.ok ) return {};
+    if( !res.ok )
+    {
+        return {};
+    }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset ); } );
 }
 
@@ -353,7 +417,10 @@ inline std::string whereisText( const std::string& root, const std::string& symb
 inline std::string strayContentText( const std::string& root, const std::string& filter, std::size_t maxFiles )
 {
     const crossref::StrayResult res = crossref::computeStrayContent( root, filter );
-    if( !res.ok ) return {};
+    if( !res.ok )
+    {
+        return {};
+    }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeStrayContent( f, res, maxFiles ); } );
 }
 
@@ -398,7 +465,9 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     const Graph&        g   = ix.g;
     const NodeId        f   = resolveFocus( ing, name );
     if( f == kNoNode || f >= ing.symbols.size() )
+    {
         return {};
+    }
 
     const auto symObj = [ & ]( NodeId id ) -> std::string
     {
@@ -417,14 +486,30 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
         const auto* ro = g.inEdges.rowOffsets();
         const auto* ci = g.inEdges.colIndices();
         bool first = true;
-        for( std::uint32_t k = ro[f]; k < ro[f + 1]; ++k ) { if( !first ) out += ","; out += symObj( ci[k] ); first = false; }
+        for( std::uint32_t k = ro[f]; k < ro[f + 1]; ++k )
+        {
+            if( !first )
+            {
+                out += ",";
+            }
+            out += symObj( ci[k] );
+            first = false;
+        }
     }
     out += "]";
     if( !referencingOnly )
     {
         out += ",\"calls\":[";
         bool first = true;
-        for( std::uint32_t k = g.outOff[f]; k < g.outOff[f + 1]; ++k ) { if( !first ) out += ","; out += symObj( g.outTargets[k] ); first = false; }
+        for( std::uint32_t k = g.outOff[f]; k < g.outOff[f + 1]; ++k )
+        {
+            if( !first )
+            {
+                out += ",";
+            }
+            out += symObj( g.outTargets[k] );
+            first = false;
+        }
         out += "]";
     }
     // §H4 §3.4: find_symbol / find_referencing_symbols are the MCP twins of --callees / --callers, so the
@@ -470,7 +555,14 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // states its ordering in full). Both are facts about this answer, so they ride in the answer.
     std::uint32_t prevFile = UINT32_MAX;
     std::size_t   filesMatched = 0;
-    for( const GrepRawHit& h : collected.raw ) if( h.fileId != prevFile ) { ++filesMatched; prevFile = h.fileId; }
+    for( const GrepRawHit& h : collected.raw )
+    {
+        if( h.fileId != prevFile )
+        {
+            ++filesMatched;
+            prevFile = h.fileId;
+        }
+    }
 
     // N8: shown/capped (+ total/has_more/next_offset/offset/limit when paging) come from pageview.h's ONE
     // disclosure under its JSON syntax row, not from a hand-written pair that would be a second vocabulary.
@@ -491,7 +583,10 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     bool first = true;
     for( const GrepHit& h : hits )
     {
-        if( !first ) out += ",";
+        if( !first )
+        {
+            out += ",";
+        }
         first = false;
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ h.fileId ] ) + "\",\"line\":" + std::to_string( h.line )
              + ",\"in\":\"" + mcpdetail::jsonEscape( h.enclosing ) + "\"}";
@@ -507,7 +602,10 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
     const std::uint32_t fid = resolveFileSuffix( ing, file );
-    if( fid == UINT32_MAX ) return {};
+    if( fid == UINT32_MAX )
+    {
+        return {};
+    }
     std::uint32_t                commits = 0;
     const std::vector<CoPartner> ps      = cochangePartners( root, ing, file, commits );
     // §P8 vocabulary: the JSON sibling of the XML at= anchor the CLI --cochange now carries — same spelling
@@ -519,7 +617,10 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     bool first = true;
     for( const CoPartner& p : ps )
     {
-        if( !first ) out += ",";
+        if( !first )
+        {
+            out += ",";
+        }
         first = false;
         char deg[ 16 ];  std::snprintf( deg, sizeof( deg ), "%.2f", p.deg );
         // §A9.3: the JSON sibling of the XML dep_capable= tell — surprising is false for a pair that could
@@ -543,7 +644,10 @@ inline std::string recallText( const std::string& root, const std::string& task,
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
     writeRecall( mem, ix.ing, scores, task, k, maxBytes, true, redact );   // docs (markdown) only
     std::fflush( mem );
     std::fclose( mem );
@@ -570,11 +674,16 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     std::vector<char> changed;
     bool isCleanTree = false;
     if( !diffOrEmpty.empty() )
+    {
         changed = changedMaskFromList( ing, diffOrEmpty );
+    }
     else
     {
         auto [ mask, ok ] = gitDiffChangedMask( root, ing );
-        if( !ok ) return {};                                  // git unavailable (not a repo) → caller reports error
+        if( !ok )
+        {
+            return {}; // git unavailable (not a repo) → caller reports error
+        }
         changed = std::move( mask );
         // ok=true + all-zero mask = clean working tree — fall through to computeSituationFacts which returns
         // all-empty arrays; set isCleanTree so we can add an explanatory note to the JSON result.
@@ -594,7 +703,18 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     const auto            jsonEsc = []( std::string_view sv ) { return mcpdetail::jsonEscape( std::string( sv ) ); };
 
     std::string out = "{\"changed_files\":[";
-    { bool first = true; for( std::uint32_t f : facts.changed ) { if( !first ) out += ","; first = false; out += fileObj( f ); } }
+    {
+        bool first = true;
+        for( std::uint32_t f : facts.changed )
+        {
+            if( !first )
+            {
+                out += ",";
+            }
+            first = false;
+            out += fileObj( f );
+        }
+    }
 
     // §B6 M11: each blast-radius row carries the dependent-SYMBOL count that already ORDERS this list. The
     // payload used to emit {"file":...} alone, so the agent got a ranked blast radius with no magnitude and
@@ -605,7 +725,11 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         bool first = true;
         for( std::size_t i = 0; i < facts.blastRadius.size(); ++i )
         {
-            if( !first ) out += ","; first = false;
+            if( !first )
+            {
+                out += ",";
+            }
+            first = false;
             out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ facts.blastRadius[i] ] )
                  + "\",\"dependent_symbols\":" + std::to_string( facts.blastDependents[i] ) + "}";
         }
@@ -620,7 +744,11 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         bool first = true;
         for( std::uint32_t f : facts.tests )
         {
-            if( !first ) out += ","; first = false;
+            if( !first )
+            {
+                out += ",";
+            }
+            first = false;
             out += "{\"test\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
         }
     }
@@ -630,7 +758,11 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         bool first = true;
         for( const auto& [ f, deg ] : facts.forgotten )
         {
-            if( !first ) out += ","; first = false;
+            if( !first )
+            {
+                out += ",";
+            }
+            first = false;
             char d[ 16 ];  std::snprintf( d, sizeof( d ), "%.2f", deg );
             out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\",\"cochange_degree\":" + d + "}";
         }
@@ -641,13 +773,28 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         bool first = true;
         for( const auto& [ f, score ] : facts.hotspots )
         {
-            if( !first ) out += ","; first = false;
+            if( !first )
+            {
+                out += ",";
+            }
+            first = false;
             out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\",\"score\":" + std::to_string( score ) + "}";
         }
     }
 
     out += "],\"modules_touched\":[";
-    { bool first = true; for( const std::string& m : facts.modulesTouched ) { if( !first ) out += ","; first = false; out += "\"" + mcpdetail::jsonEscape( m ) + "\""; } }
+    {
+        bool first = true;
+        for( const std::string& m : facts.modulesTouched )
+        {
+            if( !first )
+            {
+                out += ",";
+            }
+            first = false;
+            out += "\"" + mcpdetail::jsonEscape( m ) + "\"";
+        }
+    }
     out += "]";
 
     // §M9 (W3FIX): the §B7.3 blind-spot disclosure the XML --situ prints under its [2] section, and which
@@ -662,7 +809,9 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     // clean working tree (git diff HEAD returned 0 files) — append a note so callers can distinguish this
     // valid-but-empty result from a populated one, mirroring how the CLI --situ says "0 changed files".
     if( isCleanTree )
+    {
         out += ",\"note\":\"0 changed files — working tree is clean (git diff HEAD returned nothing to analyze)\"";
+    }
 
     out += "}";
     return out;
@@ -675,9 +824,21 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
     const McpIndex&           ix   = getIndex( root );
     const IngestResult&       ing  = ix.ing;
     const std::vector<NodeId> defs = resolveAllByName( ing, symbol );
-    if( defs.empty() ) return {};
+    if( defs.empty() )
+    {
+        return {};
+    }
     std::vector<NodeId> docs;
-    for( NodeId d : defs ) if( d < ix.g.mentions.size() ) for( NodeId dn : ix.g.mentions[d] ) docs.push_back( dn );
+    for( NodeId d : defs )
+    {
+        if( d < ix.g.mentions.size() )
+        {
+            for( NodeId dn : ix.g.mentions[d] )
+            {
+                docs.push_back( dn );
+            }
+        }
+    }
     std::sort( docs.begin(), docs.end() );  docs.erase( std::unique( docs.begin(), docs.end() ), docs.end() );
 
     // §A8.4 (same fix as CLI --mentions): one entry per FILE via the shared collapse — the old payload
@@ -690,7 +851,10 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
     bool first = true;
     for( const MentionFileRow& row : fileRows )
     {
-        if( !first ) out += ",";
+        if( !first )
+        {
+            out += ",";
+        }
         first = false;
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ row.fileId ] ) + "\",\"mentions\":" + std::to_string( row.mentions ) + "}";
     }
@@ -718,7 +882,12 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // (packLego) — same exact MaxScore pruning contract as the CLI --for (byte-identical output).
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
     for( std::size_t i = 0; i < ix.g.implementors.size() && i < ifaceExact.size(); ++i )
-        if( !ix.g.implementors[i].empty() ) ifaceExact[i] = 1;
+    {
+        if( !ix.g.implementors[i].empty() )
+        {
+            ifaceExact[i] = 1;
+        }
+    }
     // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as the CLI --for.
     const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
@@ -792,13 +961,18 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         const auto* ro = ix.g.inEdges.rowOffsets();
         const auto* ci = ix.g.inEdges.colIndices();
         for( std::size_t i = 0; i < S; ++i )
+        {
             fanIn[i] = ro[i + 1] - ro[i];   // in-degree = callers of symbol i
+        }
     }
 
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
 
     // G4: task and rc.reason are agent-controlled and land verbatim in an XML comment below — a "-->" run
     // would close the comment early and inject XML, and any "--" run alone breaks strict xmllint parsing.
@@ -819,7 +993,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         char*       buf2 = nullptr;
         std::size_t sz2  = 0;
         std::FILE*  m2   = open_memstream( &buf2, &sz2 );
-        if( !m2 ) return {};
+        if( !m2 )
+        {
+            return {};
+        }
         emitFn( m2 );
         std::fflush( m2 );  std::fclose( m2 );
         std::string s = buf2 ? std::string( buf2, sz2 ) : std::string{};
@@ -829,7 +1006,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
     // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses.
     std::vector<NodeId> lensSurfaceIds( S );
-    for( NodeId i = 0; i < NodeId( S ); ++i ) lensSurfaceIds[i] = i;
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        lensSurfaceIds[i] = i;
+    }
     std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
                [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
     lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
@@ -839,8 +1019,16 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::vector<std::vector<NodeId>> legoScoped = legoImplementorsOnSurface( ing, ix.g.implementors, lensSurfaceIds );
     std::string legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true ); } );
     std::string composeStr, routeStr;
-    if( !ix.g.composeEdges.empty() ) composeStr = renderToString( [ & ]( std::FILE* m2 ) { packCompose( m2, ing, ix.g.composeEdges, lensSurfaceIds ); } );
-    if( !ix.g.routeEdges.empty() )   routeStr   = renderToString( [ & ]( std::FILE* m2 ) { packRoutes( m2, ing, ix.g.routeEdges, lensSurfaceIds ); } );   // B6.3
+    if( !ix.g.composeEdges.empty() )
+    {
+        composeStr = renderToString( [ & ]( std::FILE* m2 )
+                                     { packCompose( m2, ing, ix.g.composeEdges, lensSurfaceIds ); } );
+    }
+    if( !ix.g.routeEdges.empty() )
+    {
+        routeStr = renderToString( [ & ]( std::FILE* m2 )
+                                   { packRoutes( m2, ing, ix.g.routeEdges, lensSurfaceIds ); } ); // B6.3
+    }
     const std::size_t fixedBytes = headerStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = kForPayloadBudgetBytes > fixedBytes ? kForPayloadBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
@@ -859,9 +1047,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // the lego block to the files the budget-trimmed sigs actually kept and re-render (a byte-subset of what
     // the budget charged for). The header prefix is skipped so only rendered sigs rows are consulted.
     std::fflush( mem );
-    if( buf && sz > headerStr.size() && !legoStr.empty()
-        && narrowLegoToRenderedSigs( ing, legoScoped, std::string_view( buf + headerStr.size(), sz - headerStr.size() ) ) )
+    if( buf && sz > headerStr.size() && !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, std::string_view( buf + headerStr.size(), sz - headerStr.size() ) ) )
+    {
         legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true ); } );
+    }
     std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
     std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
     std::fwrite( routeStr.data(), 1, routeStr.size(), mem );   // B6.3
@@ -890,7 +1079,10 @@ inline std::string legoText( const std::string& root, const std::string& type, R
     const McpIndex&     ix    = getIndex( root );
     const IngestResult& ing   = ix.ing;
     const NodeId        focus = resolveFocus( ing, type );
-    if( focus == kNoNode ) return {};
+    if( focus == kNoNode )
+    {
+        return {};
+    }
 
     const std::vector<char> impure = computeImpure( ing, ix.g );
     const std::vector<float> flat( ing.symbols.size(), 0.f );
@@ -898,7 +1090,10 @@ inline std::string legoText( const std::string& root, const std::string& type, R
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
     std::fprintf( mem, "<ctx>" );
     packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true );
     std::fprintf( mem, "</ctx>" );
@@ -929,7 +1124,10 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     if( !symbolName.empty() )
     {
         const std::vector<NodeId> defs = resolveAllByName( ing, symbolName );
-        if( defs.empty() ) return {};   // symbol not found → caller sends -32602
+        if( defs.empty() )
+        {
+            return {}; // symbol not found → caller sends -32602
+        }
         // ONE of N definitions — the lowest node id — and the report then covers that definition's file
         // alone under files="1", while callers/uses/impact/mentions on the same name all disclose defs=.
         onlyFileId  = ing.symbols[ defs[0] ].fileId;
@@ -937,12 +1135,18 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     }
 
     const std::vector<FileOwnership> ownerships = gitFileAuthors( root, ing, onlyFileId );
-    if( ownerships.empty() ) return {};   // git unavailable or no history → caller sends error
+    if( ownerships.empty() )
+    {
+        return {}; // git unavailable or no history → caller sends error
+    }
 
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
 
     const int          cap          = int( ownerships.size() );
     const std::size_t  uniformCount = countUniformOwnership( ownerships, cap );
@@ -971,7 +1175,9 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
                                  : " of=\"" + std::string( escapeXml( symbolName, owSymEsc ) ) + "\" defs=\"" + std::to_string( symDefCount ) + "\"";
     std::fprintf( mem, "<owners files=\"%zu\"%s%s>", ownerships.size(), owSymAttr.c_str(), gitstamp::atAttr( root ).c_str() );
     if( uniformCount > 0 )
+    {
         std::fprintf( mem, "<uniform authors=\"1\" bf=\"1\" share=\"1.00\" files=\"%zu\"/>", uniformCount );
+    }
     for( std::size_t i : printRows )
     {
         const FileOwnership& ow  = ownerships[i];
@@ -1026,11 +1232,17 @@ inline std::string exemplarText( const std::string& root, const std::string& kin
     std::vector<std::uint32_t> fanIn( S, 0 );
     {
         const auto* ro = g.inEdges.rowOffsets();
-        for( std::size_t i = 0; i < S; ++i ) fanIn[i] = ro[i + 1] - ro[i];
+        for( std::size_t i = 0; i < S; ++i )
+        {
+            fanIn[i] = ro[i + 1] - ro[i];
+        }
     }
 
     const ExemplarPick pick = selectExemplar( ing, g, fanIn, qm.tested, kindOrTask );
-    if( pick.winner == kNoNode ) return {};   // no candidate of the kind / task matched nothing → caller reports not-found
+    if( pick.winner == kNoNode )
+    {
+        return {}; // no candidate of the kind / task matched nothing → caller reports not-found
+    }
 
     const auto fin = [ & ]( NodeId i ) -> std::uint32_t { return ( i < fanIn.size() )    ? fanIn[i]    : 0u; };
     const auto ts  = [ & ]( NodeId i ) -> std::uint8_t  { return ( i < qm.tested.size() ) ? qm.tested[i] : std::uint8_t( 0 ); };
@@ -1052,7 +1264,10 @@ inline std::string exemplarText( const std::string& root, const std::string& kin
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
     std::fprintf( mem, "<ctx>" );
     // §B6 M13: the rule is exemplar.h's kExemplarSelectionRule, rendered — not restated here in a fourth wording.
     std::fprintf( mem, "<!-- ripwire exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
@@ -1089,7 +1304,10 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     const Graph&        g   = ix.g;
 
     const std::vector<NodeId> seeds = resolveAllByName( ing, symbol );
-    if( seeds.empty() ) return {};   // symbol not found → caller reports not-found
+    if( seeds.empty() )
+    {
+        return {}; // symbol not found → caller reports not-found
+    }
 
     const std::vector<NodeId> reach = transitiveCallers( g, seeds );
     const std::vector<float>  rank  = rankGraph( g );
@@ -1102,7 +1320,10 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
     // §H4 §3.4: the opener AND the paging clause AND the floor/counting-unit tail now come from the shared
     // constants (src/graphlegend.h + src/pageview.h), so this legend is byte-identical to the CLI --impact
     // one. It was NOT before: this copy carried an abridged paging clause with no limit="0" definition —
@@ -1162,11 +1383,20 @@ inline std::string impactText( const std::string& root, const std::string& symbo
 inline std::string qualifiedSelectorRefusal( const IngestResult& ing, const std::string& symbol, std::string_view cliFlag )
 {
     const std::size_t lastColon = symbol.rfind( ':' );
-    if( lastColon == std::string::npos || lastColon + 1 >= symbol.size() ) return {};
+    if( lastColon == std::string::npos || lastColon + 1 >= symbol.size() )
+    {
+        return {};
+    }
 
     const std::string bareName = symbol.substr( lastColon + 1 );
-    if( !resolveAllByName( ing, symbol ).empty() )   return {};   // the whole spelling IS a name
-    if( resolveAllByName( ing, bareName ).empty() )  return {};   // the bare half is not a symbol either
+    if( !resolveAllByName( ing, symbol ).empty() )
+    {
+        return {}; // the whole spelling IS a name
+    }
+    if( resolveAllByName( ing, bareName ).empty() )
+    {
+        return {}; // the bare half is not a symbol either
+    }
 
     return "qualified file:name selectors are CLI-only on this verb — pass the bare name '" + bareName
          + "' (the union across its defs), or use the CLI form `ripwire <dir> " + std::string( cliFlag ) + symbol
@@ -1177,17 +1407,31 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
 {
     const std::size_t lastColon = symbol.rfind( ':' );
     if( lastColon != std::string::npos && lastColon + 1 < symbol.size() )
+    {
         return qualifiedSelectorRefusal( ing, symbol, "--uses=" );   // "" when the qualified spelling resolves
+    }
 
-    if( !resolveAllByName( ing, symbol ).empty() ) return {};   // it has a definition — a normal answer
+    if( !resolveAllByName( ing, symbol ).empty() )
+    {
+        return {}; // it has a definition — a normal answer
+    }
 
     // no definition: refuse ONLY if it also has no use-site (early-exit scan — one match is enough to prove
     // this is a real external name rather than a typo).
     for( const Reference& r : ing.references )
     {
-        if( r.calleeName != symbol )     continue;
-        if( r.isCompose || r.isDocLink ) continue;   // type edge / doc mention — not a use-site
-        if( r.lang == Lang::Markdown )   continue;   // markdown wikilink — not a code use-site
+        if( r.calleeName != symbol )
+        {
+            continue;
+        }
+        if( r.isCompose || r.isDocLink )
+        {
+            continue; // type edge / doc mention — not a use-site
+        }
+        if( r.lang == Lang::Markdown )
+        {
+            continue; // markdown wikilink — not a code use-site
+        }
         return {};                                   // external="1" with real sites: a valid answer, not a typo
     }
     return mcprefuse::notFound( ing, "symbol", symbol,
@@ -1208,9 +1452,18 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
     std::vector<UseSite> sites;
     for( const Reference& r : ing.references )
     {
-        if( r.calleeName != sym )        continue;
-        if( r.isCompose || r.isDocLink ) continue;   // type edge / doc mention — not a use-site
-        if( r.lang == Lang::Markdown )   continue;   // markdown wikilink — not a code use-site
+        if( r.calleeName != sym )
+        {
+            continue;
+        }
+        if( r.isCompose || r.isDocLink )
+        {
+            continue; // type edge / doc mention — not a use-site
+        }
+        if( r.lang == Lang::Markdown )
+        {
+            continue; // markdown wikilink — not a code use-site
+        }
         std::string in;
         if( r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() )
         {
@@ -1220,12 +1473,14 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
-    {
-        if( a.fileId != b.fileId ) return ing.files[ a.fileId ] < ing.files[ b.fileId ];
-        if( a.line   != b.line )   return a.line < b.line;
-        if( a.role   != b.role )   return std::uint8_t( a.role ) < std::uint8_t( b.role );
-        return a.in < b.in;
-    } );
+               {
+        if( a.fileId != b.fileId ) { return ing.files[ a.fileId ] < ing.files[ b.fileId ];
+}
+        if( a.line   != b.line ) {   return a.line < b.line;
+}
+        if( a.role   != b.role ) {   return std::uint8_t( a.role ) < std::uint8_t( b.role );
+}
+        return a.in < b.in; } );
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -1233,7 +1488,10 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
     // §H4 §3.4 item 2: the opener is the SHARED one (src/graphlegend.h) — this copy and the CLI's were the
     // same false "every use-site of SYM" promise emitted twice, and a fix applied to one of two echo sites
     // is the §B4 failure family. The BODY deliberately stays surface-specific: the CLI legend documents the
@@ -1248,7 +1506,10 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
     for( const UseSite& u : sites )
     {
         std::fprintf( mem, "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( ing.files[ u.fileId ] ).c_str(), u.line );
-        if( !u.in.empty() ) std::fprintf( mem, " in_id=\"%s\"", ex( u.in ).c_str() );   // §P8: MCP twin of the CLI --uses rename
+        if( !u.in.empty() )
+        {
+            std::fprintf( mem, " in_id=\"%s\"", ex( u.in ).c_str() ); // §P8: MCP twin of the CLI --uses rename
+        }
         std::fprintf( mem, "/>" );
     }
     std::fprintf( mem, "</uses>" );
@@ -1274,7 +1535,10 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     // paths that plainly exist, and the answer never said which def it had picked.
     const std::vector<NodeId> srcDefs = resolveAllByNameQualified( ing, from );
     const std::vector<NodeId> dstDefs = resolveAllByNameQualified( ing, to );
-    if( srcDefs.empty() || dstDefs.empty() ) return {};   // an endpoint not found → caller reports not-found
+    if( srcDefs.empty() || dstDefs.empty() )
+    {
+        return {}; // an endpoint not found → caller reports not-found
+    }
 
     const std::vector<NodeId> pth     = shortestPathAny( g, srcDefs, dstDefs );
     const NodeId              srcUsed = pth.empty() ? srcDefs.front() : pth.front();
@@ -1288,14 +1552,19 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     char*       buf = nullptr;
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem ) return {};
+    if( !mem )
+    {
+        return {};
+    }
     std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                   srcDefs.size(), dstDefs.size(),
                   pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1 );
     if( pth.empty() )
+    {
         std::fprintf( mem, " hint=\"no directed call path — try the connect verb on %s,%s (undirected: finds a shared caller), or uses/impact for non-call references\"",
                       ex( from ).c_str(), ex( to ).c_str() );
+    }
     std::fprintf( mem, ">" );
     for( NodeId n : pth )
     { const Symbol& s = ing.symbols[n]; std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
@@ -1317,7 +1586,10 @@ inline std::string pathEndpointRefusal( const IngestResult& ing, const std::stri
 {
     const bool fromOk = !resolveAllByNameQualified( ing, from ).empty();
     const bool toOk   = !resolveAllByNameQualified( ing, to ).empty();
-    if( fromOk && toOk ) return {};
+    if( fromOk && toOk )
+    {
+        return {};
+    }
 
     // the near-miss clause for ONE endpoint, without re-stating "symbol not found" per side (this refusal
     // already said it once, for both).
@@ -1325,16 +1597,31 @@ inline std::string pathEndpointRefusal( const IngestResult& ing, const std::stri
     {
         std::string        part = std::string( which ) + "='" + spelling + "'";
         const std::string  near = didYouMean( ing, spelling );
-        if( !near.empty() && near != spelling ) part += " (did you mean '" + near + "'?)";
+        if( !near.empty() && near != spelling )
+        {
+            part += " (did you mean '" + near + "'?)";
+        }
         return part;
     };
 
     std::string msg = "path endpoint not found: ";
-    if( !fromOk )          msg += endpoint( "from", from );
-    if( !fromOk && !toOk ) msg += ", ";
-    if( !toOk )            msg += endpoint( "to", to );
+    if( !fromOk )
+    {
+        msg += endpoint( "from", from );
+    }
+    if( !fromOk && !toOk )
+    {
+        msg += ", ";
+    }
+    if( !toOk )
+    {
+        msg += endpoint( "to", to );
+    }
     msg += " — the other endpoint is fine; fix only the named one";
-    if( !fromOk && !toOk ) msg = msg.substr( 0, msg.rfind( " — " ) );   // both failed: no "the other" to speak of
+    if( !fromOk && !toOk )
+    {
+        msg = msg.substr( 0, msg.rfind( " — " ) ); // both failed: no "the other" to speak of
+    }
     return msg;
 }
 
@@ -1376,12 +1663,17 @@ namespace connectemit
             adj[ e.to   ].push_back( { e.from, false } );
         }
         for( auto& [ n, v ] : adj )
+        {
             std::sort( v.begin(), v.end(), []( const Nb& a, const Nb& b ) noexcept
                        { return a.to != b.to ? a.to < b.to : a.viaOut > b.viaOut; } );
+        }
 
         for( std::size_t li = 0; li < grp.paths.size(); ++li )
         {
-            if( !legRetained[ li ] ) continue;
+            if( !legRetained[li] )
+            {
+                continue;
+            }
             const NodeId srcT = grp.paths[ li ].termA, dstT = grp.paths[ li ].termB;
 
             // BFS srcT -> dstT over the group subgraph (tiny: <= core node cap), prev + discovery channel.
@@ -1392,23 +1684,38 @@ namespace connectemit
             for( std::size_t head = 0; head < q.size() && !found; ++head )
             {
                 const auto it = adj.find( q[ head ] );
-                if( it == adj.end() ) continue;
+                if( it == adj.end() )
+                {
+                    continue;
+                }
                 for( const Nb& nb : it->second )
                 {
-                    if( prev.find( nb.to ) != prev.end() ) continue;
+                    if( prev.find( nb.to ) != prev.end() )
+                    {
+                        continue;
+                    }
                     prev[ nb.to ] = q[ head ];  viaOut[ nb.to ] = nb.viaOut ? 1 : 0;
                     if( nb.to == dstT ) { found = true; break; }
                     q.push_back( nb.to );
                 }
             }
-            if( !found ) continue;                                 // defensive: leg unwalkable in the trimmed union -> skip
+            if( !found )
+            {
+                continue; // defensive: leg unwalkable in the trimmed union -> skip
+            }
 
             for( NodeId cur = dstT; cur != srcT; cur = prev[ cur ] )
             {
                 u.nodes.push_back( cur );
                 const NodeId p = prev[ cur ];
-                if( viaOut[ cur ] ) u.edges.push_back( { p, cur } );   // p CALLS cur (true direction)
-                else                u.edges.push_back( { cur, p } );   // cur CALLS p
+                if( viaOut[cur] )
+                {
+                    u.edges.push_back( { p, cur } ); // p CALLS cur (true direction)
+                }
+                else
+                {
+                    u.edges.push_back( { cur, p } ); // cur CALLS p
+                }
             }
         }
         const auto edgeLess = []( const ConnectEdge& a, const ConnectEdge& b ) noexcept
@@ -1464,11 +1771,24 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
     const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
     {
         const auto it = contents.find( fid );
-        if( it != contents.end() ) return it->second;
+        if( it != contents.end() )
+        {
+            return it->second;
+        }
         std::string s;
         if( fid < ing.files.size() )
+        {
             if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
-            { char b[ 4096 ]; std::size_t n; while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 ) s.append( b, n ); std::fclose( in ); }
+            {
+                char b[4096];
+                std::size_t n;
+                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+                {
+                    s.append( b, n );
+                }
+                std::fclose( in );
+            }
+        }
         return contents.emplace( fid, std::move( s ) ).first->second;
     };
 
@@ -1486,8 +1806,10 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
     struct LegRef { std::size_t groupIdx, legIdx; std::uint32_t dist; NodeId a, b; };
     std::vector<LegRef> legOrder;
     for( std::size_t gi = 0; gi < res.groups.size(); ++gi )
+    {
         for( std::size_t li = 0; li < res.groups[ gi ].paths.size(); ++li )
         { const ConnectPath& cp = res.groups[ gi ].paths[ li ]; legOrder.push_back( { gi, li, cp.dist, cp.termA, cp.termB } ); }
+    }
     std::sort( legOrder.begin(), legOrder.end(), []( const LegRef& x, const LegRef& y ) noexcept
                { return x.dist != y.dist ? x.dist > y.dist : x.a != y.a ? x.a < y.a : x.b < y.b; } );
 
@@ -1502,13 +1824,22 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
 
         // retained-leg mask per group for this pass.
         std::vector<std::vector<char>> retained( res.groups.size() );
-        for( std::size_t gi = 0; gi < res.groups.size(); ++gi ) retained[ gi ].assign( res.groups[ gi ].paths.size(), 1 );
-        for( std::size_t d = 0; d < legsDropped && d < legOrder.size(); ++d ) retained[ legOrder[ d ].groupIdx ][ legOrder[ d ].legIdx ] = 0;
+        for( std::size_t gi = 0; gi < res.groups.size(); ++gi )
+        {
+            retained[gi].assign( res.groups[gi].paths.size(), 1 );
+        }
+        for( std::size_t d = 0; d < legsDropped && d < legOrder.size(); ++d )
+        {
+            retained[legOrder[d].groupIdx][legOrder[d].legIdx] = 0;
+        }
 
         // connected groups first (core order = lowest-terminal-id order), then the <unconnected> singletons.
         for( const ConnectGroup& grp : res.groups )
         {
-            if( grp.terminals.size() < 2 ) continue;
+            if( grp.terminals.size() < 2 )
+            {
+                continue;
+            }
             const std::size_t gi = std::size_t( &grp - res.groups.data() );
 
             std::vector<NodeId>      steiner = grp.steiner;
@@ -1518,7 +1849,12 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
                 const connectemit::GroupUnion u = connectemit::rebuildFromLegs( grp, retained[ gi ] );
                 steiner.clear();
                 for( NodeId v : u.nodes )
-                    if( !std::binary_search( grp.terminals.begin(), grp.terminals.end(), v ) ) steiner.push_back( v );
+                {
+                    if( !std::binary_search( grp.terminals.begin(), grp.terminals.end(), v ) )
+                    {
+                        steiner.push_back( v );
+                    }
+                }
                 edges = u.edges;
             }
             ++connectedGroups;
@@ -1535,18 +1871,25 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
                     const Symbol&      sy  = ing.symbols[ sN ];
                     const std::string& src = contentOf( sy.fileId );
                     if( sy.sigStartByte < sy.sigEndByte && sy.sigEndByte <= src.size() )
+                    {
                         payload.append( " sig=\"" ).append( ex( cleanSig( src.data(), sy.sigStartByte, sy.sigEndByte, redact ) ) ).append( "\"" );
+                    }
                 }
                 payload.append( "/>" );
             }
             for( const ConnectEdge& e : edges )
+            {
                 payload.append( "<e f=\"" ).append( ex( ing.symbols[ e.from ].name ) )
                        .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"/>" );
+            }
             payload.append( "</g>" );
         }
         for( const ConnectGroup& grp : res.groups )                 // §4: <unconnected> is NEVER trimmed
         {
-            if( grp.terminals.size() != 1 ) continue;
+            if( grp.terminals.size() != 1 )
+            {
+                continue;
+            }
             nodeTotal += 1;
             payload.append( "<unconnected radius=\"" ).append( std::to_string( res.radius ) ).append( "\">" );
             symAttr( payload, "t", grp.terminals[ 0 ] );
@@ -1557,7 +1900,10 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
         // above): the same estimator that produces the printed est_tokens, so the budget the caller sets and
         // the number the caller reads can never disagree.
         const std::size_t est = connectEstTokens( payload.size() );
-        if( maxTokens <= 0 || est <= std::size_t( maxTokens ) ) break;
+        if( maxTokens <= 0 || est <= std::size_t( maxTokens ) )
+        {
+            break;
+        }
         if( withSigs )                    { withSigs = false;  continue; }   // trim 1: sigs -> name-only
         if( legsDropped < legOrder.size() ) { ++legsDropped;   continue; }   // trim 2: drop whole legs
         break;                                                               // trim 3 does not exist: terminals + <unconnected> stay
@@ -1669,11 +2015,16 @@ struct QualityDeltaOutcome
 // buried in the middle of an ingest-and-compare function.
 inline const char* mcpBaselineMarker( const rw::quality::BaselineSelection& selection, const std::string& sidecarPath )
 {
-    if( selection.source != rw::quality::BaselineSource::Absent ) return selection.marker;
+    if( selection.source != rw::quality::BaselineSource::Absent )
+    {
+        return selection.marker;
+    }
 
     std::error_code sidecarEc;
     if( std::filesystem::exists( std::filesystem::path( sidecarPath ), sidecarEc ) && !sidecarEc )
+    {
         return "git-HEAD (unreadable sidecar ignored)";   // present on disk, rejected by readBaseline
+    }
     return selection.marker;                              // genuinely absent — "git-HEAD"
 }
 
@@ -1755,9 +2106,18 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
     std::size_t minorCount = 0, newSymbolCount = 0, gatingCount = 0;
     for( const rw::quality::Regression& r : oc.regs )
     {
-        if( r.isMinor )       ++minorCount;
-        if( r.isNewSymbol )   ++newSymbolCount;
-        else if( !r.isMinor ) ++gatingCount;
+        if( r.isMinor )
+        {
+            ++minorCount;
+        }
+        if( r.isNewSymbol )
+        {
+            ++newSymbolCount;
+        }
+        else if( !r.isMinor )
+        {
+            ++gatingCount;
+        }
     }
 
     // the baseline anchor: "at":null on a non-git root (never a fake sha) — the CLI's own convention.
@@ -1775,31 +2135,53 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )
     {
-        if( !first ) out += ",";
+        if( !first )
+        {
+            out += ",";
+        }
         first = false;
         // duplication carries a member LIST + token count; the zero-magnitude kinds (dead-code, and
         // api-surface when was==now) are sym-only; every other kind carries was/now — the CLI's exact split.
         out += "{\"kind\":\"" + mcpdetail::jsonEscape( r.kind ) + "\"";
         if( r.kind == "duplication" )
+        {
             out += ",\"members\":\"" + mcpdetail::jsonEscape( rw::quality::displaySym( r.sym, root ) )
                  + "\",\"tokens\":" + std::to_string( r.now );
+        }
         else
         {
             out += ",\"sym\":\"" + mcpdetail::jsonEscape( rw::quality::displaySym( r.sym, root ) ) + "\"";
             if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
+            {
                 out += ",\"was\":" + std::to_string( r.was ) + ",\"now\":" + std::to_string( r.now );
+            }
         }
-        if( !r.path.empty() )              out += ",\"p\":\"" + mcpdetail::jsonEscape( r.path ) + ":" + std::to_string( r.line ) + "\"";   // P2.5 locator
-        if( !r.isNewSymbol && !r.isMinor ) out += ",\"gating\":true";                                                                      // the exit predicate, per row
-        if( r.isMinor )                    out += ",\"sev\":\"minor\"";
+        if( !r.path.empty() )
+        {
+            out += ",\"p\":\"" + mcpdetail::jsonEscape( r.path ) + ":" + std::to_string( r.line ) + "\""; // P2.5 locator
+        }
+        if( !r.isNewSymbol && !r.isMinor )
+        {
+            out += ",\"gating\":true"; // the exit predicate, per row
+        }
+        if( r.isMinor )
+        {
+            out += ",\"sev\":\"minor\"";
+        }
         if( !r.facet.empty() )
         {
             const char* facetName = ( r.kind == "short-horizon-churn" ) ? "churn"
                                    : ( r.kind == "api-surface" )        ? "surface"
                                    : nullptr;
-            if( facetName ) out += ",\"" + std::string( facetName ) + "\":\"" + mcpdetail::jsonEscape( r.facet ) + "\"";
+            if( facetName )
+            {
+                out += ",\"" + std::string( facetName ) + "\":\"" + mcpdetail::jsonEscape( r.facet ) + "\"";
+            }
         }
-        if( r.isNewSymbol ) out += ",\"origin\":\"new-symbol\"";   // absent = preexisting-worse (mirrors the XML)
+        if( r.isNewSymbol )
+        {
+            out += ",\"origin\":\"new-symbol\""; // absent = preexisting-worse (mirrors the XML)
+        }
         out += "}";
     }
     out += "]}";
@@ -1864,7 +2246,12 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const RouteChoice rc = chooseForRanker( ing, task );
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
     for( std::size_t i = 0; i < ix.g.implementors.size() && i < ifaceExact.size(); ++i )
-        if( !ix.g.implementors[i].empty() ) ifaceExact[i] = 1;
+    {
+        if( !ix.g.implementors[i].empty() )
+        {
+            ifaceExact[i] = 1;
+        }
+    }
     // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as CLI --pack-task.
     const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactTiered( ing, task, &tierMul )
@@ -1911,7 +2298,10 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     std::vector<std::uint32_t> fanIn( ing.symbols.size(), 0 );
     {
         const auto* ro = g.inEdges.rowOffsets();
-        for( std::size_t i = 0; i < ing.symbols.size(); ++i ) fanIn[i] = ro[i + 1] - ro[i];
+        for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+        {
+            fanIn[i] = ro[i + 1] - ro[i];
+        }
     }
 
     const notes::NoteIndex        noteIndex = notes::loadNoteIndex( root );
@@ -1924,7 +2314,9 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     in.redact       = redact;
     in.notes        = notesPtr;
     if( partitionCount >= packpartition::kMinPartitions && partitionCount <= packpartition::kMaxPartitions )
+    {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );
+    }
     return packTaskBundleText( ing, g, task, lr, in );
 }
 
@@ -1943,7 +2335,10 @@ inline std::string fromTraceText( const std::string& root, const std::string& tr
     std::vector<std::uint32_t> fanIn( ing.symbols.size(), 0 );
     {
         const auto* ro = g.inEdges.rowOffsets();
-        for( std::size_t i = 0; i < ing.symbols.size(); ++i ) fanIn[i] = ro[i + 1] - ro[i];
+        for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+        {
+            fanIn[i] = ro[i + 1] - ro[i];
+        }
     }
     const notes::NoteIndex        noteIndex = notes::loadNoteIndex( root );
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
@@ -1990,11 +2385,16 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
     // the spelling, no near-miss — on the one verb an agent reaches for right after a rename, where a typo
     // and a genuinely absent symbol are the two likeliest causes and the message distinguished neither.
     if( matches.empty() )
+    {
         return EditCheckReply{ {}, mcprefuse::notFound( ing, "symbol", symbol,
                                                         mcprefuse::notFoundHintFor( "edit_check", "symbol" ) ) };
+    }
 
     const std::vector<EditCheckGroup> groups = editCheckGroups( ing, g, matches );
-    if( groups.size() > 1 ) return EditCheckReply{ {}, editCheckAmbiguousMessage( symbol, groups, "symbol=", matches.size() ) };
+    if( groups.size() > 1 )
+    {
+        return EditCheckReply { {}, editCheckAmbiguousMessage( symbol, groups, "symbol=", matches.size() ) };
+    }
 
     return EditCheckReply{ editCheckBundleText( ing, g, root, kDefaultMaxFileBytes, {}, groups[0].lowestNode ), {} };
 }
@@ -2046,38 +2446,62 @@ inline std::string sliceBodyLinesOrError( const std::string& body, long long sta
     oob = false;
     // total lines: count '\n', plus one for a final non-newline-terminated line.
     long long nl = 0;
-    for( char c : body ) if( c == '\n' ) ++nl;
+    for( char c : body )
+    {
+        if( c == '\n' )
+        {
+            ++nl;
+        }
+    }
     const bool endsNl = !body.empty() && body.back() == '\n';
     totalLines = nl + ( ( !body.empty() && !endsNl ) ? 1 : 0 );
-    if( totalLines < 1 ) totalLines = ( body.empty() ? 0 : 1 );
+    if( totalLines < 1 )
+    {
+        totalLines = ( body.empty() ? 0 : 1 );
+    }
 
     // clamp the window to [1, totalLines]; a start past the end is genuinely out of range.
     long long s = startLine < 1 ? 1 : startLine;
     long long e = endLine   < 1 ? 1 : endLine;
     if( totalLines == 0 ) { clampedStart = 1; clampedEnd = 0; oob = ( startLine > 0 ); return {}; }
     if( s > totalLines )  { clampedStart = s; clampedEnd = e; oob = true; return {}; }   // start beyond body → error
-    if( e > totalLines )  e = totalLines;                                                 // clamp end down (not an error)
-    if( e < s )           e = s;                                                          // degenerate end<start → single line
+    if( e > totalLines )
+    {
+        e = totalLines; // clamp end down (not an error)
+    }
+    if( e < s )
+    {
+        e = s; // degenerate end<start → single line
+    }
     clampedStart = s; clampedEnd = e;
 
     // walk to the byte offset where line `s` begins and where line `e+1` begins (or end of body).
     const auto lineStartByte = [ & ]( long long lineNo ) -> std::size_t
     {
-        if( lineNo <= 1 ) return 0;
+        if( lineNo <= 1 )
+        {
+            return 0;
+        }
         long long seen = 1;                                     // we are at the start of line 1
         for( std::size_t i = 0; i < body.size(); ++i )
         {
             if( body[i] == '\n' )
             {
                 ++seen;                                         // the byte AFTER this '\n' starts line `seen`
-                if( seen == lineNo ) return i + 1;
+                if( seen == lineNo )
+                {
+                    return i + 1;
+                }
             }
         }
         return body.size();                                     // past the last line → end of body
     };
     const std::size_t aByte = lineStartByte( s );
     const std::size_t bByte = ( e >= totalLines ) ? body.size() : lineStartByte( e + 1 );
-    if( aByte > bByte || bByte > body.size() ) return {};       // paranoia: never slice out of bounds
+    if( aByte > bByte || bByte > body.size() )
+    {
+        return {}; // paranoia: never slice out of bounds
+    }
     return body.substr( aByte, bByte - aByte );
 }
 
@@ -2147,7 +2571,10 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
                 const std::string srci  = mcpdetail::readFileBytes( diskPath( ing, si.fileId ), roki );
                 const std::string bodyi = ( roki && si.sigStartByte < si.endByte && si.endByte <= srci.size() )
                                         ? srci.substr( si.sigStartByte, si.endByte - si.sigStartByte ) : std::string{};
-                if( !rok0 || !roki || bodyi != body0 ) bodiesDiffer = true;
+                if( !rok0 || !roki || bodyi != body0 )
+                {
+                    bodiesDiffer = true;
+                }
             }
         }
 
@@ -2160,9 +2587,15 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
             bool anyOther = false;
             for( std::size_t i = 0; i < handleMatches.size(); ++i )
             {
-                if( handleMatches[i] == f ) continue;
+                if( handleMatches[i] == f )
+                {
+                    continue;
+                }
                 const Symbol& si = ing.symbols[ handleMatches[i] ];
-                if( anyOther ) ambiguityNote += ", ";
+                if( anyOther )
+                {
+                    ambiguityNote += ", ";
+                }
                 ambiguityNote += ing.files[ si.fileId ] + ":" + std::to_string( si.line );
                 anyOther = true;
             }
@@ -2229,10 +2662,20 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
     else
     {
         // still report total_lines for a full fetch so an agent can decide whether to re-fetch a range next time.
-        long long nl = 0; for( char c : fullBody ) if( c == '\n' ) ++nl;
+        long long nl = 0;
+        for( char c : fullBody )
+        {
+            if( c == '\n' )
+            {
+                ++nl;
+            }
+        }
         const bool endsNl = !fullBody.empty() && fullBody.back() == '\n';
         totalLines   = nl + ( ( !fullBody.empty() && !endsNl ) ? 1 : 0 );
-        if( totalLines < 1 ) totalLines = ( fullBody.empty() ? 0 : 1 );
+        if( totalLines < 1 )
+        {
+            totalLines = ( fullBody.empty() ? 0 : 1 );
+        }
         clampedStart = 1; clampedEnd = totalLines;
     }
 
@@ -2256,7 +2699,10 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
             for( std::uint32_t i : *hits )
             {
                 const notes::Note& n = ni.notes[i];
-                if( !first ) notesJson += ",";
+                if( !first )
+                {
+                    notesJson += ",";
+                }
                 // provenance parity with the <note sha= branch=> XML attrs (serialize.h::appendOneNote) —
                 // OMITTED keys on a legacy/unstamped note, never emitted empty, and abbreviated (shortSha)
                 // to match the terse XML surfacing.
@@ -2264,7 +2710,10 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
                 if( !n.sha.empty() )
                 {
                     notesJson += ",\"sha\":\"" + mcpdetail::jsonEscape( notes::shortSha( n.sha ) ) + "\"";
-                    if( !n.branch.empty() ) notesJson += ",\"branch\":\"" + mcpdetail::jsonEscape( n.branch ) + "\"";
+                    if( !n.branch.empty() )
+                    {
+                        notesJson += ",\"branch\":\"" + mcpdetail::jsonEscape( n.branch ) + "\"";
+                    }
                 }
                 notesJson += "}";
                 first = false;
@@ -2335,7 +2784,10 @@ inline constexpr std::size_t kBatchServedCount = std::size( kBatchServedVerbs );
 // contract for every other refusal, so a paging typo in query 3 never costs the caller queries 1, 2 and 4.
 inline std::string batchPageRefusal( std::string_view verb, const McpPageParse& page )
 {
-    if( page.refusal.empty() ) return {};
+    if( page.refusal.empty() )
+    {
+        return {};
+    }
     return ( verb == "grep" || verb == "impact" ) ? page.refusal : std::string{};
 }
 
@@ -2357,11 +2809,16 @@ inline std::vector<std::string_view> batchKnownVerbs()
 inline std::string unknownSubVerbRefusal( std::string_view verb )
 {
     const std::vector<std::string_view> known = batchKnownVerbs();
-    if( std::find( known.begin(), known.end(), verb ) != known.end() ) return {};
+    if( std::find( known.begin(), known.end(), verb ) != known.end() )
+    {
+        return {};
+    }
 
     std::string msg = "unknown sub-verb '" + mcprefuse::cappedEcho( verb ) + "'";
     if( const std::string near = mcprefuse::nearestName( known, verb ); !near.empty() )
+    {
         msg += " (did you mean '" + near + "'?)";
+    }
     msg += " — batch serves read verbs only: " + mcprefuse::joinClauses( known, "/" );
     return msg;
 }
@@ -2392,7 +2849,10 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     const auto  strArg = [ & ]( const char* field ) -> std::string
     {
         const McpStringArg a = mcpStringArg( obj, field );
-        if( shapeRefusal.empty() && !a.refusal.empty() ) shapeRefusal = a.refusal;
+        if( shapeRefusal.empty() && !a.refusal.empty() )
+        {
+            shapeRefusal = a.refusal;
+        }
         return a.value;
     };
 
@@ -2414,7 +2874,10 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     const auto intArg = [ & ]( const char* field, long long least, long long most ) -> McpIntArg
     {
         const McpIntArg a = mcpIntArg( obj, field, least, most );
-        if( shapeRefusal.empty() && !a.refusal.empty() ) shapeRefusal = a.refusal;
+        if( shapeRefusal.empty() && !a.refusal.empty() )
+        {
+            shapeRefusal = a.refusal;
+        }
         return a;
     };
     const McpIntArg startArg  = intArg( "start_line", 1, kMcpPageValueMax );
@@ -2443,123 +2906,213 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
 
     // Verifier N2/N8: the paging window, validated ONCE for the two sub-verbs that consume it.
     const McpPageParse pageParse = mcpPageArgs( obj );
-    if( const std::string pageErr = batchPageRefusal( r.verb, pageParse ); !pageErr.empty() ) return bad( pageErr );
+    if( const std::string pageErr = batchPageRefusal( r.verb, pageParse ); !pageErr.empty() )
+    {
+        return bad( pageErr );
+    }
 
     if( r.verb.empty() )
+    {
         return bad( shapeRefusal.empty()
                   ? "missing required field: verb — every batch sub-query names one read verb, e.g. "
                     "verb=\"grep\" (batch serves: " + mcprefuse::joinClauses(
                         std::vector<std::string_view>( std::begin( kBatchServedVerbs ), std::end( kBatchServedVerbs ) ), "/" ) + ")"
                   : shapeRefusal );   // `verb:5` is PRESENT-but-wrong-shaped, not missing (W3FIX H5/M8)
+    }
 
     // W3FIX H5: a wrong-SHAPED sub-query argument refuses before the verb serves a default — checked at the
     // same point in the chain as the live arm's shapeRefusal gate (before verb dispatch), so a given request
     // gets the same refusal through either arm.
-    if( !shapeRefusal.empty() ) return bad( shapeRefusal );
+    if( !shapeRefusal.empty() )
+    {
+        return bad( shapeRefusal );
+    }
 
     // §B6 M9 / W3FIX M4 — in this order, deliberately: an unknown sub-verb first (it has no schema for the
     // next check to use), then an argument the batch ITEM schema does not declare, with the same near-miss
     // treatment the live arm gives an undeclared tools/call field.
-    if( const std::string verbErr = unknownSubVerbRefusal( r.verb ); !verbErr.empty() ) return bad( verbErr );
+    if( const std::string verbErr = unknownSubVerbRefusal( r.verb ); !verbErr.empty() )
+    {
+        return bad( verbErr );
+    }
     if( const std::string fieldErr = mcpUnknownFieldRefusal( obj, r.verb, mcprefuse::kBatchSubQueryFields );
-        !fieldErr.empty() ) return bad( fieldErr );
+        !fieldErr.empty() )
+    {
+        return bad( fieldErr );
+    }
 
     if( r.verb == "for" )
     {
-        if( task.empty() ) return bad( missingField( "for" ) );
+        if( task.empty() )
+        {
+            return bad( missingField( "for" ) );
+        }
         r.payload = forTaskText( root, task, topK, redactPtr );
-        if( r.payload.empty() ) return bad( "no symbols found" );
+        if( r.payload.empty() )
+        {
+            return bad( "no symbols found" );
+        }
     }
     else if( r.verb == "grep" )
     {
-        if( pattern.empty() ) return bad( missingField( "grep" ) );
+        if( pattern.empty() )
+        {
+            return bad( missingField( "grep" ) );
+        }
         r.payload = grepHitsJson( root, pattern, pageParse.page );   // N8: the batch arm pages grep too
     }
     else if( r.verb == "find_symbol" || r.verb == "callees" )
     {
-        if( symbol.empty() ) return bad( missingField( "find_symbol" ) );
+        if( symbol.empty() )
+        {
+            return bad( missingField( "find_symbol" ) );
+        }
         r.payload = symbolQueryJson( root, symbol, false );
-        if( r.payload.empty() ) return bad( symbolMissing( "find_symbol", symbol ) );
+        if( r.payload.empty() )
+        {
+            return bad( symbolMissing( "find_symbol", symbol ) );
+        }
     }
     else if( r.verb == "find_referencing_symbols" || r.verb == "callers" )
     {
-        if( symbol.empty() ) return bad( missingField( "find_referencing_symbols" ) );
+        if( symbol.empty() )
+        {
+            return bad( missingField( "find_referencing_symbols" ) );
+        }
         r.payload = symbolQueryJson( root, symbol, true );
-        if( r.payload.empty() ) return bad( symbolMissing( "find_referencing_symbols", symbol ) );
+        if( r.payload.empty() )
+        {
+            return bad( symbolMissing( "find_referencing_symbols", symbol ) );
+        }
     }
     else if( r.verb == "impact" )
     {
-        if( symbol.empty() ) return bad( missingField( "impact" ) );
+        if( symbol.empty() )
+        {
+            return bad( missingField( "impact" ) );
+        }
         r.payload = impactText( root, symbol, pageParse.page );   // §B6 M4: the batch arm honors the SAME window
-        if( r.payload.empty() ) return bad( symbolMissing( "impact", symbol ) );
+        if( r.payload.empty() )
+        {
+            return bad( symbolMissing( "impact", symbol ) );
+        }
     }
     else if( r.verb == "uses" )
     {
-        if( symbol.empty() ) return bad( missingField( "uses" ) );
+        if( symbol.empty() )
+        {
+            return bad( missingField( "uses" ) );
+        }
         // V2-1: refuse a qualified spelling whose bare name IS defined (shared guard, see usesSelectorRefusal).
         if( const std::string refusal = usesSelectorRefusal( getIndex( root ).ing, symbol ); !refusal.empty() )
+        {
             return bad( refusal );
+        }
         r.payload = usesText( root, symbol );        // count="0" is a valid answer, never empty
     }
     else if( r.verb == "mentions" )
     {
-        if( symbol.empty() ) return bad( missingField( "mentions" ) );
+        if( symbol.empty() )
+        {
+            return bad( missingField( "mentions" ) );
+        }
         // §B11.1: the batch arm refuses a qualified spelling identically — the same clone-seam drift V2-1's
         // own header warns about (its first landing guarded one dispatch site of two).
         if( const std::string refusal = qualifiedSelectorRefusal( getIndex( root ).ing, symbol, "--mentions=" ); !refusal.empty() )
+        {
             return bad( refusal );
+        }
         r.payload = mentionsJson( root, symbol );
-        if( r.payload.empty() ) return bad( symbolMissing( "mentions", symbol ) );
+        if( r.payload.empty() )
+        {
+            return bad( symbolMissing( "mentions", symbol ) );
+        }
     }
     else if( r.verb == "analyze" )
     {
         r.payload = analyzeToString( root, topK, stable );
-        if( r.payload.empty() ) return bad( "no indexed symbols at path (empty corpus or unreadable directory)" );
+        if( r.payload.empty() )
+        {
+            return bad( "no indexed symbols at path (empty corpus or unreadable directory)" );
+        }
     }
     else if( r.verb == "lego" )
     {
-        if( type.empty() ) return bad( missingField( "lego" ) );
+        if( type.empty() )
+        {
+            return bad( missingField( "lego" ) );
+        }
         r.payload = legoText( root, type, redactPtr );           // D8 fix: "" now means genuine not-found only (zero implementors is real content)
-        if( r.payload.empty() ) return bad( mcprefuse::notFound( getIndex( root ).ing, "type", type ) );
+        if( r.payload.empty() )
+        {
+            return bad( mcprefuse::notFound( getIndex( root ).ing, "type", type ) );
+        }
     }
     else if( r.verb == "owners" )
     {
         // §B11.1: same guard, same sentence — `symbol` is optional here, and an empty one has no colon.
         if( const std::string refusal = qualifiedSelectorRefusal( getIndex( root ).ing, symbol, "--owners=" ); !refusal.empty() )
+        {
             return bad( refusal );
+        }
         r.payload = ownersText( root, symbol );      // symbol optional (empty = all files)
         if( r.payload.empty() )
+        {
             return bad( symbol.empty() ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                        : symbolMissing( "owners", symbol ) );   // N7: the hint comes from the table row
+        }
     }
     else if( r.verb == "cochange" )
     {
-        if( file.empty() ) return bad( missingField( "cochange" ) );
+        if( file.empty() )
+        {
+            return bad( missingField( "cochange" ) );
+        }
         r.payload = cochangePartnersJson( root, file );
-        if( r.payload.empty() ) return bad( mcprefuse::fileNotFound( getIndex( root ).ing, file ) );
+        if( r.payload.empty() )
+        {
+            return bad( mcprefuse::fileNotFound( getIndex( root ).ing, file ) );
+        }
     }
     else if( r.verb == "path_between" )
     {
-        if( from.empty() || to.empty() ) return bad( missingField( "path_between" ) );
+        if( from.empty() || to.empty() )
+        {
+            return bad( missingField( "path_between" ) );
+        }
         r.payload = pathText( root, from, to );
         if( r.payload.empty() )
+        {
             return bad( pathEndpointRefusal( getIndex( root ).ing, from, to ) );
+        }
     }
     else if( r.verb == "exemplar" )
     {
         const std::string arg = !kind.empty() ? kind : task;
-        if( arg.empty() ) return bad( missingField( "exemplar" ) );
+        if( arg.empty() )
+        {
+            return bad( missingField( "exemplar" ) );
+        }
         r.payload = exemplarText( root, arg, redactPtr );
-        if( r.payload.empty() ) return bad( "no matching exemplar (no symbol of that kind, or the task matched nothing)" );
+        if( r.payload.empty() )
+        {
+            return bad( "no matching exemplar (no symbol of that kind, or the task matched nothing)" );
+        }
     }
     else if( r.verb == "fetch_body" )
     {
-        if( handle.empty() ) return bad( missingField( "fetch_body" ) );
+        if( handle.empty() )
+        {
+            return bad( missingField( "fetch_body" ) );
+        }
         const bool         hasRange = hasStart || hasEnd;
         const long long    s        = hasStart ? startLine : 1;
         const long long    e        = hasEnd   ? endLine   : ( hasStart ? (long long)0x7fffffff : 0 );
         const FetchOutcome fo       = fetchBody( root, handle, s, e, hasRange, redactPtr );
-        if( !fo.ok ) return bad( fo.message );
+        if( !fo.ok )
+        {
+            return bad( fo.message );
+        }
         r.payload = fo.resultJson;
     }
     else
@@ -2612,7 +3165,10 @@ inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t req
     out += "<batch n=\"" + std::to_string( subs.size() )
          + "\" requested=\"" + std::to_string( requested )
          + "\" cap=\"" + std::to_string( cap ) + "\"";
-    if( requested > cap ) out += " capped=\"1\"";
+    if( requested > cap )
+    {
+        out += " capped=\"1\"";
+    }
     out += "><!-- ripwire batch: N read sub-queries answered in one sweep. Each <q> carries i=index, "
            "verb=sub-verb, ok=1|0; the sub-answer rides verbatim in CDATA (a mix of XML and JSON payloads); "
            "<dup-of q=\"i\"/> means this payload is byte-identical to the one already emitted at index i; "
@@ -2630,11 +3186,17 @@ inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t req
         // dedup: first earlier OK sub-answer with an identical payload (exact byte match only).
         std::size_t dupOf = i;
         for( std::size_t j = 0; j < i; ++j )
+        {
             if( subs[j].ok && subs[j].payload == sub.payload ) { dupOf = j; break; }
+        }
         if( dupOf != i )
+        {
             out += "><dup-of q=\"" + std::to_string( dupOf ) + "\"/></q>";
+        }
         else
+        {
             out += ">" + batchCdata( sub.payload ) + "</q>";
+        }
     }
     out += "</batch>";
     return out;
