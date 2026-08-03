@@ -47,10 +47,11 @@ every truncation is disclosed in the header, and a zero means *none found*, neve
 Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
 contract, gated on every pull request and every push to main, not a tendency.
 
-On a 60-instance head-to-head against three other context tools — same instances, same gold, same
-metric code — it puts **all** gold files in the top 10 on **36.7%** of them, against 26.7 / 21.7 /
-13.3%, at a **0.074 s** median (warm, with a pre-built index). [The full table, and the caveats that
-belong with it →](#against-other-tools)
+On the latest 60-instance head-to-head against other context tools — same instances, same gold, same
+metric code — it puts **all** gold files in the top 10 on **58.3%** of them, against **33.3%** for the
+best competitor (repowise), at a **0.114 s** median (warm, with a pre-built index). An earlier round
+measured it against graphify, Aider's repo-map and codebase-memory-mcp; it won every round run so
+far. [The full tables, and the caveats that belong with them →](#against-other-tools)
 
 ---
 
@@ -207,6 +208,30 @@ graphify. **The speed caveat travels with the number:** 2.5 s ÷ 0.074 s is ≈3
 ripwire's figure is *warm with a pre-built index* while Aider's was *cold per run* — not an
 apples-to-apples cache state. Quote the two medians, or quote the multiple with that sentence
 attached.
+
+**Round two (2026-08-03): repowise and codeseek.** Same slice, same gold definition, same imported
+metric code — but a newer binary and evaluator, so the two rounds' tables are each internally
+paired and **not number-comparable to each other** (provenance for both:
+[`docs/EVALS.md` §2](docs/EVALS.md), full record with fairness notes in
+[`bench/headtohead/r2-2026-08-03/`](bench/headtohead/r2-2026-08-03/)).
+
+| Arm | strict file@10 | any@10 | median wall (query, warm) |
+| --- | --- | --- | --- |
+| **ripwire `--for`** | **58.3%** | **85.0%** | **0.114 s** |
+| repowise 0.37.0 (MCP `search_codebase`, LLM-free wiki) | 33.3% | 53.3% | 1.14 s¹ |
+| codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 0.042 s |
+| codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 0.025 s |
+
+Paired win–loss vs repowise at strict file@10: **17–2**; codeseek never beat ripwire on any instance.
+The caveats travel with the table: ¹ repowise's wall includes a fresh MCP-server spawn per query —
+resident-server usage is faster. ² codeseek's raw row returned **0 results on 60/60 queries** — its
+keyless fallback matches function names only, so this measures a query-protocol boundary, not its
+embedder-backed shipping mode (unbenchmarked here). On **untrimmed all-patch gold** — including files
+ripwire cannot index — the ordering holds and the margin narrows: **28.3%** vs repowise's 16.7%.
+**Vexp and CodeIndexer were excluded, not beaten**: their free tiers (node/project/chunk caps) cannot
+run a fair 60-instance sweep; the report records the exact limits. An independent adversarial pass
+attacked the comparison's design and its findings — and their dispositions — ship with the report
+([`VERIFIER.md`](bench/headtohead/r2-2026-08-03/VERIFIER.md)).
 
 **LocBench held-out, N = 243 across 78 repositories.** Strict file@10 **60.9%**, against **27.6%** for
 the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
