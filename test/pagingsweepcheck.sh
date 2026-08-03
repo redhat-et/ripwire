@@ -113,7 +113,31 @@ echo "pagingsweepcheck: BIN=$BIN  PREBIN=${PREBIN:-<none>}"
 # an arm whose row supply this repo cannot guarantee is re-anchored onto a fixture built below rather
 # than left to red on whichever clone happens to be short of rows. Defaults to $ROOT: every other arm is
 # untouched.
-run(){ "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --no-cache 2>/dev/null; }
+run(){  "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --cache="$( cacheFor "${PAGE_CORPUS:-$ROOT}" )" 2>/dev/null; }
+cold(){ "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --no-cache 2>/dev/null; }
+
+# ── one primed cache per corpus, and why that is not a weakening ──────────────────────────────────────
+# Every arm below invokes the binary five-to-eight times over a corpus that does not change for the
+# gate's whole lifetime, and --no-cache made each of those invocations pay a full cold parse of the tree.
+# What this gate asserts is the PAGING contract — row counts, the six-attribute vocabulary, seam
+# continuity, termination, cap disclosure, refusal. None of that is a claim about parsing, and none of it
+# is a claim about the cache: --cache transparency (a warm run's bytes == a cold run's bytes, on this same
+# binary) is proven on its own, against its own corpora, by test/regression.sh sections 2 / 2b / 2c. So a
+# primed cache cannot change WHAT an arm here proves; it only stops the arm from re-parsing the tree in
+# order to prove it. If transparency ever breaks, section 2 goes red — this gate is not the place that
+# claim lives, and it must not silently become a second, weaker copy of it.
+# TWO places therefore stay COLD on purpose, and say so at their own site: page_verb's (G) determinism
+# pair (a pair of runs restoring ONE cache file cannot observe a re-crawl+re-rank ordering defect), and
+# section (I)'s differential against a SECOND binary, which must never read a cache this one wrote.
+# cacheFor() keys on the corpus and primes on first use, so the in-gate fixture built below — and any
+# PAGE_CORPUS override — gets its OWN file instead of silently reading $ROOT's.
+cacheFor(){   # $1 = corpus dir → that corpus's cache path, primed once on first use
+    local corpus="$1" c
+    c="$TMP/corpus$( printf '%s' "$corpus" | cksum | tr -dc '0-9' ).cache"
+    [ -s "$c" ] || "$BIN" "$corpus" --cache="$c" >/dev/null 2>&1
+    printf '%s' "$c"
+}
+ROOTCACHE="$( cacheFor "$ROOT" )"   # the main corpus, primed up front — section (K) invokes $BIN directly
 
 # ── the in-gate paging fixture ────────────────────────────────────────────────────────────────────────
 # TWO of these arms — --mentions and --stray-content — need a corpus-SHAPE this repo does not supply on
@@ -216,9 +240,12 @@ page_verb(){
         no "$label: offset-past-end mishandled (exit=$ec rows=$nend) — a paging loop would not terminate"
     fi
 
-    # (G) a paged page is deterministic and well-formed.
-    local d2; d2="$( run "$@" --limit=3 --offset=3 )"
-    [ "$p3" = "$d2" ] && ok "$label: paged page deterministic" || no "$label: paged page NOT deterministic"
+    # (G) a paged page is deterministic and well-formed. This pair stays on cold() — see the priming site.
+    # The claim is that a full re-crawl + re-rank lands on the SAME window twice (the astQuery tie-order
+    # defect the --match arms below are deliberately shaped to flap on); two runs restoring one already-
+    # primed cache would agree by construction and could not observe it.
+    local d1 d2; d1="$( cold "$@" --limit=3 --offset=3 )"; d2="$( cold "$@" --limit=3 --offset=3 )"
+    [ "$d1" = "$d2" ] && ok "$label: paged page deterministic" || no "$label: paged page NOT deterministic"
     if command -v xmllint >/dev/null 2>&1; then
         printf '%s' "$p3" | xmllint --noout - 2>/dev/null && ok "$label: xml well-formed under paging" || no "$label: xml MALFORMED under paging"
     fi
@@ -366,7 +393,7 @@ IMP_TOTAL="$( run --impact=escapeXml --limit=200 | grep -oE 'reaches="[0-9]+"' |
 echo "--- (K) --limit/--offset refused where they are not honored ---"
 refuses(){   # $1=label $2=expected stderr substring $3..=argv after ROOT
     local label="$1" want="$2"; shift 2
-    "$BIN" "$ROOT" "$@" --no-cache >"$TMP/k.out" 2>"$TMP/k.err" </dev/null; local rc=$?
+    "$BIN" "$ROOT" "$@" --cache="$ROOTCACHE" >"$TMP/k.out" 2>"$TMP/k.err" </dev/null; local rc=$?
     if [ "$rc" = 0 ]; then
         no "$label: exited 0 — --limit was accepted and silently ignored"
     elif grep -qF -- "$want" "$TMP/k.err"; then
@@ -392,25 +419,25 @@ refuses "--stray-content --abi --limit=3"  "--callers" --stray-content --abi --l
 for v in --lint --hotspots --callers=escapeXml --callees=runUses --tree --deps --cochange --owners \
          --clones --doc-drift --communities --whereis=rankGraph --grep=NodeId --impact=escapeXml --uses=escapeXml \
          --seams --zoom --external-surface --dead-code --mentions=main --stray-content; do
-    if "$BIN" "$ROOT" $v --limit=3 --no-cache >/dev/null 2>"$TMP/k2.err"; then
+    if "$BIN" "$ROOT" $v --limit=3 --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k2.err"; then
         ok "honoring set: $v --limit=3 exits 0"
     else
         no "honoring set: $v --limit=3 was REFUSED — the guard's list disagrees with the code ($( head -1 "$TMP/k2.err" ))"
     fi
 done
-if "$BIN" "$ROOT" --match='(call_expression) @c' --limit=3 --no-cache >/dev/null 2>"$TMP/k3.err"; then
+if "$BIN" "$ROOT" --match='(call_expression) @c' --limit=3 --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k3.err"; then
     ok "honoring set: --match --limit=3 exits 0"
 else
     no "honoring set: --match --limit=3 was REFUSED ($( head -1 "$TMP/k3.err" ))"
 fi
 # --graph-query's expr carries quotes/parens, so it rides the same standalone-quoted shape as --match above.
-if "$BIN" "$ROOT" --graph-query='name("main")' --limit=3 --no-cache >/dev/null 2>"$TMP/k3b.err"; then
+if "$BIN" "$ROOT" --graph-query='name("main")' --limit=3 --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k3b.err"; then
     ok "honoring set: --graph-query --limit=3 exits 0"
 else
     no "honoring set: --graph-query --limit=3 was REFUSED ($( head -1 "$TMP/k3b.err" ))"
 fi
 # --detail=1 --owners --limit=N is a LEGAL composition (--detail restores the full listing, --limit windows it).
-"$BIN" "$ROOT" --owners --detail=1 --limit=3 --no-cache >/dev/null 2>"$TMP/k4.err" \
+"$BIN" "$ROOT" --owners --detail=1 --limit=3 --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k4.err" \
     && ok "--owners --detail=1 --limit=3 stays legal" \
     || no "--owners --detail=1 --limit=3 was refused ($( head -1 "$TMP/k4.err" ))"
 # INVERTED this arm. --batch used to be exempt from the guard on the reasoning that
@@ -420,7 +447,7 @@ fi
 # sub-query that wants a page spells it on its own line in the batch FILE. --mcp keeps its exemption (there
 # the per-request arguments are a real channel); --batch now refuses like every other non-honoring verb.
 printf 'callers:escapeXml\n' > "$TMP/batch.txt"
-if "$BIN" "$ROOT" --batch="$TMP/batch.txt" --limit=3 --no-cache >/dev/null 2>"$TMP/k5.err"; then
+if "$BIN" "$ROOT" --batch="$TMP/batch.txt" --limit=3 --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k5.err"; then
     no "--batch --limit=3 was ACCEPTED and ignored (exit 0, payload unchanged) — §A5a"
 else
     grep -q 'honored only by' "$TMP/k5.err" \
@@ -428,13 +455,17 @@ else
         || no "--batch --limit=3 failed for the wrong reason ($( head -1 "$TMP/k5.err" ))"
 fi
 # the control: plain --batch, no paging flags, is untouched.
-"$BIN" "$ROOT" --batch="$TMP/batch.txt" --no-cache >/dev/null 2>"$TMP/k5b.err" \
+"$BIN" "$ROOT" --batch="$TMP/batch.txt" --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k5b.err" \
     && ok "--batch without --limit still exits 0 (the refusal is scoped to the ignored flags)" \
     || no "--batch without --limit broke ($( head -1 "$TMP/k5b.err" ))"
 
 # ── (I): un-paginated output identical to the PRE-CHANGE binary except the root disclosure attrs ──────
 echo "--- (I) un-paginated byte-identity vs the pre-change binary (except root disclosure attrs) ---"
 if [ -n "$PREBIN" ] && [ -x "$PREBIN" ]; then
+    # EVERY invocation in this section stays --no-cache — see the priming site. Both sides here are a
+    # DIFFERENT binary from each other, and a cache is an artifact of the binary that wrote it: letting
+    # $PREBIN read (or rewrite) $BIN's cache would make the differential a statement about two cache
+    # formats rather than about two outputs. Cold on both sides is the only honest comparison.
     # Two normalizations, and only two: drop the newly-added root attrs, and drop the <!-- --> header
     # comments (which grew one sentence each, documenting exactly those attrs — the tool self-documents, so
     # a new attribute necessarily edits its own header). Everything that remains is the DATA, and it must be

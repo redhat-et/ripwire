@@ -359,22 +359,43 @@ VERBS="$( grep -c . "$TMP/verbargs.txt" )"
 
 BADPATH="$TMP/no/such/tree"
 FILEPATH="$FIX/geometry.cpp"
+# ONE SESSION for the whole 2xN sweep. Every probe here is an independent tools/call judged purely on the
+# SHAPE of its response — nothing in this arm asserts startup, restart, staleness-reload or watcher
+# behaviour, and every `path` is bad so no probe registers a workspace another could inherit — so the frames
+# go down one stdio pipe instead of forking 2xN servers. `verdict`'s three outcomes are reproduced exactly
+# (CODE|MESSAGE / OK / __BADLINE__:Type); a dead pipe yields the same __BADLINE__ row a dead process did.
+python3 - "$BIN" "$TMP/verbargs.txt" "$BADPATH" "$FILEPATH" >"$TMP/verbverdicts.txt" <<'PY'
+import json, subprocess, sys
+binPath, table, badPath, filePath = sys.argv[ 1 : 5 ]
+rows = [ l.rstrip( "\n" ).split( "\t" ) for l in open( table ) if l.strip() ]
+p = subprocess.Popen( [ binPath, "--mcp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                      stderr=subprocess.DEVNULL )
+def send( obj ):                                       # raw bytes back, exactly what `verdict` is handed
+    p.stdin.write( json.dumps( obj ).encode() + b"\n" ); p.stdin.flush()
+    return p.stdout.readline()
+send( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } )
+for verb, argstub in rows:
+    for cond, path in ( ( "missing", badPath ), ( "file", filePath ) ):
+        args = json.loads( argstub ); args[ "path" ] = path
+        line = send( { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                       "params": { "name": verb, "arguments": args } } )
+        try:                   r = json.loads( line.decode( "utf-8" ) )
+        except Exception as e: v = "__BADLINE__:" + type( e ).__name__
+        else:                  v = "%d|%s" % ( r["error"]["code"], r["error"]["message"] ) if "error" in r else "OK"
+        # one row per probe, so the shell classifier below is unchanged apart from where it reads from.
+        # tab/newline are the row's own delimiters — neutralised so a message can never split a row.
+        print( "%s\t%s\t%s" % ( verb, cond, v.replace( "\t", " " ).replace( "\r", " " ).replace( "\n", " " ) ) )
+p.stdin.close(); p.wait( 15 )
+PY
 missCount=0; fileCount=0; missBad=""; fileBad=""
-while IFS="$( printf '\t' )" read -r verb argstub; do
+while IFS="$( printf '\t' )" read -r verb cond V; do
     [ -n "$verb" ] || continue
-    for cond in missing file; do
-        [ "$cond" = missing ] && p="$BADPATH" || p="$FILEPATH"
-        A="$( python3 -c '
-import json, sys
-d = json.loads( sys.argv[1] ); d["path"] = sys.argv[2]; print( json.dumps( d ) )' "$argstub" "$p" )"
-        V="$( call_verdict "$verb" "$A" )"
-        if [ "$cond" = missing ]; then
-            case "$V" in -32602\|"path does not exist"*) missCount=$(( missCount + 1 ));; *) missBad="$missBad $verb($V)";; esac
-        else
-            case "$V" in -32602\|"path is a FILE"*)      fileCount=$(( fileCount + 1 ));; *) fileBad="$fileBad $verb($V)";; esac
-        fi
-    done
-done <"$TMP/verbargs.txt"
+    if [ "$cond" = missing ]; then
+        case "$V" in -32602\|"path does not exist"*) missCount=$(( missCount + 1 ));; *) missBad="$missBad $verb($V)";; esac
+    else
+        case "$V" in -32602\|"path is a FILE"*)      fileCount=$(( fileCount + 1 ));; *) fileBad="$fileBad $verb($V)";; esac
+    fi
+done <"$TMP/verbverdicts.txt"
 [ "$missCount" = "$VERBS" ] \
     && ok "(E1) all $VERBS verbs refuse a NONEXISTENT path naming that condition (was: 9 answered all-zero SUCCESS, the rest gave false causes)" \
     || no "(E1) $missCount/$VERBS named the condition; deviations:$( printf '%s' "$missBad" | cut -c1-400 )"
@@ -505,12 +526,33 @@ echo "=== (I) the HTTP transport returns BYTE-IDENTICAL bodies for the same byte
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # The framing gate lives in dispatchMcpLine, which both transports route through — so this arm asserts EQUALITY
 # with the stdio answers above rather than re-listing the expectations (a second list is a second thing to drift).
+# WAIT ON THE CONDITION, not on a guess: poll until the listener ACCEPTS a TCP connection on $PORT (20 ms
+# interval, 30 s ceiling), abandoning the wait the moment the child dies. Exit 1 covers both give-up reasons,
+# which the caller then tells apart — a dead child and a live-but-unreachable one are different faults and
+# get different sentences. Either way the arm FAILS loudly; it never probes a server that is not there.
+wait_listening(){ python3 - "$1" "$2" <<'PY'
+import os, socket, sys, time
+port, pid = int( sys.argv[1] ), int( sys.argv[2] )
+deadline = time.time() + 30.0
+while time.time() < deadline:
+    try:               os.kill( pid, 0 )              # the child is gone — stop waiting on a dead port
+    except OSError:    sys.exit( 1 )
+    try:
+        socket.create_connection( ( "127.0.0.1", port ), 0.25 ).close()
+        sys.exit( 0 )
+    except OSError:    time.sleep( 0.02 )
+sys.exit( 1 )
+PY
+}
 PORT=$(( 21000 + ( $$ % 9000 ) ))
 "$BIN" "$FIX" --listen=127.0.0.1:"$PORT" >"$TMP/http.log" 2>&1 &
 HTTP_PID=$!
-sleep 1.5
+wait_listening "$PORT" "$HTTP_PID"; LISTENING=$?
 if ! kill -0 "$HTTP_PID" 2>/dev/null; then
     no "(I) the HTTP listener did not start: $( head -c 200 "$TMP/http.log" )"
+elif [ "$LISTENING" != 0 ]; then
+    no "(I) the HTTP listener never ACCEPTED on 127.0.0.1:$PORT within 30 s: $( head -c 200 "$TMP/http.log" )"
+    kill "$HTTP_PID" 2>/dev/null; wait "$HTTP_PID" 2>/dev/null
 else
     http_body(){ python3 - "$PORT" "$1" <<'PY'
 import socket, sys
@@ -562,7 +604,7 @@ echo "=== (J) ITEM A — a WHITESPACE-ONLY payload is the same unset argument as
 # its range boundaries, mechanically, because F2's lesson is that a human enumeration of this set is wrong by
 # construction. Two arms, two different questions — do not fold one into the other.
 python3 - "$BIN" <<'PY'
-import json, os, shutil, subprocess, sys, tempfile
+import hashlib, json, os, shutil, subprocess, sys, tempfile
 
 BIN = sys.argv[1]
 SRC = ( "// alpha adds one.\nint alpha( int x ) { return x + 1; }\n\n"
@@ -625,21 +667,41 @@ CASES = [
     ( "U+0041 'A' (the trivial control)",        "A",           False ),
 ]
 
-def attempt( verb, field, payload ):
+# ONE long-lived server per write verb rather than a fork+exec per payload — the same harness (K1) uses one
+# arm below, for the same reason: every case here is an independent tools/call judged on its response and on
+# the file it did or did not touch, and nothing asserts startup, restart, staleness-reload or watcher
+# behaviour. Each case still gets a FRESH corpus under its own path, so no index, no handle and no refusal
+# carries from one case to the next. An absent or unparseable reply degrades to {} — the same value the
+# per-process form produced from an empty stdout — so a server that dies still lands on the same FAIL rows.
+class Server:
+    def __init__( self ):
+        self.p = subprocess.Popen( [ BIN, "--mcp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL )
+        self.send( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } )
+    def send( self, obj ):
+        try:
+            self.p.stdin.write( json.dumps( obj ).encode() + b"\n" ); self.p.stdin.flush()
+            line = self.p.stdout.readline().decode( "utf-8", "replace" ).strip()
+            return json.loads( line ) if line else {}
+        except Exception:
+            return {}
+    def close( self ):
+        try:    self.p.stdin.close(); self.p.wait( 15 )
+        except Exception: self.p.kill()
+
+def sha256( path ):                                    # in-process; a shasum(1) fork per probe was pure cost
+    with open( path, "rb" ) as fh: return hashlib.sha256( fh.read() ).hexdigest()
+
+def attempt( srv, verb, field, payload ):
     d = tempfile.mkdtemp()
     open( os.path.join( d, "a.h" ), "w" ).write( SRC )
-    before = subprocess.run( [ "shasum", "-a", "256", os.path.join( d, "a.h" ) ],
-                             stdout=subprocess.PIPE, text=True ).stdout.split()[0]
-    req = { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": { "name": verb, "arguments": { "path": d, "symbol": "alpha", "file": "a.h", field: payload } } }
-    feed = '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' + json.dumps( req ) + "\n"
-    out = subprocess.run( [ BIN, "--mcp" ], input=feed.encode(), stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL ).stdout.decode( "utf-8", "replace" )
-    lines = [ l for l in out.splitlines() if l.strip() ]
-    r = json.loads( lines[ -1 ] ) if lines else {}
-    after = subprocess.run( [ "shasum", "-a", "256", os.path.join( d, "a.h" ) ],
-                            stdout=subprocess.PIPE, text=True ).stdout.split()[0]
-    body = open( os.path.join( d, "a.h" ) ).read()
+    target = os.path.join( d, "a.h" )
+    before = sha256( target )
+    r = srv.send( { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": { "name": verb,
+                                "arguments": { "path": d, "symbol": "alpha", "file": "a.h", field: payload } } } )
+    after = sha256( target )
+    body = open( target ).read()
     shutil.rmtree( d )
     return ( "error" in r, r.get( "error", {} ).get( "message", "" ), before == after, "int alpha( int x )" in body )
 
@@ -652,8 +714,9 @@ def check( cond, msg ):
 for verb, field in ( ( "replace_symbol_body", "new_body" ),
                      ( "insert_before_symbol", "text" ),
                      ( "insert_after_symbol", "text" ) ):
+    srv = Server()
     for label, payload, mustRefuse in CASES:
-        refused, msg, sameSha, defIntact = attempt( verb, field, payload )
+        refused, msg, sameSha, defIntact = attempt( srv, verb, field, payload )
         if mustRefuse:
             check( refused, "(J) %-20s %-42s → REFUSED" % ( verb, label ) )
             check( sameSha and defIntact,
@@ -663,6 +726,7 @@ for verb, field in ( ( "replace_symbol_body", "new_body" ),
                        "(J) %-20s %-42s → the SAME missing-field sentence, naming %s" % ( verb, label, field ) )
         else:
             check( not refused, "(J) %-20s %-42s → still APPLIES (the rule does not over-reach)" % ( verb, label ) )
+    srv.close()
 
 print( "  INFO  (J) %d payload classes x 3 write verbs" % len( CASES ) )
 sys.exit( 1 if fails else 0 )
@@ -714,7 +778,7 @@ case $? in
 esac
 
 python3 - "$BIN" "$ROOT" <<'PY'
-import json, os, re, shutil, socket, subprocess, sys, tempfile, time
+import hashlib, json, os, re, shutil, socket, subprocess, sys, tempfile, time
 
 BIN, ROOT = sys.argv[1], sys.argv[2]
 SRC = ( "// alpha adds one.\nint alpha( int x ) { return x + 1; }\n\n"
@@ -802,8 +866,8 @@ class StdioServer:
 
 def identity( path ):
     st = os.stat( path )
-    sha = subprocess.run( [ "shasum", "-a", "256", path ], stdout=subprocess.PIPE, text=True ).stdout.split()[0]
-    return ( st.st_size, st.st_mtime_ns, st.st_ino, sha )
+    with open( path, "rb" ) as fh: sha = hashlib.sha256( fh.read() ).hexdigest()   # in-process; a shasum(1)
+    return ( st.st_size, st.st_mtime_ns, st.st_ino, sha )                         # fork ran twice per probe
 
 def freshCorpus():
     d = tempfile.mkdtemp()
@@ -899,10 +963,29 @@ ws    = freshCorpus()
 target = os.path.join( ws, "a.h" )
 http  = subprocess.Popen( [ BIN, ws, "--listen=127.0.0.1:%d" % port, "--allow-remote-edits",
                             "--mcp-token=" + token ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT )
-time.sleep( 2.0 )
+
+# WAIT ON THE CONDITION: poll until the listener ACCEPTS on `port` (20 ms interval, 30 s ceiling), returning
+# early if the child dies. A timeout FAILS the arm here rather than letting a 96-probe sweep fall through
+# against a socket nobody is listening on. `http.stdout` is only read once the child has EXITED — reading a
+# live child's pipe would block forever, which is the one thing a timeout path must not do.
+def waitListening( port, proc, timeoutSec = 30.0 ):
+    deadline = time.time() + timeoutSec
+    while time.time() < deadline:
+        if proc.poll() is not None: return False
+        try:
+            socket.create_connection( ( "127.0.0.1", port ), 0.25 ).close()
+            return True
+        except OSError:
+            time.sleep( 0.02 )
+    return False
+
+listening = waitListening( port, http )
 if http.poll() is not None:
     check( False, "(K2) the --allow-remote-edits listener did not start: %s"
                   % http.stdout.read()[ :180 ].decode( "utf-8", "replace" ) )
+elif not listening:
+    check( False, "(K2) the --allow-remote-edits listener never ACCEPTED on 127.0.0.1:%d within 30 s" % port )
+    http.terminate(); http.wait( 15 )
 else:
     def post( line ):
         body = line.encode()
