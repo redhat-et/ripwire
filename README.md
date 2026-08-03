@@ -12,7 +12,8 @@ of milliseconds from a warm index — and labels every count it cannot prove is 
 
 [Quickstart](#quickstart) · [What it answers](#what-it-answers) · [Real runs](#real-runs) ·
 [Measured](#measured) · [Tokens saved](#what-it-saves-you-in-tokens) ·
-[Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
+[Lineage](#standing-on-the-whole-field) · [Honesty contract](#the-honesty-contract) ·
+[Agent setup](#set-it-up-in-your-coding-agent) ·
 [Prompt loops](#improve-it-with-your-agent) · [Docs](#documentation)
 
 ---
@@ -242,6 +243,17 @@ appendix.
 
 ---
 
+## Standing on the whole field
+
+Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
+**27 repositories and 27 papers** into one deterministic executable, alongside a labelled
+survey of 220 tools that folded nothing and are catalogued separately — the two sets are disjoint,
+so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
+[`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
+by `test/readmedriftcheck.sh`, which fails if this sentence and those tables disagree.
+
+---
+
 ## The honesty contract
 
 The differentiator is not a number, it is a discipline: **a measurement you cannot check is a claim,
@@ -406,6 +418,7 @@ behind `--mentions`; Office and PDF join them through an optional bridge.
 | Pipeline, data model, determinism contract, output-honesty contract | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Every published number, its instrument, and what is *not* published | [`docs/EVALS.md`](docs/EVALS.md) |
 | The method, as something transferable | [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) |
+| Where every idea came from, and where each one lives in the code | [`docs/LINEAGE.md`](docs/LINEAGE.md) |
 | C++ house style, the G1–G5 guardrails, gate discipline, the submission checklist | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
