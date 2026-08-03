@@ -61,8 +61,14 @@ namespace wsdetail
         while( i < p.size() )
         {
             std::size_t j = p.find( delim, i );
-            if( j == std::string_view::npos ) j = p.size();
-            if( j > i ) segs.push_back( p.substr( i, j - i ) );
+            if( j == std::string_view::npos )
+            {
+                j = p.size();
+            }
+            if( j > i )
+            {
+                segs.push_back( p.substr( i, j - i ) );
+            }
             i = j + 1;
         }
         return segs;
@@ -71,12 +77,21 @@ namespace wsdetail
     // the k-segment suffix of `segs`, joined with '/'. k is clamped to segs.size().
     inline std::string suffixLabel( const std::vector<std::string_view>& segs, std::size_t k )
     {
-        if( segs.empty() ) return std::string( "root" );   // degenerate ("/" as a root) — stable fallback
-        if( k > segs.size() ) k = segs.size();
+        if( segs.empty() )
+        {
+            return std::string( "root" ); // degenerate ("/" as a root) — stable fallback
+        }
+        if( k > segs.size() )
+        {
+            k = segs.size();
+        }
         std::string out;
         for( std::size_t i = segs.size() - k; i < segs.size(); ++i )
         {
-            if( !out.empty() ) out.push_back( '/' );
+            if( !out.empty() )
+            {
+                out.push_back( '/' );
+            }
             out.append( segs[i] );
         }
         return out;
@@ -96,7 +111,9 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
         const std::string real = wsdetail::realOf( a );
         bool dup = false;
         for( const WorkspaceRoot& r : out )
+        {
             if( r.real == real ) { dup = true; break; }
+        }
         if( dup )
         {
             std::fprintf( stderr, "ripwire: duplicate root '%s' ignored (same directory already listed)\n", a.c_str() );
@@ -107,9 +124,13 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
 
     // 2) nested roots = hard error (§2.1): files would have two owners, two ids, double PageRank mass.
     for( std::size_t i = 0; i < out.size(); ++i )
+    {
         for( std::size_t j = 0; j < out.size(); ++j )
         {
-            if( i == j ) continue;
+            if( i == j )
+            {
+                continue;
+            }
             const std::string& outer = out[i].real;
             const std::string& inner = out[j].real;
             if( inner.size() > outer.size() && inner.compare( 0, outer.size(), outer ) == 0
@@ -121,6 +142,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
                 return false;
             }
         }
+    }
 
     // 3) labels: shortest unique whole-segment suffix of the REAL path (basename when unique). Extend
     //    leftward by whole segments until unique — deterministic, order-independent, stable when a third
@@ -128,7 +150,10 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
     {
         std::vector<std::vector<std::string_view>> segs;
         segs.reserve( out.size() );
-        for( const WorkspaceRoot& r : out ) segs.push_back( wsdetail::segmentsOf( r.real ) );
+        for( const WorkspaceRoot& r : out )
+        {
+            segs.push_back( wsdetail::segmentsOf( r.real ) );
+        }
 
         for( std::size_t i = 0; i < out.size(); ++i )
         {
@@ -138,8 +163,12 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
                 const std::string cand = wsdetail::suffixLabel( segs[i], k );
                 bool clash = false;
                 for( std::size_t j = 0; j < out.size() && !clash; ++j )
+                {
                     if( j != i && wsdetail::suffixLabel( segs[j], std::min( k, segs[j].size() ) ) == cand )
+                    {
                         clash = true;
+                    }
+                }
                 if( !clash || k >= segs[i].size() ) { out[i].label = cand; break; }
             }
         }
@@ -183,14 +212,19 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
     {
         bool allPartsHaveLexStats = !parts.empty();
         for( const IngestResult& p : parts )
+        {
             allPartsHaveLexStats = allPartsHaveLexStats && p.hasLexStats
                                 && p.lexTokenRowOffsets.size() == p.symbols.size() + 1
                                 && p.lexDocBodyDl.size()       == p.symbols.size()
                                 && p.lexFileSig.size()         == p.files.size() * kLexFileSigWords;
+        }
         if( allPartsHaveLexStats )
         {
             std::size_t totPairs = 0;
-            for( const IngestResult& p : parts ) totPairs += p.lexTokenHashes.size();
+            for( const IngestResult& p : parts )
+            {
+                totPairs += p.lexTokenHashes.size();
+            }
             m.hasLexStats = true;
             m.lexTokenRowOffsets.reserve( totSyms + 1 );   m.lexTokenRowOffsets.push_back( 0 );
             m.lexDocBodyDl.reserve( totSyms );             m.lexFileSig.reserve( totFiles * kLexFileSigWords );
@@ -199,7 +233,9 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             {
                 const std::uint32_t pairOff = std::uint32_t( m.lexTokenHashes.size() );
                 for( std::size_t rowIndex = 1; rowIndex < p.lexTokenRowOffsets.size(); ++rowIndex )
+                {
                     m.lexTokenRowOffsets.push_back( pairOff + p.lexTokenRowOffsets[ rowIndex ] );
+                }
                 m.lexTokenHashes.insert( m.lexTokenHashes.end(), p.lexTokenHashes.begin(), p.lexTokenHashes.end() );
                 m.lexTokenTfs.insert( m.lexTokenTfs.end(), p.lexTokenTfs.begin(), p.lexTokenTfs.end() );
                 m.lexDocBodyDl.insert( m.lexDocBodyDl.end(), p.lexDocBodyDl.begin(), p.lexDocBodyDl.end() );
@@ -249,7 +285,10 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         }
         for( Reference& ref : p.references )
         {
-            if( ref.fromSymbol != kNoNode ) ref.fromSymbol += symOff;
+            if( ref.fromSymbol != kNoNode )
+            {
+                ref.fromSymbol += symOff;
+            }
             ref.fileId += fileOff;
             m.references.push_back( std::move( ref ) );
         }
@@ -260,7 +299,10 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         }
         for( Binding& b : p.bindings )
         {
-            if( b.fromSymbol != kNoNode ) b.fromSymbol += symOff;
+            if( b.fromSymbol != kNoNode )
+            {
+                b.fromSymbol += symOff;
+            }
             b.fileId += fileOff;
             m.bindings.push_back( std::move( b ) );
         }
@@ -279,12 +321,17 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         }
         for( RouteUse& ru : p.routeUses )
         {
-            if( ru.fromSymbol != kNoNode ) ru.fromSymbol += symOff;
+            if( ru.fromSymbol != kNoNode )
+            {
+                ru.fromSymbol += symOff;
+            }
             ru.fileId += fileOff;
             m.routeUses.push_back( std::move( ru ) );
         }
         for( auto& [ fid, text ] : p.docText )
+        {
             m.docText[ fid + fileOff ] = std::move( text );
+        }
     }
 
     // root identity tables (consumed by graph.h root-scoping, resolve.h cross-root probes, serialize.h prologue).

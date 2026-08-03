@@ -101,7 +101,10 @@ struct PageWindow { std::size_t begin, end; };
 inline PageWindow pageWindow( std::size_t total, int limit, int offset ) noexcept
 {
     const std::size_t off = offset > 0 ? std::min<std::size_t>( std::size_t( offset ), total ) : 0;
-    if( limit <= 0 ) return { off, total };                       // unbounded from `off` (offset alone still applies)
+    if( limit <= 0 )
+    {
+        return { off, total }; // unbounded from `off` (offset alone still applies)
+    }
     const std::size_t end = std::min<std::size_t>( off + std::size_t( limit ), total );
     return { off, end };
 }
@@ -134,7 +137,10 @@ inline PageDisclosureValues computePageDisclosure( std::size_t rowsShown, std::s
                                                     int limit, int offset, bool discloseCap ) noexcept
 {
     const bool paging = limit > 0 || offset > 0;
-    if( !paging && !discloseCap ) return { false, 0, false, 0, 0, 0, 0 };
+    if( !paging && !discloseCap )
+    {
+        return { false, 0, false, 0, 0, 0, 0 };
+    }
 
     const unsigned capped  = rowsShown < rowTotal ? 1u : 0u;
     const unsigned hasMore = paging && windowEnd < rowTotal ? 1u : 0u;
@@ -203,10 +209,14 @@ inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t ro
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
     if( !v.paging )
+    {
         std::snprintf( buf, bufCap, syn.capOnly, rowsShown, isCapped );
+    }
     else
+    {
         std::snprintf( buf, bufCap, syn.full, rowsShown, isCapped, rowTotal, v.hasMore ? syn.yes : syn.no,
                        v.nextOrTotal, v.offsetOut, v.limitOut );
+    }
 #pragma clang diagnostic pop
     return buf;
 }

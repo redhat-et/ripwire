@@ -48,10 +48,11 @@ using Count = uint32_t;
 template<class Key>
 ALWAYS_INLINE bool keyIsSortable( Key key ) noexcept
 {
-    if constexpr ( IsFloatRadixKey<Key> )
+    if constexpr ( IsFloatRadixKey<Key> ) {
         return fastmath::isFiniteFast( key );
-    else
+    } else {
         return true;
+}
 }
 
 template<class Key>
@@ -62,8 +63,9 @@ ALWAYS_INLINE SortWordFor<Key> sortWordOf( Key key ) noexcept
         VERIFY_TEXT( keyIsSortable(key), "radix float keys must be finite" );
 
         uint32_t raw = __builtin_bit_cast( uint32_t, key );
-        if( ( raw & 0x7FFFFFFFu ) == 0u )
+        if( ( raw & 0x7FFFFFFFu ) == 0u ) {
             raw = 0u;                               // keep -0.0 and +0.0 stable-equal
+}
 
         const uint32_t sign = raw >> 31;
         const uint32_t mask = sign ? 0xFFFFFFFFu : 0x80000000u;
@@ -99,8 +101,9 @@ ALWAYS_INLINE constexpr uint16_t quantizeFloatToU16Impl( float value, float minV
 
 ALWAYS_INLINE constexpr uint16_t quantizeFloatToU16Signed1024Impl( float value ) noexcept
 {
-    if( !std::is_constant_evaluated() )
+    if( !std::is_constant_evaluated() ) {
         VERIFY_TEXT( fastmath::isFiniteFast(value), "radix quantized float keys must be finite" );
+}
 
     constexpr float kMin = -1024.f;
     constexpr float kInvRange = 1.f / 2048.f;
@@ -112,18 +115,22 @@ ALWAYS_INLINE constexpr uint16_t quantizeFloatToU16Signed1024Impl( float value )
 template<int kPasses>
 inline void clearHistograms( Count (&hist)[kPasses][256] ) noexcept
 {
-    for( int pass = 0; pass < kPasses; ++pass )
-        for( int bin = 0; bin < 256; ++bin )
+    for( int pass = 0; pass < kPasses; ++pass ) {
+        for( int bin = 0; bin < 256; ++bin ) {
             hist[pass][bin] = 0;
+}
+}
 }
 
 template<int kPasses>
 inline bool digitPassIsNoOp( const Count (&hist)[kPasses][256],
                              int pass, std::size_t count ) noexcept
 {
-    for( int bin = 0; bin < 256; ++bin )
-        if( hist[pass][bin] == count )
+    for( int bin = 0; bin < 256; ++bin ) {
+        if( hist[pass][bin] == count ) {
             return true;
+}
+}
     return false;
 }
 
@@ -142,11 +149,13 @@ inline void makeOffsets( const Count (&hist)[kPasses][256],
 template<class Item>
 inline void copyItems( Item* dst, Item* src, std::size_t count ) noexcept
 {
-    if constexpr ( IsTriviallyRelocatable<Item> )
+    if constexpr ( IsTriviallyRelocatable<Item> ) {
         memorycopy( dst, src, count * sizeof(Item) );    // one bulk move, no per-element loop
-    else
-        for( std::size_t i = 0; i < count; ++i )
+    } else {
+        for( std::size_t i = 0; i < count; ++i ) {
             dst[i] = std::move( src[i] );                 // src is consumed; move-assign (copy fallback)
+}
+}
 }
 
 inline void copyIndices( uint32_t* dst, const uint32_t* src, std::size_t count ) noexcept
@@ -176,8 +185,9 @@ void buildHistogramsScalarKeys( const Key* keys, std::size_t count,
     for( ; i < count; ++i )
     {
         const SortWordFor<Key> k = sortWordOf( keys[i] );
-        for( int pass = 0; pass < kPasses; ++pass )
+        for( int pass = 0; pass < kPasses; ++pass ) {
             ++hist[pass][digitOf(k, pass)];
+}
     }
 }
 
@@ -240,8 +250,9 @@ void buildHistogramsContiguousKeys( const Key* keys, std::size_t count,
     if constexpr ( std::is_same_v<Key, uint32_t> )
     {
         std::size_t i = 0;
-        for( ; i + 4 <= count; i += 4 )
+        for( ; i + 4 <= count; i += 4 ) {
             addNeonU32Bytes( vld1q_u32( keys + i ), hist );
+}
         for( ; i < count; ++i )
         {
             const Key k = keys[i];
@@ -255,13 +266,15 @@ void buildHistogramsContiguousKeys( const Key* keys, std::size_t count,
     else if constexpr ( std::is_same_v<Key, uint64_t> )
     {
         std::size_t i = 0;
-        for( ; i + 2 <= count; i += 2 )
+        for( ; i + 2 <= count; i += 2 ) {
             addNeonU64Bytes( vld1q_u64( keys + i ), hist );
+}
         for( ; i < count; ++i )
         {
             const Key k = keys[i];
-            for( int pass = 0; pass < kPasses; ++pass )
+            for( int pass = 0; pass < kPasses; ++pass ) {
                 ++hist[pass][digitOf(k, pass)];
+}
         }
         return;
     }
@@ -315,8 +328,9 @@ void buildHistogramsIndexedKeys( const Key* keys, const uint32_t* indices, std::
     for( ; i < count; ++i )
     {
         const SortWordFor<Key> k = sortWordOf( keys[indices[i]] );
-        for( int pass = 0; pass < kPasses; ++pass )
+        for( int pass = 0; pass < kPasses; ++pass ) {
             ++hist[pass][digitOf(k, pass)];
+}
     }
 }
 
@@ -329,8 +343,9 @@ void sortPreparedIndices( const Key* keys, uint32_t* indices, uint32_t* scratch,
 
     for( int pass = 0; pass < kPasses; ++pass )
     {
-        if( digitPassIsNoOp( hist, pass, count ) )
+        if( digitPassIsNoOp( hist, pass, count ) ) {
             continue;
+}
 
         Count offsets[256];
         makeOffsets( hist, pass, offsets );
@@ -347,8 +362,9 @@ void sortPreparedIndices( const Key* keys, uint32_t* indices, uint32_t* scratch,
         dst = tmp;
     }
 
-    if( src != indices )
+    if( src != indices ) {
         copyIndices( indices, src, count );
+}
 }
 
 } // namespace detail
@@ -369,8 +385,9 @@ void sortKeySmall( Item* items, Item* scratch, std::size_t count, KeyOf&& keyOf 
     using Key = std::remove_cvref_t<decltype( keyOf( items[0] ) )>;
     static_assert( detail::IsRadixKey<Key>, "sortKeySmall keyOf(item) must return unsigned 8/16/32/64-bit integral key or finite float key" );
 
-    if( count <= 1 ) [[unlikely]]
+    if( count <= 1 ) { [[unlikely]]
         return;
+}
 
     VERIFY_TEXT( items != nullptr,   "sortKeySmall: items must be non-null" );
     VERIFY_TEXT( scratch != nullptr, "sortKeySmall: scratch must be non-null" );
@@ -399,8 +416,9 @@ void sortKeySmall( Item* items, Item* scratch, std::size_t count, KeyOf&& keyOf 
     for( ; i < count; ++i )
     {
         const detail::SortWordFor<Key> k = detail::sortWordOf( Key( keyOf( items[i] ) ) );
-        for( int pass = 0; pass < kPasses; ++pass )
+        for( int pass = 0; pass < kPasses; ++pass ) {
             ++hist[pass][detail::digitOf(k, pass)];
+}
     }
 
     Item* src = items;
@@ -408,8 +426,9 @@ void sortKeySmall( Item* items, Item* scratch, std::size_t count, KeyOf&& keyOf 
 
     for( int pass = 0; pass < kPasses; ++pass )
     {
-        if( detail::digitPassIsNoOp( hist, pass, count ) )
+        if( detail::digitPassIsNoOp( hist, pass, count ) ) {
             continue;
+}
 
         detail::Count offsets[256];
         detail::makeOffsets( hist, pass, offsets );
@@ -426,8 +445,9 @@ void sortKeySmall( Item* items, Item* scratch, std::size_t count, KeyOf&& keyOf 
         dst = tmp;
     }
 
-    if( src != items )
+    if( src != items ) {
         detail::copyItems( items, src, count );
+}
 }
 
 template<class Key>
@@ -437,8 +457,9 @@ void sortKeyLarge( const Key* keys, uint32_t* indices, uint32_t* scratch, std::s
 
     if( count <= 1 ) [[unlikely]]
     {
-        if( count == 1 && indices )
+        if( count == 1 && indices ) {
             indices[0] = 0;
+}
         return;
     }
 
@@ -448,8 +469,9 @@ void sortKeyLarge( const Key* keys, uint32_t* indices, uint32_t* scratch, std::s
     VERIFY_TEXT( indices != scratch, "sortKeyLarge: scratch must not alias indices" );
     VERIFY_TEXT( count <= std::size_t(UINT32_MAX), "sortKeyLarge: count exceeds uint32 index range" );
 
-    for( std::size_t i = 0; i < count; ++i )
+    for( std::size_t i = 0; i < count; ++i ) {
         indices[i] = uint32_t( i );
+}
 
     constexpr int kPasses = detail::Passes<Key>;
     alignas( fastmath::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
@@ -463,8 +485,9 @@ void sortKeyLargeIndexed( const Key* keys, uint32_t* indices, uint32_t* scratch,
 {
     static_assert( detail::IsRadixKey<Key>, "sortKeyLargeIndexed keys must be unsigned 8/16/32/64-bit integral values or finite floats" );
 
-    if( count <= 1 ) [[unlikely]]
+    if( count <= 1 ) { [[unlikely]]
         return;
+}
 
     VERIFY_TEXT( keys != nullptr,    "sortKeyLargeIndexed: keys must be non-null" );
     VERIFY_TEXT( indices != nullptr, "sortKeyLargeIndexed: indices must be non-null" );
@@ -487,8 +510,9 @@ void sortKeyLargePairs( const Key* keys, uint32_t* indices, WordIndex* scratch, 
 
     if( count <= 1 ) [[unlikely]]
     {
-        if( count == 1 && indices )
+        if( count == 1 && indices ) {
             indices[0] = 0;
+}
         return;
     }
 
@@ -514,14 +538,16 @@ void sortKeyLargePairs( const Key* keys, uint32_t* indices, WordIndex* scratch, 
     {
         const uint32_t word = uint32_t( detail::sortWordOf( keys[i] ) );
         src[i] = WordIndex{ word, uint32_t(i) };
-        for( int pass = 0; pass < kPasses; ++pass )
+        for( int pass = 0; pass < kPasses; ++pass ) {
             ++hist[pass][ detail::digitOf( word, pass ) ];
+}
     }
 
     for( int pass = 0; pass < kPasses; ++pass )
     {
-        if( detail::digitPassIsNoOp( hist, pass, count ) )
+        if( detail::digitPassIsNoOp( hist, pass, count ) ) {
             continue;
+}
 
         detail::Count offsets[256];
         detail::makeOffsets( hist, pass, offsets );
@@ -537,8 +563,9 @@ void sortKeyLargePairs( const Key* keys, uint32_t* indices, WordIndex* scratch, 
         dst = tmp;
     }
 
-    for( std::size_t i = 0; i < count; ++i )
+    for( std::size_t i = 0; i < count; ++i ) {
         indices[i] = src[i].index;
+}
 }
 
 } // namespace radix

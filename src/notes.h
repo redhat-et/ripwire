@@ -80,10 +80,22 @@ struct Note
 // empty sha/branch sort first (a legacy entry precedes a stamped duplicate of the same content).
 inline bool noteLess( const Note& a, const Note& b ) noexcept
 {
-    if( a.target != b.target ) return a.target < b.target;
-    if( a.date   != b.date   ) return a.date   < b.date;
-    if( a.text   != b.text   ) return a.text   < b.text;
-    if( a.sha    != b.sha    ) return a.sha    < b.sha;
+    if( a.target != b.target )
+    {
+        return a.target < b.target;
+    }
+    if( a.date != b.date )
+    {
+        return a.date < b.date;
+    }
+    if( a.text != b.text )
+    {
+        return a.text < b.text;
+    }
+    if( a.sha != b.sha )
+    {
+        return a.sha < b.sha;
+    }
     return a.branch < b.branch;
 }
 
@@ -97,7 +109,10 @@ inline void sortNotes( std::vector<Note>& notes )
 inline std::string notesPath( const std::string& root )
 {
     std::string p = root;
-    if( !p.empty() && p.back() != '/' ) p += '/';
+    if( !p.empty() && p.back() != '/' )
+    {
+        p += '/';
+    }
     p += kNotesFile;
     return p;
 }
@@ -112,9 +127,15 @@ inline std::string sanitizeField( std::string_view s )
 {
     std::string out;
     out.reserve( s.size() );
-    for( char c : s ) out += ( c == '\t' || c == '\n' || c == '\r' ) ? ' ' : c;
+    for( char c : s )
+    {
+        out += ( c == '\t' || c == '\n' || c == '\r' ) ? ' ' : c;
+    }
     const std::size_t a = out.find_first_not_of( ' ' );
-    if( a == std::string::npos ) return {};
+    if( a == std::string::npos )
+    {
+        return {};
+    }
     const std::size_t b = out.find_last_not_of( ' ' );
     return out.substr( a, b - a + 1 );
 }
@@ -166,8 +187,12 @@ inline constexpr std::array<std::string_view, 8> kDecisionMarkers = {
 inline bool isDecisionShaped( std::string_view text )
 {
     for( std::string_view marker : kDecisionMarkers )
+    {
         if( text.find( marker ) != std::string_view::npos )
+        {
             return true;
+        }
+    }
     return false;
 }
 
@@ -190,13 +215,19 @@ inline std::string normalizeNoteTarget( std::string_view target, std::string_vie
     const std::string_view pathPart = ( sep == std::string_view::npos ) ? target : target.substr( 0, sep );
     const std::string_view rest     = ( sep == std::string_view::npos ) ? std::string_view{} : target.substr( sep );   // includes the leading "::"
 
-    if( pathPart.empty() ) return std::string( target );   // degenerate target — pass through untouched, never throw
+    if( pathPart.empty() )
+    {
+        return std::string( target ); // degenerate target — pass through untouched, never throw
+    }
 
     if( pathPart.front() == '/' )
     {
         // absolute — must land UNDER root (same root-trim + whole-component compare as relForHash) or refuse.
         std::string_view rootTrim = root;
-        while( rootTrim.size() > 1 && rootTrim.back() == '/' ) rootTrim.remove_suffix( 1 );
+        while( rootTrim.size() > 1 && rootTrim.back() == '/' )
+        {
+            rootTrim.remove_suffix( 1 );
+        }
         const bool underRoot = !rootTrim.empty() && rootTrim != "." && rootTrim.front() == '/'
             && pathPart.size() >= rootTrim.size() && pathPart.compare( 0, rootTrim.size(), rootTrim ) == 0
             && ( pathPart.size() == rootTrim.size() || pathPart[ rootTrim.size() ] == '/' );
@@ -245,12 +276,21 @@ inline std::vector<Note> readNotes( const std::string& path )
 {
     std::vector<Note> notes;
     std::ifstream f( path );
-    if( !f ) return notes;
+    if( !f )
+    {
+        return notes;
+    }
     std::string line;
     while( std::getline( f, line ) )
     {
-        while( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) ) line.pop_back();   // CRLF tolerance
-        if( line.empty() || line[0] == '#' ) continue;
+        while( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) )
+        {
+            line.pop_back(); // CRLF tolerance
+        }
+        if( line.empty() || line[0] == '#' )
+        {
+            continue;
+        }
         const std::size_t t1 = line.find( '\t' );
         const std::size_t t2 = ( t1 == std::string::npos ) ? std::string::npos : line.find( '\t', t1 + 1 );
         if( t1 == std::string::npos || t2 == std::string::npos )
@@ -289,7 +329,10 @@ inline std::vector<Note> readNotesRelative( const std::string& path, const std::
 inline std::string noteLine( const Note& n )
 {
     std::string line = n.target + "\t" + n.date + "\t" + n.text;
-    if( !n.sha.empty() ) line += "\t" + n.sha + "\t" + n.branch;
+    if( !n.sha.empty() )
+    {
+        line += "\t" + n.sha + "\t" + n.branch;
+    }
     return line;
 }
 
@@ -301,7 +344,10 @@ inline bool writeNotes( const std::string& path, std::vector<Note> notes )
     std::ofstream f( path, std::ios::trunc );
     if( !f ) { DEGRADED_PATH_ALERT( "notes: cannot write notes file" ); return false; }
     f << "# ripwire field notes v1 — one per line: <canonical-id or path> <TAB> <ISO-date> <TAB> <text> [<TAB> <HEAD sha> <TAB> <branch>]. Kept SORTED (merge-friendly union); dates are git committer-clock, not wall time; the trailing sha/branch pair is present only on provenance-stamped notes.\n";
-    for( const Note& n : notes ) f << noteLine( n ) << '\n';
+    for( const Note& n : notes )
+    {
+        f << noteLine( n ) << '\n';
+    }
     return bool( f );
 }
 
@@ -316,9 +362,22 @@ inline std::string addNote( const std::string& path, std::string_view target, st
     std::vector<Note> notes = readNotes( path );
     Note n{ std::string( target ), std::string( date ), std::string( text ), std::string( sha ), std::string( branch ) };
     bool dup = false;
-    for( const Note& e : notes ) if( e.target == n.target && e.date == n.date && e.text == n.text && e.sha == n.sha && e.branch == n.branch ) { dup = true; break; }
-    if( !dup ) notes.push_back( n );
-    if( !writeNotes( path, std::move( notes ) ) ) return {};
+    for( const Note& e : notes )
+    {
+        if( e.target == n.target && e.date == n.date && e.text == n.text && e.sha == n.sha && e.branch == n.branch )
+        {
+            dup = true;
+            break;
+        }
+    }
+    if( !dup )
+    {
+        notes.push_back( n );
+    }
+    if( !writeNotes( path, std::move( notes ) ) )
+    {
+        return {};
+    }
     return noteLine( n );
 }
 
@@ -351,7 +410,10 @@ inline NoteIndex buildNoteIndex( std::vector<Note> notes, std::string root = {} 
     idx.root = std::move( root );
     idx.notes = std::move( notes );
     idx.byTarget.reserve( idx.notes.size() );   // reserve to expected size — skip the ankerl rehash cascade
-    for( std::uint32_t i = 0; i < idx.notes.size(); ++i ) idx.byTarget[ idx.notes[i].target ].push_back( i );
+    for( std::uint32_t i = 0; i < idx.notes.size(); ++i )
+    {
+        idx.byTarget[idx.notes[i].target].push_back( i );
+    }
     return idx;
 }
 

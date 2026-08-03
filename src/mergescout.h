@@ -118,7 +118,10 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[i];
-        if( s.fileId >= ing.files.size() || s.endByte <= s.sigStartByte ) continue;   // no real body → not in bodyHash either
+        if( s.fileId >= ing.files.size() || s.endByte <= s.sigStartByte )
+        {
+            continue; // no real body → not in bodyHash either
+        }
         const std::string    relFile( relForHash( ing.files[ s.fileId ], root ) );
         const std::string    canon = canonicalId( relFile, s.scope, s.name );          // DISPLAY id (may be a bare name)
         std::string          idText;                                                   // COMPARISON key — always path-qualified
@@ -162,13 +165,22 @@ inline SymTreeIndex indexCommittish( const std::string& root, const std::string&
                                      const std::vector<std::string>& excludes, std::size_t maxFileBytes,
                                      const std::string& repoHex, const std::string& exclHex )
 {
-    if( committish.empty() ) return {};
+    if( committish.empty() )
+    {
+        return {};
+    }
     const std::string tmpRoot = quality::materializeCommitTree( root, committish, "qms" );
-    if( tmpRoot.empty() ) return {};
+    if( tmpRoot.empty() )
+    {
+        return {};
+    }
     quality::TmpTreeGuard guard{ tmpRoot };
     const std::string cachePath = msCachePath( repoHex, exclHex, committish );
     IngestResult ing = ingest( tmpRoot.c_str(), excludes, std::string_view( cachePath ), maxFileBytes, /*captureValueUses=*/false );
-    if( ing.symbols.empty() && ing.files.empty() ) return {};
+    if( ing.symbols.empty() && ing.files.empty() )
+    {
+        return {};
+    }
     return buildTreeIndex( ing, tmpRoot );
 }
 
@@ -192,10 +204,19 @@ inline std::vector<ChangedSym> diffTreeIndex( const SymTreeIndex& base, const Sy
         const auto rIt = ref.bodyHash.find( k );
         const bool inBase = bIt != base.bodyHash.end();
         const bool inRef  = rIt != ref.bodyHash.end();
-        if( inBase && inRef && bIt->second == rIt->second ) continue;   // unchanged — the common case, skipped
+        if( inBase && inRef && bIt->second == rIt->second )
+        {
+            continue; // unchanged — the common case, skipped
+        }
 
-        if( const auto rId = ref.identity.find( k ); rId != ref.identity.end() )       out.push_back( rId->second );
-        else if( const auto bId = base.identity.find( k ); bId != base.identity.end() ) out.push_back( bId->second );
+        if( const auto rId = ref.identity.find( k ); rId != ref.identity.end() )
+        {
+            out.push_back( rId->second );
+        }
+        else if( const auto bId = base.identity.find( k ); bId != base.identity.end() )
+        {
+            out.push_back( bId->second );
+        }
         // else: a body-hash key with no identity entry on either side can't happen (buildTreeIndex derives
         // both from the same symbol pass) — degrade by simply not naming it, never crash.
     }
@@ -288,9 +309,15 @@ inline std::pair<std::vector<std::string>, std::string> resolveAllRefs( const st
     std::vector<std::string> shas( refs.size() );
     for( std::size_t i = 0; i < refs.size(); ++i )
     {
-        if( refs[i] == kWorkingTreeRef ) return { {}, std::string( refs[i] ) };   // reserved — collides with the implicit arm
+        if( refs[i] == kWorkingTreeRef )
+        {
+            return { {}, std::string( refs[i] ) }; // reserved — collides with the implicit arm
+        }
         shas[i] = resolveCommittish( root, refs[i] );
-        if( shas[i].empty() ) return { {}, std::string( refs[i] ) };
+        if( shas[i].empty() )
+        {
+            return { {}, std::string( refs[i] ) };
+        }
     }
     return { std::move( shas ), std::string{} };
 }
@@ -327,11 +354,17 @@ inline Arm computeNamedArm( std::string_view ref, const std::string& refSha, con
 inline std::vector<std::uint64_t> headChangedKeysSince( const std::string& baseSha, const std::string& headSha, TreeIndexMemo& memo )
 {
     std::vector<std::uint64_t> keys;
-    if( baseSha.empty() || baseSha == headSha ) return keys;
+    if( baseSha.empty() || baseSha == headSha )
+    {
+        return keys;
+    }
 
     const std::vector<ChangedSym> headChanged = diffTreeIndex( memo.get( baseSha ), memo.get( headSha ) );
     keys.reserve( headChanged.size() );
-    for( const ChangedSym& s : headChanged ) keys.push_back( s.key );
+    for( const ChangedSym& s : headChanged )
+    {
+        keys.push_back( s.key );
+    }
     return keys;   // already key-sorted (diffTreeIndex emits in key order)
 }
 
@@ -340,10 +373,18 @@ inline std::vector<std::uint64_t> headChangedKeysSince( const std::string& baseS
 inline std::vector<ChangedSym> intersectHeadChanged( const std::vector<ChangedSym>& changed, const std::vector<std::uint64_t>& headKeys )
 {
     std::vector<ChangedSym> out;
-    if( headKeys.empty() ) return out;
+    if( headKeys.empty() )
+    {
+        return out;
+    }
 
     for( const ChangedSym& s : changed )
-        if( std::binary_search( headKeys.begin(), headKeys.end(), s.key ) ) out.push_back( s );
+    {
+        if( std::binary_search( headKeys.begin(), headKeys.end(), s.key ) )
+        {
+            out.push_back( s );
+        }
+    }
     return out;
 }
 
@@ -357,7 +398,12 @@ inline HeadChangedByBase planHeadConflictLane( const std::vector<std::string>& b
 {
     HeadChangedByBase plan;
     for( const std::string& baseSha : baseShas )
-        if( !baseSha.empty() && baseSha != headSha ) plan.try_emplace( baseSha );
+    {
+        if( !baseSha.empty() && baseSha != headSha )
+        {
+            plan.try_emplace( baseSha );
+        }
+    }
     return plan;
 }
 
@@ -418,7 +464,9 @@ inline ScoutResult computeMergeScout( const std::string& root, std::string_view 
     // consumer instead of holding every arm alive for the whole call.
     std::vector<std::string> baseShas( refs.size() );
     for( std::size_t i = 0; i < refs.size(); ++i )
+    {
         baseShas[i] = resolveMergeBase( root, refShas[i], result.headSha );
+    }
 
     const bool dirty = !quality::gitOneLine( root, "status --porcelain 2>/dev/null" ).empty();   // dirty ⇒ the implicit extra arm
 
@@ -427,28 +475,40 @@ inline ScoutResult computeMergeScout( const std::string& root, std::string_view 
     TreeIndexMemo memo( root, excludes, maxFileBytes );
     for( std::size_t i = 0; i < refs.size(); ++i )
     {
-        if( baseShas[i].empty() ) continue;   // unresolvable merge-base — computeNamedArm degrades below without touching the memo
+        if( baseShas[i].empty() )
+        {
+            continue; // unresolvable merge-base — computeNamedArm degrades below without touching the memo
+        }
         memo.reserve( baseShas[i] );
         memo.reserve( refShas[i] );
     }
-    if( dirty ) memo.reserve( result.headSha );
+    if( dirty )
+    {
+        memo.reserve( result.headSha );
+    }
     reserveHeadConflictLane( headChangedByBase, result.headSha, memo );
 
     // The head-conflict diffs run FIRST: their reserves are already counted above, so a base tree they touch
     // stays memoized for the arm loop below instead of being materialized twice.
     for( auto& [ baseSha, keys ] : headChangedByBase )
+    {
         keys = headChangedKeysSince( baseSha, result.headSha, memo );
+    }
 
     for( std::size_t i = 0; i < refs.size(); ++i )
     {
         Arm arm = computeNamedArm( refs[i], refShas[i], baseShas[i], memo );
         if( const auto it = headChangedByBase.find( arm.baseSha ); it != headChangedByBase.end() )
+        {
             arm.headConflicts = intersectHeadChanged( arm.changed, it->second );
+        }
         result.arms.push_back( std::move( arm ) );
     }
 
     if( dirty )
+    {
         result.arms.push_back( computeWorkingTreeArm( root, result.headSha, workingIng, memo ) );
+    }
 
     return result;
 }
@@ -471,11 +531,19 @@ inline PairOverlap computeOnePairOverlap( std::size_t a, std::size_t b, const Ar
 {
     PairOverlap p; p.a = a; p.b = b;
     for( const ChangedSym& x : armA.changed )
+    {
         for( const ChangedSym& y : armB.changed )
         {
-            if( x.key == y.key )        p.conflicts.push_back( x );
-            else if( x.file == y.file ) p.risks.push_back( RiskPair{ x, y } );
+            if( x.key == y.key )
+            {
+                p.conflicts.push_back( x );
+            }
+            else if( x.file == y.file )
+            {
+                p.risks.push_back( RiskPair { x, y } );
+            }
         }
+    }
     return p;
 }
 
@@ -483,8 +551,12 @@ inline std::vector<PairOverlap> computeOverlaps( const std::vector<Arm>& arms )
 {
     std::vector<PairOverlap> pairs;
     for( std::size_t a = 0; a < arms.size(); ++a )
+    {
         for( std::size_t b = a + 1; b < arms.size(); ++b )
+        {
             pairs.push_back( computeOnePairOverlap( a, b, arms[a], arms[b] ) );
+        }
+    }
     return pairs;
 }
 
@@ -495,9 +567,18 @@ inline std::size_t conflictScoreAgainstRemaining( std::size_t i, const std::vect
     std::size_t score = 0;
     for( const PairOverlap& p : pairs )
     {
-        if( p.conflicts.empty() ) continue;
-        if( p.a == i && !landed[ p.b ] )      ++score;
-        else if( p.b == i && !landed[ p.a ] ) ++score;
+        if( p.conflicts.empty() )
+        {
+            continue;
+        }
+        if( p.a == i && !landed[p.b] )
+        {
+            ++score;
+        }
+        else if( p.b == i && !landed[p.a] )
+        {
+            ++score;
+        }
     }
     return score;
 }
@@ -509,7 +590,10 @@ inline std::size_t pickNextToLand( const std::vector<Arm>& arms, const std::vect
     bool haveBest = false;
     for( std::size_t i = 0; i < arms.size(); ++i )
     {
-        if( landed[i] ) continue;
+        if( landed[i] )
+        {
+            continue;
+        }
         const std::size_t score = conflictScoreAgainstRemaining( i, pairs, landed );
         if( !haveBest || score < bestScore || ( score == bestScore && arms[i].ref < arms[best].ref ) )
         { best = i; bestScore = score; haveBest = true; }
@@ -555,7 +639,9 @@ using XmlEscaper = std::function<std::string( std::string_view )>;
 inline void writeSymRows( std::FILE* out, const char* tag, const std::vector<ChangedSym>& syms, const XmlEscaper& ex )
 {
     for( const ChangedSym& s : syms )
+    {
         std::fprintf( out, "<%s p=\"%s\" id=\"%s\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
+    }
 }
 
 inline void writeScoutArm( std::FILE* out, const Arm& arm, const XmlEscaper& ex )
@@ -573,7 +659,9 @@ inline void writeScoutArm( std::FILE* out, const Arm& arm, const XmlEscaper& ex 
     // the fixed header run above. --stray-content is the verb that answers "is this ref stale / already
     // superseded" — this row just points there instead of re-deriving that itself.
     if( arm.changed.empty() )
+    {
         std::fprintf( out, "<no-work note=\"no divergent work vs merge-base — see --stray-content\"/>" );
+    }
     writeSymRows( out, "sym", arm.changed, ex );
 
     // r26: the live line changed these too, while this arm sat unmerged — a merge fight no pairwise ARM
@@ -590,17 +678,28 @@ inline void writeScoutPair( std::FILE* out, const std::vector<Arm>& arms, const 
     std::fprintf( out, ">" );
     writeSymRows( out, "conflict", p.conflicts, ex );
     for( const RiskPair& r : p.risks )
+    {
         std::fprintf( out, "<risk p=\"%s\" a=\"%s\" b=\"%s\"/>", ex( r.a.file ).c_str(), ex( r.a.id ).c_str(), ex( r.b.id ).c_str() );
+    }
     std::fprintf( out, "</pair>" );
 }
 
 inline void writeScoutLanding( std::FILE* out, const std::vector<Arm>& arms, const std::vector<PairOverlap>& pairs, const XmlEscaper& ex )
 {
-    if( arms.empty() ) return;
+    if( arms.empty() )
+    {
+        return;
+    }
     const std::vector<std::size_t> order = landingOrder( arms, pairs );
     std::string joined;
     for( std::size_t idx = 0; idx < order.size(); ++idx )
-    { if( idx ) joined += ','; joined += arms[ order[idx] ].ref; }
+    {
+        if( idx )
+        {
+            joined += ',';
+        }
+        joined += arms[order[idx]].ref;
+    }
     std::fprintf( out, "<landing order=\"%s\"/>", ex( joined ).c_str() );
 }
 
@@ -625,10 +724,16 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
     // against <stray-content>'s 9-char base= — a second split, documented, not widened into this change.)
     std::fprintf( out, "<merge-scout arms=\"%zu\" head=\"%.9s\">", result.arms.size(), ex( result.headSha ).c_str() );
 
-    for( const Arm& arm : result.arms ) writeScoutArm( out, arm, ex );
+    for( const Arm& arm : result.arms )
+    {
+        writeScoutArm( out, arm, ex );
+    }
 
     const std::vector<PairOverlap> pairs = computeOverlaps( result.arms );
-    for( const PairOverlap& p : pairs ) writeScoutPair( out, result.arms, p, ex );
+    for( const PairOverlap& p : pairs )
+    {
+        writeScoutPair( out, result.arms, p, ex );
+    }
 
     writeScoutLanding( out, result.arms, pairs, ex );
 

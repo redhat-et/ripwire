@@ -66,28 +66,46 @@ inline constexpr int         kRecvTimeoutSec = 10;                       // SO_R
 // distinguishable by timing from a right one). Compares length first (safe: length is not the secret).
 inline bool constantTimeEquals( std::string_view a, std::string_view b ) noexcept
 {
-    if( a.size() != b.size() ) return false;
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
     unsigned diff = 0;
     for( std::size_t i = 0; i < a.size(); ++i )
+    {
         diff |= static_cast<unsigned char>( a[i] ) ^ static_cast<unsigned char>( b[i] );
+    }
     return diff == 0;
 }
 
 // case-insensitive ASCII compare for HTTP header names (RFC 7230 §3.2: field names are case-insensitive).
 inline bool iEquals( std::string_view a, std::string_view b ) noexcept
 {
-    if( a.size() != b.size() ) return false;
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
     for( std::size_t i = 0; i < a.size(); ++i )
+    {
         if( std::tolower( static_cast<unsigned char>( a[i] ) ) != std::tolower( static_cast<unsigned char>( b[i] ) ) )
+        {
             return false;
+        }
+    }
     return true;
 }
 
 inline std::string_view trim( std::string_view s ) noexcept
 {
     std::size_t b = 0, e = s.size();
-    while( b < e && ( s[b] == ' ' || s[b] == '\t' ) ) ++b;
-    while( e > b && ( s[e-1] == ' ' || s[e-1] == '\t' || s[e-1] == '\r' ) ) --e;
+    while( b < e && ( s[b] == ' ' || s[b] == '\t' ) )
+    {
+        ++b;
+    }
+    while( e > b && ( s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\r' ) )
+    {
+        --e;
+    }
     return s.substr( b, e - b );
 }
 
@@ -98,7 +116,10 @@ inline bool sendAll( int fd, const std::string& data ) noexcept
     while( sent < data.size() )
     {
         const ssize_t n = ::send( fd, data.data() + sent, data.size() - sent, 0 );
-        if( n <= 0 ) return false;
+        if( n <= 0 )
+        {
+            return false;
+        }
         sent += static_cast<std::size_t>( n );
     }
     return true;
@@ -168,24 +189,42 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
     for( ;; )
     {
         headerEnd = buf.find( "\r\n\r\n" );
-        if( headerEnd != std::string::npos ) break;
+        if( headerEnd != std::string::npos )
+        {
+            break;
+        }
         if( buf.size() > kMaxHeaderBytes ) { tooManyHeaderBytes = true; return req; }   // → 431
         const ssize_t n = ::recv( fd, tmp, sizeof( tmp ), 0 );
-        if( n <= 0 ) return req;   // EOF or SO_RCVTIMEO fired mid-headers (slow-loris) → drop, ok stays false but caller only 400s a *complete* malformed request; a stalled read just closes
+        if( n <= 0 )
+        {
+            return req; // EOF or SO_RCVTIMEO fired mid-headers (slow-loris) → drop, ok stays false but caller only 400s a *complete* malformed request; a stalled read just closes
+        }
         buf.append( tmp, static_cast<std::size_t>( n ) );
     }
 
     // 2) request line: METHOD SP TARGET SP VERSION
     const std::size_t lineEnd = buf.find( "\r\n" );
-    if( lineEnd == std::string::npos || lineEnd == 0 ) return req;   // malformed → caller 400s
+    if( lineEnd == std::string::npos || lineEnd == 0 )
+    {
+        return req; // malformed → caller 400s
+    }
     const std::string_view reqLine( buf.data(), lineEnd );
     const std::size_t sp1 = reqLine.find( ' ' );
-    if( sp1 == std::string_view::npos ) return req;
+    if( sp1 == std::string_view::npos )
+    {
+        return req;
+    }
     const std::size_t sp2 = reqLine.find( ' ', sp1 + 1 );
-    if( sp2 == std::string_view::npos ) return req;
+    if( sp2 == std::string_view::npos )
+    {
+        return req;
+    }
     req.method = std::string( reqLine.substr( 0, sp1 ) );
     std::string_view target = reqLine.substr( sp1 + 1, sp2 - sp1 - 1 );
-    if( const std::size_t q = target.find( '?' ); q != std::string_view::npos ) target = target.substr( 0, q );
+    if( const std::size_t q = target.find( '?' ); q != std::string_view::npos )
+    {
+        target = target.substr( 0, q );
+    }
     req.target = std::string( target );
 
     // 3) bounded headers we act on. Duplicate security/framing headers are ambiguous and therefore malformed.
@@ -194,7 +233,10 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
     while( pos < headerEnd )
     {
         std::size_t eol = buf.find( "\r\n", pos );
-        if( eol == std::string::npos || eol > headerEnd ) eol = headerEnd;
+        if( eol == std::string::npos || eol > headerEnd )
+        {
+            eol = headerEnd;
+        }
         const std::string_view hline( buf.data() + pos, eol - pos );
         const std::size_t colon = hline.find( ':' );
         if( colon != std::string_view::npos )
@@ -215,7 +257,10 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
                     cl = cl * 10 + digit;
                 }
                 if( any && !bad ) { req.contentLength = cl; req.hasContentLength = true; }
-                else badHeader = true;
+                else
+                {
+                    badHeader = true;
+                }
             }
             else if( iEquals( key, "authorization" ) )
             {
@@ -248,12 +293,17 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
                 req.protocolVersion = std::string( val );
             }
             else if( iEquals( key, "transfer-encoding" ) )
+            {
                 req.hasTransferEncoding = true;
+            }
         }
         pos = eol + 2;
     }
 
-    if( badHeader || req.hasTransferEncoding ) return req;
+    if( badHeader || req.hasTransferEncoding )
+    {
+        return req;
+    }
 
     if( req.contentLength > kMaxBodyBytes ) { tooLargeBody = true; return req; }   // → 413 (before reading the body)
 
@@ -263,11 +313,17 @@ inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody
     while( req.body.size() < req.contentLength )
     {
         const ssize_t n = ::recv( fd, tmp, sizeof( tmp ), 0 );
-        if( n <= 0 ) return req;   // truncated body (stall/EOF) — ok stays false; caller 400s a request we couldn't complete
+        if( n <= 0 )
+        {
+            return req; // truncated body (stall/EOF) — ok stays false; caller 400s a request we couldn't complete
+        }
         req.body.append( tmp, static_cast<std::size_t>( n ) );
         if( req.body.size() > kMaxBodyBytes ) { tooLargeBody = true; return req; }
     }
-    if( req.body.size() > req.contentLength ) req.body.resize( req.contentLength );
+    if( req.body.size() > req.contentLength )
+    {
+        req.body.resize( req.contentLength );
+    }
 
     req.ok = true;
     return req;
@@ -278,8 +334,14 @@ inline std::string_view bearerCredential( std::string_view auth ) noexcept
 {
     constexpr std::string_view kBearer = "Bearer ";
     auth = trim( auth );
-    if( auth.size() < kBearer.size() ) return {};
-    if( !iEquals( auth.substr( 0, kBearer.size() ), kBearer ) ) return {};
+    if( auth.size() < kBearer.size() )
+    {
+        return {};
+    }
+    if( !iEquals( auth.substr( 0, kBearer.size() ), kBearer ) )
+    {
+        return {};
+    }
     return trim( auth.substr( kBearer.size() ) );
 }
 
@@ -290,9 +352,18 @@ inline bool hasMediaType( std::string_view values, std::string_view wanted ) noe
     {
         const std::size_t comma = values.find( ',', offset );
         std::string_view value = trim( values.substr( offset, comma == std::string_view::npos ? values.size() - offset : comma - offset ) );
-        if( const std::size_t semi = value.find( ';' ); semi != std::string_view::npos ) value = trim( value.substr( 0, semi ) );
-        if( iEquals( value, wanted ) ) return true;
-        if( comma == std::string_view::npos ) break;
+        if( const std::size_t semi = value.find( ';' ); semi != std::string_view::npos )
+        {
+            value = trim( value.substr( 0, semi ) );
+        }
+        if( iEquals( value, wanted ) )
+        {
+            return true;
+        }
+        if( comma == std::string_view::npos )
+        {
+            break;
+        }
         offset = comma + 1;
     }
     return false;
@@ -305,16 +376,28 @@ inline bool acceptsMcpResponseTypes( std::string_view accept ) noexcept
 
 inline bool isJsonContentType( std::string_view contentType ) noexcept
 {
-    if( const std::size_t semi = contentType.find( ';' ); semi != std::string_view::npos ) contentType = contentType.substr( 0, semi );
+    if( const std::size_t semi = contentType.find( ';' ); semi != std::string_view::npos )
+    {
+        contentType = contentType.substr( 0, semi );
+    }
     return iEquals( trim( contentType ), "application/json" );
 }
 
 inline bool isAllowedOrigin( std::string_view origin, std::string_view host, int port, bool loopback )
 {
-    if( !loopback ) return false;   // remote browser origins require a future explicit allowlist; native clients omit Origin
+    if( !loopback )
+    {
+        return false; // remote browser origins require a future explicit allowlist; native clients omit Origin
+    }
     const std::string suffix = ":" + std::to_string( port );
-    if( origin == std::string( "http://" ) + std::string( host ) + suffix ) return true;
-    if( origin == std::string( "http://127.0.0.1" ) + suffix || origin == std::string( "http://localhost" ) + suffix ) return true;
+    if( origin == std::string( "http://" ) + std::string( host ) + suffix )
+    {
+        return true;
+    }
+    if( origin == std::string( "http://127.0.0.1" ) + suffix || origin == std::string( "http://localhost" ) + suffix )
+    {
+        return true;
+    }
     return false;
 }
 
@@ -340,14 +423,27 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
         const std::string& spec = cfg.listenSpec;
         const std::size_t   colon = spec.rfind( ':' );
         if( colon == std::string::npos )
+        {
             portStr = spec;                                 // bare port → loopback host
-        else { host = spec.substr( 0, colon ); portStr = spec.substr( colon + 1 ); if( host.empty() ) host = "127.0.0.1"; }
+        }
+        else
+        {
+            host = spec.substr( 0, colon );
+            portStr = spec.substr( colon + 1 );
+            if( host.empty() )
+            {
+                host = "127.0.0.1";
+            }
+        }
     }
     int port = 0;
     {
         bool any = false;
         for( char c : portStr ) { if( c < '0' || c > '9' ) { port = -1; break; } any = true; port = port * 10 + ( c - '0' ); if( port > 65535 ) { port = -1; break; } }
-        if( !any ) port = -1;
+        if( !any )
+        {
+            port = -1;
+        }
     }
     if( port <= 0 || port > 65535 )
     {
@@ -388,7 +484,9 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
         pinnedRoot = mcpCanonRoot( key );   // a real path if the dedupe collapsed to one root; else the opaque key (realpath fails → returned as-is)
     }
     else
+    {
         pinnedRoot = mcpCanonRoot( cfg.root );
+    }
 
     McpDispatchPolicy policy;
     policy.pinnedRoot   = pinnedRoot;
@@ -425,11 +523,14 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
 
     // ── 5) startup banner. LOUD + explicit on any non-loopback bind (§2.3.4: an accidental 0.0.0.0 is never silent) ──
     if( loopback )
+    {
         std::fprintf( stderr, "ripwire: MCP HTTP listener on http://%s:%d/mcp (loopback only)%s%s\n",
                       host.c_str(), port,
                       cfg.token.empty() ? "" : " [token required]",
                       cfg.allowRemoteEdits ? " [remote edits ENABLED]" : "" );
+    }
     else
+    {
         std::fprintf( stderr,
             "ripwire: ****************************************************************************\n"
             "ripwire: *  MCP HTTP listener bound to %s:%d — REACHABLE OFF-HOST.\n"
@@ -437,6 +538,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
             "ripwire: *  and real auth. The token is a tripwire, not a security boundary.%s\n"
             "ripwire: ****************************************************************************\n",
             host.c_str(), port, cfg.allowRemoteEdits ? "  [remote edits ENABLED]" : "" );
+    }
 
     // warm the pinned index once so the first client request is fast (and any parse issue surfaces now, on
     // stderr, not mid-request). getIndex caches process-wide; failure degrades to a lazy first-request build.
@@ -455,7 +557,10 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
         const int fd = ::accept( listenFd, nullptr, nullptr );
         if( fd < 0 )
         {
-            if( errno == EINTR ) continue;     // interrupted by a signal → retry, don't die
+            if( errno == EINTR )
+            {
+                continue; // interrupted by a signal → retry, don't die
+            }
             continue;                          // any other accept() error: skip this one, keep serving
         }
 
@@ -469,36 +574,59 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
         const Request req = readRequest( fd, tooManyHeaderBytes, tooLargeBody );
 
         if( tooLargeBody )
+        {
             respond( fd, "413 Payload Too Large", "application/json", jsonRpcError( -32600, "request body exceeds the 8 MB limit" ) );
+        }
         else if( tooManyHeaderBytes )
+        {
             respond( fd, "431 Request Header Fields Too Large", "application/json", jsonRpcError( -32600, "request headers too large" ) );
+        }
         else if( !req.ok )
         {
             // A COMPLETE-but-malformed request that we actually parsed a line of → a clean 400. A connection
             // that merely stalled/closed before a full request produced an empty method; nothing to answer,
             // just close (the server lives either way).
             if( !req.method.empty() )
+            {
                 respond( fd, "400 Bad Request", "application/json", jsonRpcError( -32600, "malformed HTTP request" ) );
+            }
         }
         else if( req.hasOrigin && !isAllowedOrigin( req.origin, host, port, loopback ) )
+        {
             respond( fd, "403 Forbidden", "application/json", jsonRpcError( -32003, "invalid Origin header" ) );
+        }
         else if( authRequired && !constantTimeEquals( bearerCredential( req.authorization ), cfg.token ) )
+        {
             respond( fd, "401 Unauthorized", "application/json", jsonRpcError( -32001, "missing or invalid bearer token" ) );
+        }
         else if( req.target != "/mcp" )
+        {
             respond( fd, "404 Not Found", "application/json", jsonRpcError( -32601, "unknown endpoint (POST to /mcp)" ) );
+        }
         else if( req.method == "GET" )
+        {
             respond( fd, "405 Method Not Allowed", "application/json", jsonRpcError( -32600, "SSE is not supported" ) );
+        }
         else if( req.method != "POST" )
+        {
             respond( fd, "405 Method Not Allowed", "application/json", jsonRpcError( -32600, "only POST /mcp is supported" ) );
+        }
         else if( !req.hasContentLength )
+        {
             respond( fd, "411 Length Required", "application/json", jsonRpcError( -32600, "Content-Length is required" ) );
+        }
         else if( !req.hasAccept || !acceptsMcpResponseTypes( req.accept ) )
+        {
             respond( fd, "406 Not Acceptable", "application/json", jsonRpcError( -32600, "Accept must list application/json and text/event-stream" ) );
+        }
         else if( !req.hasContentType || !isJsonContentType( req.contentType ) )
+        {
             respond( fd, "415 Unsupported Media Type", "application/json", jsonRpcError( -32600, "Content-Type must be application/json" ) );
-        else if( mcpdetail::findString( req.body, "method" ) != "initialize"
-              && req.hasProtocolVersion && !isMcpProtocolVersionSupported( req.protocolVersion ) )
+        }
+        else if( mcpdetail::findString( req.body, "method" ) != "initialize" && req.hasProtocolVersion && !isMcpProtocolVersionSupported( req.protocolVersion ) )
+        {
             respond( fd, "400 Bad Request", "application/json", jsonRpcError( -32600, "invalid or unsupported MCP-Protocol-Version" ) );
+        }
         else
         {
             // authorized, well-formed POST /mcp → the SAME shared handler the stdio loop uses. A notification
@@ -509,9 +637,13 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
 
             const McpDispatchResult r = dispatchMcpLine( req.body, cfg.topK, cfg.stable, cfg.noRedact, policy );
             if( r.isNotification )
+            {
                 respond( fd, "202 Accepted", "application/json", std::string{} );
+            }
             else
+            {
                 respond( fd, "200 OK", "application/json", r.resp );
+            }
 
             if( timingsOn )
             {

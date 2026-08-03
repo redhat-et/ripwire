@@ -99,7 +99,10 @@ inline const char*        kAcksFile = ".ripwire_quality_acks";
 inline std::string rootQualifiedSidecar( const std::string& root, const char* name )
 {
     std::string p = root;
-    if( !p.empty() && p.back() != '/' ) p += '/';
+    if( !p.empty() && p.back() != '/' )
+    {
+        p += '/';
+    }
     return p + name;
 }
 
@@ -160,7 +163,10 @@ struct Snapshot
 inline bool isPublicApi( const IngestResult& ing, NodeId i ) noexcept
 {
     const Symbol& s = ing.symbols[i];
-    if( s.kind == SymKind::Section ) return false;                       // markdown heading — not a code contract
+    if( s.kind == SymKind::Section )
+    {
+        return false; // markdown heading — not a code contract
+    }
     const std::string& p = ing.files[ s.fileId ];
     const auto ends = [ & ]( std::string_view e )
     { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
@@ -182,10 +188,22 @@ inline bool isFixturePath( std::string_view p ) noexcept
     {
         const std::size_t      slash = p.find( '/', start );
         const std::string_view c     = p.substr( start, ( slash == std::string_view::npos ? p.size() : slash ) - start );
-        if( c == "fixture" || c == "fixtures" ) return true;
-        if( c.size() > 3 && c.substr( c.size() - 3 ) == "fix" && ( prev == "test" || prev == "tests" ) ) return true;
-        if( !c.empty() && c != "." && c != ".." ) prev = c;      // "." / ".." spellings never count as the test parent
-        if( slash == std::string_view::npos ) break;
+        if( c == "fixture" || c == "fixtures" )
+        {
+            return true;
+        }
+        if( c.size() > 3 && c.substr( c.size() - 3 ) == "fix" && ( prev == "test" || prev == "tests" ) )
+        {
+            return true;
+        }
+        if( !c.empty() && c != "." && c != ".." )
+        {
+            prev = c; // "." / ".." spellings never count as the test parent
+        }
+        if( slash == std::string_view::npos )
+        {
+            break;
+        }
         start = slash + 1;
     }
     return false;
@@ -203,7 +221,10 @@ inline bool isFixturePath( std::string_view p ) noexcept
 // complexity is still worth a look) — only dead-code and duplication treat them as fixture-class.
 inline bool isTestScriptPath( std::string_view p ) noexcept
 {
-    if( !isTestPath( p ) ) return false;
+    if( !isTestPath( p ) )
+    {
+        return false;
+    }
     const auto ends = [ & ]( std::string_view e )
     { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
     return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
@@ -215,16 +236,34 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
 inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i ) noexcept
 {
     const Symbol& s = ing.symbols[i];
-    if( s.kind == SymKind::Section )    return false;            // markdown heading
-    if( s.sigEndByte >= s.endByte )     return false;            // no body (decl / prototype)
+    if( s.kind == SymKind::Section )
+    {
+        return false; // markdown heading
+    }
+    if( s.sigEndByte >= s.endByte )
+    {
+        return false; // no body (decl / prototype)
+    }
     const auto* ro = g.inEdges.rowOffsets();
-    if( ro[i + 1] - ro[i] != 0 )        return false;            // has at least one caller
+    if( ro[i + 1] - ro[i] != 0 )
+    {
+        return false; // has at least one caller
+    }
     const std::string& p = ing.files[ s.fileId ];
     const auto ends = [ & ]( std::string_view e )
     { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    if( ends( ".h" ) || ends( ".hpp" ) || ends( ".hh" ) || ends( ".hxx" ) ) return false;   // header-exported by convention
-    if( isFixturePath( p ) )            return false;            // fixtures are dead by design (noise rules)
-    if( isTestScriptPath( p ) )         return false;            // B10.1a: shell test-runner helpers — $(...) calls invisible to the parser
+    if( ends( ".h" ) || ends( ".hpp" ) || ends( ".hh" ) || ends( ".hxx" ) )
+    {
+        return false; // header-exported by convention
+    }
+    if( isFixturePath( p ) )
+    {
+        return false; // fixtures are dead by design (noise rules)
+    }
+    if( isTestScriptPath( p ) )
+    {
+        return false; // B10.1a: shell test-runner helpers — $(...) calls invisible to the parser
+    }
     return true;
 }
 
@@ -235,7 +274,13 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i )
 inline std::uint64_t cloneGroupHash( const CloneGroup& cg, const IngestResult& ing, std::string_view root )
 {
     std::vector<std::string> ids;
-    for( NodeId m : cg.members ) if( m < ing.symbols.size() ) ids.push_back( baselineCanonId( ing, m, root ) );
+    for( NodeId m : cg.members )
+    {
+        if( m < ing.symbols.size() )
+        {
+            ids.push_back( baselineCanonId( ing, m, root ) );
+        }
+    }
     std::sort( ids.begin(), ids.end() );
     std::string joined;
     for( const std::string& x : ids ) { joined += x; joined.push_back( '\n' ); }
@@ -255,18 +300,27 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
 {
     gtl::btree_map<std::uint64_t, std::uint32_t> counts;
     const std::vector<ErrorMaskHit> hits = findErrorMasking( ing );
-    if( hits.empty() ) return counts;
+    if( hits.empty() )
+    {
+        return counts;
+    }
 
     // per-file symbol id list (only real-body defs can enclose a masking block).
     std::vector<std::vector<NodeId>> byFile( ing.files.size() );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[i];
-        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte ) byFile[ s.fileId ].push_back( i );
+        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte )
+        {
+            byFile[s.fileId].push_back( i );
+        }
     }
     for( const ErrorMaskHit& h : hits )
     {
-        if( h.fileId >= byFile.size() ) continue;
+        if( h.fileId >= byFile.size() )
+        {
+            continue;
+        }
         // smallest enclosing def wins (a nested lambda/method inside a method) — pick the tightest [start,end)
         // that contains the hit so the count lands on the innermost owning symbol. Linear per file is fine.
         NodeId        owner   = kNoNode;
@@ -280,7 +334,10 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
                 if( len < bestLen ) { bestLen = len; owner = i; }
             }
         }
-        if( owner != kNoNode ) ++counts[ fnv1a64( canonicalId( relForHash( ing.files[ ing.symbols[owner].fileId ], root ), ing.symbols[owner].scope, ing.symbols[owner].name ) ) ];
+        if( owner != kNoNode )
+        {
+            ++counts[fnv1a64( canonicalId( relForHash( ing.files[ing.symbols[owner].fileId], root ), ing.symbols[owner].scope, ing.symbols[owner].name ) )];
+        }
     }
     return counts;
 }
@@ -305,30 +362,55 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[i];
-        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte ) byFile[ s.fileId ].push_back( i );
+        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte )
+        {
+            byFile[s.fileId].push_back( i );
+        }
     }
     gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // canonId hash → its symbols' raw-body hashes
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( byFile[f].empty() ) continue;
+        if( byFile[f].empty() )
+        {
+            continue;
+        }
         std::FILE* fp = std::fopen( ing.files[f].c_str(), "rb" );
-        if( !fp ) continue;
+        if( !fp )
+        {
+            continue;
+        }
         std::fseek( fp, 0, SEEK_END );
         const long sz = std::ftell( fp );
         std::fseek( fp, 0, SEEK_SET );
         bytes.clear();
-        if( sz > 0 ) { bytes.resize( std::size_t( sz ) ); if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) ) bytes.clear(); }
+        if( sz > 0 )
+        {
+            bytes.resize( std::size_t( sz ) );
+            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+            {
+                bytes.clear();
+            }
+        }
         std::fclose( fp );
-        if( bytes.empty() ) continue;
+        if( bytes.empty() )
+        {
+            continue;
+        }
         for( NodeId i : byFile[f] )
         {
             const Symbol& s = ing.symbols[i];
-            if( s.endByte > bytes.size() || s.sigStartByte >= s.endByte ) continue;
+            if( s.endByte > bytes.size() || s.sigStartByte >= s.endByte )
+            {
+                continue;
+            }
             const std::string_view relPath = relForHash( ing.files[ s.fileId ], root );
             std::string            idText;
             if( pathQualified ) { idText.append( relPath ).push_back( '\0' );  idText.append( s.scope ).push_back( '\0' );  idText.append( s.name ); }
-            else                  idText = canonicalId( relPath, s.scope, s.name );
+            else
+            {
+                idText = canonicalId( relPath, s.scope, s.name );
+            }
             const std::uint64_t key = fnv1a64( idText );
             perId[ key ].push_back( fnv1a64( std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) ) );
         }
@@ -360,7 +442,10 @@ inline std::string cacheDirLadder()
     if( tmpDir && *tmpDir )
     {
         std::string d = tmpDir;
-        while( d.size() > 1 && d.back() == '/' ) d.pop_back();
+        while( d.size() > 1 && d.back() == '/' )
+        {
+            d.pop_back();
+        }
         return d;
     }
 
@@ -381,12 +466,20 @@ inline std::string popenTrimmed( const std::string& cmd )
 {
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
+    {
         return {};
+    }
     char        buf[ 4096 ];
     std::string out;
-    while( std::fgets( buf, sizeof( buf ), pipe ) ) out += buf;
+    while( std::fgets( buf, sizeof( buf ), pipe ) )
+    {
+        out += buf;
+    }
     pclose( pipe );
-    while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' || out.back() == ' ' ) ) out.pop_back();
+    while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' || out.back() == ' ' ) )
+    {
+        out.pop_back();
+    }
     return out;
 }
 
@@ -416,7 +509,10 @@ inline std::string gitHeadSha( const std::string& root )
 inline std::string gitCommitterDateIso( const std::string& root )
 {
     const std::string out = gitOneLine( root, "log -1 --format=%cs HEAD 2>/dev/null" );
-    if( out.size() != 10 || out[4] != '-' || out[7] != '-' ) return {};
+    if( out.size() != 10 || out[4] != '-' || out[7] != '-' )
+    {
+        return {};
+    }
     return out;
 }
 
@@ -451,9 +547,17 @@ inline std::string gitCommitterDateIso( const std::string& root )
 // report rather than done silently across a file this lane does not own.
 inline bool isBareCommitSha( std::string_view s ) noexcept
 {
-    if( s.size() != 40 && s.size() != 64 ) return false;
+    if( s.size() != 40 && s.size() != 64 )
+    {
+        return false;
+    }
     for( char c : s )
-        if( !std::isxdigit( static_cast<unsigned char>( c ) ) ) return false;
+    {
+        if( !std::isxdigit( static_cast<unsigned char>( c ) ) )
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -463,14 +567,20 @@ inline bool isBareCommitSha( std::string_view s ) noexcept
 // hand a token to git should hand THIS result, never the caller's own string.
 inline std::string gitResolveCommitSha( const std::string& root, const std::string& ref )
 {
-    if( ref.empty() || ref[0] == '-' ) return {};
+    if( ref.empty() || ref[0] == '-' )
+    {
+        return {};
+    }
     const std::string out = gitOneLine( root, "rev-parse --verify --quiet " + shSingleQuote( ref + "^{commit}" ) + " 2>/dev/null" );
     return isBareCommitSha( out ) ? out : std::string{};
 }
 
 inline bool gitIsAncestor( const std::string& root, const std::string& ancestor, const std::string& descendant )
 {
-    if( ancestor.empty() || descendant.empty() ) return false;
+    if( ancestor.empty() || descendant.empty() )
+    {
+        return false;
+    }
     // SINK GUARD (r27): both operands reach `std::system` as argv entries. merge-base has no file-writing
     // option today, which is the ONLY reason the sidecar-sourced `ancestor` was merely low severity rather
     // than the P0.1 data-loss bug — the shape is identical. Refuse anything that is not a bare object name.
@@ -494,15 +604,24 @@ inline bool gitIsAncestor( const std::string& root, const std::string& ancestor,
 inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days )
 {
     const std::string epochStr = gitOneLine( root, "log -1 --format=%ct HEAD 2>/dev/null" );
-    if( epochStr.empty() ) return {};
+    if( epochStr.empty() )
+    {
+        return {};
+    }
     const std::int64_t headEpoch = std::strtoll( epochStr.c_str(), nullptr, 10 );
-    if( headEpoch <= 0 ) return {};
+    if( headEpoch <= 0 )
+    {
+        return {};
+    }
 
     // newest commit at-or-before the window floor (rev-list --min-age filters on committer time ≤ the bound;
     // cutoff−1 keeps a commit landing exactly ON the floor inside the window, matching gitmine's inclusive floor).
     const std::int64_t cutoff = headEpoch - std::int64_t( days ) * 86400;
     const std::string  preWindow = gitOneLine( root, "rev-list --max-count=1 --min-age=" + std::to_string( cutoff - 1 ) + " HEAD 2>/dev/null" );
-    if( !preWindow.empty() ) return preWindow;
+    if( !preWindow.empty() )
+    {
+        return preWindow;
+    }
 
     return gitOneLine( root, "rev-list HEAD 2>/dev/null | tail -1" );   // repo younger than the window → its first commit
 }
@@ -516,10 +635,18 @@ inline bool gitRepoHasHistory( const std::string& root )
                           + " rev-parse --verify --quiet HEAD 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
+    {
         return false;
+    }
     char buf[ 128 ];
     bool gotHead = false;
-    while( std::fgets( buf, sizeof( buf ), pipe ) ) if( buf[0] != '\n' && buf[0] != '\0' ) gotHead = true;
+    while( std::fgets( buf, sizeof( buf ), pipe ) )
+    {
+        if( buf[0] != '\n' && buf[0] != '\0' )
+        {
+            gotHead = true;
+        }
+    }
     const int rc = pclose( pipe );
     return rc == 0 && gotHead;
 }
@@ -555,7 +682,10 @@ inline std::string headSnapRepoHex( const std::string& root )
 {
     char* rp = ::realpath( root.c_str(), nullptr );
     const std::string absRoot = rp ? std::string( rp ) : root;
-    if( rp ) std::free( rp );
+    if( rp )
+    {
+        std::free( rp );
+    }
     char hex[ 20 ];
     std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( fnv1a64( absRoot ) ) );
     return std::string( hex );
@@ -669,12 +799,18 @@ inline std::string resolveCacheBlobPath( const std::string& dir, const std::stri
     namespace fs = std::filesystem;
     const std::string flatPath = dir + "/" + filename;
     std::error_code   existsEc;
-    if( fs::exists( fs::path( flatPath ), existsEc ) && !existsEc ) return flatPath;   // legacy flat blob — keep using it in place
+    if( fs::exists( fs::path( flatPath ), existsEc ) && !existsEc )
+    {
+        return flatPath; // legacy flat blob — keep using it in place
+    }
 
     const std::string shardDir = dir + "/" + blobShardHex( filename );
     std::error_code   mkEc;
     fs::create_directory( fs::path( shardDir ), mkEc );
-    if( mkEc ) return flatPath;   // degrade: couldn't make the shard dir (e.g. dir missing/unwritable) — fall back to flat rather than lose caching entirely
+    if( mkEc )
+    {
+        return flatPath; // degrade: couldn't make the shard dir (e.g. dir missing/unwritable) — fall back to flat rather than lose caching entirely
+    }
     return shardDir + "/" + filename;
 }
 
@@ -736,16 +872,31 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     {
         std::error_code sec;
         fs::directory_iterator sit( d, sec ), send;
-        if( sec ) return;
+        if( sec )
+        {
+            return;
+        }
         for( ; sit != send; sit.increment( sec ) )
         {
-            if( sec ) return;
+            if( sec )
+            {
+                return;
+            }
             const std::string name = sit->path().filename().string();
-            if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 ) continue;
-            if( name.size() < 4 || name.compare( name.size() - 4, 4, ".bin" ) != 0 ) continue;
+            if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 )
+            {
+                continue;
+            }
+            if( name.size() < 4 || name.compare( name.size() - 4, 4, ".bin" ) != 0 )
+            {
+                continue;
+            }
             std::error_code te;
             const auto mt = fs::last_write_time( sit->path(), te );
-            if( te ) continue;
+            if( te )
+            {
+                continue;
+            }
             std::error_code se;
             const auto sz = sit->file_size( se );
             mine.push_back( Blob{ mt, se ? std::uintmax_t( 0 ) : sz, sit->path().string() } );   // size-stat failure degrades to 0 (age/count passes still see the file)
@@ -757,27 +908,48 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     std::error_code       ec;
     std::vector<fs::path> shardDirs;
     fs::directory_iterator it( fs::path( dir ), ec ), end;
-    if( ec ) return;                                    // unreadable cache dir → nothing to evict, no crash
+    if( ec )
+    {
+        return; // unreadable cache dir → nothing to evict, no crash
+    }
     for( ; it != end; it.increment( ec ) )
     {
-        if( ec ) return;
+        if( ec )
+        {
+            return;
+        }
         const std::string name = it->path().filename().string();
         if( name.size() == 2 && std::isxdigit( static_cast<unsigned char>( name[0] ) ) && std::isxdigit( static_cast<unsigned char>( name[1] ) ) )
         {
             std::error_code isdirEc;
-            if( it->is_directory( isdirEc ) && !isdirEc ) shardDirs.push_back( it->path() );
+            if( it->is_directory( isdirEc ) && !isdirEc )
+            {
+                shardDirs.push_back( it->path() );
+            }
             continue;
         }
-        if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 ) continue;
-        if( name.size() < 4 || name.compare( name.size() - 4, 4, ".bin" ) != 0 ) continue;
+        if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 )
+        {
+            continue;
+        }
+        if( name.size() < 4 || name.compare( name.size() - 4, 4, ".bin" ) != 0 )
+        {
+            continue;
+        }
         std::error_code te;
         const auto mt = fs::last_write_time( it->path(), te );
-        if( te ) continue;
+        if( te )
+        {
+            continue;
+        }
         std::error_code se;
         const auto sz = it->file_size( se );
         mine.push_back( Blob{ mt, se ? std::uintmax_t( 0 ) : sz, it->path().string() } );   // size-stat failure degrades to 0 (age/count passes still see the file)
     }
-    for( const fs::path& sd : shardDirs ) scanOneDir( sd );
+    for( const fs::path& sd : shardDirs )
+    {
+        scanOneDir( sd );
+    }
 
     // age pass: outright delete anything past the cutoff (disabled when maxAgeDays == 0).
     if( maxAgeDays > 0.0 )
@@ -808,7 +980,10 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     {
         const std::uintmax_t lowWaterBytes = maxTotalBytes - maxTotalBytes / 8;
         std::uintmax_t totalBytes = 0;
-        for( const Blob& b : mine ) totalBytes += b.byteSize;
+        for( const Blob& b : mine )
+        {
+            totalBytes += b.byteSize;
+        }
         if( totalBytes > maxTotalBytes )
         {
             std::sort( mine.begin(), mine.end(), []( const Blob& a, const Blob& b ){ return a.mtime < b.mtime; } );   // oldest first
@@ -835,7 +1010,10 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
         std::sort( mine.begin(), mine.end(), []( const Blob& a, const Blob& b ){ return a.mtime > b.mtime; } );   // newest first
         for( std::size_t i = keep; i < mine.size(); ++i )
         {
-            if( mine[i].path == keepPath ) continue;
+            if( mine[i].path == keepPath )
+            {
+                continue;
+            }
             std::error_code de;
             fs::remove( fs::path( mine[i].path ), de );   // best-effort; a failed unlink just leaves an extra file
         }
@@ -866,7 +1044,10 @@ inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string&
 {
     static std::atomic<bool> swept{ false };
     bool expected = false;
-    if( !swept.compare_exchange_strong( expected, true ) ) return;   // only the first saveCache in this process sweeps
+    if( !swept.compare_exchange_strong( expected, true ) )
+    {
+        return; // only the first saveCache in this process sweeps
+    }
 
     evictOldCacheFamily( dir, "ripwire-", keepPath, std::numeric_limits<std::size_t>::max(), kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
 }
@@ -991,7 +1172,10 @@ inline void qsnapPut( std::string& buf, const T& v )
 template<class T>
 inline bool qsnapGet( const char*& p, const char* end, T& out )
 {
-    if( end - p < static_cast<std::ptrdiff_t>( sizeof( T ) ) ) return false;
+    if( end - p < static_cast<std::ptrdiff_t>( sizeof( T ) ) )
+    {
+        return false;
+    }
     std::memcpy( &out, p, sizeof( T ) );
     p += sizeof( T );
     return true;
@@ -1017,7 +1201,7 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     const auto putHashMap = [ & ]( const gtl::btree_map<std::uint64_t, std::uint64_t>& m )
     { qsnapPut( buf, std::uint32_t( m.size() ) ); for( const auto& [ k, v ] : m ) { qsnapPut( buf, k ); qsnapPut( buf, v ); } };
     const auto putVec = [ & ]( const std::vector<std::uint64_t>& v )
-    { qsnapPut( buf, std::uint32_t( v.size() ) ); for( std::uint64_t x : v ) qsnapPut( buf, x ); };
+    { qsnapPut( buf, std::uint32_t( v.size() ) ); for( std::uint64_t x : v ) { qsnapPut( buf, x ); } };
 
     putValMap( s.ccxBySym );
     putValMap( s.locBySym );
@@ -1041,60 +1225,112 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
 inline bool deserializeSnapshot( const std::string& blob, const std::string& headSha, Snapshot& out )
 {
     if( blob.size() < 4 + 3 * sizeof( std::uint32_t ) + sizeof( std::uint64_t ) + sizeof( std::uint64_t ) )
+    {
         return false;                                          // smaller than magic+scheme+cacheVer+parserVer+sha+trailer
+    }
     const char*       data    = blob.data();
     const std::size_t bodyLen = blob.size() - sizeof( std::uint64_t );   // trailer = last 8 bytes
     std::uint64_t     stored  = 0;
     std::memcpy( &stored, data + bodyLen, sizeof( std::uint64_t ) );
-    if( stored != fnv1a64( std::string_view( data, bodyLen ) ) ) return false;   // checksum
+    if( stored != fnv1a64( std::string_view( data, bodyLen ) ) )
+    {
+        return false; // checksum
+    }
 
     const char* p   = data;
     const char* end = data + bodyLen;                          // never parse into the trailer
-    if( std::memcmp( p, kQSnapMagic, 4 ) != 0 ) return false;
+    if( std::memcmp( p, kQSnapMagic, 4 ) != 0 )
+    {
+        return false;
+    }
     p += 4;
     std::uint32_t scheme = 0;
-    if( !qsnapGet( p, end, scheme ) || scheme != kQSnapCacheScheme ) return false;
+    if( !qsnapGet( p, end, scheme ) || scheme != kQSnapCacheScheme )
+    {
+        return false;
+    }
 
     // P0.2 — the EXTRACTION IDENTITY guard. Every field below is a function of tree-sitter extraction, so a
     // blob written by a binary with a different kCacheVersion/kParserVer describes a DIFFERENT corpus and must
     // be rejected outright (self-healing recompute), never merged or trusted.
     std::uint32_t blobCacheVer = 0, blobParserVer = 0;
-    if( !qsnapGet( p, end, blobCacheVer )  || blobCacheVer  != kIngestCacheVersionMirror ) return false;
-    if( !qsnapGet( p, end, blobParserVer ) || blobParserVer != kIngestParserVerMirror )    return false;
+    if( !qsnapGet( p, end, blobCacheVer )  || blobCacheVer  != kIngestCacheVersionMirror )
+    {
+        return false;
+    }
+    if( !qsnapGet( p, end, blobParserVer ) || blobParserVer != kIngestParserVerMirror )
+    {
+        return false;
+    }
 
     std::uint64_t shaHash = 0;
-    if( !qsnapGet( p, end, shaHash ) || shaHash != fnv1a64( headSha ) ) return false;
+    if( !qsnapGet( p, end, shaHash ) || shaHash != fnv1a64( headSha ) )
+    {
+        return false;
+    }
 
     Snapshot s;
     const auto getValMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint32_t>& m ) -> bool
     {
         std::uint32_t n = 0;
-        if( !qsnapGet( p, end, n ) ) return false;
+        if( !qsnapGet( p, end, n ) )
+        {
+            return false;
+        }
         for( std::uint32_t i = 0; i < n; ++i )
-        { std::uint64_t k; std::uint32_t v; if( !qsnapGet( p, end, k ) || !qsnapGet( p, end, v ) ) return false; m[ k ] = v; }
+        {
+            std::uint64_t k;
+            std::uint32_t v;
+            if( !qsnapGet( p, end, k ) || !qsnapGet( p, end, v ) )
+            {
+                return false;
+            }
+            m[k] = v;
+        }
         return true;
     };
     const auto getHashMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint64_t>& m ) -> bool
     {
         std::uint32_t n = 0;
-        if( !qsnapGet( p, end, n ) ) return false;
+        if( !qsnapGet( p, end, n ) )
+        {
+            return false;
+        }
         for( std::uint32_t i = 0; i < n; ++i )
-        { std::uint64_t k, v; if( !qsnapGet( p, end, k ) || !qsnapGet( p, end, v ) ) return false; m[ k ] = v; }
+        {
+            std::uint64_t k, v;
+            if( !qsnapGet( p, end, k ) || !qsnapGet( p, end, v ) )
+            {
+                return false;
+            }
+            m[k] = v;
+        }
         return true;
     };
     const auto getVec = [ & ]( std::vector<std::uint64_t>& v ) -> bool
     {
         std::uint32_t n = 0;
-        if( !qsnapGet( p, end, n ) ) return false;
+        if( !qsnapGet( p, end, n ) )
+        {
+            return false;
+        }
         v.reserve( n );
-        for( std::uint32_t i = 0; i < n; ++i ) { std::uint64_t x; if( !qsnapGet( p, end, x ) ) return false; v.push_back( x ); }
+        for( std::uint32_t i = 0; i < n; ++i )
+        {
+            std::uint64_t x;
+            if( !qsnapGet( p, end, x ) )
+            {
+                return false;
+            }
+            v.push_back( x );
+        }
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym )
-     || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getHashMap( s.bodyHashBySym )
-     || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi ) )
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getHashMap( s.bodyHashBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi ) )
+    {
         return false;
+    }
 
     std::sort( s.cloneGroups.begin(), s.cloneGroups.end() );   // computeDelta binary_searches these — enforce order
     std::sort( s.dead.begin(),        s.dead.end() );
@@ -1115,13 +1351,22 @@ inline int readQSnapBlob( const std::string& path, std::string& out )
     // exactly what this function's 0 already means, so it stays silent and the caller recomputes.
     {
         struct stat probe;
-        if( ::stat( path.c_str(), &probe ) != 0 || !S_ISREG( probe.st_mode ) ) return 0;
+        if( ::stat( path.c_str(), &probe ) != 0 || !S_ISREG( probe.st_mode ) )
+        {
+            return 0;
+        }
     }
 
     std::ifstream f( path, std::ios::binary | std::ios::ate );
-    if( !f ) return 0;
+    if( !f )
+    {
+        return 0;
+    }
     const std::streamsize sz = f.tellg();
-    if( sz <= 0 ) return 0;
+    if( sz <= 0 )
+    {
+        return 0;
+    }
     out.resize( static_cast<std::size_t>( sz ) );
     f.seekg( 0 );
     if( !f.read( out.data(), sz ) ) { out.clear(); return 0; }
@@ -1159,7 +1404,10 @@ inline bool atomicWriteQSnap( const std::string& path, const std::string& blob )
                           + "." + std::to_string( seq.fetch_add( 1, std::memory_order_relaxed ) );
     {
         std::ofstream of( tmp, std::ios::binary | std::ios::trunc );
-        if( !of ) return false;
+        if( !of )
+        {
+            return false;
+        }
         of.write( blob.data(), static_cast<std::streamsize>( blob.size() ) );
         of.flush();
         if( !of ) { std::error_code e; std::filesystem::remove( std::filesystem::path( tmp ), e ); return false; }
@@ -1176,7 +1424,10 @@ inline bool atomicWriteQSnap( const std::string& path, const std::string& blob )
 inline int probeSnapshotBlob( const std::string& path, const std::string& sha, Snapshot& out )
 {
     std::string blob;
-    if( readQSnapBlob( path, blob ) != 1 ) return 0;
+    if( readQSnapBlob( path, blob ) != 1 )
+    {
+        return 0;
+    }
     return deserializeSnapshot( blob, sha, out ) ? 1 : -1;
 }
 
@@ -1253,7 +1504,10 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
 
     // 1) require a git repo with a resolvable HEAD tree — the SAME windowless `rev-parse --verify HEAD` probe
     //    gitRepoHasHistory runs (one source of truth; was an inline copy of it before F13 dedup).
-    if( !gitRepoHasHistory( root ) ) return { Snapshot{}, false };
+    if( !gitRepoHasHistory( root ) )
+    {
+        return { Snapshot {}, false };
+    }
 
     // Cache keys, computed ONCE and shared by both the Snapshot cache (this step) and the ingest cache (step 3).
     const std::string headSha   = gitHeadSha( root );        // non-empty: gitRepoHasHistory passed above
@@ -1271,7 +1525,10 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     {
         Snapshot cached;
         const int hit = probeSnapshotBlob( qsnapPath, headSha, cached );
-        if( hit == 1 )  return { std::move( cached ), true };        // HIT
+        if( hit == 1 )
+        {
+            return { std::move( cached ), true }; // HIT
+        }
         if( hit == -1 )
         {
             // the fprintf is the visible line in ALL build types (test/qsnapcachecheck.sh (e) gates on it);
@@ -1293,13 +1550,18 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     {
         Snapshot cached2;
         if( probeSnapshotBlob( qsnapPath, headSha, cached2 ) == 1 )
+        {
             return { std::move( cached2 ), true };                   // HIT (won by the thread we waited on)
+        }
     }
 
     // 2) materialize HEAD into a private temp dir under the hardened cache ladder (per-user; not the repo).
     //    A unique suffix (pid) keeps concurrent runs from colliding. Cleaned up via RAII teardown.
     const std::string tmpRoot = materializeCommitTree( root, "HEAD", "qhead" );
-    if( tmpRoot.empty() ) return { Snapshot{}, false };
+    if( tmpRoot.empty() )
+    {
+        return { Snapshot {}, false };
+    }
     TmpTreeGuard guard{ tmpRoot };
 
     // 3) ingest + graph + snapshot the HEAD tree. The HEAD tree is immutable for a given HEAD sha, so we hand
@@ -1315,7 +1577,9 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     // Hygiene: cap each (repo, excludes) family to the 2 newest files (delete older sha's). Done AFTER the
     // ingest so the file we just wrote/used is the newest → always retained. Best-effort; never throws.
     if( useCache )
+    {
         evictOldHeadSnapCaches( cacheDirLadder(), repoHex, exclHex, cachePath, 2 );
+    }
     if( headIng.symbols.empty() && headIng.files.empty() )
     { DEGRADED_PATH_ALERT( "quality: HEAD tree ingested empty — falling back to run --quality-baseline first" ); return { Snapshot{}, false }; }
     const Graph headG = buildGraph( headIng, nullptr );
@@ -1347,9 +1611,15 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
                             const std::vector<std::string>& excludes = {},
                             std::size_t maxFileBytes = kDefaultMaxFileBytes )
 {
-    if( !gitRepoHasHistory( root ) ) return { {}, false };
+    if( !gitRepoHasHistory( root ) )
+    {
+        return { {}, false };
+    }
     const std::string refSha = gitWindowRefSha( root, days );
-    if( refSha.empty() ) return { {}, false };
+    if( refSha.empty() )
+    {
+        return { {}, false };
+    }
 
     const std::string repoHex   = headSnapRepoHex( root );
     const std::string exclHex   = headSnapExclHex( excludes, maxFileBytes );   // ingest-cache family (shared with qheadsnap)
@@ -1361,7 +1631,10 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     {
         Snapshot cached;
         const int hit = probeSnapshotBlob( qbodyPath, refSha, cached );
-        if( hit == 1 )  return { std::move( cached.bodyHashBySym ), true };
+        if( hit == 1 )
+        {
+            return { std::move( cached.bodyHashBySym ), true };
+        }
         if( hit == -1 )
         {
             std::fprintf( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
@@ -1376,11 +1649,16 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     {
         Snapshot cached2;
         if( probeSnapshotBlob( qbodyPath, refSha, cached2 ) == 1 )
+        {
             return { std::move( cached2.bodyHashBySym ), true };
+        }
     }
 
     const std::string tmpRoot = materializeCommitTree( root, refSha, "qref" );
-    if( tmpRoot.empty() ) return { {}, false };
+    if( tmpRoot.empty() )
+    {
+        return { {}, false };
+    }
     TmpTreeGuard guard{ tmpRoot };
 
     // the ref tree is immutable for its sha → reuse the qheadsnap INGEST cache family keyed by refSha (the
@@ -1458,38 +1736,68 @@ inline std::string serializeRawCommitStream( const RawCommitStream& raw, const s
 
 inline bool deserializeRawCommitStream( const std::string& blob, const std::string& keyMat, RawCommitStream& out )
 {
-    if( blob.size() < 4 + sizeof( std::uint32_t ) + sizeof( std::uint64_t ) + sizeof( std::uint64_t ) ) return false;
+    if( blob.size() < 4 + sizeof( std::uint32_t ) + sizeof( std::uint64_t ) + sizeof( std::uint64_t ) )
+    {
+        return false;
+    }
     const char*       data    = blob.data();
     const std::size_t bodyLen = blob.size() - sizeof( std::uint64_t );
     std::uint64_t     stored  = 0;
     std::memcpy( &stored, data + bodyLen, sizeof( std::uint64_t ) );
-    if( stored != fnv1a64( std::string_view( data, bodyLen ) ) ) return false;   // checksum
+    if( stored != fnv1a64( std::string_view( data, bodyLen ) ) )
+    {
+        return false; // checksum
+    }
 
     const char* p   = data;
     const char* end = data + bodyLen;
-    if( std::memcmp( p, kQChurnMagic, 4 ) != 0 ) return false;
+    if( std::memcmp( p, kQChurnMagic, 4 ) != 0 )
+    {
+        return false;
+    }
     p += 4;
     std::uint32_t scheme = 0;
-    if( !qsnapGet( p, end, scheme ) || scheme != kQChurnCacheScheme ) return false;
+    if( !qsnapGet( p, end, scheme ) || scheme != kQChurnCacheScheme )
+    {
+        return false;
+    }
     std::uint64_t keyHash = 0;
-    if( !qsnapGet( p, end, keyHash ) || keyHash != fnv1a64( keyMat ) ) return false;
+    if( !qsnapGet( p, end, keyHash ) || keyHash != fnv1a64( keyMat ) )
+    {
+        return false;
+    }
 
     std::uint32_t nCommits = 0;
-    if( !qsnapGet( p, end, nCommits ) ) return false;
+    if( !qsnapGet( p, end, nCommits ) )
+    {
+        return false;
+    }
     RawCommitStream r;
     r.commits.reserve( nCommits );
     for( std::uint32_t i = 0; i < nCommits; ++i )
     {
         RawCommitStream::Commit c;
-        if( !qsnapGet( p, end, c.epoch ) ) return false;
+        if( !qsnapGet( p, end, c.epoch ) )
+        {
+            return false;
+        }
         std::uint32_t nPaths = 0;
-        if( !qsnapGet( p, end, nPaths ) ) return false;
+        if( !qsnapGet( p, end, nPaths ) )
+        {
+            return false;
+        }
         c.paths.reserve( nPaths );
         for( std::uint32_t j = 0; j < nPaths; ++j )
         {
             std::uint32_t len = 0;
-            if( !qsnapGet( p, end, len ) ) return false;
-            if( end - p < static_cast<std::ptrdiff_t>( len ) ) return false;
+            if( !qsnapGet( p, end, len ) )
+            {
+                return false;
+            }
+            if( end - p < static_cast<std::ptrdiff_t>( len ) )
+            {
+                return false;
+            }
             c.paths.emplace_back( p, len );
             p += len;
         }
@@ -1511,7 +1819,9 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
 {
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
+    {
         return resolveCommitStream( gitLogNameOnlyRaw( root, coSince ), ing, maxFiles, churnMonths, outChurn, onlyRoot );
+    }
 
     const std::string repoHex  = headSnapRepoHex( root );
     const std::string boundary = gitWindowBoundarySha( root, coSince );   // cheap — no --name-only
@@ -1524,7 +1834,9 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     RawCommitStream raw;
     std::string      blob;
     if( readQSnapBlob( cachePath, blob ) == 1 && deserializeRawCommitStream( blob, keyMat, raw ) )
+    {
         return resolveCommitStream( raw, ing, maxFiles, churnMonths, outChurn, onlyRoot );   // warm hit — no walk
+    }
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
     atomicWriteQSnap( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
@@ -1540,7 +1852,10 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
     Snapshot snap;
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() ) continue;
+        if( i >= g.canonId.size() || g.canonId[i].empty() )
+        {
+            continue;
+        }
         const std::uint64_t key = fnv1a64( baselineCanonId( ing, i, root ) );
         const Symbol&       s   = ing.symbols[i];
         // overloads share a canonical id (scope+name) → keep the MAX of each per-symbol metric per id, not
@@ -1557,16 +1872,26 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         // (editcheck.h). A COUNT is overload-collision-proof for the opposite reason a MAX is: it is the one
         // number a collision cannot hide. (maskBySym is the other non-MAX kind; it sums for its own reason.)
         { std::uint32_t& slot = snap.defsBySym[ key ];    slot += 1; }
-        if( isDeadCandidate( ing, g, i ) ) snap.dead.push_back( key );
-        if( isPublicApi( ing, i ) )        snap.publicApi.push_back( key );
+        if( isDeadCandidate( ing, g, i ) )
+        {
+            snap.dead.push_back( key );
+        }
+        if( isPublicApi( ing, i ) )
+        {
+            snap.publicApi.push_back( key );
+        }
     }
     // duplication baseline = both exact (Type-1/2) AND gapped (Type-3) groups, folded into one set. A
     // Type-3 pair hashes by its sorted member canonIds exactly like an exact group, so introducing a NEW
     // near-clone changes the set ⇒ the delta flags it. Both passes are deterministic → the set is stable.
     for( const CloneGroup& cg : findClones( ing, int( kMinCloneTokens ) ) )
+    {
         snap.cloneGroups.push_back( cloneGroupHash( cg, ing, root ) );
+    }
     for( const CloneGroup& cg : findClonesType3( ing, int( kMinCloneTokens ) ) )
+    {
         snap.cloneGroups.push_back( cloneGroupHash( cg, ing, root ) );
+    }
 
     // §D#4 error-masking baseline: per-canonId count of error-masking constructs (the SUM the delta compares).
     snap.maskBySym = errorMaskCountsBySym( ing, root );
@@ -1599,17 +1924,50 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     // (then the current HEAD is empty too → they match → the deliberately-pinned baseline is honored). The
     // "head" record is an unknown kind to readBaseline, so it is skipped by the snapshot reader on both old
     // and new binaries — only readBaselineHeadSha consults it.
-    if( !headSha.empty() ) f << "head " << headSha << '\n';
-    for( const auto& [ h, v ] : s.ccxBySym )    f << "ccx "    << std::hex << h << std::dec << ' ' << v << '\n';
-    for( const auto& [ h, v ] : s.locBySym )    f << "loc "    << std::hex << h << std::dec << ' ' << v << '\n';
-    for( const auto& [ h, v ] : s.nestBySym )   f << "nest "   << std::hex << h << std::dec << ' ' << v << '\n';
-    for( const auto& [ h, v ] : s.paramsBySym ) f << "params " << std::hex << h << std::dec << ' ' << v << '\n';
-    for( const auto& [ h, v ] : s.maskBySym )   f << "mask "   << std::hex << h << std::dec << ' ' << v << '\n';   // §D#4 error-masking count
-    for( const auto& [ h, v ] : s.defsBySym )   f << "defs "   << std::hex << h << std::dec << ' ' << v << '\n';   // overload-set CARDINALITY (a count, not a max)
-    for( const auto& [ h, v ] : s.bodyHashBySym ) f << "body " << std::hex << h << ' ' << v << std::dec << '\n';   // §D#4 short-horizon-churn raw-body hash (both hex)
-    for( std::uint64_t h : s.cloneGroups )      f << "clone "  << std::hex << h << std::dec << '\n';
-    for( std::uint64_t h : s.dead )             f << "dead "   << std::hex << h << std::dec << '\n';
-    for( std::uint64_t h : s.publicApi )        f << "api "    << std::hex << h << std::dec << '\n';
+    if( !headSha.empty() )
+    {
+        f << "head " << headSha << '\n';
+    }
+    for( const auto& [h, v] : s.ccxBySym )
+    {
+        f << "ccx " << std::hex << h << std::dec << ' ' << v << '\n';
+    }
+    for( const auto& [h, v] : s.locBySym )
+    {
+        f << "loc " << std::hex << h << std::dec << ' ' << v << '\n';
+    }
+    for( const auto& [h, v] : s.nestBySym )
+    {
+        f << "nest " << std::hex << h << std::dec << ' ' << v << '\n';
+    }
+    for( const auto& [h, v] : s.paramsBySym )
+    {
+        f << "params " << std::hex << h << std::dec << ' ' << v << '\n';
+    }
+    for( const auto& [h, v] : s.maskBySym )
+    {
+        f << "mask " << std::hex << h << std::dec << ' ' << v << '\n'; // §D#4 error-masking count
+    }
+    for( const auto& [h, v] : s.defsBySym )
+    {
+        f << "defs " << std::hex << h << std::dec << ' ' << v << '\n'; // overload-set CARDINALITY (a count, not a max)
+    }
+    for( const auto& [h, v] : s.bodyHashBySym )
+    {
+        f << "body " << std::hex << h << ' ' << v << std::dec << '\n'; // §D#4 short-horizon-churn raw-body hash (both hex)
+    }
+    for( std::uint64_t h : s.cloneGroups )
+    {
+        f << "clone " << std::hex << h << std::dec << '\n';
+    }
+    for( std::uint64_t h : s.dead )
+    {
+        f << "dead " << std::hex << h << std::dec << '\n';
+    }
+    for( std::uint64_t h : s.publicApi )
+    {
+        f << "api " << std::hex << h << std::dec << '\n';
+    }
     return true;
 }
 
@@ -1623,12 +1981,18 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
 inline bool readBaseline( const std::string& path, Snapshot& out )
 {
     std::ifstream f( path );
-    if( !f ) return false;
+    if( !f )
+    {
+        return false;
+    }
     std::size_t recognizedLineCount = 0;
     std::string line;
     while( std::getline( f, line ) )
     {
-        if( line.empty() ) continue;
+        if( line.empty() )
+        {
+            continue;
+        }
         if( line[0] == '#' ) { ++recognizedLineCount; continue; }     // the format's own header comment counts as structure
         std::istringstream is( line );
         std::string        kind;
@@ -1647,20 +2011,51 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         { std::uint64_t h = 0, v = 0; is >> std::hex >> h >> v;
           if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } m[h] = v; };
 
-        if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask"
-         || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs" )
+        if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs" )
+        {
             ++recognizedLineCount;                                    // structure seen — this file IS a baseline
+        }
 
-        if( kind == "ccx" )         readValMap( out.ccxBySym,    "quality: malformed baseline ccx line skipped" );
-        else if( kind == "loc" )    readValMap( out.locBySym,    "quality: malformed baseline loc line skipped" );
-        else if( kind == "nest" )   readValMap( out.nestBySym,   "quality: malformed baseline nest line skipped" );
-        else if( kind == "params" ) readValMap( out.paramsBySym, "quality: malformed baseline params line skipped" );
-        else if( kind == "mask" )   readValMap( out.maskBySym,   "quality: malformed baseline mask line skipped" );
-        else if( kind == "defs" )   readValMap( out.defsBySym,   "quality: malformed baseline defs line skipped" );
-        else if( kind == "body" )   readHashMap( out.bodyHashBySym, "quality: malformed baseline body line skipped" );
-        else if( kind == "clone" )  readSet( out.cloneGroups, "quality: malformed baseline clone line skipped" );
-        else if( kind == "dead" )   readSet( out.dead,        "quality: malformed baseline dead line skipped" );
-        else if( kind == "api" )    readSet( out.publicApi,   "quality: malformed baseline api line skipped" );
+        if( kind == "ccx" )
+        {
+            readValMap( out.ccxBySym, "quality: malformed baseline ccx line skipped" );
+        }
+        else if( kind == "loc" )
+        {
+            readValMap( out.locBySym, "quality: malformed baseline loc line skipped" );
+        }
+        else if( kind == "nest" )
+        {
+            readValMap( out.nestBySym, "quality: malformed baseline nest line skipped" );
+        }
+        else if( kind == "params" )
+        {
+            readValMap( out.paramsBySym, "quality: malformed baseline params line skipped" );
+        }
+        else if( kind == "mask" )
+        {
+            readValMap( out.maskBySym, "quality: malformed baseline mask line skipped" );
+        }
+        else if( kind == "defs" )
+        {
+            readValMap( out.defsBySym, "quality: malformed baseline defs line skipped" );
+        }
+        else if( kind == "body" )
+        {
+            readHashMap( out.bodyHashBySym, "quality: malformed baseline body line skipped" );
+        }
+        else if( kind == "clone" )
+        {
+            readSet( out.cloneGroups, "quality: malformed baseline clone line skipped" );
+        }
+        else if( kind == "dead" )
+        {
+            readSet( out.dead, "quality: malformed baseline dead line skipped" );
+        }
+        else if( kind == "api" )
+        {
+            readSet( out.publicApi, "quality: malformed baseline api line skipped" );
+        }
         // else: unknown kind (older/newer format) → skip silently, do not crash.
     }
     if( recognizedLineCount == 0 )
@@ -1691,17 +2086,28 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
 inline std::string readBaselineHeadSha( const std::string& path )
 {
     std::ifstream f( path );
-    if( !f ) return {};
+    if( !f )
+    {
+        return {};
+    }
     std::string line;
     while( std::getline( f, line ) )
+    {
         if( line.rfind( "head ", 0 ) == 0 )
         {
             std::string sha = line.substr( 5 );
-            while( !sha.empty() && ( sha.back() == '\r' || sha.back() == ' ' || sha.back() == '\t' ) ) sha.pop_back();
-            if( isBareCommitSha( sha ) ) return sha;
+            while( !sha.empty() && ( sha.back() == '\r' || sha.back() == ' ' || sha.back() == '\t' ) )
+            {
+                sha.pop_back();
+            }
+            if( isBareCommitSha( sha ) )
+            {
+                return sha;
+            }
             DEGRADED_PATH_ALERT( "quality: baseline head stamp is not a bare commit sha — ignoring the pin" );
             return {};
         }
+    }
     return {};
 }
 
@@ -1817,9 +2223,13 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
         // .ripwire_quality_baseline and no git HEAD to auto-compare against"), so no consumer is misled
         // today — but the alert itself should not assert a fallback that does not exist.
         else if( headSha.empty() )
+        {
             DEGRADED_PATH_ALERT( "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; this tree has no git HEAD to fall back to either, so this run has no baseline floor at all" );
+        }
         else
+        {
             DEGRADED_PATH_ALERT( "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; the baseline still falls back to git HEAD" );
+        }
     }
     return sel;
 }
@@ -1853,23 +2263,35 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
 inline bool gitBlameRangeHasWindowCommit( const std::string& root, const std::string& relPath,
                                           std::uint32_t startLine, std::uint32_t lineCount, std::int64_t windowCutoffEpoch )
 {
-    if( startLine == 0 || lineCount == 0 ) return false;
+    if( startLine == 0 || lineCount == 0 )
+    {
+        return false;
+    }
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " blame --porcelain -L " + std::to_string( startLine ) + ",+" + std::to_string( lineCount )
                           + " HEAD -- " + shSingleQuote( relPath ) + " 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe ) return false;
+    if( !pipe )
+    {
+        return false;
+    }
     bool hot = false;
     char buf[ 512 ];
     while( std::fgets( buf, sizeof( buf ), pipe ) )
     {
         std::string_view ln( buf );
-        while( !ln.empty() && ( ln.back() == '\n' || ln.back() == '\r' ) ) ln.remove_suffix( 1 );
+        while( !ln.empty() && ( ln.back() == '\n' || ln.back() == '\r' ) )
+        {
+            ln.remove_suffix( 1 );
+        }
         // a porcelain block-header line: 40 lowercase-hex sha, then " <origLine> <finalLine>[ <numLines>]".
         const bool isHeaderSha = ln.size() >= 40
             && std::all_of( ln.begin(), ln.begin() + 40, []( char c ){ return std::isxdigit( static_cast<unsigned char>( c ) ); } )
             && ( ln.size() == 40 || ln[40] == ' ' );
-        if( isHeaderSha ) continue;                                // the sha itself carries no date — wait for its committer-time line
+        if( isHeaderSha )
+        {
+            continue; // the sha itself carries no date — wait for its committer-time line
+        }
         if( ln.rfind( "committer-time ", 0 ) == 0 )
         {
             const std::int64_t t = std::strtoll( std::string( ln.substr( 15 ) ).c_str(), nullptr, 10 );
@@ -1912,14 +2334,23 @@ inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const 
     char buf[ 4096 ];
     while( std::fgets( buf, sizeof( buf ), pipe ) )
     {
-        if( buf[0] != '@' || buf[1] != '@' ) continue;              // only hunk-header lines matter here
+        if( buf[0] != '@' || buf[1] != '@' )
+        {
+            continue; // only hunk-header lines matter here
+        }
         int oldStart = 0, oldCount = 1, newStart = 0, newCount = 1;
         if( std::sscanf( buf, "@@ -%d,%d +%d,%d @@", &oldStart, &oldCount, &newStart, &newCount ) == 4 ) {}
         else if( std::sscanf( buf, "@@ -%d,%d +%d @@", &oldStart, &oldCount, &newStart ) == 3 ) { newCount = 1; }
         else if( std::sscanf( buf, "@@ -%d +%d,%d @@", &oldStart, &newStart, &newCount ) == 3 ) { oldCount = 1; }
         else if( std::sscanf( buf, "@@ -%d +%d @@", &oldStart, &newStart ) == 2 ) { oldCount = 1; newCount = 1; }
-        else continue;                                              // malformed/unexpected header — skip (degrade per-hunk)
-        if( oldStart < 0 || oldCount < 0 || newStart < 0 || newCount < 0 ) continue;   // git never emits these; refuse rather than wrap
+        else
+        {
+            continue; // malformed/unexpected header — skip (degrade per-hunk)
+        }
+        if( oldStart < 0 || oldCount < 0 || newStart < 0 || newCount < 0 )
+        {
+            continue; // git never emits these; refuse rather than wrap
+        }
 
         hunks.push_back( DiffHunk{ std::uint32_t( oldStart ), std::uint32_t( oldCount ),
                                    std::uint32_t( newStart ), std::uint32_t( newCount ) } );
@@ -1933,7 +2364,10 @@ inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const 
 inline const std::vector<DiffHunk>& diffHunksMemoized( DiffHunkMemo& memo, const std::string& root, const std::string& relPath )
 {
     const auto it = memo.find( relPath );
-    if( it != memo.end() ) return it->second;
+    if( it != memo.end() )
+    {
+        return it->second;
+    }
     return memo.emplace( relPath, gitDiffHunksVsHead( root, relPath ) ).first->second;
 }
 
@@ -1944,12 +2378,18 @@ inline const std::vector<DiffHunk>& diffHunksMemoized( DiffHunkMemo& memo, const
 inline bool churnEditTouchesHotLine( DiffHunkMemo& memo, const std::string& root, const std::string& relPath,
                                      std::uint32_t symStart, std::uint32_t symLoc, std::int64_t windowCutoffEpoch )
 {
-    if( symStart == 0 ) return false;
+    if( symStart == 0 )
+    {
+        return false;
+    }
     const std::uint32_t symEnd = symStart + ( symLoc > 0 ? symLoc - 1 : 0 );
 
     for( const DiffHunk& h : diffHunksMemoized( memo, root, relPath ) )
     {
-        if( h.oldCount == 0 ) continue;                              // pure insertion — never SELF by itself ("adds lines")
+        if( h.oldCount == 0 )
+        {
+            continue; // pure insertion — never SELF by itself ("adds lines")
+        }
 
         // Overlap test in NEW-file (working-tree) coordinates, matching the symbol's own line numbers.
         //
@@ -1969,10 +2409,15 @@ inline bool churnEditTouchesHotLine( DiffHunkMemo& memo, const std::string& root
         // lines were themselves last committed inside the churn window.
         const std::uint32_t hunkNewStart = h.newStart;
         const std::uint32_t hunkNewEnd   = ( h.newCount > 0 ) ? hunkNewStart + h.newCount - 1 : hunkNewStart + 1;
-        if( hunkNewEnd < symStart || hunkNewStart > symEnd ) continue;   // this hunk falls outside the symbol
+        if( hunkNewEnd < symStart || hunkNewStart > symEnd )
+        {
+            continue; // this hunk falls outside the symbol
+        }
 
         if( gitBlameRangeHasWindowCommit( root, relPath, h.oldStart, h.oldCount, windowCutoffEpoch ) )
+        {
             return true;                                             // one hot line is enough — short-circuit
+        }
     }
     return false;
 }
@@ -2028,8 +2473,14 @@ inline std::string displaySym( const std::string& sym, std::string_view root )
         const std::string_view token = std::string_view( sym ).substr( tokenStart, sp == std::string::npos ? std::string::npos : sp - tokenStart );
         const std::size_t      sep   = token.find( "::" );   // path never contains "::" — only scope/name do
         if( sep != std::string_view::npos ) { out += relForHash( token.substr( 0, sep ), root ); out += token.substr( sep ); }
-        else                                  out += token;
-        if( sp == std::string::npos ) break;
+        else
+        {
+            out += token;
+        }
+        if( sp == std::string::npos )
+        {
+            break;
+        }
         out += ' ';
         tokenStart = sp + 1;
     }
@@ -2093,7 +2544,10 @@ inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
 // change in what is suppressed is reviewable.
 inline std::string ackKindToken( const std::string& kind, bool isZeroMagnitude, bool isNewSymbol )
 {
-    if( !isZeroMagnitude ) return kind;
+    if( !isZeroMagnitude )
+    {
+        return kind;
+    }
     return kind + ( isNewSymbol ? ":new-symbol" : ":preexisting" );
 }
 
@@ -2107,7 +2561,10 @@ inline std::string ackKindToken( const Regression& r )
 // was almost certainly recorded for, and so writeAckRecords self-heals the file into the new spelling.
 inline std::string normalizeLegacyAckKind( const std::string& kind, std::uint32_t ackNow )
 {
-    if( ackNow != 0 || kind.find( ':' ) != std::string::npos ) return kind;
+    if( ackNow != 0 || kind.find( ':' ) != std::string::npos )
+    {
+        return kind;
+    }
     return kind + ":new-symbol";
 }
 
@@ -2135,12 +2592,21 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
 {
     gtl::btree_map<std::string, AckRecord> out;
     std::ifstream f( path );
-    if( !f ) return out;
+    if( !f )
+    {
+        return out;
+    }
     std::string line;
     while( std::getline( f, line ) )
     {
-        while( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) ) line.pop_back();   // CRLF tolerance (merged-in Windows checkout)
-        if( line.empty() || line[0] == '#' ) continue;
+        while( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) )
+        {
+            line.pop_back(); // CRLF tolerance (merged-in Windows checkout)
+        }
+        if( line.empty() || line[0] == '#' )
+        {
+            continue;
+        }
         std::istringstream is( line );
         std::string tag, kind;
         std::uint64_t key = 0;
@@ -2150,13 +2616,21 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
         kind = normalizeLegacyAckKind( kind, ackNow );               // P0.3 migration — see the note at ackKindToken
         std::string reason;
         std::getline( is, reason );
-        while( !reason.empty() && reason.front() == ' ' ) reason.erase( reason.begin() );
-        while( !reason.empty() && reason.back() == '\r' ) reason.pop_back();   // CRLF tolerance on the trailing field too
+        while( !reason.empty() && reason.front() == ' ' )
+        {
+            reason.erase( reason.begin() );
+        }
+        while( !reason.empty() && reason.back() == '\r' )
+        {
+            reason.pop_back(); // CRLF tolerance on the trailing field too
+        }
 
         const std::string mapKey = ackMapKey( kind, key );
         const auto        it     = out.find( mapKey );
-        if( it == out.end() || ackNow > it->second.ackNow )              // D2: max(ackNow) wins, not last-line
+        if( it == out.end() || ackNow > it->second.ackNow )
+        { // D2: max(ackNow) wins, not last-line
             out[ mapKey ] = AckRecord{ kind, key, ackNow, reason };
+        }
     }
     return out;
 }
@@ -2183,7 +2657,10 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
 // contract-change row for the same symbol.
 inline std::size_t applyAckRatchet( std::vector<Regression>& regs, const gtl::btree_map<std::string, AckRecord>& acks )
 {
-    if( acks.empty() ) return 0;
+    if( acks.empty() )
+    {
+        return 0;
+    }
     const std::size_t before = regs.size();
     regs.erase( std::remove_if( regs.begin(), regs.end(),
                                 [ & ]( const Regression& r )
@@ -2225,8 +2702,12 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // passes index `keyByNode[i]`. Byte-identical output: same hash values, just computed once instead of eight.
     std::vector<std::uint64_t> keyByNode( ing.symbols.size(), 0 );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
         if( i < g.canonId.size() && !g.canonId[i].empty() )
+        {
             keyByNode[i] = fnv1a64( baselineCanonId( ing, i, root ) );
+        }
+    }
 
     // ─── r26 ORIGIN AXIS: preexisting-worse vs new-symbol ──────────────────────────────────────────────
     // The exit code used to fire on ANY major unacked finding, which meant every large-but-fine NEW symbol
@@ -2286,11 +2767,16 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                     && base.cloneGroups.empty() && base.dead.empty() && base.publicApi.empty();
     const bool originOracleOk = !base.locBySym.empty() || baselineIsWhollyEmpty;
     if( !originOracleOk )
+    {
         DEGRADED_PATH_ALERT( "quality: baseline has no per-symbol loc map (pre-Q1 format) — origin unclassifiable, gating every finding" );
+    }
 
     const auto existedAtBaseline = [ & ]( std::uint64_t symKey )
     {
-        if( !originOracleOk ) return true;                                     // fail closed — see the degrade note above
+        if( !originOracleOk )
+        {
+            return true; // fail closed — see the degrade note above
+        }
         return base.locBySym.find( symKey ) != base.locBySym.end();
     };
 
@@ -2302,9 +2788,17 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // fail-closed rule exists to prevent. Answer the oracle question FIRST, once, for the whole group.
     const auto cloneGroupIsNew = [ & ]( const CloneGroup& cg )
     {
-        if( !originOracleOk ) return false;                                    // fail closed — preexisting-worse, gates
+        if( !originOracleOk )
+        {
+            return false; // fail closed — preexisting-worse, gates
+        }
         for( NodeId m : cg.members )
-            if( m < keyByNode.size() && keyByNode[m] != 0 && existedAtBaseline( keyByNode[m] ) ) return false;
+        {
+            if( m < keyByNode.size() && keyByNode[m] != 0 && existedAtBaseline( keyByNode[m] ) )
+            {
+                return false;
+            }
+        }
         return true;
     };
 
@@ -2314,9 +2808,15 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     const auto stampLoc = [ & ]( NodeId i )
     {
         VERIFY( !regs.empty() );
-        if( i >= ing.symbols.size() ) return;                                  // degrade: no locator rather than a wrong one
+        if( i >= ing.symbols.size() )
+        {
+            return; // degrade: no locator rather than a wrong one
+        }
         const Symbol& s = ing.symbols[i];
-        if( s.fileId >= ing.files.size() ) return;
+        if( s.fileId >= ing.files.size() )
+        {
+            return;
+        }
         regs.back().path = std::string( relForHash( ing.files[ s.fileId ], root ) );
         regs.back().line = s.line;
     };
@@ -2329,10 +2829,16 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         std::string bestId;
         for( NodeId m : cg.members )
         {
-            if( m >= g.canonId.size() || g.canonId[m].empty() ) continue;
+            if( m >= g.canonId.size() || g.canonId[m].empty() )
+            {
+                continue;
+            }
             if( best == NodeId( -1 ) || g.canonId[m] < bestId ) { best = m; bestId = g.canonId[m]; }
         }
-        if( best != NodeId( -1 ) ) stampLoc( best );
+        if( best != NodeId( -1 ) )
+        {
+            stampLoc( best );
+        }
     };
 
     // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores
@@ -2350,18 +2856,30 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         ScratchMap<std::uint32_t> nowBySym( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
-            if( i >= g.canonId.size() || g.canonId[i].empty() ) continue;
+            if( i >= g.canonId.size() || g.canonId[i].empty() )
+            {
+                continue;
+            }
             std::uint32_t& slot = nowBySym[ keyByNode[i] ];
             slot = std::max( slot, metricOf( ing.symbols[i] ) );
         }
         ScratchMap<std::uint8_t> reported( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
-            if( i >= g.canonId.size() || g.canonId[i].empty() ) continue;
+            if( i >= g.canonId.size() || g.canonId[i].empty() )
+            {
+                continue;
+            }
             const std::uint64_t key   = keyByNode[i];
-            if( !insertScratchSeen( reported, key, "quality: per-symbol seen scratch capacity exceeded" ) ) continue;   // already reported at an earlier overload
+            if( !insertScratchSeen( reported, key, "quality: per-symbol seen scratch capacity exceeded" ) )
+            {
+                continue; // already reported at an earlier overload
+            }
             const auto          nowIt = nowBySym.find( key );
-            if( nowIt == nowBySym.end() ) continue;                     // corrupt/inconsistent ids: degrade by skipping
+            if( nowIt == nowBySym.end() )
+            {
+                continue; // corrupt/inconsistent ids: degrade by skipping
+            }
             const std::uint32_t now = nowIt->second;
             const auto          it  = baseMap.find( key );
             const std::uint32_t was = ( it == baseMap.end() ) ? 0u : it->second;
@@ -2401,21 +2919,45 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         for( const CloneGroup& cg : cgs )
         {
             const std::uint64_t h = cloneGroupHash( cg, ing, root );
-            if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) ) continue;
+            if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) )
+            {
+                continue;
+            }
             // B10.1a: a clone group ENTIRELY composed of test-SCRIPT members is fixture-class noise — sibling
             // shell test scripts repeat near-identical setup/ok/no boilerplate by convention (see
             // isTestScriptPath); exempt only when every member is a test script, so a real src/ ↔ test-script
             // clone (still worth a look) is unaffected.
             bool allTestScript = !cg.members.empty();
             for( NodeId m : cg.members )
+            {
                 if( m >= ing.symbols.size() || !isTestScriptPath( ing.files[ ing.symbols[m].fileId ] ) ) { allTestScript = false; break; }
-            if( allTestScript ) continue;
-            if( !dupSeen.insert( { h, 1 } ).second ) continue;   // same member-set already reported this run
+            }
+            if( allTestScript )
+            {
+                continue;
+            }
+            if( !dupSeen.insert( { h, 1 } ).second )
+            {
+                continue; // same member-set already reported this run
+            }
             std::vector<std::string> ids;
-            for( NodeId m : cg.members ) if( m < g.canonId.size() ) ids.push_back( g.canonId[m] );
+            for( NodeId m : cg.members )
+            {
+                if( m < g.canonId.size() )
+                {
+                    ids.push_back( g.canonId[m] );
+                }
+            }
             std::sort( ids.begin(), ids.end() );
             std::string joined;
-            for( std::size_t k = 0; k < ids.size(); ++k ) { joined += ids[k]; if( k + 1 < ids.size() ) joined += " | "; }
+            for( std::size_t k = 0; k < ids.size(); ++k )
+            {
+                joined += ids[k];
+                if( k + 1 < ids.size() )
+                {
+                    joined += " | ";
+                }
+            }
             regs.push_back( { "duplication", joined, 0, cg.tokens, h, false, {}, cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
             stampCloneLoc( cg );
         }
@@ -2425,7 +2967,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i ) ) continue;
+        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i ) )
+        {
+            continue;
+        }
         if( !std::binary_search( base.dead.begin(), base.dead.end(), keyByNode[i] ) )
         {
             regs.push_back( { "dead-code", g.canonId[i], 0, 0, keyByNode[i], false, {},
@@ -2466,16 +3011,25 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     gtl::btree_map<std::uint64_t, std::uint32_t> nowParamsBySym;
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() ) continue;
+        if( i >= g.canonId.size() || g.canonId[i].empty() )
+        {
+            continue;
+        }
         std::uint32_t& slot = nowParamsBySym[ keyByNode[i] ];
         slot = std::max( slot, std::uint32_t( ing.symbols[i].params ) );
     }
     ScratchMap<std::uint8_t> apiSeen( ing.symbols.size() );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() || !isPublicApi( ing, i ) ) continue;
+        if( i >= g.canonId.size() || g.canonId[i].empty() || !isPublicApi( ing, i ) )
+        {
+            continue;
+        }
         const std::uint64_t key = keyByNode[i];
-        if( !insertScratchSeen( apiSeen, key, "quality: api seen scratch capacity exceeded" ) ) continue;   // overload of an already-reported symbol
+        if( !insertScratchSeen( apiSeen, key, "quality: api seen scratch capacity exceeded" ) )
+        {
+            continue; // overload of an already-reported symbol
+        }
 
         if( !std::binary_search( base.publicApi.begin(), base.publicApi.end(), key ) )
         {
@@ -2486,7 +3040,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         }
 
         const auto pit = base.paramsBySym.find( key );
-        if( pit == base.paramsBySym.end() ) continue;                         // no baseline params recorded — nothing to compare
+        if( pit == base.paramsBySym.end() )
+        {
+            continue; // no baseline params recorded — nothing to compare
+        }
         const std::uint32_t nowParams = nowParamsBySym[ key ];                // MAX-aggregated — see the overload-trap note above
         if( nowParams != pit->second )
         {
@@ -2507,11 +3064,20 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         ScratchMap<std::uint8_t> maskSeen( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
-            if( i >= g.canonId.size() || g.canonId[i].empty() ) continue;
+            if( i >= g.canonId.size() || g.canonId[i].empty() )
+            {
+                continue;
+            }
             const std::uint64_t key = keyByNode[i];
             const auto          nit = nowMask.find( key );
-            if( nit == nowMask.end() ) continue;                       // this symbol masks no errors now
-            if( !insertScratchSeen( maskSeen, key, "quality: mask seen scratch capacity exceeded" ) ) continue;   // already reported at an earlier overload of this id
+            if( nit == nowMask.end() )
+            {
+                continue; // this symbol masks no errors now
+            }
+            if( !insertScratchSeen( maskSeen, key, "quality: mask seen scratch capacity exceeded" ) )
+            {
+                continue; // already reported at an earlier overload of this id
+            }
             const std::uint32_t now = nit->second;
             const auto          bit = base.maskBySym.find( key );
             const std::uint32_t was = ( bit == base.maskBySym.end() ) ? 0u : bit->second;
@@ -2551,7 +3117,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
                 // fixture exemption, hoisted per file (path scan once, not per symbol).
                 std::vector<std::uint8_t> fixtureByFile( ing.files.size(), 0 );
-                for( std::uint32_t f = 0; f < ing.files.size(); ++f ) fixtureByFile[f] = isFixturePath( ing.files[f] ) ? 1 : 0;
+                for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+                {
+                    fixtureByFile[f] = isFixturePath( ing.files[f] ) ? 1 : 0;
+                }
 
                 // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
                 // minus the window, never wall-clock). A failed lookup (should not happen here since refOk
@@ -2563,7 +3132,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                     if( !epochStr.empty() )
                     {
                         const std::int64_t headEpoch = std::strtoll( epochStr.c_str(), nullptr, 10 );
-                        if( headEpoch > 0 ) churnCutoffEpoch = headEpoch - std::int64_t( kShortHorizonDays ) * 86400;
+                        if( headEpoch > 0 )
+                        {
+                            churnCutoffEpoch = headEpoch - std::int64_t( kShortHorizonDays ) * 86400;
+                        }
                     }
                 }
 
@@ -2574,21 +3146,48 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 ScratchMap<std::uint8_t> churnSeen( ing.symbols.size() );
                 for( NodeId i = 0; i < ing.symbols.size(); ++i )
                 {
-                    if( i >= g.canonId.size() || g.canonId[i].empty() ) continue;
+                    if( i >= g.canonId.size() || g.canonId[i].empty() )
+                    {
+                        continue;
+                    }
                     const Symbol& s = ing.symbols[i];
-                    if( s.kind == SymKind::Section ) continue;                // doc sections churn by design (exempt)
-                    if( s.fileId >= commitCounts.size() || commitCounts[ s.fileId ] < kShortHorizonMinCommits ) continue;
-                    if( fixtureByFile[ s.fileId ] ) continue;                 // fixtures churn by design (exempt)
+                    if( s.kind == SymKind::Section )
+                    {
+                        continue; // doc sections churn by design (exempt)
+                    }
+                    if( s.fileId >= commitCounts.size() || commitCounts[s.fileId] < kShortHorizonMinCommits )
+                    {
+                        continue;
+                    }
+                    if( fixtureByFile[s.fileId] )
+                    {
+                        continue; // fixtures churn by design (exempt)
+                    }
                     const std::uint64_t key = keyByNode[i];
-                    if( !insertScratchSeen( churnSeen, key, "quality: churn seen scratch capacity exceeded" ) ) continue;   // one report per canonId
+                    if( !insertScratchSeen( churnSeen, key, "quality: churn seen scratch capacity exceeded" ) )
+                    {
+                        continue; // one report per canonId
+                    }
                     const auto nb = nowBody.find( key );
-                    if( nb == nowBody.end() ) continue;                       // no hashable body now (decl only) → nothing to rewrite
+                    if( nb == nowBody.end() )
+                    {
+                        continue; // no hashable body now (decl only) → nothing to rewrite
+                    }
                     const auto bb = base.bodyHashBySym.find( key );
-                    if( bb == base.bodyHashBySym.end() ) continue;            // gate 2: absent from baseline = a first write, never churn
-                    if( bb->second == nb->second ) continue;                  // gate 2: this diff does not rewrite it
+                    if( bb == base.bodyHashBySym.end() )
+                    {
+                        continue; // gate 2: absent from baseline = a first write, never churn
+                    }
+                    if( bb->second == nb->second )
+                    {
+                        continue; // gate 2: this diff does not rewrite it
+                    }
                     const auto rb = refBody.find( key );
                     // gate 3: rewritten across window commits (ref ≠ baseline body), or first COMMITTED inside the window.
-                    if( rb != refBody.end() && rb->second == bb->second ) continue;
+                    if( rb != refBody.end() && rb->second == bb->second )
+                    {
+                        continue;
+                    }
 
                     // B10.2d: SELF vs AMBIENT — does THIS diff modify a pre-existing line that was itself
                     // last committed inside the window? See the section comment above churnEditTouchesHotLine.
@@ -2619,7 +3218,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             for( const CloneGroup& cg : cgs )
             {
                 const std::uint64_t h = cloneGroupHash( cg, ing, root );
-                if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) ) continue;   // group already existed → not new
+                if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) )
+                {
+                    continue; // group already existed → not new
+                }
                 // r27 SUSPICION-C FIX — "the reused helper is preexisting BY CONSTRUCTION" was asserted here
                 // (and in fbc527e's commit message) but never ENFORCED: fan-in ≥ 3 is trivially reached by a
                 // brand-new helper that three brand-new call sites use, so an all-new blob of code duplicating
@@ -2630,18 +3232,46 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 std::uint32_t maxFanin = 0;
                 for( NodeId m : cg.members )
                 {
-                    if( m >= ing.symbols.size() ) continue;
-                    if( m >= keyByNode.size() || keyByNode[m] == 0 ) continue;                              // unclassifiable member — never evidence of preexisting reuse
-                    if( !existedAtBaseline( keyByNode[m] ) ) continue;                                      // a NEW helper's fan-in is not reuse this change eroded
+                    if( m >= ing.symbols.size() )
+                    {
+                        continue;
+                    }
+                    if( m >= keyByNode.size() || keyByNode[m] == 0 )
+                    {
+                        continue; // unclassifiable member — never evidence of preexisting reuse
+                    }
+                    if( !existedAtBaseline( keyByNode[m] ) )
+                    {
+                        continue; // a NEW helper's fan-in is not reuse this change eroded
+                    }
                     maxFanin = std::max( maxFanin, std::uint32_t( ro[m + 1] - ro[m] ) );                    // in-edge count = fan-in
                 }
-                if( maxFanin < kReusedHelperMinFanin ) continue;                                            // no PREEXISTING reused helper in the group
-                if( !reuseSeen.insert( { h, 1 } ).second ) continue;                                       // same member-set already reported
+                if( maxFanin < kReusedHelperMinFanin )
+                {
+                    continue; // no PREEXISTING reused helper in the group
+                }
+                if( !reuseSeen.insert( { h, 1 } ).second )
+                {
+                    continue; // same member-set already reported
+                }
                 std::vector<std::string> ids;
-                for( NodeId m : cg.members ) if( m < g.canonId.size() ) ids.push_back( g.canonId[m] );
+                for( NodeId m : cg.members )
+                {
+                    if( m < g.canonId.size() )
+                    {
+                        ids.push_back( g.canonId[m] );
+                    }
+                }
                 std::sort( ids.begin(), ids.end() );
                 std::string joined;
-                for( std::size_t k = 0; k < ids.size(); ++k ) { joined += ids[k]; if( k + 1 < ids.size() ) joined += " | "; }
+                for( std::size_t k = 0; k < ids.size(); ++k )
+                {
+                    joined += ids[k];
+                    if( k + 1 < ids.size() )
+                    {
+                        joined += " | ";
+                    }
+                }
                 regs.push_back( { "new-clone-of-reused-helper", joined, 0, maxFanin, h, false, {}, cloneGroupIsNew( cg ) } );   // now = the eroded helper's fan-in; ack identity = the member-set hash
                 stampCloneLoc( cg );
             }

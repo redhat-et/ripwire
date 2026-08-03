@@ -77,12 +77,16 @@ int main( int argc, char** argv )
     // ---- counts by kind ----
     std::array<int, kSymKindCount> kindCount {};            // indexed by SymKind underlying value
     for( const rw::Symbol& s : ir.symbols )
+    {
         ++kindCount[ kindIndex( s.kind ) ];
+    }
 
     // ---- counts by language (defs) ----
     std::array<int, std::size( kLangName )> langCount {};   // indexed by Lang underlying value
     for( const rw::Symbol& s : ir.symbols )
+    {
         ++langCount[ langIndex( s.lang ) ];
+    }
 
     std::printf( "==== ripwire ingest probe ====\n" );
     std::printf( "root:        %s\n", root );
@@ -94,7 +98,9 @@ int main( int argc, char** argv )
     // eight of them. `sec` (markdown heading) and `other` used to be off the end of the printf.
     std::printf( "\nsymbols by kind:\n " );
     for( std::size_t kind = 0; kind < kSymKindCount; ++kind )
+    {
         std::printf( "  %s=%d", rw::symTag( static_cast<rw::SymKind>( kind ) ), kindCount[ kind ] );
+    }
     std::printf( "\n" );
 
     // languages: only the ones that ACTUALLY appear — sixteen rows of mostly zeros is noise, and what
@@ -105,14 +111,18 @@ int main( int argc, char** argv )
         for( std::size_t lang = 0; lang < std::size( kLangName ); ++lang )
         {
             if( langCount[ lang ] == 0 )
+            {
                 continue;
+            }
 
             std::printf( "  %s=%d", kLangName[ lang ], langCount[ lang ] );
             ++langsShown;
         }
 
         if( langsShown == 0 )
+        {
             std::printf( "  (no defs)" );
+        }
     }
     std::printf( "\n" );
 
@@ -122,7 +132,9 @@ int main( int argc, char** argv )
         for( const rw::Reference& r : ir.references )
         {
             if( r.fromSymbol != rw::kNoNode )
+            {
                 ++attributed;
+            }
         }
         std::printf( "\nreferences attributed to an enclosing symbol: %zu / %zu (rest are file-scope)\n",
                      attributed, ir.references.size() );
@@ -133,7 +145,9 @@ int main( int argc, char** argv )
     for( const rw::Reference& r : ir.references )
     {
         if( r.fromSymbol != rw::kNoNode )
+        {
             bySym[ r.fromSymbol ].push_back( &r );
+        }
     }
 
     // ---- first ~40 symbols + their references ----

@@ -93,7 +93,10 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {} );
     h += "<!-- ripwire task bundle for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
-    else                 h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+    else
+    {
+        h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+    }
     h.append( p.routeNote );
     h.append( p.mentionNote );
     h.append( p.boostNote );
@@ -152,16 +155,33 @@ inline PackTaskSection packTaskListSection( std::string_view tag, std::string_vi
                                             const std::vector<std::string>& entries, std::size_t budget, std::size_t wrapReserve )
 {
     PackTaskSection out;
-    if( entries.empty() || budget <= wrapReserve ) return out;
+    if( entries.empty() || budget <= wrapReserve )
+    {
+        return out;
+    }
     std::size_t used = wrapReserve;
-    for( const std::string& e : entries ) { if( used + e.size() > budget ) break;  used += e.size();  ++out.kept; }
-    if( out.kept == 0 ) return out;
+    for( const std::string& e : entries )
+    {
+        if( used + e.size() > budget )
+        {
+            break;
+        }
+        used += e.size();
+        ++out.kept;
+    }
+    if( out.kept == 0 )
+    {
+        return out;
+    }
     char open[ 160 ];
     std::snprintf( open, sizeof( open ), "<%.*s%.*s shown=\"%zu\" total=\"%zu\" capped=\"%d\">",
                    int( tag.size() ), tag.data(), int( extraAttr.size() ), extraAttr.data(), out.kept, entries.size(),
                    out.kept < entries.size() ? 1 : 0 );
     out.xml = open;
-    for( std::size_t i = 0; i < out.kept; ++i ) out.xml += entries[i];
+    for( std::size_t i = 0; i < out.kept; ++i )
+    {
+        out.xml += entries[i];
+    }
     out.xml += "</";  out.xml.append( tag );  out.xml += ">";
     return out;
 }
@@ -172,11 +192,17 @@ inline PackTaskSection packTaskListSection( std::string_view tag, std::string_vi
 // silence-means-nothing-happened convention route/mention/boost/over_ceiling already use in this dialect.
 inline std::string packTaskOmittedBodiesJson( const IngestResult& ing, const rw::EmittedBodies& emitted )
 {
-    if( emitted.omitted.empty() ) return {};
+    if( emitted.omitted.empty() )
+    {
+        return {};
+    }
     std::string out = ",\"bodies_omitted\":[";
     for( std::size_t i = 0; i < emitted.omitted.size(); ++i )
     {
-        if( i ) out += ",";
+        if( i )
+        {
+            out += ",";
+        }
         out += "\"" + jsonStr( ing.symbols[ emitted.omitted[i] ].name ) + "\"";
     }
     return out + "]";
@@ -248,13 +274,19 @@ inline std::vector<NodeId> rawNeighborIdsOf( const D1WalkCtx& ctx, NodeId b, boo
     std::vector<NodeId> ids;
     if( viaCallerEdges )
     {
-        if( b >= ctx.ing->symbols.size() ) return ids;
+        if( b >= ctx.ing->symbols.size() )
+        {
+            return ids;
+        }
         const auto* ro = ctx.g->inEdges.rowOffsets();
         const auto* ci = ctx.g->inEdges.colIndices();
         ids.assign( ci + ro[b], ci + ro[b + 1] );
         return ids;
     }
-    if( b + 1 >= ctx.g->outOff.size() ) return ids;
+    if( b + 1 >= ctx.g->outOff.size() )
+    {
+        return ids;
+    }
     ids.assign( ctx.g->outTargets.begin() + ctx.g->outOff[b], ctx.g->outTargets.begin() + ctx.g->outOff[b + 1] );
     return ids;
 }
@@ -265,7 +297,10 @@ inline void collectNeighborsOf( D1WalkCtx& ctx, NodeId b, bool viaCallerEdges )
 {
     for( NodeId c : rawNeighborIdsOf( ctx, b, viaCallerEdges ) )
     {
-        if( c >= ctx.seenNeighbor->size() || (*ctx.seenNeighbor)[c] || (*ctx.d0Mark)[c] ) continue;
+        if( c >= ctx.seenNeighbor->size() || ( *ctx.seenNeighbor )[c] || ( *ctx.d0Mark )[c] )
+        {
+            continue;
+        }
         (*ctx.seenNeighbor)[c] = 1;  ctx.out->ids.push_back( c );  ctx.out->isCaller.push_back( viaCallerEdges ? 1 : 0 );
     }
 }
@@ -274,11 +309,17 @@ inline void collectNeighborsOf( D1WalkCtx& ctx, NodeId b, bool viaCallerEdges )
 inline D1Neighbors sortNeighborsBySite( const IngestResult& ing, D1Neighbors&& in )
 {
     std::vector<std::uint32_t> perm( in.ids.size() );
-    for( std::uint32_t i = 0; i < perm.size(); ++i ) perm[i] = i;
+    for( std::uint32_t i = 0; i < perm.size(); ++i )
+    {
+        perm[i] = i;
+    }
     std::sort( perm.begin(), perm.end(), [ & ]( std::uint32_t a, std::uint32_t b )
     {
         const Symbol& sa = ing.symbols[ in.ids[a] ];  const Symbol& sb = ing.symbols[ in.ids[b] ];
-        if( sa.fileId != sb.fileId ) return ing.files[sa.fileId] < ing.files[sb.fileId];
+        if( sa.fileId != sb.fileId )
+        {
+            return ing.files[sa.fileId] < ing.files[sb.fileId];
+        }
         return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
     } );
     D1Neighbors out;
@@ -293,8 +334,14 @@ inline D1Neighbors computeD1Neighbors( const IngestResult& ing, const Graph& g,
     D1Neighbors out;
     std::vector<char> seenNeighbor( ing.symbols.size(), 0 );
     D1WalkCtx ctx{ &ing, &g, &d0Mark, &seenNeighbor, &out };
-    for( NodeId b : bodyIds ) collectNeighborsOf( ctx, b, /*viaCallerEdges=*/true );
-    for( NodeId b : bodyIds ) collectNeighborsOf( ctx, b, /*viaCallerEdges=*/false );
+    for( NodeId b : bodyIds )
+    {
+        collectNeighborsOf( ctx, b, /*viaCallerEdges=*/true );
+    }
+    for( NodeId b : bodyIds )
+    {
+        collectNeighborsOf( ctx, b, /*viaCallerEdges=*/false );
+    }
     return sortNeighborsBySite( ing, std::move( out ) );
 }
 
@@ -309,12 +356,18 @@ struct D1Row  { std::string xml;              std::string rawSig; };
 inline const std::string& d1ReadSrcCached( const IngestResult& ing, std::uint32_t fileId,
                                            HashMap<std::uint32_t, std::string>& cache )
 {
-    if( auto it = cache.find( fileId ); it != cache.end() ) return it->second;
+    if( auto it = cache.find( fileId ); it != cache.end() )
+    {
+        return it->second;
+    }
     std::string body;
     if( std::FILE* in = std::fopen( diskPath( ing, fileId ).c_str(), "rb" ) )
     {
         char buf[ 4096 ];  std::size_t n;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) body.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            body.append( buf, n );
+        }
         std::fclose( in );
     }
     return cache.emplace( fileId, std::move( body ) ).first->second;
@@ -326,10 +379,16 @@ inline std::string resolveD1Signature( const IngestResult& ing, const Symbol& s,
                                        HashMap<std::uint32_t, std::string>& srcCache,
                                        RedactCounts* redact )   // §B0/W3-N1: REQUIRED — a d1 sig is emitted text
 {
-    if( s.fileId >= ing.files.size() ) return {};
+    if( s.fileId >= ing.files.size() )
+    {
+        return {};
+    }
     const std::string& src = d1ReadSrcCached( ing, s.fileId, srcCache );
     const std::size_t  a = s.sigStartByte, b = s.sigEndByte;
-    if( a >= src.size() || b > src.size() || a >= b ) return {};
+    if( a >= src.size() || b > src.size() || a >= b )
+    {
+        return {};
+    }
     std::string sig = cleanSig( src.data(), a, b, redact );
     truncateUtf8WithEllipsis( sig, kForCapTailSigBytes );
     return sig;
@@ -353,8 +412,16 @@ inline D1Row buildD1Row( const IngestResult& ing, NodeId id, bool isCaller,
     row.xml += ":";         row.xml += std::to_string( s.line );
     row.xml += "\" rel=\""; row.xml += isCaller ? "caller" : "callee";
     row.xml += "\"";
-    if( sig.empty() ) row.xml += "/>";
-    else { row.xml += ">";  row.xml += ex( sig );  row.xml += "</s>"; }
+    if( sig.empty() )
+    {
+        row.xml += "/>";
+    }
+    else
+    {
+        row.xml += ">";
+        row.xml += ex( sig );
+        row.xml += "</s>";
+    }
     row.rawSig = std::move( sig );
     return row;
 }
@@ -401,7 +468,9 @@ inline void partitionByEligibility( const std::vector<NodeId>& topRanked, const 
                                     std::vector<NodeId>& eligibleIds, std::vector<NodeId>& d2plusIds )
 {
     for( NodeId id : topRanked )
+    {
         ( ( id < d0Mark.size() && d0Mark[id] ) || ( id < d1Mark.size() && d1Mark[id] ) ? eligibleIds : d2plusIds ).push_back( id );
+    }
 }
 
 // R2: everything outside `eligibleIds` is pinned to -1 (below any real, non-negative score) so
@@ -411,7 +480,13 @@ inline std::vector<float> buildMaskedRank( const IngestResult& ing, const std::v
                                            const std::vector<NodeId>& eligibleIds )
 {
     std::vector<float> masked( ing.symbols.size(), -1.0f );
-    for( NodeId id : eligibleIds ) if( id < masked.size() ) masked[id] = rank[id];
+    for( NodeId id : eligibleIds )
+    {
+        if( id < masked.size() )
+        {
+            masked[id] = rank[id];
+        }
+    }
     return masked;
 }
 
@@ -477,9 +552,13 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
     out.farXml   = far.xml;
 
     if( !far.xml.empty() && out.sigsStr.size() >= 7 && out.sigsStr.compare( out.sigsStr.size() - 7, 7, "</sigs>" ) == 0 )
+    {
         out.sigsStr.insert( out.sigsStr.size() - 7, far.xml );
+    }
     else if( !far.xml.empty() )
+    {
         DEGRADED_PATH_ALERT( "pack-task: <sigs> did not end with the expected closing tag — <far> omitted" );
+    }
     return out;
 }
 
@@ -511,12 +590,18 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
     // top ranked ids (score desc, id asc). Body candidates = the top heads with a POSITIVE score.
     std::vector<NodeId> order( ing.symbols.size() );
-    for( NodeId i = 0; i < order.size(); ++i ) order[i] = i;
+    for( NodeId i = 0; i < order.size(); ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
     std::vector<NodeId> bodyIds;
     for( std::size_t k = 0; k < order.size() && bodyIds.size() < kPackTaskBodyCandidates; ++k )
     {
-        if( rank[ order[k] ] <= 0.0f ) break;
+        if( rank[order[k]] <= 0.0f )
+        {
+            break;
+        }
         bodyIds.push_back( order[k] );
     }
 
@@ -527,11 +612,23 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // signature-level detail. Everything else considered by the ranking pool but NOT within 1 hop of any
     // anchor (d2+) is demoted to a bare name-only row — still surfaced (no silent loss), just cheaper.
     std::vector<char> d0Mark( ing.symbols.size(), 0 );
-    for( NodeId b : bodyIds ) if( b < d0Mark.size() ) d0Mark[b] = 1;
+    for( NodeId b : bodyIds )
+    {
+        if( b < d0Mark.size() )
+        {
+            d0Mark[b] = 1;
+        }
+    }
 
     const D1Neighbors  d1 = computeD1Neighbors( ing, g, bodyIds, d0Mark );
     std::vector<char> d1Mark( ing.symbols.size(), 0 );
-    for( NodeId n : d1.ids ) if( n < d1Mark.size() ) d1Mark[n] = 1;
+    for( NodeId n : d1.ids )
+    {
+        if( n < d1Mark.size() )
+        {
+            d1Mark[n] = 1;
+        }
+    }
 
     // the ranking pool: the same top-rankTopN window --for would show for this task (unmasked). Partition it
     // into ELIGIBLE (d0 ∪ d1 — keeps full signature+doc detail in section 1) and d2plus (demoted to a bare
@@ -548,8 +645,15 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     {
         ownClone.assign( ing.symbols.size(), 0u );
         for( const CloneGroup& cg : findClones( ing, 40 ) )
+        {
             for( NodeId m : cg.members )
-                if( m < ownClone.size() ) ownClone[m] = 1u;
+            {
+                if( m < ownClone.size() )
+                {
+                    ownClone[m] = 1u;
+                }
+            }
+        }
     }
     const std::vector<std::uint8_t>& forClone = in.cloneMember ? *in.cloneMember : ownClone;
 
@@ -650,15 +754,22 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         seenTarget.reserve( bodyIds.size() * 2 );
         const auto emitTarget = [ & ]( const std::string& target )
         {
-            if( target.empty() || seenTarget.find( target ) != seenTarget.end() ) return;
+            if( target.empty() || seenTarget.find( target ) != seenTarget.end() )
+            {
+                return;
+            }
             seenTarget[ target ] = 1;
             const std::vector<std::uint32_t>* idxs = in.notes->find( target );
-            if( !idxs || idxs->empty() ) return;
+            if( !idxs || idxs->empty() )
+            {
+                return;
+            }
             std::string entry = "<target id=\"" + ex( target ) + "\">";
             for( std::uint32_t ni : *idxs )
             {
                 const notes::Note& n = in.notes->notes[ ni ];
-                std::string safe;  safe.reserve( n.text.size() );
+                std::string safe;
+                safe.reserve( n.text.size() );
                 appendCdataSafe( n.text, safe );
                 entry += "<note d=\"" + ex( n.date ) + "\"><![CDATA[" + safe + "]]></note>";
             }
@@ -667,19 +778,28 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             if( jsonOut )
             {
                 std::vector<std::pair<std::string, std::string>> raw;
-                for( std::uint32_t ni : *idxs ) raw.emplace_back( in.notes->notes[ ni ].date, in.notes->notes[ ni ].text );
+                for( std::uint32_t ni : *idxs )
+                {
+                    raw.emplace_back( in.notes->notes[ni].date, in.notes->notes[ni].text );
+                }
                 noteEntriesData.emplace_back( target, std::move( raw ) );
             }
         };
         for( NodeId b : bodyIds )
         {
             const Symbol& s = ing.symbols[b];
-            if( s.fileId < ing.files.size() ) emitTarget( canonicalId( relForHash( ing.files[ s.fileId ], in.notes->root ), s.scope, s.name ) );   // D5: root-relative note key
+            if( s.fileId < ing.files.size() )
+            {
+                emitTarget( canonicalId( relForHash( ing.files[s.fileId], in.notes->root ), s.scope, s.name ) ); // D5: root-relative note key
+            }
         }
         for( NodeId b : bodyIds )
         {
             const Symbol& s = ing.symbols[b];
-            if( s.fileId < ing.files.size() ) emitTarget( std::string( relForHash( ing.files[ s.fileId ], in.notes->root ) ) );   // D5: root-relative note key
+            if( s.fileId < ing.files.size() )
+            {
+                emitTarget( std::string( relForHash( ing.files[s.fileId], in.notes->root ) ) ); // D5: root-relative note key
+            }
         }
     }
     const PackTaskSection notes        = packTaskListSection( "notes", "", noteEntries, cap( kShareNotes ), kPackTaskWrapReserve );
@@ -694,8 +814,16 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     {
         std::vector<NodeId> testSeeds;
         for( NodeId b : bodyIds )
-            if( b < ing.symbols.size() && !rw::isTestPath( ing.files[ ing.symbols[b].fileId ] ) ) testSeeds.push_back( b );
-        if( testSeeds.empty() ) testSeeds = bodyIds;
+        {
+            if( b < ing.symbols.size() && !rw::isTestPath( ing.files[ing.symbols[b].fileId] ) )
+            {
+                testSeeds.push_back( b );
+            }
+        }
+        if( testSeeds.empty() )
+        {
+            testSeeds = bodyIds;
+        }
         const std::vector<NodeId>  reach = transitiveCallers( g, testSeeds );
         std::vector<char>          fseen( ing.files.size(), 0 );
         for( NodeId n : reach )
@@ -740,7 +868,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         const RedactTallyFreeze tallyFreeze( in.redact );
         std::string&            j = *jsonOut;
         j = "{\"task\":\"" + jsonStr( task ) + "\"";
-        if( !lr.routeNote.empty() )      j += ",\"route\":\""       + jsonStr( lr.routeNote )      + "\"";
+        if( !lr.routeNote.empty() )
+        {
+            j += ",\"route\":\"" + jsonStr( lr.routeNote ) + "\"";
+        }
         // The scrub disclosure travels WITH the two fields it describes: `task` and `route` are XML-scrubbed
         // copies (xmlSafeByte maps C0 except \t\n\r to a space, invalid UTF-8 to '?'), and a consumer holding
         // only the JSON is owed that fact from the JSON. ctxRootJsonScrubKeys is ctxRootOpen's twin — same two
@@ -748,9 +879,18 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // on clean input, so no ordinary document moves a byte. This closes the residual bodydialectcheck's
         // arm (H) pinned as a SET; that arm is built to go RED when this lands, naming the pin to delete.
         j += ctxRootJsonScrubKeys( task, lr.routeNote );
-        if( !lr.mentionNote.empty() )    j += ",\"mention\":\""     + jsonStr( lr.mentionNote )    + "\"";
-        if( !lr.boostNote.empty() )      j += ",\"boost\":\""       + jsonStr( lr.boostNote )      + "\"";
-        if( !lr.docMentionNote.empty() ) j += ",\"doc_mention\":\"" + jsonStr( lr.docMentionNote ) + "\"";
+        if( !lr.mentionNote.empty() )
+        {
+            j += ",\"mention\":\"" + jsonStr( lr.mentionNote ) + "\"";
+        }
+        if( !lr.boostNote.empty() )
+        {
+            j += ",\"boost\":\"" + jsonStr( lr.boostNote ) + "\"";
+        }
+        if( !lr.docMentionNote.empty() )
+        {
+            j += ",\"doc_mention\":\"" + jsonStr( lr.docMentionNote ) + "\"";
+        }
         // §B1.6: all THREE budget facts the XML header states ("budget=N bytes (T-token target, ceiling C)").
         // budget_ceiling_bytes was the one number with no JSON key — the hard byte ceiling the token target
         // implies, which is what a consumer checks the bundle against; budget_bytes is the WORKING budget
@@ -802,7 +942,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
                + "\",\"p\":\"" + jsonStr( ing.files[ s.fileId ] ) + ":" + std::to_string( s.line )
                + "\",\"rel\":\"" + ( d1.isCaller[i] ? "caller" : "callee" ) + "\"";
-            if( !d1SigRaw[i].empty() ) j += ",\"sig\":\"" + jsonStr( d1SigRaw[i] ) + "\"";
+            if( !d1SigRaw[i].empty() )
+            {
+                j += ",\"sig\":\"" + jsonStr( d1SigRaw[i] ) + "\"";
+            }
             j += "}";
         }
         j += "]";
@@ -815,7 +958,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             j += "{\"target\":\"" + jsonStr( noteEntriesData[i].first ) + "\",\"notes\":[";
             const auto& raw = noteEntriesData[i].second;
             for( std::size_t k = 0; k < raw.size(); ++k )
+            {
                 j += std::string( k == 0 ? "" : "," ) + "{\"d\":\"" + jsonStr( raw[k].first ) + "\",\"text\":\"" + jsonStr( raw[k].second ) + "\"}";
+            }
             j += "]}";
         }
         j += "]";
@@ -827,8 +972,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         const rw::TestRunnerIndex jsonRunners( ing );
         const auto                 jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
         for( std::size_t i = 0; i < testsShown; ++i )
+        {
             j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( ing.files[ testFiles[i] ] ) + "\""
                + rw::runFieldJson( jsonRunners, testFiles[i], jrun ) + "}";
+        }
         j += "]";
 
         // W3FIX M1 — the JSON sibling of the XML header's over_ceiling sentence. §B1.6 gave this dialect
@@ -837,7 +984,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // ceiling (the silence-means-nothing-happened convention route/mention/boost use above), never "not
         // measured". Measured on the FINISHED document, so the key's own bytes are part of what it reports on.
         constexpr std::size_t kOverCeilingKeyBytes = 22;   // `,"over_ceiling":true` + the closing brace
-        if( j.size() + kOverCeilingKeyBytes > rw::ceilingAllowanceBytes( budgetTokens ) ) j += ",\"over_ceiling\":true";
+        if( j.size() + kOverCeilingKeyBytes > rw::ceilingAllowanceBytes( budgetTokens ) )
+        {
+            j += ",\"over_ceiling\":true";
+        }
         j += "}";
     }
 
@@ -895,7 +1045,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                                                        whole.size() - headerStr.size() + in.trailingSectionBytes,
                                                        rw::ceilingAllowanceBytes( budgetTokens ),
                                                        /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
-        if( chosen != headerStr ) whole.replace( 0, headerStr.size(), chosen );
+        if( chosen != headerStr )
+        {
+            whole.replace( 0, headerStr.size(), chosen );
+        }
     }
 
     // §6 --partition: the bundle's own surface (see the contract above). topRanked already contains bodyIds

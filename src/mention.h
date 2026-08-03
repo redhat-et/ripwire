@@ -84,15 +84,27 @@ inline std::string_view stripExt( std::string_view name ) noexcept
 // e.g. segments [transformers, optimization] matches "src/transformers/optimization.py".
 inline bool pathSuffixMatches( std::string_view path, const std::vector<std::string>& segments ) noexcept
 {
-    if( segments.empty() ) return false;
+    if( segments.empty() )
+    {
+        return false;
+    }
 
     // last segment: whole basename, basename-with-extension, or basename-sans-extension
     const std::string_view base = baseNameOf( path );
     const std::string&     last = segments.back();
     std::string_view       remaining;
-    if( base == last )                               remaining = path.substr( 0, path.size() - base.size() );
-    else if( stripExt( base ) == last )              remaining = path.substr( 0, path.size() - base.size() );
-    else                                             return false;
+    if( base == last )
+    {
+        remaining = path.substr( 0, path.size() - base.size() );
+    }
+    else if( stripExt( base ) == last )
+    {
+        remaining = path.substr( 0, path.size() - base.size() );
+    }
+    else
+    {
+        return false;
+    }
 
     // earlier segments must match the preceding whole components right-to-left
     // (decrement INSIDE the body — the `i-- > 0` idiom wraps the unsigned at loop exit, which G1's
@@ -100,10 +112,16 @@ inline bool pathSuffixMatches( std::string_view path, const std::vector<std::str
     for( std::size_t i = segments.size() - 1; i > 0; )
     {
         --i;
-        if( remaining.empty() || remaining.back() != '/' ) return false;
+        if( remaining.empty() || remaining.back() != '/' )
+        {
+            return false;
+        }
         remaining.remove_suffix( 1 );
         const std::string_view comp = baseNameOf( remaining );
-        if( comp != segments[i] ) return false;
+        if( comp != segments[i] )
+        {
+            return false;
+        }
         remaining = remaining.substr( 0, remaining.size() - comp.size() );
     }
     return true;
@@ -119,18 +137,33 @@ inline std::vector<RawMention> extractMentions( std::string_view task )
     {
         if( !isTokenChar( task[i] ) ) { ++i; continue; }
         const std::size_t start = i;
-        while( i < task.size() && isTokenChar( task[i] ) ) ++i;
+        while( i < task.size() && isTokenChar( task[i] ) )
+        {
+            ++i;
+        }
         std::string_view tok = task.substr( start, i - start );
         const bool backticked = start > 0 && task[start - 1] == '`' && i < task.size() && task[i] == '`';
 
         // trim joiner punctuation that is really sentence punctuation ("see foo.py." / "path/,")
-        while( !tok.empty() && ( tok.back() == '.' || tok.back() == '/' || tok.back() == '-' ) ) tok.remove_suffix( 1 );
-        while( !tok.empty() && ( tok.front() == '.' || tok.front() == '/' || tok.front() == '-' ) ) tok.remove_prefix( 1 );
-        if( tok.size() < 3 || tok.size() > 200 ) continue;
+        while( !tok.empty() && ( tok.back() == '.' || tok.back() == '/' || tok.back() == '-' ) )
+        {
+            tok.remove_suffix( 1 );
+        }
+        while( !tok.empty() && ( tok.front() == '.' || tok.front() == '/' || tok.front() == '-' ) )
+        {
+            tok.remove_prefix( 1 );
+        }
+        if( tok.size() < 3 || tok.size() > 200 )
+        {
+            continue;
+        }
 
         const bool hasSlash = tok.find( '/' ) != std::string_view::npos;
         const bool hasDot   = tok.find( '.' ) != std::string_view::npos;
-        if( !hasSlash && !hasDot && !backticked ) continue;   // plain word — not a mention
+        if( !hasSlash && !hasDot && !backticked )
+        {
+            continue; // plain word — not a mention
+        }
 
         // split on the joiner ('/' wins: a URL/path token's dots live inside its basename segment)
         RawMention m;
@@ -146,23 +179,48 @@ inline std::vector<RawMention> extractMentions( std::string_view task )
             if( seg.empty() ) { malformed = !hasSlash; if( hasSlash ) { p = ( q == std::string_view::npos ) ? tok.size() + 1 : q + 1; continue; } break; }
             m.segments.emplace_back( seg );
             maxSegmentLen = std::max( maxSegmentLen, seg.size() );
-            if( q == std::string_view::npos ) break;
+            if( q == std::string_view::npos )
+            {
+                break;
+            }
             p = q + 1;
         }
-        if( malformed || m.segments.empty() ) continue;
+        if( malformed || m.segments.empty() )
+        {
+            continue;
+        }
 
         // dotted chains need a real identifier somewhere ("e.g", "i.e", version numbers "3.10" stay prose)
         if( !hasSlash && !backticked )
         {
-            if( m.segments.size() < 2 || maxSegmentLen < 3 ) continue;
+            if( m.segments.size() < 2 || maxSegmentLen < 3 )
+            {
+                continue;
+            }
             bool allDigits = true;
-            for( const std::string& s : m.segments ) for( const char c : s ) if( c < '0' || c > '9' ) { allDigits = false; break; }
-            if( allDigits ) continue;
+            for( const std::string& s : m.segments )
+            {
+                for( const char c : s )
+                {
+                    if( c < '0' || c > '9' )
+                    {
+                        allDigits = false;
+                        break;
+                    }
+                }
+            }
+            if( allDigits )
+            {
+                continue;
+            }
         }
 
         // path mentions keep only their meaningful tail (a URL prefix like github.com/org/repo/blob/main
         // would otherwise demand components the indexed repo-relative path does not have)
-        if( m.isPath && m.segments.size() > 3 ) m.segments.erase( m.segments.begin(), m.segments.end() - 3 );
+        if( m.isPath && m.segments.size() > 3 )
+        {
+            m.segments.erase( m.segments.begin(), m.segments.end() - 3 );
+        }
 
         raw.push_back( std::move( m ) );
     }
@@ -176,15 +234,27 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
 {
     using namespace mention_detail;
     VERIFY( lensRank.size() == ing.symbols.size() );
-    if( task.empty() || lensRank.empty() || lensRank.size() != ing.symbols.size() ) return false;
+    if( task.empty() || lensRank.empty() || lensRank.size() != ing.symbols.size() )
+    {
+        return false;
+    }
 
     const std::vector<RawMention> raw = extractMentions( task );
-    if( raw.empty() ) return false;
+    if( raw.empty() )
+    {
+        return false;
+    }
 
     // current top score = the unbreakable ceiling (a rank with no positive score anchors from 1.0)
     float topScore = 0.0f;
-    for( const float s : lensRank ) topScore = std::max( topScore, s );
-    if( !( topScore > 0.0f ) ) topScore = 1.0f;
+    for( const float s : lensRank )
+    {
+        topScore = std::max( topScore, s );
+    }
+    if( !( topScore > 0.0f ) )
+    {
+        topScore = 1.0f;
+    }
 
     // pass 1 — resolve mentions to files (text order, deduped, capped) and to directly-named symbols.
     std::vector<std::uint32_t> mentionedFiles;                       // <= kMentionMaxFiles, text order
@@ -205,9 +275,14 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
             const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
             for( std::uint32_t f = 0; f < fileCount && mentionedFiles.size() < kMentionMaxFiles; ++f )
             {
-                if( !pathSuffixMatches( ing.files[f], suffix ) ) continue;
+                if( !pathSuffixMatches( ing.files[f], suffix ) )
+                {
+                    continue;
+                }
                 if( std::find( mentionedFiles.begin(), mentionedFiles.end(), f ) == mentionedFiles.end() )
+                {
                     mentionedFiles.push_back( f );
+                }
                 matchedFile = true;
             }
         }
@@ -224,12 +299,18 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
                 if( s.name == nameSeg && s.scope == scopeSeg )
                 {
                     directSymbols.push_back( s.id );
-                    if( directSymbols.size() >= kMentionMaxDirectSymbols ) break;
+                    if( directSymbols.size() >= kMentionMaxDirectSymbols )
+                    {
+                        break;
+                    }
                 }
             }
         }
     }
-    if( mentionedFiles.empty() && directSymbols.empty() ) return false;
+    if( mentionedFiles.empty() && directSymbols.empty() )
+    {
+        return false;
+    }
 
     // pass 2 — lift. Slot ladder: file i's symbols land at top*(1 - step*(i+1)); direct symbols land at
     // the first slot. max() keeps anything the ranker already scored higher exactly where it was.
@@ -242,7 +323,10 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
 
     std::sort( directSymbols.begin(), directSymbols.end() );
     directSymbols.erase( std::unique( directSymbols.begin(), directSymbols.end() ), directSymbols.end() );
-    for( const NodeId id : directSymbols ) lift( id, 0 );
+    for( const NodeId id : directSymbols )
+    {
+        lift( id, 0 );
+    }
 
     for( std::size_t fi = 0; fi < mentionedFiles.size(); ++fi )
     {
@@ -253,18 +337,39 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         std::uint32_t bestCount = 0;
         for( const Symbol& s : ing.symbols )
         {
-            if( s.fileId != f ) continue;
+            if( s.fileId != f )
+            {
+                continue;
+            }
             std::uint32_t at = bestCount < kMentionMaxSymbolsPerFile ? bestCount : kMentionMaxSymbolsPerFile;
-            while( at > 0 && ( lensRank[s.id] > lensRank[ best[at - 1] ] || ( lensRank[s.id] == lensRank[ best[at - 1] ] && s.id < best[at - 1] ) ) ) --at;
-            if( at >= kMentionMaxSymbolsPerFile ) continue;
-            for( std::uint32_t k = ( bestCount < kMentionMaxSymbolsPerFile ? bestCount : kMentionMaxSymbolsPerFile - 1 ); k > at; --k ) best[k] = best[k - 1];
+            while( at > 0 && ( lensRank[s.id] > lensRank[best[at - 1]] || ( lensRank[s.id] == lensRank[best[at - 1]] && s.id < best[at - 1] ) ) )
+            {
+                --at;
+            }
+            if( at >= kMentionMaxSymbolsPerFile )
+            {
+                continue;
+            }
+            for( std::uint32_t k = ( bestCount < kMentionMaxSymbolsPerFile ? bestCount : kMentionMaxSymbolsPerFile - 1 ); k > at; --k )
+            {
+                best[k] = best[k - 1];
+            }
             best[at] = s.id;
-            if( bestCount < kMentionMaxSymbolsPerFile ) ++bestCount;
+            if( bestCount < kMentionMaxSymbolsPerFile )
+            {
+                ++bestCount;
+            }
         }
-        for( std::uint32_t k = 0; k < bestCount; ++k ) lift( best[k], fi );
+        for( std::uint32_t k = 0; k < bestCount; ++k )
+        {
+            lift( best[k], fi );
+        }
     }
 
-    if( liftedSymbolCount == 0 ) return false;
+    if( liftedSymbolCount == 0 )
+    {
+        return false;
+    }
     if( outInfo )
     {
         outInfo->fileCount   = std::uint32_t( mentionedFiles.size() );
@@ -306,13 +411,19 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
 {
     const std::size_t N = lensRank.size();
     VERIFY( g.mentions.empty() || g.mentions.size() == N );
-    if( N == 0 || g.mentions.empty() ) return false;
+    if( N == 0 || g.mentions.empty() )
+    {
+        return false;
+    }
 
     // top-kDocMentionMaxAnchors symbols by (current score desc, id asc) — the symbols THIS query, after every
     // prior boost (route/anchor/query-mention/co-change), actually resolved onto. Positive scores only, same
     // pattern as graph.h's anchoredLexicalRank anchor selection.
     std::vector<NodeId> order( N );
-    for( NodeId i = 0; i < N; ++i ) order[i] = i;
+    for( NodeId i = 0; i < N; ++i )
+    {
+        order[i] = i;
+    }
     const std::size_t topN = std::min( kDocMentionMaxAnchors, N );
     std::partial_sort( order.begin(), order.begin() + topN, order.end(), [ & ]( NodeId a, NodeId b ) noexcept
     { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );
@@ -321,15 +432,27 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
     for( std::size_t k = 0; k < topN && liftedDocs < kDocMentionMaxDocsTotal; ++k )
     {
         const NodeId anchor = order[k];
-        if( !( lensRank[anchor] > 0.0f ) ) break;                          // rest of `order` only gets worse
-        if( anchor >= g.mentions.size() || g.mentions[anchor].empty() ) continue;
+        if( !( lensRank[anchor] > 0.0f ) )
+        {
+            break; // rest of `order` only gets worse
+        }
+        if( anchor >= g.mentions.size() || g.mentions[anchor].empty() )
+        {
+            continue;
+        }
 
         const float   target    = lensRank[anchor] * kDocMentionDecay;
         std::size_t   perAnchor = 0;
         for( NodeId doc : g.mentions[anchor] )
         {
-            if( perAnchor >= kDocMentionMaxDocsPerAnchor || liftedDocs >= kDocMentionMaxDocsTotal ) break;
-            if( doc >= lensRank.size() ) continue;                        // defensive; buildGraph keeps these in-range
+            if( perAnchor >= kDocMentionMaxDocsPerAnchor || liftedDocs >= kDocMentionMaxDocsTotal )
+            {
+                break;
+            }
+            if( doc >= lensRank.size() )
+            {
+                continue; // defensive; buildGraph keeps these in-range
+            }
             if( lensRank[doc] < target )
             {
                 lensRank[doc] = target;
@@ -337,10 +460,16 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
                 ++perAnchor;
             }
         }
-        if( perAnchor > 0 ) ++usedAnchors;
+        if( perAnchor > 0 )
+        {
+            ++usedAnchors;
+        }
     }
 
-    if( liftedDocs == 0 ) return false;
+    if( liftedDocs == 0 )
+    {
+        return false;
+    }
     if( outInfo ) { outInfo->anchorCount = usedAnchors; outInfo->docCount = liftedDocs; }
     return true;
 }
@@ -362,9 +491,14 @@ inline std::vector<MentionFileRow> collapseMentionsToFileRows( const IngestResul
     {
         const Symbol&    ds           = ing.symbols[dn];
         const auto [ it, wasInserted ] = rowOfFile.try_emplace( ds.fileId, fileRows.size() );
-        if( wasInserted ) fileRows.push_back( { ds.fileId, 1 } );
+        if( wasInserted )
+        {
+            fileRows.push_back( { ds.fileId, 1 } );
+        }
         else
+        {
             ++fileRows[ it->second ].mentions;
+        }
     }
     std::sort( fileRows.begin(), fileRows.end(), [ & ]( const MentionFileRow& a, const MentionFileRow& b )
                { return ing.files[ a.fileId ] < ing.files[ b.fileId ]; } );

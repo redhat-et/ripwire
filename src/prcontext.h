@@ -117,12 +117,17 @@ inline std::string resolveNumstatPath( std::string col )
 {
     col = gitUnquotePath( col );
     const std::size_t arrow = col.find( " => " );
-    if( arrow == std::string::npos ) return col;                     // not a rename row
+    if( arrow == std::string::npos )
+    {
+        return col; // not a rename row
+    }
 
     const std::size_t lb = col.rfind( '{', arrow );
     const std::size_t rb = col.find( '}', arrow );
     if( lb != std::string::npos && rb != std::string::npos && lb < arrow && rb > arrow )
+    {
         return col.substr( 0, lb ) + col.substr( arrow + 4, rb - ( arrow + 4 ) ) + col.substr( rb + 1 );   // pre{old => new}post
+    }
     return col.substr( arrow + 4 );                                 // bare "old => new" → new
 }
 
@@ -170,18 +175,29 @@ struct NumstatRow
 // is the defect being fixed.)
 inline NumstatRow numstatRowPath( std::string row )
 {
-    while( !row.empty() && ( row.back() == '\n' || row.back() == '\r' ) ) row.pop_back();
-    if( row.empty() ) return {};
+    while( !row.empty() && ( row.back() == '\n' || row.back() == '\r' ) )
+    {
+        row.pop_back();
+    }
+    if( row.empty() )
+    {
+        return {};
+    }
 
     const std::size_t t1 = row.find( '\t' );
     const std::size_t t2 = ( t1 == std::string::npos ) ? std::string::npos : row.find( '\t', t1 + 1 );
-    if( t1 == std::string::npos || t2 == std::string::npos ) return NumstatRow{ std::move( row ), false };
+    if( t1 == std::string::npos || t2 == std::string::npos )
+    {
+        return NumstatRow { std::move( row ), false };
+    }
 
     const std::string_view added( row.data(), t1 );
     const std::string_view deleted( row.data() + t1 + 1, t2 - t1 - 1 );
     std::string            pathCol = row.substr( t2 + 1 );
     if( added == "0" && deleted == "0" && pathCol.find( " => " ) == std::string::npos )
+    {
         return NumstatRow{ std::string{}, true };
+    }
 
     return NumstatRow{ resolveNumstatPath( std::move( pathCol ) ), false };
 }
@@ -198,18 +214,30 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
                           + revArgs + " -- 2>/dev/null";
 
     std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe ) return out;
+    if( !pipe )
+    {
+        return out;
+    }
 
     char line[ 4096 ];
     while( std::fgets( line, sizeof( line ), pipe ) )
     {
         auto [ path, isModeOnly ] = numstatRowPath( std::string( line ) );
 
-        if( isModeOnly )         ++out.skippedModeOnly;
-        else if( !path.empty() ) out.paths.push_back( std::move( path ) );
+        if( isModeOnly )
+        {
+            ++out.skippedModeOnly;
+        }
+        else if( !path.empty() )
+        {
+            out.paths.push_back( std::move( path ) );
+        }
     }
     const int rc = pclose( pipe );
-    if( rc != 0 && out.paths.empty() && out.skippedModeOnly == 0 ) return out;   // git failed outright
+    if( rc != 0 && out.paths.empty() && out.skippedModeOnly == 0 )
+    {
+        return out; // git failed outright
+    }
     out.ok = true;
     return out;
 }
@@ -249,9 +277,17 @@ struct DiffAnchor
 // inherits from git's output format — a non-hex answer degrades to a refusal, never to a raw-token diff.
 inline bool isCommitSha( std::string_view s )
 {
-    if( s.size() != 40 && s.size() != 64 ) return false;
+    if( s.size() != 40 && s.size() != 64 )
+    {
+        return false;
+    }
     for( const char c : s )
-        if( !( ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) ) ) return false;
+    {
+        if( !( ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) ) )
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -340,10 +376,16 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
 
     // P0.1: an unresolvable ref never reaches `git diff` — and a root with no git history has nothing to
     // diff either. Both leave `ok` false; `badRef` is what tells the caller to REFUSE rather than degrade.
-    if( anchor.badRef || anchor.gitUnusable ) return result;
+    if( anchor.badRef || anchor.gitUnusable )
+    {
+        return result;
+    }
 
     const NumstatDiff mine = numstatChangedPaths( root, anchor.revArgs );
-    if( !mine.ok ) return result;
+    if( !mine.ok )
+    {
+        return result;
+    }
 
     const std::vector<std::string>& changed = mine.paths;
     result.skippedModeOnly = mine.skippedModeOnly;
@@ -358,7 +400,12 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
         const NumstatDiff moved = numstatChangedPaths( root, shSingleQuote( result.baseSha ) + " "
                                                              + shSingleQuote( anchor.refSha ) );
         for( const std::string& p : moved.paths )
-            if( std::find( changed.begin(), changed.end(), p ) == changed.end() ) ++result.baseMoved;
+        {
+            if( std::find( changed.begin(), changed.end(), p ) == changed.end() )
+            {
+                ++result.baseMoved;
+            }
+        }
     }
 
     markChangedFilesFromGitPaths( changed, ing, result.mask, onlyRoot );   // §H6b — the ONE join (gitmine.h)
@@ -408,9 +455,14 @@ template< typename Escaper >
 inline std::string prAnchorAttr( const PrContextMask& anchor, const Escaper& ex )
 {
     if( anchor.baseAnchored )
+    {
         return std::string( " anchor=\"merge-base\" base_sha=\"" ) + ex( std::string_view( anchor.baseSha ).substr( 0, 9 ) )
              + "\" base_moved=\"" + std::to_string( anchor.baseMoved ) + "\"";
-    if( anchor.baseRefGiven ) return std::string( " anchor=\"ref-tip-two-dot\" base_moved=\"0\"" );
+    }
+    if( anchor.baseRefGiven )
+    {
+        return std::string( " anchor=\"ref-tip-two-dot\" base_moved=\"0\"" );
+    }
     return {};
 }
 
@@ -426,8 +478,14 @@ inline std::string prAnchorAttr( const PrContextMask& anchor, const Escaper& ex 
 // SIDE), and anchor= answers WHERE the diff is anchored.
 inline std::string prDirectionAttr( const PrContextMask& anchor )
 {
-    if( !anchor.baseRefGiven )  return " direction=\"worktree-since-head\"";   // uncommitted work vs HEAD
-    if( !anchor.baseAnchored )  return " direction=\"head-since-ref-tip\"";    // unrelated history: no merge base exists
+    if( !anchor.baseRefGiven )
+    {
+        return " direction=\"worktree-since-head\""; // uncommitted work vs HEAD
+    }
+    if( !anchor.baseAnchored )
+    {
+        return " direction=\"head-since-ref-tip\""; // unrelated history: no merge base exists
+    }
     return " direction=\"head-since-fork\"";
 }
 
@@ -478,18 +536,33 @@ inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budget
             emitFiles( ms, kPrTrims[li] );
             std::fflush( ms );
             std::fclose( ms );
-            if( buf ) rendered.assign( buf, sz );
+            if( buf )
+            {
+                rendered.assign( buf, sz );
+            }
         }
         std::free( buf );
         const std::size_t est = std::size_t( std::ceil( double( rendered.size() + kPrHeaderOverheadBytes ) / kMinBytesPerToken ) );
         out.level     = li;
         out.estTokens = est;
         out.body      = std::move( rendered );
-        if( est <= budgetTokens ) break;
-        if( li + 1 == nLevels ) isOverFloor = true;   // even the floor render is over budget
+        if( est <= budgetTokens )
+        {
+            break;
+        }
+        if( li + 1 == nLevels )
+        {
+            isOverFloor = true; // even the floor render is over budget
+        }
     }
-    if( out.level > 0 ) out.truncated = kPrTrims[ out.level ].dropped;
-    if( isOverFloor )   out.truncated += ";budget-floor-exceeded";
+    if( out.level > 0 )
+    {
+        out.truncated = kPrTrims[out.level].dropped;
+    }
+    if( isOverFloor )
+    {
+        out.truncated += ";budget-floor-exceeded";
+    }
     return out;
 }
 
@@ -516,7 +589,10 @@ inline void writePrRootOpen( std::FILE* out, const std::string& sharedAttrs, con
     // plain / budgeted) share — which is exactly the drift this helper exists to prevent, and the reason it
     // is appended LAST, past every caller-supplied tail attribute (same placement rule as gitstamp::atAttr).
     std::fprintf( out, "<pr-context%s%s%s>", sharedAttrs.c_str(), tailAttrs.c_str(), rw::kGraphCountFloorAttrXml );
-    if( !anchor.refHasNoWork ) return;
+    if( !anchor.refHasNoWork )
+    {
+        return;
+    }
     std::fprintf( out, "<no-ref-work note=\"%s tip == merge-base, so that ref has no divergent work of its own; this "
                        "bundle is HEAD's work since the fork. For the ref's OWN diff see merge-scout or stray-content\"/>",
                   baseLabelEscaped.c_str() );
@@ -528,7 +604,10 @@ inline void writePrRootOpen( std::FILE* out, const std::string& sharedAttrs, con
 // own comments call out. Keep it that way when editing.
 inline void writeAnchorNote( std::FILE* out, const std::string& anchorAttr )
 {
-    if( anchorAttr.empty() ) return;
+    if( anchorAttr.empty() )
+    {
+        return;
+    }
 
     std::fprintf( out, "<!-- anchoring: a base ref was given, so this diff is anchored at merge base(BASEREF, HEAD), "
                        "NOT at the ref's tip — the bundle is what THIS work changed since it forked, not how the two "
@@ -552,7 +631,10 @@ inline void orderChangedFilesByImpact( std::vector<std::uint32_t>& changed, cons
                                        const std::vector<std::vector<NodeId>>& symsByFile )
 {
     std::vector<std::size_t> dependentsByFile( ing.files.size(), 0 );
-    for( std::uint32_t f : changed ) dependentsByFile[f] = transitiveCallers( g, symsByFile[f] ).size();
+    for( std::uint32_t f : changed )
+    {
+        dependentsByFile[f] = transitiveCallers( g, symsByFile[f] ).size();
+    }
     orderIdsByKeyDescPathAsc( changed, dependentsByFile, ing.files );
 }
 
@@ -577,10 +659,19 @@ inline std::pair<std::string, std::vector<NodeId>> splitDocSections( const Inges
     rowSyms.reserve( fileSyms.size() );
     for( NodeId s : fileSyms )
     {
-        if( ing.symbols[s].kind == SymKind::Section ) ++sectionCount;
-        else                                          rowSyms.push_back( s );
+        if( ing.symbols[s].kind == SymKind::Section )
+        {
+            ++sectionCount;
+        }
+        else
+        {
+            rowSyms.push_back( s );
+        }
     }
-    if( sectionCount == 0 ) return { std::string(), std::move( rowSyms ) };
+    if( sectionCount == 0 )
+    {
+        return { std::string(), std::move( rowSyms ) };
+    }
     return { std::string( " sections=\"" ) + std::to_string( sectionCount ) + "\"", std::move( rowSyms ) };
 }
 
@@ -632,7 +723,13 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // changed files, in path order (deterministic). Only files with ≥1 indexed symbol carry analysis;
     // a changed file with no indexed symbols still gets a section (so the reviewer sees it changed).
     std::vector<std::uint32_t> changed;
-    for( std::uint32_t f = 0; f < F; ++f ) if( changedFile[f] ) changed.push_back( f );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( changedFile[f] )
+        {
+            changed.push_back( f );
+        }
+    }
     std::sort( changed.begin(), changed.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
     std::fprintf( out, "<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
@@ -682,7 +779,10 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // One-time file→defined-symbols index (in id order == file/line order), so each changed file reads its
     // symbols in O(1) instead of re-scanning all N symbols (A4-P10). Buckets fill in ascending id order.
     std::vector<std::vector<NodeId>> symsByFile( F );
-    for( NodeId i = 0; i < N; ++i ) symsByFile[ ing.symbols[i].fileId ].push_back( i );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        symsByFile[ing.symbols[i].fileId].push_back( i );
+    }
 
     // §P11.7: files lead by BLAST RADIUS, not by path — see orderChangedFilesByImpact above.
     orderChangedFilesByImpact( changed, ing, g, symsByFile );
@@ -727,12 +827,27 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             {
                 const std::uint32_t rf = ing.symbols[n].fileId;
                 reachFileSeen[rf] = 1;
-                if( !changedFile[rf] ) ++fileReachers[rf];
+                if( !changedFile[rf] )
+                {
+                    ++fileReachers[rf];
+                }
             }
             std::size_t                totalReachFiles = 0;
-            for( std::uint32_t rf = 0; rf < F; ++rf ) if( reachFileSeen[rf] ) ++totalReachFiles;
+            for( std::uint32_t rf = 0; rf < F; ++rf )
+            {
+                if( reachFileSeen[rf] )
+                {
+                    ++totalReachFiles;
+                }
+            }
             std::vector<std::uint32_t> radiusFiles;
-            for( std::uint32_t rf = 0; rf < F; ++rf ) if( fileReachers[rf] ) radiusFiles.push_back( rf );
+            for( std::uint32_t rf = 0; rf < F; ++rf )
+            {
+                if( fileReachers[rf] )
+                {
+                    radiusFiles.push_back( rf );
+                }
+            }
             std::sort( radiusFiles.begin(), radiusFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                        { return fileReachers[a] != fileReachers[b] ? fileReachers[a] > fileReachers[b] : ing.files[a] < ing.files[b]; } );
 
@@ -743,12 +858,16 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                 std::fprintf( o, "<impact dependents=\"%zu\" files=\"%zu\" files_other=\"%zu\" shown=\"%zu\" capped=\"%u\">",
                              reach.size(), totalReachFiles, radiusFiles.size(), fSc.shown, fSc.capped );
                 for( std::size_t i = 0; i < fSc.shown; ++i )
+                {
                     std::fprintf( o, "<f p=\"%s\" deps=\"%u\"/>", ex( ing.files[ radiusFiles[i] ] ).c_str(), fileReachers[ radiusFiles[i] ] );
+                }
                 std::fprintf( o, "</impact>" );
             }
             else
+            {
                 std::fprintf( o, "<impact dependents=\"%zu\" files=\"%zu\" files_other=\"%zu\" shown=\"%zu\" capped=\"%u\"/>",
                              reach.size(), totalReachFiles, radiusFiles.size(), fSc.shown, fSc.capped );
+            }
 
             // (4) affected tests to run. §B3: same shown=/capped= disclosure on <tests>' count=.
             const PrShownCap tSc = prShownCap( testFiles.size(), trim.testCap );
@@ -756,11 +875,15 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             {
                 std::fprintf( o, "<tests count=\"%zu\" shown=\"%zu\" capped=\"%u\">", testFiles.size(), tSc.shown, tSc.capped );
                 for( std::size_t i = 0; i < tSc.shown; ++i )
+                {
                     std::fprintf( o, "<test p=\"%s\"%s/>", ex( ing.files[ testFiles[i] ] ).c_str(), runAttr( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
+                }
                 std::fprintf( o, "</tests>" );
             }
             else
+            {
                 std::fprintf( o, "<tests count=\"%zu\" shown=\"%zu\" capped=\"%u\"/>", testFiles.size(), tSc.shown, tSc.capped );
+            }
 
             // (5) per-symbol callers (1-hop in-edges) — the review anchor "who breaks if this symbol changes".
             //     Emit each changed symbol with its direct callers, in id order; cap callers per symbol. At the
@@ -776,12 +899,21 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                     const Symbol& sy = ing.symbols[s];
                     std::vector<NodeId> callers;
                     for( std::uint32_t k = inRo[s]; k < inRo[s + 1]; ++k )
-                    { const NodeId c = inCi[k]; if( c < N ) callers.push_back( c ); }
+                    {
+                        const NodeId c = inCi[k];
+                        if( c < N )
+                        {
+                            callers.push_back( c );
+                        }
+                    }
                     std::sort( callers.begin(), callers.end() );
                     callers.erase( std::unique( callers.begin(), callers.end() ), callers.end() );
                     std::sort( callers.begin(), callers.end(), [ & ]( NodeId a, NodeId b )
                                { const Symbol& sa = ing.symbols[a]; const Symbol& sb = ing.symbols[b];
-                                 if( sa.fileId != sb.fileId ) return ing.files[sa.fileId] < ing.files[sb.fileId];
+                        if( sa.fileId != sb.fileId )
+                        {
+                            return ing.files[sa.fileId] < ing.files[sb.fileId];
+                        }
                                  return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name; } );
                     // §B3: <caller> is a TOP-N subset of callers= — same shown=/capped= disclosure.
                     const PrShownCap cSc = prShownCap( callers.size(), trim.callerCap );
@@ -796,21 +928,31 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                         }
                         std::fprintf( o, "</s>" );
                     }
-                    else   // keep the row + its callers COUNT (the cheap structural fact), drop the caller list
+                    else
+                    { // keep the row + its callers COUNT (the cheap structural fact), drop the caller list
                         std::fprintf( o, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\" callers=\"%zu\" shown=\"%zu\" capped=\"%u\"/>",
                                      symTag( sy.kind ), ex( sy.name ).c_str(), ex( ing.files[ sy.fileId ] ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
+                    }
                 }
                 std::fprintf( o, "</changed-symbols>" );
             }
             else
+            {
                 std::fprintf( o, "<changed-symbols count=\"%zu\"%s/>", fileSyms.size(), sectionsAttr.c_str() );
+            }
 
             // (6) co-change partners NOT in the diff (gitmine). Degrades to an empty list without git. A4-P10:
             // answered from the once-mined `coSets` (no per-file `git log` popen).
             std::uint32_t                commits = 0;
             const std::vector<CoPartner> partners = cochangePartners( ing, ing.files[f], commits, coSets );
             std::vector<const CoPartner*> outside;
-            for( const CoPartner& p : partners ) if( !changedFile[ p.fileId ] ) outside.push_back( &p );
+            for( const CoPartner& p : partners )
+            {
+                if( !changedFile[p.fileId] )
+                {
+                    outside.push_back( &p );
+                }
+            }
             // cochangePartners already returns deg-desc, path-asc order → keep it.
             // §B3: <partner> is a TOP-N subset of partners= — same shown=/capped= disclosure.
             const PrShownCap pSc = prShownCap( outside.size(), trim.cochangeCap );
@@ -818,12 +960,16 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             {
                 std::fprintf( o, "<cochange commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\">", commits, outside.size(), pSc.shown, pSc.capped );
                 for( std::size_t i = 0; i < pSc.shown; ++i )
+                {
                     std::fprintf( o, "<partner p=\"%s\" deg=\"%.2f\"%s/>", ex( ing.files[ outside[i]->fileId ] ).c_str(),
                                  outside[i]->deg, coPairAttr( *outside[i] ) );   // §A9.3: surprising= or dep_capable="0"
+                }
                 std::fprintf( o, "</cochange>" );
             }
             else
+            {
                 std::fprintf( o, "<cochange commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\"/>", commits, outside.size(), pSc.shown, pSc.capped );
+            }
 
             // (7) owners of this file (gitmine, recency-weighted). A4-P?: answered from the once-mined
             //     `allOwners` (no per-file `git log` popen) — ownershipForFile is a pure binary search,
@@ -835,13 +981,19 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                 const PrShownCap aSc = prShownCap( ow->authors.size(), trim.ownerCap );
                 std::fprintf( o, "<owners authors=\"%u\" bf=\"%d\" shown=\"%zu\" capped=\"%u\">", ow->uniqueAuthors, ow->busFactor ? 1 : 0, aSc.shown, aSc.capped );
                 for( std::size_t i = 0; i < aSc.shown; ++i )
+                {
                     std::fprintf( o, "<author email=\"%s\" share=\"%.2f\"/>", ex( ow->authors[i].email ).c_str(), ow->authors[i].share );
+                }
                 std::fprintf( o, "</owners>" );
             }
-            else if( ow )   // trimmed: keep the author COUNT + bus-factor flag (cheap structural facts), drop the list
+            else if( ow )
+            { // trimmed: keep the author COUNT + bus-factor flag (cheap structural facts), drop the list
                 std::fprintf( o, "<owners authors=\"%u\" bf=\"%d\" shown=\"0\" capped=\"%u\"/>", ow->uniqueAuthors, ow->busFactor ? 1 : 0, ow->authors.empty() ? 0u : 1u );
+            }
             else
+            {
                 std::fprintf( o, "<owners authors=\"0\" bf=\"0\"/>" );   // no git ownership data at all — not a capped listing, nothing to disclose
+            }
 
             std::fprintf( o, "</file>" );
         }

@@ -116,8 +116,14 @@ consteval bool blankRangesAreCanonical() noexcept
 {
     for( std::size_t rangeIndex = 0; rangeIndex < std::size( kBlankRanges ); ++rangeIndex )
     {
-        if( kBlankRanges[ rangeIndex ].lo > kBlankRanges[ rangeIndex ].hi ) return false;
-        if( rangeIndex > 0 && kBlankRanges[ rangeIndex ].lo <= kBlankRanges[ rangeIndex - 1 ].hi + 1 ) return false;
+        if( kBlankRanges[rangeIndex].lo > kBlankRanges[rangeIndex].hi )
+        {
+            return false;
+        }
+        if( rangeIndex > 0 && kBlankRanges[rangeIndex].lo <= kBlankRanges[rangeIndex - 1].hi + 1 )
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -154,14 +160,19 @@ inline DecodedCodePoint decodeUtf8At( std::string_view text, std::size_t byteOff
     // utf8SeqLen is fully validating (0 on a bad continuation, an overlong form, a surrogate half or a tail
     // truncated by the buffer end), so everything below it is a well-formed U+0000..U+10FFFF scalar value.
     const int seqLength = jsonesc::utf8SeqLen( text.data(), byteOffset, text.size() );
-    if( seqLength == 0 ) return { 0, 0 };
+    if( seqLength == 0 )
+    {
+        return { 0, 0 };
+    }
 
     const unsigned char lead = static_cast<unsigned char>( text[ byteOffset ] );
     std::uint32_t codePoint = seqLength == 1 ? std::uint32_t( lead )
                                              : std::uint32_t( lead & ( 0xFF >> ( seqLength + 1 ) ) );
     for( int continuationIndex = 1; continuationIndex < seqLength; ++continuationIndex )
+    {
         codePoint = ( codePoint << 6 )
                   | std::uint32_t( static_cast<unsigned char>( text[ byteOffset + std::size_t( continuationIndex ) ] ) & 0x3F );
+    }
 
     return { codePoint, seqLength };
 }
@@ -174,8 +185,14 @@ inline bool hasVisibleContent( std::string_view payload ) noexcept
     for( std::size_t byteOffset = 0; byteOffset < payload.size(); )
     {
         const DecodedCodePoint decoded = decodeUtf8At( payload, byteOffset );
-        if( decoded.seqLength == 0 ) return true;                    // invalid UTF-8 — content, by the ruling
-        if( !isBlankCodePoint( decoded.codePoint ) ) return true;     // a code point that renders — content
+        if( decoded.seqLength == 0 )
+        {
+            return true; // invalid UTF-8 — content, by the ruling
+        }
+        if( !isBlankCodePoint( decoded.codePoint ) )
+        {
+            return true; // a code point that renders — content
+        }
 
         byteOffset += std::size_t( decoded.seqLength );
     }
@@ -203,20 +220,29 @@ inline std::pair<std::size_t, std::string> blankPayloadSpelling( std::string_vie
     for( std::size_t byteOffset = 0; byteOffset < payload.size(); )
     {
         const DecodedCodePoint decoded = decodeUtf8At( payload, byteOffset );
-        if( decoded.seqLength == 0 ) return { 0, {} };   // not an all-blank payload at all — caller's guard failed
+        if( decoded.seqLength == 0 )
+        {
+            return { 0, {} }; // not an all-blank payload at all — caller's guard failed
+        }
 
         if( codePointCount < kBlankSpellingMaxCodePoints )
         {
             char hex[16] = {};
             std::snprintf( hex, sizeof( hex ), "U+%04X", decoded.codePoint );
-            if( !spelling.empty() ) spelling += ' ';
+            if( !spelling.empty() )
+            {
+                spelling += ' ';
+            }
             spelling += hex;
         }
         ++codePointCount;
         byteOffset += std::size_t( decoded.seqLength );
     }
 
-    if( codePointCount > kBlankSpellingMaxCodePoints ) spelling += " …";
+    if( codePointCount > kBlankSpellingMaxCodePoints )
+    {
+        spelling += " …";
+    }
     return { codePointCount, spelling };
 }
 

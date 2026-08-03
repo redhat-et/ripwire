@@ -36,7 +36,10 @@ inline std::vector<std::string> wrapVerbGroupLines()
         std::string* line = ( v.group == McpVerbGroup::Read )           ? &readLine
                            : ( v.group == McpVerbGroup::FlagshipReflex ) ? &reflexLine
                                                                           : &editLine;
-        if( !line->empty() ) *line += ", ";
+        if( !line->empty() )
+        {
+            *line += ", ";
+        }
         *line += v.name;
     }
     return {
@@ -51,9 +54,13 @@ inline std::vector<std::string> wrapVerbGroupLines()
 inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent )
 {
     if( agent == "claude" )
+    {
         std::fprintf( out, "bash skills/install.sh   # deploy to ~/.claude/skills (drift-gated)\n" );
+    }
     else if( agent == "codex" )
+    {
         std::fprintf( out, "bash skills/install.sh --codex   # deploy to ${CODEX_HOME:-~/.codex}/skills (drift-gated)\n" );
+    }
 }
 
 inline void wrapList( std::FILE* out )
@@ -74,7 +81,10 @@ inline std::string wrapTomlString( const std::string_view value )
     out.reserve( value.size() + 8 );
     for( const char c : value )
     {
-        if( c == '\\' || c == '"' ) out.push_back( '\\' );
+        if( c == '\\' || c == '"' )
+        {
+            out.push_back( '\\' );
+        }
         out.push_back( c );
     }
     return out;
@@ -106,12 +116,18 @@ inline std::vector<AgentConfig> getAgentConfigs() noexcept
 {
     namespace fs = std::filesystem;
     const char* home = std::getenv( "HOME" );
-    if( !home ) home = "";
+    if( !home )
+    {
+        home = "";
+    }
 
     // Each agent's detection: expand ~ in the template path and check if it exists
     const auto expandPath = [ home ]( std::string_view tpl ) -> std::string
     {
-        if( tpl.empty() ) return std::string();
+        if( tpl.empty() )
+        {
+            return std::string();
+        }
         if( tpl.front() == '~' )
         {
             std::string s( home );
@@ -124,7 +140,10 @@ inline std::vector<AgentConfig> getAgentConfigs() noexcept
     {
         return [ tpl, home ]() -> bool
         {
-            if( tpl.empty() ) return false;   // aider has no config dir
+            if( tpl.empty() )
+            {
+                return false; // aider has no config dir
+            }
             std::string path = tpl.front() == '~' ? std::string( home ) + std::string( tpl.begin() + 1, tpl.end() )
                                                    : std::string( tpl );
             std::error_code ec;
@@ -148,14 +167,19 @@ inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
 {
     namespace fs = std::filesystem;
     std::error_code ec;
-    if( !fs::exists( dir, ec ) || ec ) return 0;
+    if( !fs::exists( dir, ec ) || ec )
+    {
+        return 0;
+    }
 
     // Collect + sort .md paths for determinism.
     std::vector<std::string> mdPaths;
     for( const auto& entry : fs::recursive_directory_iterator( dir, fs::directory_options::skip_permission_denied, ec ) )
     {
         if( !ec && entry.is_regular_file( ec ) && !ec && entry.path().extension() == ".md" )
+        {
             mdPaths.push_back( entry.path().string() );
+        }
         ec.clear();
     }
     std::sort( mdPaths.begin(), mdPaths.end() );
@@ -165,11 +189,20 @@ inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
     {
         const std::vector<SkillFinding> findings = scanSkillFile( p );
         const int code = skillScanExitCode( findings );
-        if( code <= 0 ) continue;
-        if( code > maxSev ) maxSev = code;
+        if( code <= 0 )
+        {
+            continue;
+        }
+        if( code > maxSev )
+        {
+            maxSev = code;
+        }
         for( const SkillFinding& f : findings )
         {
-            if( f.sev == SkillSeverity::Info ) continue;   // silent on INFO
+            if( f.sev == SkillSeverity::Info )
+            {
+                continue; // silent on INFO
+            }
             std::fprintf( stderr, "ripwire wrap: %s  %s:%d  %s  — \"%s\"\n",
                           skillSeverityStr( f.sev ), p.c_str(), f.line, f.rule, f.excerpt.c_str() );
         }
@@ -187,15 +220,24 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
             "# ripwire -> Claude Code (MCP — deterministic, no LLM, no embeddings)\n"
             "claude mcp add ripwire -- ripwire --mcp\n"
             "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
-        for( const std::string& line : verbLines ) std::printf( "%s\n", line.c_str() );
+        for( const std::string& line : verbLines )
+        {
+            std::printf( "%s\n", line.c_str() );
+        }
         std::printf( "# (no-MCP one-shot orientation: ripwire . --for=\"<task>\" --max-tokens=2000)\n" );
     }
     else if( agent == "cursor" )
+    {
         wrapMcpJson( ".cursor/mcp.json  (project)  or  ~/.cursor/mcp.json  (global)" );
+    }
     else if( agent == "windsurf" )
+    {
         wrapMcpJson( "~/.codeium/windsurf/mcp_config.json" );
+    }
     else if( agent == "gemini" )
+    {
         wrapMcpJson( "~/.gemini/settings.json" );
+    }
     else if( agent == "codex" )
     {
         const std::string command = wrapTomlString( executablePath );
@@ -206,11 +248,13 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
             "args = [\"--mcp\"]\n", command.c_str() );
     }
     else if( agent == "aider" )
+    {
         std::printf(
             "# ripwire -> aider (no MCP; feed a ranked repo map as read-only context)\n"
             "ripwire . --for=\"<your task>\" --max-tokens=2000 > .ripwire-map.txt\n"
             "aider --read .ripwire-map.txt\n"
             "# re-run the first line when the tree changes; the warm cache makes it ~instant.\n" );
+    }
 
     // every MCP agent recipe also gets the grouped verb list printed as a comment (cursor/windsurf/
     // gemini/codex use a plain JSON/TOML stanza with no verb comment of their own, so add it here
@@ -218,7 +262,10 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     if( agent == "cursor" || agent == "windsurf" || agent == "gemini" || agent == "codex" )
     {
         std::printf( "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
-        for( const std::string& line : verbLines ) std::printf( "%s\n", line.c_str() );
+        for( const std::string& line : verbLines )
+        {
+            std::printf( "%s\n", line.c_str() );
+        }
     }
 
     // A4-S2: adoption recipes name a skill install step only for verified agent discovery paths.
@@ -233,7 +280,13 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
     // ── P1-C: scan local skill directories before emitting the recipe ─────────────────────────
     // Best-effort: missing dirs are silently skipped. CRITICAL → block unless --force.
     bool force = false;
-    for( int i = 3; i < argc; ++i ) if( std::string_view( argv[i] ) == "--force" ) force = true;
+    for( int i = 3; i < argc; ++i )
+    {
+        if( std::string_view( argv[i] ) == "--force" )
+        {
+            force = true;
+        }
+    }
 
     int warnSev  = wrapScanSkillDir( "./skills",       force );
     int warnSev2 = wrapScanSkillDir( ".agents/skills", force );
@@ -263,7 +316,10 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
                 ++skippedCount;
                 continue;
             }
-            if( configuredCount > 0 ) std::printf( "\n" );   // blank line separator between agents
+            if( configuredCount > 0 )
+            {
+                std::printf( "\n" ); // blank line separator between agents
+            }
             std::printf( "# ──── %.*s ────\n", int( ac.name.size() ), ac.name.data() );
             wrapEmitAgent( ac.name, verbLines, executablePath );
             ++configuredCount;

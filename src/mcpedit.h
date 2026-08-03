@@ -47,11 +47,17 @@ namespace mcpedit
         cands.reserve( ing.symbols.size() );
         for( const Symbol& s : ing.symbols )
         {
-            if( s.name.empty() ) continue;
+            if( s.name.empty() )
+            {
+                continue;
+            }
             // shared-prefix length (case-insensitive) minus length difference → higher = closer
             std::size_t pfx = 0;
             const std::size_t lim = std::min( s.name.size(), name.size() );
-            while( pfx < lim && std::tolower( (unsigned char)s.name[pfx] ) == std::tolower( (unsigned char)name[pfx] ) ) ++pfx;
+            while( pfx < lim && std::tolower( (unsigned char)s.name[pfx] ) == std::tolower( (unsigned char)name[pfx] ) )
+            {
+                ++pfx;
+            }
             const int lenDelta = int( s.name.size() ) - int( name.size() );
             const int score = int( pfx ) * 4 - ( lenDelta < 0 ? -lenDelta : lenDelta );
             cands.push_back( { score, s.name } );
@@ -61,8 +67,14 @@ namespace mcpedit
         std::vector<std::string> out;
         for( const Cand& c : cands )
         {
-            if( out.size() >= k ) break;
-            if( !out.empty() && out.back() == c.n ) continue;   // dedup same name (overloads)
+            if( out.size() >= k )
+            {
+                break;
+            }
+            if( !out.empty() && out.back() == c.n )
+            {
+                continue; // dedup same name (overloads)
+            }
             out.push_back( c.n );
         }
         return out;
@@ -77,8 +89,14 @@ namespace mcpedit
         std::vector<NodeId> matches;
         for( const Symbol& s : ing.symbols )
         {
-            if( s.name != symbol ) continue;
-            if( !pathHint.empty() && !filePathContains( ing.files[ s.fileId ], pathHint ) ) continue;   // `<label>/./<rel>`-tolerant
+            if( s.name != symbol )
+            {
+                continue;
+            }
+            if( !pathHint.empty() && !filePathContains( ing.files[s.fileId], pathHint ) )
+            {
+                continue; // `<label>/./<rel>`-tolerant
+            }
             matches.push_back( s.id );
         }
         std::sort( matches.begin(), matches.end() );
@@ -105,12 +123,22 @@ namespace mcpedit
         if( matches.empty() )
         {
             std::string m = "symbol '" + symbol + "' not found";
-            if( !pathHint.empty() ) m += " under path '" + pathHint + "'";
+            if( !pathHint.empty() )
+            {
+                m += " under path '" + pathHint + "'";
+            }
             const std::vector<std::string> near = nearestNames( ing, symbol, 5 );
             if( !near.empty() )
             {
                 m += "; nearest: ";
-                for( std::size_t i = 0; i < near.size(); ++i ) { if( i ) m += ", "; m += near[i]; }
+                for( std::size_t i = 0; i < near.size(); ++i )
+                {
+                    if( i )
+                    {
+                        m += ", ";
+                    }
+                    m += near[i];
+                }
             }
             err = m;
             return kNoNode;
@@ -128,7 +156,10 @@ namespace mcpedit
         for( std::size_t i = 0; i < matches.size(); ++i )
         {
             const Symbol& s = ing.symbols[ matches[i] ];
-            if( i ) m += "; ";
+            if( i )
+            {
+                m += "; ";
+            }
             m += ing.files[ s.fileId ] + ":" + std::to_string( s.line );
         }
         err = m;
@@ -160,7 +191,10 @@ namespace mcpedit
         else if( op == Op::InsertBefore )
         {
             std::string ins = text;
-            if( ins.empty() || ins.back() != '\n' ) ins += '\n';
+            if( ins.empty() || ins.back() != '\n' )
+            {
+                ins += '\n';
+            }
             out.reserve( src.size() + ins.size() );
             out.append( src, 0, a );
             outStart = a;
@@ -171,7 +205,10 @@ namespace mcpedit
         else   // InsertAfter — at endByte, preserving the byte at b exactly
         {
             std::string ins = text;
-            if( ins.empty() || ins.front() != '\n' ) ins.insert( ins.begin(), '\n' );
+            if( ins.empty() || ins.front() != '\n' )
+            {
+                ins.insert( ins.begin(), '\n' );
+            }
             out.reserve( src.size() + ins.size() );
             out.append( src, 0, b );
             outStart = b;
@@ -223,18 +260,27 @@ namespace mcpedit
             for( int attempt = 0; attempt < 20; ++attempt )
             {
                 if( ::flock( fd, LOCK_EX | LOCK_NB ) == 0 ) { locked = true; break; }
-                if( errno != EWOULDBLOCK ) break;
+                if( errno != EWOULDBLOCK )
+                {
+                    break;
+                }
                 struct timespec ts{ 0, 10 * 1000 * 1000 };   // 10 ms
                 ::nanosleep( &ts, nullptr );
             }
-            if( !locked ) DEGRADED_PATH_ALERT( "edit lock contended past timeout; proceeding lock-free (re-check still guards)" );
+            if( !locked )
+            {
+                DEGRADED_PATH_ALERT( "edit lock contended past timeout; proceeding lock-free (re-check still guards)" );
+            }
         }
 
         ~EditLock()
         {
             if( fd >= 0 )
             {
-                if( locked ) ::flock( fd, LOCK_UN );
+                if( locked )
+                {
+                    ::flock( fd, LOCK_UN );
+                }
                 ::close( fd );
             }
         }
@@ -264,7 +310,10 @@ namespace mcpedit
 
         const std::string tmp = path + "." + std::to_string( ::getpid() ) + ".tmp";
         const int fd = ::open( tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644 );
-        if( fd < 0 ) return false;
+        if( fd < 0 )
+        {
+            return false;
+        }
 
         // write the full buffer (a short write is a failure); a partial-write loop handles a signal-truncated write.
         bool        wErr = false;
@@ -279,14 +328,23 @@ namespace mcpedit
         // A3-F7: restore the original mode bits onto the temp before the rename (preserve +x etc.). A new file
         // (no original) keeps the umask default. fchmod failure is non-fatal — degrade to the default mode.
         if( !wErr && haveOrig )
+        {
             if( ::fchmod( fd, orig.st_mode & 07777 ) != 0 )
+            {
                 DEGRADED_PATH_ALERT( "atomicWrite: could not restore original file mode; wrote with default mode" );
+            }
+        }
 
         // A3-F7: fsync the data to disk BEFORE the atomic rename so a crash can't leave a renamed-but-empty file.
         if( !wErr && ::fsync( fd ) != 0 )
+        {
             DEGRADED_PATH_ALERT( "atomicWrite: fsync failed; proceeding (bytes may not be durable across a crash)" );
+        }
 
-        if( ::close( fd ) != 0 ) wErr = true;
+        if( ::close( fd ) != 0 )
+        {
+            wErr = true;
+        }
         if( wErr ) { ::unlink( tmp.c_str() ); return false; }
         if( std::rename( tmp.c_str(), path.c_str() ) != 0 ) { ::unlink( tmp.c_str() ); return false; }
         return true;

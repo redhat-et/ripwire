@@ -29,7 +29,9 @@ void ConsoleLog::handleAssert( const char* expr, const char* file, int line,
         << "  Location: " << file << ":" << line << "\n"
         << "  Function: " << function << "\n";
     if( description && description[0] != '\0' )
+    {
         std::cerr << "  Notes:    " << description << "\n";
+    }
     std::cerr << "======================================\n" << std::flush;
     __builtin_trap();
 }
@@ -63,7 +65,9 @@ void ConsoleLog::handleThreadViolation( uint64_t expected, uint64_t got,
         << "  Location: " << file << ":" << line << "\n"
         << "  Function: " << function << "\n";
     if( description && description[0] != '\0' )
+    {
         std::cerr << "  Notes:    " << description << "\n";
+    }
     std::cerr << "======================================\n" << std::flush;
     __builtin_trap();
 }

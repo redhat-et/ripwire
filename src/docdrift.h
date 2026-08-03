@@ -233,8 +233,14 @@ struct Anchor
 
 inline bool anchorLess( const Anchor& a, const Anchor& b )
 {
-    if( a.line != b.line ) return a.line < b.line;
-    if( a.col  != b.col  ) return a.col  < b.col;
+    if( a.line != b.line )
+    {
+        return a.line < b.line;
+    }
+    if( a.col != b.col )
+    {
+        return a.col < b.col;
+    }
     return std::size_t( a.kind ) < std::size_t( b.kind );
 }
 
@@ -302,7 +308,10 @@ inline void splitQualified( std::string_view s, std::string_view& leaf, std::str
         leaf  = s.substr( colon + 2 );
         scope = s.substr( 0, colon );
         const std::size_t prev = scope.rfind( "::" );
-        if( prev != std::string_view::npos ) scope = scope.substr( prev + 2 );
+        if( prev != std::string_view::npos )
+        {
+            scope = scope.substr( prev + 2 );
+        }
         return;
     }
     const std::size_t dot = s.rfind( '.' );
@@ -327,11 +336,17 @@ inline bool codeShaped( std::string_view s ) noexcept
     {
         const unsigned char c = (unsigned char)s[i];
         if( c == '_' ) { hasUnderscore = true; continue; }
-        if( std::islower( c ) ) hasLower = true;
+        if( std::islower( c ) )
+        {
+            hasLower = true;
+        }
         if( std::isupper( c ) )
         {
             hasUpper = true;
-            if( i > 0 && std::islower( (unsigned char)s[ i - 1 ] ) ) camelSeam = true;
+            if( i > 0 && std::islower( (unsigned char)s[i - 1] ) )
+            {
+                camelSeam = true;
+            }
         }
     }
     const bool screaming  = hasUpper && !hasLower;
@@ -344,7 +359,10 @@ inline bool codeShaped( std::string_view s ) noexcept
 // -fsanitize=integer, where a wrap is a hard error, not a quirk).
 inline bool parseIntLiteral( std::string_view s, std::size_t& i, std::uint64_t& out )
 {
-    if( i >= s.size() || !std::isdigit( (unsigned char)s[i] ) ) return false;
+    if( i >= s.size() || !std::isdigit( (unsigned char)s[i] ) )
+    {
+        return false;
+    }
 
     std::uint64_t value  = 0;
     std::size_t   digits = 0;
@@ -354,24 +372,36 @@ inline bool parseIntLiteral( std::string_view s, std::size_t& i, std::uint64_t& 
         while( i < s.size() && ( std::isxdigit( (unsigned char)s[i] ) || s[i] == '_' ) )
         {
             if( s[i] == '_' ) { ++i; continue; }
-            if( ++digits > kMaxHexDigits ) return false;
+            if( ++digits > kMaxHexDigits )
+            {
+                return false;
+            }
             const unsigned char c = (unsigned char)std::tolower( (unsigned char)s[i] );
             value = value * 16u + std::uint64_t( std::isdigit( c ) ? c - '0' : c - 'a' + 10 );
             ++i;
         }
-        if( digits == 0 ) return false;
+        if( digits == 0 )
+        {
+            return false;
+        }
     }
     else
     {
         while( i < s.size() && ( std::isdigit( (unsigned char)s[i] ) || s[i] == '_' ) )
         {
             if( s[i] == '_' ) { ++i; continue; }
-            if( ++digits > kMaxDecDigits ) return false;
+            if( ++digits > kMaxDecDigits )
+            {
+                return false;
+            }
             value = value * 10u + std::uint64_t( s[i] - '0' );
             ++i;
         }
     }
-    while( i < s.size() && ( s[i] == 'u' || s[i] == 'U' || s[i] == 'l' || s[i] == 'L' ) ) ++i;
+    while( i < s.size() && ( s[i] == 'u' || s[i] == 'U' || s[i] == 'l' || s[i] == 'L' ) )
+    {
+        ++i;
+    }
     out = value;
     return true;
 }
@@ -380,8 +410,14 @@ inline bool parseIntLiteral( std::string_view s, std::size_t& i, std::uint64_t& 
 // what makes `kX = 4u << 20` decline to be a comparable constant instead of silently reporting the value 4.
 inline bool literalTerminates( std::string_view s, std::size_t i )
 {
-    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' || s[i] == '`' ) ) ++i;
-    if( i >= s.size() ) return true;
+    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' || s[i] == '`' ) )
+    {
+        ++i;
+    }
+    if( i >= s.size() )
+    {
+        return true;
+    }
     const char c = s[i];
     return c == ';' || c == ',' || c == ')' || c == '}' || c == ']' || c == '/' || c == '#' || c == '\r';
 }
@@ -392,9 +428,14 @@ inline bool literalTerminates( std::string_view s, std::size_t i )
 // an EXPRESSION (`= 4 << 20`) whose leading integer is not the value being claimed.
 inline bool literalTerminatesInProse( std::string_view s, std::size_t i )
 {
-    if( i < s.size() && ( darkflags::identByte( (unsigned char)s[i] )
-                          || ( s[i] == '.' && i + 1 < s.size() && std::isdigit( (unsigned char)s[ i + 1 ] ) ) ) ) return false;
-    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' || s[i] == '`' ) ) ++i;
+    if( i < s.size() && ( darkflags::identByte( (unsigned char)s[i] ) || ( s[i] == '.' && i + 1 < s.size() && std::isdigit( (unsigned char)s[i + 1] ) ) ) )
+    {
+        return false;
+    }
+    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' || s[i] == '`' ) )
+    {
+        ++i;
+    }
     return i >= s.size() || std::strchr( "*+-/<>^&|%=", s[i] ) == nullptr;
 }
 
@@ -408,10 +449,22 @@ inline bool matchBracketExtent( std::string_view s, std::size_t openIndex, std::
     VERIFY( openIndex < s.size() && s[ openIndex ] == '[' );
 
     std::size_t k = openIndex + 1;
-    while( k < s.size() && s[k] == ' ' ) ++k;
-    if( !parseIntLiteral( s, k, extent ) ) return false;
-    while( k < s.size() && s[k] == ' ' ) ++k;
-    if( k >= s.size() || s[k] != ']' ) return false;
+    while( k < s.size() && s[k] == ' ' )
+    {
+        ++k;
+    }
+    if( !parseIntLiteral( s, k, extent ) )
+    {
+        return false;
+    }
+    while( k < s.size() && s[k] == ' ' )
+    {
+        ++k;
+    }
+    if( k >= s.size() || s[k] != ']' )
+    {
+        return false;
+    }
 
     closeIndex = k;
     return true;
@@ -442,14 +495,23 @@ inline bool hasWholeWord( std::string_view line, std::string_view word )
     {
         const bool leftOk  = at == 0 || !darkflags::identByte( (unsigned char)line[ at - 1 ] );
         const bool rightOk = at + word.size() >= line.size() || !darkflags::identByte( (unsigned char)line[ at + word.size() ] );
-        if( leftOk && rightOk ) return true;
+        if( leftOk && rightOk )
+        {
+            return true;
+        }
     }
     return false;
 }
 
 inline bool declKeywordOnLine( std::string_view line )
 {
-    for( const char* kw : kDeclKeywords ) if( hasWholeWord( line, kw ) ) return true;
+    for( const char* kw : kDeclKeywords )
+    {
+        if( hasWholeWord( line, kw ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -465,8 +527,14 @@ inline std::vector<std::pair<std::size_t, std::size_t>> backtickSpans( std::stri
         if( line[i] != '`' ) { ++i; continue; }
         const std::size_t open = i + 1;
         std::size_t       close = open;
-        while( close < line.size() && line[ close ] != '`' ) ++close;
-        if( close >= line.size() ) break;                       // an unterminated run — not inline code
+        while( close < line.size() && line[close] != '`' )
+        {
+            ++close;
+        }
+        if( close >= line.size() )
+        {
+            break; // an unterminated run — not inline code
+        }
         spans.emplace_back( open, close );
         i = close + 1;
     }
@@ -488,11 +556,17 @@ inline SpanName spanIdentifier( std::string_view span )
     SpanName         out;
     std::string_view s = darkflags::trimView( span );
     if( s.size() >= 2 && s.substr( s.size() - 2 ) == "()" ) { out.hadParens = true; s.remove_suffix( 2 ); }
-    if( s.find( '/' ) != std::string_view::npos ) return out;    // a path, whatever else it looks like
+    if( s.find( '/' ) != std::string_view::npos )
+    {
+        return out; // a path, whatever else it looks like
+    }
 
     std::string_view leaf, scope;
     splitQualified( s, leaf, scope );
-    if( !identOk( leaf, 2 ) ) return out;
+    if( !identOk( leaf, 2 ) )
+    {
+        return out;
+    }
     out.name  = leaf;
     out.scope = identOk( scope, 1 ) ? scope : std::string_view{};
     return out;
@@ -503,12 +577,20 @@ inline SpanName spanIdentifier( std::string_view span )
 inline bool matchFileLine( std::string_view line, std::size_t i, std::size_t& end, std::string_view& path, std::uint64_t& lineNo )
 {
     const std::size_t start = i;
-    while( i < line.size() && ( darkflags::identByte( (unsigned char)line[i] ) || line[i] == '.' || line[i] == '/'
-                                || line[i] == '-' || line[i] == '+' ) ) ++i;
-    if( i >= line.size() || line[i] != ':' || i == start ) return false;
+    while( i < line.size() && ( darkflags::identByte( (unsigned char)line[i] ) || line[i] == '.' || line[i] == '/' || line[i] == '-' || line[i] == '+' ) )
+    {
+        ++i;
+    }
+    if( i >= line.size() || line[i] != ':' || i == start )
+    {
+        return false;
+    }
 
     path = line.substr( start, i - start );
-    if( path.size() < 3 ) return false;
+    if( path.size() < 3 )
+    {
+        return false;
+    }
 
     // The BASENAME must look like a filename: start with a letter or digit, and have a stem of at least two
     // characters. Markdown emphasis routinely splits a real filename mid-token (a backtick inside
@@ -516,29 +598,56 @@ inline bool matchFileLine( std::string_view line, std::size_t i, std::size_t& en
     // the file the doc meant nor a file at all; without this they became "missing-file" rows on both repos.
     const std::size_t   slash = path.find_last_of( '/' );
     std::string_view    base  = slash == std::string_view::npos ? path : path.substr( slash + 1 );
-    if( base.empty() || !std::isalnum( (unsigned char)base.front() ) ) return false;
+    if( base.empty() || !std::isalnum( (unsigned char)base.front() ) )
+    {
+        return false;
+    }
     const std::size_t baseDot = base.find_last_of( '.' );
-    if( baseDot == std::string_view::npos || baseDot < 2 ) return false;
+    if( baseDot == std::string_view::npos || baseDot < 2 )
+    {
+        return false;
+    }
 
     const std::size_t dot = path.find_last_of( '.' );
-    if( dot == 0 || dot == std::string_view::npos || dot + 1 >= path.size() ) return false;   // no extension ⇒ not a file ref
+    if( dot == 0 || dot == std::string_view::npos || dot + 1 >= path.size() )
+    {
+        return false; // no extension ⇒ not a file ref
+    }
     // The extension must contain a LETTER. Without that rule `127.0.0.1:8765` parses as the file "127.0.0.1"
     // at line 8765 and every host:port in the docs becomes a missing-file row.
     const std::string_view ext = path.substr( dot + 1 );
-    if( ext.size() > kMaxExtLen ) return false;
+    if( ext.size() > kMaxExtLen )
+    {
+        return false;
+    }
     bool extHasAlpha = false;
     for( char c : ext )
     {
-        if( !std::isalnum( (unsigned char)c ) ) return false;
-        if( std::isalpha( (unsigned char)c ) ) extHasAlpha = true;
+        if( !std::isalnum( (unsigned char)c ) )
+        {
+            return false;
+        }
+        if( std::isalpha( (unsigned char)c ) )
+        {
+            extHasAlpha = true;
+        }
     }
-    if( !extHasAlpha ) return false;
+    if( !extHasAlpha )
+    {
+        return false;
+    }
 
     std::size_t j = i + 1;
-    if( !parseIntLiteral( line, j, lineNo ) || lineNo == 0 ) return false;
+    if( !parseIntLiteral( line, j, lineNo ) || lineNo == 0 )
+    {
+        return false;
+    }
     // A doc that writes `engine.cpp:4294967297` is illustrating a hostile input, not claiming a location.
     // Past this bound the text is an example, so it never becomes an anchor (see the LIMITS note in help).
-    if( lineNo > kMaxClaimedLine ) return false;
+    if( lineNo > kMaxClaimedLine )
+    {
+        return false;
+    }
     end = j;
     return true;
 }
@@ -548,8 +657,14 @@ inline bool matchFileLine( std::string_view line, std::size_t i, std::size_t& en
 inline bool matchArrayClaim( std::string_view line, std::size_t afterName, std::size_t& closeIndex, std::uint64_t& extent )
 {
     std::size_t open = afterName;
-    while( open < line.size() && line[ open ] == '`' ) ++open;
-    if( open >= line.size() || line[ open ] != '[' ) return false;
+    while( open < line.size() && line[open] == '`' )
+    {
+        ++open;
+    }
+    if( open >= line.size() || line[open] != '[' )
+    {
+        return false;
+    }
     return matchBracketExtent( line, open, closeIndex, extent );
 }
 
@@ -565,7 +680,10 @@ inline bool identStartsAt( std::string_view s, std::size_t i ) noexcept
 // `kFoo` = 10, so PROSE counts a backtick as padding; code never does.
 inline std::size_t skipClaimGap( std::string_view s, std::size_t i, bool allowsBacktick )
 {
-    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' || ( allowsBacktick && s[i] == '`' ) ) ) ++i;
+    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' || ( allowsBacktick && s[i] == '`' ) ) )
+    {
+        ++i;
+    }
     return i;
 }
 
@@ -573,9 +691,18 @@ inline std::size_t skipClaimGap( std::string_view s, std::size_t i, bool allowsB
 // (`+=`, `<=`, `!=`). Returns the index just past it, or npos when this `=` is not an assignment.
 inline std::size_t matchAssignEquals( std::string_view s, std::size_t at )
 {
-    if( at >= s.size() || s[at] != '=' ) return std::string_view::npos;
-    if( at + 1 < s.size() && s[ at + 1 ] == '=' ) return std::string_view::npos;                          // a comparison
-    if( at > 0 && std::strchr( "!<>+-*/%&|^~=", s[ at - 1 ] ) != nullptr ) return std::string_view::npos;  // ditto
+    if( at >= s.size() || s[at] != '=' )
+    {
+        return std::string_view::npos;
+    }
+    if( at + 1 < s.size() && s[at + 1] == '=' )
+    {
+        return std::string_view::npos; // a comparison
+    }
+    if( at > 0 && std::strchr( "!<>+-*/%&|^~=", s[at - 1] ) != nullptr )
+    {
+        return std::string_view::npos; // ditto
+    }
     return at + 1;
 }
 
@@ -609,13 +736,22 @@ inline ValueClaim matchValueClaim( std::string_view line, std::size_t afterName,
     if( !isImplicitDefine )
     {
         v = matchAssignEquals( line, v );
-        if( v == std::string_view::npos ) return {};
+        if( v == std::string_view::npos )
+        {
+            return {};
+        }
         v = skipClaimGap( line, v, dialect.allowsBacktickGap );
     }
 
     std::uint64_t value = 0;
-    if( !parseIntLiteral( line, v, value ) ) return {};
-    if( !dialect.terminates( line, v ) ) return {};
+    if( !parseIntLiteral( line, v, value ) )
+    {
+        return {};
+    }
+    if( !dialect.terminates( line, v ) )
+    {
+        return {};
+    }
 
     return ValueClaim{ true, v, value };
 }
@@ -666,12 +802,16 @@ inline std::vector<NamedSpan> collectNamedSpans( std::string_view line, std::uin
     for( const auto& [ s, e ] : spans )
     {
         const SpanName id = spanIdentifier( line.substr( s, e - s ) );
-        if( id.name.empty() ) continue;
+        if( id.name.empty() )
+        {
+            continue;
+        }
 
         const bool isDefined = defined.find( std::string( id.name ) ) != defined.end();
-        if( isDefined && id.name.size() >= kMinMentionLen && codeShaped( id.name )
-            && ( resolvingLines.empty() || resolvingLines.back() != lineNo ) )
+        if( isDefined && id.name.size() >= kMinMentionLen && codeShaped( id.name ) && ( resolvingLines.empty() || resolvingLines.back() != lineNo ) )
+        {
             resolvingLines.push_back( lineNo );
+        }
 
         named.push_back( NamedSpan{ s, e, std::string( id.name ), std::string( id.scope ), id.hadParens, isDefined } );
     }
@@ -699,8 +839,14 @@ inline std::string nearestDefinedName( std::span<const NamedSpan> named, std::si
     std::size_t bestDist = SIZE_MAX;
     for( const NamedSpan& n : named )
     {
-        if( !n.isDefined || ( n.spanStart >= refStart && n.spanStart < refEnd ) ) continue;
-        if( n.name.size() < kMinMentionLen || !codeShaped( n.name ) ) continue;
+        if( !n.isDefined || ( n.spanStart >= refStart && n.spanStart < refEnd ) )
+        {
+            continue;
+        }
+        if( n.name.size() < kMinMentionLen || !codeShaped( n.name ) )
+        {
+            continue;
+        }
         const std::size_t dist = n.spanStart > refStart ? n.spanStart - refStart : refStart - n.spanStart;
         if( dist < bestDist ) { bestDist = dist; best = n.name; }
     }
@@ -740,7 +886,10 @@ inline void scanMentionLane( const DocLineScan& scan, std::vector<Anchor>& out )
 {
     for( const NamedSpan& n : scan.named )
     {
-        if( !n.hadParens && !( n.name.size() >= kMinMentionLen && codeShaped( n.name ) ) ) continue;
+        if( !n.hadParens && !( n.name.size() >= kMinMentionLen && codeShaped( n.name ) ) )
+        {
+            continue;
+        }
 
         Anchor a;
         a.kind = AnchorKind::Symbol;
@@ -764,7 +913,10 @@ inline void scanValueLane( const DocLineScan& scan, std::vector<Anchor>& out )
 
         const std::size_t      nameStart = i;
         const std::string_view name      = darkflags::takeIdent( line, i );
-        if( !identOk( name, kMinValueNameLen ) || !codeShaped( name ) ) continue;
+        if( !identOk( name, kMinValueNameLen ) || !codeShaped( name ) )
+        {
+            continue;
+        }
 
         const DocPos  at         = DocPos{ scan.lineNo, nameStart };
         std::size_t   closeIndex = 0;
@@ -777,7 +929,10 @@ inline void scanValueLane( const DocLineScan& scan, std::vector<Anchor>& out )
         }
 
         const ValueClaim claim = matchValueClaim( line, i, kProseClaim, false );
-        if( !claim.isMatch ) continue;
+        if( !claim.isMatch )
+        {
+            continue;
+        }
 
         // The doc's own spelling, minus the markdown: `kFoo` = 10 quotes only the name, and echoing the
         // stray backtick back into the report just makes the row harder to read.
@@ -805,12 +960,24 @@ inline void scanValueLane( const DocLineScan& scan, std::vector<Anchor>& out )
 // reference or nested-index punctuation. `closeIndex` comes back as the index of the ']'.
 inline bool matchBareExtent( std::string_view line, std::size_t openIndex, std::size_t& closeIndex, std::uint64_t& extent )
 {
-    if( openIndex > 0 && ( darkflags::identByte( (unsigned char)line[ openIndex - 1 ] ) || line[ openIndex - 1 ] == '`' ) ) return false;
+    if( openIndex > 0 && ( darkflags::identByte( (unsigned char)line[openIndex - 1] ) || line[openIndex - 1] == '`' ) )
+    {
+        return false;
+    }
 
     std::size_t k = openIndex + 1;
-    if( !parseIntLiteral( line, k, extent ) || extent < kMinBareExtent ) return false;
-    if( k >= line.size() || line[k] != ']' ) return false;
-    if( k + 1 < line.size() && ( line[ k + 1 ] == '(' || line[ k + 1 ] == ':' || line[ k + 1 ] == '[' ) ) return false;
+    if( !parseIntLiteral( line, k, extent ) || extent < kMinBareExtent )
+    {
+        return false;
+    }
+    if( k >= line.size() || line[k] != ']' )
+    {
+        return false;
+    }
+    if( k + 1 < line.size() && ( line[k + 1] == '(' || line[k + 1] == ':' || line[k + 1] == '[' ) )
+    {
+        return false;
+    }
 
     closeIndex = k;
     return true;
@@ -818,15 +985,27 @@ inline bool matchBareExtent( std::string_view line, std::size_t openIndex, std::
 
 inline void scanBareExtentLane( const DocLineScan& scan, std::vector<Anchor>& out )
 {
-    if( scan.named.size() != 1 ) return;
-    for( const Anchor& a : out ) if( a.kind == AnchorKind::Array && a.line == scan.lineNo ) return;
+    if( scan.named.size() != 1 )
+    {
+        return;
+    }
+    for( const Anchor& a : out )
+    {
+        if( a.kind == AnchorKind::Array && a.line == scan.lineNo )
+        {
+            return;
+        }
+    }
 
     const std::string_view line = scan.line;
     for( std::size_t i = 0; i + 2 < line.size(); ++i )
     {
         std::size_t   closeIndex = 0;
         std::uint64_t extent     = 0;
-        if( line[i] != '[' || !matchBareExtent( line, i, closeIndex, extent ) ) continue;
+        if( line[i] != '[' || !matchBareExtent( line, i, closeIndex, extent ) )
+        {
+            continue;
+        }
 
         out.push_back( valueAnchor( AnchorKind::Array, DocPos{ scan.lineNo, i },
                                     std::string( line.substr( i, closeIndex + 1 - i ) ), scan.named[0].name, extent ) );
@@ -878,7 +1057,12 @@ inline void scanDocLine( std::string_view line, std::uint32_t lineNo, bool inFen
 
     const DocLineScan scan{ line, lineNo, named };
     for( const LaneSpec& lane : kLaneTable )
-        if( lane.isAdmittedInFence || !inFence ) lane.scan( scan, out );
+    {
+        if( lane.isAdmittedInFence || !inFence )
+        {
+            lane.scan( scan, out );
+        }
+    }
 }
 
 // ── the dated-record classifier: what the AUTHOR marked, never what the verb guesses ─────────────────────
@@ -890,12 +1074,21 @@ inline void scanDocLine( std::string_view line, std::uint32_t lineNo, bool inFen
 // a locale-aware fold would make the verdict depend on the environment, which the det-gate forbids.
 inline std::size_t findNoCase( std::string_view hay, std::string_view needle ) noexcept
 {
-    if( needle.empty() || needle.size() > hay.size() ) return std::string_view::npos;
+    if( needle.empty() || needle.size() > hay.size() )
+    {
+        return std::string_view::npos;
+    }
     for( std::size_t i = 0; i + needle.size() <= hay.size(); ++i )
     {
         std::size_t k = 0;
-        while( k < needle.size() && std::tolower( (unsigned char)hay[ i + k ] ) == (unsigned char)needle[k] ) ++k;
-        if( k == needle.size() ) return i;
+        while( k < needle.size() && std::tolower( (unsigned char)hay[i + k] ) == (unsigned char)needle[k] )
+        {
+            ++k;
+        }
+        if( k == needle.size() )
+        {
+            return i;
+        }
     }
     return std::string_view::npos;
 }
@@ -906,12 +1099,30 @@ inline std::size_t findNoCase( std::string_view hay, std::string_view needle ) n
 // verb exists to avoid. Month and day are range-checked so a version string (`1999-12-99`) is not a date.
 inline bool isoDateAt( std::string_view s, std::size_t i ) noexcept
 {
-    if( i + 10 > s.size() ) return false;
-    if( i > 0 && ( std::isdigit( (unsigned char)s[ i - 1 ] ) || s[ i - 1 ] == '-' ) ) return false;
+    if( i + 10 > s.size() )
+    {
+        return false;
+    }
+    if( i > 0 && ( std::isdigit( (unsigned char)s[i - 1] ) || s[i - 1] == '-' ) )
+    {
+        return false;
+    }
     static constexpr std::size_t kDigitOffset[] = { 0, 1, 2, 3, 5, 6, 8, 9 };   // YYYY-MM-DD, minus its two dashes
-    for( std::size_t k : kDigitOffset ) if( !std::isdigit( (unsigned char)s[ i + k ] ) ) return false;
-    if( s[ i + 4 ] != '-' || s[ i + 7 ] != '-' ) return false;
-    if( i + 10 < s.size() && std::isdigit( (unsigned char)s[ i + 10 ] ) ) return false;
+    for( std::size_t k : kDigitOffset )
+    {
+        if( !std::isdigit( (unsigned char)s[i + k] ) )
+        {
+            return false;
+        }
+    }
+    if( s[i + 4] != '-' || s[i + 7] != '-' )
+    {
+        return false;
+    }
+    if( i + 10 < s.size() && std::isdigit( (unsigned char)s[i + 10] ) )
+    {
+        return false;
+    }
 
     const int year  = ( s[i] - '0' ) * 1000 + ( s[ i + 1 ] - '0' ) * 100 + ( s[ i + 2 ] - '0' ) * 10 + ( s[ i + 3 ] - '0' );
     const int month = ( s[ i + 5 ] - '0' ) * 10 + ( s[ i + 6 ] - '0' );
@@ -921,7 +1132,13 @@ inline bool isoDateAt( std::string_view s, std::size_t i ) noexcept
 
 inline std::size_t findIsoDate( std::string_view s, std::size_t from = 0 ) noexcept
 {
-    for( std::size_t i = from; i + 10 <= s.size(); ++i ) if( isoDateAt( s, i ) ) return i;
+    for( std::size_t i = from; i + 10 <= s.size(); ++i )
+    {
+        if( isoDateAt( s, i ) )
+        {
+            return i;
+        }
+    }
     return std::string_view::npos;
 }
 
@@ -940,20 +1157,42 @@ inline constexpr std::string_view kAsOfPhrase[] = {
 inline bool namesAMoment( std::string_view rest ) noexcept
 {
     std::size_t i = 0;
-    while( i < rest.size() && ( rest[i] == ' ' || rest[i] == '`' || rest[i] == '*' || rest[i] == '"' ) ) ++i;
-    if( i >= rest.size() ) return false;
-    if( isoDateAt( rest, i ) ) return true;
-    if( i + 4 <= rest.size() && ( rest.compare( i, 2, "19" ) == 0 || rest.compare( i, 2, "20" ) == 0 )
-        && std::isdigit( (unsigned char)rest[ i + 2 ] ) && std::isdigit( (unsigned char)rest[ i + 3 ] ) ) return true;
+    while( i < rest.size() && ( rest[i] == ' ' || rest[i] == '`' || rest[i] == '*' || rest[i] == '"' ) )
+    {
+        ++i;
+    }
+    if( i >= rest.size() )
+    {
+        return false;
+    }
+    if( isoDateAt( rest, i ) )
+    {
+        return true;
+    }
+    if( i + 4 <= rest.size() && ( rest.compare( i, 2, "19" ) == 0 || rest.compare( i, 2, "20" ) == 0 ) && std::isdigit( (unsigned char)rest[i + 2] ) && std::isdigit( (unsigned char)rest[i + 3] ) )
+    {
+        return true;
+    }
     const std::string_view tail = rest.substr( i );
     for( std::string_view w : { "today", "this writing", "writing", "this note", "that note", "head", "then" } )
-        if( tail.size() >= w.size() && findNoCase( tail.substr( 0, w.size() ), w ) == 0 ) return true;
+    {
+        if( tail.size() >= w.size() && findNoCase( tail.substr( 0, w.size() ), w ) == 0 )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
 inline bool hasAsOfHedge( std::string_view line )
 {
-    for( std::string_view p : kAsOfPhrase ) if( findNoCase( line, p ) != std::string_view::npos ) return true;
+    for( std::string_view p : kAsOfPhrase )
+    {
+        if( findNoCase( line, p ) != std::string_view::npos )
+        {
+            return true;
+        }
+    }
 
     // Every "as of" on the line, not just the first: a row commonly carries the stale value and its live one
     // ("22 at the time of this note; 30 as of 2026-07-24"), and only the second occurrence names the moment.
@@ -961,9 +1200,15 @@ inline bool hasAsOfHedge( std::string_view line )
     for( std::size_t from = 0; from < line.size(); )
     {
         const std::size_t at = findNoCase( line.substr( from ), kAsOf );
-        if( at == std::string_view::npos ) break;
+        if( at == std::string_view::npos )
+        {
+            break;
+        }
         const std::size_t past = from + at + kAsOf.size();
-        if( namesAMoment( line.substr( past ) ) ) return true;
+        if( namesAMoment( line.substr( past ) ) )
+        {
+            return true;
+        }
         from = past;
     }
     return false;
@@ -974,8 +1219,10 @@ inline bool hasAsOfHedge( std::string_view line )
 inline bool opensWithIsoDate( std::string_view line ) noexcept
 {
     std::size_t i = 0;
-    while( i < line.size() && ( line[i] == ' ' || line[i] == '\t' || line[i] == '|' || line[i] == '-'
-                                || line[i] == '*' || line[i] == '>' || line[i] == '#' || line[i] == '`' ) ) ++i;
+    while( i < line.size() && ( line[i] == ' ' || line[i] == '\t' || line[i] == '|' || line[i] == '-' || line[i] == '*' || line[i] == '>' || line[i] == '#' || line[i] == '`' ) )
+    {
+        ++i;
+    }
     return isoDateAt( line, i );
 }
 
@@ -986,11 +1233,17 @@ inline std::size_t findWordNoCase( std::string_view hay, std::string_view word )
     for( std::size_t from = 0; from + word.size() <= hay.size(); )
     {
         const std::size_t rel = findNoCase( hay.substr( from ), word );
-        if( rel == std::string_view::npos ) return std::string_view::npos;
+        if( rel == std::string_view::npos )
+        {
+            return std::string_view::npos;
+        }
         const std::size_t at = from + rel;
         const bool leftOk  = at == 0 || !darkflags::identByte( (unsigned char)hay[ at - 1 ] );
         const bool rightOk = at + word.size() >= hay.size() || !darkflags::identByte( (unsigned char)hay[ at + word.size() ] );
-        if( leftOk && rightOk ) return at;
+        if( leftOk && rightOk )
+        {
+            return at;
+        }
         from = at + 1;
     }
     return std::string_view::npos;
@@ -1008,10 +1261,13 @@ inline constexpr std::string_view kLabelGapBytes = " \t:*_`,([=-.";
 // Skip the run of gap bytes at `k`, and the optional "on" of "written ON 2026-…" with its own gap run.
 inline std::size_t skipLabelGap( std::string_view line, std::size_t k, std::size_t limit ) noexcept
 {
-    const auto runOfGaps = [ & ]( std::size_t at ) { while( at < limit && kLabelGapBytes.find( line[at] ) != std::string_view::npos ) ++at; return at; };
+    const auto runOfGaps = [ & ]( std::size_t at ) { while( at < limit && kLabelGapBytes.find( line[at] ) != std::string_view::npos ) { ++at; } return at; };
 
     k = runOfGaps( k );
-    if( k + 2 <= limit && findWordNoCase( line.substr( k, 2 ), "on" ) == 0 ) k = runOfGaps( k + 2 );
+    if( k + 2 <= limit && findWordNoCase( line.substr( k, 2 ), "on" ) == 0 )
+    {
+        k = runOfGaps( k + 2 );
+    }
     return k;
 }
 
@@ -1020,8 +1276,14 @@ inline bool introducesDate( std::string_view line, std::string_view word, std::s
     for( std::size_t from = 0; from < dateAt; )
     {
         const std::size_t rel = findWordNoCase( line.substr( from, dateAt - from ), word );
-        if( rel == std::string_view::npos ) return false;
-        if( skipLabelGap( line, from + rel + word.size(), dateAt ) == dateAt ) return true;
+        if( rel == std::string_view::npos )
+        {
+            return false;
+        }
+        if( skipLabelGap( line, from + rel + word.size(), dateAt ) == dateAt )
+        {
+            return true;
+        }
         from = from + rel + 1;
     }
     return false;
@@ -1054,7 +1316,12 @@ inline bool isInceptionDate( std::string_view line, std::size_t dateAt ) noexcep
 inline bool hasDatingIsoDate( std::string_view s ) noexcept
 {
     for( std::size_t at = findIsoDate( s ); at != std::string_view::npos; at = findIsoDate( s, at + 1 ) )
-        if( !isInceptionDate( s, at ) ) return true;
+    {
+        if( !isInceptionDate( s, at ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -1062,8 +1329,17 @@ inline bool hasLabelledSelfDate( std::string_view line )
 {
     for( std::size_t at = findIsoDate( line ); at != std::string_view::npos; at = findIsoDate( line, at + 1 ) )
     {
-        if( isInceptionDate( line, at ) ) continue;
-        for( std::string_view label : kSelfDateLabel ) if( introducesDate( line, label, at ) ) return true;
+        if( isInceptionDate( line, at ) )
+        {
+            continue;
+        }
+        for( std::string_view label : kSelfDateLabel )
+        {
+            if( introducesDate( line, label, at ) )
+            {
+                return true;
+            }
+        }
     }
     return false;
 }
@@ -1086,14 +1362,16 @@ inline DocDating docDatingOf( std::string_view rel, std::string_view bytes )
 
     std::size_t seen = 0;
     darkflags::forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t )
-    {
-        if( seen >= kMaxFrontMatter ) return;
+                            {
+        if( seen >= kMaxFrontMatter ) { return;
+}
         const std::string_view t = darkflags::trimView( line );
         if( t.size() >= 3 && t.compare( 0, 3, "## " ) == 0 ) { seen = kMaxFrontMatter; return; }
         ++seen;
-        if( t.size() >= 2 && t.compare( 0, 2, "# " ) == 0 && hasDatingIsoDate( t ) ) out.isTitleDated = true;
-        if( hasLabelledSelfDate( t ) )                                              out.isStampDated = true;
-    } );
+        if( t.size() >= 2 && t.compare( 0, 2, "# " ) == 0 && hasDatingIsoDate( t ) ) { out.isTitleDated = true;
+}
+        if( hasLabelledSelfDate( t ) ) {                                              out.isStampDated = true;
+} } );
     return out;
 }
 
@@ -1102,10 +1380,22 @@ inline DocDating docDatingOf( std::string_view rel, std::string_view bytes )
 // verb actually has.
 inline Record recordOf( std::string_view line, bool isHeadingDated, const DocDating& dating )
 {
-    if( hasAsOfHedge( line ) || opensWithIsoDate( line ) ) return Record::Line;
-    if( isHeadingDated )                                   return Record::Block;
-    if( dating.isTitleDated )                              return Record::Title;
-    if( dating.isStampDated )                              return Record::Stamp;
+    if( hasAsOfHedge( line ) || opensWithIsoDate( line ) )
+    {
+        return Record::Line;
+    }
+    if( isHeadingDated )
+    {
+        return Record::Block;
+    }
+    if( dating.isTitleDated )
+    {
+        return Record::Title;
+    }
+    if( dating.isStampDated )
+    {
+        return Record::Stamp;
+    }
     return Record::Live;
 }
 
@@ -1127,16 +1417,25 @@ inline std::vector<Anchor> collectDocAnchors( std::string_view rel, std::string_
     {
         const std::string_view t = darkflags::trimView( line );
         if( t.size() >= 3 && ( t.compare( 0, 3, "```" ) == 0 || t.compare( 0, 3, "~~~" ) == 0 ) ) { inFence = !inFence; return; }
-        if( !inFence && !t.empty() && t.front() == '#' ) isHeadingDated = hasDatingIsoDate( t );
+        if( !inFence && !t.empty() && t.front() == '#' )
+        {
+            isHeadingDated = hasDatingIsoDate( t );
+        }
 
         // The record classifier runs ONLY over the anchors THIS line produced, so a doc line that anchors
         // nothing — the overwhelming majority — never pays for the lane.
         const std::size_t before = anchors.size();
         scanDocLine( line, lineNo, inFence, defined, anchors, resolving );
-        if( anchors.size() == before ) return;
+        if( anchors.size() == before )
+        {
+            return;
+        }
 
         const Record rec = recordOf( line, isHeadingDated, dating );
-        for( std::size_t i = before; i < anchors.size(); ++i ) anchors[i].rec = rec;
+        for( std::size_t i = before; i < anchors.size(); ++i )
+        {
+            anchors[i].rec = rec;
+        }
     } );
 
     std::stable_sort( anchors.begin(), anchors.end(), anchorLess );
@@ -1194,7 +1493,10 @@ inline void foldValueFact( NameFact& f, bool isArray, std::uint64_t value, const
     std::string&   where = isArray ? f.arraySite   : f.constSite;
 
     if( !has )               { has = true; slot = value; where = site.rel + ":" + std::to_string( site.lineNo ); }
-    else if( slot != value )   ambig = true;
+    else if( slot != value )
+    {
+        ambig = true;
+    }
 }
 
 // Fold ONE identifier token's evidence into the fact of the name the docs asked about. Presence is
@@ -1202,7 +1504,10 @@ inline void foldValueFact( NameFact& f, bool isArray, std::uint64_t value, const
 inline void harvestCodeToken( const CodeToken& t, const DeclShape& shape, const CodeSite& site, NameFact& f )
 {
     f.presentInCode = true;
-    if( !shape.isDeclLine && !t.opensLine ) return;                        // an assignment/index, not a declaration
+    if( !shape.isDeclLine && !t.opensLine )
+    {
+        return; // an assignment/index, not a declaration
+    }
 
     // NAME[N] — a fixed array extent. This lane demands a real DECLARATION keyword, not merely opening the
     // line: `pointLocation[0] = p;` opens plenty of lines and is an INDEX, and taking it for an extent
@@ -1218,7 +1523,10 @@ inline void harvestCodeToken( const CodeToken& t, const DeclShape& shape, const 
     // NAME = N  (and the `#define NAME N` shape — there the FIRST identifier on the line is the word
     // `define` itself, so the macro name is the second one and only IT gets the implicit `=`)
     const ValueClaim claim = matchValueClaim( t.line, t.afterName, kCodeClaim, shape.isDefineLine && t.tok != "define" );
-    if( claim.isMatch ) foldValueFact( f, false, claim.value, site );
+    if( claim.isMatch )
+    {
+        foldValueFact( f, false, claim.value, site );
+    }
 }
 
 // Fold one CODE line into the facts of the names the docs asked about. Three jobs, one walk: identifier
@@ -1243,10 +1551,19 @@ inline void harvestCodeLine( std::string_view line, const std::string& rel, std:
         const bool             opensLine = isFirstIdent;
         isFirstIdent = false;
 
-        if( tok.size() < kMinValueNameLen || tok.size() > kMaxNameLen ) continue;
-        if( !wantsFirstByte[ (unsigned char)tok[0] ] ) continue;                 // cheap reject before the hash
+        if( tok.size() < kMinValueNameLen || tok.size() > kMaxNameLen )
+        {
+            continue;
+        }
+        if( !wantsFirstByte[(unsigned char)tok[0]] )
+        {
+            continue; // cheap reject before the hash
+        }
         std::string key( tok );
-        if( wanted.find( key ) == wanted.end() ) continue;
+        if( wanted.find( key ) == wanted.end() )
+        {
+            continue;
+        }
 
         harvestCodeToken( CodeToken{ line, i, tok, opensLine }, shape, site, into[ std::move( key ) ] );
     }
@@ -1276,9 +1593,18 @@ inline constexpr std::string_view kAuxTextExt[] = {
 
 inline bool isAuxTextFile( std::string_view base )
 {
-    if( base == "CMakeLists.txt" ) return true;
+    if( base == "CMakeLists.txt" )
+    {
+        return true;
+    }
     const std::string ext = lowerExtOf( base );
-    for( std::string_view e : kAuxTextExt ) if( ext == e ) return true;
+    for( std::string_view e : kAuxTextExt )
+    {
+        if( ext == e )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -1306,18 +1632,29 @@ inline RepoPaths collectRepoPaths( const std::string& root, const std::vector<st
         if( it->is_directory( ec ) )
         {
             std::error_code sec;
-            if( isSkippedProbeDir( base ) || std::filesystem::exists( it->path() / "CMakeCache.txt", sec ) ) it.disable_recursion_pending();
+            if( isSkippedProbeDir( base ) || std::filesystem::exists( it->path() / "CMakeCache.txt", sec ) )
+            {
+                it.disable_recursion_pending();
+            }
             continue;
         }
 
         const std::string full = it->path().string();
         bool              skip = false;
         for( const std::string& x : excludes )
+        {
             if( !x.empty() && full.find( x ) != std::string::npos ) { skip = true; break; }
-        if( skip ) continue;
+        }
+        if( skip )
+        {
+            continue;
+        }
 
         out.rel.emplace_back( relForHash( full, root ) );
-        if( isAuxTextFile( base ) ) out.auxFull.push_back( full );
+        if( isAuxTextFile( base ) )
+        {
+            out.auxFull.push_back( full );
+        }
     }
     std::sort( out.rel.begin(), out.rel.end() );
     std::sort( out.auxFull.begin(), out.auxFull.end() );
@@ -1335,12 +1672,26 @@ inline RepoPaths collectRepoPaths( const std::string& root, const std::vector<st
 inline bool pathExistsOnDisk( const RepoPaths& repo, std::string_view written )
 {
     std::vector<std::string> segments;
-    for( std::string_view seg : wsdetail::segmentsOf( written, '/' ) ) segments.emplace_back( seg );
-    if( segments.empty() ) return false;
+    for( std::string_view seg : wsdetail::segmentsOf( written, '/' ) )
+    {
+        segments.emplace_back( seg );
+    }
+    if( segments.empty() )
+    {
+        return false;
+    }
     const auto hit = repo.byBase.find( segments.back() );
-    if( hit == repo.byBase.end() ) return false;
+    if( hit == repo.byBase.end() )
+    {
+        return false;
+    }
     for( std::uint32_t idx : hit->second )
-        if( mention_detail::pathSuffixMatches( repo.rel[ idx ], segments ) ) return true;
+    {
+        if( mention_detail::pathSuffixMatches( repo.rel[idx], segments ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -1414,19 +1765,31 @@ inline void resolveFileLine( const ResolveContext& ctx, Anchor& a )
     bool          hasDefHere = false, holds = false;
     for( const Symbol& s : ctx.ing.symbols )
     {
-        if( s.fileId != fileId || s.name != a.name || s.line == 0 ) continue;
+        if( s.fileId != fileId || s.name != a.name || s.line == 0 )
+        {
+            continue;
+        }
         hasDefHere = true;
         const std::uint32_t end = s.line + ( s.loc > 0 ? s.loc - 1 : 0 );
         // The anchor may point a little ABOVE the definition — at its doc comment, which is where a reader
         // naturally cites a function from. That is not drift.
         const std::uint32_t from = s.line > kAnchorSlack ? s.line - kAnchorSlack : 1;
-        if( a.want >= from && a.want <= end ) holds = true;
-        if( defLine == 0 || s.line < defLine ) defLine = s.line;
+        if( a.want >= from && a.want <= end )
+        {
+            holds = true;
+        }
+        if( defLine == 0 || s.line < defLine )
+        {
+            defLine = s.line;
+        }
     }
     if( !hasDefHere ) { a.skip = Unchecked::NamedElsewhere; return; }
 
     a.isChecked = true;
-    if( holds ) return;
+    if( holds )
+    {
+        return;
+    }
 
     const NodeId enc = traceEnclosingSymbol( ctx.ing, fileId, std::uint32_t( a.want ) );
     a.why = Drift::LineMoved;
@@ -1477,7 +1840,10 @@ inline void resolveValue( const ResolveContext& ctx, Anchor& a )
     if( !has )  { a.skip = Unchecked::NoDefSite;      return; }
     if( ambig ) { a.skip = Unchecked::AmbiguousValue; return; }
     a.isChecked = true;
-    if( value == a.want ) return;
+    if( value == a.want )
+    {
+        return;
+    }
 
     a.why = isArray ? Drift::ArrayExtent : Drift::ConstValue;
     a.got = std::to_string( value );
@@ -1515,7 +1881,10 @@ inline void resolveAnchor( const ResolveContext& ctx, Anchor& a )
 template<class Work>
 inline void forEachIndexParallel( std::size_t count, const char* what, Work&& work )
 {
-    if( count == 0 ) return;
+    if( count == 0 )
+    {
+        return;
+    }
 
     std::atomic<std::size_t> nextIndex{ 0 };
     const auto               indexWorker = [ & ]()
@@ -1524,7 +1893,9 @@ inline void forEachIndexParallel( std::size_t count, const char* what, Work&& wo
         {
             for( std::size_t i = nextIndex.fetch_add( 1, std::memory_order_relaxed ); i < count;
                  i = nextIndex.fetch_add( 1, std::memory_order_relaxed ) )
+            {
                 work( i );
+            }
         }
         catch( ... )
         {
@@ -1540,8 +1911,14 @@ inline void forEachIndexParallel( std::size_t count, const char* what, Work&& wo
     {
         std::vector<std::thread> workers;
         workers.reserve( workerCount );
-        for( std::size_t w = 0; w < workerCount; ++w ) workers.emplace_back( indexWorker );
-        for( std::thread& worker : workers ) worker.join();
+        for( std::size_t w = 0; w < workerCount; ++w )
+        {
+            workers.emplace_back( indexWorker );
+        }
+        for( std::thread& worker : workers )
+        {
+            worker.join();
+        }
     }
 }
 
@@ -1588,9 +1965,15 @@ inline DocScan scanDocAnchors( const IngestResult& ing, const std::string& root,
     std::vector<std::uint32_t> docFileIds;
     for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
     {
-        if( !isMarkdownPath( ing.files[ fileId ] ) ) continue;
+        if( !isMarkdownPath( ing.files[fileId] ) )
+        {
+            continue;
+        }
         std::string rel( relForHash( ing.files[ fileId ], root ) );
-        if( !filter.empty() && rel.find( filter ) == std::string::npos ) continue;
+        if( !filter.empty() && rel.find( filter ) == std::string::npos )
+        {
+            continue;
+        }
         docFileIds.push_back( fileId );
         out.docRel.push_back( std::move( rel ) );
     }
@@ -1604,7 +1987,10 @@ inline DocScan scanDocAnchors( const IngestResult& ing, const std::string& root,
     forEachIndexParallel( docCount, "doc scan", [ & ]( std::size_t d )
     {
         std::string bytes;
-        if( !darkflags::readWhole( diskPath( ing, docFileIds[d] ), bytes ) ) return;   // isDocRead stays 0
+        if( !darkflags::readWhole( diskPath( ing, docFileIds[d] ), bytes ) )
+        {
+            return; // isDocRead stays 0
+        }
         out.perDoc[d]    = collectDocAnchors( out.docRel[d], bytes, defined, out.perDocResolving[d] );
         out.isDocRead[d] = 1;
     } );
@@ -1631,7 +2017,10 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
 
     const std::size_t indexedCount = ing.files.size();
     const std::size_t scanCount    = indexedCount + repo.auxFull.size();
-    if( scanCount == 0 ) return 0;
+    if( scanCount == 0 )
+    {
+        return 0;
+    }
 
     const std::size_t hwThreadCount = std::thread::hardware_concurrency();
     const std::size_t blockCount    = std::min( { ( hwThreadCount ? hwThreadCount : 1 ) * 4, scanCount, std::size_t( 64 ) } );
@@ -1651,7 +2040,10 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
         const std::string& identPath = isIndexed ? ing.files[k]                        : repo.auxFull[ k - indexedCount ];
 
         std::string bytes;
-        if( !darkflags::readWhole( readPath, bytes ) ) return;   // oversized/unreadable: counts stay 0
+        if( !darkflags::readWhole( readPath, bytes ) )
+        {
+            return; // oversized/unreadable: counts stay 0
+        }
         ++corpusFiles;
 
         if( isIndexed && isIndexedDocPath( identPath ) )
@@ -1664,14 +2056,20 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
         const std::string   rel( relForHash( identPath, root ) );
         const std::uint32_t lineCount = forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t lineIndex )
                                                      { harvestCodeLine( line, rel, lineIndex, wantsFirstByte, facts, into ); } );
-        if( isIndexed ) lineCounts[k] = lineCount;
+        if( isIndexed )
+        {
+            lineCounts[k] = lineCount;
+        }
     };
 
     forEachIndexParallel( blockCount, "corpus scan", [ & ]( std::size_t b )
     {
         const std::size_t from = b * blockSpan;
         const std::size_t to   = std::min( from + blockSpan, scanCount );
-        for( std::size_t k = from; k < to; ++k ) scanOne( k, blockFacts[b], blockCorpusFiles[b] );
+        for( std::size_t k = from; k < to; ++k )
+        {
+            scanOne( k, blockFacts[b], blockCorpusFiles[b] );
+        }
     } );
 
     std::size_t corpusFiles = 0;
@@ -1681,7 +2079,10 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
         for( const auto& [ name, fact ] : blockFacts[b] )
         {
             const auto it = facts.find( name );
-            if( it != facts.end() ) mergeNameFact( it->second, fact );
+            if( it != facts.end() )
+            {
+                mergeNameFact( it->second, fact );
+            }
         }
     }
     return corpusFiles;
@@ -1698,17 +2099,27 @@ inline HashMap<std::string, std::uint32_t> buildPathMemo( const IngestResult& in
     HashMap<std::string, std::uint32_t> memo;
     std::vector<std::string>            memoKeys;                 // distinct, in doc-then-anchor order
     for( const std::vector<Anchor>& anchors : perDoc )
+    {
         for( const Anchor& a : anchors )
+        {
             if( a.kind == AnchorKind::FileLine )
             {
                 std::string key( a.ref.substr( 0, a.ref.find( ':' ) ) );
-                if( memo.try_emplace( key, kNoTraceFile ).second ) memoKeys.push_back( std::move( key ) );
+                if( memo.try_emplace( key, kNoTraceFile ).second )
+                {
+                    memoKeys.push_back( std::move( key ) );
+                }
             }
+        }
+    }
 
     std::vector<std::uint32_t> memoIds( memoKeys.size(), kNoTraceFile );
     forEachIndexParallel( memoKeys.size(), "path memo", [ & ]( std::size_t k )
                           { memoIds[k] = traceMatchFile( ing, memoKeys[k] ); } );
-    for( std::size_t k = 0; k < memoKeys.size(); ++k ) memo[ memoKeys[k] ] = memoIds[k];
+    for( std::size_t k = 0; k < memoKeys.size(); ++k )
+    {
+        memo[memoKeys[k]] = memoIds[k];
+    }
     return memo;
 }
 
@@ -1746,7 +2157,12 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     HashMap<std::string, std::uint32_t> defined;
     defined.reserve( ing.symbols.size() );
     for( const Symbol& s : ing.symbols )
-        if( !s.name.empty() ) defined.try_emplace( s.name, s.id );
+    {
+        if( !s.name.empty() )
+        {
+            defined.try_emplace( s.name, s.id );
+        }
+    }
 
     // ── pass A: the docs' anchors ────────────────────────────────────────────────────────────────────────
     std::vector<DocRow>                     rows;
@@ -1768,7 +2184,13 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
             DEGRADED_PATH_ALERT( "doc-drift: cannot read a markdown file — its anchors are omitted" );
             continue;
         }
-        for( const Anchor& a : scan.perDoc[d] ) if( !a.name.empty() ) facts.try_emplace( a.name, NameFact{} );
+        for( const Anchor& a : scan.perDoc[d] )
+        {
+            if( !a.name.empty() )
+            {
+                facts.try_emplace( a.name, NameFact {} );
+            }
+        }
 
         DocRow row;
         row.path        = std::move( scan.docRel[d] );
@@ -1786,7 +2208,10 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     // Skipped entirely when the docs raised no anchor at all — an anchor-free tree must not pay for a read
     // of every file just to produce an empty report.
     std::size_t anchorTotal = 0;
-    for( const std::vector<Anchor>& v : perDoc ) anchorTotal += v.size();
+    for( const std::vector<Anchor>& v : perDoc )
+    {
+        anchorTotal += v.size();
+    }
 
     // The on-disk path set (one prune-aware walk, no reads) — the existence fallback plus the CMake list.
     // Hoisted ABOVE the corpus scan (it reads no file contents and depends on nothing the scan produces) so
@@ -1794,7 +2219,10 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     const RepoPaths repo = anchorTotal > 0 ? collectRepoPaths( root, excludes ) : RepoPaths{};
 
     std::vector<std::uint32_t> lineCounts( ing.files.size(), 0 );
-    if( anchorTotal > 0 ) res.corpusFiles += scanCorpusFacts( ing, root, repo, facts, lineCounts );
+    if( anchorTotal > 0 )
+    {
+        res.corpusFiles += scanCorpusFacts( ing, root, repo, facts, lineCounts );
+    }
 
     // ── resolution ───────────────────────────────────────────────────────────────────────────────────────
     const HashMap<std::string, std::uint32_t> pathMemo = buildPathMemo( ing, perDoc );
@@ -1804,7 +2232,10 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     forEachIndexParallel( perDoc.size(), "anchor resolve", [ & ]( std::size_t d )
     {
         const ResolveContext ctx{ ing, root, repo, defined, facts, lineCounts, pathMemo, perDocResolving[d], history };
-        for( Anchor& a : perDoc[d] ) resolveAnchor( ctx, a );
+        for( Anchor& a : perDoc[d] )
+        {
+            resolveAnchor( ctx, a );
+        }
     } );
 
     for( std::size_t d = 0; d < rows.size(); ++d )
@@ -1817,10 +2248,22 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
         for( const Anchor& a : anchors )
         {
             // Exactly one of three buckets, so `checked + unchecked == anchors` holds by construction.
-            if     ( a.isProse )             ++prose;
-            else if( a.why != Drift::Holds ) drifted.push_back( a );
-            else if( a.isChecked )           ++row.checkedCount;
-            else                             ++res.uncheckedBy[ std::size_t( a.skip ) ];
+            if( a.isProse )
+            {
+                ++prose;
+            }
+            else if( a.why != Drift::Holds )
+            {
+                drifted.push_back( a );
+            }
+            else if( a.isChecked )
+            {
+                ++row.checkedCount;
+            }
+            else
+            {
+                ++res.uncheckedBy[std::size_t( a.skip )];
+            }
         }
 
         // A prose `= N` was never an anchor, so it leaves the tally rather than inflating "unchecked".
@@ -1835,7 +2278,14 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
 
         // Split the failures the author DATED out of the rot, counting both. Nothing leaves `drifted`: a
         // record still prints, it just stops inflating the number a reader is being asked to act on.
-        for( const Anchor& a : drifted ) if( a.rec != Record::Live ) { ++row.datedCount; ++res.datedBy[ std::size_t( a.rec ) ]; }
+        for( const Anchor& a : drifted )
+        {
+            if( a.rec != Record::Live )
+            {
+                ++row.datedCount;
+                ++res.datedBy[std::size_t( a.rec )];
+            }
+        }
         VERIFY( row.datedCount <= drifted.size() );
         res.dated  += row.datedCount;
         res.drift  += std::uint32_t( drifted.size() ) - row.datedCount;
@@ -1862,19 +2312,38 @@ inline void writeTally( std::FILE* out, const char* tag, std::span<const Spec> t
 {
     VERIFY( table.size() == counts.size() );
     for( std::size_t r = 0; r < counts.size(); ++r )
+    {
         if( counts[r] )
+        {
             std::fprintf( out, "<%s r=\"%s\" n=\"%u\" note=\"%s\"/>", tag, table[r].tag, counts[r], ex( table[r].note ).c_str() );
+        }
+    }
 }
 
 inline void writeAnchor( std::FILE* out, const Anchor& a, const XmlEscaper& ex )
 {
     std::fprintf( out, "<a k=\"%s\" l=\"%u\" c=\"%u\" why=\"%s\"", anchorKindTag( a.kind ), a.line, a.col, driftTag( a.why ) );
-    if( a.rec != Record::Live ) std::fprintf( out, " kind=\"dated-record\" rec=\"%s\"", recordTag( a.rec ) );
+    if( a.rec != Record::Live )
+    {
+        std::fprintf( out, " kind=\"dated-record\" rec=\"%s\"", recordTag( a.rec ) );
+    }
     std::fprintf( out, " ref=\"%s\"", ex( a.ref ).c_str() );
-    if( !a.name.empty() && a.kind == AnchorKind::FileLine ) std::fprintf( out, " sym=\"%s\"", ex( a.name ).c_str() );
-    if( a.kind == AnchorKind::Const || a.kind == AnchorKind::Array ) std::fprintf( out, " want=\"%llu\"", (unsigned long long)a.want );
-    if( !a.got.empty() ) std::fprintf( out, " got=\"%s\"", ex( a.got ).c_str() );
-    if( !a.tgt.empty() ) std::fprintf( out, " tgt=\"%s\"", ex( a.tgt ).c_str() );
+    if( !a.name.empty() && a.kind == AnchorKind::FileLine )
+    {
+        std::fprintf( out, " sym=\"%s\"", ex( a.name ).c_str() );
+    }
+    if( a.kind == AnchorKind::Const || a.kind == AnchorKind::Array )
+    {
+        std::fprintf( out, " want=\"%llu\"", (unsigned long long)a.want );
+    }
+    if( !a.got.empty() )
+    {
+        std::fprintf( out, " got=\"%s\"", ex( a.got ).c_str() );
+    }
+    if( !a.tgt.empty() )
+    {
+        std::fprintf( out, " tgt=\"%s\"", ex( a.tgt ).c_str() );
+    }
     std::fprintf( out, "/>" );
 }
 
@@ -1891,7 +2360,10 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
     for( const DocRow& row : res.docs )
     {
         const std::uint32_t live = std::uint32_t( row.drifted.size() ) - row.datedCount;
-        if( live == 0 ) continue;   // already fully dated (or fully clean) — nothing to gate here
+        if( live == 0 )
+        {
+            continue; // already fully dated (or fully clean) — nothing to gate here
+        }
         liveTotal += live;
         targets.push_back( &row );
     }
@@ -1907,7 +2379,9 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
     // (which configures Release) could never observe. This is an EMITTER, and a bad accounting total is
     // recoverable: clamp it, and say out loud that it was clamped, in the builds that can still hear.
     if( liveTotal != res.drift )
+    {
         DEGRADED_PATH_ALERT( "doc-drift gateability: live total disagrees with drift= — projected_drift clamped to a floor of 0" );
+    }
     const std::uint32_t projectedDrift = res.drift > liveTotal ? res.drift - liveTotal : 0u;
 
     std::fprintf( out, "<!-- ripwire doc-drift gateability: every doc below still has >=1 LIVE (undated) "
@@ -1922,8 +2396,10 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
                        "classified, by a date it does not deserve. Weigh each row; do not game the number. -->" );
     std::fprintf( out, "<gateability docs=\"%zu\" projected_drift=\"%u\">", targets.size(), projectedDrift );
     for( const DocRow* row : targets )
+    {
         std::fprintf( out, "<fix p=\"%s\" live=\"%u\"/>", ex( row->path ).c_str(),
                       std::uint32_t( row->drifted.size() ) - row->datedCount );
+    }
     std::fprintf( out, "</gateability>" );
 }
 
@@ -2007,17 +2483,26 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
 
     std::uint32_t unchecked = 0;
-    for( std::uint32_t n : res.uncheckedBy ) unchecked += n;
+    for( std::uint32_t n : res.uncheckedBy )
+    {
+        unchecked += n;
+    }
 
     const PageWindow docPage = pageWindow( res.docs.size(), pageLimit, pageOffset );
 
     std::fputs( kDocDriftLegend, out );
     std::fprintf( out, "<doc-drift docs=\"%u\" clean=\"%u\" anchors=\"%u\" checked=\"%u\" unchecked=\"%u\" drift=\"%u\" dated=\"%u\" prose=\"%u\" corpus=\"%zu\"",
                   res.docsScanned, res.cleanDocs, res.anchors, res.checked, unchecked, res.drift, res.dated, res.prose, res.corpusFiles );
-    if( !res.filter.empty() ) std::fprintf( out, " filter=\"%s\"", ex( res.filter ).c_str() );
+    if( !res.filter.empty() )
+    {
+        std::fprintf( out, " filter=\"%s\"", ex( res.filter ).c_str() );
+    }
     // r26-stamp Task A: anchor these counts to the commit (and dirty-tree state) they were computed against —
     // omitted entirely on a non-git root rather than printed as a placeholder (see gitstamp.h's header comment).
-    if( !res.atStamp.empty() ) std::fprintf( out, " at=\"%s\"", res.atStamp.c_str() );
+    if( !res.atStamp.empty() )
+    {
+        std::fprintf( out, " at=\"%s\"", res.atStamp.c_str() );
+    }
     {
         char pab[ kPageDisclosureCap ];
         std::fprintf( out, "%s", pageDisclosure( pab, sizeof( pab ), docPage.end - docPage.begin, res.docs.size(),
@@ -2027,7 +2512,10 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
 
     // What the history probe did, when it was asked for — stated up front so a reader knows whether the
     // mention lane below is the strong (three-way) one or the old two-way one.
-    if( res.history != nullptr ) gitoracle::writeHistoryProbe( out, *res.history, ex );
+    if( res.history != nullptr )
+    {
+        gitoracle::writeHistoryProbe( out, *res.history, ex );
+    }
 
     for( std::size_t docIndex = docPage.begin; docIndex < docPage.end; ++docIndex )
     {
@@ -2041,8 +2529,13 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
         // the element vanished entirely and one row disappeared unmarked.
         const std::size_t shownCount = std::min( row.drifted.size(), maxPerDoc );
         for( std::size_t anchorIndex = 0; anchorIndex < shownCount; ++anchorIndex )
+        {
             writeAnchor( out, row.drifted[ anchorIndex ], ex );
-        if( row.drifted.size() > shownCount ) std::fprintf( out, "<more drift=\"%zu\"/>", row.drifted.size() - shownCount );
+        }
+        if( row.drifted.size() > shownCount )
+        {
+            std::fprintf( out, "<more drift=\"%zu\"/>", row.drifted.size() - shownCount );
+        }
         std::fprintf( out, "</doc>" );
     }
 
@@ -2053,7 +2546,10 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
     writeTally<UncheckedSpec>( out, "unchecked", kUncheckedTable, res.uncheckedBy, ex );
     writeTally<RecordSpec>   ( out, "dated",     kRecordTable,    res.datedBy,     ex );
 
-    if( gateability ) writeGateability( out, res, ex );
+    if( gateability )
+    {
+        writeGateability( out, res, ex );
+    }
 
     std::fprintf( out, "</doc-drift>" );
 }

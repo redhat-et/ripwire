@@ -52,7 +52,10 @@ inline bool readByteSafeLine( std::FILE* in, std::string& line )
     for( int byteOrEof = std::fgetc( in ); byteOrEof != EOF; byteOrEof = std::fgetc( in ) )
     {
         didReadAnyByte = true;
-        if( byteOrEof == '\n' ) return true; // delimiter consumed, not appended
+        if( byteOrEof == '\n' )
+        {
+            return true; // delimiter consumed, not appended
+        }
 
         line.push_back( static_cast<char>( static_cast<unsigned char>( byteOrEof ) ) );
     }

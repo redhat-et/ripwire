@@ -41,19 +41,31 @@ namespace namesplit
 // The `cursor`/`index` split below cannot wrap: cursor is only decremented while it is strictly positive.
 inline std::string_view stripTrailingGroup( std::string_view f, char open, char close ) noexcept
 {
-    if( f.empty() || f.back() != close ) return f;
+    if( f.empty() || f.back() != close )
+    {
+        return f;
+    }
 
     std::size_t depth = 0;
     for( std::size_t cursor = f.size(); cursor > 0; )
     {
         const std::size_t i = --cursor;
-        if( f[i] == close ) ++depth;
+        if( f[i] == close )
+        {
+            ++depth;
+        }
         else if( f[i] == open )
         {
             VERIFY( depth > 0 ); // depth is seeded by f.back() == close
-            if( --depth != 0 ) continue;
+            if( --depth != 0 )
+            {
+                continue;
+            }
             const std::string_view head = f.substr( 0, i );
-            if( head.empty() || head.back() == '-' ) return f;
+            if( head.empty() || head.back() == '-' )
+            {
+                return f;
+            }
             return head.size() >= 8 && head.substr( head.size() - 8 ) == "operator" ? f : head;
         }
     }

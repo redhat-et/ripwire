@@ -562,17 +562,23 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::size_t cap = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, std::min( S, std::size_t( 5000 ) ) );
 
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
-    std::sort( order.begin(), order.end(), [ & ]( NodeId a, NodeId b )
+    for( NodeId i = 0; i < S; ++i )
     {
-        if( rank[a] != rank[b] ) return rank[a] > rank[b];
-        return a < b;
-    } );
+        order[i] = i;
+    }
+    std::sort( order.begin(), order.end(), [ & ]( NodeId a, NodeId b )
+               {
+        if( rank[a] != rank[b] ) { return rank[a] > rank[b];
+}
+        return a < b; } );
     order.resize( cap );
 
     // map original symbol id → selected-array index (kNoNode if not selected)
     std::vector<NodeId> idxOf( S, kNoNode );
-    for( NodeId k = 0; k < cap; ++k ) idxOf[ order[k] ] = k;
+    for( NodeId k = 0; k < cap; ++k )
+    {
+        idxOf[order[k]] = k;
+    }
 
     // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism
     struct Edge { std::uint32_t s, t; };
@@ -585,7 +591,9 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             const NodeId tgt = outTargets[e];
             if( tgt < S && idxOf[tgt] != kNoNode )
+            {
                 edges.push_back( { si, idxOf[tgt] } );
+            }
         }
     }
     // sort (s, t) for determinism
@@ -627,11 +635,16 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         auto it = moduleSlot.find( c );
         std::uint32_t slot;
         if( it == moduleSlot.end() ) { slot = std::uint32_t( modules.size() ); moduleSlot.emplace( c, slot ); modules.push_back( {} ); modules.back().commId = c; }
-        else                          slot = it->second;
+        else
+        {
+            slot = it->second;
+        }
         modules[ slot ].members.push_back( k );
         if( fileIdOf[k] != kNoNode &&
             std::find( modules[ slot ].files.begin(), modules[ slot ].files.end(), fileIdOf[k] ) == modules[ slot ].files.end() )
+        {
             modules[ slot ].files.push_back( fileIdOf[k] );
+        }
     }
     // keep only modules with ≥2 selected members — "a lone symbol is not a module" (matches --communities)
     modules.erase( std::remove_if( modules.begin(), modules.end(),
@@ -640,7 +653,12 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // per-selected-node → module-array slot (kNoNode if its community didn't survive the ≥2 filter)
     std::vector<NodeId> moduleOf( cap, kNoNode );
     for( NodeId m = 0; m < modules.size(); ++m )
-        for( NodeId k : modules[m].members ) moduleOf[k] = m;
+    {
+        for( NodeId k : modules[m].members )
+        {
+            moduleOf[k] = m;
+        }
+    }
 
     // rank/name the members within each module, pick top-5, name the card after the top member
     for( ModuleCard& m : modules )
@@ -657,22 +675,31 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     for( const Edge& e : edges )
     {
         const NodeId ms = moduleOf[e.s], mt = moduleOf[e.t];
-        if( ms == kNoNode || mt == kNoNode || ms == mt ) continue;
+        if( ms == kNoNode || mt == kNoNode || ms == mt )
+        {
+            continue;
+        }
         ++modules[ ms ].outCross;
         ++modules[ mt ].inCross;
     }
 
     // final module order: member count desc, commId asc (deterministic; matches --communities)
     std::vector<NodeId> modOrder( modules.size() );
-    for( NodeId m = 0; m < modules.size(); ++m ) modOrder[m] = m;
-    std::sort( modOrder.begin(), modOrder.end(), [ & ]( NodeId a, NodeId b )
+    for( NodeId m = 0; m < modules.size(); ++m )
     {
-        if( modules[a].members.size() != modules[b].members.size() ) return modules[a].members.size() > modules[b].members.size();
-        return modules[a].commId < modules[b].commId;
-    } );
+        modOrder[m] = m;
+    }
+    std::sort( modOrder.begin(), modOrder.end(), [ & ]( NodeId a, NodeId b )
+               {
+        if( modules[a].members.size() != modules[b].members.size() ) { return modules[a].members.size() > modules[b].members.size();
+}
+        return modules[a].commId < modules[b].commId; } );
     // moduleRank[slot] = position in modOrder (the DISPLAY id used in JSON/URLs) — stable, 0-based
     std::vector<NodeId> moduleRank( modules.size() );
-    for( NodeId disp = 0; disp < modOrder.size(); ++disp ) moduleRank[ modOrder[disp] ] = disp;
+    for( NodeId disp = 0; disp < modOrder.size(); ++disp )
+    {
+        moduleRank[modOrder[disp]] = disp;
+    }
 
     // emit document head. Three in-file VIEWS share one #bar + one #c canvas; #cards (Overview) and
     // #crumb (breadcrumb trail) are additional DOM regions toggled by the router, not separate pages.
@@ -764,7 +791,10 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
                       rankBuf,
                       unsigned( fileIdOf[k] == kNoNode ? 0 : fileIdOf[k] ),
                       comm );
-        if( k + 1 < cap ) std::fprintf( out, "," );
+        if( k + 1 < cap )
+        {
+            std::fprintf( out, "," );
+        }
         std::fprintf( out, "\n" );
     }
     std::fprintf( out, "];\n" );
@@ -774,7 +804,10 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     for( std::size_t i = 0; i < fileList.size(); ++i )
     {
         std::fprintf( out, "  \"%s\"", jsonEscape( ing.files[ fileList[i] ] ).c_str() );
-        if( i + 1 < fileList.size() ) std::fprintf( out, "," );
+        if( i + 1 < fileList.size() )
+        {
+            std::fprintf( out, "," );
+        }
         std::fprintf( out, "\n" );
     }
     std::fprintf( out, "];\n" );
@@ -784,7 +817,10 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     for( std::size_t k = 0; k < edges.size(); ++k )
     {
         std::fprintf( out, "  {\"s\":%u,\"t\":%u}", unsigned( edges[k].s ), unsigned( edges[k].t ) );
-        if( k + 1 < edges.size() ) std::fprintf( out, "," );
+        if( k + 1 < edges.size() )
+        {
+            std::fprintf( out, "," );
+        }
         std::fprintf( out, "\n" );
     }
     std::fprintf( out, "];\n" );
@@ -800,9 +836,18 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         for( const Edge& e : edges )
         {
             const NodeId ms = moduleOf[e.s], mt = moduleOf[e.t];
-            if( ms == kNoNode || mt == kNoNode ) continue;
-            if( ms == modOrder[disp] && mt != modOrder[disp] ) neigh.push_back( moduleRank[mt] );
-            if( mt == modOrder[disp] && ms != modOrder[disp] ) neigh.push_back( moduleRank[ms] );
+            if( ms == kNoNode || mt == kNoNode )
+            {
+                continue;
+            }
+            if( ms == modOrder[disp] && mt != modOrder[disp] )
+            {
+                neigh.push_back( moduleRank[mt] );
+            }
+            if( mt == modOrder[disp] && ms != modOrder[disp] )
+            {
+                neigh.push_back( moduleRank[ms] );
+            }
         }
         std::sort( neigh.begin(), neigh.end() );
         neigh.erase( std::unique( neigh.begin(), neigh.end() ), neigh.end() );
@@ -812,28 +857,43 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         for( std::size_t i = 0; i < m.files.size(); ++i )
         {
             std::fprintf( out, "%u", unsigned( m.files[i] ) );
-            if( i + 1 < m.files.size() ) std::fprintf( out, "," );
+            if( i + 1 < m.files.size() )
+            {
+                std::fprintf( out, "," );
+            }
         }
         std::fprintf( out, "],\"members\":[" );
         for( std::size_t i = 0; i < m.members.size(); ++i )
         {
             std::fprintf( out, "%u", unsigned( m.members[i] ) );
-            if( i + 1 < m.members.size() ) std::fprintf( out, "," );
+            if( i + 1 < m.members.size() )
+            {
+                std::fprintf( out, "," );
+            }
         }
         std::fprintf( out, "],\"top\":[" );
         for( std::size_t i = 0; i < m.top.size(); ++i )
         {
             std::fprintf( out, "%u", unsigned( m.top[i] ) );
-            if( i + 1 < m.top.size() ) std::fprintf( out, "," );
+            if( i + 1 < m.top.size() )
+            {
+                std::fprintf( out, "," );
+            }
         }
         std::fprintf( out, "],\"inCross\":%u,\"outCross\":%u,\"neigh\":[", m.inCross, m.outCross );
         for( std::size_t i = 0; i < neigh.size(); ++i )
         {
             std::fprintf( out, "%u", neigh[i] );
-            if( i + 1 < neigh.size() ) std::fprintf( out, "," );
+            if( i + 1 < neigh.size() )
+            {
+                std::fprintf( out, "," );
+            }
         }
         std::fprintf( out, "]}" );
-        if( disp + 1 < modOrder.size() ) std::fprintf( out, "," );
+        if( disp + 1 < modOrder.size() )
+        {
+            std::fprintf( out, "," );
+        }
         std::fprintf( out, "\n" );
     }
     std::fprintf( out, "];\n" );

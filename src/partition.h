@@ -121,7 +121,10 @@ inline std::uint64_t groupKeyFor( const IngestResult& ing, const Graph& g, const
     const auto* inRowOffset  = g.inEdges.rowOffsets();
     const bool  hasCallEdges = id + 1 < g.outOff.size()
                             && ( g.outOff[id] != g.outOff[id + 1] || inRowOffset[id] != inRowOffset[id + 1] );
-    if( hasCallEdges ) return std::uint64_t( id < cm.comm.size() ? cm.comm[id] : 0u );
+    if( hasCallEdges )
+    {
+        return std::uint64_t( id < cm.comm.size() ? cm.comm[id] : 0u );
+    }
     return ( std::uint64_t( 1 ) << 32 ) | ( id < ing.symbols.size() ? ing.symbols[id].fileId : 0u );
 }
 
@@ -143,7 +146,10 @@ inline CommunityGroups groupSurfaceByCommunity( const IngestResult& ing, const G
             out.members.emplace_back();
             out.groupKey.push_back( key );
         }
-        else slot = it->second;
+        else
+        {
+            slot = it->second;
+        }
         out.members[ slot ].push_back( id );
     }
     return out;
@@ -157,8 +163,12 @@ inline std::size_t widestSplittableGroup( const CommunityGroups& grp )
 {
     std::size_t widestIndex = kNoGroup;
     for( std::size_t i = 0; i < grp.members.size(); ++i )
+    {
         if( grp.members[i].size() >= 2 && ( widestIndex == kNoGroup || grp.members[i].size() > grp.members[ widestIndex ].size() ) )
+        {
             widestIndex = i;
+        }
+    }
     return widestIndex;
 }
 
@@ -171,7 +181,10 @@ inline std::uint32_t splitGroupsUpTo( CommunityGroups& grp, std::uint32_t target
     while( grp.members.size() < std::size_t( targetCount ) )
     {
         const std::size_t widest = widestSplittableGroup( grp );
-        if( widest == kNoGroup ) break;             // every group is a singleton — N is unreachable, caller reports it
+        if( widest == kNoGroup )
+        {
+            break; // every group is a singleton — N is unreachable, caller reports it
+        }
 
         std::vector<NodeId>& src  = grp.members[ widest ];
         const std::size_t    half = ( src.size() + 1 ) / 2;
@@ -190,7 +203,10 @@ inline std::vector<std::vector<std::uint32_t>> packGroupsIntoBins( const Communi
 {
     VERIFY( binCount > 0 );
     std::vector<std::uint32_t> byWeight( grp.members.size() );
-    for( std::uint32_t i = 0; i < byWeight.size(); ++i ) byWeight[i] = i;
+    for( std::uint32_t i = 0; i < byWeight.size(); ++i )
+    {
+        byWeight[i] = i;
+    }
     std::stable_sort( byWeight.begin(), byWeight.end(),                                   // stable ⇒ ties keep index order
                       [ & ]( std::uint32_t a, std::uint32_t b ) { return grp.members[a].size() > grp.members[b].size(); } );
 
@@ -199,7 +215,13 @@ inline std::vector<std::vector<std::uint32_t>> packGroupsIntoBins( const Communi
     for( std::uint32_t gi : byWeight )
     {
         std::size_t lightest = 0;
-        for( std::size_t b = 1; b < binCount; ++b ) if( binLoad[b] < binLoad[ lightest ] ) lightest = b;   // ties → lowest index
+        for( std::size_t b = 1; b < binCount; ++b )
+        {
+            if( binLoad[b] < binLoad[lightest] )
+            {
+                lightest = b; // ties → lowest index
+            }
+        }
         bins[ lightest ].push_back( gi );
         binLoad[ lightest ] += grp.members[ gi ].size();
     }
@@ -214,7 +236,10 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
 
     // ── decision 1 — the task-relevant surface (top ranked, positive score only) ──────────────────────────
     std::vector<NodeId> order( ing.symbols.size() );
-    for( NodeId i = 0; i < order.size(); ++i ) order[i] = i;
+    for( NodeId i = 0; i < order.size(); ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
 
     const std::size_t   surfaceCap = kPackTaskBodyCandidates + kSurfacePerPartition * std::size_t( partitionCount );
@@ -222,7 +247,10 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
     surface.reserve( surfaceCap );
     for( std::size_t k = 0; k < order.size() && surface.size() < surfaceCap; ++k )
     {
-        if( rank[ order[k] ] <= 0.0f ) break;      // a zero-score symbol is not on the task's surface at all
+        if( rank[order[k]] <= 0.0f )
+        {
+            break; // a zero-score symbol is not on the task's surface at all
+        }
         surface.push_back( order[k] );
     }
     plan.surfaceCount = std::uint32_t( surface.size() );
@@ -245,7 +273,9 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
 
     const std::uint32_t binCount = std::min<std::uint32_t>( partitionCount, std::uint32_t( grp.members.size() ) );
     if( binCount < partitionCount )
+    {
         DEGRADED_PATH_ALERT( "pack-task partition: fewer separable modules than partitions requested — emitting the modules that exist" );
+    }
 
     const std::vector<std::vector<std::uint32_t>> bins = packGroupsIntoBins( grp, binCount );
     plan.groups.resize( binCount );
@@ -288,8 +318,14 @@ inline std::size_t sortedIntersectionSize( const std::vector<NodeId>& a, const s
     while( i < a.size() && j < b.size() )
     {
         if( a[i] == b[j] )      { ++n;  ++i;  ++j; }
-        else if( a[i] < b[j] )  ++i;
-        else                    ++j;
+        else if( a[i] < b[j] )
+        {
+            ++i;
+        }
+        else
+        {
+            ++j;
+        }
     }
     return n;
 }
@@ -302,26 +338,40 @@ inline OverlapStats measureOverlap( const std::vector<std::vector<NodeId>>& surf
     std::size_t pairCount = 0;
     double      sum = 0.0;
     for( std::size_t i = 0; i < surfaces.size(); ++i )
+    {
         for( std::size_t j = i + 1; j < surfaces.size(); ++j )
         {
             const std::size_t inter = sortedIntersectionSize( surfaces[i], surfaces[j] );
             const std::size_t uni   = surfaces[i].size() + surfaces[j].size() - inter;
             const double      jac   = uni == 0 ? 0.0 : double( inter ) / double( uni );
             sum += jac;  ++pairCount;
-            if( jac > out.worst ) out.worst = jac;
+            if( jac > out.worst )
+            {
+                out.worst = jac;
+            }
         }
+    }
     out.mean = pairCount == 0 ? 0.0 : sum / double( pairCount );
 
     // shared / union across all partition surfaces
     std::vector<NodeId> all;
-    for( const std::vector<NodeId>& s : surfaces ) all.insert( all.end(), s.begin(), s.end() );
+    for( const std::vector<NodeId>& s : surfaces )
+    {
+        all.insert( all.end(), s.begin(), s.end() );
+    }
     std::sort( all.begin(), all.end() );
     for( std::size_t i = 0; i < all.size(); )
     {
         std::size_t j = i;
-        while( j < all.size() && all[j] == all[i] ) ++j;
+        while( j < all.size() && all[j] == all[i] )
+        {
+            ++j;
+        }
         ++out.unionCount;
-        if( j - i >= 2 ) ++out.sharedCount;
+        if( j - i >= 2 )
+        {
+            ++out.sharedCount;
+        }
         i = j;
     }
 
@@ -329,7 +379,9 @@ inline OverlapStats measureOverlap( const std::vector<std::vector<NodeId>>& surf
     std::vector<NodeId> unionIds = all;
     unionIds.erase( std::unique( unionIds.begin(), unionIds.end() ), unionIds.end() );
     if( !coreSurface.empty() )
+    {
         out.coreLeak = double( sortedIntersectionSize( coreSurface, unionIds ) ) / double( coreSurface.size() );
+    }
     return out;
 }
 
@@ -457,8 +509,15 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
     // assembler calls so a 16-way fan-out pays for it ONCE (the assembler computes its own when unset).
     std::vector<std::uint8_t> cloneMember( ing.symbols.size(), 0u );
     for( const CloneGroup& cg : findClones( ing, 40 ) )
+    {
         for( NodeId m : cg.members )
-            if( m < cloneMember.size() ) cloneMember[m] = 1u;
+        {
+            if( m < cloneMember.size() )
+            {
+                cloneMember[m] = 1u;
+            }
+        }
+    }
 
     PackTaskInputs in = inBase;
     in.cloneMember    = &cloneMember;
@@ -478,11 +537,17 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
 
     std::vector<std::vector<NodeId>> partSurfaces;
     partSurfaces.reserve( parts.size() );
-    for( const BundleOut& b : parts ) partSurfaces.push_back( b.surface );
+    for( const BundleOut& b : parts )
+    {
+        partSurfaces.push_back( b.surface );
+    }
     const OverlapStats ov = measureOverlap( partSurfaces, core.surface );
 
     sum.totalBytes = core.xml.size();
-    for( const BundleOut& b : parts ) sum.totalBytes += b.xml.size();
+    for( const BundleOut& b : parts )
+    {
+        sum.totalBytes += b.xml.size();
+    }
 
     // ── the document ──────────────────────────────────────────────────────────────────────────────────────
     // The wrapper comment is deliberately STATIC (it never echoes the task) — a task string containing "--"
@@ -503,10 +568,16 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
         // with the rate named in kPartitionLegend so a reader can reconcile it against a map's est_tokens.
         const std::size_t estTokens = rw::tokensForEmittedBytes( b.xml.size(), rw::kMinBytesPerToken );
         char h[ 288 ];
-        if( index < 0 ) std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" symbols=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
-                                       role, b.assigned, b.xml.size(), estTokens, estTokens );
-        else            std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" i=\"%d\" symbols=\"%u\" modules=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
-                                       role, index, b.assigned, b.modules, b.xml.size(), estTokens, estTokens );
+        if( index < 0 )
+        {
+            std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" symbols=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
+                           role, b.assigned, b.xml.size(), estTokens, estTokens );
+        }
+        else
+        {
+            std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" i=\"%d\" symbols=\"%u\" modules=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
+                           role, index, b.assigned, b.modules, b.xml.size(), estTokens, estTokens );
+        }
         return h;
     };
 

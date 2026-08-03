@@ -119,7 +119,10 @@ inline bool isDarkDefault( std::string_view v )
 {
     std::string low;
     low.reserve( v.size() );
-    for( char c : v ) low.push_back( char( std::tolower( (unsigned char)c ) ) );
+    for( char c : v )
+    {
+        low.push_back( char( std::tolower( (unsigned char)c ) ) );
+    }
     return low.empty() || low == "0" || low == "off" || low == "false" || low == "no" || low == "unset";
 }
 
@@ -132,8 +135,14 @@ inline bool identByte( unsigned char c ) noexcept { return std::isalnum( c ) || 
 // layout.h's declaration scanner, flipimpact.h's value lane, and the harvest below.
 inline bool wholeWordAt( std::string_view hay, std::size_t at, std::size_t len ) noexcept
 {
-    if( at > 0 && identByte( (unsigned char)hay[ at - 1 ] ) )                  return false;
-    if( at + len < hay.size() && identByte( (unsigned char)hay[ at + len ] ) ) return false;
+    if( at > 0 && identByte( (unsigned char)hay[at - 1] ) )
+    {
+        return false;
+    }
+    if( at + len < hay.size() && identByte( (unsigned char)hay[at + len] ) )
+    {
+        return false;
+    }
     return true;
 }
 
@@ -143,9 +152,21 @@ inline bool wholeWordAt( std::string_view hay, std::size_t at, std::size_t len )
 // `,`, `, `, `" sym="` and `CANYON_*` cannot be gates: nothing else can name an environment variable.
 inline bool isIdentShaped( std::string_view s, std::size_t minLen, std::size_t maxLen ) noexcept
 {
-    if( s.size() < minLen || s.size() > maxLen )                  return false;
-    if( !( std::isalpha( (unsigned char)s[0] ) || s[0] == '_' ) ) return false;
-    for( char c : s ) if( !identByte( (unsigned char)c ) )        return false;
+    if( s.size() < minLen || s.size() > maxLen )
+    {
+        return false;
+    }
+    if( !( std::isalpha( (unsigned char)s[0] ) || s[0] == '_' ) )
+    {
+        return false;
+    }
+    for( char c : s )
+    {
+        if( !identByte( (unsigned char)c ) )
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -158,9 +179,17 @@ inline bool endsWithView( std::string_view s, std::string_view suffix ) noexcept
 // a caller that must read what sits to the LEFT of the hit (flipimpact's binding declarator) needs WHERE.
 inline std::size_t firstWordAt( std::string_view hay, std::string_view word ) noexcept
 {
-    if( word.empty() ) return std::string_view::npos;
+    if( word.empty() )
+    {
+        return std::string_view::npos;
+    }
     for( std::size_t at = hay.find( word ); at != std::string_view::npos; at = hay.find( word, at + 1 ) )
-        if( wholeWordAt( hay, at, word.size() ) ) return at;
+    {
+        if( wholeWordAt( hay, at, word.size() ) )
+        {
+            return at;
+        }
+    }
     return std::string_view::npos;
 }
 
@@ -186,12 +215,21 @@ inline std::uint32_t forEachLine( std::string_view bytes, PerLine&& perLine )
     for( std::size_t i = 0; i < bytes.size(); )
     {
         std::size_t e = bytes.find( '\n', i );
-        if( e == std::string_view::npos ) e = bytes.size();
+        if( e == std::string_view::npos )
+        {
+            e = bytes.size();
+        }
         std::string_view line = bytes.substr( i, e - i );
-        if( !line.empty() && line.back() == '\r' ) line.remove_suffix( 1 );
+        if( !line.empty() && line.back() == '\r' )
+        {
+            line.remove_suffix( 1 );
+        }
         ++lineCount;
         perLine( line, lineCount );
-        if( e == bytes.size() ) break;
+        if( e == bytes.size() )
+        {
+            break;
+        }
         i = e + 1;
     }
     return lineCount;
@@ -200,8 +238,14 @@ inline std::uint32_t forEachLine( std::string_view bytes, PerLine&& perLine )
 inline std::string_view trimView( std::string_view s )
 {
     std::size_t a = 0, b = s.size();
-    while( a < b && std::isspace( (unsigned char)s[a] ) )     ++a;
-    while( b > a && std::isspace( (unsigned char)s[b - 1] ) ) --b;
+    while( a < b && std::isspace( (unsigned char)s[a] ) )
+    {
+        ++a;
+    }
+    while( b > a && std::isspace( (unsigned char)s[b - 1] ) )
+    {
+        --b;
+    }
     return s.substr( a, b - a );
 }
 
@@ -209,7 +253,10 @@ inline std::string_view trimView( std::string_view s )
 inline std::string_view takeIdent( std::string_view src, std::size_t& i )
 {
     const std::size_t s = i;
-    while( i < src.size() && identByte( (unsigned char)src[i] ) ) ++i;
+    while( i < src.size() && identByte( (unsigned char)src[i] ) )
+    {
+        ++i;
+    }
     return src.substr( s, i - s );
 }
 
@@ -221,7 +268,10 @@ inline std::vector<std::string_view> identsIn( std::string_view expr )
     {
         if( !identByte( (unsigned char)expr[i] ) ) { ++i; continue; }
         const std::string_view id = takeIdent( expr, i );
-        if( !id.empty() && id != "defined" && !std::isdigit( (unsigned char)id[0] ) ) out.push_back( id );
+        if( !id.empty() && id != "defined" && !std::isdigit( (unsigned char)id[0] ) )
+        {
+            out.push_back( id );
+        }
     }
     return out;
 }
@@ -264,8 +314,14 @@ inline void harvestDirective( std::string_view d, std::uint32_t lineNo, FileHarv
         // The trailing comment is NOT part of the value: `#define F 1   // shipped ON` must report "1",
         // not the whole rest of the line (which then lands verbatim in an XML attribute).
         std::string_view raw = rest.substr( j );
-        if( const std::size_t c = raw.find( "//" ); c != std::string_view::npos ) raw = raw.substr( 0, c );
-        if( const std::size_t c = raw.find( "/*" ); c != std::string_view::npos ) raw = raw.substr( 0, c );
+        if( const std::size_t c = raw.find( "//" ); c != std::string_view::npos )
+        {
+            raw = raw.substr( 0, c );
+        }
+        if( const std::size_t c = raw.find( "/*" ); c != std::string_view::npos )
+        {
+            raw = raw.substr( 0, c );
+        }
         const std::string value( trimView( raw ) );
 
         // A VALUE is required. `#ifndef X / #define X` with nothing after it is an INCLUDE GUARD, which
@@ -280,7 +336,10 @@ inline void harvestDirective( std::string_view d, std::uint32_t lineNo, FileHarv
         {
             std::size_t k = 0;
             const std::string_view target = takeIdent( std::string_view( value ), k );
-            if( k == value.size() ) fh.reads.push_back( FileHarvest::Read{ std::string( target ), lineNo } );
+            if( k == value.size() )
+            {
+                fh.reads.push_back( FileHarvest::Read { std::string( target ), lineNo } );
+            }
         }
 
         if( name == pendingIfndef && !name.empty() && !value.empty() )
@@ -289,7 +348,9 @@ inline void harvestDirective( std::string_view d, std::uint32_t lineNo, FileHarv
             // The enclosing `#ifndef NAME` is this gate's DECLARATION, not a use of it — mark it so the
             // region is not later counted as guarded code or as a read site of the gate it declares.
             if( !stack.empty() && stack.back().idents.size() == 1 && stack.back().idents[0] == name )
+            {
                 stack.back().declared = true;
+            }
         }
         pendingIfndef.clear();
         return;
@@ -310,20 +371,37 @@ inline void harvestDirective( std::string_view d, std::uint32_t lineNo, FileHarv
         // `#if !defined(NAME)` is the same guard idiom spelled the other way; treat it like `#ifndef NAME`
         // so the `#define` beneath it is still recognised as that gate's default.
         std::vector<std::string> ids;
-        for( std::string_view s : identsIn( rest ) ) ids.emplace_back( s );
+        for( std::string_view s : identsIn( rest ) )
+        {
+            ids.emplace_back( s );
+        }
         if( kw == "if" && rest.find( '!' ) != std::string_view::npos && rest.find( "defined" ) != std::string_view::npos && ids.size() == 1 )
+        {
             pendingIfndef = ids[0];
-        if( kw == "elif" && !stack.empty() ) stack.back().idents.insert( stack.back().idents.end(), ids.begin(), ids.end() );
-        else                                  stack.push_back( OpenCond{ std::move( ids ), lineNo } );
+        }
+        if( kw == "elif" && !stack.empty() )
+        {
+            stack.back().idents.insert( stack.back().idents.end(), ids.begin(), ids.end() );
+        }
+        else
+        {
+            stack.push_back( OpenCond { std::move( ids ), lineNo } );
+        }
         return;
     }
 
     if( kw == "endif" )
     {
-        if( stack.empty() ) return;                       // unbalanced (a file fragment) — degrade, never crash
+        if( stack.empty() )
+        {
+            return; // unbalanced (a file fragment) — degrade, never crash
+        }
         OpenCond top = std::move( stack.back() );
         stack.pop_back();
-        if( top.declared ) return;                        // the gate's own declaration guard — not a use of it
+        if( top.declared )
+        {
+            return; // the gate's own declaration guard — not a use of it
+        }
         fh.conds.push_back( FileHarvest::Cond{ std::move( top.idents ), top.line,
                                                ( lineNo > top.line ) ? ( lineNo - top.line - 1 ) : 0u } );
     }
@@ -360,14 +438,25 @@ inline LineSyntax lineSyntaxFor( std::string_view path )
     const std::string ext = docparse::lowerExtOf( path );
     LineSyntax        syn;
     for( std::string_view hashExt : kHashCommentExtTable )
+    {
         if( ext == hashExt )
         {
             syn.hasHashComments = true;
             syn.hasSlashComments = false;
-            for( std::string_view shellExt : kShellExtTable ) if( ext == shellExt ) syn.hasHeredocs = true;
+            for( std::string_view shellExt : kShellExtTable )
+            {
+                if( ext == shellExt )
+                {
+                    syn.hasHeredocs = true;
+                }
+            }
             return syn;
         }
-    if( ext == ".md" || ext == ".markdown" || ext == ".rst" || ext == ".txt" || docparse::isDocExtension( ext ) ) syn.isProse = true;
+    }
+    if( ext == ".md" || ext == ".markdown" || ext == ".rst" || ext == ".txt" || docparse::isDocExtension( ext ) )
+    {
+        syn.isProse = true;
+    }
     return syn;
 }
 
@@ -389,16 +478,25 @@ inline void forEachCodeByte( std::string_view line, const LineSyntax& syn, bool&
         if( quote != 0 )
         {
             if( c == '\\' ) { ++i; continue; }                      // an escaped byte closes nothing
-            if( c == quote ) quote = 0;
+            if( c == quote )
+            {
+                quote = 0;
+            }
             continue;
         }
         if( c == '"' || c == '\'' ) { quote = c; continue; }
         if( syn.hasSlashComments && c == '/' && i + 1 < line.size() )
         {
-            if( line[ i + 1 ] == '/' ) return;                     // line comment: nothing after it is code
+            if( line[i + 1] == '/' )
+            {
+                return; // line comment: nothing after it is code
+            }
             if( line[ i + 1 ] == '*' ) { isInBlockComment = true; ++i; continue; }
         }
-        if( syn.hasHashComments && c == '#' ) return;
+        if( syn.hasHashComments && c == '#' )
+        {
+            return;
+        }
         onCode( i );
     }
 }
@@ -423,20 +521,38 @@ inline constexpr std::string_view kEnvProbeTable[] = { "getenv", "environ.get", 
 // finds must be identifier-shaped.
 inline std::string_view envNameAt( std::string_view line, std::size_t at, std::string_view probe )
 {
-    if( line.compare( at, probe.size(), probe ) != 0 ) return {};
+    if( line.compare( at, probe.size(), probe ) != 0 )
+    {
+        return {};
+    }
 
     std::size_t i = at + probe.size();
     if( probe.back() != '[' )                                            // `environ[` already opened its own
     {
-        while( i < line.size() && std::isspace( (unsigned char)line[i] ) ) ++i;
-        if( i >= line.size() || line[i] != '(' ) return {};
+        while( i < line.size() && std::isspace( (unsigned char)line[i] ) )
+        {
+            ++i;
+        }
+        if( i >= line.size() || line[i] != '(' )
+        {
+            return {};
+        }
         ++i;
     }
-    while( i < line.size() && std::isspace( (unsigned char)line[i] ) ) ++i;
-    if( i >= line.size() || line[i] != '"' ) return {};                   // computed name — cannot be named
+    while( i < line.size() && std::isspace( (unsigned char)line[i] ) )
+    {
+        ++i;
+    }
+    if( i >= line.size() || line[i] != '"' )
+    {
+        return {}; // computed name — cannot be named
+    }
 
     const std::size_t close = line.find( '"', i + 1 );
-    if( close == std::string_view::npos ) return {};
+    if( close == std::string_view::npos )
+    {
+        return {};
+    }
 
     const std::string_view name = line.substr( i + 1, close - i - 1 );
     return isIdentShaped( name, 1, kMaxEnvNameLen ) ? name : std::string_view{};
@@ -446,17 +562,18 @@ inline void harvestEnvReads( std::string_view line, std::uint32_t lineNo, FileHa
                              const LineSyntax& syn, bool& isInBlockComment )
 {
     forEachCodeByte( line, syn, isInBlockComment, [ & ]( std::size_t at )
-    {
-        if( at > 0 && identByte( (unsigned char)line[ at - 1 ] ) ) return;   // mid-identifier — not a call of ours
+                     {
+        if( at > 0 && identByte( (unsigned char)line[ at - 1 ] ) ) { return;   // mid-identifier — not a call of ours
+}
         for( std::string_view probe : kEnvProbeTable )
         {
             const std::string_view name = envNameAt( line, at, probe );
-            if( name.empty() ) continue;
+            if( name.empty() ) { continue;
+}
             fh.reads.push_back( FileHarvest::Read{ std::string( name ), lineNo } );
             fh.defs.push_back( FileHarvest::Def{ std::string( name ), "unset", lineNo, GateKind::Env } );
             return;
-        }
-    } );
+        } } );
 }
 
 // `option( NAME "doc" ON )` — CMake's own declaration of a build switch, with its default as the LAST token.
@@ -464,15 +581,33 @@ inline void harvestEnvReads( std::string_view line, std::uint32_t lineNo, FileHa
 inline void harvestCMakeOption( std::string_view line, std::uint32_t lineNo, FileHarvest& fh )
 {
     const std::size_t at = line.find( "option" );
-    if( at == std::string_view::npos ) return;
-    if( at > 0 && identByte( (unsigned char)line[ at - 1 ] ) ) return;      // e.g. `add_option(`
+    if( at == std::string_view::npos )
+    {
+        return;
+    }
+    if( at > 0 && identByte( (unsigned char)line[at - 1] ) )
+    {
+        return; // e.g. `add_option(`
+    }
     std::size_t i = at + 6;
-    while( i < line.size() && std::isspace( (unsigned char)line[i] ) ) ++i;
-    if( i >= line.size() || line[i] != '(' ) return;
+    while( i < line.size() && std::isspace( (unsigned char)line[i] ) )
+    {
+        ++i;
+    }
+    if( i >= line.size() || line[i] != '(' )
+    {
+        return;
+    }
     ++i;
-    while( i < line.size() && std::isspace( (unsigned char)line[i] ) ) ++i;
+    while( i < line.size() && std::isspace( (unsigned char)line[i] ) )
+    {
+        ++i;
+    }
     const std::string_view name = takeIdent( line, i );
-    if( name.empty() ) return;
+    if( name.empty() )
+    {
+        return;
+    }
 
     const std::size_t close = line.rfind( ')' );
     std::string       def( "OFF" );
@@ -481,7 +616,10 @@ inline void harvestCMakeOption( std::string_view line, std::uint32_t lineNo, Fil
         std::string_view tail = trimView( line.substr( i, close - i ) );
         const std::size_t sp  = tail.find_last_of( " \t\"" );
         const std::string_view last = ( sp == std::string_view::npos ) ? tail : trimView( tail.substr( sp + 1 ) );
-        if( !last.empty() && last.find( '"' ) == std::string_view::npos ) def.assign( last );
+        if( !last.empty() && last.find( '"' ) == std::string_view::npos )
+        {
+            def.assign( last );
+        }
     }
     fh.defs.push_back( FileHarvest::Def{ std::string( name ), def, lineNo, GateKind::CMake } );
 }
@@ -496,11 +634,23 @@ inline std::string_view heredocDelimiterOn( std::string_view line )
     for( std::size_t at = line.find( "<<" ); at != std::string_view::npos; at = line.find( "<<", at + 1 ) )
     {
         std::size_t i = at + 2;
-        if( i < line.size() && line[i] == '<' ) continue;                  // <<< is a here-string, not a heredoc
-        if( i < line.size() && line[i] == '-' ) ++i;                       // <<- strips leading tabs
-        if( i < line.size() && ( line[i] == '\'' || line[i] == '"' ) ) ++i;
+        if( i < line.size() && line[i] == '<' )
+        {
+            continue; // <<< is a here-string, not a heredoc
+        }
+        if( i < line.size() && line[i] == '-' )
+        {
+            ++i; // <<- strips leading tabs
+        }
+        if( i < line.size() && ( line[i] == '\'' || line[i] == '"' ) )
+        {
+            ++i;
+        }
         const std::string_view word = takeIdent( line, i );
-        if( !word.empty() ) return word;
+        if( !word.empty() )
+        {
+            return word;
+        }
     }
     return {};
 }
@@ -517,7 +667,10 @@ inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, b
     FileHarvest           fh;
     const LineSyntax      syn = isCMake ? LineSyntax{ /*slash=*/false, /*hash=*/true, /*heredoc=*/false, /*prose=*/false }
                                       : lineSyntaxFor( path );
-    if( syn.isProse ) return fh;
+    if( syn.isProse )
+    {
+        return fh;
+    }
 
     std::vector<OpenCond> stack;
     std::string           pendingIfndef;
@@ -532,14 +685,22 @@ inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, b
             // A CMake mention of an already-declared option (`${NAME}`, a generator expression, a
             // target_compile_definitions row) is a READ site — it is where the switch reaches the build.
             for( std::string_view id : identsIn( line ) )
-                if( id.size() > 2 ) fh.reads.push_back( FileHarvest::Read{ std::string( id ), lineIndex } );
+            {
+                if( id.size() > 2 )
+                {
+                    fh.reads.push_back( FileHarvest::Read { std::string( id ), lineIndex } );
+                }
+            }
             return;
         }
 
         // Heredoc bodies, in the shell family only: skipped whole, until their own delimiter line closes them.
         if( !heredocDelimiter.empty() )
         {
-            if( trimView( line ) == heredocDelimiter ) heredocDelimiter.clear();
+            if( trimView( line ) == heredocDelimiter )
+            {
+                heredocDelimiter.clear();
+            }
             return;
         }
 
@@ -551,13 +712,21 @@ inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, b
         // The opener line itself IS code (it can carry a real call); only what follows it is data. A `#`
         // comment mentioning a heredoc must not open one, or the rest of the file goes dark.
         if( syn.hasHeredocs && !trimView( line ).empty() && trimView( line )[0] != '#' )
+        {
             heredocDelimiter.assign( heredocDelimiterOn( line ) );
+        }
 
         // The preprocessor lane is C-family only. In a hash-comment language every `#` line is a comment, and
         // feeding those to harvestDirective made `# if the cache is warm` open an unbalanced `#if` region.
-        if( wasInBlockComment || syn.hasHashComments ) return;
+        if( wasInBlockComment || syn.hasHashComments )
+        {
+            return;
+        }
         const std::string_view t = trimView( line );
-        if( t.empty() || t[0] != '#' ) return;
+        if( t.empty() || t[0] != '#' )
+        {
+            return;
+        }
         harvestDirective( trimView( t.substr( 1 ) ), lineIndex, fh, stack, pendingIfndef );
     } );
     return fh;
@@ -568,7 +737,10 @@ inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, b
 inline bool readWhole( const std::string& path, std::string& out )
 {
     std::FILE* fp = std::fopen( path.c_str(), "rb" );
-    if( !fp ) return false;
+    if( !fp )
+    {
+        return false;
+    }
     out.clear();
     char        buf[ 65536 ];
     std::size_t n = 0;
@@ -613,10 +785,17 @@ inline std::vector<std::string> collectCMakeFiles( const std::string& root, cons
         const std::string p = it->path().string();
         bool skip = false;
         for( const std::string& x : excludes )
+        {
             if( !x.empty() && p.find( x ) != std::string::npos ) { skip = true; break; }
-        if( skip ) continue;
+        }
+        if( skip )
+        {
+            continue;
+        }
         if( base == "CMakeLists.txt" || ( base.size() > 6 && base.compare( base.size() - 6, 6, ".cmake" ) == 0 ) )
+        {
             out.push_back( p );
+        }
     }
     std::sort( out.begin(), out.end() );
     return out;
@@ -639,7 +818,10 @@ inline void mergeDef( gtl::btree_map<std::string, Gate>& gates, const FileHarves
         g.name = d.name;  g.kind = d.kind;  g.def = d.value;  g.defSite = Site{ rel, d.line };
         return;
     }
-    if( g.kind == d.kind ) return;                                    // first site of a kind wins (sorted walk ⇒ stable)
+    if( g.kind == d.kind )
+    {
+        return; // first site of a kind wins (sorted walk ⇒ stable)
+    }
 
     // Different kinds for one name: CMake is what the build actually passes, so it wins the headline and the
     // other becomes the <also/> row. Env never displaces a real build switch (it is a runtime read, not a
@@ -671,14 +853,26 @@ inline void resolveAliases( gtl::btree_map<std::string, Gate>& gates )
         for( std::uint32_t depth = 0; depth < kMaxAliasDepth; ++depth )
         {
             const auto p = gates.find( cursor );
-            if( p == gates.end() || p->first == name ) break;
-            if( depth == 0 ) g.aliasParent = cursor;      // the immediate link, before the walk climbs past it
+            if( p == gates.end() || p->first == name )
+            {
+                break;
+            }
+            if( depth == 0 )
+            {
+                g.aliasParent = cursor; // the immediate link, before the walk climbs past it
+            }
             master = cursor;
             cursor = p->second.def;
         }
-        if( master.empty() ) continue;
+        if( master.empty() )
+        {
+            continue;
+        }
         const auto m = gates.find( master );
-        if( m == gates.end() ) continue;
+        if( m == gates.end() )
+        {
+            continue;
+        }
         g.aliasOf = master;
         g.def     = m->second.def;                                       // inherit the master's effective default
     }
@@ -689,11 +883,19 @@ inline void resolveAliases( gtl::btree_map<std::string, Gate>& gates )
     struct RollUp { std::string parent; std::uint32_t regions, lines; };
     std::vector<RollUp> rolls;
     for( const auto& [ name, g ] : gates )
-        if( !g.aliasOf.empty() ) rolls.push_back( RollUp{ g.aliasOf, g.regions, g.guardedLines } );
+    {
+        if( !g.aliasOf.empty() )
+        {
+            rolls.push_back( RollUp { g.aliasOf, g.regions, g.guardedLines } );
+        }
+    }
     for( const RollUp& r : rolls )
     {
         const auto p = gates.find( r.parent );
-        if( p == gates.end() ) continue;
+        if( p == gates.end() )
+        {
+            continue;
+        }
         ++p->second.aliasCount;
         p->second.aliasRegions += r.regions;
         p->second.aliasLines   += r.lines;
@@ -716,38 +918,59 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     const auto scan = [ & ]( const std::string& full, bool isCMake )
     {
         std::string bytes;
-        if( !readWhole( full, bytes ) ) return;
+        if( !readWhole( full, bytes ) )
+        {
+            return;
+        }
         std::string rel( relForHash( full, root ) );
         FileHarvest fh = harvestFile( bytes, full, isCMake );
         harvest.push_back( Harvested{ std::move( rel ), std::move( fh ) } );
     };
 
-    for( const std::string& f : ing.files )                scan( f, false );
-    for( const std::string& f : collectCMakeFiles( root, excludes ) ) scan( f, true );
+    for( const std::string& f : ing.files )
+    {
+        scan( f, false );
+    }
+    for( const std::string& f : collectCMakeFiles( root, excludes ) )
+    {
+        scan( f, true );
+    }
 
     // Pass 1 — gate identities (declarations only).
     gtl::btree_map<std::string, Gate> gates;
     for( const Harvested& h : harvest )
+    {
         for( const FileHarvest::Def& d : h.fh.defs )
+        {
             mergeDef( gates, d, h.rel );
+        }
+    }
 
     // Pass 2 — regions and read sites, attributed only to declared gates.
     for( const Harvested& h : harvest )
     {
         for( const FileHarvest::Cond& c : h.fh.conds )
+        {
             for( const std::string& id : c.idents )
             {
                 const auto it = gates.find( id );
-                if( it == gates.end() ) continue;
+                if( it == gates.end() )
+                {
+                    continue;
+                }
                 ++it->second.regions;
                 it->second.guardedLines += c.lines;
                 it->second.reads.push_back( Site{ h.rel, c.line } );
                 it->second.regionSpans.push_back( Region{ Site{ h.rel, c.line }, c.lines } );
             }
+        }
         for( const FileHarvest::Read& r : h.fh.reads )
         {
             const auto it = gates.find( r.name );
-            if( it == gates.end() ) continue;
+            if( it == gates.end() )
+            {
+                continue;
+            }
             it->second.reads.push_back( Site{ h.rel, r.line } );
         }
     }
@@ -758,10 +981,16 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     res.filesScanned = harvest.size();
     for( auto& [ name, g ] : gates )
     {
-        if( !filter.empty() && name.find( filter ) == std::string::npos ) continue;
+        if( !filter.empty() && name.find( filter ) == std::string::npos )
+        {
+            continue;
+        }
         // A declaration with no reader is a dead name, not a gate — the getenv lane especially would
         // otherwise report every one-off environment probe as a repo-wide switch.
-        if( g.reads.empty() && !keepUnreadGates ) continue;
+        if( g.reads.empty() && !keepUnreadGates )
+        {
+            continue;
+        }
 
         // `#endif` order is not start-line order once regions nest (the inner one closes first) — sort so the
         // span list is deterministic and reads top-down like the file does.
@@ -770,10 +999,22 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
         std::sort( g.reads.begin(), g.reads.end(), siteLess );
         g.reads.erase( std::unique( g.reads.begin(), g.reads.end(),
                                     []( const Site& a, const Site& b ) { return a.path == b.path && a.line == b.line; } ), g.reads.end() );
-        if( isDarkDefault( g.def ) ) ++res.dark;
-        if     ( g.kind == GateKind::CMake ) ++res.cmakeCount;
-        else if( g.kind == GateKind::Env )   ++res.envCount;
-        else                                 ++res.compileCount;
+        if( isDarkDefault( g.def ) )
+        {
+            ++res.dark;
+        }
+        if( g.kind == GateKind::CMake )
+        {
+            ++res.cmakeCount;
+        }
+        else if( g.kind == GateKind::Env )
+        {
+            ++res.envCount;
+        }
+        else
+        {
+            ++res.compileCount;
+        }
         res.gates.push_back( std::move( g ) );
     }
 
@@ -783,8 +1024,14 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     std::sort( res.gates.begin(), res.gates.end(), [ & ]( const Gate& a, const Gate& b )
     {
         const bool ad = isDarkDefault( a.def ), bd = isDarkDefault( b.def );
-        if( ad != bd )                   return ad;
-        if( weight( a ) != weight( b ) ) return weight( a ) > weight( b );
+        if( ad != bd )
+        {
+            return ad;
+        }
+        if( weight( a ) != weight( b ) )
+        {
+            return weight( a ) > weight( b );
+        }
         return a.name < b.name;
     } );
     return res;
@@ -800,20 +1047,31 @@ inline void writeGate( std::FILE* out, const Gate& g, const XmlEscaper& ex, std:
                   ex( g.name ).c_str(), gateKindTag( g.kind ), ex( g.def ).c_str(), isDarkDefault( g.def ) ? 1 : 0,
                   g.regions, g.guardedLines, g.reads.size(), ex( g.defSite.path ).c_str(), g.defSite.line );
     if( !g.aliasOf.empty() )
+    {
         std::fprintf( out, "<alias-of name=\"%s\"/>", ex( g.aliasOf ).c_str() );
+    }
     if( g.aliasCount )
+    {
         std::fprintf( out, "<aliases n=\"%u\" regions=\"%u\" loc=\"%u\"/>", g.aliasCount, g.aliasRegions, g.aliasLines );
+    }
     if( g.hasAlso )
+    {
         std::fprintf( out, "<also kind=\"%s\" default=\"%s\" p=\"%s\" l=\"%u\"/>",
                       gateKindTag( g.alsoKind ), ex( g.alsoDef ).c_str(), ex( g.alsoSite.path ).c_str(), g.alsoSite.line );
+    }
     // "Nothing is dropped without a number": shownCount is what the loop will PRINT, so the <more/> remainder
     // is exactly what it will not. The `shown++ >= cap` form got this wrong twice over — it left the counter
     // at cap+1, so <more/> under-reported the drop by one, and at exactly cap+1 reads the element vanished
     // entirely and one row disappeared unmarked. abicheck.h::writeAbiRef is the shape this follows.
     const std::size_t shownCount = std::min( g.reads.size(), maxSites );
     for( std::size_t readIndex = 0; readIndex < shownCount; ++readIndex )
+    {
         std::fprintf( out, "<read p=\"%s\" l=\"%u\"/>", ex( g.reads[ readIndex ].path ).c_str(), g.reads[ readIndex ].line );
-    if( g.reads.size() > shownCount ) std::fprintf( out, "<more reads=\"%zu\"/>", g.reads.size() - shownCount );
+    }
+    if( g.reads.size() > shownCount )
+    {
+        std::fprintf( out, "<more reads=\"%zu\"/>", g.reads.size() - shownCount );
+    }
     std::fprintf( out, "</gate>" );
 }
 
@@ -836,7 +1094,10 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     // gates=/compile=/cmake=/env= siblings; it had ZERO parsers, so the bool half keeps its name.
     std::fprintf( out, "<flags gates=\"%zu\" dark_gates=\"%u\" compile=\"%u\" cmake=\"%u\" env=\"%u\" files=\"%zu\">",
                   res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned );
-    for( const Gate& g : res.gates ) writeGate( out, g, ex, maxSites );
+    for( const Gate& g : res.gates )
+    {
+        writeGate( out, g, ex, maxSites );
+    }
     std::fprintf( out, "</flags>" );
 }
 

@@ -66,10 +66,17 @@ inline constexpr std::array<BuiltinLayer, 18> kBuiltinLayers = {{
 
 inline bool ciEqualAscii( std::string_view a, std::string_view b ) noexcept
 {
-    if( a.size() != b.size() ) return false;
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
     for( std::size_t i = 0; i < a.size(); ++i )
+    {
         if( std::tolower( static_cast<unsigned char>( a[i] ) ) != static_cast<unsigned char>( b[i] ) )
+        {
             return false;
+        }
+    }
     return true;
 }
 
@@ -77,7 +84,10 @@ inline bool ciEqualAscii( std::string_view a, std::string_view b ) noexcept
 inline const char* builtinLayer( std::string_view path ) noexcept
 {
     const std::size_t lastSlash = path.rfind( '/' );
-    if( lastSlash == std::string_view::npos ) return "";          // no directory → no layer
+    if( lastSlash == std::string_view::npos )
+    {
+        return ""; // no directory → no layer
+    }
     const std::string_view dirs = path.substr( 0, lastSlash );
     std::size_t start = 0;
     while( start <= dirs.size() )
@@ -85,8 +95,16 @@ inline const char* builtinLayer( std::string_view path ) noexcept
         const std::size_t      slash = dirs.find( '/', start );
         const std::string_view comp  = dirs.substr( start, ( slash == std::string_view::npos ? dirs.size() : slash ) - start );
         for( const BuiltinLayer& bl : kBuiltinLayers )
-            if( ciEqualAscii( comp, bl.dir ) ) return bl.layer;
-        if( slash == std::string_view::npos ) break;
+        {
+            if( ciEqualAscii( comp, bl.dir ) )
+            {
+                return bl.layer;
+            }
+        }
+        if( slash == std::string_view::npos )
+        {
+            break;
+        }
         start = slash + 1;
     }
     return "";
@@ -177,7 +195,10 @@ inline std::string substituteBackrefs( std::string_view toTemplate, const std::s
             if( nxt >= '1' && nxt <= '9' )
             {
                 const std::size_t grp = std::size_t( nxt - '0' );
-                if( grp < m.size() && m[ grp ].matched ) out += regexEscapeLiteral( m[ grp ].str() );
+                if( grp < m.size() && m[grp].matched )
+                {
+                    out += regexEscapeLiteral( m[grp].str() );
+                }
                 i += 1;                                   // consume the digit
                 continue;
             }
@@ -203,22 +224,37 @@ inline bool pathRuleForbids( const ArchRules& r, std::string_view src, std::stri
     // 1) is the edge explicitly ALLOWED by any allow path-rule? (exception wins → never a violation)
     for( const PathRule& pr : r.pathRules )
     {
-        if( pr.bad || !pr.allow ) continue;
+        if( pr.bad || !pr.allow )
+        {
+            continue;
+        }
         std::smatch fm;
-        if( !std::regex_search( srcS, fm, pr.fromRe ) ) continue;
+        if( !std::regex_search( srcS, fm, pr.fromRe ) )
+        {
+            continue;
+        }
         std::regex toRe;
         try { toRe = std::regex( substituteBackrefs( pr.to, fm ), std::regex::ECMAScript ); }
         catch( const std::regex_error& ) { continue; }       // malformed-after-substitution → inert
-        if( std::regex_search( dstS, toRe ) ) return false;   // an allow rule matches → permitted
+        if( std::regex_search( dstS, toRe ) )
+        {
+            return false; // an allow rule matches → permitted
+        }
     }
 
     // 2) does any DENY path-rule match? (first match wins for the label, file order = deterministic)
     for( std::size_t i = 0; i < r.pathRules.size(); ++i )
     {
         const PathRule& pr = r.pathRules[i];
-        if( pr.bad || pr.allow ) continue;
+        if( pr.bad || pr.allow )
+        {
+            continue;
+        }
         std::smatch fm;
-        if( !std::regex_search( srcS, fm, pr.fromRe ) ) continue;
+        if( !std::regex_search( srcS, fm, pr.fromRe ) )
+        {
+            continue;
+        }
         std::regex toRe;
         try { toRe = std::regex( substituteBackrefs( pr.to, fm ), std::regex::ECMAScript ); }
         catch( const std::regex_error& ) { continue; }       // malformed-after-substitution → inert
@@ -229,8 +265,17 @@ inline bool pathRuleForbids( const ArchRules& r, std::string_view src, std::stri
 
 inline int archLayerId( const ArchRules& r, std::string_view name )   // name → id; '*' → -1; unknown → -2
 {
-    if( name == "*" ) return -1;
-    for( std::size_t i = 0; i < r.layerNames.size(); ++i ) if( r.layerNames[i] == name ) return int( i );
+    if( name == "*" )
+    {
+        return -1;
+    }
+    for( std::size_t i = 0; i < r.layerNames.size(); ++i )
+    {
+        if( r.layerNames[i] == name )
+        {
+            return int( i );
+        }
+    }
     return -2;
 }
 
@@ -248,16 +293,35 @@ inline std::vector<std::string> builtinLayerSubs( std::string_view name ) noexce
     std::vector<std::string> subs;
     for( const BuiltinLayer& bl : kBuiltinLayers )
     {
-        if( name != bl.layer ) continue;
+        if( name != bl.layer )
+        {
+            continue;
+        }
         // mid-path form: "/dir/"  e.g. "/render/"
         const std::string mid = std::string( "/" ) + std::string( bl.dir ) + "/";
         // root-path form: "dir/"  e.g. "render/"  (handles paths that start with the dir name)
         const std::string root = std::string( bl.dir ) + "/";
         // dedup before inserting
         bool hasMid = false, hasRoot = false;
-        for( const std::string& s : subs ) { if( s == mid ) hasMid = true; if( s == root ) hasRoot = true; }
-        if( !hasMid  ) subs.push_back( mid  );
-        if( !hasRoot ) subs.push_back( root );
+        for( const std::string& s : subs )
+        {
+            if( s == mid )
+            {
+                hasMid = true;
+            }
+            if( s == root )
+            {
+                hasRoot = true;
+            }
+        }
+        if( !hasMid )
+        {
+            subs.push_back( mid );
+        }
+        if( !hasRoot )
+        {
+            subs.push_back( root );
+        }
     }
     return subs;
 }
@@ -266,7 +330,10 @@ inline ArchRules parseArchRules( const std::string& path )
 {
     ArchRules r;
     std::ifstream f( path );
-    if( !f ) return r;   // can't open at all — caller reports "cannot read rules file" (r.parseError stays false)
+    if( !f )
+    {
+        return r; // can't open at all — caller reports "cannot read rules file" (r.parseError stays false)
+    }
 
     // collect raw rule tokens in file order; resolve ids AFTER all user `layer` lines are seen,
     // then auto-add built-in layers for names that still have no definition.
@@ -294,16 +361,25 @@ inline ArchRules parseArchRules( const std::string& path )
     {
         ++lineNo;
         const std::size_t h = line.find( '#' );
-        if( h != std::string::npos ) line.resize( h );        // strip comment
+        if( h != std::string::npos )
+        {
+            line.resize( h ); // strip comment
+        }
         std::istringstream ss( line );
         std::string kw;
-        if( !( ss >> kw ) ) continue;                          // blank (or comment-only) line — fine
+        if( !( ss >> kw ) )
+        {
+            continue; // blank (or comment-only) line — fine
+        }
         if( kw == "layer" )
         {
             std::string name, eq, s;
             ss >> name >> eq;                                  // layer NAME = ...
             std::vector<std::string> subs;
-            while( ss >> s ) subs.push_back( s );
+            while( ss >> s )
+            {
+                subs.push_back( s );
+            }
             if( name.empty() || eq != "=" || subs.empty() ) { ok = badLine( lineNo, "malformed line (want: layer NAME = sub1 sub2 ...)" ); break; }
             r.layerNames.push_back( name ); r.layerSubs.push_back( std::move( subs ) );
         }
@@ -356,8 +432,14 @@ inline ArchRules parseArchRules( const std::string& path )
     {
         for( const std::string* namePtr : { &rr.from, &rr.to } )
         {
-            if( *namePtr == "*" ) continue;                   // wildcard, always valid
-            if( archLayerId( r, *namePtr ) != -2 ) continue;  // already defined → skip
+            if( *namePtr == "*" )
+            {
+                continue; // wildcard, always valid
+            }
+            if( archLayerId( r, *namePtr ) != -2 )
+            {
+                continue; // already defined → skip
+            }
             std::vector<std::string> subs = builtinLayerSubs( *namePtr );
             if( !subs.empty() ) { r.layerNames.push_back( *namePtr ); r.layerSubs.push_back( std::move( subs ) ); }
         }
@@ -367,7 +449,10 @@ inline ArchRules parseArchRules( const std::string& path )
     for( const RawRule& rr : rawRules )
     {
         const int fi = archLayerId( r, rr.from ), ti = archLayerId( r, rr.to );
-        if( fi != -2 && ti != -2 ) r.rules.push_back( { fi, ti, rr.allow } );
+        if( fi != -2 && ti != -2 )
+        {
+            r.rules.push_back( { fi, ti, rr.allow } );
+        }
     }
 
     r.loaded = true;
@@ -377,8 +462,15 @@ inline ArchRules parseArchRules( const std::string& path )
 inline int archLayerOf( const ArchRules& r, std::string_view path )   // first matching layer, or -1 (unlayered)
 {
     for( std::size_t i = 0; i < r.layerSubs.size(); ++i )
+    {
         for( const std::string& s : r.layerSubs[i] )
-            if( path.find( s ) != std::string_view::npos ) return int( i );
+        {
+            if( path.find( s ) != std::string_view::npos )
+            {
+                return int( i );
+            }
+        }
+    }
     return -1;
 }
 
@@ -390,9 +482,18 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
     {
         const bool fromM = ( rule.from == -1 || rule.from == la );
         const bool toM   = ( rule.to   == -1 || rule.to   == lb );
-        if( rule.allow && fromM )           hasAllow = true;   // wildcard `allow * -> X` allow-lists every layer too
-        if( rule.allow && fromM && toM )    allowed  = true;
-        if( !rule.allow && fromM && toM )   denied   = true;
+        if( rule.allow && fromM )
+        {
+            hasAllow = true; // wildcard `allow * -> X` allow-lists every layer too
+        }
+        if( rule.allow && fromM && toM )
+        {
+            allowed = true;
+        }
+        if( !rule.allow && fromM && toM )
+        {
+            denied = true;
+        }
     }
     return denied || ( hasAllow && !allowed );
 }
@@ -406,7 +507,10 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
 inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 {
     std::uint64_t h = 14695981039346656037ull;
-    for( const char c : s ) h = hashutil::fnv1aAbsorb( h, c );
+    for( const char c : s )
+    {
+        h = hashutil::fnv1aAbsorb( h, c );
+    }
     return h;
 }
 
@@ -435,20 +539,35 @@ inline std::string_view relForHash( std::string_view path, std::string_view root
 {
     // 1) strip the ingest-root prefix if present (allow one optional trailing '/' on the root).
     std::string_view rootTrim = root;
-    while( rootTrim.size() > 1 && rootTrim.back() == '/' ) rootTrim.remove_suffix( 1 );   // "/abs/repo/" → "/abs/repo"
+    while( rootTrim.size() > 1 && rootTrim.back() == '/' )
+    {
+        rootTrim.remove_suffix( 1 ); // "/abs/repo/" → "/abs/repo"
+    }
     if( !rootTrim.empty() && rootTrim != "." && path.size() >= rootTrim.size()
         && path.compare( 0, rootTrim.size(), rootTrim ) == 0 )
     {
         // matched the root; the next char (if any) must be a '/' so we strip whole path components only
         // ("/abs/repo" must not eat the "repo" in "/abs/repository/...").
         std::string_view rest = path.substr( rootTrim.size() );
-        if( rest.empty() || rest.front() == '/' ) path = rest;
+        if( rest.empty() || rest.front() == '/' )
+        {
+            path = rest;
+        }
     }
 
     // 2) normalize residual leading "./" then leading "/" so "." / "./x" / "/x" all collapse to "x".
-    while( path.size() >= 2 && path[0] == '.' && path[1] == '/' ) path.remove_prefix( 2 );
-    while( !path.empty() && path.front() == '/' ) path.remove_prefix( 1 );
-    while( path.size() >= 2 && path[0] == '.' && path[1] == '/' ) path.remove_prefix( 2 );
+    while( path.size() >= 2 && path[0] == '.' && path[1] == '/' )
+    {
+        path.remove_prefix( 2 );
+    }
+    while( !path.empty() && path.front() == '/' )
+    {
+        path.remove_prefix( 1 );
+    }
+    while( path.size() >= 2 && path[0] == '.' && path[1] == '/' )
+    {
+        path.remove_prefix( 2 );
+    }
     return path;
 }
 
@@ -461,8 +580,12 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
     std::uint64_t h = 14695981039346656037ull;
     const auto mix = [ &h ]( std::string_view sv ) noexcept
     {
-        for( const char c : sv ) h = hashutil::fnv1aAbsorb( h, c );
-        h ^= 0u; h = hashutil::fnv1aMultiply( h );   // NUL separator byte
+        for( const char c : sv )
+        {
+            h = hashutil::fnv1aAbsorb( h, c );
+        }
+        h ^= 0u;
+        h = hashutil::fnv1aMultiply( h ); // NUL separator byte
     };
     mix( srcFile );
     mix( dstFile );
@@ -483,15 +606,24 @@ inline std::unordered_set<std::uint64_t> archReadBaseline( const std::string& si
 {
     std::unordered_set<std::uint64_t> hashes;
     std::ifstream f( sidecarPath );
-    if( !f ) return hashes;
+    if( !f )
+    {
+        return hashes;
+    }
     std::string line;
     while( std::getline( f, line ) )
     {
         // skip comment lines (start with '#') and blank lines
-        if( line.empty() || line[0] == '#' ) continue;
+        if( line.empty() || line[0] == '#' )
+        {
+            continue;
+        }
         char*               end = nullptr;
         const std::uint64_t h   = std::strtoull( line.c_str(), &end, 16 );
-        if( end != line.c_str() ) hashes.insert( h );
+        if( end != line.c_str() )
+        {
+            hashes.insert( h );
+        }
     }
     return hashes;
 }
@@ -505,10 +637,15 @@ inline bool archWriteBaseline( const std::string&                         sideca
     std::sort( sorted.begin(), sorted.end() );
 
     std::FILE* f = std::fopen( sidecarPath.c_str(), "w" );
-    if( !f ) return false;
+    if( !f )
+    {
+        return false;
+    }
     std::fprintf( f, "# ripwire arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n" );
     for( std::uint64_t h : sorted )
+    {
         std::fprintf( f, "%016llx\n", static_cast<unsigned long long>( h ) );
+    }
     std::fclose( f );
     return true;
 }
@@ -600,7 +737,10 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
     {
         const std::string d( dirOf( ing.files[f] ) );
         const auto [ it, inserted ] = modId.try_emplace( d, std::uint32_t( modPath.size() ) );
-        if( inserted ) modPath.push_back( d );
+        if( inserted )
+        {
+            modPath.push_back( d );
+        }
         fileMod[f] = it->second;
     }
     const std::uint32_t M = std::uint32_t( modPath.size() );
@@ -610,18 +750,39 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
     {
         std::vector<std::unordered_set<std::uint32_t>> seen( M );
         for( std::uint32_t f = 0; f < F; ++f )
+        {
             for( std::uint32_t g : adj[f] )
             {
-                if( g >= F ) continue;
+                if( g >= F )
+                {
+                    continue;
+                }
                 const std::uint32_t a = fileMod[f], b = fileMod[g];
-                if( a == b ) continue;                   // intra-module include → not a module edge
-                if( seen[a].insert( b ).second ) mout[a].push_back( b );
+                if( a == b )
+                {
+                    continue; // intra-module include → not a module edge
+                }
+                if( seen[a].insert( b ).second )
+                {
+                    mout[a].push_back( b );
+                }
             }
-        for( std::uint32_t m = 0; m < M; ++m ) std::sort( mout[m].begin(), mout[m].end() );
+        }
+        for( std::uint32_t m = 0; m < M; ++m )
+        {
+            std::sort( mout[m].begin(), mout[m].end() );
+        }
     }
     // Ca / Ce per module.
     std::vector<std::uint32_t> ce( M, 0 ), ca( M, 0 );
-    for( std::uint32_t m = 0; m < M; ++m ) { ce[m] = std::uint32_t( mout[m].size() ); for( std::uint32_t b : mout[m] ) ++ca[b]; }
+    for( std::uint32_t m = 0; m < M; ++m )
+    {
+        ce[m] = std::uint32_t( mout[m].size() );
+        for( std::uint32_t b : mout[m] )
+        {
+            ++ca[b];
+        }
+    }
 
     // abstractness counts per module from the symbol tags (no new parse pass).
     // 1) which CLASS/STRUCT symbols declare a bodyless method? membership = method.scope == class.name in
@@ -630,9 +791,18 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
     HashMap<std::string, char> moduleClassPure;          // key = "<modId>#<className>" → '1' if a bodyless method seen
     for( const Symbol& s : ing.symbols )
     {
-        if( s.kind != SymKind::Method ) continue;
-        if( hasBody( s ) ) continue;                     // only a DECLARATION (pure-virtual / abstract) counts
-        if( s.scope.empty() ) continue;
+        if( s.kind != SymKind::Method )
+        {
+            continue;
+        }
+        if( hasBody( s ) )
+        {
+            continue; // only a DECLARATION (pure-virtual / abstract) counts
+        }
+        if( s.scope.empty() )
+        {
+            continue;
+        }
         const std::uint32_t m = fileMod[ s.fileId ];
         moduleClassPure[ std::to_string( m ) + "#" + s.scope ] = '1';
     }
@@ -640,25 +810,60 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
     for( const Symbol& s : ing.symbols )
     {
         const bool isType = ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
-        if( !isType ) continue;
+        if( !isType )
+        {
+            continue;
+        }
         const std::uint32_t m = fileMod[ s.fileId ];
         ++totalTypes[m];
         bool abstractT = ( s.kind == SymKind::Interface );   // a TS/Go interface / Swift-ObjC protocol → abstract
         if( !abstractT )
+        {
             abstractT = moduleClassPure.find( std::to_string( m ) + "#" + s.name ) != moduleClassPure.end();   // ≥1 pure-virtual method
-        if( abstractT ) ++abstractTypes[m];
+        }
+        if( abstractT )
+        {
+            ++abstractTypes[m];
+        }
     }
 
     // reachability: entries = modules with a `main` symbol ∪ DAG roots (Ca == 0). Forward BFS over mout.
     std::vector<char> isEntry( M, 0 );
-    for( std::uint32_t m = 0; m < M; ++m ) if( ca[m] == 0 ) isEntry[m] = 1;   // every DAG root is a live entry
+    for( std::uint32_t m = 0; m < M; ++m )
+    {
+        if( ca[m] == 0 )
+        {
+            isEntry[m] = 1; // every DAG root is a live entry
+        }
+    }
     for( const Symbol& s : ing.symbols )
-        if( s.name == "main" && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) ) isEntry[ fileMod[ s.fileId ] ] = 1;
+    {
+        if( s.name == "main" && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) )
+        {
+            isEntry[fileMod[s.fileId]] = 1;
+        }
+    }
     std::vector<char>          reach( M, 0 );
     std::vector<std::uint32_t> q;
-    for( std::uint32_t m = 0; m < M; ++m ) if( isEntry[m] && !reach[m] ) { reach[m] = 1; q.push_back( m ); }
+    for( std::uint32_t m = 0; m < M; ++m )
+    {
+        if( isEntry[m] && !reach[m] )
+        {
+            reach[m] = 1;
+            q.push_back( m );
+        }
+    }
     for( std::size_t head = 0; head < q.size(); ++head )
-        for( std::uint32_t b : mout[ q[head] ] ) if( !reach[b] ) { reach[b] = 1; q.push_back( b ); }
+    {
+        for( std::uint32_t b : mout[q[head]] )
+        {
+            if( !reach[b] )
+            {
+                reach[b] = 1;
+                q.push_back( b );
+            }
+        }
+    }
 
     // assemble + compute I/A/D + zone, then sort by path for a stable emit order.
     std::vector<ModuleMetric> out;
@@ -686,12 +891,18 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
         // the zone_pain/zone_useless header tally below (main.cpp emitMetrics) so the ratio a reader
         // computes is over modules that CAN carry the metric, not the whole corpus.
         if( mm.totalTypes == 0 )
+        {
             mm.zone = "n/a";
         // zone only when D is past the threshold; pain = concrete+stable corner, useless = abstract+unstable.
+        }
         else if( mm.distance > distThreshold )
+        {
             mm.zone = ( mm.abstractness + mm.instability < kZoneBalancePoint ) ? "pain" : "useless";
+        }
         else
+        {
             mm.zone = "ok";
+        }
         out.push_back( std::move( mm ) );
     }
     std::sort( out.begin(), out.end(), []( const ModuleMetric& a, const ModuleMetric& b ) { return a.path < b.path; } );
@@ -753,15 +964,24 @@ inline std::uint64_t sumReachableClosure( const std::vector<std::vector<std::uin
             stack.pop_back();
             for( const std::uint32_t g : adj[v] )
             {
-                if( g >= F ) continue;            // out-of-range id (resolveIncludeAdj can't, but guard)
-                if( visited[g] ) continue;        // bitset dedups duplicate adjacency entries + revisits
+                if( g >= F )
+                {
+                    continue; // out-of-range id (resolveIncludeAdj can't, but guard)
+                }
+                if( visited[g] )
+                {
+                    continue; // bitset dedups duplicate adjacency entries + revisits
+                }
                 visited[g] = 1; touched.push_back( g ); ++reachedCount;
                 stack.push_back( g );
             }
         }
         total += reachedCount;
 
-        for( const std::uint32_t t : touched ) visited[t] = 0;    // O(reached) reset — no full-vector wipe
+        for( const std::uint32_t t : touched )
+        {
+            visited[t] = 0; // O(reached) reset — no full-vector wipe
+        }
     }
     return total;
 }
@@ -778,12 +998,24 @@ inline double dsmPropagationCostCapable( const IngestResult&                    
                                          const std::vector<char>&                       depCapable ) noexcept
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
-    if( F == 0 ) return 0.0;
+    if( F == 0 )
+    {
+        return 0.0;
+    }
 
     std::vector<std::uint32_t> roots;
     roots.reserve( F );
-    for( std::uint32_t s = 0; s < F; ++s ) if( s < depCapable.size() && depCapable[s] ) roots.push_back( s );
-    if( roots.empty() ) return 0.0;               // no dependency-capable file at all → 0 (documented)
+    for( std::uint32_t s = 0; s < F; ++s )
+    {
+        if( s < depCapable.size() && depCapable[s] )
+        {
+            roots.push_back( s );
+        }
+    }
+    if( roots.empty() )
+    {
+        return 0.0; // no dependency-capable file at all → 0 (documented)
+    }
 
     const std::uint64_t reachableTotal = sumReachableClosure( adj, roots, F );
     const double        n              = double( roots.size() );

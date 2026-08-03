@@ -147,7 +147,10 @@ inline ClaimIdentity buildClaimIdentity( const IngestResult& ing, const Graph& g
     gtl::btree_map<std::uint64_t, std::vector<NodeId>> byKey;
     for( NodeId i = 0; i < NodeId( symbolCount ); ++i )
     {
-        if( ing.symbols[i].fileId >= ing.files.size() ) continue;   // degrade: an unfilable symbol keeps key 0
+        if( ing.symbols[i].fileId >= ing.files.size() )
+        {
+            continue; // degrade: an unfilable symbol keeps key 0
+        }
         out.key[i] = claimKeyOf( ing, root, ing.symbols[i] );
         byKey[ out.key[i] ].push_back( i );
     }
@@ -176,7 +179,9 @@ inline ClaimIdentity buildClaimIdentity( const IngestResult& ing, const Graph& g
         ++idCount[ idOf[i] ];
     }
     for( NodeId i = 0; i < NodeId( symbolCount ); ++i )
+    {
         out.idCollidesWith[i] = idCount[ idOf[i] ] - 1u;
+    }
     return out;
 }
 
@@ -324,12 +329,23 @@ inline Claim makeClaim( const IngestResult& ing, const Graph& g, const ClaimLens
     // requires that it resolves to exactly one symbol here (never emit an id and let the consumer discover
     // it is ambiguous). The spelling is g.canonId's, i.e. byte-identical to the map's own id=.
     if( !s.scope.empty() )
+    {
         c.id = ( g.canonId.size() == ing.symbols.size() ) ? g.canonId[ node ] : canonicalId( c.path, s.scope, s.name );
+    }
     c.idAddressable = !c.id.empty() && c.idCollidesWith == 0 && c.overloads == 1;
 
-    if( node < g.ambOut.size() )                                   c.amb    = g.ambOut[ node ];
-    if( lens.churn && s.fileId < lens.churn->size() )              c.churn  = (*lens.churn)[ s.fileId ];
-    if( lens.tested && node < NodeId( lens.tested->size() ) )      c.tested = (*lens.tested)[ node ];
+    if( node < g.ambOut.size() )
+    {
+        c.amb = g.ambOut[node];
+    }
+    if( lens.churn && s.fileId < lens.churn->size() )
+    {
+        c.churn = ( *lens.churn )[s.fileId];
+    }
+    if( lens.tested && node < NodeId( lens.tested->size() ) )
+    {
+        c.tested = ( *lens.tested )[node];
+    }
     return c;
 }
 
@@ -342,12 +358,21 @@ inline void buildClaims( const IngestResult& ing, const Graph& g, const ClaimLen
     gtl::btree_map<std::uint64_t, Claim> byKey;
     for( NodeId node : assigned )
     {
-        if( node >= NodeId( ing.symbols.size() ) ) continue;
+        if( node >= NodeId( ing.symbols.size() ) )
+        {
+            continue;
+        }
         lane.claimNodes.push_back( node );
         const Claim c  = makeClaim( ing, g, lens, node );
         const auto  it = byKey.find( c.key );
-        if( it == byKey.end() )        byKey.emplace( c.key, c );
-        else if( c.ord < it->second.ord ) it->second = c;          // the lowest-ord member represents the fold
+        if( it == byKey.end() )
+        {
+            byKey.emplace( c.key, c );
+        }
+        else if( c.ord < it->second.ord )
+        {
+            it->second = c; // the lowest-ord member represents the fold
+        }
     }
     for( const auto& [ k, c ] : byKey ) { (void)k; lane.claims.push_back( c ); }
 
@@ -372,7 +397,10 @@ inline void buildLaneFiles( const IngestResult& ing, const std::vector<std::uint
     {
         const std::uint32_t f  = ing.symbols[ node ].fileId;
         const auto          it = byPath.find( ing.files[f] );
-        if( it == byPath.end() ) continue;
+        if( it == byPath.end() )
+        {
+            continue;
+        }
         it->second.ccxSum += ing.symbols[ node ].ccx;
         it->second.churn   = ( churn && f < churn->size() ) ? (*churn)[f] : 0u;
         it->second.hotspotRank = f < hotspotRank.size() ? hotspotRank[f] : 0u;
@@ -387,17 +415,34 @@ inline std::vector<std::uint32_t> buildHotspotRanks( const IngestResult& ing, co
     const std::size_t          fileCount = ing.files.size();
     std::vector<std::uint64_t> score( fileCount, 0u );
     std::vector<std::uint64_t> ccxSum( fileCount, 0u );
-    for( const Symbol& s : ing.symbols ) if( s.fileId < fileCount ) ccxSum[ s.fileId ] += s.ccx;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < fileCount )
+        {
+            ccxSum[s.fileId] += s.ccx;
+        }
+    }
     for( std::size_t f = 0; f < fileCount; ++f )
+    {
         score[f] = ccxSum[f] * std::uint64_t( churn && f < churn->size() ? (*churn)[f] : 0u );
+    }
 
     std::vector<std::uint32_t> ranked;
-    for( std::uint32_t f = 0; f < std::uint32_t( fileCount ); ++f ) if( score[f] > 0 ) ranked.push_back( f );
+    for( std::uint32_t f = 0; f < std::uint32_t( fileCount ); ++f )
+    {
+        if( score[f] > 0 )
+        {
+            ranked.push_back( f );
+        }
+    }
     std::sort( ranked.begin(), ranked.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                { return score[a] != score[b] ? score[a] > score[b] : ing.files[a] < ing.files[b]; } );
 
     std::vector<std::uint32_t> rankOf( fileCount, 0u );
-    for( std::size_t i = 0; i < ranked.size(); ++i ) rankOf[ ranked[i] ] = std::uint32_t( i + 1 );
+    for( std::size_t i = 0; i < ranked.size(); ++i )
+    {
+        rankOf[ranked[i]] = std::uint32_t( i + 1 );
+    }
     return rankOf;
 }
 
@@ -406,13 +451,22 @@ inline void buildLaneReach( const IngestResult& ing, const Graph& g, const std::
 {
     const std::size_t symbolCount = ing.symbols.size();
     std::vector<char> isClaim( symbolCount, 0 );
-    for( NodeId n : lane.claimNodes ) if( n < NodeId( symbolCount ) ) isClaim[n] = 1;
+    for( NodeId n : lane.claimNodes )
+    {
+        if( n < NodeId( symbolCount ) )
+        {
+            isClaim[n] = 1;
+        }
+    }
 
     lane.blastMask.assign( symbolCount, 0 );
     gtl::btree_map<std::string, char> blastPaths;
     for( NodeId n : transitiveCallers( g, lane.claimNodes ) )
     {
-        if( n >= NodeId( symbolCount ) || isClaim[n] ) continue;   // the claims are the change, not its radius
+        if( n >= NodeId( symbolCount ) || isClaim[n] )
+        {
+            continue; // the claims are the change, not its radius
+        }
         lane.blastMask[n] = 1;
         ++lane.blastReaches;
         blastPaths[ ing.files[ ing.symbols[n].fileId ] ] = 1;
@@ -438,14 +492,25 @@ inline void buildLaneReach( const IngestResult& ing, const Graph& g, const std::
 // ── field notes on the claimed symbols and files (free: the index is already built) ───────────────────────
 inline void buildLaneNotes( const notes::NoteIndex* ni, Lane& lane )
 {
-    if( !ni ) return;
+    if( !ni )
+    {
+        return;
+    }
     gtl::btree_map<std::string, char> seen;
     const auto collect = [ & ]( const std::string& target )
     {
         const std::vector<std::uint32_t>* hits = ni->find( target );
-        if( !hits ) return;
+        if( !hits )
+        {
+            return;
+        }
         for( std::uint32_t idx : *hits )
-            if( idx < ni->notes.size() ) seen[ ni->notes[idx].target + ": " + ni->notes[idx].text ] = 1;
+        {
+            if( idx < ni->notes.size() )
+            {
+                seen[ni->notes[idx].target + ": " + ni->notes[idx].text] = 1;
+            }
+        }
     };
     for( const Claim& c : lane.claims )
     {
@@ -462,7 +527,10 @@ inline void buildLaneNotes( const notes::NoteIndex* ni, Lane& lane )
 inline std::uint32_t moduleSpanOf( const IngestResult& ing, const Graph& g, const Communities& cm, const Lane& lane )
 {
     gtl::btree_map<std::uint64_t, char> keys;
-    for( const Claim& c : lane.claims ) keys[ packpartition::groupKeyFor( ing, g, cm, c.node ) ] = 1;
+    for( const Claim& c : lane.claims )
+    {
+        keys[packpartition::groupKeyFor( ing, g, cm, c.node )] = 1;
+    }
     return std::uint32_t( keys.size() );
 }
 
@@ -482,7 +550,9 @@ inline std::vector<mergescout::Arm> synthesizeArms( const std::vector<Lane>& lan
         arm.ref = lane.id;
         arm.ok  = true;
         for( const Claim& c : lane.claims )
+        {
             arm.changed.push_back( mergescout::ChangedSym{ c.key, c.path, c.id.empty() ? c.name : c.id } );
+        }
         std::sort( arm.changed.begin(), arm.changed.end(),
                    [ ]( const mergescout::ChangedSym& x, const mergescout::ChangedSym& y ) { return x.key < y.key; } );
         arms.push_back( std::move( arm ) );
@@ -492,7 +562,13 @@ inline std::vector<mergescout::Arm> synthesizeArms( const std::vector<Lane>& lan
 
 inline const Claim* findClaimByKey( const Lane& lane, std::uint64_t key )
 {
-    for( const Claim& c : lane.claims ) if( c.key == key ) return &c;
+    for( const Claim& c : lane.claims )
+    {
+        if( c.key == key )
+        {
+            return &c;
+        }
+    }
     return nullptr;
 }
 
@@ -500,10 +576,16 @@ inline const Claim* findClaimByKey( const Lane& lane, std::uint64_t key )
 // emits both directions and the row names which way the adaptation runs.
 inline void collectContractTouch( const Lane& from, const Lane& to, std::vector<TouchRow>& out )
 {
-    if( to.blastMask.empty() ) return;
+    if( to.blastMask.empty() )
+    {
+        return;
+    }
     for( const Claim& c : from.claims )
     {
-        if( c.node >= NodeId( to.blastMask.size() ) || !to.blastMask[ c.node ] ) continue;
+        if( c.node >= NodeId( to.blastMask.size() ) || !to.blastMask[c.node] )
+        {
+            continue;
+        }
         out.push_back( TouchRow{ c.path, c.name, from.id, to.id, c.key } );
     }
 }
@@ -520,7 +602,12 @@ inline PairRow renderPair( const std::vector<Lane>& lanes, const mergescout::Pai
     row.b = laneB.id;
 
     for( const mergescout::ChangedSym& s : p.conflicts )
-        if( const Claim* c = findClaimByKey( laneA, s.key ) ) row.conflicts.push_back( *c );
+    {
+        if( const Claim* c = findClaimByKey( laneA, s.key ) )
+        {
+            row.conflicts.push_back( *c );
+        }
+    }
 
     gtl::btree_map<std::string, RiskFileRow>                     byFile;
     gtl::btree_map<std::string, gtl::btree_map<std::uint64_t, char>> aKeys, bKeys;
@@ -556,14 +643,28 @@ inline WarnTally tallyClaims( const std::vector<Lane>& lanes )
 {
     WarnTally t;
     for( const Lane& lane : lanes )
+    {
         for( const Claim& c : lane.claims )
         {
             ++t.claimTotal;
-            if( c.id.empty() )           ++t.bareNameClaims;
-            if( c.overloads > 1 )        ++t.foldedClaims;
-            if( c.idCollidesWith > 0 )   ++t.idCollisions;
-            if( isTestPath( c.path ) )   ++t.nonSourceClaims;
+            if( c.id.empty() )
+            {
+                ++t.bareNameClaims;
+            }
+            if( c.overloads > 1 )
+            {
+                ++t.foldedClaims;
+            }
+            if( c.idCollidesWith > 0 )
+            {
+                ++t.idCollisions;
+            }
+            if( isTestPath( c.path ) )
+            {
+                ++t.nonSourceClaims;
+            }
         }
+    }
     return t;
 }
 
@@ -586,21 +687,40 @@ inline void warnCoincidingClaims( PlanLanesResult& result )
 {
     char buf[ 640 ];
     for( std::size_t a = 0; a < result.lanes.size(); ++a )
+    {
         for( std::size_t b = a + 1; b < result.lanes.size(); ++b )
         {
             const std::vector<Claim>& ca = result.lanes[a].claims;
             const std::vector<Claim>& cb = result.lanes[b].claims;
-            if( ca.empty() || cb.empty() ) continue;
+            if( ca.empty() || cb.empty() )
+            {
+                continue;
+            }
 
             ankerl::unordered_dense::set<std::uint64_t> keysA, keysB;
-            for( const Claim& c : ca ) keysA.insert( c.key );
+            for( const Claim& c : ca )
+            {
+                keysA.insert( c.key );
+            }
             std::size_t shared = 0;
-            for( const Claim& c : cb ) if( keysB.insert( c.key ).second && keysA.count( c.key ) ) ++shared;
+            for( const Claim& c : cb )
+            {
+                if( keysB.insert( c.key ).second && keysA.count( c.key ) )
+                {
+                    ++shared;
+                }
+            }
 
             const std::size_t unionCount = keysA.size() + keysB.size() - shared;
-            if( unionCount == 0 ) continue;
+            if( unionCount == 0 )
+            {
+                continue;
+            }
             const double jaccard = double( shared ) / double( unionCount );
-            if( jaccard < 0.5 ) continue;                                   // only flag a genuinely degenerate carve
+            if( jaccard < 0.5 )
+            {
+                continue; // only flag a genuinely degenerate carve
+            }
 
             std::snprintf( buf, sizeof( buf ),
                            "%s and %s claim %zu of %zu symbols IN COMMON (Jaccard %.2f). Their conflicts are an artifact of the "
@@ -610,6 +730,7 @@ inline void warnCoincidingClaims( PlanLanesResult& result )
                            result.lanes[a].id.c_str(), result.lanes[b].id.c_str(), shared, unionCount, jaccard );
             addWarning( result.warnings, "lane-claims-coincide", "warn", buf );
         }
+    }
 }
 
 inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
@@ -678,10 +799,12 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
         addWarning( result.warnings, "carve-is-not-decomposition", "warn", buf );
     }
     else
+    {
         addWarning( result.warnings, "brief-mode-has-no-core", "info",
                     "In brief mode no shared core is carved: each lane is ranked independently from its own brief line, so two "
                     "lines that rank the same symbol to the top produce a real conflict row rather than a symbol quietly lifted "
                     "into a core nobody claims." );
+    }
 
     if( result.lanes.size() < in.requested )
     {
@@ -693,12 +816,14 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     }
 
     for( const Lane& lane : result.lanes )
+    {
         if( lane.moduleSpan < 2 && !lane.claims.empty() )
         {
             std::snprintf( buf, sizeof( buf ), "%s spans %u call-graph module(s): its surface sits in one place, so what it got "
                                                "is a rank cut, not a semantic split.", lane.id.c_str(), lane.moduleSpan );
             addWarning( result.warnings, "single-module-lane", "warn", buf );
         }
+    }
 
     warnCoincidingClaims( result );
 
@@ -716,10 +841,15 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     gtl::btree_map<std::string, std::uint32_t> lanesPerFile;
     gtl::btree_map<std::string, std::uint32_t> rankOfFile;
     for( const Lane& lane : result.lanes )
+    {
         for( const LaneFileRow& f : lane.files ) { ++lanesPerFile[ f.path ]; rankOfFile[ f.path ] = f.hotspotRank; }
+    }
     for( const auto& [ path, laneCount ] : lanesPerFile )
     {
-        if( laneCount < 2 || rankOfFile[ path ] == 0 || rankOfFile[ path ] > 10 ) continue;
+        if( laneCount < 2 || rankOfFile[path] == 0 || rankOfFile[path] > 10 )
+        {
+            continue;
+        }
         std::snprintf( buf, sizeof( buf ), "%s is claimed by %u lanes and is hotspot rank %u (complexity x churn). Same-file risk "
                                            "on one of the repo's highest-churn files is the most likely place this plan goes wrong.",
                        path.c_str(), laneCount, rankOfFile[ path ] );
@@ -727,9 +857,11 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     }
 
     if( result.lanes.empty() )
+    {
         addWarning( result.warnings, "no-lane-surface", "warn",
                     "The task's ranked surface produced no assignable lane: either nothing scored above zero, or the whole surface "
                     "fits in the shared core. This is a plan with no lanes, not a failure — rephrase the task, or use brief." );
+    }
 }
 
 // ── the computation ───────────────────────────────────────────────────────────────────────────────────────
@@ -750,7 +882,10 @@ inline void carveLanes( const LanesInputs& in, const ClaimLens& lens, PlanLanesR
 
     for( NodeId node : plan.coreIds )
     {
-        if( node >= NodeId( ing.symbols.size() ) ) continue;
+        if( node >= NodeId( ing.symbols.size() ) )
+        {
+            continue;
+        }
         const Symbol& s = ing.symbols[ node ];
         CoreSymbol    cs;
         cs.path  = ing.files[ s.fileId ];
@@ -758,14 +893,19 @@ inline void carveLanes( const LanesInputs& in, const ClaimLens& lens, PlanLanesR
         cs.scope = s.scope;
         cs.line  = s.line;
         if( !s.scope.empty() )
+        {
             cs.id = ( g.canonId.size() == ing.symbols.size() ) ? g.canonId[ node ] : canonicalId( cs.path, s.scope, s.name );
+        }
         result.coreSymbols.push_back( cs );
     }
     std::sort( result.coreSymbols.begin(), result.coreSymbols.end(), [ ]( const CoreSymbol& a, const CoreSymbol& b )
                { return a.path != b.path ? a.path < b.path : ( a.name != b.name ? a.name < b.name : a.line < b.line ); } );
     {
         gtl::btree_map<std::string, char> coreFileSet;
-        for( const CoreSymbol& cs : result.coreSymbols ) coreFileSet[ cs.path ] = 1;
+        for( const CoreSymbol& cs : result.coreSymbols )
+        {
+            coreFileSet[cs.path] = 1;
+        }
         for( const auto& [ p, mark ] : coreFileSet ) { (void)mark; result.coreFiles.push_back( p ); }
     }
 
@@ -790,13 +930,19 @@ inline void briefLanes( const LanesInputs& in, const ClaimLens& lens, PlanLanesR
     {
         const std::vector<float>& rank = (*in.laneRanks)[i];
         std::vector<NodeId>       order( ing.symbols.size() );
-        for( NodeId n = 0; n < NodeId( order.size() ); ++n ) order[n] = n;
+        for( NodeId n = 0; n < NodeId( order.size() ); ++n )
+        {
+            order[n] = n;
+        }
         sortutil::radixSortByScoreDescId( order, rank );
 
         std::vector<NodeId> head;
         for( NodeId n : order )
         {
-            if( head.size() >= kBriefClaimsPerLane || rank[n] <= 0.0f ) break;
+            if( head.size() >= kBriefClaimsPerLane || rank[n] <= 0.0f )
+            {
+                break;
+            }
             head.push_back( n );
         }
 
@@ -819,7 +965,13 @@ inline void measureLaneOverlap( const IngestResult& ing, const std::vector<Lane>
     for( const Lane& lane : lanes )
     {
         std::vector<NodeId> surface = lane.claimNodes;
-        for( NodeId n = 0; n < NodeId( lane.blastMask.size() ); ++n ) if( lane.blastMask[n] ) surface.push_back( n );
+        for( NodeId n = 0; n < NodeId( lane.blastMask.size() ); ++n )
+        {
+            if( lane.blastMask[n] )
+            {
+                surface.push_back( n );
+            }
+        }
         std::sort( surface.begin(), surface.end() );
         surface.erase( std::unique( surface.begin(), surface.end() ), surface.end() );
         surfaces.push_back( std::move( surface ) );
@@ -828,8 +980,12 @@ inline void measureLaneOverlap( const IngestResult& ing, const std::vector<Lane>
     // the core surface, as node ids: matched by (path, name) — the core rows are display rows, not claims.
     std::vector<NodeId> coreSurface;
     for( NodeId n = 0; n < NodeId( ing.symbols.size() ); ++n )
+    {
         for( const CoreSymbol& cs : coreSymbols )
+        {
             if( ing.symbols[n].name == cs.name && ing.files[ ing.symbols[n].fileId ] == cs.path ) { coreSurface.push_back( n ); break; }
+        }
+    }
     std::sort( coreSurface.begin(), coreSurface.end() );
 
     const packpartition::OverlapStats ov = packpartition::measureOverlap( surfaces, coreSurface );
@@ -859,8 +1015,14 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
     const ClaimIdentity ident = buildClaimIdentity( ing, g, *in.root );
     const ClaimLens     lens{ &ident, in.churn, in.tested };
 
-    if( in.autoCarve ) carveLanes( in, lens, result );
-    else               briefLanes( in, lens, result );
+    if( in.autoCarve )
+    {
+        carveLanes( in, lens, result );
+    }
+    else
+    {
+        briefLanes( in, lens, result );
+    }
 
     // the per-lane lenses: files + hotspot rank, blast radius, test obligations, notes, module span
     const std::vector<std::uint32_t> hotspotRank = buildHotspotRanks( ing, in.churn );
@@ -874,17 +1036,28 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
         lane.moduleSpan = moduleSpanOf( ing, g, cm, lane );
     }
 
-    if( result.haveCarve ) measureLaneOverlap( ing, result.lanes, result.coreSymbols, result.carve );
+    if( result.haveCarve )
+    {
+        measureLaneOverlap( ing, result.lanes, result.coreSymbols, result.carve );
+    }
 
     // the pairwise classification + the landing order — mergescout's own pure functions, fed synthetic arms
     const std::vector<mergescout::Arm>         arms  = synthesizeArms( result.lanes );
     const std::vector<mergescout::PairOverlap> pairs = mergescout::computeOverlaps( arms );
-    for( const mergescout::PairOverlap& p : pairs ) result.pairs.push_back( renderPair( result.lanes, p ) );
-    for( std::size_t idx : mergescout::landingOrder( arms, pairs ) ) result.landingOrder.push_back( arms[idx].ref );
+    for( const mergescout::PairOverlap& p : pairs )
+    {
+        result.pairs.push_back( renderPair( result.lanes, p ) );
+    }
+    for( std::size_t idx : mergescout::landingOrder( arms, pairs ) )
+    {
+        result.landingOrder.push_back( arms[idx].ref );
+    }
 
     buildWarnings( in, result );
     if( result.lanes.empty() )
+    {
         DEGRADED_PATH_ALERT( "plan-lanes: the task's ranked surface produced no assignable lane — emitting a plan with zero lanes" );
+    }
     return result;
 }
 
@@ -896,15 +1069,23 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
 
 inline void writeJsonStringOrNull( std::FILE* out, const std::string& value )
 {
-    if( value.empty() ) std::fprintf( out, "null" );
-    else                std::fprintf( out, "\"%s\"", jsonStr( value ).c_str() );
+    if( value.empty() )
+    {
+        std::fprintf( out, "null" );
+    }
+    else
+    {
+        std::fprintf( out, "\"%s\"", jsonStr( value ).c_str() );
+    }
 }
 
 inline void writePathArray( std::FILE* out, const std::vector<std::string>& paths )
 {
     std::fprintf( out, "[" );
     for( std::size_t i = 0; i < paths.size(); ++i )
+    {
         std::fprintf( out, "%s\"%s\"", i == 0 ? "" : ",", jsonStr( paths[i] ).c_str() );
+    }
     std::fprintf( out, "]" );
 }
 
@@ -924,17 +1105,37 @@ inline void writeLaneFileRow( std::FILE* out, const LaneFileRow& f )
 {
     std::fprintf( out, "{\"p\":\"%s\",\"symbols\":%u,\"churn\":%u,\"ccx\":%u,\"hotspot_rank\":",
                   jsonStr( f.path ).c_str(), f.symbolCount, f.churn, f.ccxSum );
-    if( f.hotspotRank == 0 ) std::fprintf( out, "null}" );
-    else                     std::fprintf( out, "%u}", f.hotspotRank );
+    if( f.hotspotRank == 0 )
+    {
+        std::fprintf( out, "null}" );
+    }
+    else
+    {
+        std::fprintf( out, "%u}", f.hotspotRank );
+    }
 }
 
 inline void writeLane( std::FILE* out, const Lane& lane )
 {
     std::fprintf( out, "{\"id\":\"%s\",\"task\":\"%s\",\"claims\":{\"symbols\":[",
                   jsonStr( lane.id ).c_str(), jsonStr( lane.task ).c_str() );
-    for( std::size_t i = 0; i < lane.claims.size(); ++i ) { if( i ) std::fprintf( out, "," ); writeClaimRow( out, lane.claims[i] ); }
+    for( std::size_t i = 0; i < lane.claims.size(); ++i )
+    {
+        if( i )
+        {
+            std::fprintf( out, "," );
+        }
+        writeClaimRow( out, lane.claims[i] );
+    }
     std::fprintf( out, "],\"files\":[" );
-    for( std::size_t i = 0; i < lane.files.size(); ++i ) { if( i ) std::fprintf( out, "," ); writeLaneFileRow( out, lane.files[i] ); }
+    for( std::size_t i = 0; i < lane.files.size(); ++i )
+    {
+        if( i )
+        {
+            std::fprintf( out, "," );
+        }
+        writeLaneFileRow( out, lane.files[i] );
+    }
     std::fprintf( out, "]},\"blast_radius\":{\"reaches\":%zu,\"files_total\":%zu,\"capped\":%s,\"files\":",
                   lane.blastReaches, lane.blastFileTotal, lane.blastCapped ? "true" : "false" );
     writePathArray( out, lane.blastFiles );
@@ -1019,9 +1220,23 @@ inline void writePlanLanes( std::FILE* out, const PlanLanesResult& r )
     writeCore( out, r );
 
     std::fprintf( out, ",\"lanes\":[" );
-    for( std::size_t i = 0; i < r.lanes.size(); ++i ) { if( i ) std::fprintf( out, "," ); writeLane( out, r.lanes[i] ); }
+    for( std::size_t i = 0; i < r.lanes.size(); ++i )
+    {
+        if( i )
+        {
+            std::fprintf( out, "," );
+        }
+        writeLane( out, r.lanes[i] );
+    }
     std::fprintf( out, "],\"pairs\":[" );
-    for( std::size_t i = 0; i < r.pairs.size(); ++i ) { if( i ) std::fprintf( out, "," ); writePair( out, r.pairs[i] ); }
+    for( std::size_t i = 0; i < r.pairs.size(); ++i )
+    {
+        if( i )
+        {
+            std::fprintf( out, "," );
+        }
+        writePair( out, r.pairs[i] );
+    }
     std::fprintf( out, "],\"landing_order\":" );
     writePathArray( out, r.landingOrder );
     std::fprintf( out, ",\"landing_rule\":\"fewest-conflicts-first greedy; ties by lane id ascending (lexicographic on the lane id string)\","
@@ -1032,7 +1247,10 @@ inline void writePlanLanes( std::FILE* out, const PlanLanesResult& r )
     {
         const Warning& w = r.warnings[i];
         std::fprintf( out, "%s{\"code\":\"%s\",\"sev\":\"%s\",", i == 0 ? "" : ",", w.code, w.sev );
-        if( w.hasCount ) std::fprintf( out, "\"count\":%llu,", ( unsigned long long )w.count );
+        if( w.hasCount )
+        {
+            std::fprintf( out, "\"count\":%llu,", (unsigned long long)w.count );
+        }
         std::fprintf( out, "\"text\":\"%s\"}", jsonStr( w.text ).c_str() );
     }
     std::fprintf( out, "]}\n" );

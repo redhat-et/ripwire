@@ -64,10 +64,16 @@ inline bool xmlScrubIsLossy( std::string_view s ) noexcept
     for( std::size_t i = 0; i < n; )
     {
         const unsigned char c = static_cast<unsigned char>( d[i] );
-        if( c < 0x20 && c != '\t' && c != '\n' && c != '\r' ) return true;    // xmlSafeByte -> ' '
+        if( c < 0x20 && c != '\t' && c != '\n' && c != '\r' )
+        {
+            return true; // xmlSafeByte -> ' '
+        }
         if( c < 0x80 ) { ++i; continue; }
         const int len = jsonesc::utf8SeqLen( d, i, n );
-        if( len == 0 ) return true;                                          // escapeXml -> '?', appendCdataSafe -> '?'
+        if( len == 0 )
+        {
+            return true; // escapeXml -> '?', appendCdataSafe -> '?'
+        }
         i += std::size_t( len );
     }
     return false;
@@ -114,7 +120,7 @@ inline std::string_view escapeXml( std::string_view s, std::vector<char>& out )
     out.clear();
     out.reserve( s.size() + 16 );
 
-    const auto put  = [ & ]( const char* lit ) { while( *lit ) out.push_back( *lit++ ); };
+    const auto put  = [ & ]( const char* lit ) { while( *lit ) { out.push_back( *lit++ ); } };
     const char*       d = s.data();
     const std::size_t n = s.size();
     for( std::size_t i = 0; i < n; )
@@ -133,7 +139,14 @@ inline std::string_view escapeXml( std::string_view s, std::vector<char>& out )
             default:
                 if( static_cast<unsigned char>( c ) < 0x80 ) { out.push_back( xmlSafeByte( c ) ); ++i; }
                 else if( const int len = utf8SeqLen( d, i, n ); len == 0 ) { out.push_back( '?' ); ++i; }   // scrub invalid UTF-8
-                else { for( int k = 0; k < len; ++k ) out.push_back( d[i + k] ); i += std::size_t( len ); }
+                else
+                {
+                    for( int k = 0; k < len; ++k )
+                    {
+                        out.push_back( d[i + k] );
+                    }
+                    i += std::size_t( len );
+                }
         }
     }
     return std::string_view( out.data(), out.size() );
@@ -243,8 +256,14 @@ inline std::string ctxRootOpen( std::string_view task, std::string_view routeNot
     // not move. Present, it says: this attribute is NOT the verbatim copy its contract promises, and the
     // --json dialect of the same field is. Named per-field because a task can be lossy while its route note
     // is not — a single root-level bit would make the reader guess which one.
-    if( !task.empty()      && xmlScrubIsLossy( task ) )      out += " task_scrubbed=\"1\"";
-    if( !routeNote.empty() && xmlScrubIsLossy( routeNote ) ) out += " route_scrubbed=\"1\"";
+    if( !task.empty() && xmlScrubIsLossy( task ) )
+    {
+        out += " task_scrubbed=\"1\"";
+    }
+    if( !routeNote.empty() && xmlScrubIsLossy( routeNote ) )
+    {
+        out += " route_scrubbed=\"1\"";
+    }
     out += ">";
     return out;
 }
@@ -265,8 +284,14 @@ inline std::string ctxRootOpen( std::string_view task, std::string_view routeNot
 inline std::string ctxRootJsonScrubKeys( std::string_view task, std::string_view routeNote )
 {
     std::string keys;
-    if( !task.empty()      && xmlScrubIsLossy( task ) )      keys += ",\"task_xml_scrubbed\":true";
-    if( !routeNote.empty() && xmlScrubIsLossy( routeNote ) ) keys += ",\"route_xml_scrubbed\":true";
+    if( !task.empty() && xmlScrubIsLossy( task ) )
+    {
+        keys += ",\"task_xml_scrubbed\":true";
+    }
+    if( !routeNote.empty() && xmlScrubIsLossy( routeNote ) )
+    {
+        keys += ",\"route_xml_scrubbed\":true";
+    }
     return keys;
 }
 
@@ -310,7 +335,9 @@ public:
             std::memcpy( m_buf + m_used, p, take );
             m_used += take;  p += take;  n -= take;
             if( m_used == kCap )
+            {
                 flush();
+            }
         }
     }
 
@@ -322,7 +349,10 @@ public:
             // silently truncated and ripwire still exited 0. Latch the failure so the caller can turn it into a
             // nonzero exit + one stderr line (the failed fwrite also sets ferror(m_out), the seam main reads).
             const std::size_t wrote = std::fwrite( m_buf, 1, m_used, m_out );
-            if( wrote != m_used ) m_writeError = true;
+            if( wrote != m_used )
+            {
+                m_writeError = true;
+            }
             m_used = 0;
         }
     }
@@ -382,10 +412,19 @@ inline void appendOneNote( XmlWriter& w, const notes::Note& n, std::vector<char>
 inline std::string renderNoteChildren( const notes::NoteIndex* ni, const std::string& target, std::vector<char>& esc )
 {
     std::string out;
-    if( !ni ) return out;
+    if( !ni )
+    {
+        return out;
+    }
     const std::vector<std::uint32_t>* hits = ni->find( target );
-    if( !hits ) return out;
-    for( std::uint32_t i : *hits ) appendOneNote( out, ni->notes[i], esc );
+    if( !hits )
+    {
+        return out;
+    }
+    for( std::uint32_t i : *hits )
+    {
+        appendOneNote( out, ni->notes[i], esc );
+    }
     return out;
 }
 
@@ -528,13 +567,20 @@ inline std::string climbCeilingLadder( BuildFn&& build, std::string_view builtHe
                                        std::size_t byteCeiling, bool hasRouteAttr, const CeilingLadderNotes& notes )
 {
     const auto fits = [ & ]( std::size_t headerBytes ) { return headerBytes + payloadBytes <= byteCeiling; };
-    if( fits( builtHeader.size() ) ) return std::string( builtHeader );
+    if( fits( builtHeader.size() ) )
+    {
+        return std::string( builtHeader );
+    }
 
     std::string candidate = build( /*withRouteAttr=*/true, /*withTaskEcho=*/false, notes.echoDropped );
     if( !fits( candidate.size() ) && hasRouteAttr )
+    {
         candidate = build( /*withRouteAttr=*/false, /*withTaskEcho=*/false, notes.echoAndRouteDropped );
+    }
     if( !fits( candidate.size() ) )
+    {
         candidate = build( /*withRouteAttr=*/true, /*withTaskEcho=*/true, notes.overCeiling );
+    }
     return candidate;
 }
 
@@ -579,16 +625,28 @@ inline constexpr std::size_t kForCapTailSigBytes    = 96;
 // boundary back-off mirrors docCommentBefore's cap cut. No-op when the text already fits.
 inline void truncateUtf8WithEllipsis( std::string& s, std::size_t maxBytes )
 {
-    if( s.size() <= maxBytes ) return;
+    if( s.size() <= maxBytes )
+    {
+        return;
+    }
     std::size_t cut = maxBytes;
-    while( cut > 0 && ( static_cast<unsigned char>( s[ cut ] ) & 0xC0 ) == 0x80 ) --cut;
+    while( cut > 0 && ( static_cast<unsigned char>( s[cut] ) & 0xC0 ) == 0x80 )
+    {
+        --cut;
+    }
     s.resize( cut );
     s += "\xE2\x80\xA6";   // U+2026 ellipsis
 }
 
 inline constexpr double bytesPerTokenFor( Lang l ) noexcept
 {
-    for( const TokenCalib& c : kTokenCalib ) if( c.lang == l ) return c.bytesPerToken;
+    for( const TokenCalib& c : kTokenCalib )
+    {
+        if( c.lang == l )
+        {
+            return c.bytesPerToken;
+        }
+    }
     return kBytesPerTokenDefault;
 }
 
@@ -679,7 +737,10 @@ inline constexpr bool isChargeBufferFaultInjected() noexcept { return false; }
 // own documented degrade path; this function never reports a failure it did not have.
 inline std::FILE* openChargeBuffer( char** bufOut, std::size_t* sizeOut ) noexcept
 {
-    if( isChargeBufferFaultInjected() ) return nullptr;   // ENOMEM-class, on demand, non-release only
+    if( isChargeBufferFaultInjected() )
+    {
+        return nullptr; // ENOMEM-class, on demand, non-release only
+    }
     return open_memstream( bufOut, sizeOut );
 }
 
@@ -717,7 +778,10 @@ inline bool sectionWillEmit( const ChargedSection& section, bool hasEdges ) noex
 // algebra and no rate arithmetic of its own.
 inline CtxWrap ctxWrapFor( const ChargedSection& a, bool aHasEdges, const ChargedSection& b, bool bHasEdges ) noexcept
 {
-    if( !sectionWillEmit( a, aHasEdges ) && !sectionWillEmit( b, bHasEdges ) ) return {};
+    if( !sectionWillEmit( a, aHasEdges ) && !sectionWillEmit( b, bHasEdges ) )
+    {
+        return {};
+    }
     return { true, tokensForEmittedBytes( kCtxWrapBytes, kBytesPerTokenDefault ) };
 }
 
@@ -751,8 +815,14 @@ inline ChargedSection chargeSection( RenderFn&& render, double bytesPerToken )
 template<typename RenderFn>
 inline void emitChargedSection( std::FILE* out, const ChargedSection& sec, RenderFn&& renderDirect )
 {
-    if( sec.isRendered ) std::fwrite( sec.xml.data(), 1, sec.xml.size(), out );
-    else                 renderDirect();
+    if( sec.isRendered )
+    {
+        std::fwrite( sec.xml.data(), 1, sec.xml.size(), out );
+    }
+    else
+    {
+        renderDirect();
+    }
 }
 
 // estimateTokens' answer: the modelled token count AND the modelled byte total it was derived from.
@@ -855,11 +925,13 @@ inline TokenEstimate estimateTokens( const IngestResult& ing, const std::vector<
     double estTokensF   = double( markupBytes ) / kBytesPerTokenDefault;
     double modelBytesF  = double( markupBytes );
     for( int l = 0; l < 13; ++l )
+    {
         if( contentBytesByLang[ l ] > 0.0 )
         {
             estTokensF  += contentBytesByLang[ l ] / bytesPerTokenFor( Lang( l ) );
             modelBytesF += contentBytesByLang[ l ];
         }
+    }
     return TokenEstimate{ std::size_t( estTokensF + 0.5 ), std::size_t( modelBytesF + 0.5 ) };
 }
 
@@ -896,7 +968,10 @@ inline OverloadRows collapseOverloadRows( const IngestResult& ing, const std::ve
             // different k= (each overload NodeId carries its own independently-computed PageRank) and
             // breaking the set-equality a reader (and fillordercheck's #9) expects between two orderings
             // of the identical symbol set. The lower NodeId always wins, so content is order-invariant.
-            if( nodeId < out.id[ it->second ] ) out.id[ it->second ] = nodeId;
+            if( nodeId < out.id[it->second] )
+            {
+                out.id[it->second] = nodeId;
+            }
         }
     }
     return out;
@@ -987,9 +1062,17 @@ inline constexpr RankByDisclosure kRankByDisclosure[] = {
 // null check is the same one it makes for churn. Table-driven per the house rule: a new ranker adds a ROW.
 inline const char* rankByLegendFor( const char* label ) noexcept
 {
-    if( label == nullptr ) return nullptr;
+    if( label == nullptr )
+    {
+        return nullptr;
+    }
     for( const RankByDisclosure& d : kRankByDisclosure )
-        if( std::string_view( d.label ) == label ) return d.legend;
+    {
+        if( std::string_view( d.label ) == label )
+        {
+            return d.legend;
+        }
+    }
     return nullptr;
 }
 
@@ -1107,7 +1190,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
 
     // rank order: (rank desc, id asc) — the id tie-break makes the top-K deterministic.
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
 
     const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
@@ -1155,14 +1241,19 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         std::sort( fileOrder.begin(), fileOrder.end(),
                    [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
         for( std::vector<NodeId>& b : buckets )
+        {
             std::sort( b.begin(), b.end() );                   // by symbol id == file+line order (stable)
+        }
     }
     // --most-important-last (explicit) OR T3 auto-flip: emit highest-rank file/symbol LAST (some models
     // weight end-of-context more heavily). Order-only; det-gate still holds.
     else if( effImportantLast )
     {
         std::reverse( fileOrder.begin(), fileOrder.end() );
-        for( std::vector<NodeId>& b : buckets ) std::reverse( b.begin(), b.end() );
+        for( std::vector<NodeId>& b : buckets )
+        {
+            std::reverse( b.begin(), b.end() );
+        }
     }
 
     std::vector<char> esc;
@@ -1178,42 +1269,81 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     std::string legend = outProv
         ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->"
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->";
-    if( churnWindow != nullptr )      legend += kChurnRankLegend;      // §A9.6, churn-only (see the constant)
+    if( churnWindow != nullptr )
+    {
+        legend += kChurnRankLegend; // §A9.6, churn-only (see the constant)
+    }
     // §B2.1: the same treatment for authority/hub/rrf. Mutually exclusive with the churn arm by construction
     // (main.cpp fills exactly one of the two fields), and null on the default pagerank map ⇒ zero bytes there.
-    if( const char* rbLegend = rankByLegendFor( ann.rankByLabel ) ) legend += rbLegend;
-    if( metrics )                     legend += kMetricsLegend;        // §B7.3, metrics-only (ditto)
+    if( const char* rbLegend = rankByLegendFor( ann.rankByLabel ) )
+    {
+        legend += rbLegend;
+    }
+    if( metrics )
+    {
+        legend += kMetricsLegend; // §B7.3, metrics-only (ditto)
+    }
     // Beyond the brief, found by the CA4 legend-coverage sweep: `at=` is the ONE root attribute the map can
     // emit that no map legend ever defined — §B7.1 fixed exactly this on the quality-delta screen and the map
     // is the other surface that prints it. Emitted only on the runs that carry the stamp (map-diff / churn),
     // so the default map is untouched and the clause is charged where the attribute is.
     if( mapAtStamp != nullptr && !mapAtStamp->empty() )
+    {
         legend += kAtStampLegend;
-    if( ann.maxTokensFit != nullptr ) legend += kMaxTokensFitLegend;   // §B13.4, --max-tokens-only (ditto)
+    }
+    if( ann.maxTokensFit != nullptr )
+    {
+        legend += kMaxTokensFitLegend; // §B13.4, --max-tokens-only (ditto)
+    }
 
     // header honesty gauges: ambiguous=resolver guessed among >1 in-repo def (read source); unresolved=the callee
     // name IS defined in-repo but EVERY def was language-filtered — a plausibly-internal, cross-language-filtered
     // edge (NOT counted for genuine externals like stdlib/third-party, whose name has no in-repo def at all).
     std::size_t ambTotal = 0;                                  // global honesty gauge: how many calls the
-    if( ambOut ) for( std::uint32_t v : *ambOut ) ambTotal += v;   // resolver could not pin to one target
+    if( ambOut )
+    {
+        for( std::uint32_t v : *ambOut )
+        {
+            ambTotal += v; // resolver could not pin to one target
+        }
+    }
     std::size_t unresolvedTotal = 0;                           // honesty lever #2 gauge: how many calls hit an
-    if( unresolvedOut ) for( std::uint32_t v : *unresolvedOut ) unresolvedTotal += v;   // in-repo name, all defs lang-filtered
+    if( unresolvedOut )
+    {
+        for( std::uint32_t v : *unresolvedOut )
+        {
+            unresolvedTotal += v; // in-repo name, all defs lang-filtered
+        }
+    }
     std::size_t preciseTotal = 0;                              // how many out-edges the SCIP index pinned
-    if( outProv ) for( std::uint8_t v : *outProv ) preciseTotal += ( v ? 1u : 0u );
+    if( outProv )
+    {
+        for( std::uint8_t v : *outProv )
+        {
+            preciseTotal += ( v ? 1u : 0u );
+        }
+    }
     char precAttr[ 40 ];  precAttr[ 0 ] = '\0';                // emitted ONLY under --scip (else absent → no golden churn)
-    if( outProv ) std::snprintf( precAttr, sizeof( precAttr ), " precise=%zu", preciseTotal );
+    if( outProv )
+    {
+        std::snprintf( precAttr, sizeof( precAttr ), " precise=%zu", preciseTotal );
+    }
     // Multi-root workspace (A13): `roots=N` joins the header gauges and a
     // `<root l="LABEL" p="PATH"/>` prologue opens <r> — ONLY when N≥2 (single-root output byte-unchanged).
     char rootsAttr[ 32 ];  rootsAttr[ 0 ] = '\0';
     if( ing.rootLabels.size() >= 2 )
+    {
         std::snprintf( rootsAttr, sizeof( rootsAttr ), " roots=%zu", ing.rootLabels.size() );
+    }
     // D6: --map-diff's teleport-seed file count, ONLY when the caller passes changedCount
     // (nullptr for every non-map-diff caller ⇒ zero token cost, byte-identical golden map). A clean
     // tree reports "changed=0" so the caller can see the teleport degraded to uniform without shelling
     // out to git a second time — that map is otherwise byte-identical to the plain default map.
     char changedAttr[ 40 ];  changedAttr[ 0 ] = '\0';
     if( changedCount )
+    {
         std::snprintf( changedAttr, sizeof( changedAttr ), " changed=%zu", *changedCount );
+    }
     // §P0.5d: how many otherwise-indexable files the crawl dropped for exceeding a per-file size ceiling —
     // --max-file-size, or (§B13.1) the .json lane's fixed 256 KB config ceiling that --max-file-size does not
     // raise. `--max-file-size=8K` dropped ~296 of ~759 files on this repo and files= reported the survivors as
@@ -1221,7 +1351,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // skipped, so a default run over a tree with nothing oversized stays byte-identical.
     char skippedAttr[ 48 ];  skippedAttr[ 0 ] = '\0';
     if( ing.skippedOversizeCount > 0 )
+    {
         std::snprintf( skippedAttr, sizeof( skippedAttr ), " skipped_oversize=%u", ing.skippedOversizeCount );
+    }
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -1230,9 +1362,11 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // MapAnnotations::MaxTokensFit for the four ways the cap was breached and why the label is monotone.
     char fitAttr[ 96 ];  fitAttr[ 0 ] = '\0';
     if( ann.maxTokensFit != nullptr )
+    {
         std::snprintf( fitAttr, sizeof( fitAttr ), " max_tokens=%zu fit_bytes=%zu%s",
                        ann.maxTokensFit->askedTokens, ann.maxTokensFit->ceilingBytes,
                        ann.maxTokensFit->isOverCeiling ? " over_ceiling=1" : "" );
+    }
     // order= marker: T3's auto-flip must be OBSERVABLE, not a silent behaviour change — "important-
     // last(auto:fill)" is distinct from the explicit "important-last" so a reader (or a diff) can tell
     // the ordering was the fill-aware heuristic, not a requested flag.
@@ -1274,7 +1408,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const auto buildHead = [ & ]( std::size_t estTokens ) -> std::string
     {
         std::string h = legend;
-        if( !stable || statsFirstScreen ) h += buildStats( estTokens );
+        if( !stable || statsFirstScreen )
+        {
+            h += buildStats( estTokens );
+        }
         // r26-stamp Task A: ` at="..."` ONLY when the caller passed a non-empty stamp (--map-diff); every other
         // caller passes nullptr, so the hot default-map path pays a pointer compare, not a git call. at= stays
         // FIRST — the `<r at="<sha>` byte sequence gitstampcheck.sh pins is unchanged.
@@ -1312,21 +1449,28 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     std::size_t childSz  = 0;
     std::FILE*  childMem = openChargeBuffer( &childBuf, &childSz );
     if( !childMem )
+    {
         DEGRADED_PATH_ALERT( "serialize: open_memstream failed — est_tokens reports the MODELLED bytes, not the emitted ones" );
+    }
 
     const std::size_t modelledTokens = mapEstTokens + extraPayloadTokens;
     XmlWriter         w( childMem ? childMem : out );
-    if( !childMem ) w.write( buildHead( modelledTokens ) );
+    if( !childMem )
+    {
+        w.write( buildHead( modelledTokens ) );
+    }
     // §P8 collision: this prologue spelled its LABEL `l=`, the two characters 22 other sites use for a LINE
     // NUMBER — including the <f p= …> rows just below. Renamed: the label had exactly two references in the
     // tree (both updated here) against 15+ readers of the line-number meaning that must not move.
-    if( ing.rootLabels.size() >= 2 )                      // A13 prologue: label → root path, canonical order
+    if( ing.rootLabels.size() >= 2 )
+    { // A13 prologue: label → root path, canonical order
         for( std::size_t r = 0; r < ing.rootLabels.size(); ++r )
         {
             w.write( "<root label=\"" );  w.write( escapeXml( ing.rootLabels[r], esc ) );
             w.write( "\" p=\"" );     w.write( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) );
             w.write( "\"/>" );
         }
+    }
     for( std::uint32_t f : fileOrder )
     {
         w.write( "<f p=\"" );  w.write( escapeXml( ing.files[f], esc ) );  w.write( "\"" );
@@ -1366,12 +1510,17 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
 
             char ambs[ 24 ];  ambs[ 0 ] = '\0';   // "fast guessed K of this symbol's call targets — read source"
             if( ambOut && id < ambOut->size() && ( *ambOut )[id] > 0 )
+            {
                 std::snprintf( ambs, sizeof( ambs ), " amb=\"%u\"", ( *ambOut )[id] );
+            }
 
             // PageRank k= is GLOBALLY volatile (any edit perturbs every rank) → omit it in --stable mode
             // so the prefix stays byte-identical for unedited files (provider KV-cache hits). Default keeps k=.
             char kbuf[ 24 ];  kbuf[ 0 ] = '\0';
-            if( !stable ) std::snprintf( kbuf, sizeof( kbuf ), " k=\"%.4f\"", double( rank[id] ) );
+            if( !stable )
+            {
+                std::snprintf( kbuf, sizeof( kbuf ), " k=\"%.4f\"", double( rank[id] ) );
+            }
 
             // Q-compute descriptive attrs (loc/params/nest/cbo/lcom4/tested), built into a side buffer that is
             // appended before the closing '>' of the metrics attr. ALL --metrics-only; absent by default so the
@@ -1392,10 +1541,16 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
 #pragma clang diagnostic ignored "-Wformat-security"
                     const int r = std::snprintf( qp, std::size_t( qe - qp ), fmt, args... );
 #pragma clang diagnostic pop
-                    if( r > 0 ) qp = ( r < qe - qp ) ? qp + r : qe;
+                    if( r > 0 )
+                    {
+                        qp = ( r < qe - qp ) ? qp + r : qe;
+                    }
                 };
                 // loc: physical line span — always meaningful (SIZE is the master variable — report it first).
-                if( s.loc > 0 ) appendf( " loc=\"%u\"", s.loc );
+                if( s.loc > 0 )
+                {
+                    appendf( " loc=\"%u\"", s.loc );
+                }
                 const bool isFn = ( s.kind == SymKind::Function || s.kind == SymKind::Method );
                 if( isFn )
                 {
@@ -1403,13 +1558,21 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                     appendf( " nest=\"%u\"", unsigned( s.maxNest ) );
                 }
                 if( cbo && id < cbo->size() )
+                {
                     appendf( " cbo=\"%u\"", (*cbo)[id] );
-                if( lcom4 && id < lcom4->size() && (*lcom4)[id] != 0xFFFFFFFFu )   // 0xFFFFFFFF = kLcom4NA (graph.h) ⇒ omit
+                }
+                if( lcom4 && id < lcom4->size() && ( *lcom4 )[id] != 0xFFFFFFFFu )
+                { // 0xFFFFFFFF = kLcom4NA (graph.h) ⇒ omit
                     appendf( " lcom4=\"%u\"", (*lcom4)[id] );
+                }
                 if( amp && id < amp->size() )
+                {
                     appendf( " amp=\"%u\"", (*amp)[id] );
-                if( tested && id < tested->size() && (*tested)[id] )               // omit when 0 (lean output)
+                }
+                if( tested && id < tested->size() && ( *tested )[id] )
+                { // omit when 0 (lean output)
                     appendf( " tested=\"1\"" );
+                }
             }
 
             char attr[ 320 ];   // descriptive metric attrs (fan-in/out/cx/role/amb + Q-compute qbuf) — facts, never
@@ -1421,7 +1584,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                                in, out, s.cx, s.ccx, ( in >= 8 ? " role=\"hub\"" : "" ), qbuf, ambs, kbuf );
             }
             else
+            {
                 std::snprintf( attr, sizeof( attr ), "%s%s>", ambs, kbuf );
+            }
             w.write( attr );
 
             for( std::uint32_t e = outOff[id]; e < outOff[id + 1]; ++e )
@@ -1431,7 +1596,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
                 // binding-table edge (pybind/extern-C/JNI). Absent = name-based guess (the common case →
                 // zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
-                if( outProv && e < outProv->size() && (*outProv)[e] ) w.write( (*outProv)[e] == 2u ? "\" prov=\"binding" : "\" prov=\"scip" );
+                if( outProv && e < outProv->size() && ( *outProv )[e] )
+                {
+                    w.write( ( *outProv )[e] == 2u ? "\" prov=\"binding" : "\" prov=\"scip" );
+                }
                 w.write( "\"/>" );
             }
             w.write( "</s>" );
@@ -1450,7 +1618,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         w.write( buildTail( modelledTokens ) );   // trailing volatile summary — kept out of the byte-stable prefix
         w.flush();
-        if( outEstTokens ) *outEstTokens = modelledTokens;
+        if( outEstTokens )
+        {
+            *outEstTokens = modelledTokens;
+        }
         return;
     }
 
@@ -1478,16 +1649,25 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         const std::size_t next = tokensForEmittedBytes( head.size() + childrenStr.size() + tail.size(),
                                                         mapEst.bytesPerToken() ) + extraPayloadTokens;
-        if( next == estTokens ) break;
+        if( next == estTokens )
+        {
+            break;
+        }
         estTokens = next;
         head      = buildHead( estTokens );
         tail      = buildTail( estTokens );
     }
-    if( outEstTokens ) *outEstTokens = estTokens;   // --token-budget reads THIS value — never a second counter
+    if( outEstTokens )
+    {
+        *outEstTokens = estTokens; // --token-budget reads THIS value — never a second counter
+    }
 
     std::fwrite( head.data(), 1, head.size(), out );
     std::fwrite( childrenStr.data(), 1, childrenStr.size(), out );
-    if( !tail.empty() ) std::fwrite( tail.data(), 1, tail.size(), out );
+    if( !tail.empty() )
+    {
+        std::fwrite( tail.data(), 1, tail.size(), out );
+    }
 }
 
 // --pack-top-n: append raw source of the top-N files (by aggregate symbol rank),
@@ -1502,10 +1682,16 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
 {
     const std::size_t F = ing.files.size();
     std::vector<float> fileRank( F, 0.f );
-    for( const Symbol& s : ing.symbols ) fileRank[ s.fileId ] += rank[ s.id ];
+    for( const Symbol& s : ing.symbols )
+    {
+        fileRank[s.fileId] += rank[s.id];
+    }
 
     std::vector<std::uint32_t> order( F );
-    for( std::uint32_t i = 0; i < F; ++i ) order[i] = i;
+    for( std::uint32_t i = 0; i < F; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, fileRank );
 
     XmlWriter         w( out );
@@ -1516,12 +1702,18 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
     for( std::size_t k = 0; k < keep && used < budgetBytes; ++k )
     {
         std::FILE* in = std::fopen( diskPath( ing, order[k] ).c_str(), "rb" );
-        if( !in ) continue;                                    // graceful: file gone
+        if( !in )
+        {
+            continue; // graceful: file gone
+        }
 
         std::string body;
         char        buf[ 4096 ];
         std::size_t n;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) body.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            body.append( buf, n );
+        }
         std::fclose( in );
 
         bool truncated = false;
@@ -1529,10 +1721,16 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
         {
             const std::size_t room = budgetBytes - used;
             std::size_t cut = body.rfind( '\n', room );
-            if( cut == std::string::npos ) cut = room;
+            if( cut == std::string::npos )
+            {
+                cut = room;
+            }
             // never cut mid-codepoint: back off any UTF-8 continuation bytes (10xxxxxx) so the
             // CDATA stays valid UTF-8 (otherwise xmllint / the G4 guardrail rejects it)
-            while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) --cut;
+            while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 )
+            {
+                --cut;
+            }
             body.resize( cut );
             truncated = true;
         }
@@ -1547,7 +1745,10 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
 
         w.write( "<src p=\"" );  w.write( escapeXml( ing.files[ order[k] ], esc ) );  w.write( "\"><![CDATA[" );
         w.write( safe );
-        if( truncated ) w.write( "\n<!-- truncated -->" );
+        if( truncated )
+        {
+            w.write( "\n<!-- truncated -->" );
+        }
         w.write( "]]></src>" );
         used += safe.size();   // charge EMITTED CDATA bytes (post ]]> expansion), not raw body
     }
@@ -1570,10 +1771,15 @@ inline std::string cleanSig( const char* data, std::size_t a, std::size_t b, Red
 {
     std::string_view raw( data + a, b - a );
     if( const std::size_t stop = raw.find_first_of( "{;" ); stop != std::string_view::npos )
+    {
         raw = raw.substr( 0, stop );
+    }
 
     std::string redacted;
-    if( redact != nullptr && redactSecrets( raw, redacted, *redact ) ) raw = redacted;
+    if( redact != nullptr && redactSecrets( raw, redacted, *redact ) )
+    {
+        raw = redacted;
+    }
 
     constexpr std::size_t  kMaxSig = 240;
     std::string            sig;  sig.reserve( raw.size() < kMaxSig ? raw.size() : kMaxSig );
@@ -1592,7 +1798,10 @@ inline std::string cleanSig( const char* data, std::size_t a, std::size_t b, Red
                 if( ( static_cast<unsigned char>( c ) & 0xC0 ) == 0x80 )
                 {
                     std::size_t cut = sig.size();
-                    while( cut > 0 && ( static_cast<unsigned char>( sig[ cut - 1 ] ) & 0xC0 ) == 0x80 ) --cut;
+                    while( cut > 0 && ( static_cast<unsigned char>( sig[cut - 1] ) & 0xC0 ) == 0x80 )
+                    {
+                        --cut;
+                    }
                     sig.resize( cut > 0 ? cut - 1 : 0 );
                 }
                 break;
@@ -1600,7 +1809,10 @@ inline std::string cleanSig( const char* data, std::size_t a, std::size_t b, Red
             sig.push_back( c ); inSpace = false;
         }
     }
-    while( !sig.empty() && sig.back() == ' ' ) sig.pop_back();
+    while( !sig.empty() && sig.back() == ' ' )
+    {
+        sig.pop_back();
+    }
     return sig;
 }
 
@@ -1611,9 +1823,14 @@ inline std::string cleanSig( const char* data, std::size_t a, std::size_t b, Red
 // the last ')', avoiding const-ref parameters like `const vector3f&`.)
 inline bool pureFromSig( const std::string& sig, Lang lang = Lang::Cpp )
 {
-    if( sig.find( "constexpr" ) != std::string::npos || sig.find( "consteval" ) != std::string::npos ) return true;
-    if( lang == Lang::Swift )   // a non-`mutating` func doesn't mutate its value-type receiver (the const-equivalent);
+    if( sig.find( "constexpr" ) != std::string::npos || sig.find( "consteval" ) != std::string::npos )
+    {
+        return true;
+    }
+    if( lang == Lang::Swift )
+    { // a non-`mutating` func doesn't mutate its value-type receiver (the const-equivalent);
         return sig.find( "func " ) != std::string::npos && sig.find( "mutating" ) == std::string::npos;   // a hint — imprecise for class (reference-type) methods
+    }
     const std::size_t rp = sig.rfind( ')' );   // C/C++/ObjC: a trailing `const` after the parameter list
     return rp != std::string::npos && sig.find( "const", rp ) != std::string::npos;
 }
@@ -1624,22 +1841,52 @@ inline bool pureFromSig( const std::string& sig, Lang lang = Lang::Cpp )
 // signal context per token (the whole reason for L2).
 inline std::string docCommentBefore( const std::string& src, std::size_t defStart )
 {
-    if( defStart == 0 || defStart > src.size() ) return {};
+    if( defStart == 0 || defStart > src.size() )
+    {
+        return {};
+    }
     std::size_t lineStart = defStart;                                          // back up to the def's line start
-    while( lineStart > 0 && src[ lineStart - 1 ] != '\n' ) --lineStart;
-    if( lineStart == 0 ) return {};
+    while( lineStart > 0 && src[lineStart - 1] != '\n' )
+    {
+        --lineStart;
+    }
+    if( lineStart == 0 )
+    {
+        return {};
+    }
 
     const auto strip = []( std::string_view l ) -> std::string_view           // drop leading ws + //,/// markers + a space
     {
         std::size_t t = 0;
-        while( t < l.size() && ( l[t] == ' ' || l[t] == '\t' || l[t] == '*' ) ) ++t;
-        while( t < l.size() && l[t] == '/' ) ++t;
-        while( t < l.size() && ( l[t] == '!' || l[t] == '<' || l[t] == '*' ) ) ++t;
-        if( t < l.size() && l[t] == ' ' ) ++t;
+        while( t < l.size() && ( l[t] == ' ' || l[t] == '\t' || l[t] == '*' ) )
+        {
+            ++t;
+        }
+        while( t < l.size() && l[t] == '/' )
+        {
+            ++t;
+        }
+        while( t < l.size() && ( l[t] == '!' || l[t] == '<' || l[t] == '*' ) )
+        {
+            ++t;
+        }
+        if( t < l.size() && l[t] == ' ' )
+        {
+            ++t;
+        }
         std::string_view r = l.substr( t );
-        while( !r.empty() && ( r.back() == ' ' || r.back() == '\t' || r.back() == '\r' ) ) r.remove_suffix( 1 );
-        if( r.size() >= 2 && r.back() == '/' && r[ r.size() - 2 ] == '*' ) r.remove_suffix( 2 );   // trailing */
-        while( !r.empty() && ( r.back() == ' ' || r.back() == '\t' || r.back() == '*' ) ) r.remove_suffix( 1 );
+        while( !r.empty() && ( r.back() == ' ' || r.back() == '\t' || r.back() == '\r' ) )
+        {
+            r.remove_suffix( 1 );
+        }
+        if( r.size() >= 2 && r.back() == '/' && r[r.size() - 2] == '*' )
+        {
+            r.remove_suffix( 2 ); // trailing */
+        }
+        while( !r.empty() && ( r.back() == ' ' || r.back() == '\t' || r.back() == '*' ) )
+        {
+            r.remove_suffix( 1 );
+        }
         return r;
     };
 
@@ -1649,25 +1896,51 @@ inline std::string docCommentBefore( const std::string& src, std::size_t defStar
     {
         const std::size_t le = cur - 1;                                       // the '\n' ending the line above
         std::size_t ls = le;
-        while( ls > 0 && src[ ls - 1 ] != '\n' ) --ls;
+        while( ls > 0 && src[ls - 1] != '\n' )
+        {
+            --ls;
+        }
         std::string_view line( src.data() + ls, le > ls ? le - ls : 0 );
         std::size_t tt = 0;
-        while( tt < line.size() && ( line[tt] == ' ' || line[tt] == '\t' ) ) ++tt;
+        while( tt < line.size() && ( line[tt] == ' ' || line[tt] == '\t' ) )
+        {
+            ++tt;
+        }
         const std::string_view tl = line.substr( tt );
         const bool isLineComment  = tl.size() >= 2 && tl[0] == '/' && tl[1] == '/';
         const bool isBlockPiece   = !tl.empty() && ( tl[0] == '*' || ( tl.size() >= 2 && tl[0] == '/' && tl[1] == '*' )
                                                      || ( tl.size() >= 2 && tl[ tl.size() - 1 ] == '/' && tl[ tl.size() - 2 ] == '*' ) );
-        if( isLineComment || isBlockPiece ) { rev.push_back( tl ); cur = ls; if( tl.size() >= 2 && tl[0] == '/' && tl[1] == '*' ) break; }
-        else break;                                                          // first non-comment line → stop
+        if( isLineComment || isBlockPiece )
+        {
+            rev.push_back( tl );
+            cur = ls;
+            if( tl.size() >= 2 && tl[0] == '/' && tl[1] == '*' )
+            {
+                break;
+            }
+        }
+        else
+        {
+            break; // first non-comment line → stop
+        }
     }
-    if( rev.empty() ) return {};
+    if( rev.empty() )
+    {
+        return {};
+    }
 
     std::string doc;
     for( auto it = rev.rbegin(); it != rev.rend(); ++it )
     {
         const std::string_view piece = strip( *it );
-        if( piece.empty() ) continue;
-        if( !doc.empty() ) doc += ' ';
+        if( piece.empty() )
+        {
+            continue;
+        }
+        if( !doc.empty() )
+        {
+            doc += ' ';
+        }
         doc += std::string( piece );
         if( doc.size() >= 200 )
         {
@@ -1675,7 +1948,10 @@ inline std::string docCommentBefore( const std::string& src, std::size_t defStar
             // as the packSource budget cut. (The decorative trailing-strip below happens to eat partial
             // sequences too — its alnum test is ASCII-only — but make the guarantee explicit here.)
             std::size_t cut = 200;
-            while( cut > 0 && ( static_cast<unsigned char>( doc[cut] ) & 0xC0 ) == 0x80 ) --cut;
+            while( cut > 0 && ( static_cast<unsigned char>( doc[cut] ) & 0xC0 ) == 0x80 )
+            {
+                --cut;
+            }
             doc.resize( cut );
             break;
         }
@@ -1683,8 +1959,14 @@ inline std::string docCommentBefore( const std::string& src, std::size_t defStar
     // strip decorative leading/trailing non-alphanumeric runs (── box dividers, ===, ***), keep the label
     const auto alnum = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ); };
     std::size_t b0 = 0, b1 = doc.size();
-    while( b0 < b1 && !alnum( doc[ b0 ] ) )     ++b0;
-    while( b1 > b0 && !alnum( doc[ b1 - 1 ] ) ) --b1;
+    while( b0 < b1 && !alnum( doc[b0] ) )
+    {
+        ++b0;
+    }
+    while( b1 > b0 && !alnum( doc[b1 - 1] ) )
+    {
+        --b1;
+    }
     return doc.substr( b0, b1 - b0 );
 }
 
@@ -1730,7 +2012,10 @@ inline std::string compressBody( std::string_view src )
                 // Raw string: collect delimiter between " and (
                 std::size_t j = i + 1;
                 std::string delim;
-                while( j < N && src[j] != '(' && src[j] != '\n' ) delim += src[j++];
+                while( j < N && src[j] != '(' && src[j] != '\n' )
+                {
+                    delim += src[j++];
+                }
                 if( j < N && src[j] == '(' )
                 {
                     // We're inside R"delim(...).  Copy everything verbatim until )delim"
@@ -1762,7 +2047,10 @@ inline std::string compressBody( std::string_view src )
                 const char sc = src[i];
                 out += sc;
                 if( sc == '\\' && i + 1 < N ) { out += src[++i]; }   // escape: skip next char
-                else if( sc == '"' ) break;                            // end of string
+                else if( sc == '"' )
+                {
+                    break; // end of string
+                }
                 ++i;
             }
             ++i;   // step past the closing "
@@ -1779,7 +2067,10 @@ inline std::string compressBody( std::string_view src )
                 const char sc = src[i];
                 out += sc;
                 if( sc == '\\' && i + 1 < N ) { out += src[++i]; }
-                else if( sc == '\'' ) break;
+                else if( sc == '\'' )
+                {
+                    break;
+                }
                 ++i;
             }
             ++i;
@@ -1792,7 +2083,10 @@ inline std::string compressBody( std::string_view src )
             // Line comment: // …  — consume to end of line, emit a newline to preserve line count.
             if( src[i + 1] == '/' )
             {
-                while( i < N && src[i] != '\n' ) ++i;
+                while( i < N && src[i] != '\n' )
+                {
+                    ++i;
+                }
                 // leave the \n to be emitted in the NORMAL branch below
                 continue;
             }
@@ -1802,10 +2096,16 @@ inline std::string compressBody( std::string_view src )
                 i += 2;   // skip /*
                 while( i + 1 < N && !( src[i] == '*' && src[i + 1] == '/' ) )
                 {
-                    if( src[i] == '\n' ) out += '\n';   // preserve newlines so line numbers survive
+                    if( src[i] == '\n' )
+                    {
+                        out += '\n'; // preserve newlines so line numbers survive
+                    }
                     ++i;
                 }
-                if( i + 1 < N ) i += 2;   // skip */
+                if( i + 1 < N )
+                {
+                    i += 2; // skip */
+                }
                 continue;
             }
         }
@@ -1834,19 +2134,32 @@ inline std::string compressBody( std::string_view src )
     {
         // Find end of line.
         std::size_t eol = out.find( '\n', pos );
-        if( eol == std::string::npos ) eol = M;
+        if( eol == std::string::npos )
+        {
+            eol = M;
+        }
 
         const std::string_view line( out.data() + pos, eol - pos );
 
         // Is this line blank (all whitespace)?
         bool isBlank = true;
-        for( char ch : line ) if( ch != ' ' && ch != '\t' && ch != '\r' ) { isBlank = false; break; }
+        for( char ch : line )
+        {
+            if( ch != ' ' && ch != '\t' && ch != '\r' )
+            {
+                isBlank = false;
+                break;
+            }
+        }
 
         if( isBlank )
         {
             // Suppress leading blank lines at the very start of a body (artifact of stripping
             // the opening comment of a function body), and collapse 3+ consecutive blanks.
-            if( !firstLine ) ++blanks;
+            if( !firstLine )
+            {
+                ++blanks;
+            }
             // Emit at most one blank line (we allow up to 2 accumulated before we start collapsing;
             // the spec says "runs of 3+ → single blank", so blanks==1 and blanks==2 are both fine).
             if( !firstLine && blanks <= 2 )
@@ -1861,14 +2174,20 @@ inline std::string compressBody( std::string_view src )
             blanks    = 0;
             firstLine = false;
             result.append( out.data() + pos, eol - pos );
-            if( eol < M ) result += '\n';
+            if( eol < M )
+            {
+                result += '\n';
+            }
         }
 
         pos = ( eol < M ) ? eol + 1 : M;
     }
 
     // Trim a single trailing newline that may have been added (cosmetic).
-    while( !result.empty() && result.back() == '\n' ) result.pop_back();
+    while( !result.empty() && result.back() == '\n' )
+    {
+        result.pop_back();
+    }
     return result;
 }
 
@@ -1956,11 +2275,15 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     {
         char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
         if( facts.fanIn && id < facts.fanIn->size() )
+        {
             std::snprintf( inAttr, sizeof( inAttr ), " in=\"%u\"", ( *facts.fanIn )[ id ] );
+        }
         std::snprintf( tail, sizeof( tail ), " cx=\"%u\" ccx=\"%u\"%s%s%s>", s.cx, s.ccx, inAttr, facts.lens, facts.pure );
     }
     else
+    {
         std::snprintf( tail, sizeof( tail ), "%s%s>", facts.lens, facts.pure );
+    }
     head += tail;
     return head;
 }
@@ -1997,26 +2320,54 @@ inline void trimSigLadder( std::vector<EntryT>& entries, std::vector<FileT>& fil
 
     // ladder steps A..F (see kForPayloadBudgetBytes above); entries walk tail → head. Plain
     // pre-decrement countdown loops — `k-- > 0` wraps at 0, which G1's -fsanitize=integer traps.
-    for( std::size_t k = entries.size(); k > 0 && !fits(); )                 // A: tail sigs 160 → 96
-        if( --k; entries[k].globalRank > kForDocExcerptRankCount ) shrinkSig( entries[k], kForCapTailSigBytes );
-    for( std::size_t k = entries.size(); k > 0 && !fits(); )                 // B: rank 13..24 lose the excerpt
-        if( --k; entries[k].globalRank > kForDocFullRankCount && entries[k].globalRank <= kForDocExcerptRankCount ) dropDoc( entries[k] );
-    for( std::size_t k = entries.size(); k > 0 && !fits(); )                 // C: rank 1..12 doc capped at 96
-        if( --k; entries[k].globalRank <= kForDocFullRankCount ) capDoc( entries[k], kForDocExcerptBytes );
-    for( std::size_t k = entries.size(); k > 0 && !fits(); )                 // D: rank 5..12 doc dropped + sig capped
+    for( std::size_t k = entries.size(); k > 0 && !fits(); )
+    { // A: tail sigs 160 → 96
+        if( --k; entries[k].globalRank > kForDocExcerptRankCount )
+        {
+            shrinkSig( entries[k], kForCapTailSigBytes );
+        }
+    }
+    for( std::size_t k = entries.size(); k > 0 && !fits(); )
+    { // B: rank 13..24 lose the excerpt
+        if( --k; entries[k].globalRank > kForDocFullRankCount && entries[k].globalRank <= kForDocExcerptRankCount )
+        {
+            dropDoc( entries[k] );
+        }
+    }
+    for( std::size_t k = entries.size(); k > 0 && !fits(); )
+    { // C: rank 1..12 doc capped at 96
+        if( --k; entries[k].globalRank <= kForDocFullRankCount )
+        {
+            capDoc( entries[k], kForDocExcerptBytes );
+        }
+    }
+    for( std::size_t k = entries.size(); k > 0 && !fits(); )
+    { // D: rank 5..12 doc dropped + sig capped
         if( --k; entries[k].globalRank > 4 && entries[k].globalRank <= kForDocFullRankCount ) { dropDoc( entries[k] ); shrinkSig( entries[k], kForTailSigBytes ); }
-    for( std::size_t k = entries.size(); k > 0 && !fits(); )                 // E: rank 1..4 sig capped (doc floor stays)
-        if( --k; entries[k].globalRank <= 4 ) shrinkSig( entries[k], kForTailSigBytes );
+    }
+    for( std::size_t k = entries.size(); k > 0 && !fits(); )
+    { // E: rank 1..4 sig capped (doc floor stays)
+        if( --k; entries[k].globalRank <= 4 )
+        {
+            shrinkSig( entries[k], kForTailSigBytes );
+        }
+    }
     for( std::size_t fi = files.size(); fi > 0 && !fits(); )                 // F: drop whole entries, tail file first
     {
         FileT& sf = files[ --fi ];
         for( std::size_t k = sf.entryEnd; k > sf.entryBegin && !fits(); )
         {
             EntryT& e = entries[ --k ];
-            if( e.dropped || e.globalRank <= 4 ) continue;                   // rank 1..4 always survive (the floor)
+            if( e.dropped || e.globalRank <= 4 )
+            {
+                continue; // rank 1..4 always survive (the floor)
+            }
             total -= entryCost( e );
             e.dropped = true;
-            if( --sf.liveCount == 0 && sf.entryEnd > sf.entryBegin ) total -= sf.wrapBytes;   // wrapper goes with its last entry
+            if( --sf.liveCount == 0 && sf.entryEnd > sf.entryBegin )
+            {
+                total -= sf.wrapBytes; // wrapper goes with its last entry
+            }
         }
     }
 }
@@ -2055,13 +2406,19 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
     // Matches writeRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
-    if( budgetBytes == 0 ) budgetBytes = SIZE_MAX;
+    if( budgetBytes == 0 )
+    {
+        budgetBytes = SIZE_MAX;
+    }
 
     const std::size_t S = ing.symbols.size();
 
     // top-N symbols by (rank desc, id asc)
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
     const std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
 
@@ -2082,7 +2439,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     if( rankAdaptivePayload )
     {
         globalRankOf.assign( S, 0 );
-        for( std::size_t k = 0; k < keep; ++k ) globalRankOf[ order[k] ] = std::uint32_t( k + 1 );
+        for( std::size_t k = 0; k < keep; ++k )
+        {
+            globalRankOf[order[k]] = std::uint32_t( k + 1 );
+        }
     }
 
     XmlWriter         w( out );
@@ -2121,14 +2481,23 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         // phase 1 — collect (mirrors the streaming loop byte-for-byte, including the budgetBytes gate)
         for( std::uint32_t f : fileOrder )
         {
-            if( used >= budgetBytes ) break;
+            if( used >= budgetBytes )
+            {
+                break;
+            }
 
             std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-            if( !in ) continue;                                    // graceful: file gone
+            if( !in )
+            {
+                continue; // graceful: file gone
+            }
             std::string src;
             char        buf[ 4096 ];
             std::size_t n;
-            while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) src.append( buf, n );
+            while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+            {
+                src.append( buf, n );
+            }
             std::fclose( in );
 
             std::vector<NodeId>& syms = buckets[f];
@@ -2141,23 +2510,37 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 // exact wrapper bytes: <f p="…"> [+ layer="…"] + </f>
                 sf.wrapBytes = 6 + escapeXml( ing.files[f], esc ).size() + 1 + 1 + 4;
-                if( const char* fl = builtinLayer( ing.files[f] ); *fl ) sf.wrapBytes += 8 + std::strlen( fl ) + 1;
+                if( const char* fl = builtinLayer( ing.files[f] ); *fl )
+                {
+                    sf.wrapBytes += 8 + std::strlen( fl ) + 1;
+                }
                 sf.notes      = renderNoteChildren( noteIndex, fileNoteTarget( noteIndex, ing.files[f] ), esc );   // W3-N2
                 sf.wrapBytes += sf.notes.size();                                                                   //   charged, never trimmed
             }
             for( NodeId id : syms )
             {
-                if( used >= budgetBytes ) break;
+                if( used >= budgetBytes )
+                {
+                    break;
+                }
                 const Symbol&     s = ing.symbols[id];
                 const std::size_t a = s.sigStartByte, b = s.sigEndByte;
-                if( a >= src.size() || b > src.size() || a >= b ) continue;
+                if( a >= src.size() || b > src.size() || a >= b )
+                {
+                    continue;
+                }
 
                 std::string sig = cleanSig( src.data(), a, b, redact );
-                if( sig.empty() ) continue;
+                if( sig.empty() )
+                {
+                    continue;
+                }
 
                 const std::uint32_t globalRank = globalRankOf[ id ];
                 if( globalRank > kForDocExcerptRankCount )
+                {
                     truncateUtf8WithEllipsis( sig, kForTailSigBytes );
+                }
 
                 const bool  pureSig = pureFromSig( sig, s.lang ) && !( impure && id < impure->size() && (*impure)[id] );
                 const char* pure    = pureSig ? " pure=\"1\"" : "";
@@ -2171,26 +2554,46 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
 #pragma clang diagnostic ignored "-Wformat-security"
                         const int r = std::snprintf( qp, std::size_t( qe - qp ), fmt, args... );
 #pragma clang diagnostic pop
-                        if( r > 0 ) qp = ( r < qe - qp ) ? qp + r : qe;
+                        if( r > 0 )
+                        {
+                            qp = ( r < qe - qp ) ? qp + r : qe;
+                        }
                     };
                     if( churnPerFile && f < churnPerFile->size() && (*churnPerFile)[f] > 0 )
+                    {
                         appendf( " churn=\"%u\"", (*churnPerFile)[f] );
+                    }
                     if( amp && id < amp->size() && (*amp)[id] > 0 )
+                    {
                         appendf( " amp=\"%u\"", (*amp)[id] );
+                    }
                     if( cloneMember && id < cloneMember->size() && (*cloneMember)[id] )
+                    {
                         appendf( " clone=\"1\"" );
+                    }
                     if( tested && id < tested->size() && (*tested)[id] )
+                    {
                         appendf( " tested=\"1\"" );
+                    }
                 }
 
                 std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc );
 
                 std::string doc = docCommentBefore( src, a );
                 redactInPlace( doc, redact );
-                if( globalRank > kForDocExcerptRankCount )      doc.clear();
-                else if( globalRank > kForDocFullRankCount )    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
+                if( globalRank > kForDocExcerptRankCount )
+                {
+                    doc.clear();
+                }
+                else if( globalRank > kForDocFullRankCount )
+                {
+                    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
+                }
 
-                if( !doc.empty() ) used += doc.size() + 12;     // the same budgetBytes accounting as the streaming path
+                if( !doc.empty() )
+                {
+                    used += doc.size() + 12; // the same budgetBytes accounting as the streaming path
+                }
                 used += sig.size() + 16;
 
                 SigEntry e;
@@ -2209,16 +2612,28 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         // exact emitted byte count of the block as collected
         const auto entryCost = [ & ]( const SigEntry& e ) -> std::size_t
         {
-            if( e.dropped ) return 0;
+            if( e.dropped )
+            {
+                return 0;
+            }
             std::size_t c = e.head.size() + 4;                                       // "<d …>" + "</d>"
-            if( !e.doc.empty() ) c += 11 + escapeXml( e.doc, esc ).size();           // "<doc>" + "</doc>"
+            if( !e.doc.empty() )
+            {
+                c += 11 + escapeXml( e.doc, esc ).size(); // "<doc>" + "</doc>"
+            }
             c += escapeXml( e.sig, esc ).size();
             return c + e.notes.size();                                               // W3-N2: notes are pre-rendered, so their
-                                                                                     //   EXACT emitted size is known (jsonSigEntryCost)
+            //   EXACT emitted size is known (jsonSigEntryCost)
         };
         std::size_t total = 6 + 7;                                                   // "<sigs>" + "</sigs>"
-        for( const SigFile&  sf : sigFiles ) total += sf.wrapBytes;
-        for( const SigEntry& e  : entries  ) total += entryCost( e );
+        for( const SigFile& sf : sigFiles )
+        {
+            total += sf.wrapBytes;
+        }
+        for( const SigEntry& e : entries )
+        {
+            total += entryCost( e );
+        }
 
         const bool capped = total > payloadBudgetBytes;
         if( capped )
@@ -2244,7 +2659,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         w.write( capped ? "<sigs capped=\"1\">" : "<sigs>" );
         for( const SigFile& sf : sigFiles )
         {
-            if( capped && sf.liveCount == 0 && sf.entryEnd > sf.entryBegin ) continue;   // every entry dropped → wrapper too
+            if( capped && sf.liveCount == 0 && sf.entryEnd > sf.entryBegin )
+            {
+                continue; // every entry dropped → wrapper too
+            }
             w.write( "<f p=\"" );  w.write( escapeXml( ing.files[ sf.fileId ], esc ) );  w.write( "\"" );
             if( const char* fl = builtinLayer( ing.files[ sf.fileId ] ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
             w.write( ">" );
@@ -2252,7 +2670,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             for( std::size_t k = sf.entryBegin; k < sf.entryEnd; ++k )
             {
                 const SigEntry& e = entries[k];
-                if( e.dropped ) continue;
+                if( e.dropped )
+                {
+                    continue;
+                }
                 w.write( e.head.c_str() );
                 if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
                 w.write( escapeXml( e.sig, esc ) );
@@ -2269,14 +2690,23 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     w.write( "<sigs>" );
     for( std::uint32_t f : fileOrder )
     {
-        if( used >= budgetBytes ) break;
+        if( used >= budgetBytes )
+        {
+            break;
+        }
 
         std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !in ) continue;                                        // graceful: file gone
+        if( !in )
+        {
+            continue; // graceful: file gone
+        }
         std::string src;
         char        buf[ 4096 ];
         std::size_t n;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) src.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            src.append( buf, n );
+        }
         std::fclose( in );
 
         // signatures in source order for readability
@@ -2294,20 +2724,31 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         }
         for( NodeId id : syms )
         {
-            if( used >= budgetBytes ) break;
+            if( used >= budgetBytes )
+            {
+                break;
+            }
             const Symbol&     s = ing.symbols[id];
             const std::size_t a = s.sigStartByte, b = s.sigEndByte;
-            if( a >= src.size() || b > src.size() || a >= b ) continue;
+            if( a >= src.size() || b > src.size() || a >= b )
+            {
+                continue;
+            }
 
             // compact one-line declaration (shared cleaner: stop at '{' or ';', collapse whitespace)
             std::string sig = cleanSig( src.data(), a, b, redact );
-            if( sig.empty() ) continue;
+            if( sig.empty() )
+            {
+                continue;
+            }
 
             // B0.3 rank-adaptive payload: a pure function of (global rank, fixed byte limits) — see the
             // kForDoc*/kForTailSig constants. Top ranks are untouched; the tail is signature-only.
             const std::uint32_t globalRank = rankAdaptivePayload ? globalRankOf[ id ] : 0u;
             if( rankAdaptivePayload && globalRank > kForDocExcerptRankCount )
+            {
                 truncateUtf8WithEllipsis( sig, kForTailSigBytes );
+            }
 
             const bool  pureSig = pureFromSig( sig, s.lang ) && !( impure && id < impure->size() && (*impure)[id] );   // const/non-mutating AND no transitive side-effects
             const char* pure    = pureSig ? " pure=\"1\"" : "";
@@ -2329,16 +2770,27 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
 #pragma clang diagnostic ignored "-Wformat-security"
                     const int r = std::snprintf( qp, std::size_t( qe - qp ), fmt, args... );
 #pragma clang diagnostic pop
-                    if( r > 0 ) qp = ( r < qe - qp ) ? qp + r : qe;
+                    if( r > 0 )
+                    {
+                        qp = ( r < qe - qp ) ? qp + r : qe;
+                    }
                 };
                 if( churnPerFile && f < churnPerFile->size() && (*churnPerFile)[f] > 0 )
+                {
                     appendf( " churn=\"%u\"", (*churnPerFile)[f] );
+                }
                 if( amp && id < amp->size() && (*amp)[id] > 0 )
+                {
                     appendf( " amp=\"%u\"", (*amp)[id] );
+                }
                 if( cloneMember && id < cloneMember->size() && (*cloneMember)[id] )
+                {
                     appendf( " clone=\"1\"" );
+                }
                 if( tested && id < tested->size() && (*tested)[id] )
+                {
                     appendf( " tested=\"1\"" );
+                }
             }
 
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
@@ -2347,8 +2799,14 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             redactInPlace( doc, redact );                    // a doc-comment body can hold a pasted secret
             if( rankAdaptivePayload )                        // B0.3: tail entries carry a trimmed excerpt / no doc
             {
-                if( globalRank > kForDocExcerptRankCount )      doc.clear();
-                else if( globalRank > kForDocFullRankCount )    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
+                if( globalRank > kForDocExcerptRankCount )
+                {
+                    doc.clear();
+                }
+                else if( globalRank > kForDocFullRankCount )
+                {
+                    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
+                }
             }
             if( !doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( doc, esc ) );  w.write( "</doc>" );  used += doc.size() + 12; }
             w.write( escapeXml( sig, esc ) );
@@ -2402,7 +2860,10 @@ inline std::string candidatesRootTag( std::size_t keep, std::size_t corpusCount,
                     + "\" capped=\"" + ( keep < corpusCount ? "1" : "0" ) + "\"";
     if( prov.route ) { tag += " route=\"";  tag += prov.route;  tag += "\""; }
     tag += " anchored=\"" + std::to_string( prov.anchored ) + "\"";
-    if( prov.weak ) tag += " weak=\"1\"";
+    if( prov.weak )
+    {
+        tag += " weak=\"1\"";
+    }
     return tag + ">";
 }
 
@@ -2413,7 +2874,10 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
     const std::size_t S = ing.symbols.size();
 
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
     const std::size_t keep = std::min<std::size_t>( cap > 0 ? std::size_t( cap ) : S, S );
 
@@ -2423,11 +2887,24 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
     const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
     {
         const auto it = contents.find( fid );
-        if( it != contents.end() ) return it->second;
+        if( it != contents.end() )
+        {
+            return it->second;
+        }
         std::string s;
         if( fid < ing.files.size() )
+        {
             if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
-            { char b[ 4096 ]; std::size_t n; while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 ) s.append( b, n ); std::fclose( in ); }
+            {
+                char b[4096];
+                std::size_t n;
+                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+                {
+                    s.append( b, n );
+                }
+                std::fclose( in );
+            }
+        }
         return contents.emplace( fid, std::move( s ) ).first->second;
     };
 
@@ -2453,7 +2930,9 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
 
         std::string sig;
         if( s.sigStartByte < s.sigEndByte && s.sigEndByte <= src.size() )
+        {
             sig = cleanSig( src.data(), s.sigStartByte, s.sigEndByte, redact );
+        }
         const std::string canon = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
 
         char hb[ 96 ];  std::snprintf( hb, sizeof( hb ), "<cand r=\"%zu\" s=\"%.6g\" n=\"", r + 1, double( rank[id] ) );
@@ -2501,16 +2980,30 @@ inline SlicedBody sliceBodyLines( std::string_view body, std::uint32_t startLine
     std::vector<std::pair<std::size_t, std::size_t>> lines;
     std::size_t                                      lineStart = 0;
     for( std::size_t i = 0; i < body.size(); ++i )
+    {
         if( body[i] == '\n' ) { lines.emplace_back( lineStart, i ); lineStart = i + 1; }
+    }
     lines.emplace_back( lineStart, body.size() );   // final line (no trailing '\n', or the text after the last one)
 
     const std::uint32_t total = std::uint32_t( lines.size() );
-    if( startLine > endLine ) std::swap( startLine, endLine );          // defensive: never emit an inverted slice
+    if( startLine > endLine )
+    {
+        std::swap( startLine, endLine ); // defensive: never emit an inverted slice
+    }
     std::uint32_t lo = startLine < 1 ? 1 : startLine;
     std::uint32_t hi = endLine   < 1 ? 1 : endLine;
-    if( lo > total ) lo = total;                                        // clamp — never index past the def's span
-    if( hi > total ) hi = total;
-    if( lo > hi )    lo = hi;                                           // degenerate (empty def) — 1 line, both ends equal
+    if( lo > total )
+    {
+        lo = total; // clamp — never index past the def's span
+    }
+    if( hi > total )
+    {
+        hi = total;
+    }
+    if( lo > hi )
+    {
+        lo = hi; // degenerate (empty def) — 1 line, both ends equal
+    }
 
     const std::size_t byteStart = lines[ lo - 1 ].first;
     std::size_t       byteEnd   = lines[ hi - 1 ].second;
@@ -2519,8 +3012,14 @@ inline SlicedBody sliceBodyLines( std::string_view body, std::uint32_t startLine
     // are on '\n' (always a codepoint boundary) so this is normally a no-op; kept as the same defensive
     // back-off used elsewhere (packSource/cleanSig/docCommentBefore) in case of a corrupt/binary body.
     std::size_t bs = byteStart;
-    while( bs < body.size() && ( static_cast<unsigned char>( body[bs] ) & 0xC0 ) == 0x80 ) ++bs;
-    while( byteEnd > bs && ( static_cast<unsigned char>( body[byteEnd] ) & 0xC0 ) == 0x80 ) --byteEnd;
+    while( bs < body.size() && ( static_cast<unsigned char>( body[bs] ) & 0xC0 ) == 0x80 )
+    {
+        ++bs;
+    }
+    while( byteEnd > bs && ( static_cast<unsigned char>( body[byteEnd] ) & 0xC0 ) == 0x80 )
+    {
+        --byteEnd;
+    }
 
     SlicedBody out;
     out.text   = std::string( body.substr( bs, byteEnd - bs ) );
@@ -2596,7 +3095,10 @@ struct EmittedBodies
 // statement that pushed that function's nesting metric over the bar — measured by bisection, not guessed.
 inline void noteOmittedBody( EmittedBodies* out, NodeId id )
 {
-    if( out ) out->omitted.push_back( id );
+    if( out )
+    {
+        out->omitted.push_back( id );
+    }
 }
 
 // The two sinks emitCalleeCallsBlock writes through. A struct rather than two more parameters: the function
@@ -2622,33 +3124,55 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
                                   const CalleeCallsSink& sink )
 {
     RedactCounts* const redact = sink.redact;
-    if( id + 1 >= outOff.size() ) return;
+    if( id + 1 >= outOff.size() )
+    {
+        return;
+    }
     const std::uint32_t total = outOff[id + 1] - outOff[id];
-    if( total == 0 ) return;
+    if( total == 0 )
+    {
+        return;
+    }
 
     std::string callsBody;
     int         shown = 0;
     for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
     {
         const NodeId cid = outTargets[k];
-        if( cid >= ing.symbols.size() ) continue;
+        if( cid >= ing.symbols.size() )
+        {
+            continue;
+        }
         const Symbol&      cs   = ing.symbols[cid];
         const std::string& csrc = contentOf( cs.fileId );
-        if( cs.sigStartByte >= cs.sigEndByte || cs.sigEndByte > csrc.size() ) continue;
+        if( cs.sigStartByte >= cs.sigEndByte || cs.sigEndByte > csrc.size() )
+        {
+            continue;
+        }
         const std::string  sig  = cleanSig( csrc.data(), cs.sigStartByte, cs.sigEndByte, redact );
-        if( sig.empty() ) continue;
+        if( sig.empty() )
+        {
+            continue;
+        }
         char hb[ 32 ];  std::snprintf( hb, sizeof( hb ), "\" l=\"%u\">", cs.line );
         callsBody += "<c n=\"";  callsBody += escapeXml( cs.name, esc );  callsBody += hb;
         callsBody += escapeXml( sig, esc );  callsBody += "</c>";
         used += sig.size() + 24;
         ++shown;
-        if( sink.recorded ) sink.recorded->push_back( EmittedBodyCall{ cs.name, cs.line, sig } );   // §H5
+        if( sink.recorded )
+        {
+            sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, sig } ); // §H5
+        }
     }
     char callsHdr[ 64 ];
     if( static_cast<std::uint32_t>( shown ) < total )
+    {
         std::snprintf( callsHdr, sizeof( callsHdr ), "<calls total=\"%u\" shown=\"%d\" capped=\"1\">", total, shown );
+    }
     else
+    {
         std::snprintf( callsHdr, sizeof( callsHdr ), "<calls total=\"%u\">", total );
+    }
     out += callsHdr;
     out += callsBody;
     out += "</calls>";
@@ -2712,7 +3236,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
     // Matches writeRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
-    if( budgetBytes == 0 ) budgetBytes = SIZE_MAX;
+    if( budgetBytes == 0 )
+    {
+        budgetBytes = SIZE_MAX;
+    }
 
     XmlWriter         w( out );
     std::vector<char> esc;
@@ -2723,11 +3250,24 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
     {
         const auto it = contents.find( fid );
-        if( it != contents.end() ) return it->second;
+        if( it != contents.end() )
+        {
+            return it->second;
+        }
         std::string s;
         if( fid < ing.files.size() )
+        {
             if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
-            { char b[ 4096 ]; std::size_t n; while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 ) s.append( b, n ); std::fclose( in ); }
+            {
+                char b[4096];
+                std::size_t n;
+                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+                {
+                    s.append( b, n );
+                }
+                std::fclose( in );
+            }
+        }
         return contents.emplace( fid, std::move( s ) ).first->second;
     };
 
@@ -2737,25 +3277,43 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     std::size_t                                            requestedCount = 0;
     for( NodeId id : nodes )
     {
-        if( id >= ing.symbols.size() ) continue;
+        if( id >= ing.symbols.size() )
+        {
+            continue;
+        }
         ++requestedCount;
         const std::uint32_t f = ing.symbols[id].fileId;
-        if( byFile.find( f ) == byFile.end() ) fileOrder.push_back( f );
+        if( byFile.find( f ) == byFile.end() )
+        {
+            fileOrder.push_back( f );
+        }
         byFile[f].push_back( id );
     }
-    if( outEmitted ) outEmitted->requested = requestedCount;
+    if( outEmitted )
+    {
+        outEmitted->requested = requestedCount;
+    }
 
     std::string children;         // see THE <bodies> DISCLOSURE in the header for why this is buffered, not streamed
     std::size_t shownCount = 0;   // counted at the emission, never by substring-matching `children`
     for( std::uint32_t f : fileOrder )
     {
-        if( used >= budgetBytes ) break;
+        if( used >= budgetBytes )
+        {
+            break;
+        }
 
-        if( contentOf( f ).empty() ) continue;                     // graceful: file gone / empty
+        if( contentOf( f ).empty() )
+        {
+            continue; // graceful: file gone / empty
+        }
 
         for( NodeId id : byFile[f] )
         {
-            if( used >= budgetBytes ) break;
+            if( used >= budgetBytes )
+            {
+                break;
+            }
 
             // re-fetch the content EVERY iteration: `contents` is a flat HashMap (values stored
             // contiguously), so the cross-file callee-signature contentOf() below can reallocate the
@@ -2763,7 +3321,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             const std::string& src = contentOf( f );
             const Symbol&      s = ing.symbols[id];
             const std::size_t  a = s.sigStartByte, b = s.endByte;
-            if( a >= b || b > src.size() ) continue;
+            if( a >= b || b > src.size() )
+            {
+                continue;
+            }
 
             std::string body( src.data() + a, b - a );
 
@@ -2801,8 +3362,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                 if( used == 0 && body.size() > budgetBytes )       // a single def larger than the WHOLE budget → truncate it (UTF-8 safe)
                 {
                     std::size_t cut = body.rfind( '\n', budgetBytes );
-                    if( cut == std::string::npos ) cut = budgetBytes;
-                    while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) --cut;
+                    if( cut == std::string::npos )
+                    {
+                        cut = budgetBytes;
+                    }
+                    while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 )
+                    {
+                        --cut;
+                    }
                     body.resize( cut );
                     truncated = true;
                 }
@@ -2833,7 +3400,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             if( compress )
             {
                 std::string compressed = compressBody( body );
-                if( compressed.size() < body.size() ) body = std::move( compressed );
+                if( compressed.size() < body.size() )
+                {
+                    body = std::move( compressed );
+                }
             }
 
             // Redact credential shapes from the def body (a full-body emission seam). After compress /
@@ -2853,10 +3423,16 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             children += hdr;  children += escapeXml( ing.files[f], esc );
             children += "\" n=\"";  children += escapeXml( s.name, esc );  children += "\"";
             children += partAttr;                                 // octocode partial-fetch: lines="lo-hi/total" (empty on the whole-body path)
-            if( bodyScrubbed ) children += " scrubbed=\"1\"";     // absent = the CDATA is byte-equal to the JSON twin
+            if( bodyScrubbed )
+            {
+                children += " scrubbed=\"1\""; // absent = the CDATA is byte-equal to the JSON twin
+            }
             children += "><![CDATA[";
             children += safe;
-            if( truncated ) children += "\n<!-- truncated -->";
+            if( truncated )
+            {
+                children += "\n<!-- truncated -->";
+            }
             children += "]]>";
             used += safe.size();
 
@@ -2910,18 +3486,34 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
                                              bool compress = false,
                                              const HashMap<NodeId, LineRange>* ranges = nullptr )
 {
-    if( budgetBytes == 0 ) budgetBytes = SIZE_MAX;
+    if( budgetBytes == 0 )
+    {
+        budgetBytes = SIZE_MAX;
+    }
 
     // per-file content cache (each def's file read once), mirroring packBodies' contentOf.
     HashMap<std::uint32_t, std::string> contents;
     const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
     {
         const auto it = contents.find( fid );
-        if( it != contents.end() ) return it->second;
+        if( it != contents.end() )
+        {
+            return it->second;
+        }
         std::string s;
         if( fid < ing.files.size() )
+        {
             if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
-            { char b[ 4096 ]; std::size_t n; while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 ) s.append( b, n ); std::fclose( in ); }
+            {
+                char b[4096];
+                std::size_t n;
+                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+                {
+                    s.append( b, n );
+                }
+                std::fclose( in );
+            }
+        }
         return contents.emplace( fid, std::move( s ) ).first->second;
     };
 
@@ -2932,23 +3524,42 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
 
     for( NodeId id : nodes )
     {
-        if( used >= budgetBytes ) break;
-        if( id >= ing.symbols.size() ) continue;
+        if( used >= budgetBytes )
+        {
+            break;
+        }
+        if( id >= ing.symbols.size() )
+        {
+            continue;
+        }
         const Symbol&      s   = ing.symbols[id];
         const std::string& src = contentOf( s.fileId );
         const std::size_t  a = s.sigStartByte, b = s.endByte;
-        if( a >= b || b > src.size() ) continue;
+        if( a >= b || b > src.size() )
+        {
+            continue;
+        }
 
         std::string body( src.data() + a, b - a );
         if( ranges )
+        {
             if( const auto it = ranges->find( id ); it != ranges->end() && it->second.hasRange )
+            {
                 body = sliceBodyLines( body, it->second.startLine, it->second.endLine ).text;
+            }
+        }
         if( compress )
         {
             std::string compressed = compressBody( body );
-            if( compressed.size() < body.size() ) body = std::move( compressed );
+            if( compressed.size() < body.size() )
+            {
+                body = std::move( compressed );
+            }
         }
-        if( body.size() > budgetBytes - used ) body.resize( budgetBytes - used );   // budget cap (conservative)
+        if( body.size() > budgetBytes - used )
+        {
+            body.resize( budgetBytes - used ); // budget cap (conservative)
+        }
         used += body.size();
 
         // per-body markup (~40 B for the <b …> tag + CDATA wrapper + name/path) at markup rate; body TEXT at
@@ -2964,10 +3575,16 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
             for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
             {
                 const NodeId cid = outTargets[k];
-                if( cid >= ing.symbols.size() ) continue;
+                if( cid >= ing.symbols.size() )
+                {
+                    continue;
+                }
                 const Symbol&      cs   = ing.symbols[cid];
                 const std::string& csrc = contentOf( cs.fileId );
-                if( cs.sigStartByte >= cs.sigEndByte || cs.sigEndByte > csrc.size() ) continue;
+                if( cs.sigStartByte >= cs.sigEndByte || cs.sigEndByte > csrc.size() )
+                {
+                    continue;
+                }
                 const std::size_t sigBytes = cs.sigEndByte - cs.sigStartByte;
                 tokensF += double( 24 + cs.name.size() ) / kBytesPerTokenDefault + double( sigBytes ) / bytesPerTokenFor( cs.lang );
                 used += sigBytes + 24;
@@ -2995,28 +3612,49 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
     std::vector<std::uint32_t>                  fileOrder;
     for( NodeId id : nodes )
     {
-        if( id >= ing.symbols.size() ) continue;
+        if( id >= ing.symbols.size() )
+        {
+            continue;
+        }
         const std::uint32_t f = ing.symbols[id].fileId;
-        if( byFile.find( f ) == byFile.end() ) fileOrder.push_back( f );
+        if( byFile.find( f ) == byFile.end() )
+        {
+            fileOrder.push_back( f );
+        }
         byFile[f].push_back( id );
     }
 
     w.write( "<outline>" );
     for( std::uint32_t f : fileOrder )
     {
-        if( used >= budgetBytes ) break;
+        if( used >= budgetBytes )
+        {
+            break;
+        }
         std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !in ) continue;
+        if( !in )
+        {
+            continue;
+        }
         std::string src;  char buf[ 4096 ];  std::size_t n;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) src.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            src.append( buf, n );
+        }
         std::fclose( in );
 
         for( NodeId id : byFile[f] )
         {
-            if( used >= budgetBytes ) break;
+            if( used >= budgetBytes )
+            {
+                break;
+            }
             const Symbol&     s = ing.symbols[id];
             const std::size_t a = s.sigStartByte, b = s.endByte;
-            if( a >= b || b > src.size() ) continue;
+            if( a >= b || b > src.size() )
+            {
+                continue;
+            }
 
             std::string sk;                                            // build the depth-collapsed skeleton
             int         depth     = 0;
@@ -3025,18 +3663,38 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
             while( i < b )
             {
                 std::size_t eol = src.find( '\n', i );
-                if( eol == std::string::npos || eol > b ) eol = b;
+                if( eol == std::string::npos || eol > b )
+                {
+                    eol = b;
+                }
                 const int startD = depth;
-                for( std::size_t k = i; k < eol; ++k ) { const char c = src[k]; if( c == '{' ) ++depth; else if( c == '}' ) --depth; }
+                for( std::size_t k = i; k < eol; ++k )
+                {
+                    const char c = src[k];
+                    if( c == '{' ) { ++depth; }
+                    else if( c == '}' )
+                    {
+                        --depth;
+                    }
+                }
                 if( std::min( startD, depth ) <= 1 ) { sk.append( src, i, eol - i ); sk.push_back( '\n' ); collapsed = false; }
                 else if( !collapsed ) { sk += "  ...\n"; collapsed = true; }
                 i = ( eol < b ) ? eol + 1 : b;
             }
-            if( sk.empty() ) continue;
+            if( sk.empty() )
+            {
+                continue;
+            }
 
             // --compress (P2-B): strip comments + collapse blank runs from the skeleton text.
-            if( compress ) sk = compressBody( sk );
-            if( sk.empty() ) continue;
+            if( compress )
+            {
+                sk = compressBody( sk );
+            }
+            if( sk.empty() )
+            {
+                continue;
+            }
 
             // anti-growth guard (octocode's rule, Wave 4 #3): the whole POINT of an outline is fewer
             // bytes than the real definition — a "..."-collapse can occasionally cost MORE than the few
@@ -3044,12 +3702,18 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
             // the PAYLOAD only (skeleton text vs the original [a,b) def span), never the wrapper tags —
             // if the reduced form is not strictly smaller, emit the original bytes instead. Deterministic,
             // pure size comparison: compression must never cost tokens.
-            if( sk.size() >= ( b - a ) ) sk.assign( src, a, b - a );
+            if( sk.size() >= ( b - a ) )
+            {
+                sk.assign( src, a, b - a );
+            }
 
             // Redact credential shapes from the control-flow skeleton (a body-emission seam — the
             // skeleton keeps depth≤1 source lines verbatim, which can include a secret literal). --no-redact = no-op.
             redactInPlace( sk, redact );
-            if( sk.empty() ) continue;
+            if( sk.empty() )
+            {
+                continue;
+            }
 
             std::string safe;  safe.reserve( sk.size() );              // split ]]>; scrub C0 controls (G4) + invalid UTF-8 (A4-F20)
             appendCdataSafe( sk, safe );
@@ -3073,7 +3737,10 @@ inline void packCompose( std::FILE* out, const IngestResult& ing,
                          const std::vector<ComposeEdge>& composeEdges,
                          const std::vector<NodeId>& relevantIds )
 {
-    if( composeEdges.empty() || relevantIds.empty() ) return;
+    if( composeEdges.empty() || relevantIds.empty() )
+    {
+        return;
+    }
 
     // build a quick membership set for O(log N) lookup
     std::vector<NodeId> relevant( relevantIds );
@@ -3091,8 +3758,14 @@ inline void packCompose( std::FILE* out, const IngestResult& ing,
 
     for( const ComposeEdge& ce : composeEdges )
     {
-        if( !inSet( ce.ownerSym ) && !inSet( ce.typeSym ) ) continue;
-        if( ce.ownerSym >= ing.symbols.size() ) continue;
+        if( !inSet( ce.ownerSym ) && !inSet( ce.typeSym ) )
+        {
+            continue;
+        }
+        if( ce.ownerSym >= ing.symbols.size() )
+        {
+            continue;
+        }
         if( !open ) { w.write( "<compose>" );  open = true; }
         w.write( "<field name=\"" );  w.write( escapeXml( ce.fieldName, esc ) );
         w.write( "\" type=\"" );      w.write( escapeXml( ce.typeName, esc ) );
@@ -3110,7 +3783,10 @@ inline void packRoutes( std::FILE* out, const IngestResult& ing,
                         const std::vector<RouteEdge>& routeEdges,
                         const std::vector<NodeId>& relevantIds )
 {
-    if( routeEdges.empty() || relevantIds.empty() ) return;
+    if( routeEdges.empty() || relevantIds.empty() )
+    {
+        return;
+    }
 
     std::vector<NodeId> relevant( relevantIds );
     std::sort( relevant.begin(), relevant.end() );
@@ -3127,7 +3803,10 @@ inline void packRoutes( std::FILE* out, const IngestResult& ing,
 
     for( const RouteEdge& re : routeEdges )
     {
-        if( !inSet( re.fromSym ) && !inSet( re.toSym ) ) continue;
+        if( !inSet( re.fromSym ) && !inSet( re.toSym ) )
+        {
+            continue;
+        }
         if( !open ) { w.write( "<routes>" );  open = true; }
         w.write( "<route method=\"" );  w.write( httpMethodTag( re.method ) );
         w.write( "\" path=\"" );        w.write( escapeXml( re.path, esc ) );
@@ -3152,22 +3831,40 @@ inline void packGraphBlock( std::FILE* out, const IngestResult& ing, const std::
                             const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets )
 {
     const std::size_t S = ing.symbols.size();
-    if( S == 0 ) return;
+    if( S == 0 )
+    {
+        return;
+    }
 
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
     const std::size_t keep = std::min( kWithGraphNodeCap, S );
     const std::vector<NodeId> nodes( order.begin(), order.begin() + keep );   // rank order, id 0..keep-1 index
 
     const auto indexOf = [ & ]( NodeId id ) -> std::size_t   // linear scan is fine at keep<=8
     {
-        for( std::size_t j = 0; j < nodes.size(); ++j ) if( nodes[j] == id ) return j;
+        for( std::size_t j = 0; j < nodes.size(); ++j )
+        {
+            if( nodes[j] == id )
+            {
+                return j;
+            }
+        }
         return std::size_t( -1 );
     };
     const auto sanitize = []( std::string s ) -> std::string
     {
-        for( char& ch : s ) if( ch == '"' ) ch = '\'';   // mermaid label safety (same rule as --mermaid)
+        for( char& ch : s )
+        {
+            if( ch == '"' )
+            {
+                ch = '\''; // mermaid label safety (same rule as --mermaid)
+            }
+        }
         return s;
     };
 
@@ -3192,11 +3889,17 @@ inline void packGraphBlock( std::FILE* out, const IngestResult& ing, const std::
     for( std::size_t i = 0; i < keep; ++i )
     {
         const NodeId u = nodes[i];
-        if( outOff.empty() || u + 1 >= outOff.size() ) continue;
+        if( outOff.empty() || u + 1 >= outOff.size() )
+        {
+            continue;
+        }
         for( std::uint32_t k = outOff[u]; k < outOff[u + 1]; ++k )     // outTargets is deduped, ascending per source (CSR order)
         {
             const std::size_t j = indexOf( outTargets[k] );
-            if( j == std::size_t( -1 ) ) continue;                    // 1-hop among the top-N only — not the whole graph
+            if( j == std::size_t( -1 ) )
+            {
+                continue; // 1-hop among the top-N only — not the whole graph
+            }
             char eb[ 32 ];
             std::snprintf( eb, sizeof( eb ), "n%zu --> n%zu\n", i, j );
             body += eb;
@@ -3258,18 +3961,28 @@ inline std::vector<std::vector<NodeId>> legoImplementorsOnSurface( const IngestR
     std::vector<char>            onSurface( ing.symbols.size(), 0 );
     HashMap<std::uint32_t, char> surfaceFiles;
     for( NodeId s : surfaceIds )
+    {
         if( s < onSurface.size() ) { onSurface[s] = 1;  surfaceFiles.emplace( ing.symbols[s].fileId, char( 1 ) ); }
+    }
 
     const auto isOnSurface = [ & ]( NodeId n ) { return n < onSurface.size() && ( onSurface[n] || surfaceFiles.find( ing.symbols[n].fileId ) != surfaceFiles.end() ); };
 
     std::vector<std::vector<NodeId>> scoped( implementors.size() );          // empty lists = "not an interface" to packLego
     for( NodeId id = 0; id < implementors.size(); ++id )
     {
-        if( implementors[id].empty() ) continue;
+        if( implementors[id].empty() )
+        {
+            continue;
+        }
         bool isReached = isOnSurface( id );
         for( NodeId im : implementors[id] )
+        {
             isReached = isReached || isOnSurface( im );
-        if( isReached ) scoped[id] = implementors[id];
+        }
+        if( isReached )
+        {
+            scoped[id] = implementors[id];
+        }
     }
     return scoped;
 }
@@ -3292,7 +4005,10 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
     {
         const std::size_t open  = at + 6;
         const std::size_t close = sigsRendered.find( '"', open );
-        if( close == std::string_view::npos ) break;                     // torn attribute at end-of-buffer → stop scanning
+        if( close == std::string_view::npos )
+        {
+            break; // torn attribute at end-of-buffer → stop scanning
+        }
         renderedFilePaths.emplace( std::string( sigsRendered.substr( open, close - open ) ), char( 1 ) );
         at = close;
     }
@@ -3302,7 +4018,10 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
     std::vector<char>        esc;
     const auto isRenderedFile = [ & ]( std::uint32_t f ) -> bool
     {
-        if( f >= ing.files.size() ) return false;
+        if( f >= ing.files.size() )
+        {
+            return false;
+        }
         if( fileVerdict[f] < 0 )
         {
             const std::string_view escaped = escapeXml( ing.files[f], esc );
@@ -3314,17 +4033,29 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
     bool narrowed = false;
     for( NodeId id = 0; id < legoScoped.size(); ++id )
     {
-        if( legoScoped[id].empty() ) continue;
+        if( legoScoped[id].empty() )
+        {
+            continue;
+        }
         if( !isRenderedFile( ing.symbols[id].fileId ) ) { legoScoped[id].clear();  narrowed = true;  continue; }
 
         std::vector<NodeId> kept;
         kept.reserve( legoScoped[id].size() );
         for( NodeId im : legoScoped[id] )
         {
-            if( im < ing.symbols.size() && isRenderedFile( ing.symbols[im].fileId ) ) kept.push_back( im );
-            else narrowed = true;
+            if( im < ing.symbols.size() && isRenderedFile( ing.symbols[im].fileId ) )
+            {
+                kept.push_back( im );
+            }
+            else
+            {
+                narrowed = true;
+            }
         }
-        if( kept.size() != legoScoped[id].size() ) legoScoped[id] = std::move( kept );   // empty ⇒ packLego drops the iface
+        if( kept.size() != legoScoped[id].size() )
+        {
+            legoScoped[id] = std::move( kept ); // empty ⇒ packLego drops the iface
+        }
     }
     return narrowed;
 }
@@ -3360,9 +4091,17 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     else
     {
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
-            if( i < implementors.size() && !implementors[i].empty() ) ifaces.push_back( i );
+        {
+            if( i < implementors.size() && !implementors[i].empty() )
+            {
+                ifaces.push_back( i );
+            }
+        }
     }
-    if( ifaces.empty() ) return;
+    if( ifaces.empty() )
+    {
+        return;
+    }
 
     sortutil::radixSortByScoreDescId( ifaces, rank );
 
@@ -3371,7 +4110,12 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     HashMap<std::string, char> seenName;
     std::vector<NodeId>        uniq;
     for( NodeId id : ifaces )
-        if( seenName.emplace( ing.symbols[id].name, char( 1 ) ).second ) uniq.push_back( id );
+    {
+        if( seenName.emplace( ing.symbols[id].name, char( 1 ) ).second )
+        {
+            uniq.push_back( id );
+        }
+    }
     ifaces.swap( uniq );
 
     const std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : ifaces.size(), ifaces.size() );
@@ -3403,21 +4147,42 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             {
                 src.clear();  loadedFile = isym.fileId;
                 std::FILE* in = std::fopen( diskPath( ing, isym.fileId ).c_str(), "rb" );
-                if( in ) { char buf[ 4096 ]; std::size_t n; while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) src.append( buf, n ); std::fclose( in ); }
+                if( in )
+                {
+                    char buf[4096];
+                    std::size_t n;
+                    while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+                    {
+                        src.append( buf, n );
+                    }
+                    std::fclose( in );
+                }
             }
             const int maxMethods = ( focusId != kNoNode ) ? 64 : 6;   // targeted verb = full contract; --for = a taste
             int shown = 0;
             for( const Symbol& m : ing.symbols )
             {
-                if( m.kind != SymKind::Method || m.fileId != isym.fileId || m.id == id ) continue;
-                if( m.sigStartByte < isym.sigStartByte || m.sigStartByte >= isym.endByte ) continue;   // inside the class span
+                if( m.kind != SymKind::Method || m.fileId != isym.fileId || m.id == id )
+                {
+                    continue;
+                }
+                if( m.sigStartByte < isym.sigStartByte || m.sigStartByte >= isym.endByte )
+                {
+                    continue; // inside the class span
+                }
                 // FIX #2 (nested-class over-list): span-containment alone lists a method of a class NESTED
                 // inside the iface (that method's span sits within the iface's span too). Require the method's
                 // OWN nearest class-like scope to BE the iface — Symbol::scope carries exactly that (the nearest
                 // enclosing class/struct name; enclosingScopeOf in ingest). scope==name ⇒ the iface owns it;
                 // Outer::Nested::nestedMethod (scope "Nested") is correctly excluded from Outer's contract.
-                if( m.scope != isym.name ) continue;
-                if( m.sigEndByte <= m.sigStartByte || m.sigEndByte > src.size() ) continue;
+                if( m.scope != isym.name )
+                {
+                    continue;
+                }
+                if( m.sigEndByte <= m.sigStartByte || m.sigEndByte > src.size() )
+                {
+                    continue;
+                }
                 if( ++shown > maxMethods ) { w.write( "<!-- +more methods -->" ); break; }
                 const std::string sig = cleanSig( src.data(), m.sigStartByte, m.sigEndByte, redact );
                 if( !sig.empty() )
@@ -3438,7 +4203,10 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( ing.files[ im.fileId ], esc ) ); }
             w.write( "\"/>" );
         }
-        if( impls.size() > cap ) w.write( "<!-- +more -->" );
+        if( impls.size() > cap )
+        {
+            w.write( "<!-- +more -->" );
+        }
         w.write( "</iface>" );
     }
     w.write( "</lego>" );
@@ -3465,10 +4233,21 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     const std::size_t depFiles       = std::size_t( std::count( depCapableMask.begin(), depCapableMask.end(), char( 1 ) ) );
     std::vector<std::vector<std::uint32_t>> byFile( F );   // file → indices into ing.includes
     for( std::uint32_t i = 0; i < ing.includes.size(); ++i )
-        if( ing.includes[i].fileId < F ) byFile[ ing.includes[i].fileId ].push_back( i );
+    {
+        if( ing.includes[i].fileId < F )
+        {
+            byFile[ing.includes[i].fileId].push_back( i );
+        }
+    }
 
     std::vector<std::uint32_t> order;
-    for( std::uint32_t f = 0; f < F; ++f ) if( !byFile[f].empty() ) order.push_back( f );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( !byFile[f].empty() )
+        {
+            order.push_back( f );
+        }
+    }
     const auto trans = [ & ]( std::uint32_t f ) { return f < transitive.size() ? transitive[f] : std::uint32_t( byFile[f].size() ); };
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )   // heaviest TRANSITIVE cone first
     { return trans( a ) != trans( b ) ? trans( a ) > trans( b ) : a < b; } );
@@ -3514,7 +4293,13 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // The complement of the transitive-cone ranking below (efferent, "pulls in 100 headers").
     {
         std::vector<std::uint32_t> byAff;
-        for( std::uint32_t f = 0; f < F; ++f ) if( f < afferent.size() && afferent[f] > 0 ) byAff.push_back( f );
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            if( f < afferent.size() && afferent[f] > 0 )
+            {
+                byAff.push_back( f );
+            }
+        }
         std::sort( byAff.begin(), byAff.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                    { return afferent[a] != afferent[b] ? afferent[a] > afferent[b] : ing.files[a] < ing.files[b]; } );
         const std::size_t capG = byAff.size() < 12 ? byAff.size() : 12;
@@ -3549,8 +4334,15 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         struct SV { std::uint32_t from, to; double gap; };
         std::vector<SV> sv;
         for( std::uint32_t f = 0; f < adj.size(); ++f )
+        {
             for( std::uint32_t g : adj[f] )
-                if( const double gap = instab( g ) - instab( f ); gap > 0.05 ) sv.push_back( { f, g, gap } );
+            {
+                if( const double gap = instab( g ) - instab( f ); gap > 0.05 )
+                {
+                    sv.push_back( { f, g, gap } );
+                }
+            }
+        }
         std::sort( sv.begin(), sv.end(), [ & ]( const SV& a, const SV& b )
                    { return a.gap != b.gap ? a.gap > b.gap
                             : ( ing.files[a.from] != ing.files[b.from] ? ing.files[a.from] < ing.files[b.from] : ing.files[a.to] < ing.files[b.to] ); } );
@@ -3594,10 +4386,17 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                 { return std::binary_search( memberOf.begin(), memberOf.end(), f ); };
                 for( std::uint32_t src : cycles[c] )
                 {
-                    if( src >= adj.size() ) continue;
+                    if( src >= adj.size() )
+                    {
+                        continue;
+                    }
                     for( std::uint32_t dst : adj[src] )
+                    {
                         if( dst != src && isMember( dst ) )
+                        {
                             ++weight[ ( std::uint64_t( src ) << 32 ) | dst ];
+                        }
+                    }
                 }
                 bool haveCut = false;  std::uint32_t bestSrc = 0, bestDst = 0, bestW = 0;
                 for( const auto& [ key, w_ ] : weight )
@@ -3646,7 +4445,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         const std::size_t cap = byFile[f].size() < 40 ? byFile[f].size() : 40;
         for( std::size_t j = 0; j < cap; ++j )
         { w.write( "<inc t=\"" );  w.write( escapeXml( ing.includes[ byFile[f][j] ].target, esc ) );  w.write( "\"/>" ); }
-        if( byFile[f].size() > cap ) w.write( "<!-- +more -->" );
+        if( byFile[f].size() > cap )
+        {
+            w.write( "<!-- +more -->" );
+        }
         w.write( "</f>" );
     }
     w.write( "</deps>" );
@@ -3731,13 +4533,22 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
     if( q.lcom4 && q.id < q.lcom4->size() && (*q.lcom4)[q.id] != 0xFFFFFFFFu )   // 0xFFFFFFFF = kLcom4NA (graph.h) ⇒ omit
     { std::snprintf( num, sizeof( num ), ",\"lcom4\":%u", (*q.lcom4)[q.id] );  w.write( num ); }
     if( q.amp && q.id < q.amp->size() ) { std::snprintf( num, sizeof( num ), ",\"amp\":%u", (*q.amp)[q.id] );  w.write( num ); }
-    if( q.tested && q.id < q.tested->size() && (*q.tested)[q.id] ) w.write( ",\"tested\":true" );
-    if( !q.fanIn ) return;
+    if( q.tested && q.id < q.tested->size() && ( *q.tested )[q.id] )
+    {
+        w.write( ",\"tested\":true" );
+    }
+    if( !q.fanIn )
+    {
+        return;
+    }
 
     const std::uint32_t in = ( q.id < q.fanIn->size() ) ? (*q.fanIn)[q.id] : 0u;
     std::snprintf( num, sizeof( num ), ",\"in\":%u,\"out\":%u,\"cx\":%u,\"ccx\":%u", in, q.outDegree, s.cx, s.ccx );
     w.write( num );
-    if( in >= 8 ) w.write( ",\"role\":\"hub\"" );
+    if( in >= 8 )
+    {
+        w.write( ",\"role\":\"hub\"" );
+    }
 }
 
 // The default map's JSON header — the gauge block plus the two prologues that ride on it, in one place so
@@ -3767,7 +4578,10 @@ struct JsonMapHeader
 // serializeJson: jsonUnsupportedVerb refuses --map-diff before this emitter is ever reached.
 inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotations* ann )
 {
-    if( !ann ) return;
+    if( !ann )
+    {
+        return;
+    }
 
     // §B12.6 (CA4): `at`'s ABSENCE had two meanings inside one dialect. Five JSON emitters (quality-delta,
     // test-gate, cochange, plan-lanes, the MCP quality_delta twin) write `"at":null` when the root has no
@@ -3785,8 +4599,14 @@ inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotat
     if( didAttemptAtStamp )
     {
         w.write( ",\"at\":" );
-        if( ann->atStamp != nullptr && !ann->atStamp->empty() ) writeJsonStr( w, *ann->atStamp, esc );
-        else                                                    w.write( "null" );
+        if( ann->atStamp != nullptr && !ann->atStamp->empty() )
+        {
+            writeJsonStr( w, *ann->atStamp, esc );
+        }
+        else
+        {
+            w.write( "null" );
+        }
     }
     if( ann->churnWindow != nullptr )
     {
@@ -3846,7 +4666,10 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     if( h.outProv )
     {
         std::size_t preciseTotal = 0;
-        for( std::uint8_t v : *h.outProv ) preciseTotal += ( v ? 1u : 0u );
+        for( std::uint8_t v : *h.outProv )
+        {
+            preciseTotal += ( v ? 1u : 0u );
+        }
         std::snprintf( hdr, sizeof( hdr ), "\"precise\":%zu,", preciseTotal );
         w.write( hdr );
     }
@@ -3858,13 +4681,19 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
     // Without it every `"p"` in the payload is an unresolvable root-relative fragment.
-    if( h.ing.rootLabels.size() < 2 ) return;
+    if( h.ing.rootLabels.size() < 2 )
+    {
+        return;
+    }
 
     std::snprintf( hdr, sizeof( hdr ), ",\"roots_count\":%zu,\"roots\":[", h.ing.rootLabels.size() );
     w.write( hdr );
     for( std::size_t r = 0; r < h.ing.rootLabels.size(); ++r )
     {
-        if( r ) w.write( "," );
+        if( r )
+        {
+            w.write( "," );
+        }
         w.write( "{\"label\":" );  writeJsonStr( w, h.ing.rootLabels[r], esc );
         // V1-6: "p", not "path" — the XML sibling is <root label= p=/> and --help promises keys mirror attrs 1:1.
         w.write( ",\"p\":" );      writeJsonStr( w, r < h.ing.rootPaths.size() ? h.ing.rootPaths[r] : std::string(), esc );
@@ -3914,7 +4743,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     const std::size_t S = ing.symbols.size();
 
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
 
     const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
@@ -3944,18 +4776,36 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     {
         std::sort( fileOrder.begin(), fileOrder.end(),
                    [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
-        for( std::vector<NodeId>& b : buckets ) std::sort( b.begin(), b.end() );
+        for( std::vector<NodeId>& b : buckets )
+        {
+            std::sort( b.begin(), b.end() );
+        }
     }
     else if( effImportantLast )
     {
         std::reverse( fileOrder.begin(), fileOrder.end() );
-        for( std::vector<NodeId>& b : buckets ) std::reverse( b.begin(), b.end() );
+        for( std::vector<NodeId>& b : buckets )
+        {
+            std::reverse( b.begin(), b.end() );
+        }
     }
 
     std::size_t ambTotal = 0;
-    if( ambOut ) for( std::uint32_t v : *ambOut ) ambTotal += v;
+    if( ambOut )
+    {
+        for( std::uint32_t v : *ambOut )
+        {
+            ambTotal += v;
+        }
+    }
     std::size_t unresolvedTotal = 0;
-    if( unresolvedOut ) for( std::uint32_t v : *unresolvedOut ) unresolvedTotal += v;
+    if( unresolvedOut )
+    {
+        for( std::uint32_t v : *unresolvedOut )
+        {
+            unresolvedTotal += v;
+        }
+    }
     const char* orderAttr = stable ? "stable"
                           : mostImportantLast ? "important-last"
                           : autoFlip ? "important-last(auto:fill)"
@@ -3968,7 +4818,9 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     std::size_t rowsSz  = 0;
     std::FILE*  rowsMem = openChargeBuffer( &rowsBuf, &rowsSz );
     if( !rowsMem )
+    {
         DEGRADED_PATH_ALERT( "serializeJson: open_memstream failed — est_tokens reports the MODELLED bytes, not the emitted ones" );
+    }
 
     // ONE header emitter, used by the degrade write, the size probe and the real write, so the three can
     // never disagree on the header's shape.
@@ -3981,7 +4833,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         hw.write( ",\"r\":[" );
     };
 
-    if( !rowsMem ) emitHeader( out, mapEstTokens );   // degrade: nothing to measure, so the model stands
+    if( !rowsMem )
+    {
+        emitHeader( out, mapEstTokens ); // degrade: nothing to measure, so the model stands
+    }
 
     JsonWriter w( rowsMem ? rowsMem : out );
     char       num[ 64 ];
@@ -3989,7 +4844,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     bool firstFile = true;
     for( std::uint32_t f : fileOrder )
     {
-        if( !firstFile ) w.write( "," );
+        if( !firstFile )
+        {
+            w.write( "," );
+        }
         firstFile = false;
         w.write( "{\"p\":" );  writeJsonStr( w, ing.files[f], esc );
         if( const char* fl = builtinLayer( ing.files[f] ); *fl ) { w.write( ",\"layer\":" );  writeJsonStr( w, fl, esc ); }
@@ -4004,7 +4862,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         for( std::size_t rowIndex = 0; rowIndex < rows.id.size(); ++rowIndex )
         {
             const NodeId id = rows.id[ rowIndex ];
-            if( !firstSym ) w.write( "," );
+            if( !firstSym )
+            {
+                w.write( "," );
+            }
             firstSym = false;
             const Symbol&       s   = ing.symbols[id];
             const std::uint32_t out2= outOff[id + 1] - outOff[id];
@@ -4028,13 +4889,18 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
             { std::snprintf( num, sizeof( num ), ",\"k\":%.4f", double( rank[id] ) );  w.write( num ); }
 
             if( metrics )
+            {
                 writeJsonQMetrics( w, JsonQMetrics{ s, id, out2, fanIn, cbo, tested, lcom4, amp } );
+            }
 
             w.write( ",\"c\":[" );
             bool firstC = true;
             for( std::uint32_t e = outOff[id]; e < outOff[id + 1]; ++e )
             {
-                if( !firstC ) w.write( "," );
+                if( !firstC )
+                {
+                    w.write( "," );
+                }
                 firstC = false;
                 w.write( "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[e] ].name, esc );
                 // §A4d: prov mirrors the XML attribute 1:1 — "scip" for a SCIP-pinned edge, "binding" for a
@@ -4051,7 +4917,14 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     w.flush();
 
     // ── PHASE 2: measure, decide, then write ────────────────────────────────────────────────────────────
-    if( !rowsMem ) { if( outEstTokens ) *outEstTokens = mapEstTokens;  return; }
+    if( !rowsMem )
+    {
+        if( outEstTokens )
+        {
+            *outEstTokens = mapEstTokens;
+        }
+        return;
+    }
     std::fflush( rowsMem );
     std::fclose( rowsMem );
     std::string rowsStr;
@@ -4077,12 +4950,17 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
             std::free( pbuf );
         }
         else
+        {
             DEGRADED_PATH_ALERT( "serializeJson: open_memstream failed for the header size probe — est_tokens charges the modelled envelope instead" );
+        }
     }
 
     const std::size_t estTokens = tokensForEmittedBytes( headerBytes + kEstTokensFieldReserve + rowsStr.size(),
                                                          mapEst.bytesPerToken() );
-    if( outEstTokens ) *outEstTokens = estTokens;
+    if( outEstTokens )
+    {
+        *outEstTokens = estTokens;
+    }
     emitHeader( out, estTokens );
     std::fwrite( rowsStr.data(), 1, rowsStr.size(), out );
 }
@@ -4129,20 +5007,32 @@ struct JsonSigNoteCounts
 // with no NoteIndex keeps the pre-feature bytes exactly (the L3 inertness contract).
 inline std::size_t appendJsonNoteArray( std::string& out, const notes::NoteIndex* ni, const std::string& target )
 {
-    if( !ni ) return 0;
+    if( !ni )
+    {
+        return 0;
+    }
     const std::vector<std::uint32_t>* hits = ni->find( target );
-    if( !hits || hits->empty() ) return 0;
+    if( !hits || hits->empty() )
+    {
+        return 0;
+    }
 
     out += ",\"notes\":[";
     for( std::size_t i = 0; i < hits->size(); ++i )
     {
         const notes::Note& n = ni->notes[ (*hits)[i] ];
-        if( i ) out += ",";
+        if( i )
+        {
+            out += ",";
+        }
         appendJsonStrField( out, "{\"d\":", n.date );
         if( !n.sha.empty() )
         {
             appendJsonStrField( out, ",\"sha\":", notes::shortSha( n.sha ) );
-            if( !n.branch.empty() ) appendJsonStrField( out, ",\"branch\":", n.branch );
+            if( !n.branch.empty() )
+            {
+                appendJsonStrField( out, ",\"branch\":", n.branch );
+            }
         }
         appendJsonStrField( out, ",\"text\":", n.text );
         out += "}";
@@ -4183,15 +5073,30 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
     // P2.3: the chain key — "n" always, "id" only when the canonical form adds an enclosing scope
     // (the XML sibling's rule, scopedCanonicalId above), so a JSON consumer can chain onward too.
     appendJsonStrField( head, ",\"n\":", s.name );
-    if( const std::string canon = scopedCanonicalId( ing, s ); !canon.empty() ) appendJsonStrField( head, ",\"id\":", canon );
-    if( lens.metrics ) appendJsonMetricFields( head, s, id, lens.fanIn );
+    if( const std::string canon = scopedCanonicalId( ing, s ); !canon.empty() )
+    {
+        appendJsonStrField( head, ",\"id\":", canon );
+    }
+    if( lens.metrics )
+    {
+        appendJsonMetricFields( head, s, id, lens.fanIn );
+    }
     if( lens.churnPerFile && fileId < lens.churnPerFile->size() && (*lens.churnPerFile)[fileId] > 0 )
     { std::snprintf( num, sizeof( num ), ",\"churn\":%u", (*lens.churnPerFile)[fileId] );  head += num; }
     if( lens.amp && id < lens.amp->size() && (*lens.amp)[id] > 0 )
     { std::snprintf( num, sizeof( num ), ",\"amp\":%u", (*lens.amp)[id] );  head += num; }
-    if( lens.cloneMember && id < lens.cloneMember->size() && (*lens.cloneMember)[id] ) head += ",\"clone\":true";
-    if( lens.tested && id < lens.tested->size() && (*lens.tested)[id] )                head += ",\"tested\":true";
-    if( pureSig ) head += ",\"pure\":true";
+    if( lens.cloneMember && id < lens.cloneMember->size() && ( *lens.cloneMember )[id] )
+    {
+        head += ",\"clone\":true";
+    }
+    if( lens.tested && id < lens.tested->size() && ( *lens.tested )[id] )
+    {
+        head += ",\"tested\":true";
+    }
+    if( pureSig )
+    {
+        head += ",\"pure\":true";
+    }
     return head;
 }
 
@@ -4200,9 +5105,15 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
 // over-reports by one byte — the budget stays conservative, never optimistic).
 inline std::size_t jsonSigEntryCost( const JsonSigEntry& e )
 {
-    if( e.dropped ) return 0;
+    if( e.dropped )
+    {
+        return 0;
+    }
     std::size_t c = 1 + e.head.size() + 1;                                   // `,` … `}`
-    if( !e.doc.empty() ) c += 9 + jsonStr( e.doc ).size();
+    if( !e.doc.empty() )
+    {
+        c += 9 + jsonStr( e.doc ).size();
+    }
     return c + 9 + jsonStr( e.sig ).size() + e.notes.size();                 // §B1.3: notes are pre-rendered, so
                                                                              // their EXACT emitted size is known
 }
@@ -4212,8 +5123,14 @@ inline std::size_t jsonSigEntryCost( const JsonSigEntry& e )
 inline std::size_t collectedJsonNoteTotal( const std::vector<JsonSigFile>& files, const std::vector<JsonSigEntry>& entries )
 {
     std::size_t total = 0;
-    for( const JsonSigFile&  sf : files   ) total += sf.noteCount;
-    for( const JsonSigEntry& e  : entries ) total += e.noteCount;
+    for( const JsonSigFile& sf : files )
+    {
+        total += sf.noteCount;
+    }
+    for( const JsonSigEntry& e : entries )
+    {
+        total += e.noteCount;
+    }
     return total;
 }
 
@@ -4226,10 +5143,19 @@ inline std::string renderJsonSigRows( const std::vector<JsonSigEntry>& entries, 
     for( std::size_t k = sf.entryBegin; k < sf.entryEnd; ++k )
     {
         const JsonSigEntry& e = entries[k];
-        if( e.dropped ) continue;
-        if( !rows.empty() ) rows += ",";
+        if( e.dropped )
+        {
+            continue;
+        }
+        if( !rows.empty() )
+        {
+            rows += ",";
+        }
         rows += e.head;
-        if( !e.doc.empty() ) appendJsonStrField( rows, ",\"doc\":", e.doc );
+        if( !e.doc.empty() )
+        {
+            appendJsonStrField( rows, ",\"doc\":", e.doc );
+        }
         appendJsonStrField( rows, ",\"sig\":", e.sig );
         rows         += e.notes;      // §B1.3: pre-rendered, after `sig` — the XML order of <d>'s children
         outKeptNotes += e.noteCount;
@@ -4259,14 +5185,23 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
     std::size_t used = 0;
     for( std::uint32_t f : fileOrder )
     {
-        if( used >= budgetBytes ) break;
+        if( used >= budgetBytes )
+        {
+            break;
+        }
 
         std::FILE* in = std::fopen( diskPath( ing, f ).c_str(), "rb" );
-        if( !in ) continue;                                    // graceful: file gone
+        if( !in )
+        {
+            continue; // graceful: file gone
+        }
         std::string src;
         char        buf[ 4096 ];
         std::size_t n;
-        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 ) src.append( buf, n );
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            src.append( buf, n );
+        }
         std::fclose( in );
 
         std::vector<NodeId>& syms = buckets[f];
@@ -4278,7 +5213,10 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
         sf.entryBegin = outEntries.size();
         // exact wrapper bytes: `,` + `{"p":"…"` [+ `,"layer":"…"`] + `,"symbols":[` + `]}`
         sf.wrapBytes  = 1 + 6 + jsonStr( ing.files[f] ).size() + 1 + 12 + 2;
-        if( const char* fl = builtinLayer( ing.files[f] ); *fl ) sf.wrapBytes += 10 + std::strlen( fl ) + 1;
+        if( const char* fl = builtinLayer( ing.files[f] ); *fl )
+        {
+            sf.wrapBytes += 10 + std::strlen( fl ) + 1;
+        }
         // §B1.3: FILE-level notes ride the wrapper, exactly as the XML <f> child does — rendered here so the
         // wrapper's byte cost stays EXACT (the ladder trims against these numbers).
         sf.noteCount  = appendJsonNoteArray( sf.notes, lens.noteIndex, fileNoteTarget( lens.noteIndex, ing.files[f] ) );
@@ -4286,27 +5224,47 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
 
         for( NodeId id : syms )
         {
-            if( used >= budgetBytes ) break;
+            if( used >= budgetBytes )
+            {
+                break;
+            }
             const Symbol&     s = ing.symbols[id];
             const std::size_t a = s.sigStartByte, b = s.sigEndByte;
-            if( a >= src.size() || b > src.size() || a >= b ) continue;
+            if( a >= src.size() || b > src.size() || a >= b )
+            {
+                continue;
+            }
             std::string sig = cleanSig( src.data(), a, b, redact );
-            if( sig.empty() ) continue;
+            if( sig.empty() )
+            {
+                continue;
+            }
 
             const std::uint32_t globalRank = lens.rankAdaptivePayload ? globalRankOf[ id ] : 0u;
             if( lens.rankAdaptivePayload && globalRank > kForDocExcerptRankCount )
+            {
                 truncateUtf8WithEllipsis( sig, kForTailSigBytes );
+            }
             const bool pureSig = pureFromSig( sig, s.lang ) && !( lens.impure && id < lens.impure->size() && (*lens.impure)[id] );
 
             std::string doc = docCommentBefore( src, a );
             redactInPlace( doc, redact );                   // §B0: same seam, same order as the XML sibling (:1586)
             if( lens.rankAdaptivePayload )
             {
-                if( globalRank > kForDocExcerptRankCount )      doc.clear();
-                else if( globalRank > kForDocFullRankCount )    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
+                if( globalRank > kForDocExcerptRankCount )
+                {
+                    doc.clear();
+                }
+                else if( globalRank > kForDocFullRankCount )
+                {
+                    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
+                }
             }
 
-            if( !doc.empty() ) used += doc.size() + 12;      // the same budgetBytes accounting as the XML path
+            if( !doc.empty() )
+            {
+                used += doc.size() + 12; // the same budgetBytes accounting as the XML path
+            }
             used += sig.size() + 16;
 
             JsonSigEntry e;
@@ -4346,13 +5304,25 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 JsonSigNoteCounts* outNotes    = nullptr ) // §B1.3: matched vs emitted note counts
 {
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
-    if( outCapped ) *outCapped = false;
-    if( outNotes )  *outNotes  = JsonSigNoteCounts{};
-    if( budgetBytes == 0 ) budgetBytes = SIZE_MAX;   // A3-F1 convention, same as packSignatures
+    if( outCapped )
+    {
+        *outCapped = false;
+    }
+    if( outNotes )
+    {
+        *outNotes = JsonSigNoteCounts {};
+    }
+    if( budgetBytes == 0 )
+    {
+        budgetBytes = SIZE_MAX; // A3-F1 convention, same as packSignatures
+    }
 
     const std::size_t S = ing.symbols.size();
     std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i ) order[i] = i;
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
     sortutil::radixSortByScoreDescId( order, rank );
     const std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
 
@@ -4360,13 +5330,19 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     std::vector<std::uint32_t>       fileOrder;
     std::vector<char>                seen( ing.files.size(), 0 );
     std::vector<std::uint32_t>       globalRankOf;
-    if( rankAdaptivePayload ) globalRankOf.assign( S, 0 );
+    if( rankAdaptivePayload )
+    {
+        globalRankOf.assign( S, 0 );
+    }
     for( std::size_t k = 0; k < keep; ++k )
     {
         const std::uint32_t f = ing.symbols[ order[k] ].fileId;
         if( !seen[f] ) { seen[f] = 1; fileOrder.push_back( f ); }
         buckets[f].push_back( order[k] );
-        if( rankAdaptivePayload ) globalRankOf[ order[k] ] = std::uint32_t( k + 1 );
+        if( rankAdaptivePayload )
+        {
+            globalRankOf[order[k]] = std::uint32_t( k + 1 );
+        }
     }
 
     // phase 1 — collect (collectJsonSigEntries above), then the exact emitted byte total of the array as
@@ -4376,14 +5352,29 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     collectJsonSigEntries( ing, fileOrder, buckets, globalRankOf, lens, redact, budgetBytes, sigFiles, entries );
 
     std::size_t total = 2;                                                       // "[" + "]"
-    for( const JsonSigFile&  sf : sigFiles ) total += sf.wrapBytes;
-    for( const JsonSigEntry& e  : entries  ) total += jsonSigEntryCost( e );
+    for( const JsonSigFile& sf : sigFiles )
+    {
+        total += sf.wrapBytes;
+    }
+    for( const JsonSigEntry& e : entries )
+    {
+        total += jsonSigEntryCost( e );
+    }
 
     const bool capped = payloadBudgetBytes > 0 && total > payloadBudgetBytes;
-    if( capped ) trimSigLadder( entries, sigFiles, total, payloadBudgetBytes, jsonSigEntryCost );
-    if( outCapped ) *outCapped = capped;
+    if( capped )
+    {
+        trimSigLadder( entries, sigFiles, total, payloadBudgetBytes, jsonSigEntryCost );
+    }
+    if( outCapped )
+    {
+        *outCapped = capped;
+    }
 
-    if( outNotes ) outNotes->total = collectedJsonNoteTotal( sigFiles, entries );   // §B1.3 — see its header
+    if( outNotes )
+    {
+        outNotes->total = collectedJsonNoteTotal( sigFiles, entries ); // §B1.3 — see its header
+    }
 
     // phase 2 — emit (identical write shapes to the pre-§A4a streaming path)
     JsonWriter  w( out );
@@ -4394,15 +5385,24 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     {
         std::size_t       fileKeptNotes = 0;
         const std::string fileSyms      = renderJsonSigRows( entries, sf, fileKeptNotes );
-        if( fileSyms.empty() ) continue;   // every symbol in this file skipped/dropped — no wrapper, no comma spent
+        if( fileSyms.empty() )
+        {
+            continue; // every symbol in this file skipped/dropped — no wrapper, no comma spent
+        }
 
-        if( !firstFile ) w.write( "," );
+        if( !firstFile )
+        {
+            w.write( "," );
+        }
         firstFile = false;
         w.write( "{\"p\":" );  writeJsonStr( w, ing.files[ sf.fileId ], esc );
         if( const char* fl = builtinLayer( ing.files[ sf.fileId ] ); *fl ) { w.write( ",\"layer\":" );  writeJsonStr( w, fl, esc ); }
         w.write( sf.notes );               // §B1.3: file-level notes, where the XML puts them on <f>
         w.write( ",\"symbols\":[" );  w.write( fileSyms );  w.write( "]}" );
-        if( outNotes ) outNotes->kept += sf.noteCount + fileKeptNotes;
+        if( outNotes )
+        {
+            outNotes->kept += sf.noteCount + fileKeptNotes;
+        }
     }
     w.write( "]" );
     w.flush();
@@ -4430,10 +5430,16 @@ inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const Emitt
     bool first = true;
     for( const EmittedBody& e : record.kept )
     {
-        if( e.id >= ing.symbols.size() ) continue;
+        if( e.id >= ing.symbols.size() )
+        {
+            continue;
+        }
         const Symbol& s = ing.symbols[ e.id ];
 
-        if( !first ) w.write( "," );
+        if( !first )
+        {
+            w.write( "," );
+        }
         first = false;
 
         w.write( "{\"t\":" );  writeJsonStr( w, symTag( s.kind ), esc );
@@ -4448,12 +5454,18 @@ inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const Emitt
         // §H5: the per-body truncation vocabulary this dialect had NONE of. The XML appends
         // `\n<!-- truncated -->` inside the CDATA; a JSON consumer gets a boolean it can branch on. Emitted
         // only when true, matching the tool's silence-means-nothing-happened convention.
-        if( e.isTruncated ) w.write( ",\"truncated\":true" );
+        if( e.isTruncated )
+        {
+            w.write( ",\"truncated\":true" );
+        }
         // §B12.7/F-MED-1: THIS dialect's `body` is the faithful one, and the XML CDATA for the same def is
         // NOT byte-equal to it — appendCdataSafe's scrub mapped a C0 byte to a space or an invalid UTF-8
         // sequence to '?'. Emitted here as well as on the XML <b scrubbed="1"> because a consumer diffing the
         // two dialects must be able to learn it from whichever one it happens to hold. Absent = byte-equal.
-        if( e.isXmlScrubbed ) w.write( ",\"xml_scrubbed\":true" );
+        if( e.isXmlScrubbed )
+        {
+            w.write( ",\"xml_scrubbed\":true" );
+        }
 
         // calls: the rows the XML <calls> block actually printed, with its own total= as the denominator.
         // calls_capped is pageview.h rule 3 in this dialect — the bit that always rides with a shown count.
@@ -4463,7 +5475,10 @@ inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const Emitt
         bool firstC = true;
         for( const EmittedBodyCall& c : e.calls )
         {
-            if( !firstC ) w.write( "," );
+            if( !firstC )
+            {
+                w.write( "," );
+            }
             firstC = false;
             w.write( "{\"n\":" );  writeJsonStr( w, c.name, esc );
             std::snprintf( num, sizeof( num ), ",\"l\":%u", c.line );

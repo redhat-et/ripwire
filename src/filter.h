@@ -23,7 +23,10 @@ inline bool hasDirSegment( std::string_view p, std::string_view seg ) noexcept
     std::size_t pos = 0;
     while( ( pos = p.find( seg, pos ) ) != std::string_view::npos )
     {
-        if( pos == 0 || p[ pos - 1 ] == '/' ) return true;
+        if( pos == 0 || p[pos - 1] == '/' )
+        {
+            return true;
+        }
         ++pos;
     }
     return false;
@@ -33,15 +36,28 @@ inline bool isTestPath( std::string_view p ) noexcept
 {
     // directory segment: test/ or tests/  (bounded by '/' or start)
     for( std::string_view seg : { std::string_view( "test/" ), std::string_view( "tests/" ) } )
-        if( hasDirSegment( p, seg ) ) return true;
+    {
+        if( hasDirSegment( p, seg ) )
+        {
+            return true;
+        }
+    }
 
     // filename heuristics
     const std::size_t      sl = p.rfind( '/' );
     const std::string_view fn = ( sl == std::string_view::npos ) ? p : p.substr( sl + 1 );
-    if( fn.rfind( "test_", 0 ) == 0 ) return true;                       // test_*.*
+    if( fn.rfind( "test_", 0 ) == 0 )
+    {
+        return true; // test_*.*
+    }
     for( std::string_view m : { std::string_view( "_test." ), std::string_view( ".test." ),
                                 std::string_view( "_spec." ), std::string_view( ".spec." ) } )
-        if( fn.find( m ) != std::string_view::npos ) return true;
+    {
+        if( fn.find( m ) != std::string_view::npos )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -63,13 +79,23 @@ inline PathTier pathTierOf( std::string_view p ) noexcept
 {
     const std::string ext = docparse::lowerExtOf( p );
     if( ext == ".md" || ext == ".markdown" || ext == ".rst" || ext == ".txt" || docparse::isDocExtension( ext ) )
+    {
         return PathTier::Doc;
+    }
 
-    if( isTestPath( p ) ) return PathTier::TestOrBench;
+    if( isTestPath( p ) )
+    {
+        return PathTier::TestOrBench;
+    }
     for( std::string_view seg : { std::string_view( "bench/" ),   std::string_view( "benches/" ),
                                   std::string_view( "fixture/" ), std::string_view( "fixtures/" ),
                                   std::string_view( "testdata/" ) } )
-        if( hasDirSegment( p, seg ) ) return PathTier::TestOrBench;
+    {
+        if( hasDirSegment( p, seg ) )
+        {
+            return PathTier::TestOrBench;
+        }
+    }
 
     return PathTier::Source;
 }
@@ -101,7 +127,12 @@ inline PathTier pathTierOf( std::string_view p ) noexcept
 inline bool isDemoOrGeneratedPath( std::string_view p ) noexcept
 {
     for( std::string_view seg : { std::string_view( "present/" ), std::string_view( "docs/captures/" ) } )
-        if( hasDirSegment( p, seg ) ) return true;
+    {
+        if( hasDirSegment( p, seg ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -111,8 +142,14 @@ inline constexpr float kRankTierDemoMul = 0.35f;
 // tier factor for one path — 1.0 for anything not in the two down-weighted families
 inline float rankTierMultiplierOf( std::string_view p ) noexcept
 {
-    if( isDemoOrGeneratedPath( p ) ) return kRankTierDemoMul;
-    if( pathTierOf( p ) == PathTier::TestOrBench ) return kRankTierTestMul;
+    if( isDemoOrGeneratedPath( p ) )
+    {
+        return kRankTierDemoMul;
+    }
+    if( pathTierOf( p ) == PathTier::TestOrBench )
+    {
+        return kRankTierTestMul;
+    }
     return 1.0f;
 }
 
@@ -121,11 +158,19 @@ inline float rankTierMultiplierOf( std::string_view p ) noexcept
 inline std::vector<float> rankTierSymbolMultipliers( const IngestResult& ing )
 {
     std::vector<float> fileMul( ing.files.size(), 1.f );
-    for( std::size_t f = 0; f < ing.files.size(); ++f ) fileMul[f] = rankTierMultiplierOf( ing.files[f] );
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        fileMul[f] = rankTierMultiplierOf( ing.files[f] );
+    }
 
     std::vector<float> mul( ing.symbols.size(), 1.f );
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
-        if( ing.symbols[i].fileId < fileMul.size() ) mul[i] = fileMul[ ing.symbols[i].fileId ];
+    {
+        if( ing.symbols[i].fileId < fileMul.size() )
+        {
+            mul[i] = fileMul[ing.symbols[i].fileId];
+        }
+    }
     return mul;
 }
 
@@ -139,7 +184,9 @@ inline float maxScoreUndoingTier( const std::vector<float>& rank, const std::vec
     VERIFY( rank.size() == tierMul.size() );
     float rawMax = 0.f;
     for( std::size_t i = 0; i < rank.size() && i < tierMul.size(); ++i )
+    {
         rawMax = std::max( rawMax, tierMul[i] > 0.f ? rank[i] / tierMul[i] : rank[i] );
+    }
     return rawMax;
 }
 
@@ -161,12 +208,15 @@ inline void applyIgnoreTests( IngestResult& ing )
 {
     std::vector<char> drop( ing.files.size(), 0 );
     for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
         drop[f] = isTestPath( ing.files[f] ) ? 1 : 0;
+    }
 
     std::vector<NodeId> remap( ing.symbols.size(), kNoNode );
     std::vector<Symbol> keptSyms;
     keptSyms.reserve( ing.symbols.size() );
     for( const Symbol& s : ing.symbols )
+    {
         if( !drop[ s.fileId ] )
         {
             const NodeId nid = NodeId( keptSyms.size() );
@@ -174,17 +224,24 @@ inline void applyIgnoreTests( IngestResult& ing )
             Symbol c = s;  c.id = nid;
             keptSyms.push_back( std::move( c ) );
         }
+    }
 
     std::vector<Reference> keptRefs;
     keptRefs.reserve( ing.references.size() );
     for( const Reference& r : ing.references )
     {
-        if( drop[ r.fileId ] ) continue;
+        if( drop[r.fileId] )
+        {
+            continue;
+        }
         Reference c = r;
         if( c.fromSymbol != kNoNode )
         {
             const NodeId nf = remap[ c.fromSymbol ];
-            if( nf == kNoNode ) continue;          // caller was a test symbol → drop
+            if( nf == kNoNode )
+            {
+                continue; // caller was a test symbol → drop
+            }
             c.fromSymbol = nf;
         }
         keptRefs.push_back( std::move( c ) );
@@ -196,12 +253,18 @@ inline void applyIgnoreTests( IngestResult& ing )
     keptBinds.reserve( ing.bindings.size() );
     for( const Binding& b : ing.bindings )
     {
-        if( drop[ b.fileId ] ) continue;
+        if( drop[b.fileId] )
+        {
+            continue;
+        }
         Binding c = b;
         if( c.fromSymbol != kNoNode )
         {
             const NodeId nf = remap[ c.fromSymbol ];
-            if( nf == kNoNode ) continue;          // scope was a test symbol → drop
+            if( nf == kNoNode )
+            {
+                continue; // scope was a test symbol → drop
+            }
             c.fromSymbol = nf;
         }
         keptBinds.push_back( std::move( c ) );

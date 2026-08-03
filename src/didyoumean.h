@@ -35,14 +35,20 @@ inline int boundedEditDistance( std::string_view a, std::string_view b, int maxD
 {
     const std::size_t n = a.size(), m = b.size();
     const int lenDelta = int( n ) > int( m ) ? int( n ) - int( m ) : int( m ) - int( n );
-    if( lenDelta > maxDist ) return maxDist + 1;
+    if( lenDelta > maxDist )
+    {
+        return maxDist + 1;
+    }
 
     const auto lo = []( char c ) { return static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); };
 
     // rolling three rows (prev2/prev1/cur) — prev2 is needed for the transposition term. Row 0 = distance
     // from the empty prefix of a to each prefix of b (pure insertions), matching the standard DP boundary.
     std::vector<int> prev2( m + 1, 0 ), prev1( m + 1 ), cur( m + 1 );
-    for( std::size_t j = 0; j <= m; ++j ) prev1[j] = int( j );
+    for( std::size_t j = 0; j <= m; ++j )
+    {
+        prev1[j] = int( j );
+    }
 
     for( std::size_t i = 1; i <= n; ++i )
     {
@@ -54,7 +60,9 @@ inline int boundedEditDistance( std::string_view a, std::string_view b, int maxD
             const int  cost = ( ai == bj ) ? 0 : 1;
             int val = std::min( { cur[j - 1] + 1, prev1[j] + 1, prev1[j - 1] + cost } );
             if( i > 1 && j > 1 && ai == lo( b[j - 2] ) && lo( a[i - 2] ) == bj )
+            {
                 val = std::min( val, prev2[j - 2] + 1 );   // adjacent transposition ("teh" -> "the")
+            }
             cur[j] = val;
         }
         prev2.swap( prev1 );
@@ -93,16 +101,28 @@ inline std::string didYouMean( const IngestResult& ing, std::string_view name )
     Cand best{ kMaxEditDistance + 1, 0, {} };
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name.empty() || s.kind == SymKind::Section ) continue;
+        if( s.name.empty() || s.kind == SymKind::Section )
+        {
+            continue;
+        }
         const int dist = boundedEditDistance( s.name, name, kMaxEditDistance );
-        if( dist > kMaxEditDistance ) continue;
+        if( dist > kMaxEditDistance )
+        {
+            continue;
+        }
         std::size_t pfx = 0;
         const std::size_t lim = std::min( s.name.size(), name.size() );
-        while( pfx < lim && std::tolower( static_cast<unsigned char>( s.name[pfx] ) ) == std::tolower( static_cast<unsigned char>( name[pfx] ) ) ) ++pfx;
+        while( pfx < lim && std::tolower( static_cast<unsigned char>( s.name[pfx] ) ) == std::tolower( static_cast<unsigned char>( name[pfx] ) ) )
+        {
+            ++pfx;
+        }
         const bool better = dist < best.dist
                           || ( dist == best.dist && pfx > best.prefixLen )
                           || ( dist == best.dist && pfx == best.prefixLen && ( best.n.empty() || s.name < best.n ) );
-        if( better ) best = { dist, pfx, std::string_view( s.name ) };
+        if( better )
+        {
+            best = { dist, pfx, std::string_view( s.name ) };
+        }
     }
     return best.n.empty() ? std::string() : std::string( best.n );
 }
@@ -113,7 +133,10 @@ inline std::string didYouMean( const IngestResult& ing, std::string_view name )
 inline std::string withDidYouMean( const IngestResult& ing, std::string_view name, std::string msg )
 {
     const std::string near = didYouMean( ing, name );
-    if( !near.empty() && near != name ) msg += " (did you mean '" + near + "'?)";
+    if( !near.empty() && near != name )
+    {
+        msg += " (did you mean '" + near + "'?)";
+    }
     return msg;
 }
 

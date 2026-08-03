@@ -40,8 +40,14 @@ inline void writeCommaEscaped( std::FILE* out, std::string_view alreadyXmlEscape
 {
     for( char c : alreadyXmlEscaped )
     {
-        if( c == ',' ) std::fputs( "&#44;", out );
-        else           std::fputc( c, out );
+        if( c == ',' )
+        {
+            std::fputs( "&#44;", out );
+        }
+        else
+        {
+            std::fputc( c, out );
+        }
     }
 }
 
@@ -77,7 +83,14 @@ inline void buildPathTable( const std::vector<std::uint32_t>& rowFileIds,
     {
         std::uint32_t idx = 0;
         bool          found = false;
-        for( ; idx < outUniqueFiles.size(); ++idx ) if( outUniqueFiles[idx] == fid ) { found = true; break; }
+        for( ; idx < outUniqueFiles.size(); ++idx )
+        {
+            if( outUniqueFiles[idx] == fid )
+            {
+                found = true;
+                break;
+            }
+        }
         if( !found ) { idx = std::uint32_t( outUniqueFiles.size() ); outUniqueFiles.push_back( fid ); }
         outRowPathIdx.push_back( idx );
     }
@@ -90,7 +103,10 @@ inline void emitPathTable( std::FILE* out, const IngestResult& ing,
     std::fputs( "<paths>", out );
     for( std::size_t i = 0; i < uniqueFiles.size(); ++i )
     {
-        if( i ) std::fputc( ' ', out );
+        if( i )
+        {
+            std::fputc( ' ', out );
+        }
         std::fprintf( out, "%zu=", i );
         const std::string_view p = escapeXml( ing.files[ uniqueFiles[i] ], esc );
         std::fwrite( p.data(), 1, p.size(), out );
@@ -110,7 +126,10 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::vector<char> esc;
 
     std::vector<std::uint32_t> rowFiles;  rowFiles.reserve( rows.size() );
-    for( NodeId id : rows ) rowFiles.push_back( ing.symbols[id].fileId );
+    for( NodeId id : rows )
+    {
+        rowFiles.push_back( ing.symbols[id].fileId );
+    }
     std::vector<std::uint32_t> uniqueFiles, rowPathIdx;
     buildPathTable( rowFiles, uniqueFiles, rowPathIdx );
 
@@ -121,21 +140,49 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
 
     // path index array
     std::fputs( "<path>", out );
-    for( std::size_t i = 0; i < rowPathIdx.size(); ++i ) { if( i ) std::fputc( ',', out ); std::fprintf( out, "%u", rowPathIdx[i] ); }
+    for( std::size_t i = 0; i < rowPathIdx.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fprintf( out, "%u", rowPathIdx[i] );
+    }
     std::fputs( "</path>", out );
     // name array (XML-escaped; most identifiers never contain a comma, but markdown SECTION symbols and
     // canonical ids CAN (A4-F15) — writeCommaEscaped protects the ',' field separator from a value comma).
     std::fputs( "<name>", out );
     for( std::size_t i = 0; i < rows.size(); ++i )
-    { if( i ) std::fputc( ',', out ); const std::string_view n = escapeXml( ing.symbols[ rows[i] ].name, esc ); writeCommaEscaped( out, n ); }
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        const std::string_view n = escapeXml( ing.symbols[rows[i]].name, esc );
+        writeCommaEscaped( out, n );
+    }
     std::fputs( "</name>", out );
     // line array
     std::fputs( "<line>", out );
-    for( std::size_t i = 0; i < rows.size(); ++i ) { if( i ) std::fputc( ',', out ); std::fprintf( out, "%u", ing.symbols[ rows[i] ].line ); }
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fprintf( out, "%u", ing.symbols[rows[i]].line );
+    }
     std::fputs( "</line>", out );
     // kind array (terse tags)
     std::fputs( "<kind>", out );
-    for( std::size_t i = 0; i < rows.size(); ++i ) { if( i ) std::fputc( ',', out ); std::fputs( symTag( ing.symbols[ rows[i] ].kind ), out ); }
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fputs( symTag( ing.symbols[rows[i]].kind ), out );
+    }
     std::fputs( "</kind>", out );
 
     std::fprintf( out, "</cols></%s>", wrapperTag );
@@ -162,17 +209,45 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
     std::fprintf( out, "<cols n=\"%zu\" fields=\"path,line,role,in_id\">", nRows );
 
     std::fputs( "<path>", out );
-    for( std::size_t i = 0; i < rowPathIdx.size(); ++i ) { if( i ) std::fputc( ',', out ); std::fprintf( out, "%u", rowPathIdx[i] ); }
+    for( std::size_t i = 0; i < rowPathIdx.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fprintf( out, "%u", rowPathIdx[i] );
+    }
     std::fputs( "</path>", out );
     std::fputs( "<line>", out );
-    for( std::size_t i = 0; i < nRows; ++i ) { if( i ) std::fputc( ',', out ); std::fprintf( out, "%u", lines[i] ); }
+    for( std::size_t i = 0; i < nRows; ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fprintf( out, "%u", lines[i] );
+    }
     std::fputs( "</line>", out );
     std::fputs( "<role>", out );
-    for( std::size_t i = 0; i < nRows; ++i ) { if( i ) std::fputc( ',', out ); std::fputs( refRoleTag( roles[i] ), out ); }
+    for( std::size_t i = 0; i < nRows; ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fputs( refRoleTag( roles[i] ), out );
+    }
     std::fputs( "</role>", out );
     std::fputs( "<in_id>", out );
     for( std::size_t i = 0; i < nRows; ++i )
-    { if( i ) std::fputc( ',', out ); const std::string_view v = escapeXml( inNames[i], esc ); writeCommaEscaped( out, v ); }
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        const std::string_view v = escapeXml( inNames[i], esc );
+        writeCommaEscaped( out, v );
+    }
     std::fputs( "</in_id>", out );
 
     std::fputs( "</cols></uses>", out );

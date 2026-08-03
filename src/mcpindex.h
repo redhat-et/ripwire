@@ -105,7 +105,10 @@ namespace mcpdetail
     inline long long mtimeOf( const std::string& p )
     {
         struct stat st;
-        if( ::stat( p.c_str(), &st ) != 0 ) return -1;
+        if( ::stat( p.c_str(), &st ) != 0 )
+        {
+            return -1;
+        }
         return mtimeNsOf( st );
     }
 
@@ -115,7 +118,10 @@ namespace mcpdetail
     inline std::pair<long long, long long> statOf( const std::string& p )
     {
         struct stat st;
-        if( ::stat( p.c_str(), &st ) != 0 ) return { -1, -1 };
+        if( ::stat( p.c_str(), &st ) != 0 )
+        {
+            return { -1, -1 };
+        }
         return { mtimeNsOf( st ), (long long)st.st_size };
     }
 
@@ -132,13 +138,19 @@ namespace mcpdetail
 
         std::error_code ec;
         fs::recursive_directory_iterator it( fs::path( root ), fs::directory_options::skip_permission_denied, ec );
-        if( ec ) return;   // unreadable root — the root mtime alone still catches top-level changes
+        if( ec )
+        {
+            return; // unreadable root — the root mtime alone still catches top-level changes
+        }
 
         const fs::recursive_directory_iterator end;
         for( ; it != end; it.increment( ec ) )
         {
             if( ec ) { ec.clear(); continue; }
-            if( !it->is_directory( ec ) ) continue;
+            if( !it->is_directory( ec ) )
+            {
+                continue;
+            }
 
             // prune the ingest denylist subtrees — changes inside them never affect the index
             static constexpr std::string_view kSkipDirs[] = {
@@ -149,14 +161,20 @@ namespace mcpdetail
             const std::string dn = it->path().filename().string();
             bool skip = false;
             for( std::string_view s : kSkipDirs )
+            {
                 if( dn == s ) { skip = true; break; }
+            }
             if( !skip && dn.size() > 12 && dn.compare( 0, 12, "cmake-build-" ) == 0 )
+            {
                 skip = true;
+            }
             if( !skip )
             {
                 const fs::path cacheSentinel = it->path() / "CMakeCache.txt";
                 if( fs::exists( cacheSentinel, ec ) )
+                {
                     skip = true;
+                }
                 ec.clear();
             }
             if( skip ) { it.disable_recursion_pending(); continue; }
@@ -210,9 +228,18 @@ namespace mcpdetail
         // release every fd (symmetric teardown; called on rebuild before re-arming and at destruction).
         void reset() noexcept
         {
-            for( int fd : dirFds ) if( fd >= 0 ) ::close( fd );
+            for( int fd : dirFds )
+            {
+                if( fd >= 0 )
+                {
+                    ::close( fd );
+                }
+            }
             dirFds.clear();
-            if( kq >= 0 ) ::close( kq );
+            if( kq >= 0 )
+            {
+                ::close( kq );
+            }
             kq = -1;
             healthy = false;
         }
@@ -267,7 +294,10 @@ namespace mcpdetail
         // failure degrades to `true` (assume changed → force a sweep — never skip on uncertainty).
         bool drainHadEvent() noexcept
         {
-            if( kq < 0 ) return true;                                   // unhealthy (incl. every non-kqueue platform, where arm() never opens kq) → force the sweep
+            if( kq < 0 )
+            {
+                return true; // unhealthy (incl. every non-kqueue platform, where arm() never opens kq) → force the sweep
+            }
 #if RIPWIRE_HAS_KQUEUE
             struct kevent out[ 32 ];
             struct timespec zero = { 0, 0 };
@@ -275,10 +305,19 @@ namespace mcpdetail
             for( ;; )
             {
                 const int n = ::kevent( kq, nullptr, 0, out, 32, &zero );
-                if( n < 0 )  return true;                               // poll error → conservative: assume changed
-                if( n == 0 ) break;
+                if( n < 0 )
+                {
+                    return true; // poll error → conservative: assume changed
+                }
+                if( n == 0 )
+                {
+                    break;
+                }
                 any = true;
-                if( n < 32 ) break;                                     // fewer than the batch cap → queue drained
+                if( n < 32 )
+                {
+                    break; // fewer than the batch cap → queue drained
+                }
             }
             return any;
 #else
@@ -295,14 +334,23 @@ namespace mcpdetail
     {
         readOk = false;
         std::FILE* in = std::fopen( path.c_str(), "rb" );
-        if( !in ) return {};
+        if( !in )
+        {
+            return {};
+        }
         std::string s;
         char b[ 8192 ];
         std::size_t n;
-        while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 ) s.append( b, n );
+        while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+        {
+            s.append( b, n );
+        }
         const bool err = std::ferror( in ) != 0;
         std::fclose( in );
-        if( err ) return {};
+        if( err )
+        {
+            return {};
+        }
         readOk = true;
         return s;
     }
@@ -344,7 +392,10 @@ namespace mcpdetail
     {
         // scoped canonId already includes the path ("path::scope::name") → unique + stable, use as-is.
         // free-function canonId is the bare name (resolve.h: empty scope → bare name) → fold the path in.
-        if( canonId.find( "::" ) != std::string::npos ) return canonId;
+        if( canonId.find( "::" ) != std::string::npos )
+        {
+            return canonId;
+        }
         return path + "::" + name;                                          // unscoped: path-qualify for per-file uniqueness
     }
 
@@ -367,9 +418,18 @@ namespace mcpdetail
     inline bool parseHandle( const std::string& h, std::uint64_t& idHash, std::uint64_t& contentHash )
     {
         idHash = 0; contentHash = 0;
-        if( h.size() != 4 + 16 + 1 + 16 ) return false;                     // "sym#" + 16 + "@" + 16
-        if( h.compare( 0, 4, "sym#" ) != 0 ) return false;
-        if( h[ 20 ] != '@' ) return false;
+        if( h.size() != 4 + 16 + 1 + 16 )
+        {
+            return false; // "sym#" + 16 + "@" + 16
+        }
+        if( h.compare( 0, 4, "sym#" ) != 0 )
+        {
+            return false;
+        }
+        if( h[20] != '@' )
+        {
+            return false;
+        }
         const auto hex16 = []( const std::string& s, std::size_t off, std::uint64_t& out ) -> bool
         {
             out = 0;
@@ -377,9 +437,18 @@ namespace mcpdetail
             {
                 const char c = s[ off + i ];
                 std::uint64_t d;
-                if(      c >= '0' && c <= '9' ) d = std::uint64_t( c - '0' );
-                else if( c >= 'a' && c <= 'f' ) d = std::uint64_t( c - 'a' + 10 );
-                else return false;                                          // uppercase / non-hex → reject (handles are always lowercase)
+                if( c >= '0' && c <= '9' )
+                {
+                    d = std::uint64_t( c - '0' );
+                }
+                else if( c >= 'a' && c <= 'f' )
+                {
+                    d = std::uint64_t( c - 'a' + 10 );
+                }
+                else
+                {
+                    return false; // uppercase / non-hex → reject (handles are always lowercase)
+                }
                 out = ( out << 4 ) | d;
             }
             return true;
@@ -472,7 +541,10 @@ inline std::string mcpCachePath( const std::string& root )
     if( tmpDir && *tmpDir )
     {
         std::string d = tmpDir;
-        if( d.back() != '/' ) d += '/';
+        if( d.back() != '/' )
+        {
+            d += '/';
+        }
         return d + name;
     }
 
@@ -496,7 +568,13 @@ inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 {
     std::uint64_t          h = 14695981039346656037ull;
     std::vector<std::uint32_t> ids;
-    for( std::uint32_t f = 0; f < changed.size(); ++f ) if( changed[f] ) ids.push_back( f );
+    for( std::uint32_t f = 0; f < changed.size(); ++f )
+    {
+        if( changed[f] )
+        {
+            ids.push_back( f );
+        }
+    }
     for( std::uint32_t f : ids )
     {
         h ^= f;
@@ -573,13 +651,23 @@ inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 // the answer for a given tree state is byte-identical whether or not the dir loop ran.
 inline bool mcpStale( const McpIndex& ix, bool skipDirSweep = false )
 {
-    if( !ix.valid ) return true;
+    if( !ix.valid )
+    {
+        return true;
+    }
 
     // directory watch-list (catches adds/deletes/renames that bubble into a watched dir). Skipped ONLY when
     // the FS-event watcher has proven no structural change occurred (getIndex passes skipDirSweep in that case).
     if( !skipDirSweep )
+    {
         for( const auto& [d, m] : ix.dirMtime )
-            if( mcpdetail::mtimeOf( d ) != m ) return true;
+        {
+            if( mcpdetail::mtimeOf( d ) != m )
+            {
+                return true;
+            }
+        }
+    }
 
     // per-file mtime+size loop — ALWAYS run (the S1 content-staleness authority; never gated by the watcher).
     for( std::size_t i = 0; i < ix.ing.files.size(); ++i )
@@ -587,7 +675,10 @@ inline bool mcpStale( const McpIndex& ix, bool skipDirSweep = false )
         const auto [ mtime, size ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );   // one stat() → both signals
         const long long recMtime = ix.fileMtime[i];
         const long long recSize  = ( i < ix.fileSize.size() ) ? ix.fileSize[i] : -1;
-        if( mtime != recMtime || size != recSize ) return true;              // mtime OR size moved → stale, no read
+        if( mtime != recMtime || size != recSize )
+        {
+            return true; // mtime OR size moved → stale, no read
+        }
     }
     return false;
 }
@@ -636,7 +727,10 @@ inline std::string mcpWorkspaceKey( const std::vector<std::string>& rootArgs, st
     if( rootArgs.size() > kMaxWorkspaceRoots ) { err = "too many roots in `paths` (max 16)"; return {}; }
     std::vector<WorkspaceRoot> ws;
     if( !buildWorkspaceRoots( rootArgs, ws ) ) { err = "nested roots are not allowed in `paths` — pass disjoint roots"; return {}; }
-    if( ws.size() == 1 ) return ws[0].arg;                       // dedupe collapsed to one → plain single-root path
+    if( ws.size() == 1 )
+    {
+        return ws[0].arg; // dedupe collapsed to one → plain single-root path
+    }
     std::string key;
     for( const WorkspaceRoot& r : ws ) { key.append( r.real );  key.push_back( '\x1f' ); }
     mcpWorkspaceRegistry()[ key ] = std::move( ws );
@@ -679,7 +773,10 @@ inline std::size_t mcpPrefetchMinFiles()
         {
             char*                    end = nullptr;
             const unsigned long long n   = std::strtoull( e, &end, 10 );
-            if( end != e ) return static_cast<std::size_t>( n );
+            if( end != e )
+            {
+                return static_cast<std::size_t>( n );
+            }
         }
         return 500;
     }();
@@ -698,21 +795,39 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
 {
     std::string gitDir = root + "/.git";
     struct stat st;
-    if( ::stat( gitDir.c_str(), &st ) != 0 ) return 0;                   // not a git working tree we track
+    if( ::stat( gitDir.c_str(), &st ) != 0 )
+    {
+        return 0; // not a git working tree we track
+    }
     if( ( st.st_mode & S_IFMT ) == S_IFREG )
     {
         // ".git" is a FILE ("gitdir: <path>") for worktrees / submodules — resolve one hop, cheaply.
         bool        ok = false;
         std::string s  = mcpdetail::readFileBytes( gitDir, ok );
         std::size_t p  = ok ? s.find( "gitdir:" ) : std::string::npos;
-        if( p == std::string::npos ) return 0;                          // unresolvable → indeterminate
+        if( p == std::string::npos )
+        {
+            return 0; // unresolvable → indeterminate
+        }
         p += 7;
-        while( p < s.size() && ( s[p] == ' ' || s[p] == '\t' ) ) ++p;
+        while( p < s.size() && ( s[p] == ' ' || s[p] == '\t' ) )
+        {
+            ++p;
+        }
         std::size_t e = p;
-        while( e < s.size() && s[e] != '\n' && s[e] != '\r' ) ++e;
+        while( e < s.size() && s[e] != '\n' && s[e] != '\r' )
+        {
+            ++e;
+        }
         std::string gd = s.substr( p, e - p );
-        if( gd.empty() ) return 0;
-        if( gd.front() != '/' ) gd = root + "/" + gd;                   // relative gitdir → resolve against root
+        if( gd.empty() )
+        {
+            return 0;
+        }
+        if( gd.front() != '/' )
+        {
+            gd = root + "/" + gd; // relative gitdir → resolve against root
+        }
         gitDir = gd;
     }
 
@@ -732,16 +847,30 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
     bool        okH  = false;
     std::string head = mcpdetail::readFileBytes( gitDir + "/HEAD", okH );
     if( okH )
+    {
         if( std::size_t q = head.find( "ref:" ); q != std::string::npos )
         {
             q += 4;
-            while( q < head.size() && ( head[q] == ' ' || head[q] == '\t' ) ) ++q;
+            while( q < head.size() && ( head[q] == ' ' || head[q] == '\t' ) )
+            {
+                ++q;
+            }
             std::size_t e2 = q;
-            while( e2 < head.size() && head[e2] != '\n' && head[e2] != '\r' ) ++e2;
+            while( e2 < head.size() && head[e2] != '\n' && head[e2] != '\r' )
+            {
+                ++e2;
+            }
             const std::string ref = head.substr( q, e2 - q );
-            if( !ref.empty() ) fold( gitDir + "/" + ref );
+            if( !ref.empty() )
+            {
+                fold( gitDir + "/" + ref );
+            }
         }
-    if( h == 0 ) h = 1;                 // 0 is the "indeterminate" sentinel — a real token must never collide with it
+    }
+    if( h == 0 )
+    {
+        h = 1; // 0 is the "indeterminate" sentinel — a real token must never collide with it
+    }
     return h;
 }
 
@@ -750,10 +879,16 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
 // above, gated first on the file count so a small repo does not even probe git.
 inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t fileCount )
 {
-    if( fileCount < mcpPrefetchMinFiles() ) return;                     // (4) GO-at-scale: small repos never pay
+    if( fileCount < mcpPrefetchMinFiles() )
+    {
+        return; // (4) GO-at-scale: small repos never pay
+    }
 
     const std::uint64_t token = gitHeadMoveToken( root );
-    if( token == 0 ) return;                                           // indeterminate git state → no prefetch
+    if( token == 0 )
+    {
+        return; // indeterminate git state → no prefetch
+    }
 
     std::uint64_t last = mcpPrefetchLastToken().load( std::memory_order_relaxed );
     if( last == 0 )                                                    // FIRST observation: seed, do NOT fire (§Open-q 2: no startup pre-warm)
@@ -761,13 +896,18 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
         mcpPrefetchLastToken().compare_exchange_strong( last, token, std::memory_order_relaxed );
         return;
     }
-    if( token == last ) return;                                        // HEAD has not moved since we last acted
+    if( token == last )
+    {
+        return; // HEAD has not moved since we last acted
+    }
 
     // (2) single-flight: at most ONE worker. If one is already warming, DROP this trigger WITHOUT advancing
     //     lastToken, so the next observation re-fires once the worker finishes (newest sha eventually warmed).
     bool expected = false;
     if( !mcpPrefetchInFlight().compare_exchange_strong( expected, true, std::memory_order_acq_rel ) )
+    {
         return;
+    }
 
     mcpPrefetchLastToken().store( token, std::memory_order_relaxed );  // we won → this move is ours
     mcpPrefetchSpawnCount().fetch_add( 1, std::memory_order_relaxed );
@@ -826,7 +966,9 @@ inline const McpIndex& getIndex( const std::string& root )
             std::vector<IngestResult> parts;
             parts.reserve( roots.size() );
             for( const WorkspaceRoot& r : roots )
+            {
                 parts.push_back( ingest( r.arg.c_str(), {}, mcpCachePath( r.arg ), kDefaultMaxFileBytes, true, r.label ) );
+            }
             ix.cacheFile = mcpCachePath( root );                      // key-derived (unused by the per-root ingests)
             ix.ing = mergeWorkspaceIngests( roots, parts );
         }
@@ -853,13 +995,24 @@ inline const McpIndex& getIndex( const std::string& root )
         {
             const auto [ mask, gitOk ] = gitDiffChangedMask( roots[r].arg, ix.ing, r );
             if( gitOk )
-                for( std::size_t f = 0; f < changed.size() && f < mask.size(); ++f ) if( mask[f] ) changed[f] = 1;
+            {
+                for( std::size_t f = 0; f < changed.size() && f < mask.size(); ++f )
+                {
+                    if( mask[f] )
+                    {
+                        changed[f] = 1;
+                    }
+                }
+            }
         }
     }
     else
     {
         const auto [ mask, gitOk ] = gitDiffChangedMask( root, ix.ing );
-        if( gitOk ) changed = mask;                                       // not a repo / git missing → stays all-zero
+        if( gitOk )
+        {
+            changed = mask; // not a repo / git missing → stays all-zero
+        }
     }
     ix.workingSetHash = workingSetHashOf( changed );
     ix.rank = rankGraphTeleport( ix.g, diffTeleport( ix.ing, changed ) );
@@ -882,9 +1035,16 @@ inline const McpIndex& getIndex( const std::string& root )
     // file-less dirs are detected too — see collectDirMtimes.
     ix.dirMtime.clear();
     if( isWorkspace )
-        for( const WorkspaceRoot& r : wsIt->second ) mcpdetail::collectDirMtimes( r.arg, ix.dirMtime );
+    {
+        for( const WorkspaceRoot& r : wsIt->second )
+        {
+            mcpdetail::collectDirMtimes( r.arg, ix.dirMtime );
+        }
+    }
     else
+    {
         mcpdetail::collectDirMtimes( root, ix.dirMtime );
+    }
 
     // Feature 1: (re-)arm the FS-event watcher over the freshly-collected dir set. The rebuild we just did IS
     // the freshest possible read, so events queued against the old state are dropped with the old fds. If
@@ -893,7 +1053,10 @@ inline const McpIndex& getIndex( const std::string& root )
     // as-is (no sort needed).
     std::vector<std::string> watchDirs;
     watchDirs.reserve( ix.dirMtime.size() );
-    for( const auto& [ d, m ] : ix.dirMtime ) watchDirs.push_back( d );
+    for( const auto& [d, m] : ix.dirMtime )
+    {
+        watchDirs.push_back( d );
+    }
     ix.watcher.arm( watchDirs );
 
     ix.root  = root;
@@ -909,7 +1072,10 @@ inline const McpIndex& getIndex( const std::string& root )
 // fingerprint (both already on the index). The READ verbs attach this so an agent knows what to ask for.
 inline std::string handleFor( const McpIndex& ix, NodeId id )
 {
-    if( id >= ix.ing.symbols.size() ) return {};
+    if( id >= ix.ing.symbols.size() )
+    {
+        return {};
+    }
     const Symbol&       s      = ix.ing.symbols[id];
     const std::string&  canon  = ( id < ix.g.canonId.size() ) ? ix.g.canonId[id] : ix.ing.symbols[id].name;
     const std::string&  path   = ix.ing.files[ s.fileId ];
@@ -936,7 +1102,10 @@ inline NodeId resolveHandleAll( const McpIndex& ix, std::uint64_t idHash, std::v
         const std::string& path  = ing.files[ s.fileId ];
         if( mcpdetail::str64( mcpdetail::stableHandleId( canon, path, s.name ) ) == idHash )
         {
-            if( best == kNoNode ) best = id;   // ids ascend → first match is the lowest; deterministic
+            if( best == kNoNode )
+            {
+                best = id; // ids ascend → first match is the lowest; deterministic
+            }
             matches.push_back( id );
         }
     }

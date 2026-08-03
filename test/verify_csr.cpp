@@ -23,7 +23,9 @@ sparseCsr<float> buildCsr( const Adjacency& adjacency )
     const std::size_t nodeCount = adjacency.size();
     std::size_t edgeCount = 0;
     for( const auto& row : adjacency )
+    {
         edgeCount += row.size();
+    }
 
     sparseCsr<float> csr( nodeCount, nodeCount, edgeCount );
     std::uint32_t* rowOffsets = csr.rowOffsets();
@@ -49,7 +51,9 @@ Adjacency generateAdjacency( std::size_t nodeCount )
 {
     Adjacency adjacency( nodeCount );
     if( nodeCount == 0 )
+    {
         return adjacency;
+    }
 
     std::uint32_t state = 0x9e3779b9u ^ std::uint32_t( nodeCount );
     const std::size_t edgeCountPerRow = std::min<std::size_t>( nodeCount, 7 );
@@ -72,7 +76,9 @@ Adjacency generateAdjacency( std::size_t nodeCount )
 bool roundTrips( const sparseCsr<float>& csr, const Adjacency& expected )
 {
     if( csr.rows() != expected.size() )
+    {
         return false;
+    }
 
     const std::uint32_t* rowOffsets = csr.rowOffsets();
     const std::uint32_t* columnIndices = csr.colIndices();
@@ -81,14 +87,17 @@ bool roundTrips( const sparseCsr<float>& csr, const Adjacency& expected )
     {
         const auto& row = expected[ rowIndex ];
         if( std::size_t( rowOffsets[ rowIndex + 1 ] - rowOffsets[ rowIndex ] ) != row.size() )
+        {
             return false;
+        }
 
         for( std::size_t localEdgeIndex = 0; localEdgeIndex < row.size(); ++localEdgeIndex )
         {
             const std::size_t edgeIndex = rowOffsets[ rowIndex ] + localEdgeIndex;
-            if( columnIndices[ edgeIndex ] != row[ localEdgeIndex ].first
-                || std::fabs( values[ edgeIndex ] - row[ localEdgeIndex ].second ) > 1e-7f )
+            if( columnIndices[edgeIndex] != row[localEdgeIndex].first || std::fabs( values[edgeIndex] - row[localEdgeIndex].second ) > 1e-7f )
+            {
                 return false;
+            }
         }
     }
     return true;
@@ -113,7 +122,9 @@ TEST_CASE( "CSR structural properties and adjacency round-trip" )
         Adjacency adjacency( 2 );
         adjacency[ 0 ].reserve( kStressEdgeCount );
         for( std::size_t edgeIndex = 0; edgeIndex < kStressEdgeCount; ++edgeIndex )
+        {
             adjacency[ 0 ].emplace_back( std::uint32_t( edgeIndex & 1u ), 1.f );
+        }
         const sparseCsr<float> csr = buildCsr( adjacency );
         CHECK_MESSAGE( csr.nnz() == kStressEdgeCount, "CSR edge count truncated above uint16 range" );
         CHECK_MESSAGE( rw::verifyCsr( csr, adjacency.size() ), "large CSR failed structural verification" );

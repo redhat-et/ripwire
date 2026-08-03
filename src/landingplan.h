@@ -89,7 +89,10 @@ inline std::string joinRefNames( const std::vector<crossref::RefRow>& refs, cons
     std::string csv;
     for( std::size_t i : idx )
     {
-        if( !csv.empty() ) csv += ',';
+        if( !csv.empty() )
+        {
+            csv += ',';
+        }
         csv += refs[i].ref.name;
     }
     return csv;
@@ -124,20 +127,33 @@ inline PlanResult computePlan( const std::string& root, std::string_view filter,
     for( std::size_t i = 0; i < result.stray.refs.size(); ++i )
     {
         const crossref::RefRow& r = result.stray.refs[i];
-        if     ( !r.ok || r.verdict == crossref::Verdict::Unknown ) result.undetermined.push_back( i );
-        else if( r.verdict == crossref::Verdict::Unmerged )         unmergedIdx.push_back( i );
+        if( !r.ok || r.verdict == crossref::Verdict::Unknown )
+        {
+            result.undetermined.push_back( i );
+        }
+        else if( r.verdict == crossref::Verdict::Unmerged )
+        {
+            unmergedIdx.push_back( i );
+        }
     }
 
     for( std::size_t rank = 0; rank < unmergedIdx.size(); ++rank )
+    {
         ( rank < scoutCap ? result.scouted : result.bounded ).push_back( unmergedIdx[rank] );
+    }
 
-    if( result.scouted.empty() ) return result;   // nothing unmerged (or the bound is 0) — stray-content already answered it
+    if( result.scouted.empty() )
+    {
+        return result; // nothing unmerged (or the bound is 0) — stray-content already answered it
+    }
 
     const std::string refsCsv = joinRefNames( result.stray.refs, result.scouted );
     result.scout   = mergescout::computeMergeScout( root, refsCsv, workingIng, excludes, maxFileBytes );
     result.scoutOk = result.scout.ok;
     if( !result.scoutOk )
+    {
         DEGRADED_PATH_ALERT( "landing-plan: merge-scout refused the selected landing set — reporting the sweep without arms/conflicts/order" );
+    }
     return result;
 }
 
@@ -181,7 +197,13 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
 
     std::uint32_t supersededCount = 0;
-    for( const crossref::RefRow& r : p.stray.refs ) if( r.verdict == crossref::Verdict::Superseded ) ++supersededCount;
+    for( const crossref::RefRow& r : p.stray.refs )
+    {
+        if( r.verdict == crossref::Verdict::Superseded )
+        {
+            ++supersededCount;
+        }
+    }
 
     // G4: an XML comment may not contain a double hyphen, so this text (like writeStrayContent's and
     // writeWhereis's) uses an em dash for punctuation and names flags WITHOUT their leading dashes.
@@ -219,17 +241,38 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
                   supersededCount, p.stray.mergedRefs, p.undetermined.size(), p.scouted.size(), p.bounded.size(),
                   p.scoutOk ? 1 : 0, atAttr.c_str() );
 
-    for( std::size_t i : p.scouted )      writePlanRef( out, p.stray.refs[i], true,  ex );
-    for( std::size_t i : p.bounded )      writePlanRef( out, p.stray.refs[i], false, ex );
-    for( std::size_t i : p.undetermined ) writePlanDrop( out, p.stray.refs[i], ex );
-    for( const crossref::RefRow& r : p.stray.refs ) if( r.ok && r.verdict == crossref::Verdict::Superseded ) writePlanDrop( out, r, ex );
+    for( std::size_t i : p.scouted )
+    {
+        writePlanRef( out, p.stray.refs[i], true, ex );
+    }
+    for( std::size_t i : p.bounded )
+    {
+        writePlanRef( out, p.stray.refs[i], false, ex );
+    }
+    for( std::size_t i : p.undetermined )
+    {
+        writePlanDrop( out, p.stray.refs[i], ex );
+    }
+    for( const crossref::RefRow& r : p.stray.refs )
+    {
+        if( r.ok && r.verdict == crossref::Verdict::Superseded )
+        {
+            writePlanDrop( out, r, ex );
+        }
+    }
 
     // The scout section: reuse mergescout.h's own arm/pair/landing emitters VERBATIM (byte-identical shape
     // to a hand-authored --merge-scout=... call over the same ref list) — this composition never re-derives
     // conflict/risk/landing-order logic, only selects which refs reach it.
-    for( const mergescout::Arm& arm : p.scout.arms ) mergescout::writeScoutArm( out, arm, ex );
+    for( const mergescout::Arm& arm : p.scout.arms )
+    {
+        mergescout::writeScoutArm( out, arm, ex );
+    }
     const std::vector<mergescout::PairOverlap> pairs = mergescout::computeOverlaps( p.scout.arms );
-    for( const mergescout::PairOverlap& pr : pairs ) mergescout::writeScoutPair( out, p.scout.arms, pr, ex );
+    for( const mergescout::PairOverlap& pr : pairs )
+    {
+        mergescout::writeScoutPair( out, p.scout.arms, pr, ex );
+    }
     mergescout::writeScoutLanding( out, p.scout.arms, pairs, ex );
 
     std::fprintf( out, "</landing-plan>" );

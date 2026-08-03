@@ -63,7 +63,12 @@ constexpr std::string_view kCrawlSkipDirs[] = {
 inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
 {
     for( std::string_view s : kCrawlSkipDirs )
-        if( dirName == s ) return true;
+    {
+        if( dirName == s )
+        {
+            return true;
+        }
+    }
     return dirName.size() > 12 && dirName.compare( 0, 12, "cmake-build-" ) == 0;
 }
 
@@ -138,7 +143,10 @@ inline AstQueryShape astQueryShape( std::string_view query )
         if( inString )
         {
             if( c == '\\' ) { ++i; continue; }                    // escape: skip the escaped byte
-            if( c == '"' )  inString = false;
+            if( c == '"' )
+            {
+                inString = false;
+            }
             continue;
         }
         if( c == '"' ) { inString = true; continue; }
@@ -148,24 +156,38 @@ inline AstQueryShape astQueryShape( std::string_view query )
         if( c == ';' )
         {
             shape.hasComment = true;
-            while( i + 1 < query.size() && query[ i + 1 ] != '\n' ) ++i;
+            while( i + 1 < query.size() && query[i + 1] != '\n' )
+            {
+                ++i;
+            }
             continue;
         }
         if( c == '@' ) { shape.hasCapture = true; continue; }
         if( c == '(' || c == '[' )
         {
-            if( depth == 0 ) ++topLevelGroupCount;
+            if( depth == 0 )
+            {
+                ++topLevelGroupCount;
+            }
             ++depth;
             continue;
         }
         if( c == ')' || c == ']' )
         {
-            if( depth > 0 ) --depth;
-            if( depth == 0 ) closedTopLevelGroup = true;
+            if( depth > 0 )
+            {
+                --depth;
+            }
+            if( depth == 0 )
+            {
+                closedTopLevelGroup = true;
+            }
             continue;
         }
         if( depth == 0 && closedTopLevelGroup && !std::isspace( static_cast<unsigned char>( c ) ) )
+        {
             sawContentAfterTopLevelGroup = true;
+        }
     }
 
     shape.isSingleTopLevel = ( topLevelGroupCount == 1 ) && ( depth == 0 ) && !inString && !sawContentAfterTopLevelGroup;

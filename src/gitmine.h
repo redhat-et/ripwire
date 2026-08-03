@@ -78,27 +78,49 @@ inline bool looksLikeDate( std::string_view s )
     };
 
     std::string lower( s );
-    for( char& c : lower ) c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+    for( char& c : lower )
+    {
+        c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+    }
 
     bool hasDigit = false, hasDateWord = false;
-    for( char c : lower ) if( c >= '0' && c <= '9' ) hasDigit = true;
+    for( char c : lower )
+    {
+        if( c >= '0' && c <= '9' )
+        {
+            hasDigit = true;
+        }
+    }
 
     // Every alphabetic RUN must be date-shaped; one non-date word (`notaref`, `not`) disqualifies the value.
     for( std::size_t runBegin = 0; runBegin < lower.size(); )
     {
         if( !std::isalpha( static_cast<unsigned char>( lower[ runBegin ] ) ) ) { ++runBegin; continue; }
         std::size_t runEnd = runBegin;
-        while( runEnd < lower.size() && std::isalpha( static_cast<unsigned char>( lower[ runEnd ] ) ) ) ++runEnd;
+        while( runEnd < lower.size() && std::isalpha( static_cast<unsigned char>( lower[runEnd] ) ) )
+        {
+            ++runEnd;
+        }
         const std::string_view run( lower.data() + runBegin, runEnd - runBegin );
 
         bool runIsDateShaped = false;
-        if( run.size() == 1 ) runIsDateShaped = ( run[0] == 't' || run[0] == 'z' );   // ISO 8601 designators only
+        if( run.size() == 1 )
+        {
+            runIsDateShaped = ( run[0] == 't' || run[0] == 'z' ); // ISO 8601 designators only
+        }
         else
+        {
             for( const char* w : kWords )
+            {
                 if( run.size() >= std::string_view( w ).size() && run.compare( 0, std::string_view( w ).size(), w ) == 0 )
                 { runIsDateShaped = true;  hasDateWord = true;  break; }
+            }
+        }
 
-        if( !runIsDateShaped ) return false;
+        if( !runIsDateShaped )
+        {
+            return false;
+        }
         runBegin = runEnd;
     }
     return hasDigit || hasDateWord;
@@ -116,7 +138,10 @@ inline bool looksLikeDate( std::string_view s )
 inline SinceScope resolveSinceScope( const std::string& root, std::string_view value )
 {
     SinceScope scope;
-    if( value.empty() ) return scope;   // no --since given → inactive, caller uses its default
+    if( value.empty() )
+    {
+        return scope; // no --since given → inactive, caller uses its default
+    }
 
     const std::string val( value );
 
@@ -179,9 +204,13 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
 inline std::string sinceLogArgs( const SinceScope& scope, const char* fallbackSince )
 {
     if( !scope.active )
+    {
         return "--since=" + shSingleQuote( fallbackSince ) + " ";
+    }
     if( scope.isRev )
+    {
         return shSingleQuote( scope.revBoundary + ".." ) + " ";   // positional rev-range, not a --since flag
+    }
     return "--since=" + shSingleQuote( scope.sinceDate ) + " ";
 }
 
@@ -261,7 +290,10 @@ using GitPathIndex = HashMap<std::string, std::uint32_t>;   // repo-relative git
 // mask, which includes this header) unquotes identically.
 inline std::string gitUnquotePath( const std::string& raw )
 {
-    if( raw.size() < 2 || raw.front() != '"' || raw.back() != '"' ) return raw;   // not C-quoted → verbatim
+    if( raw.size() < 2 || raw.front() != '"' || raw.back() != '"' )
+    {
+        return raw; // not C-quoted → verbatim
+    }
 
     std::string out;
     out.reserve( raw.size() );
@@ -270,7 +302,10 @@ inline std::string gitUnquotePath( const std::string& raw )
     {
         const char c = raw[i];
         if( c != '\\' ) { out += c; continue; }
-        if( i + 1 >= contentEnd ) break;             // trailing lone backslash (malformed) — drop it
+        if( i + 1 >= contentEnd )
+        {
+            break; // trailing lone backslash (malformed) — drop it
+        }
         const char e = raw[ ++i ];
 
         switch( e )
@@ -289,10 +324,15 @@ inline std::string gitUnquotePath( const std::string& raw )
                 {
                     int val = e - '0';
                     for( int k = 0; k < 2 && i + 1 < contentEnd && raw[ i + 1 ] >= '0' && raw[ i + 1 ] <= '7'; ++k )
+                    {
                         val = val * 8 + ( raw[ ++i ] - '0' );
+                    }
                     out += char( val );
                 }
-                else out += e;                        // unknown escape — keep the char literally
+                else
+                {
+                    out += e; // unknown escape — keep the char literally
+                }
                 break;
         }
     }
@@ -303,7 +343,10 @@ inline std::string gitUnquotePath( const std::string& raw )
 // A plain suffix isn't enough — "bar.cpp" must not match "foobar.cpp". Pure, allocation-free.
 inline bool isBoundarySuffix( std::string_view indexedPath, std::string_view gitRelPath ) noexcept
 {
-    if( indexedPath.size() < gitRelPath.size() ) return false;
+    if( indexedPath.size() < gitRelPath.size() )
+    {
+        return false;
+    }
     const std::size_t off = indexedPath.size() - gitRelPath.size();
     return indexedPath.compare( off, gitRelPath.size(), gitRelPath ) == 0 && ( off == 0 || indexedPath[ off - 1 ] == '/' );
 }
@@ -367,7 +410,10 @@ inline bool hasCombiningMark( std::string_view path ) noexcept
         else if( ( b0 & 0xF8 ) == 0xF0 ) { cp = b0 & 0x07u; len = 4; }
         else                                        { ++i; continue; }                       // stray continuation byte
 
-        if( i + len > path.size() ) break;
+        if( i + len > path.size() )
+        {
+            break;
+        }
         bool isWellFormed = true;
         for( std::size_t k = 1; k < len; ++k )
         {
@@ -378,7 +424,12 @@ inline bool hasCombiningMark( std::string_view path ) noexcept
         if( !isWellFormed ) { ++i; continue; }
 
         for( const CodepointRange& r : kCombiningMarkRanges )
-            if( cp >= r.lo && cp <= r.hi ) return true;
+        {
+            if( cp >= r.lo && cp <= r.hi )
+            {
+                return true;
+            }
+        }
         i += len;
     }
     return false;
@@ -414,7 +465,10 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
 {
     GitCommandLines out;
     std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe ) return out;
+    if( !pipe )
+    {
+        return out;
+    }
     out.isStarted = true;
 
     // R4's readByteSafeLine, not a `char line[4096]` + fgets — the rule for EVERY git-pipe reader in this file.
@@ -434,8 +488,14 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
     std::string line;
     while( readByteSafeLine( pipe, line ) )
     {
-        while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) ) line.pop_back();
-        if( !line.empty() ) out.lines.push_back( line );
+        while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) )
+        {
+            line.pop_back();
+        }
+        if( !line.empty() )
+        {
+            out.lines.push_back( line );
+        }
     }
     out.status = pclose( pipe );
     return out;
@@ -454,7 +514,10 @@ inline std::string gitRepoToplevel( const std::string& absDir )
     {
         const std::lock_guard<std::mutex> lock{ toplevelMutex };
         const auto                        it = toplevelByProbeDir.find( absDir );
-        if( it != toplevelByProbeDir.end() ) return it->second;
+        if( it != toplevelByProbeDir.end() )
+        {
+            return it->second;
+        }
     }
 
     std::string top;
@@ -524,7 +587,10 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
     probeOrder.reserve( ing.files.size() );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( onlyRoot != UINT32_MAX && ( f >= ing.fileRoot.size() || ing.fileRoot[f] != onlyRoot ) ) continue;
+        if( onlyRoot != UINT32_MAX && ( f >= ing.fileRoot.size() || ing.fileRoot[f] != onlyRoot ) )
+        {
+            continue;
+        }
         probeOrder.emplace_back( std::uint32_t( std::count( ing.files[f].begin(), ing.files[f].end(), '/' ) ), f );
     }
     std::sort( probeOrder.begin(), probeOrder.end() );
@@ -538,21 +604,36 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
         const std::size_t  slash    = disk.rfind( '/' );
         const std::string  probeDir = ( slash == std::string::npos ) ? std::string{ "." } : ( slash == 0 ? std::string{ "/" } : disk.substr( 0, slash ) );
         char               resolvedDir[ PATH_MAX ];
-        if( !::realpath( probeDir.c_str(), resolvedDir ) ) continue;   // this probe is unreadable — try the next file
+        if( !::realpath( probeDir.c_str(), resolvedDir ) )
+        {
+            continue; // this probe is unreadable — try the next file
+        }
 
         const std::string top = gitRepoToplevel( resolvedDir );
-        if( top.empty() ) break;                                      // not a git repo at all — no later file changes that
+        if( top.empty() )
+        {
+            break; // not a git repo at all — no later file changes that
+        }
         offset.isGitRepo    = true;
         offset.probePath    = ing.files[f];
         offset.repoToplevel = top;
 
         std::string topSlash{ top };
-        if( topSlash.back() != '/' ) topSlash += '/';
+        if( topSlash.back() != '/' )
+        {
+            topSlash += '/';
+        }
 
         std::string absProbe{ resolvedDir };
-        if( absProbe.back() != '/' ) absProbe += '/';
+        if( absProbe.back() != '/' )
+        {
+            absProbe += '/';
+        }
         absProbe += ( slash == std::string::npos ) ? disk : disk.substr( slash + 1 );
-        if( absProbe.size() <= topSlash.size() || absProbe.compare( 0, topSlash.size(), topSlash ) != 0 ) break;   // probe outside its own toplevel
+        if( absProbe.size() <= topSlash.size() || absProbe.compare( 0, topSlash.size(), topSlash ) != 0 )
+        {
+            break; // probe outside its own toplevel
+        }
 
         const std::string  gitRelProbe = normalizeJoinPath( absProbe.substr( topSlash.size() ) );
         const std::string& indexProbe  = ing.files[f];
@@ -570,7 +651,10 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
                 break;
             }
             const std::size_t nextSlash = gitRelProbe.find( '/', tailStart );
-            if( nextSlash == std::string::npos ) break;
+            if( nextSlash == std::string::npos )
+            {
+                break;
+            }
             tailStart = nextSlash + 1;
         }
         break;   // ONE probe decides the root — see the split argument above
@@ -613,7 +697,10 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
 // -DNDEBUG and is therefore what the gates read.
 inline void noteGitJoinDegradeOnce( std::atomic<bool>& hasReported, const std::string& humanSentence )
 {
-    if( hasReported.exchange( true, std::memory_order_relaxed ) ) return;
+    if( hasReported.exchange( true, std::memory_order_relaxed ) )
+    {
+        return;
+    }
     std::fprintf( stderr, "ripwire: %s\n", humanSentence.c_str() );
     DEGRADED_PATH_ALERT( "gitmine: a git-history path join was left unmade — see the stderr line naming the state and the path" );
 }
@@ -665,11 +752,17 @@ inline void noteDecomposedIndexedFiles( const std::string& indexSpelling, const 
 // pure-ASCII repo pays nothing at all.
 inline std::string gitSpellingOfPath( const std::string& repoToplevel, const std::string& gitRelPath )
 {
-    if( repoToplevel.empty() || gitRelPath.empty() ) return {};
+    if( repoToplevel.empty() || gitRelPath.empty() )
+    {
+        return {};
+    }
 
     const GitCommandLines out = gitCommandLines( "git -c core.quotepath=false -C " + shSingleQuote( repoToplevel )
                                                + " ls-files --full-name -- " + shSingleQuote( gitRelPath ) + " 2>/dev/null" );
-    if( !out.isStarted || out.lines.empty() ) return {};
+    if( !out.isStarted || out.lines.empty() )
+    {
+        return {};
+    }
     return gitUnquotePath( out.lines.front() );
 }
 
@@ -702,19 +795,28 @@ inline void addRootFilesToGitPathIndex( const IngestResult& ing, std::uint32_t r
     const GitPathOffset offset = deriveGitPathOffset( ing, rootId );
     if( !offset.isDerived )
     {
-        if( offset.isGitRepo ) noteUnderivableGitJoin( offset.probePath );   // a repo we cannot spell ⇒ loud; a non-repo ⇒ nothing to say
+        if( offset.isGitRepo )
+        {
+            noteUnderivableGitJoin( offset.probePath ); // a repo we cannot spell ⇒ loud; a non-repo ⇒ nothing to say
+        }
         return;
     }
 
     const std::size_t stripByteCount = offset.indexStripPrefix.size();
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( rootId != UINT32_MAX && ( f >= ing.fileRoot.size() || ing.fileRoot[f] != rootId ) ) continue;
+        if( rootId != UINT32_MAX && ( f >= ing.fileRoot.size() || ing.fileRoot[f] != rootId ) )
+        {
+            continue;
+        }
 
         const std::string& fp = ing.files[f];
         if( fp.size() <= stripByteCount || fp.compare( 0, stripByteCount, offset.indexStripPrefix ) != 0 )
         {
-            if( notes.unspelledFileCount++ == 0 ) notes.unspelledFirstPath = fp;
+            if( notes.unspelledFileCount++ == 0 )
+            {
+                notes.unspelledFirstPath = fp;
+            }
             continue;
         }
 
@@ -728,11 +830,17 @@ inline void addRootFilesToGitPathIndex( const IngestResult& ing, std::uint32_t r
         }
 
         const auto [ it, isNew ] = byGitPath.try_emplace( key, f );
-        if( isNew || it->second == f ) continue;
+        if( isNew || it->second == f )
+        {
+            continue;
+        }
 
         it->second = UINT32_MAX;                                            // two indexed files, one git path ⇒ neither may claim it
         if( notes.collidedCandidateCount == 0 )     { notes.collidedFirstPath = key;  notes.collidedCandidateCount = 2; }
-        else if( notes.collidedFirstPath == key )   ++notes.collidedCandidateCount;
+        else if( notes.collidedFirstPath == key )
+        {
+            ++notes.collidedCandidateCount;
+        }
     }
 }
 
@@ -742,12 +850,30 @@ inline GitPathIndex gitPathIndexOfFiles( const IngestResult& ing, std::uint32_t 
     GitPathIndexNotes notes;
     byGitPath.reserve( ing.files.size() );
 
-    if( onlyRoot != UINT32_MAX )      addRootFilesToGitPathIndex( ing, onlyRoot, byGitPath, notes );
-    else if( ing.rootLabels.empty() ) addRootFilesToGitPathIndex( ing, UINT32_MAX, byGitPath, notes );   // unmerged ingest: no fileRoot to filter on
-    else for( std::uint32_t r = 0; r < std::uint32_t( ing.rootLabels.size() ); ++r ) addRootFilesToGitPathIndex( ing, r, byGitPath, notes );
+    if( onlyRoot != UINT32_MAX )
+    {
+        addRootFilesToGitPathIndex( ing, onlyRoot, byGitPath, notes );
+    }
+    else if( ing.rootLabels.empty() )
+    {
+        addRootFilesToGitPathIndex( ing, UINT32_MAX, byGitPath, notes ); // unmerged ingest: no fileRoot to filter on
+    }
+    else
+    {
+        for( std::uint32_t r = 0; r < std::uint32_t( ing.rootLabels.size() ); ++r )
+        {
+            addRootFilesToGitPathIndex( ing, r, byGitPath, notes );
+        }
+    }
 
-    if( notes.unspelledFileCount )     noteUnspelledIndexedFiles( notes.unspelledFirstPath, notes.unspelledFileCount );
-    if( notes.collidedCandidateCount ) noteAmbiguousGitJoin( notes.collidedFirstPath, notes.collidedCandidateCount );
+    if( notes.unspelledFileCount )
+    {
+        noteUnspelledIndexedFiles( notes.unspelledFirstPath, notes.unspelledFileCount );
+    }
+    if( notes.collidedCandidateCount )
+    {
+        noteAmbiguousGitJoin( notes.collidedFirstPath, notes.collidedCandidateCount );
+    }
 
     // G2: the ONE confirmation probe, and only when a decomposed name exists — a pure-ASCII repo never runs it.
     // Silence when git spells the file the way we do (a platform that records NFD) or when it does not track
@@ -757,7 +883,9 @@ inline GitPathIndex gitPathIndexOfFiles( const IngestResult& ing, std::uint32_t 
     {
         const std::string gitSpelling = gitSpellingOfPath( notes.decomposedFirstToplevel, notes.decomposedFirstKey );
         if( !gitSpelling.empty() && gitSpelling != notes.decomposedFirstKey )
+        {
             noteDecomposedIndexedFiles( notes.decomposedFirstKey, gitSpelling, notes.decomposedFileCount );
+        }
     }
     return byGitPath;
 }
@@ -784,7 +912,10 @@ inline GitPathBinding bindGitPathToFile( const GitPathIndex& byGitPath, const st
 {
     GitPathBinding binding;
     const auto     it = byGitPath.find( normalizeJoinPath( gitUnquotePath( rawGitPath ) ) );
-    if( it == byGitPath.end() )     return binding;
+    if( it == byGitPath.end() )
+    {
+        return binding;
+    }
     if( it->second == UINT32_MAX ) { binding.isRefusedAmbiguous = true;  return binding; }
     binding.fileId = it->second;
     return binding;
@@ -824,13 +955,19 @@ inline const std::string& gitPathOfEntry( const std::pair<Key, Value>& tallyEntr
 template<typename Entries, typename Apply>
 inline void forEachBoundGitPath( const Entries& entries, const IngestResult& ing, std::uint32_t onlyRoot, Apply&& apply )
 {
-    if( entries.empty() ) return;   // nothing to join ⇒ do not even probe for the offset
+    if( entries.empty() )
+    {
+        return; // nothing to join ⇒ do not even probe for the offset
+    }
 
     const GitPathIndex byGitPath = gitPathIndexOfFiles( ing, onlyRoot );
     for( const auto& entry : entries )
     {
         const std::uint32_t fileId = resolveGitPath( byGitPath, gitPathOfEntry( entry ) );
-        if( fileId != UINT32_MAX ) apply( fileId, entry );
+        if( fileId != UINT32_MAX )
+        {
+            apply( fileId, entry );
+        }
     }
 }
 
@@ -893,24 +1030,38 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + kMergeDiffArgs + windowArgs + "--name-only --format=tformat:__C__ 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
+    {
         return sets;
+    }
 
     std::vector<std::uint32_t> cur;
     const auto flush = [ & ]()
     {
         std::sort( cur.begin(), cur.end() );
         cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
-        if( cur.size() >= 1 && cur.size() <= maxFiles ) sets.push_back( cur );   // keep 1..max (freq needs size-1 too)
+        if( cur.size() >= 1 && cur.size() <= maxFiles )
+        {
+            sets.push_back( cur ); // keep 1..max (freq needs size-1 too)
+        }
         cur.clear();
     };
     std::string s;
     while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
     {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) ) s.pop_back();
+        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        {
+            s.pop_back();
+        }
         if( s == "__C__" ) { flush(); continue; }
-        if( s.empty() ) continue;
+        if( s.empty() )
+        {
+            continue;
+        }
         const std::uint32_t f = resolveGitPath( byGitPath, s );
-        if( f != UINT32_MAX ) cur.push_back( f );
+        if( f != UINT32_MAX )
+        {
+            cur.push_back( f );
+        }
     }
     flush();
     pclose( pipe );
@@ -979,20 +1130,32 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
                           + " log " + kMergeDiffArgs + "--since=" + shSingleQuote( coSince )
                           + " --name-only --format=tformat:__C__%x20%ct 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe ) return out;
+    if( !pipe )
+    {
+        return out;
+    }
 
     std::string s;
     while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
     {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) ) s.pop_back();
+        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        {
+            s.pop_back();
+        }
         if( s.rfind( "__C__", 0 ) == 0 )                       // new commit marker: "__C__ <epoch>"
         {
             const std::int64_t epoch = ( s.size() > 6 ) ? std::strtoll( s.c_str() + 6, nullptr, 10 ) : 0;
             out.commits.push_back( RawCommitStream::Commit{ epoch, {} } );
             continue;
         }
-        if( s.empty() ) continue;
-        if( out.commits.empty() ) out.commits.push_back( RawCommitStream::Commit{} );   // defensive: tformat always emits the marker first, but never crash on a malformed stream
+        if( s.empty() )
+        {
+            continue;
+        }
+        if( out.commits.empty() )
+        {
+            out.commits.push_back( RawCommitStream::Commit {} ); // defensive: tformat always emits the marker first, but never crash on a malformed stream
+        }
         out.commits.back().paths.push_back( std::move( s ) );   // readByteSafeLine clear()s its buffer first, so moving out of it is safe
     }
     pclose( pipe );
@@ -1016,7 +1179,10 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " log --since=" + shSingleQuote( coSince ) + " --format=%H 2>/dev/null | tail -1";
     const GitCommandLines res = gitCommandLines( cmd );
-    if( !res.isStarted || res.lines.empty() ) return {};
+    if( !res.isStarted || res.lines.empty() )
+    {
+        return {};
+    }
     return res.lines.back();
 }
 
@@ -1029,8 +1195,14 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
     unsigned churnMonths, std::vector<std::uint32_t>* outChurn, std::uint32_t onlyRoot = UINT32_MAX )
 {
     std::vector<std::vector<std::uint32_t>> sets;
-    if( outChurn ) outChurn->assign( ing.files.size(), 0u );   // always sized (even on an empty stream)
-    if( raw.commits.empty() ) return sets;                     // nothing to resolve ⇒ do not even probe for the offset
+    if( outChurn )
+    {
+        outChurn->assign( ing.files.size(), 0u ); // always sized (even on an empty stream)
+    }
+    if( raw.commits.empty() )
+    {
+        return sets; // nothing to resolve ⇒ do not even probe for the offset
+    }
 
     // the git-path index over ingested files → fileId — THE shared builder, so this miner and gitCommitFileSets
     // cannot drift on which files are indexable or on how a git path is spelled.
@@ -1047,19 +1219,31 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
         std::vector<std::uint32_t> cur;
         for( const std::string& p : c.paths )
         {
-            if( inChurnWindow ) ++churnCounts[ p ];             // churn tally: raw path (gitChurnCounts parity)
+            if( inChurnWindow )
+            {
+                ++churnCounts[p]; // churn tally: raw path (gitChurnCounts parity)
+            }
             const std::uint32_t f = resolve( p );               // co-change: resolve to fileId
-            if( f != UINT32_MAX ) cur.push_back( f );
+            if( f != UINT32_MAX )
+            {
+                cur.push_back( f );
+            }
         }
         std::sort( cur.begin(), cur.end() );
         cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
-        if( cur.size() >= 1 && cur.size() <= maxFiles ) sets.push_back( std::move( cur ) );   // keep 1..max (freq needs size-1 too)
+        if( cur.size() >= 1 && cur.size() <= maxFiles )
+        {
+            sets.push_back( std::move( cur ) ); // keep 1..max (freq needs size-1 too)
+        }
     }
 
     // Map churn raw-path counts onto ingested fileIds — the SHARED specificity-ordered mapper (§H6), the same
     // one main.cpp's gitChurnCounts uses. Still no C-unquote on this side (gitChurnCounts does not either;
     // preserved for byte-identity — A4-F13 covers the co-change/ownership resolvers, not this tally).
-    if( outChurn ) mapChurnCountsOntoFiles( churnCounts, ing, *outChurn, onlyRoot );
+    if( outChurn )
+    {
+        mapChurnCountsOntoFiles( churnCounts, ing, *outChurn, onlyRoot );
+    }
     return sets;
 }
 
@@ -1106,7 +1290,10 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitFileCommitCountsInDayWindow (short-horizon churn)" );
     std::vector<std::uint32_t> counts( ing.files.size(), 0 );
-    if( ing.files.empty() ) return counts;
+    if( ing.files.empty() )
+    {
+        return counts;
+    }
 
     // HEAD's committer epoch — the window anchor (deterministic; system now() is never consulted).
     std::int64_t headEpoch = 0;
@@ -1115,12 +1302,24 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
         // answer; gitCommandLines strips the CR/LF tail, and the trailing-space strip is kept for the value.
         const std::string       cmd = "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log -1 --format=%ct HEAD 2>/dev/null";
         const GitCommandLines   res = gitCommandLines( cmd );
-        if( !res.isStarted || res.lines.empty() ) return counts;
+        if( !res.isStarted || res.lines.empty() )
+        {
+            return counts;
+        }
         std::string out = res.lines.front();
-        while( !out.empty() && out.back() == ' ' ) out.pop_back();
-        if( out.empty() ) return counts;
+        while( !out.empty() && out.back() == ' ' )
+        {
+            out.pop_back();
+        }
+        if( out.empty() )
+        {
+            return counts;
+        }
         headEpoch = std::strtoll( out.c_str(), nullptr, 10 );
-        if( headEpoch <= 0 ) return counts;
+        if( headEpoch <= 0 )
+        {
+            return counts;
+        }
     }
     const std::int64_t cutoff = headEpoch - std::int64_t( days ) * 86400;   // window floor (inclusive)
 
@@ -1133,7 +1332,10 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " log " + kMergeDiffArgs + "--name-only --format=tformat:__C__%x20%ct 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe ) return counts;
+    if( !pipe )
+    {
+        return counts;
+    }
 
     bool                       inWindow = false;   // is the commit we are currently reading files for in-window?
     std::vector<std::uint32_t> cur;                // this commit's resolved fileIds (dedup before tally)
@@ -1143,14 +1345,20 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
         {
             std::sort( cur.begin(), cur.end() );
             cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
-            for( std::uint32_t f : cur ) ++counts[f];
+            for( std::uint32_t f : cur )
+            {
+                ++counts[f];
+            }
         }
         cur.clear();
     };
     std::string s;
     while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
     {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) ) s.pop_back();
+        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        {
+            s.pop_back();
+        }
         if( s.rfind( "__C__", 0 ) == 0 )                       // new commit marker: "__C__ <epoch>"
         {
             flush();
@@ -1158,9 +1366,15 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
             inWindow = ( epoch >= cutoff && epoch <= headEpoch );
             continue;
         }
-        if( s.empty() || !inWindow ) continue;
+        if( s.empty() || !inWindow )
+        {
+            continue;
+        }
         const std::uint32_t f = resolve( s );
-        if( f != UINT32_MAX ) cur.push_back( f );
+        if( f != UINT32_MAX )
+        {
+            cur.push_back( f );
+        }
     }
     flush();
     pclose( pipe );
@@ -1186,13 +1400,24 @@ inline std::vector<float> churnPriorFromFreq( const IngestResult& ing, const std
     if( N == 0 || !anyHistory )
     {
         if( !anyHistory )
+        {
             DEGRADED_PATH_ALERT( "gitmine: the churn window mined no commits — the churn prior is UNIFORM, so the ranking is the structural one" );
+        }
         return p;
     }
     double tot = 0.0;
-    for( const Symbol& s : ing.symbols ) tot += double( freq[ s.fileId ] ) + 1.0;
-    if( tot <= 0.0 ) return p;
-    for( const Symbol& s : ing.symbols ) p[ s.id ] = float( ( double( freq[ s.fileId ] ) + 1.0 ) / tot );
+    for( const Symbol& s : ing.symbols )
+    {
+        tot += double( freq[s.fileId] ) + 1.0;
+    }
+    if( tot <= 0.0 )
+    {
+        return p;
+    }
+    for( const Symbol& s : ing.symbols )
+    {
+        p[s.id] = float( ( double( freq[s.fileId] ) + 1.0 ) / tot );
+    }
     return p;
 }
 
@@ -1205,8 +1430,17 @@ inline std::vector<float> churnTeleport( const std::string& root, const IngestRe
     PROFILE_SCOPE_DESCRIBE( "gitmine: churnTeleport (rank-by=churn)" );
     std::vector<std::uint32_t> freq( ing.files.size(), 0 );
     const auto sets = gitCommitFileSets( root, ing, since, 100, scope );   // generous cap: keep refactors, drop merge-bombs
-    for( const auto& set : sets ) for( const std::uint32_t f : set ) ++freq[ f ];
-    if( outHasChurnEvidence ) *outHasChurnEvidence = !sets.empty();
+    for( const auto& set : sets )
+    {
+        for( const std::uint32_t f : set )
+        {
+            ++freq[f];
+        }
+    }
+    if( outHasChurnEvidence )
+    {
+        *outHasChurnEvidence = !sets.empty();
+    }
     return churnPriorFromFreq( ing, freq, !sets.empty() );
 }
 
@@ -1224,10 +1458,22 @@ inline std::vector<float> churnTeleportWorkspace( const std::vector<std::string>
     for( std::uint32_t r = 0; r < rootDirs.size(); ++r )
     {
         const auto sets = gitCommitFileSets( rootDirs[r], ing, since, 100, nullptr, r );
-        if( !sets.empty() ) anyHistory = true;
-        for( const auto& set : sets ) for( const std::uint32_t f : set ) ++freq[ f ];
+        if( !sets.empty() )
+        {
+            anyHistory = true;
+        }
+        for( const auto& set : sets )
+        {
+            for( const std::uint32_t f : set )
+            {
+                ++freq[f];
+            }
+        }
     }
-    if( outHasChurnEvidence ) *outHasChurnEvidence = anyHistory;
+    if( outHasChurnEvidence )
+    {
+        *outHasChurnEvidence = anyHistory;
+    }
     return churnPriorFromFreq( ing, freq, anyHistory );
 }
 
@@ -1241,7 +1487,10 @@ inline std::vector<float> churnTeleportWorkspace( const std::vector<std::string>
 inline std::string churnWindowStamp( std::string_view minedWindow, bool hasChurnEvidence )
 {
     std::string stamp{ minedWindow };   // brace-init: stamp( minedWindow ) parses as a function declarator (the vexing-parse lookalike hasEnclosingGitRepo warns about) and pollutes the symbol map
-    if( !hasChurnEvidence ) stamp += " (no churn evidence)";
+    if( !hasChurnEvidence )
+    {
+        stamp += " (no churn evidence)";
+    }
     return stamp;
 }
 
@@ -1254,7 +1503,10 @@ inline std::uint32_t resolveFileSuffix( const IngestResult& ing, std::string_vie
         if( fp.size() >= sub.size() )
         {
             const std::size_t off = fp.size() - sub.size();
-            if( fp.compare( off, sub.size(), sub ) == 0 && ( off == 0 || fp[off - 1] == '/' ) ) return f;
+            if( fp.compare( off, sub.size(), sub ) == 0 && ( off == 0 || fp[off - 1] == '/' ) )
+            {
+                return f;
+            }
         }
     }
     return UINT32_MAX;
@@ -1348,13 +1600,18 @@ inline std::vector<FileOwnership> gitFileAuthors(
         const std::string& fp = ing.files[ onlyFileId ];
         std::string        relPath = fp;
         if( fp.size() > rootSlash.size() && fp.compare( 0, rootSlash.size(), rootSlash ) == 0 )
+        {
             relPath = fp.substr( rootSlash.size() );
+        }
         cmd += " -- " + shSingleQuote( relPath );
     }
     cmd += " 2>/dev/null";
 
     std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe ) return {};
+    if( !pipe )
+    {
+        return {};
+    }
 
     std::string  curEmail;
     std::int64_t curTs = 0;
@@ -1362,7 +1619,10 @@ inline std::vector<FileOwnership> gitFileAuthors(
     std::string  s;
     while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
     {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) ) s.pop_back();
+        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        {
+            s.pop_back();
+        }
         if( s.compare( 0, 5, "__C__" ) == 0 )
         {
             const std::string_view rest( s.data() + 5, s.size() - 5 );
@@ -1373,21 +1633,33 @@ inline std::vector<FileOwnership> gitFileAuthors(
                 continue;
             }
             curEmail = rest.substr( 0, pipePos );
-            for( char& c : curEmail ) c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+            for( char& c : curEmail )
+            {
+                c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+            }
             const std::string tsStr( rest.substr( pipePos + 1 ) );
             char* end = nullptr;
             curTs = std::strtoll( tsStr.c_str(), &end, 10 );
             haveCommit = ( end != tsStr.c_str() );
             continue;
         }
-        if( s.empty() || !haveCommit ) continue;   // blank separator line, or malformed header — skip its files
+        if( s.empty() || !haveCommit )
+        {
+            continue; // blank separator line, or malformed header — skip its files
+        }
 
         const std::uint32_t f = resolve( s );
-        if( f == UINT32_MAX ) continue;
+        if( f == UINT32_MAX )
+        {
+            continue;
+        }
 
         perFile[ f ][ curEmail ].push_back( curTs );
         std::int64_t& newest = newestTsByFile[ f ];
-        if( curTs > newest ) newest = curTs;
+        if( curTs > newest )
+        {
+            newest = curTs;
+        }
     }
     pclose( pipe );
 
@@ -1395,7 +1667,10 @@ inline std::vector<FileOwnership> gitFileAuthors(
     result.reserve( perFile.size() );
     for( auto& [ fid, authorTs ] : perFile )
     {
-        if( authorTs.empty() ) continue;
+        if( authorTs.empty() )
+        {
+            continue;
+        }
         const std::int64_t newestTs = newestTsByFile[ fid ];
 
         // Compute decay scores
@@ -1417,12 +1692,18 @@ inline std::vector<FileOwnership> gitFileAuthors(
         // Fill shares + detect bus factor
         const bool topOver80 = [ & ]() -> bool
         {
-            if( totalScore <= 0.0 ) return false;
+            if( totalScore <= 0.0 )
+            {
+                return false;
+            }
             double best = 0.0;
             for( auto& a : authors )
             {
                 a.share = a.score / totalScore;
-                if( a.score > best ) best = a.score;
+                if( a.score > best )
+                {
+                    best = a.score;
+                }
             }
             return ( best / totalScore ) > 0.80;
         }();
@@ -1492,16 +1773,26 @@ class StaticIncludeCoupling
 public:
     explicit StaticIncludeCoupling( const IngestResult& ing ) : files_( ing.files ), adj_( resolveIncludeAdj( ing ) )
     {
-        for( const Include& inc : ing.includes )                                       // §P9.1 fallback index
+        for( const Include& inc : ing.includes )
+        { // §P9.1 fallback index
             if( inc.fileId < ing.files.size() && !inc.target.empty() )
+            {
                 includedBaseNames_[ inc.fileId ].emplace_back( mention_detail::baseNameOf( inc.target ) );
+            }
+        }
     }
 
     bool isStaticallyCoupled( std::uint32_t a, std::uint32_t b ) const
     {
-        if( namesBaseNameOf( a, b ) || namesBaseNameOf( b, a ) ) return true;   // §P9.1 bare-name fallback (cheapest test)
+        if( namesBaseNameOf( a, b ) || namesBaseNameOf( b, a ) )
+        {
+            return true; // §P9.1 bare-name fallback (cheapest test)
+        }
         const std::vector<char>& fa = forwardClosure( a );
-        if( b < fa.size() && fa[b] ) return true;
+        if( b < fa.size() && fa[b] )
+        {
+            return true;
+        }
         const std::vector<char>& fb = forwardClosure( b );
         return a < fb.size() && fb[a];
     }
@@ -1511,17 +1802,28 @@ private:
     bool namesBaseNameOf( std::uint32_t includer, std::uint32_t other ) const
     {
         const auto it = includedBaseNames_.find( includer );
-        if( it == includedBaseNames_.end() || other >= files_.size() ) return false;
+        if( it == includedBaseNames_.end() || other >= files_.size() )
+        {
+            return false;
+        }
         const std::string_view otherBase = mention_detail::baseNameOf( files_[ other ] );
         for( const std::string& target : it->second )
-            if( target == otherBase ) return true;
+        {
+            if( target == otherBase )
+            {
+                return true;
+            }
+        }
         return false;
     }
 
     const std::vector<char>& forwardClosure( std::uint32_t src ) const
     {
         const auto it = memo_.find( src );
-        if( it != memo_.end() ) return it->second;
+        if( it != memo_.end() )
+        {
+            return it->second;
+        }
         std::vector<char> seen( adj_.size(), 0 );
         if( src < adj_.size() )
         {
@@ -1530,7 +1832,14 @@ private:
             while( !stack.empty() )
             {
                 const std::uint32_t v = stack.back(); stack.pop_back();
-                for( std::uint32_t w : adj_[v] ) if( w < seen.size() && !seen[w] ) { seen[w] = 1; stack.push_back( w ); }
+                for( std::uint32_t w : adj_[v] )
+                {
+                    if( w < seen.size() && !seen[w] )
+                    {
+                        seen[w] = 1;
+                        stack.push_back( w );
+                    }
+                }
             }
         }
         return memo_.emplace( src, std::move( seen ) ).first->second;
@@ -1572,7 +1881,10 @@ struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; boo
 // emitter a vocabulary the others do not speak — the §P9.1 defect, one attribute over.
 inline const char* coPairAttr( bool isDepCapable, bool isSurprising ) noexcept
 {
-    if( !isDepCapable ) return " dep_capable=\"0\"";
+    if( !isDepCapable )
+    {
+        return " dep_capable=\"0\"";
+    }
     return isSurprising ? " surprising=\"1\"" : "";
 }
 inline const char* coPairAttr( const CoPartner& p ) noexcept { return coPairAttr( p.depCapable, p.surprising ); }
@@ -1594,17 +1906,35 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     outCommits = 0;
     std::vector<CoPartner> res;
     const std::uint32_t fid = resolveFileSuffix( ing, fileSubstr );
-    if( fid == UINT32_MAX ) return res;
-    if( sets.empty() ) return res;
+    if( fid == UINT32_MAX )
+    {
+        return res;
+    }
+    if( sets.empty() )
+    {
+        return res;
+    }
 
     std::vector<std::uint32_t>            freq( ing.files.size(), 0 );
     HashMap<std::uint32_t, std::uint32_t> together;                          // other file id → shared commits
     for( const auto& cs : sets )
     {
         const bool has = std::binary_search( cs.begin(), cs.end(), fid );    // cs is sorted+unique
-        for( std::uint32_t f : cs ) ++freq[f];
-        if( !has ) continue;
-        for( std::uint32_t f : cs ) if( f != fid ) ++together[f];
+        for( std::uint32_t f : cs )
+        {
+            ++freq[f];
+        }
+        if( !has )
+        {
+            continue;
+        }
+        for( std::uint32_t f : cs )
+        {
+            if( f != fid )
+            {
+                ++together[f];
+            }
+        }
     }
     outCommits = freq[fid];
 
@@ -1614,6 +1944,7 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
     const StaticIncludeCoupling coupling( ing );
     constexpr std::uint32_t kSupport = 3;
     for( const auto& [other, n] : together )
+    {
         if( n >= kSupport )
         {
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
@@ -1621,6 +1952,7 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
             res.push_back( { other, n, freq[fid] ? double( n ) / freq[fid] : 0.0,
                              isDepCapable && !coupling.isStaticallyCoupled( fid, other ), isDepCapable } );
         }
+    }
     std::sort( res.begin(), res.end(), [ & ]( const CoPartner& x, const CoPartner& y )
                { return x.deg != y.deg ? x.deg > y.deg : ing.files[x.fileId] < ing.files[y.fileId]; } );
     return res;
@@ -1635,7 +1967,10 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: cochangePartners (--cochange)" );
     outCommits = 0;
-    if( resolveFileSuffix( ing, fileSubstr ) == UINT32_MAX ) return {};   // unknown file → no git call, as before
+    if( resolveFileSuffix( ing, fileSubstr ) == UINT32_MAX )
+    {
+        return {}; // unknown file → no git call, as before
+    }
     const auto sets = gitCommitFileSets( root, ing, "18 months ago", 30, scope, onlyRoot );
     return cochangePartners( ing, fileSubstr, outCommits, sets );
 }
@@ -1649,17 +1984,29 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
 inline bool hasEnclosingGitRepo( const std::string& root )
 {
     char resolved[ PATH_MAX ];
-    if( !::realpath( root.c_str(), resolved ) ) return false;   // unresolvable root → treat as no repo (degrade)
+    if( !::realpath( root.c_str(), resolved ) )
+    {
+        return false; // unresolvable root → treat as no repo (degrade)
+    }
     std::string dir{ resolved };   // brace-init: dir( resolved ) parses as a function declarator (vexing-parse lookalike) and would pollute the symbol map
 
     // walk up at most 64 levels (any real path is far shallower; the bound is a hostile-symlink guard)
     for( int levelIndex = 0; levelIndex < 64 && !dir.empty(); ++levelIndex )
     {
         struct stat st;
-        if( ::stat( ( dir + "/.git" ).c_str(), &st ) == 0 ) return true;
-        if( dir == "/" ) break;
+        if( ::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
+        {
+            return true;
+        }
+        if( dir == "/" )
+        {
+            break;
+        }
         const std::size_t slash = dir.rfind( '/' );
-        if( slash == std::string::npos ) break;
+        if( slash == std::string::npos )
+        {
+            break;
+        }
         dir.resize( slash == 0 ? 1 : slash );   // parent dir; "/" is its own parent → loop exit above
     }
     return false;
@@ -1706,7 +2053,10 @@ struct CoBoostInfo
 inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& sets, std::vector<float>& lensRank, CoBoostInfo* outInfo = nullptr )
 {
     VERIFY( lensRank.size() == ing.symbols.size() );
-    if( sets.empty() || lensRank.empty() || lensRank.size() != ing.symbols.size() ) return false;
+    if( sets.empty() || lensRank.empty() || lensRank.size() != ing.symbols.size() )
+    {
+        return false;
+    }
 
     // seeds: the top kCoBoostSeedCount symbols under the serializer's own total order (score desc, id asc),
     // positive scores only — a query that matched nothing has no seeds and therefore no boost.
@@ -1715,17 +2065,35 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
     {
         for( NodeId id = 0; id < NodeId( lensRank.size() ); ++id )
         {
-            if( !( lensRank[id] > 0.0f ) ) continue;
+            if( !( lensRank[id] > 0.0f ) )
+            {
+                continue;
+            }
             // insertion sort into the tiny fixed seed array (score desc, id asc)
             std::uint32_t at = seedSymbolCount < kCoBoostSeedCount ? seedSymbolCount : kCoBoostSeedCount;
-            while( at > 0 && ( lensRank[id] > lensRank[ seedIds[at - 1] ] || ( lensRank[id] == lensRank[ seedIds[at - 1] ] && id < seedIds[at - 1] ) ) ) --at;
-            if( at >= kCoBoostSeedCount ) continue;
-            for( std::uint32_t k = ( seedSymbolCount < kCoBoostSeedCount ? seedSymbolCount : kCoBoostSeedCount - 1 ); k > at; --k ) seedIds[k] = seedIds[k - 1];
+            while( at > 0 && ( lensRank[id] > lensRank[seedIds[at - 1]] || ( lensRank[id] == lensRank[seedIds[at - 1]] && id < seedIds[at - 1] ) ) )
+            {
+                --at;
+            }
+            if( at >= kCoBoostSeedCount )
+            {
+                continue;
+            }
+            for( std::uint32_t k = ( seedSymbolCount < kCoBoostSeedCount ? seedSymbolCount : kCoBoostSeedCount - 1 ); k > at; --k )
+            {
+                seedIds[k] = seedIds[k - 1];
+            }
             seedIds[at] = id;
-            if( seedSymbolCount < kCoBoostSeedCount ) ++seedSymbolCount;
+            if( seedSymbolCount < kCoBoostSeedCount )
+            {
+                ++seedSymbolCount;
+            }
         }
     }
-    if( seedSymbolCount == 0 ) return false;
+    if( seedSymbolCount == 0 )
+    {
+        return false;
+    }
     const float seedFloor = lensRank[ seedIds[ seedSymbolCount - 1 ] ];   // lowest seed score — the unbreakable ceiling
     VERIFY( seedFloor > 0.0f );
 
@@ -1736,22 +2104,50 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
     {
         const std::uint32_t f = ing.symbols[ seedIds[s] ].fileId;
         bool isKnown = false;
-        for( std::uint32_t k = 0; k < seedFileCount; ++k ) if( seedFiles[k] == f ) { isKnown = true; break; }
-        if( !isKnown ) seedFiles[ seedFileCount++ ] = f;
+        for( std::uint32_t k = 0; k < seedFileCount; ++k )
+        {
+            if( seedFiles[k] == f )
+            {
+                isKnown = true;
+                break;
+            }
+        }
+        if( !isKnown )
+        {
+            seedFiles[seedFileCount++] = f;
+        }
     }
 
     // one pass over the commit sets: per-file commit frequency + per-seed-file shared-commit counts
     const std::size_t fileCount = ing.files.size();
     std::vector<std::uint32_t> freq( fileCount, 0u );
     std::vector<std::uint32_t> together[ kCoBoostSeedCount ];
-    for( std::uint32_t k = 0; k < seedFileCount; ++k ) together[k].assign( fileCount, 0u );
+    for( std::uint32_t k = 0; k < seedFileCount; ++k )
+    {
+        together[k].assign( fileCount, 0u );
+    }
     for( const std::vector<std::uint32_t>& cs : sets )
     {
-        for( const std::uint32_t f : cs ) if( f < fileCount ) ++freq[f];
+        for( const std::uint32_t f : cs )
+        {
+            if( f < fileCount )
+            {
+                ++freq[f];
+            }
+        }
         for( std::uint32_t k = 0; k < seedFileCount; ++k )
         {
-            if( !std::binary_search( cs.begin(), cs.end(), seedFiles[k] ) ) continue;   // cs is sorted+unique (gitLogFileSets flush)
-            for( const std::uint32_t f : cs ) if( f != seedFiles[k] && f < fileCount ) ++together[k][f];
+            if( !std::binary_search( cs.begin(), cs.end(), seedFiles[k] ) )
+            {
+                continue; // cs is sorted+unique (gitLogFileSets flush)
+            }
+            for( const std::uint32_t f : cs )
+            {
+                if( f != seedFiles[k] && f < fileCount )
+                {
+                    ++together[k][f];
+                }
+            }
         }
     }
 
@@ -1762,31 +2158,63 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
     for( std::uint32_t f = 0; f < fileCount; ++f )
     {
         bool isSeedFile = false;
-        for( std::uint32_t k = 0; k < seedFileCount; ++k ) if( seedFiles[k] == f ) { isSeedFile = true; break; }
-        if( isSeedFile ) continue;
+        for( std::uint32_t k = 0; k < seedFileCount; ++k )
+        {
+            if( seedFiles[k] == f )
+            {
+                isSeedFile = true;
+                break;
+            }
+        }
+        if( isSeedFile )
+        {
+            continue;
+        }
         double deg = 0.0;
         for( std::uint32_t k = 0; k < seedFileCount; ++k )
+        {
             if( together[k][f] >= kCoBoostSupport && freq[ seedFiles[k] ] > 0 )
+            {
                 deg = std::max( deg, double( together[k][f] ) / double( freq[ seedFiles[k] ] ) );
-        if( deg > 0.0 ) partners.push_back( { f, deg } );
+            }
+        }
+        if( deg > 0.0 )
+        {
+            partners.push_back( { f, deg } );
+        }
     }
-    if( partners.empty() ) return false;
-    if( outInfo ) outInfo->partnerFileCount = std::uint32_t( partners.size() );
+    if( partners.empty() )
+    {
+        return false;
+    }
+    if( outInfo )
+    {
+        outInfo->partnerFileCount = std::uint32_t( partners.size() );
+    }
 
     // strongest partners only: (deg desc, path asc) is a total order (paths are unique) → deterministic cap
     std::sort( partners.begin(), partners.end(), [ &ing ]( const Partner& x, const Partner& y )
                { return x.deg != y.deg ? x.deg > y.deg : ing.files[x.fileId] < ing.files[y.fileId]; } );
-    if( partners.size() > kCoBoostMaxPartnerFiles ) partners.resize( kCoBoostMaxPartnerFiles );
+    if( partners.size() > kCoBoostMaxPartnerFiles )
+    {
+        partners.resize( kCoBoostMaxPartnerFiles );
+    }
 
     // collect each kept partner file's symbols (id-asc by construction of the single pass)
     HashMap<std::uint32_t, std::uint32_t> partnerIndexByFile;
     partnerIndexByFile.reserve( partners.size() );
-    for( std::uint32_t p = 0; p < partners.size(); ++p ) partnerIndexByFile[ partners[p].fileId ] = p;
+    for( std::uint32_t p = 0; p < partners.size(); ++p )
+    {
+        partnerIndexByFile[partners[p].fileId] = p;
+    }
     std::vector<std::vector<NodeId>> partnerSymbols( partners.size() );
     for( const Symbol& sym : ing.symbols )
     {
         const auto it = partnerIndexByFile.find( sym.fileId );
-        if( it != partnerIndexByFile.end() ) partnerSymbols[ it->second ].push_back( sym.id );
+        if( it != partnerIndexByFile.end() )
+        {
+            partnerSymbols[it->second].push_back( sym.id );
+        }
     }
 
     // boost: each partner file's top kCoBoostMaxSymbolsPerFile symbols (score desc, id asc) gain
@@ -1798,7 +2226,10 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
     for( std::uint32_t p = 0; p < partners.size(); ++p )
     {
         std::vector<NodeId>& ids = partnerSymbols[p];
-        if( ids.empty() ) continue;
+        if( ids.empty() )
+        {
+            continue;
+        }
         std::sort( ids.begin(), ids.end(), [ &lensRank ]( NodeId a, NodeId b )
                    { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );
         const float boostAdd = kCoBoostFrac * float( partners[p].deg ) * seedFloor;
@@ -1807,7 +2238,10 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
         {
             const NodeId id = ids[i];
             float boosted = lensRank[id] + boostAdd;
-            if( boosted > clampCeil ) boosted = clampCeil;
+            if( boosted > clampCeil )
+            {
+                boosted = clampCeil;
+            }
             if( boosted > lensRank[id] )
             {
                 lensRank[id] = boosted;
@@ -1815,7 +2249,10 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
                 fileRose = true;
             }
         }
-        if( fileRose ) ++boostedFileCount;
+        if( fileRose )
+        {
+            ++boostedFileCount;
+        }
     }
     if( outInfo )
     {

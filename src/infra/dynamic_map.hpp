@@ -530,7 +530,10 @@ public:
             // fixed point at level==2 (2/2+1==2) and would spin forever; for
             // B>=6 the formula already decreases, so the guard is a no-op there.
             std::uint64_t parents = level / MIN_KEYS + 1;
-            if (parents >= level) parents = level - 1;
+            if( parents >= level )
+            {
+                parents = level - 1;
+            }
             level = parents;
             internal += level;
         }

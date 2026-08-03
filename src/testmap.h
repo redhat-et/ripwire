@@ -56,7 +56,10 @@ struct AffectedSeeds
 // sets from the same argument), so it is disclosed on the root element rather than left to be inferred.
 inline const char* affectedSeededBy( const AffectedSeeds& sel ) noexcept
 {
-    if( sel.sawFileItem && sel.sawSymbolItem ) return "mixed";
+    if( sel.sawFileItem && sel.sawSymbolItem )
+    {
+        return "mixed";
+    }
     return sel.sawSymbolItem ? "symbol" : "file";
 }
 
@@ -66,22 +69,40 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
     for( std::size_t start = 0; start < spec.size(); )
     {
         std::size_t comma = spec.find( ',', start );
-        if( comma == std::string_view::npos ) comma = spec.size();
+        if( comma == std::string_view::npos )
+        {
+            comma = spec.size();
+        }
         const std::string_view item = spec.substr( start, comma - start );
         start = comma + 1;
-        if( item.empty() ) continue;
+        if( item.empty() )
+        {
+            continue;
+        }
 
         // §P8 seam 2: the PATH reading is stripLineLocator'd, so a `./src/graph.h:1148` row pasted out of
         // --hotspots/--clones/--grep/--lint/--quality-delta means the bare path. The SYMBOL reading gets
         // the item VERBATIM — its own `file:NAME` colon must survive.
         const std::string_view pathPattern = stripLineLocator( item );
         bool                   fileMatched = false;
-        for( const std::string& f : ing.files ) if( filePathContains( f, pathPattern ) ) { fileMatched = true; break; }
+        for( const std::string& f : ing.files )
+        {
+            if( filePathContains( f, pathPattern ) )
+            {
+                fileMatched = true;
+                break;
+            }
+        }
         if( fileMatched )
         {
             sel.sawFileItem = true;
             for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
-                if( filePathContains( ing.files[ ing.symbols[i].fileId ], pathPattern ) ) sel.seeds.push_back( i );
+            {
+                if( filePathContains( ing.files[ing.symbols[i].fileId], pathPattern ) )
+                {
+                    sel.seeds.push_back( i );
+                }
+            }
             continue;
         }
 
@@ -117,7 +138,10 @@ inline ExerciseSeeds resolveExerciseSeeds( const IngestResult& ing, std::string_
     std::vector<char>      isSeedFile( ing.files.size(), 0 );
     for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ); ++f )
     {
-        if( !filePathContains( ing.files[f], pathPattern ) ) continue;
+        if( !filePathContains( ing.files[f], pathPattern ) )
+        {
+            continue;
+        }
         sel.anyFileMatched = true;
         if( !isTestPath( ing.files[f] ) ) { ++sel.nonTestMatches;  continue; }
         isSeedFile[f] = 1;
@@ -125,7 +149,12 @@ inline ExerciseSeeds resolveExerciseSeeds( const IngestResult& ing, std::string_
     }
     std::sort( sel.testFiles.begin(), sel.testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
     for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
-        if( isSeedFile[ ing.symbols[i].fileId ] ) sel.seeds.push_back( i );
+    {
+        if( isSeedFile[ing.symbols[i].fileId] )
+        {
+            sel.seeds.push_back( i );
+        }
+    }
     return sel;
 }
 
@@ -136,7 +165,12 @@ inline std::vector<NodeId> exercisedSymbols( const IngestResult& ing, const Grap
     const std::vector<char> reached = forwardReach( g, seeds );
     std::vector<NodeId>     out;
     for( NodeId i = 0; i < NodeId( reached.size() ) && i < NodeId( ing.symbols.size() ); ++i )
-        if( reached[i] && !isTestPath( ing.files[ ing.symbols[i].fileId ] ) ) out.push_back( i );
+    {
+        if( reached[i] && !isTestPath( ing.files[ing.symbols[i].fileId] ) )
+        {
+            out.push_back( i );
+        }
+    }
     return out;
 }
 
@@ -164,7 +198,12 @@ public:
     explicit TestRunnerIndex( const IngestResult& ing ) : ing_( &ing )
     {
         for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ); ++f )
-            if( isTestPath( ing.files[f] ) && runnerVerb( ing.files[f] ) != nullptr ) runners_.push_back( f );
+        {
+            if( isTestPath( ing.files[f] ) && runnerVerb( ing.files[f] ) != nullptr )
+            {
+                runners_.push_back( f );
+            }
+        }
         std::sort( runners_.begin(), runners_.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
     }
 
@@ -172,9 +211,15 @@ public:
     const std::string& commandFor( std::uint32_t fileId ) const
     {
         static const std::string kNoRunner;
-        if( fileId >= ing_->files.size() ) return kNoRunner;
+        if( fileId >= ing_->files.size() )
+        {
+            return kNoRunner;
+        }
         const auto cached = cache_.find( fileId );
-        if( cached != cache_.end() ) return cached->second;
+        if( cached != cache_.end() )
+        {
+            return cached->second;
+        }
         return cache_.emplace( fileId, derive( fileId ) ).first->second;
     }
 
@@ -185,7 +230,12 @@ private:
         struct RunnerRow { std::string_view ext; const char* verb; };
         static constexpr RunnerRow kRunnerKinds[] = { { ".sh", "bash" }, { ".py", "python3" } };
         for( const RunnerRow& r : kRunnerKinds )
-            if( path.size() > r.ext.size() && path.compare( path.size() - r.ext.size(), r.ext.size(), r.ext ) == 0 ) return r.verb;
+        {
+            if( path.size() > r.ext.size() && path.compare( path.size() - r.ext.size(), r.ext.size(), r.ext ) == 0 )
+            {
+                return r.verb;
+            }
+        }
         return nullptr;
     }
 
@@ -198,25 +248,46 @@ private:
 
     void loadTexts() const
     {
-        if( textsLoaded_ ) return;
+        if( textsLoaded_ )
+        {
+            return;
+        }
         textsLoaded_ = true;
         texts_.resize( runners_.size() );
         for( std::size_t i = 0; i < runners_.size(); ++i )
-            if( !docparse::detail::readWholeFile( diskPath( *ing_, runners_[i] ), texts_[i] ) ) texts_[i].clear();   // unreadable ⇒ no evidence, never a guess
+        {
+            if( !docparse::detail::readWholeFile( diskPath( *ing_, runners_[i] ), texts_[i] ) )
+            {
+                texts_[i].clear(); // unreadable ⇒ no evidence, never a guess
+            }
+        }
     }
 
     std::string derive( std::uint32_t fileId ) const
     {
         const std::string& target = ing_->files[ fileId ];
-        if( runnerVerb( target ) != nullptr ) return {};                    // a runner script IS the command; no hint to add
+        if( runnerVerb( target ) != nullptr )
+        {
+            return {}; // a runner script IS the command; no hint to add
+        }
 
-        for( std::uint32_t r : runners_ )                                   // (1) stem — runners_ is path-sorted, so the pick is deterministic
-            if( stemOf( ing_->files[r] ) == stemOf( target ) ) return spell( r );
+        for( std::uint32_t r : runners_ )
+        { // (1) stem — runners_ is path-sorted, so the pick is deterministic
+            if( stemOf( ing_->files[r] ) == stemOf( target ) )
+            {
+                return spell( r );
+            }
+        }
 
         loadTexts();                                                        // (2) mention — first (path asc) runner naming the harness's basename
         const std::string_view targetBase = mention_detail::baseNameOf( target );
         for( std::size_t i = 0; i < runners_.size(); ++i )
-            if( texts_[i].find( targetBase ) != std::string::npos ) return spell( runners_[i] );
+        {
+            if( texts_[i].find( targetBase ) != std::string::npos )
+            {
+                return spell( runners_[i] );
+            }
+        }
         return {};
     }
 
@@ -226,7 +297,10 @@ private:
     std::string spell( std::uint32_t runnerFile ) const
     {
         std::string_view p = diskPath( *ing_, runnerFile );
-        if( p.rfind( "./", 0 ) == 0 ) p = p.substr( 2 );
+        if( p.rfind( "./", 0 ) == 0 )
+        {
+            p = p.substr( 2 );
+        }
         return std::string( runnerVerb( p ) ) + " " + std::string( p );
     }
 
@@ -250,7 +324,10 @@ inline std::string runHint( const TestRunnerIndex& idx, std::uint32_t fileId,
                             std::string_view open, std::string_view close, EscapeFn esc )
 {
     const std::string& cmd = idx.commandFor( fileId );
-    if( cmd.empty() ) return {};
+    if( cmd.empty() )
+    {
+        return {};
+    }
     return std::string( open ) + esc( cmd ) + std::string( close );
 }
 
@@ -284,8 +361,12 @@ inline std::size_t scriptGatesUnmodelledCount( const IngestResult& ing )
 {
     std::size_t gateCount = 0;
     for( const std::string& filePath : ing.files )
+    {
         if( isTestPath( filePath ) && filePath.size() >= 3 && filePath.compare( filePath.size() - 3, 3, ".sh" ) == 0 )
+        {
             ++gateCount;
+        }
+    }
     return gateCount;
 }
 

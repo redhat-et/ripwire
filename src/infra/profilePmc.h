@@ -144,7 +144,9 @@ inline bool load_api() noexcept
     g_api.kperfdata = dlopen( "/System/Library/PrivateFrameworks/kperfdata.framework/kperfdata", RTLD_LAZY );
 
     if( !g_api.kperf || !g_api.kperfdata )
+    {
         return false;
+    }
 
     bool ok = true;
 
@@ -215,8 +217,12 @@ inline constexpr const char* kDefaultSelection[] =
 inline const char* label_for( const char* alias ) noexcept
 {
     for( const EventDesc& d : kEvents )
+    {
         if( std::strcmp( d.alias, alias ) == 0 )
+        {
             return d.label;
+        }
+    }
     return alias;
 }
 
@@ -233,12 +239,16 @@ inline bool resolve_event( kpep_db* db, const char* alias, kpep_event** out ) no
     for( const EventDesc& d : kEvents )
     {
         if( std::strcmp( d.alias, alias ) != 0 )
+        {
             continue;
+        }
 
         for( const char* probe : d.probes )
         {
             if( !probe )
+            {
                 break;
+            }
             if( g_api.kpep_db_event( db, probe, out ) == 0 && *out )
             {
                 PMC_DIAG( "resolved '%s' -> '%s'\n", alias, probe );
@@ -396,7 +406,9 @@ inline void ensure_thread_counting() noexcept
 {
     ensure_global_init();
     if( g_perf.ok )
+    {
         g_api.kpc_set_thread_counting( g_perf.classes );
+    }
 }
 
 // ---- hot path: read all configured counters for the calling thread ----------
@@ -408,7 +420,9 @@ ALWAYS_INLINE Snapshot read() noexcept
 {
     Snapshot s {};
     if( !g_perf.ok )
+    {
         return s;
+    }
 
     uint64_t  raw[ 64 ] {};
     const int rc = g_api.kpc_get_thread_counters( 0, sizeof( raw ) / sizeof( raw[ 0 ] ), raw );
@@ -424,10 +438,14 @@ ALWAYS_INLINE Snapshot read() noexcept
 #endif
 
     if( rc != 0 )
+    {
         return s;
+    }
 
     for( unsigned i = 0; i < g_perf.event_count; ++i )
+    {
         s.values[ i ] = raw[ g_perf.kpc_map[ i ] ];
+    }
 
     return s;
 }

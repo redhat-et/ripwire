@@ -82,10 +82,22 @@ struct Eval
         : ing( ingest ), g( graph ), src( expr ) {}
 
     // ── scanner ───────────────────────────────────────────────────────────────────────────────────────
-    void skipWs()         { while( pos < src.size() && std::isspace( static_cast<unsigned char>( src[pos] ) ) ) ++pos; }
+    void skipWs()
+    {
+        while( pos < src.size() && std::isspace( static_cast<unsigned char>( src[pos] ) ) )
+        {
+            ++pos;
+        }
+    }
     char peek()           { skipWs(); return pos < src.size() ? src[pos] : '\0'; }
     bool accept( char c ) { skipWs(); if( pos < src.size() && src[pos] == c ) { ++pos; return true; } return false; }
-    void expect( char c ) { if( !accept( c ) ) fail( std::string( "expected '" ) + c + "'" ); }
+    void expect( char c )
+    {
+        if( !accept( c ) )
+        {
+            fail( std::string( "expected '" ) + c + "'" );
+        }
+    }
 
     // A3-F16b: every parse error gets ONE grammar reminder + a worked example appended, not just the
     // bare "expected '('" — `if( ok )` makes this a latch (first failure wins), so the reminder is
@@ -93,7 +105,10 @@ struct Eval
     // unwinds after the first error.
     void fail( std::string m )
     {
-        if( !ok ) return;
+        if( !ok )
+        {
+            return;
+        }
         ok = false;
         err = std::move( m );
         err += "\n  grammar: and|or|not(...) sources name(\"X\")|all filters kind|cx|fanin|file closure "
@@ -105,7 +120,10 @@ struct Eval
     {
         skipWs();
         const std::size_t start = pos;
-        while( pos < src.size() && ( std::isalnum( static_cast<unsigned char>( src[pos] ) ) || src[pos] == '_' ) ) ++pos;
+        while( pos < src.size() && ( std::isalnum( static_cast<unsigned char>( src[pos] ) ) || src[pos] == '_' ) )
+        {
+            ++pos;
+        }
         return std::string( src.substr( start, pos - start ) );
     }
 
@@ -115,9 +133,16 @@ struct Eval
         if( peek() != '"' ) { fail( "expected a \"quoted\" string" ); return {}; }
         ++pos;
         const std::size_t start = pos;
-        while( pos < src.size() && src[pos] != '"' ) ++pos;
+        while( pos < src.size() && src[pos] != '"' )
+        {
+            ++pos;
+        }
         std::string out( src.substr( start, pos - start ) );
-        if( pos < src.size() ) ++pos; else fail( "unterminated string" );
+        if( pos < src.size() ) { ++pos; }
+        else
+        {
+            fail( "unterminated string" );
+        }
         return out;
     }
 
@@ -125,11 +150,17 @@ struct Eval
     {
         skipWs();
         const std::size_t start = pos;
-        while( pos < src.size() && std::isdigit( static_cast<unsigned char>( src[pos] ) ) ) ++pos;
+        while( pos < src.size() && std::isdigit( static_cast<unsigned char>( src[pos] ) ) )
+        {
+            ++pos;
+        }
         if( pos == start ) { fail( "expected an integer" ); return 0; }
         if( pos - start > 18 ) { fail( "integer too large" ); return 0; }   // 18 digits fits a long; more is signed-overflow UB
         long v = 0;
-        for( std::size_t k = start; k < pos; ++k ) v = v * 10 + ( src[k] - '0' );
+        for( std::size_t k = start; k < pos; ++k )
+        {
+            v = v * 10 + ( src[k] - '0' );
+        }
         return v;
     }
 
@@ -143,7 +174,10 @@ struct Eval
     std::vector<NodeId> sourceAll()
     {
         std::vector<NodeId> r( ing.symbols.size() );
-        for( std::size_t i = 0; i < r.size(); ++i ) r[i] = static_cast<NodeId>( i );
+        for( std::size_t i = 0; i < r.size(); ++i )
+        {
+            r[i] = static_cast<NodeId>( i );
+        }
         return r;   // 0..N-1 is already sorted-unique
     }
 
@@ -151,7 +185,10 @@ struct Eval
     {
         std::vector<NodeId> r = resolveAllByName( ing, nm );
         sortUniq( r );
-        if( r.empty() ) unresolvedNames.push_back( nm );   // §P0.5b — a typo, not a measurement; refused at the CLI seam
+        if( r.empty() )
+        {
+            unresolvedNames.push_back( nm ); // §P0.5b — a typo, not a measurement; refused at the CLI seam
+        }
         return r;
     }
 
@@ -199,11 +236,21 @@ struct Eval
     // call graph terminates.
     std::vector<NodeId> closure( const std::vector<NodeId>& seeds, bool wantCallers, int depth )
     {
-        if( depth < 1 ) depth = 1;
+        if( depth < 1 )
+        {
+            depth = 1;
+        }
         const std::size_t   N = ing.symbols.size();
         std::vector<char>   seen( N, 0 );
         std::vector<NodeId> frontier;
-        for( NodeId s : seeds ) if( s < N && !seen[s] ) { seen[s] = 1; frontier.push_back( s ); }   // seeds marked → excluded
+        for( NodeId s : seeds )
+        {
+            if( s < N && !seen[s] )
+            {
+                seen[s] = 1;
+                frontier.push_back( s );
+            } // seeds marked → excluded
+        }
 
         const auto* inRo = g.inEdges.rowOffsets();
         const auto* inCi = g.inEdges.colIndices();
@@ -215,17 +262,21 @@ struct Eval
             for( NodeId u : frontier )
             {
                 if( wantCallers )
+                {
                     for( std::uint32_t k = inRo[u]; k < inRo[u + 1]; ++k )
                     {
                         const NodeId c = inCi[k];
                         if( c < N && !seen[c] ) { seen[c] = 1; out.push_back( c ); next.push_back( c ); }
                     }
+                }
                 else
+                {
                     for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
                     {
                         const NodeId c = g.outTargets[k];
                         if( c < N && !seen[c] ) { seen[c] = 1; out.push_back( c ); next.push_back( c ); }
                     }
+                }
             }
             frontier = std::move( next );
         }
@@ -238,34 +289,61 @@ struct Eval
     {
         sortUniq( a ); sortUniq( b );
         std::vector<NodeId> r;
-        if(      op == "and" ) std::set_intersection( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( r ) );
-        else if( op == "or"  ) std::set_union(        a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( r ) );
-        else                   std::set_difference(   a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( r ) );   // "not"
+        if( op == "and" )
+        {
+            std::set_intersection( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( r ) );
+        }
+        else if( op == "or" )
+        {
+            std::set_union( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( r ) );
+        }
+        else
+        {
+            std::set_difference( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( r ) ); // "not"
+        }
         return r;
     }
 
     // ── the one recursive entry: parse + evaluate an expression ──────────────────────────────────────────
     std::vector<NodeId> expr()
     {
-        if( !ok ) return {};
+        if( !ok )
+        {
+            return {};
+        }
         const std::string op = ident();
         if( op.empty() ) { fail( "expected an operator name" ); return {}; }
 
-        if( op == "all" && peek() != '(' ) return sourceAll();        // `all` may appear bare (no parens)
+        if( op == "all" && peek() != '(' )
+        {
+            return sourceAll(); // `all` may appear bare (no parens)
+        }
 
         expect( '(' );
-        if( !ok ) return {};
+        if( !ok )
+        {
+            return {};
+        }
 
         std::vector<NodeId> result;
-        if(      op == "all"  ) result = sourceAll();
-        else if( op == "name" ) result = sourceName( quoted() );
+        if( op == "all" )
+        {
+            result = sourceAll();
+        }
+        else if( op == "name" )
+        {
+            result = sourceName( quoted() );
+        }
         else if( op == "kind" || op == "cx" || op == "fanin" || op == "file" || op == "callers" || op == "callees" )
         {
             std::vector<NodeId> set = expr();                         // first arg is always a SET
             if( op == "callers" || op == "callees" )
             {
                 int depth = 1;
-                if( accept( ',' ) ) depth = static_cast<int>( integer() );
+                if( accept( ',' ) )
+                {
+                    depth = static_cast<int>( integer() );
+                }
                 result = closure( set, op == "callers", depth );
             }
             else
@@ -275,12 +353,24 @@ struct Eval
                 {
                     const std::string kw = ident();
                     SymKind           k  = SymKind::Other;
-                    if( !kindOfWord( kw, k ) ) fail( "unknown kind '" + kw + "' (use fn|method|cls|struct|iface|var|sec)" );
+                    if( !kindOfWord( kw, k ) )
+                    {
+                        fail( "unknown kind '" + kw + "' (use fn|method|cls|struct|iface|var|sec)" );
+                    }
                     result = filterKind( std::move( set ), k );
                 }
-                else if( op == "cx"    ) result = filterCx(    std::move( set ), integer() );
-                else if( op == "fanin" ) result = filterFanin( std::move( set ), integer() );
-                else                     result = filterFile(  std::move( set ), quoted() );   // "file"
+                else if( op == "cx" )
+                {
+                    result = filterCx( std::move( set ), integer() );
+                }
+                else if( op == "fanin" )
+                {
+                    result = filterFanin( std::move( set ), integer() );
+                }
+                else
+                {
+                    result = filterFile( std::move( set ), quoted() ); // "file"
+                }
             }
         }
         else if( op == "and" || op == "or" || op == "not" )
@@ -304,7 +394,10 @@ struct Eval
     {
         std::vector<NodeId> r = expr();
         skipWs();
-        if( ok && pos != src.size() ) fail( "trailing characters after the expression" );
+        if( ok && pos != src.size() )
+        {
+            fail( "trailing characters after the expression" );
+        }
         return ok ? r : std::vector<NodeId>{};
     }
 };

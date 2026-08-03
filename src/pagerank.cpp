@@ -23,7 +23,9 @@ double probabilityMass( std::span<const double> values ) noexcept
         const std::size_t blockEnd = std::min( blockBegin + kReductionBlockSize, values.size() );
         double partial = 0.0;
         for( std::size_t valueIndex = blockBegin; valueIndex < blockEnd; ++valueIndex )
+        {
             partial += values[valueIndex];
+        }
         total += partial;
     }
     return total;
@@ -43,7 +45,9 @@ unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double
     VERIFY( config.tolerance > 0.0 );
     VERIFY( config.maxIterationCount > 0 );
     if( nodeCount == 0 )
+    {
         return 0;
+    }
     VERIFY( rank.data() != teleport.data() );
 
     for( std::size_t nodeIndex = 0; nodeIndex < nodeCount; ++nodeIndex )
@@ -73,12 +77,16 @@ unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double
             const std::size_t blockEnd = std::min( blockBegin + kReductionBlockSize, nodeCount );
             double partial = 0.0;
             for( std::size_t nodeIndex = blockBegin; nodeIndex < blockEnd; ++nodeIndex )
+            {
                 partial += weightedOutDegree[nodeIndex] > 0.0 ? 0.0 : currentRank[nodeIndex];
+            }
             danglingMass += partial;
         }
 
         for( std::size_t nodeIndex = 0; nodeIndex < nodeCount; ++nodeIndex )
+        {
             scaledRank[nodeIndex] = weightedOutDegree[nodeIndex] > 0.0 ? currentRank[nodeIndex] / weightedOutDegree[nodeIndex] : 0.0;
+        }
 
         // In-edge CSR gather. Edges remain float; multiplication and accumulation promote to double.
         const double teleportScale = config.alpha * danglingMass + ( 1.0 - config.alpha );
@@ -86,7 +94,9 @@ unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double
         {
             double incomingRank = 0.0;
             for( std::uint32_t edgeIndex = rowOffsets[targetNodeId]; edgeIndex < rowOffsets[targetNodeId + 1]; ++edgeIndex )
+            {
                 incomingRank += double( edgeValues[edgeIndex] ) * scaledRank[columnIndices[edgeIndex]];
+            }
             nextRank[targetNodeId] = config.alpha * incomingRank + teleportScale * teleport[targetNodeId];
         }
 
@@ -97,7 +107,9 @@ unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double
             const std::size_t blockEnd = std::min( blockBegin + kReductionBlockSize, nodeCount );
             double partial = 0.0;
             for( std::size_t nodeIndex = blockBegin; nodeIndex < blockEnd; ++nodeIndex )
+            {
                 partial += std::fabs( nextRank[nodeIndex] - currentRank[nodeIndex] );
+            }
             residual += partial;
         }
 
@@ -111,7 +123,9 @@ unsigned pageRankDouble( const sparseCsr<float>& inEdges, std::span<const double
     }
 
     if( !hasConverged )
+    {
         DEGRADED_PATH_ALERT( "PageRank reached max iterations before L1 convergence" );
+    }
     std::copy( currentRank.begin(), currentRank.end(), rank.begin() );
     return iterationCount;
 }

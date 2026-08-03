@@ -63,7 +63,10 @@ struct SkillDoc
 inline std::string readWholeFileText( const std::filesystem::path& p )
 {
     std::ifstream in( p, std::ios::binary );
-    if( !in ) return {};
+    if( !in )
+    {
+        return {};
+    }
     std::ostringstream ss;
     ss << in.rdbuf();
     return ss.str();
@@ -79,12 +82,21 @@ inline std::vector<std::string> splitTextLines( const std::string& text )
         const std::size_t nl  = text.find( '\n', start );
         const std::size_t end = ( nl == std::string::npos ) ? text.size() : nl;
         std::string       line = text.substr( start, end - start );
-        if( !line.empty() && line.back() == '\r' ) line.pop_back();
+        if( !line.empty() && line.back() == '\r' )
+        {
+            line.pop_back();
+        }
         lines.push_back( std::move( line ) );
-        if( nl == std::string::npos ) break;
+        if( nl == std::string::npos )
+        {
+            break;
+        }
         start = nl + 1;
     }
-    if( !lines.empty() && lines.back().empty() ) lines.pop_back();
+    if( !lines.empty() && lines.back().empty() )
+    {
+        lines.pop_back();
+    }
     return lines;
 }
 
@@ -98,8 +110,12 @@ inline void parseSkillMd( const std::string& text, std::string& descOut, std::st
     // locate the frontmatter fence pair
     int frontEndLineIndex = 0;                       // index of the closing `---` line (0 = no frontmatter)
     if( !lines.empty() && lines[0] == "---" )
+    {
         for( int i = 1; i < int( lines.size() ); ++i )
+        {
             if( lines[i] == "---" ) { frontEndLineIndex = i; break; }
+        }
+    }
 
     // description: value + indented continuations
     bool inDesc = false;
@@ -108,18 +124,30 @@ inline void parseSkillMd( const std::string& text, std::string& descOut, std::st
         const std::string& line = lines[i];
         if( !inDesc )
         {
-            if( line.rfind( "description:", 0 ) != 0 ) continue;
+            if( line.rfind( "description:", 0 ) != 0 )
+            {
+                continue;
+            }
             std::string_view rest = std::string_view( line ).substr( 12 );
-            while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) ) rest.remove_prefix( 1 );
+            while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) )
+            {
+                rest.remove_prefix( 1 );
+            }
             if( rest != ">" && rest != ">-" && rest != "|" && rest != "|-" && !rest.empty() )
             { descOut.append( rest ); descOut.push_back( ' ' ); }
             inDesc = true;
             continue;
         }
         const bool isContinuation = !line.empty() && ( line.front() == ' ' || line.front() == '\t' );
-        if( !isContinuation ) break;                 // next frontmatter key ends the block scalar
+        if( !isContinuation )
+        {
+            break; // next frontmatter key ends the block scalar
+        }
         std::string_view body = line;
-        while( !body.empty() && ( body.front() == ' ' || body.front() == '\t' ) ) body.remove_prefix( 1 );
+        while( !body.empty() && ( body.front() == ' ' || body.front() == '\t' ) )
+        {
+            body.remove_prefix( 1 );
+        }
         descOut.append( body );
         descOut.push_back( ' ' );
     }
@@ -142,17 +170,29 @@ inline SkillSet discoverSkills( const std::string& root )
     std::error_code ec;
     for( const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator( root, ec ) )
     {
-        if( ec ) break;
-        if( !entry.is_directory() ) continue;
+        if( ec )
+        {
+            break;
+        }
+        if( !entry.is_directory() )
+        {
+            continue;
+        }
         const std::filesystem::path md = entry.path() / "SKILL.md";
-        if( !std::filesystem::exists( md ) ) continue;
+        if( !std::filesystem::exists( md ) )
+        {
+            continue;
+        }
 
         SkillDoc doc;
         doc.dirName = entry.path().filename().string();
         parseSkillMd( readWholeFileText( md ), doc.descText, doc.bodyText );
 
         if( doc.dirName == "ripwire-router" ) { set.router = std::move( doc ); set.hasRouter = true; }
-        else                                    set.candidates.push_back( std::move( doc ) );
+        else
+        {
+            set.candidates.push_back( std::move( doc ) );
+        }
     }
     std::sort( set.candidates.begin(), set.candidates.end(),
                []( const SkillDoc& a, const SkillDoc& b ) { return a.dirName < b.dirName; } );
@@ -184,14 +224,18 @@ struct PromptRow
 inline bool parseProv( std::string_view s, Prov& out )
 {
     for( std::size_t p = 0; p < 4; ++p )
+    {
         if( s == kProvName[p] ) { out = Prov( p ); return true; }
+    }
     return false;
 }
 
 inline bool parseSplit( std::string_view s, Split& out )
 {
     for( std::size_t p = 0; p < 2; ++p )
+    {
         if( s == kSplitName[p] ) { out = Split( p ); return true; }
+    }
     return false;
 }
 
@@ -205,7 +249,10 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
     if( !in ) { std::fprintf( stderr, "ripwire --eval-skills: cannot open '%s'\n", path.c_str() ); return false; }
 
     HashMap<std::string, std::uint32_t> indexOfSkill;
-    for( std::uint32_t c = 0; c < candidates.size(); ++c ) indexOfSkill[ candidates[c].dirName ] = c;
+    for( std::uint32_t c = 0; c < candidates.size(); ++c )
+    {
+        indexOfSkill[candidates[c].dirName] = c;
+    }
 
     bool        ok = true;
     std::string line;
@@ -216,8 +263,14 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
     while( std::getline( in, line ) )
     {
         ++lineNumber;
-        if( !line.empty() && line.back() == '\r' ) line.pop_back();
-        if( line.empty() || line[0] == '#' ) continue;
+        if( !line.empty() && line.back() == '\r' )
+        {
+            line.pop_back();
+        }
+        if( line.empty() || line[0] == '#' )
+        {
+            continue;
+        }
 
         const std::size_t tab1 = line.find( '\t' );
         const std::size_t tab2 = ( tab1 == std::string::npos ) ? std::string::npos : line.find( '\t', tab1 + 1 );
@@ -252,10 +305,16 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
                 if( it == indexOfSkill.end() )
                 { bad( ( "unknown skill label '" + one + "' (ripwire-router is never a legal label)" ).c_str() ); rowOk = false; break; }
                 row.permitted.push_back( it->second );
-                if( comma == std::string::npos ) break;
+                if( comma == std::string::npos )
+                {
+                    break;
+                }
                 from = comma + 1;
             }
-            if( !rowOk || row.permitted.empty() ) continue;
+            if( !rowOk || row.permitted.empty() )
+            {
+                continue;
+            }
         }
         rows.push_back( std::move( row ) );
     }
@@ -281,11 +340,19 @@ inline BagStats buildBagStats( const std::vector<std::string_view>& texts )
 {
     BagStats st;
     st.bags.reserve( texts.size() );
-    for( const std::string_view t : texts ) st.bags.push_back( bagOfText( t ) );
-    for( const TokenBag& b : st.bags ) st.avgLen += double( b.lenTokens );
+    for( const std::string_view t : texts )
+    {
+        st.bags.push_back( bagOfText( t ) );
+    }
+    for( const TokenBag& b : st.bags )
+    {
+        st.avgLen += double( b.lenTokens );
+    }
     st.avgLen /= double( texts.empty() ? 1 : texts.size() );
     for( const TokenBag& b : st.bags )
+    {
         for( const auto& [ tok, count ] : b.tf ) { (void)count; ++st.df[ tok ]; }
+    }
     return st;
 }
 
@@ -302,11 +369,20 @@ inline std::vector<std::string> uniqueQueryTokens( std::string_view prompt )
 inline std::vector<double> overlapArm( const std::vector<TokenBag>& bags, const std::vector<std::string>& qUnique )
 {
     std::vector<double> score( bags.size(), 0.0 );
-    if( qUnique.empty() ) return score;
+    if( qUnique.empty() )
+    {
+        return score;
+    }
     for( std::size_t c = 0; c < bags.size(); ++c )
     {
         std::size_t hitCount = 0;
-        for( const std::string& t : qUnique ) if( bags[c].tf.find( t ) != bags[c].tf.end() ) ++hitCount;
+        for( const std::string& t : qUnique )
+        {
+            if( bags[c].tf.find( t ) != bags[c].tf.end() )
+            {
+                ++hitCount;
+            }
+        }
         score[c] = double( hitCount ) / double( qUnique.size() );
     }
     return score;
@@ -327,7 +403,10 @@ inline std::vector<double> bm25Arm( const BagStats& st, const std::vector<std::s
         for( const std::string& t : qUnique )
         {
             const auto it = st.bags[c].tf.find( t );
-            if( it == st.bags[c].tf.end() ) continue;
+            if( it == st.bags[c].tf.end() )
+            {
+                continue;
+            }
             const auto   di  = st.df.find( t );
             const int    n   = ( di == st.df.end() ) ? 1 : di->second;
             const int    tf  = it->second;
@@ -347,7 +426,10 @@ inline std::vector<double> bm25Arm( const BagStats& st, const std::vector<std::s
 inline std::vector<std::uint32_t> rankCandidates( const std::vector<double>& score )
 {
     std::vector<std::uint32_t> order( score.size() );
-    for( std::uint32_t c = 0; c < score.size(); ++c ) order[c] = c;
+    for( std::uint32_t c = 0; c < score.size(); ++c )
+    {
+        order[c] = c;
+    }
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                { return score[a] != score[b] ? score[a] > score[b] : a < b; } );
     return order;
@@ -371,12 +453,17 @@ inline RowOutcome outcomeOf( const std::vector<double>& score, const PromptRow& 
     RowOutcome out;
     out.top1Index = order[0];
     out.top1Score = score[ order[0] ];
-    if( row.permitted.empty() ) return out;
+    if( row.permitted.empty() )
+    {
+        return out;
+    }
 
     const auto isPermitted = [ & ]( std::uint32_t c )
     { return std::find( row.permitted.begin(), row.permitted.end(), c ) != row.permitted.end(); };
     for( std::size_t r = 0; r < order.size(); ++r )
+    {
         if( isPermitted( order[r] ) ) { out.firstPermittedRank = r + 1; break; }
+    }
     out.hit1 = out.firstPermittedRank == 1;
     out.hit2 = out.firstPermittedRank >= 1 && out.firstPermittedRank <= 2;
     return out;
@@ -391,11 +478,18 @@ inline constexpr const char* kArmName[kArmCount] = { "overlap", "name", "bm25-de
 // 0.5 = no signal; < 0.5 = inverted (negatives outscore positives — the failure mode to fail loudly on).
 inline double separationAuc( const std::vector<double>& posTop, const std::vector<double>& negTop )
 {
-    if( posTop.empty() || negTop.empty() ) return 0.5;
+    if( posTop.empty() || negTop.empty() )
+    {
+        return 0.5;
+    }
     double sum = 0.0;
     for( const double p : posTop )
+    {
         for( const double n : negTop )
+        {
             sum += p > n ? 1.0 : ( p == n ? 0.5 : 0.0 );
+        }
+    }
     return sum / ( double( posTop.size() ) * double( negTop.size() ) );
 }
 
@@ -407,7 +501,13 @@ inline void reportSplit( const std::vector<PromptRow>& rows, const std::vector<R
 {
     // The split's own row counts — an empty split still prints, so a reader sees it exists and is empty.
     std::size_t sPos = 0, sNeg = 0;
-    for( const PromptRow& r : rows ) if( r.split == target ) ( r.permitted.empty() ? sNeg : sPos )++;
+    for( const PromptRow& r : rows )
+    {
+        if( r.split == target )
+        {
+            ( r.permitted.empty() ? sNeg : sPos )++;
+        }
+    }
     std::printf( "  split=%s (N=%zu: %zu positive + %zu negative):\n", label, sPos + sNeg, sPos, sNeg );
     if( sPos == 0 ) { std::printf( "    split=%s (no positive rows in this split yet)\n", label ); return; }
 
@@ -418,22 +518,32 @@ inline void reportSplit( const std::vector<PromptRow>& rows, const std::vector<R
         std::vector<double> posTop, negTop;
         for( std::size_t i = 0; i < rows.size(); ++i )
         {
-            if( rows[i].split != target ) continue;
+            if( rows[i].split != target )
+            {
+                continue;
+            }
             const RowOutcome& o = outcomes[a][i];
             if( rows[i].permitted.empty() ) { negTop.push_back( o.top1Score ); continue; }
             posTop.push_back( o.top1Score );
             hit1 += o.hit1 ? 1 : 0;
             hit2 += o.hit2 ? 1 : 0;
-            if( o.firstPermittedRank > 0 ) mrr += 1.0 / double( o.firstPermittedRank );
+            if( o.firstPermittedRank > 0 )
+            {
+                mrr += 1.0 / double( o.firstPermittedRank );
+            }
         }
 
         const double P = double( sPos );
         if( sNeg > 0 )
+        {
             std::printf( "    split=%-5s %-11s %6.1f%% %6.1f%%   %5.3f     %5.3f\n", label, kArmName[a],
                          100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P, separationAuc( posTop, negTop ) );
+        }
         else
+        {
             std::printf( "    split=%-5s %-11s %6.1f%% %6.1f%%   %5.3f       n/a (no negative rows in this split)\n",
                          label, kArmName[a], 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P );
+        }
     }
 }
 
@@ -446,7 +556,10 @@ inline OraclePoint oracleFireAbstain( const std::vector<RowOutcome>& outcomes, c
     VERIFY( outcomes.size() == rows.size() );
     std::vector<double> thresholds;
     thresholds.push_back( -1.0 );                                  // "always fire" (every score is >= 0)
-    for( const RowOutcome& o : outcomes ) thresholds.push_back( o.top1Score );
+    for( const RowOutcome& o : outcomes )
+    {
+        thresholds.push_back( o.top1Score );
+    }
     std::sort( thresholds.begin(), thresholds.end() );
     thresholds.erase( std::unique( thresholds.begin(), thresholds.end() ), thresholds.end() );
 
@@ -458,8 +571,14 @@ inline OraclePoint oracleFireAbstain( const std::vector<RowOutcome>& outcomes, c
         {
             const bool isPositive = !rows[i].permitted.empty();
             const bool fired      = outcomes[i].top1Score > th;
-            if( isPositive ) correct += ( fired && outcomes[i].hit1 ) ? 1 : 0;
-            else             correct += fired ? 0 : 1;
+            if( isPositive )
+            {
+                correct += ( fired && outcomes[i].hit1 ) ? 1 : 0;
+            }
+            else
+            {
+                correct += fired ? 0 : 1;
+            }
         }
         const double acc = rows.empty() ? 0.0 : double( correct ) / double( rows.size() );
         if( acc > best.acc ) { best.acc = acc; best.th = th; }
@@ -470,10 +589,19 @@ inline OraclePoint oracleFireAbstain( const std::vector<RowOutcome>& outcomes, c
 // exact C(n,k) in doubles via the product form (IEEE ops are correctly rounded ⇒ cross-platform stable).
 inline double binomialChoose( std::size_t n, std::size_t k )
 {
-    if( k > n ) return 0.0;
-    if( k > n - k ) k = n - k;
+    if( k > n )
+    {
+        return 0.0;
+    }
+    if( k > n - k )
+    {
+        k = n - k;
+    }
     double c = 1.0;
-    for( std::size_t i = 1; i <= k; ++i ) c = c * double( n - k + i ) / double( i );
+    for( std::size_t i = 1; i <= k; ++i )
+    {
+        c = c * double( n - k + i ) / double( i );
+    }
     return c;
 }
 
@@ -495,17 +623,30 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         return 1;
     }
     for( const SkillDoc& s : set.candidates )
+    {
         if( s.descText.empty() )
+        {
             std::fprintf( stderr, "ripwire --eval-skills: note: %s has an empty description: block\n", s.dirName.c_str() );
+        }
+    }
 
     std::vector<PromptRow> rows;
-    if( !parseCorpus( labelsPath, set.candidates, rows ) ) return 1;
+    if( !parseCorpus( labelsPath, set.candidates, rows ) )
+    {
+        return 1;
+    }
     std::size_t posCount = 0, negCount = 0;
-    for( const PromptRow& r : rows ) ( r.permitted.empty() ? negCount : posCount )++;
+    for( const PromptRow& r : rows )
+    {
+        ( r.permitted.empty() ? negCount : posCount )++;
+    }
     if( posCount == 0 )
     { std::fprintf( stderr, "ripwire --eval-skills: no positive rows in '%s'\n", labelsPath.c_str() ); return 1; }
     std::size_t testSplitCount = 0, devSplitCount = 0;
-    for( const PromptRow& r : rows ) ( r.split == Split::Dev ? devSplitCount : testSplitCount )++;
+    for( const PromptRow& r : rows )
+    {
+        ( r.split == Split::Dev ? devSplitCount : testSplitCount )++;
+    }
 
     // ---- selector inputs, built once ----
     std::vector<std::string_view> descTexts, fullTexts, nameTexts;
@@ -535,12 +676,17 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     std::vector<std::int32_t> skillIndexOfFile( fileCount, -1 );
     {
         std::vector<std::string> needles( skillCount );
-        for( std::size_t c = 0; c < skillCount; ++c ) needles[c] = "/" + set.candidates[c].dirName + "/";
+        for( std::size_t c = 0; c < skillCount; ++c )
+        {
+            needles[c] = "/" + set.candidates[c].dirName + "/";
+        }
         for( std::uint32_t f = 0; f < fileCount; ++f )
         {
             const std::string slashed = "/" + ing.files[f];
             for( std::uint32_t c = 0; c < skillCount; ++c )
+            {
                 if( slashed.find( needles[c] ) != std::string::npos ) { skillIndexOfFile[f] = std::int32_t( c ); break; }
+            }
         }
     }
 
@@ -569,18 +715,27 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             const std::vector<float> fileScore = maxPoolToFiles( ing, base, fileCount );
             std::vector<double>      pooled( skillCount, 0.0 );
             for( std::uint32_t f = 0; f < fileCount; ++f )
+            {
                 if( skillIndexOfFile[f] >= 0 && double( fileScore[f] ) > pooled[ std::size_t( skillIndexOfFile[f] ) ] )
+                {
                     pooled[ std::size_t( skillIndexOfFile[f] ) ] = double( fileScore[f] );
+                }
+            }
             armScore[4] = std::move( pooled );
         }
         for( std::size_t a = 0; a < kArmCount; ++a )
+        {
             outcomes[a].push_back( outcomeOf( armScore[a], row ) );
+        }
 
         if( set.hasRouter && !row.permitted.empty() )
         {
             const std::vector<double>        magnetScore = bm25Arm( magnetStats, qUnique );
             const std::vector<std::uint32_t> order       = rankCandidates( magnetScore );
-            if( order[0] == std::uint32_t( skillCount ) ) ++routerMagnetWins;      // the appended router doc won
+            if( order[0] == std::uint32_t( skillCount ) )
+            {
+                ++routerMagnetWins; // the appended router doc won
+            }
         }
     }
 
@@ -601,17 +756,24 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             posTop.push_back( o.top1Score );
             hit1 += o.hit1 ? 1 : 0;
             hit2 += o.hit2 ? 1 : 0;
-            if( o.firstPermittedRank > 0 ) mrr += 1.0 / double( o.firstPermittedRank );
+            if( o.firstPermittedRank > 0 )
+            {
+                mrr += 1.0 / double( o.firstPermittedRank );
+            }
         }
         const double      P      = double( posCount );
         const double      auc    = separationAuc( posTop, negTop );
         const OraclePoint oracle = oracleFireAbstain( outcomes[a], rows );
         if( negCount > 0 )
+        {
             std::printf( "  %-11s %6.1f%% %6.1f%%   %5.3f     %5.3f   %5.1f%% (th=%.3f)\n",
                          kArmName[a], 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P, auc, 100.0 * oracle.acc, oracle.th );
+        }
         else
+        {
             std::printf( "  %-11s %6.1f%% %6.1f%%   %5.3f       n/a   n/a (no negative rows)\n",
                          kArmName[a], 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P );
+        }
     }
 
     // analytic random floor over the SAME permitted sets (uniform ranking of K candidates, no scores).
@@ -619,12 +781,17 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         double hit1 = 0, hit2 = 0, mrr = 0;
         for( const PromptRow& row : rows )
         {
-            if( row.permitted.empty() ) continue;
+            if( row.permitted.empty() )
+            {
+                continue;
+            }
             const std::size_t p = row.permitted.size();
             hit1 += double( p ) / double( skillCount );
             hit2 += 1.0 - binomialChoose( skillCount - p, 2 ) / binomialChoose( skillCount, 2 );
-            for( std::size_t r = 1; r + p <= skillCount + 1; ++r )                      // E[1/rank of first permitted]
+            for( std::size_t r = 1; r + p <= skillCount + 1; ++r )
+            { // E[1/rank of first permitted]
                 mrr += ( 1.0 / double( r ) ) * binomialChoose( skillCount - r, p - 1 ) / binomialChoose( skillCount, p );
+            }
         }
         const double P = double( posCount );
         std::printf( "  %-11s %6.1f%% %6.1f%%   %5.3f     0.500   <- floor (uniform-random ranking; auc 0.5 by definition)\n",
@@ -637,7 +804,10 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         std::size_t provHit[3] = { 0, 0, 0 }, provN[3] = { 0, 0, 0 };
         for( std::size_t i = 0; i < rows.size(); ++i )
         {
-            if( rows[i].permitted.empty() ) continue;
+            if( rows[i].permitted.empty() )
+            {
+                continue;
+            }
             const std::size_t p = std::size_t( rows[i].prov );
             VERIFY( p < 3 );
             ++provN[p];
@@ -656,7 +826,12 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             {
                 std::size_t judgedHit = 0;
                 for( std::size_t i = 0; i < rows.size(); ++i )
-                    if( !rows[i].permitted.empty() && rows[i].prov == Prov::Judged && outcomes[a][i].hit1 ) ++judgedHit;
+                {
+                    if( !rows[i].permitted.empty() && rows[i].prov == Prov::Judged && outcomes[a][i].hit1 )
+                    {
+                        ++judgedHit;
+                    }
+                }
                 std::printf( "%s %s %zu/%zu", a ? "," : "", kArmName[a], judgedHit, provN[2] );
             }
             std::printf( "\n" );
@@ -664,8 +839,10 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     }
 
     if( set.hasRouter )
+    {
         std::printf( "  router-magnet: with ripwire-router ADMITTED as a candidate it takes top-1 on %zu/%zu positive prompts "
                      "(%s arm) - why it is excluded above\n", routerMagnetWins, posCount, kArmName[kDiagArm] );
+    }
 
     // per-skill table (diagnostics arm): which skills never win when permitted (mis-described), which
     // over-fire on rows that are not theirs, and which attract off-topic negatives.
@@ -678,18 +855,26 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             if( rows[i].permitted.empty() ) { ++tally[ o.top1Index ].negFires; continue; }
             ++tally[ o.top1Index ].posFires;
             const bool top1Permitted = std::find( rows[i].permitted.begin(), rows[i].permitted.end(), o.top1Index ) != rows[i].permitted.end();
-            if( !top1Permitted ) ++tally[ o.top1Index ].falseFires;
+            if( !top1Permitted )
+            {
+                ++tally[o.top1Index].falseFires;
+            }
             for( const std::uint32_t c : rows[i].permitted )
             {
                 ++tally[c].permittedRows;
-                if( top1Permitted && o.top1Index == c ) ++tally[c].won;
+                if( top1Permitted && o.top1Index == c )
+                {
+                    ++tally[c].won;
+                }
             }
         }
         std::printf( "  per-skill (%s): name / permitted-rows / won / pos-fires / false-fires / neg-fires\n", kArmName[kDiagArm] );
         for( std::size_t c = 0; c < skillCount; ++c )
+        {
             std::printf( "    %-26s %3zu %5zu %5zu %5zu %5zu%s\n", set.candidates[c].dirName.c_str(),
                          tally[c].permittedRows, tally[c].won, tally[c].posFires, tally[c].falseFires, tally[c].negFires,
                          ( tally[c].permittedRows >= 2 && tally[c].won == 0 ) ? "   <- never wins its own rows (mis-described?)" : "" );
+        }
     }
 
     // the misses, one line each (diagnostics arm) — the rows a description change should be measured on.
@@ -698,17 +883,32 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         std::size_t missCount = 0;
         for( std::size_t i = 0; i < rows.size(); ++i )
         {
-            if( rows[i].permitted.empty() || outcomes[kDiagArm][i].hit1 ) continue;
+            if( rows[i].permitted.empty() || outcomes[kDiagArm][i].hit1 )
+            {
+                continue;
+            }
             ++missCount;
             std::string want;
             for( const std::uint32_t c : rows[i].permitted )
-            { if( !want.empty() ) want += ','; want += set.candidates[c].dirName; }
+            {
+                if( !want.empty() )
+                {
+                    want += ',';
+                }
+                want += set.candidates[c].dirName;
+            }
             std::string clipped = rows[i].prompt.substr( 0, 56 );                     // corpus is ASCII by contract
-            if( rows[i].prompt.size() > 56 ) clipped += "...";
+            if( rows[i].prompt.size() > 56 )
+            {
+                clipped += "...";
+            }
             std::printf( "    line %-3d want=%s got=%s \"%s\"\n", rows[i].lineNumber, want.c_str(),
                          set.candidates[ outcomes[kDiagArm][i].top1Index ].dirName.c_str(), clipped.c_str() );
         }
-        if( missCount == 0 ) std::printf( "    (none)\n" );
+        if( missCount == 0 )
+        {
+            std::printf( "    (none)\n" );
+        }
     }
 
     // split report (r26 P4): test/dev reported SEPARATELY so the two can never be silently conflated —

@@ -57,10 +57,19 @@ inline std::vector<NodeId> editCheckOverloadSet( const IngestResult& ing, const 
 {
     std::vector<NodeId> overloadNodes;
     if( focus < g.canonId.size() && !g.canonId[ focus ].empty() )
+    {
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
+        {
             if( i < g.canonId.size() && g.canonId[i] == g.canonId[ focus ] && ing.symbols[i].fileId == ing.symbols[ focus ].fileId )
+            {
                 overloadNodes.push_back( i );
-    if( overloadNodes.empty() ) overloadNodes.push_back( focus );   // degrade: no canonId — treat focus alone as its own set
+            }
+        }
+    }
+    if( overloadNodes.empty() )
+    {
+        overloadNodes.push_back( focus ); // degrade: no canonId — treat focus alone as its own set
+    }
     return overloadNodes;
 }
 
@@ -87,10 +96,16 @@ inline std::vector<EditCheckGroup> editCheckGroups( const IngestResult& ing, con
     std::vector<std::pair<std::uint32_t, std::string>> keys;
     for( NodeId m : matches )
     {
-        if( m >= ing.symbols.size() ) continue;
+        if( m >= ing.symbols.size() )
+        {
+            continue;
+        }
         const std::uint32_t fileId = ing.symbols[m].fileId;
         const std::string   canon  = ( m < g.canonId.size() ) ? g.canonId[m] : ing.symbols[m].name;
-        if( std::find( keys.begin(), keys.end(), std::make_pair( fileId, canon ) ) != keys.end() ) continue;
+        if( std::find( keys.begin(), keys.end(), std::make_pair( fileId, canon ) ) != keys.end() )
+        {
+            continue;
+        }
         keys.emplace_back( fileId, canon );
         groups.push_back( EditCheckGroup{ m, std::string{} } );
     }
@@ -103,7 +118,13 @@ inline std::vector<EditCheckGroup> editCheckGroups( const IngestResult& ing, con
         const Symbol&      s            = ing.symbols[ groups[ groupIndex ].lowestNode ];
         const std::string& canonOfThis  = keys[ groupIndex ].second;
         std::size_t        groupsInFile = 0;
-        for( const auto& [ fileId, canon ] : keys ) if( fileId == s.fileId ) ++groupsInFile;
+        for( const auto& [fileId, canon] : keys )
+        {
+            if( fileId == s.fileId )
+            {
+                ++groupsInFile;
+            }
+        }
 
         const bool fileIsEnough = ( groupsInFile == 1 ) || ( canonOfThis == s.name );
         groups[ groupIndex ].spelling = fileIsEnough ? ing.files[ s.fileId ] + ":" + s.name : canonOfThis;
@@ -139,8 +160,13 @@ inline std::string editCheckAmbiguousMessage( std::string_view spec, std::span<c
                     + std::to_string( definitionCount ) + "\"; this verb cannot). Qualify one contract: ";
     const std::size_t shownCount = std::min( groups.size(), kEditCheckSpellingsShown );
     for( std::size_t groupIndex = 0; groupIndex < shownCount; ++groupIndex )
+    {
         msg += ( groupIndex ? ", " : "" ) + groups[ groupIndex ].spelling;
-    if( groups.size() > shownCount ) msg += " (+" + std::to_string( groups.size() - shownCount ) + " more contracts)";
+    }
+    if( groups.size() > shownCount )
+    {
+        msg += " (+" + std::to_string( groups.size() - shownCount ) + " more contracts)";
+    }
 
     msg += " — e.g. " + std::string( exampleForm ) + groups[0].spelling;
     return msg;
@@ -167,8 +193,16 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
     // canonId-scoped here, so on an unedited tree they are equal by construction — the property that makes
     // this signal safe to put in the headline at all.
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
-        if( i < g.canonId.size() && !g.canonId[i].empty() && g.canonId[i] == g.canonId[ focus ] ) ++res.nowDefs;
-    for( NodeId i : overloadNodes ) res.nowParams = std::max( res.nowParams, std::uint32_t( ing.symbols[i].params ) );
+    {
+        if( i < g.canonId.size() && !g.canonId[i].empty() && g.canonId[i] == g.canonId[focus] )
+        {
+            ++res.nowDefs;
+        }
+    }
+    for( NodeId i : overloadNodes )
+    {
+        res.nowParams = std::max( res.nowParams, std::uint32_t( ing.symbols[i].params ) );
+    }
     // §B11.3 — the WORKING-TREE side must fold the group exactly the way the BASELINE side folds it, or the
     // two numbers are answers to different questions. computeSnapshot takes the MAX of params over every node
     // sharing a baseline key and push_backs `publicApi` PER NODE (so presence in that sorted set is an OR over
@@ -178,7 +212,10 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
     // is a claim about a function in another header, i.e. exactly the kind of "the seam rule stated in a comment"
     // that rots. OR over the group instead: identical answer today, structurally symmetric with the snapshot
     // forever, and one fewer invariant to remember.
-    for( NodeId i : overloadNodes ) res.nowPublic = res.nowPublic || quality::isPublicApi( ing, i );
+    for( NodeId i : overloadNodes )
+    {
+        res.nowPublic = res.nowPublic || quality::isPublicApi( ing, i );
+    }
 
     // HEAD baseline — the warm path MUST hit computeHeadSnapshot's own qsnap cache (the ≤100ms budget).
     auto [ base, baselineOk ] = quality::computeHeadSnapshot( root, nullptr, maxFileBytes, excludes );
@@ -186,7 +223,10 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
     if( !baselineOk || base.locBySym.find( key ) == base.locBySym.end() )
     {
         res.status = "new-symbol";
-        if( !baselineOk ) DEGRADED_PATH_ALERT( "edit-check: no git HEAD baseline available — treating SYM as new-symbol" );
+        if( !baselineOk )
+        {
+            DEGRADED_PATH_ALERT( "edit-check: no git HEAD baseline available — treating SYM as new-symbol" );
+        }
         return res;
     }
 
@@ -204,7 +244,10 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
         res.wasDefs = res.nowDefs;
         DEGRADED_PATH_ALERT( "edit-check: baseline snapshot has no definition count for SYM — defs_was suppressed" );
     }
-    else res.wasDefs = dit->second;
+    else
+    {
+        res.wasDefs = dit->second;
+    }
 
     res.status = ( res.wasParams != res.nowParams || res.wasPublic != res.nowPublic || res.wasDefs != res.nowDefs )
                  ? "contract-change" : "unchanged";
@@ -259,16 +302,31 @@ inline EditCheckVerdict editCheckVerdict( const EditCheckContract& contract, std
 {
     // new-symbol is not reassurance ABOUT A CONTRACT — there was none to compare against — so it is never
     // escalated and carries no change list. Its callers can still be flagged; that is the payload's job.
-    if( std::string_view( contract.status ) == "new-symbol" ) return EditCheckVerdict{ contract.status, std::string{} };
+    if( std::string_view( contract.status ) == "new-symbol" )
+    {
+        return EditCheckVerdict { contract.status, std::string {} };
+    }
 
     std::string change;
-    const auto  add = [ &change ]( const char* token ) { if( !change.empty() ) change += ","; change += token; };
-    if( contract.wasParams != contract.nowParams ) add( "params" );
-    if( contract.wasPublic != contract.nowPublic ) add( "public" );
-    if( contract.wasDefs   != contract.nowDefs   ) add( "defs" );
+    const auto add = [ &change ]( const char* token ) { if( !change.empty() ) { change += ","; } change += token; };
+    if( contract.wasParams != contract.nowParams )
+    {
+        add( "params" );
+    }
+    if( contract.wasPublic != contract.nowPublic )
+    {
+        add( "public" );
+    }
+    if( contract.wasDefs != contract.nowDefs )
+    {
+        add( "defs" );
+    }
     // corroboration only, and only where something else already carried the verdict — see the note above for
     // the measurement that rules it out as a verdict-carrier of its own.
-    if( !change.empty() && incompatibleCount > 0 ) add( "broken-callers" );
+    if( !change.empty() && incompatibleCount > 0 )
+    {
+        add( "broken-callers" );
+    }
 
     // the two derivations tied together so they cannot drift: editCheckContractVsHead's own status IS the
     // was/now half of exactly this expression, so the change list is empty exactly where that half said
@@ -318,16 +376,30 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
     const auto provenIncompatible = [ & ]( std::uint16_t argCount ) -> bool
     {
         for( NodeId ov : overloadNodes )
+        {
             if( const Symbol& os = ing.symbols[ov];
-                os.arityExact == 0 || editCheckImplicitReceiver( os ) || os.params == argCount ) return false;   // a candidate could still accept it
+                os.arityExact == 0 || editCheckImplicitReceiver( os ) || os.params == argCount )
+            {
+                return false; // a candidate could still accept it
+            }
+        }
         return true;
     };
     std::vector<char> callerIncompatible( ing.symbols.size(), 0 );
     for( const Reference& r : ing.references )
     {
-        if( r.role != RefRole::Call || r.fromSymbol >= seenCaller.size() || !seenCaller[ r.fromSymbol ] ) continue;
-        if( r.calleeName != symName || !r.argCountKnown )                                                  continue;
-        if( provenIncompatible( r.argCount ) ) callerIncompatible[ r.fromSymbol ] = 1;
+        if( r.role != RefRole::Call || r.fromSymbol >= seenCaller.size() || !seenCaller[r.fromSymbol] )
+        {
+            continue;
+        }
+        if( r.calleeName != symName || !r.argCountKnown )
+        {
+            continue;
+        }
+        if( provenIncompatible( r.argCount ) )
+        {
+            callerIncompatible[r.fromSymbol] = 1;
+        }
     }
     return callerIncompatible;
 }
@@ -343,9 +415,14 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
     const auto* ci = g.inEdges.colIndices();
     for( NodeId ov : overloadNodes )
     {
-        if( ov >= ing.symbols.size() ) continue;
+        if( ov >= ing.symbols.size() )
+        {
+            continue;
+        }
         for( std::uint32_t k = ro[ov]; k < ro[ov + 1]; ++k )
+        {
             if( NodeId c = ci[k]; c < seenCaller.size() && !seenCaller[c] ) { seenCaller[c] = 1; callerIds.push_back( c ); }
+        }
     }
 
     std::vector<char> callerIncompatible = editCheckIncompatibleFlags( ing, overloadNodes, symName, seenCaller );
@@ -353,7 +430,10 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
     std::sort( callerIds.begin(), callerIds.end(), [ & ]( NodeId a, NodeId b )
     {
         const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
-        if( sa.fileId != sb.fileId ) return ing.files[sa.fileId] < ing.files[sb.fileId];
+        if( sa.fileId != sb.fileId )
+        {
+            return ing.files[sa.fileId] < ing.files[sb.fileId];
+        }
         return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
     } );
     return { std::move( callerIds ), std::move( callerIncompatible ) };
@@ -376,7 +456,13 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // pair (see editCheckVerdict), so counting it after the status attribute was already emitted is what made
     // "unchanged" reachable beside a proven break.
     std::size_t incompatibleCount = 0;
-    for( NodeId c : callerIds ) if( callerIncompatible[c] ) ++incompatibleCount;
+    for( NodeId c : callerIds )
+    {
+        if( callerIncompatible[c] )
+        {
+            ++incompatibleCount;
+        }
+    }
     const EditCheckVerdict verdict = editCheckVerdict( contract, incompatibleCount );
 
     std::vector<char> esc;
@@ -482,6 +568,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // node id, which editCheckOverloadSet builds by a forward walk of ing.symbols → deterministic, and the
     // first row is always the definition p= names.
     if( overloadNodes.size() > 1 )
+    {
         for( NodeId ov : overloadNodes )
         {
             const Symbol& os = ing.symbols[ov];
@@ -491,6 +578,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
             out += "\" params=\""; out += std::to_string( std::uint32_t( os.params ) );
             out += "\"/>";
         }
+    }
     for( NodeId c : callerIds )
     {
         const Symbol& cs = ing.symbols[c];
@@ -498,7 +586,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         out += "\" p=\"";   out += ex( ing.files[ cs.fileId ] );
         out += ":";         out += std::to_string( cs.line );
         out += "\"";
-        if( callerIncompatible[c] ) out += " incompatible=\"1\"";
+        if( callerIncompatible[c] )
+        {
+            out += " incompatible=\"1\"";
+        }
         out += "/>";
     }
     out += "</edit-check>";

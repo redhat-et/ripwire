@@ -33,14 +33,16 @@ inline bool cloneIsKeyword( std::string_view w ) noexcept
     {
         HashMap<std::string_view, std::uint8_t> m;
         for( std::string_view k : {
-            "if","else","for","while","do","switch","case","default","break","continue","return","goto",
-            "struct","class","enum","union","namespace","template","typename","typedef","using","public","private","protected","virtual","override","final",
-            "const","constexpr","consteval","static","inline","extern","volatile","mutable","auto","void","int","float","double","char","bool","long","short","unsigned","signed",
-            "new","delete","this","nullptr","true","false","sizeof","operator","friend","explicit","try","catch","throw",
-            "def","elif","except","finally","lambda","pass","raise","with","yield","import","from","as","global","nonlocal","in","is","not","and","or","None","True","False","self",
-            "func","var","let","mutating","protocol","extension","guard","defer","where","repeat","fallthrough","init","deinit","fn","impl","trait","mod","pub","use","match","loop","move","ref","dyn","async","await",
-            "package","interface","map","chan","go","select","type","range","function","typeof","instanceof","export" } )
+                 "if","else","for","while","do","switch","case","default","break","continue","return","goto",
+                 "struct","class","enum","union","namespace","template","typename","typedef","using","public","private","protected","virtual","override","final",
+                 "const","constexpr","consteval","static","inline","extern","volatile","mutable","auto","void","int","float","double","char","bool","long","short","unsigned","signed",
+                 "new","delete","this","nullptr","true","false","sizeof","operator","friend","explicit","try","catch","throw",
+                 "def","elif","except","finally","lambda","pass","raise","with","yield","import","from","as","global","nonlocal","in","is","not","and","or","None","True","False","self",
+                 "func","var","let","mutating","protocol","extension","guard","defer","where","repeat","fallthrough","init","deinit","fn","impl","trait","mod","pub","use","match","loop","move","ref","dyn","async","await",
+                 "package","interface","map","chan","go","select","type","range","function","typeof","instanceof","export" } )
+        {
             m.emplace( k, std::uint8_t( 1 ) );
+        }
         return m;
     }();
     return kw.find( w ) != kw.end();
@@ -54,14 +56,23 @@ inline std::size_t cloneCharLiteralLen( const std::string& src, std::size_t i, s
 {
     // caller guarantees src[i] == '\''
     std::size_t j = i + 1;
-    if( j >= n ) return 0;
+    if( j >= n )
+    {
+        return 0;
+    }
     if( src[j] == '\\' )
     {
         j += 2;                                          // backslash + at least one escaped byte ('\n', '\\', '\'')
         const std::size_t cap = i + 8;                   // bound the scan so '\xFFFF'-shaped input stays a constant
-        while( j < n && j < cap && src[j] != '\'' ) ++j; // consume multi-byte escapes ('\xNN', '\123')
+        while( j < n && j < cap && src[j] != '\'' )
+        {
+            ++j; // consume multi-byte escapes ('\xNN', '\123')
+        }
     }
-    else j += 1;                                         // exactly one content byte ('x')
+    else
+    {
+        j += 1; // exactly one content byte ('x')
+    }
     return ( j < n && src[j] == '\'' ) ? ( j - i + 1 ) : 0;
 }
 
@@ -81,10 +92,50 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
     {
         const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
         if( std::isspace( c ) )                              { ++i; continue; }
-        if( c == '/' && i + 1 < n && src[i + 1] == '/' )     { i += 2; while( i < n && src[i] != '\n' ) ++i; continue; }
-        if( c == '/' && i + 1 < n && src[i + 1] == '*' )     { i += 2; while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) ) ++i; i = std::min( n, i + 2 ); continue; }
-        if( stripHashComments && c == '#' )                  { i += 1; while( i < n && src[i] != '\n' ) ++i; continue; }
-        if( c == '"' )                                       { ++i; while( i < n && src[i] != '"' ) { if( src[i] == '\\' ) ++i; ++i; } ++i; out += "$S "; ++tokenCount; continue; }
+        if( c == '/' && i + 1 < n && src[i + 1] == '/' )
+        {
+            i += 2;
+            while( i < n && src[i] != '\n' )
+            {
+                ++i;
+            }
+            continue;
+        }
+        if( c == '/' && i + 1 < n && src[i + 1] == '*' )
+        {
+            i += 2;
+            while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
+            {
+                ++i;
+            }
+            i = std::min( n, i + 2 );
+            continue;
+        }
+        if( stripHashComments && c == '#' )
+        {
+            i += 1;
+            while( i < n && src[i] != '\n' )
+            {
+                ++i;
+            }
+            continue;
+        }
+        if( c == '"' )
+        {
+            ++i;
+            while( i < n && src[i] != '"' )
+            {
+                if( src[i] == '\\' )
+                {
+                    ++i;
+                }
+                ++i;
+            }
+            ++i;
+            out += "$S ";
+            ++tokenCount;
+            continue;
+        }
         // ' opens a char literal only with a plausible close (bounded lookahead) AND not directly after an
         // identifier/digit byte — else it's punctuation (Rust lifetime `'a`, a stray apostrophe). Digit
         // separators (1'000'000) are absorbed by the number branch below, never reaching here.
@@ -95,13 +146,33 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
             if( lit ) { i += lit; out += "$S "; ++tokenCount; continue; }
             out += '\'';  out += ' ';  ++i;  ++tokenCount;  continue;   // punctuation
         }
-        if( std::isdigit( c ) )                              { while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) ) ++i; out += "$N "; ++tokenCount; continue; }
+        if( std::isdigit( c ) )
+        {
+            while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) )
+            {
+                ++i;
+            }
+            out += "$N ";
+            ++tokenCount;
+            continue;
+        }
         if( std::isalpha( c ) || c == '_' )
         {
             const std::size_t s = i;
-            while( i < n && idc( (unsigned char)src[i] ) ) ++i;
+            while( i < n && idc( (unsigned char)src[i] ) )
+            {
+                ++i;
+            }
             const std::string_view w( src.data() + s, i - s );
-            if( cloneIsKeyword( w ) ) { out += w; out += ' '; } else out += "$I ";
+            if( cloneIsKeyword( w ) )
+            {
+                out += w;
+                out += ' ';
+            }
+            else
+            {
+                out += "$I ";
+            }
             ++tokenCount;
             continue;
         }
@@ -126,10 +197,49 @@ inline std::vector<std::string> normalizeTokens( const std::string& src, std::ui
     {
         const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
         if( std::isspace( c ) )                              { ++i; continue; }
-        if( c == '/' && i + 1 < n && src[i + 1] == '/' )     { i += 2; while( i < n && src[i] != '\n' ) ++i; continue; }
-        if( c == '/' && i + 1 < n && src[i + 1] == '*' )     { i += 2; while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) ) ++i; i = std::min( n, i + 2 ); continue; }
-        if( stripHashComments && c == '#' )                  { i += 1; while( i < n && src[i] != '\n' ) ++i; continue; }
-        if( c == '"' )                                       { ++i; while( i < n && src[i] != '"' ) { if( src[i] == '\\' ) ++i; ++i; } ++i; out.emplace_back( "$S" ); continue; }
+        if( c == '/' && i + 1 < n && src[i + 1] == '/' )
+        {
+            i += 2;
+            while( i < n && src[i] != '\n' )
+            {
+                ++i;
+            }
+            continue;
+        }
+        if( c == '/' && i + 1 < n && src[i + 1] == '*' )
+        {
+            i += 2;
+            while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
+            {
+                ++i;
+            }
+            i = std::min( n, i + 2 );
+            continue;
+        }
+        if( stripHashComments && c == '#' )
+        {
+            i += 1;
+            while( i < n && src[i] != '\n' )
+            {
+                ++i;
+            }
+            continue;
+        }
+        if( c == '"' )
+        {
+            ++i;
+            while( i < n && src[i] != '"' )
+            {
+                if( src[i] == '\\' )
+                {
+                    ++i;
+                }
+                ++i;
+            }
+            ++i;
+            out.emplace_back( "$S" );
+            continue;
+        }
         // ' → char literal only with a plausible close and not right after an identifier/digit byte (A4-F2).
         if( c == '\'' )
         {
@@ -138,13 +248,28 @@ inline std::vector<std::string> normalizeTokens( const std::string& src, std::ui
             if( lit ) { i += lit; out.emplace_back( "$S" ); continue; }
             out.emplace_back( 1, '\'' );  ++i;  continue;   // punctuation
         }
-        if( std::isdigit( c ) )                              { while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) ) ++i; out.emplace_back( "$N" ); continue; }
+        if( std::isdigit( c ) )
+        {
+            while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) )
+            {
+                ++i;
+            }
+            out.emplace_back( "$N" );
+            continue;
+        }
         if( std::isalpha( c ) || c == '_' )
         {
             const std::size_t s = i;
-            while( i < n && idc( (unsigned char)src[i] ) ) ++i;
+            while( i < n && idc( (unsigned char)src[i] ) )
+            {
+                ++i;
+            }
             const std::string_view w( src.data() + s, i - s );
-            if( cloneIsKeyword( w ) ) out.emplace_back( w ); else out.emplace_back( "$I" );
+            if( cloneIsKeyword( w ) ) { out.emplace_back( w ); }
+            else
+            {
+                out.emplace_back( "$I" );
+            }
             continue;
         }
         out.emplace_back( 1, char( c ) );  ++i;   // operator / punctuation
@@ -169,25 +294,44 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     // same-implementation / different-name still matches.
     std::vector<std::vector<NodeId>> byFile( ing.files.size() );
     for( const Symbol& s : ing.symbols )
-        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size()
-            && s.endByte > s.sigEndByte )
+    {
+        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size() && s.endByte > s.sigEndByte )
+        {
             byFile[ s.fileId ].push_back( s.id );
+        }
+    }
 
     HashMap<std::string, std::vector<NodeId>> groups;   // normalized body → member symbol ids
     HashMap<NodeId, std::uint32_t>            tok;       // symbol → token count (for ranking)
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( byFile[f].empty() ) continue;
+        if( byFile[f].empty() )
+        {
+            continue;
+        }
         std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp ) continue;
+        if( !fp )
+        {
+            continue;
+        }
         std::fseek( fp, 0, SEEK_END );
         const long sz = std::ftell( fp );
         std::fseek( fp, 0, SEEK_SET );
         bytes.clear();
-        if( sz > 0 ) { bytes.resize( std::size_t( sz ) ); if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) ) bytes.clear(); }
+        if( sz > 0 )
+        {
+            bytes.resize( std::size_t( sz ) );
+            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+            {
+                bytes.clear();
+            }
+        }
         std::fclose( fp );
-        if( bytes.empty() ) continue;
+        if( bytes.empty() )
+        {
+            continue;
+        }
 
         for( NodeId id : byFile[f] )
         {
@@ -195,7 +339,10 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
             std::uint32_t tc = 0;
             const bool    hash = ( s.lang == Lang::Python || s.lang == Lang::Bash || s.lang == Lang::Ruby );   // `#` line comments
             std::string   norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, tc, hash );   // the BODY only [sigEndByte,endByte)
-            if( int( tc ) < minTokens ) continue;
+            if( int( tc ) < minTokens )
+            {
+                continue;
+            }
             tok[id] = tc;
             groups[ std::move( norm ) ].push_back( id );
         }
@@ -203,13 +350,21 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
 
     std::vector<CloneGroup> out;
     for( auto& [norm, members] : groups )
-        if( members.size() >= 2 ) out.push_back( { members, tok[ members[0] ] } );
-    std::sort( out.begin(), out.end(), [ & ]( const CloneGroup& x, const CloneGroup& y )
-               {   // biggest clones first; stable tiebreak by first member's file:line
-                   if( x.tokens != y.tokens ) return x.tokens > y.tokens;
-                   const Symbol& sx = ing.symbols[ x.members[0] ];  const Symbol& sy = ing.symbols[ y.members[0] ];
-                   return ing.files[sx.fileId] != ing.files[sy.fileId] ? ing.files[sx.fileId] < ing.files[sy.fileId] : sx.line < sy.line;
-               } );
+    {
+        if( members.size() >= 2 )
+        {
+            out.push_back( { members, tok[members[0]] } );
+        }
+    }
+    std::sort( out.begin(), out.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) { // biggest clones first; stable tiebreak by first member's file:line
+        if( x.tokens != y.tokens )
+        {
+            return x.tokens > y.tokens;
+        }
+        const Symbol& sx = ing.symbols[x.members[0]];
+        const Symbol& sy = ing.symbols[y.members[0]];
+        return ing.files[sx.fileId] != ing.files[sy.fileId] ? ing.files[sx.fileId] < ing.files[sy.fileId] : sx.line < sy.line;
+    } );
     return out;
 }
 
@@ -319,7 +474,10 @@ inline constexpr std::uint64_t sketchSplitmix64( std::uint64_t x ) noexcept
 inline constexpr std::array<std::uint64_t, kSketchHashes> kSketchMul = []
 {
     std::array<std::uint64_t, kSketchHashes> m{};
-    for( std::uint32_t j = 0; j < kSketchHashes; ++j ) m[j] = sketchSplitmix64( j + 1 ) | 1ull;   // odd ⇒ bijective multiply mod 2^64
+    for( std::uint32_t j = 0; j < kSketchHashes; ++j )
+    {
+        m[j] = sketchSplitmix64( j + 1 ) | 1ull; // odd ⇒ bijective multiply mod 2^64
+    }
     return m;
 }();
 
@@ -335,7 +493,10 @@ inline void cloneSketchSig( const std::vector<std::uint64_t>& fp, std::uint8_t* 
         {
             std::uint64_t h = hashutil::multiplyModulo64( g, mul );   // sanitizer-clean modulo-2^64 (G1 integer stack)
             h ^= h >> 32;                                // fold the well-mixed high half into the compared/stored bits
-            if( h < mn ) mn = h;
+            if( h < mn )
+            {
+                mn = h;
+            }
         }
         sig[j] = std::uint8_t( mn );
     }
@@ -345,7 +506,10 @@ inline void cloneSketchSig( const std::vector<std::uint64_t>& fp, std::uint8_t* 
 inline std::uint32_t cloneSketchMatches( const std::uint8_t* a, const std::uint8_t* b ) noexcept
 {
     std::uint32_t m = 0;
-    for( std::uint32_t j = 0; j < kSketchHashes; ++j ) m += std::uint32_t( a[j] == b[j] );
+    for( std::uint32_t j = 0; j < kSketchHashes; ++j )
+    {
+        m += std::uint32_t( a[j] == b[j] );
+    }
     return m;
 }
 
@@ -371,7 +535,10 @@ struct Type3Stats
 inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) noexcept
 {
     std::uint64_t h = seed;
-    for( const char c : t ) h = hashutil::fnv1aAbsorb( h, c );
+    for( const char c : t )
+    {
+        h = hashutil::fnv1aAbsorb( h, c );
+    }
     h ^= 0x9e3779b97f4a7c15ull;  h = hashutil::fnv1aMultiply( h );   // token separator so [ab][c] != [a][bc]
     return h;
 }
@@ -382,12 +549,17 @@ inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) 
 inline std::size_t cloneLcsLen( const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b )
 {
     const std::size_t na = a.size(), nb = b.size();
-    if( na == 0 || nb == 0 ) return 0;
+    if( na == 0 || nb == 0 )
+    {
+        return 0;
+    }
     std::vector<std::uint32_t> prev( nb + 1, 0 ), cur( nb + 1, 0 );
     for( std::size_t i = 1; i <= na; ++i )
     {
         for( std::size_t j = 1; j <= nb; ++j )
+        {
             cur[j] = ( a[i - 1] == b[j - 1] ) ? prev[j - 1] + 1 : std::max( prev[j], cur[j - 1] );
+        }
         std::swap( prev, cur );
         std::fill( cur.begin(), cur.end(), 0u );
     }
@@ -405,9 +577,12 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     // per-file candidate ids: same body-region gate as findClones (real body, function/method).
     std::vector<std::vector<NodeId>> byFile( ing.files.size() );
     for( const Symbol& s : ing.symbols )
-        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size()
-            && s.endByte > s.sigEndByte )
+    {
+        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size() && s.endByte > s.sigEndByte )
+        {
             byFile[ s.fileId ].push_back( s.id );
+        }
+    }
 
     // Candidate = one representative per DISTINCT normalized stream (exact dups are Type-1/2, excluded here).
     // A4-P2: token streams are interned to u32 ids (one repo-wide HashMap) so the LCS DP and the k-gram
@@ -431,34 +606,59 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( byFile[f].empty() ) continue;
+        if( byFile[f].empty() )
+        {
+            continue;
+        }
         std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp ) continue;   // degrade: unreadable file just contributes no candidates (never a crash)
+        if( !fp )
+        {
+            continue; // degrade: unreadable file just contributes no candidates (never a crash)
+        }
         std::fseek( fp, 0, SEEK_END );
         const long sz = std::ftell( fp );
         std::fseek( fp, 0, SEEK_SET );
         bytes.clear();
-        if( sz > 0 ) { bytes.resize( std::size_t( sz ) ); if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) ) bytes.clear(); }
+        if( sz > 0 )
+        {
+            bytes.resize( std::size_t( sz ) );
+            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+            {
+                bytes.clear();
+            }
+        }
         std::fclose( fp );
-        if( bytes.empty() ) continue;
+        if( bytes.empty() )
+        {
+            continue;
+        }
 
         for( NodeId id : byFile[f] )
         {
             const Symbol&            s    = ing.symbols[id];
             const bool               hash = ( s.lang == Lang::Python || s.lang == Lang::Bash || s.lang == Lang::Ruby );
             std::vector<std::string> raw  = normalizeTokens( bytes, s.sigEndByte, s.endByte, hash );
-            if( int( raw.size() ) < minTokens ) continue;
+            if( int( raw.size() ) < minTokens )
+            {
+                continue;
+            }
 
             // dedup exact streams: hash the joined token TEXT (byte-identical to the pre-A4-P2 hash); keep only the
             // first id per distinct stream. Done over `raw` so the exact-dedup equivalence classes never shift.
             std::uint64_t sh = 1469598103934665603ull;
             for( const std::string& t : raw )
             {
-                for( const char c : t ) sh = hashutil::fnv1aAbsorb( sh, c );
+                for( const char c : t )
+                {
+                    sh = hashutil::fnv1aAbsorb( sh, c );
+                }
                 sh ^= 0x2full;
                 sh = hashutil::fnv1aMultiply( sh );
             }
-            if( streamSeen.find( sh ) != streamSeen.end() ) continue;   // exact clone of an earlier candidate → skip (Type-1/2)
+            if( streamSeen.find( sh ) != streamSeen.end() )
+            {
+                continue; // exact clone of an earlier candidate → skip (Type-1/2)
+            }
             streamSeen.emplace( sh, id );
 
             // k-gram fingerprint set (sorted+unique for Jaccard by merge) — hashed over the token TEXT, exactly as
@@ -470,7 +670,10 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
                 for( std::size_t i = 0; i + kFpGram <= raw.size(); ++i )
                 {
                     std::uint64_t g = 1469598103934665603ull;
-                    for( std::uint32_t k = 0; k < kFpGram; ++k ) g = cloneTokenHash( raw[i + k], g );
+                    for( std::uint32_t k = 0; k < kFpGram; ++k )
+                    {
+                        g = cloneTokenHash( raw[i + k], g );
+                    }
                     fp.push_back( g );
                 }
                 std::sort( fp.begin(), fp.end() );
@@ -501,8 +704,12 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     // ever compared, so a pair with ZERO shared k-grams is never touched (the O(N²) escape hatch).
     HashMap<std::uint64_t, std::vector<std::uint32_t>> buckets;
     for( std::uint32_t ci = 0; ci < cands.size(); ++ci )
+    {
         for( std::uint64_t g : cands[ci].fp )
+        {
             buckets[g].push_back( ci );
+        }
+    }
 
     // Enumerate candidate PAIRS via co-occurrence in any bucket; de-dup pairs with a seen-set.
     HashMap<std::uint64_t, std::uint8_t> pairSeen;
@@ -514,13 +721,20 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     for( auto& [g, idxs] : buckets )
     {
         (void)g;
-        if( idxs.size() < 2 ) continue;
+        if( idxs.size() < 2 )
+        {
+            continue;
+        }
         // Stop-gram cut (A4-P2): a bucket bigger than kType3MaxBucket is a ubiquitous k-gram — O(size²) pairs of
         // pure boilerplate. Skip it; any real near-clone in it shares a rarer gram and is compared via a smaller
         // bucket. Fixed threshold + this is before any per-pair work, so the decision is fully deterministic.
-        if( idxs.size() > kType3MaxBucket ) continue;
+        if( idxs.size() > kType3MaxBucket )
+        {
+            continue;
+        }
         std::sort( idxs.begin(), idxs.end() );   // deterministic pair enumeration within the bucket
         for( std::size_t a = 0; a < idxs.size(); ++a )
+        {
             for( std::size_t b = a + 1; b < idxs.size(); ++b )
             {
                 const std::uint32_t ia = idxs[a], ib = idxs[b];   // ia < ib by the sort
@@ -537,13 +751,19 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
                 // from a cache-resident array instead of two random Cand-struct loads per raw visit.
                 ++st.rawPairVisits;
                 const std::uint32_t lo = std::min( candTokens[ia], candTokens[ib] ), hi = std::max( candTokens[ia], candTokens[ib] );
-                if( hi == 0 || float( lo ) / float( hi ) < kType3LenBand ) continue;
+                if( hi == 0 || float( lo ) / float( hi ) < kType3LenBand )
+                {
+                    continue;
+                }
 
                 // De-dup the length-band survivors (once per distinct pair) + charge the deterministic cap. `pairSeen`
                 // is insertion-order-free (pure membership) and the bucket walk is insertion-ordered + idx-sorted, so
                 // the kept/dropped split on a cap-hitting corpus is fully deterministic.
                 const std::uint64_t pk = pairKey( ia, ib );
-                if( pairSeen.find( pk ) != pairSeen.end() ) continue;
+                if( pairSeen.find( pk ) != pairSeen.end() )
+                {
+                    continue;
+                }
                 pairSeen.emplace( pk, 1 );
                 if( comparedPairs >= kType3MaxPairs ) { DEGRADED_PATH_ALERT( "clones: Type-3 pair cap hit — first N compared (both-gate-surviving) near-misses kept, rest skipped" ); goto done; }
                 ++st.distinctPairs;
@@ -569,11 +789,18 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
                     while( i < ca.fp.size() && j < cb.fp.size() )
                     {
                         if( ca.fp[i] == cb.fp[j] ) { ++inter; ++i; ++j; }
-                        else if( ca.fp[i] < cb.fp[j] ) ++i; else ++j;
+                        else if( ca.fp[i] < cb.fp[j] ) { ++i; }
+                        else
+                        {
+                            ++j;
+                        }
                     }
                 }
                 const std::size_t uni = ca.fp.size() + cb.fp.size() - inter;
-                if( uni == 0 || float( inter ) / float( uni ) < kType3MinFpJaccard ) continue;
+                if( uni == 0 || float( inter ) / float( uni ) < kType3MinFpJaccard )
+                {
+                    continue;
+                }
 
                 // (c) the expensive compare: LCS over token sequences (clamped to the cost cap).
                 ++comparedPairs;
@@ -585,14 +812,21 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
                 if( pb->size() > kType3MaxTokensForLcs ) { tb.assign( pb->begin(), pb->begin() + kType3MaxTokensForLcs ); pb = &tb; }
                 const std::size_t lcs = cloneLcsLen( *pa, *pb );
                 const std::size_t den = pa->size() + pb->size();
-                if( den == 0 ) continue;
+                if( den == 0 )
+                {
+                    continue;
+                }
                 const float sim = 2.0f * float( lcs ) / float( den );
-                if( sim < kType3MinSimilarity || sim >= 1.0f ) continue;   // < 1.0: exact would be Type-1/2
+                if( sim < kType3MinSimilarity || sim >= 1.0f )
+                {
+                    continue; // < 1.0: exact would be Type-1/2
+                }
 
                 // member order stable by symbol id (small id first) → deterministic emit.
                 const NodeId x = std::min( ca.id, cb.id ), y = std::max( ca.id, cb.id );
                 out.push_back( { { x, y }, std::max( candTokens[ia], candTokens[ib] ), std::uint8_t( 3 ), sim } );
             }
+        }
     }
 done:
     // Deterministic order: by (first member id, second member id). Similarity is a pure function of the streams,
@@ -600,7 +834,10 @@ done:
     std::sort( out.begin(), out.end(), []( const CloneGroup& p, const CloneGroup& q )
                { return p.members[0] != q.members[0] ? p.members[0] < q.members[0] : p.members[1] < q.members[1]; } );
     st.emittedPairs = out.size();
-    if( statsOut ) *statsOut = st;
+    if( statsOut )
+    {
+        *statsOut = st;
+    }
     return out;
 }
 

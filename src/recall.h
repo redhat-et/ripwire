@@ -60,7 +60,10 @@ inline bool readDocPrefix( const IngestResult& ing, std::uint32_t fileId, std::s
         return true;
     }
     std::ifstream in( diskPath( ing, fileId ), std::ios::binary );
-    if( !in ) return false;
+    if( !in )
+    {
+        return false;
+    }
     if( maxBytes == 0 ) { std::ostringstream ss;  ss << in.rdbuf();  out = ss.str();  return true; }
     out.assign( maxBytes, '\0' );
     in.read( out.data(), std::streamsize( maxBytes ) );
@@ -72,9 +75,15 @@ inline bool readDocPrefix( const IngestResult& ing, std::uint32_t fileId, std::s
 // file cannot be sized — such a file takes no part in the median and is never demoted by the size arm.
 inline std::size_t docByteSize( const IngestResult& ing, std::uint32_t fileId )
 {
-    if( const auto it = ing.docText.find( fileId ); it != ing.docText.end() ) return it->second.size();
+    if( const auto it = ing.docText.find( fileId ); it != ing.docText.end() )
+    {
+        return it->second.size();
+    }
     std::ifstream in( diskPath( ing, fileId ), std::ios::binary | std::ios::ate );
-    if( !in ) return 0;
+    if( !in )
+    {
+        return 0;
+    }
     const std::streampos end = in.tellg();
     return ( end > 0 ) ? std::size_t( end ) : 0;
 }
@@ -93,7 +102,13 @@ inline std::size_t docByteSize( const IngestResult& ing, std::uint32_t fileId )
 inline std::vector<char> docFileMask( const IngestResult& ing )
 {
     std::vector<char> isDoc( ing.files.size(), 0 );
-    for( const Symbol& s : ing.symbols ) if( s.lang == Lang::Markdown && s.fileId < isDoc.size() ) isDoc[ s.fileId ] = 1;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.lang == Lang::Markdown && s.fileId < isDoc.size() )
+        {
+            isDoc[s.fileId] = 1;
+        }
+    }
     return isDoc;
 }
 
@@ -111,9 +126,15 @@ inline GeneratedDocVerdicts classifyGeneratedDocs( const IngestResult& ing, cons
     sizeSamples.reserve( ing.files.size() );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( f >= isDoc.size() || !isDoc[f] ) continue;
+        if( f >= isDoc.size() || !isDoc[f] )
+        {
+            continue;
+        }
         byteSizes[f] = docByteSize( ing, f );
-        if( byteSizes[f] > 0 ) sizeSamples.push_back( byteSizes[f] );
+        if( byteSizes[f] > 0 )
+        {
+            sizeSamples.push_back( byteSizes[f] );
+        }
     }
     verdicts.docCount = sizeSamples.size();
     if( !sizeSamples.empty() )
@@ -127,10 +148,16 @@ inline GeneratedDocVerdicts classifyGeneratedDocs( const IngestResult& ing, cons
     std::string       text;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( f >= isDoc.size() || !isDoc[f] || byteSizes[f] == 0 ) continue;
+        if( f >= isDoc.size() || !isDoc[f] || byteSizes[f] == 0 )
+        {
+            continue;
+        }
         const bool        couldClearSizeArm = sizeArmBytes > 0 && byteSizes[f] >= sizeArmBytes;
         const std::size_t readBytes         = couldClearSizeArm ? 0 : kGeneratedHeadScanBytes;   // 0 = whole file
-        if( !readDocPrefix( ing, f, readBytes, text ) ) continue;
+        if( !readDocPrefix( ing, f, readBytes, text ) )
+        {
+            continue;
+        }
         verdicts.reasonOf[f] = std::uint8_t( docparse::classifyGeneratedDoc( text, byteSizes[f],
                                                                              verdicts.medianBytes, verdicts.docCount ) );
     }
@@ -166,8 +193,14 @@ inline bool recallOrderLess( const Recalled& a, const Recalled& b, const IngestR
 {
     const bool aGen = a.generated != docparse::GeneratedDocReason::None;
     const bool bGen = b.generated != docparse::GeneratedDocReason::None;
-    if( aGen != bGen ) return !aGen;                        // hand-written beats generated (the primary key)
-    if( a.score != b.score ) return a.score > b.score;
+    if( aGen != bGen )
+    {
+        return !aGen; // hand-written beats generated (the primary key)
+    }
+    if( a.score != b.score )
+    {
+        return a.score > b.score;
+    }
     return ing.files[ a.fileId ] < ing.files[ b.fileId ];   // deterministic tiebreak
 }
 
@@ -184,22 +217,37 @@ inline RecallSelection recallTopFiles( const IngestResult& ing, const std::vecto
     for( std::size_t i = 0; i < ing.symbols.size() && i < scores.size(); ++i )
     {
         const std::uint32_t f = ing.symbols[i].fileId;
-        if( docsOnly && f < isDoc.size() && !isDoc[f] ) continue;
-        if( f < best.size() && scores[i] > best[f] ) best[f] = scores[i];
+        if( docsOnly && f < isDoc.size() && !isDoc[f] )
+        {
+            continue;
+        }
+        if( f < best.size() && scores[i] > best[f] )
+        {
+            best[f] = scores[i];
+        }
     }
     RecallSelection selection;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( best[f] <= 0.f ) continue;
+        if( best[f] <= 0.f )
+        {
+            continue;
+        }
         const auto reason = ( f < verdicts.reasonOf.size() ) ? docparse::GeneratedDocReason( verdicts.reasonOf[f] )
                                                              : docparse::GeneratedDocReason::None;
-        if( reason != docparse::GeneratedDocReason::None ) ++selection.demotedMatchCount;
+        if( reason != docparse::GeneratedDocReason::None )
+        {
+            ++selection.demotedMatchCount;
+        }
         selection.files.push_back( { f, best[f], reason } );
     }
     std::sort( selection.files.begin(), selection.files.end(),
                [ & ]( const Recalled& a, const Recalled& b ) noexcept { return recallOrderLess( a, b, ing ); } );
     selection.matchedCount = selection.files.size();   // §B2: TRUE count, taken BEFORE the --top-k cut
-    if( k > 0 && int( selection.files.size() ) > k ) selection.files.resize( std::size_t( k ) );
+    if( k > 0 && int( selection.files.size() ) > k )
+    {
+        selection.files.resize( std::size_t( k ) );
+    }
     // §A8.2/§B9.2: docFileMask()'s population when docsOnly (the DOCUMENT files --recall actually ranks), else
     // the whole file corpus — see the comment above isDoc for why docsOnly is the honest denominator.
     selection.docCount = docsOnly ? std::size_t( std::count( isDoc.begin(), isDoc.end(), char( 1 ) ) )
@@ -254,8 +302,14 @@ inline constexpr std::size_t kRecallMinBodyBytes       = 240;
 // deterministic, no map order, no clock. Returns true when it had to close a fence.
 inline bool closeOpenMarkdownFence( std::string& body )
 {
-    if( !docparse::scanMarkdownFences( body ).endsInsideFence ) return false;
-    if( !body.empty() && body.back() != '\n' ) body += '\n';
+    if( !docparse::scanMarkdownFences( body ).endsInsideFence )
+    {
+        return false;
+    }
+    if( !body.empty() && body.back() != '\n' )
+    {
+        body += '\n';
+    }
     body += "```";
     return true;
 }
@@ -294,7 +348,10 @@ inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::
     else
     {
         std::ifstream in( diskPath( ing, fileId ), std::ios::binary );
-        if( !in ) return std::nullopt;
+        if( !in )
+        {
+            return std::nullopt;
+        }
         std::ostringstream ss;  ss << in.rdbuf();
         body = ss.str();
     }
@@ -315,11 +372,20 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // leaves payloadBudget at 0 with the header still over). Absent ⇒ within the budget, or no --max-tokens at
     // all: the same silence-means-nothing-happened rule truncated=/generated_demoted= follow below.
     std::string overCeilingAttr;
-    if( shape.isOverCeiling ) overCeilingAttr = " over_ceiling=1";
+    if( shape.isOverCeiling )
+    {
+        overCeilingAttr = " over_ceiling=1";
+    }
     std::string truncAttr;
-    if( shape.truncatedCount > 0 ) truncAttr = " truncated=" + std::to_string( shape.truncatedCount );
+    if( shape.truncatedCount > 0 )
+    {
+        truncAttr = " truncated=" + std::to_string( shape.truncatedCount );
+    }
     std::string demotedAttr;
-    if( shape.demotedCount > 0 ) demotedAttr = " generated_demoted=" + std::to_string( shape.demotedCount );
+    if( shape.demotedCount > 0 )
+    {
+        demotedAttr = " generated_demoted=" + std::to_string( shape.demotedCount );
+    }
     // §B2: the numerator and total= are the TRUE relevant count (matchedCount, pre-top-k) — shown= is what
     // this run actually emitted; capped= (isCapped) is honest about the gap between the two, whatever cut
     // caused it (--top-k, the byte budget, or an unreadable file).
@@ -358,7 +424,10 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
 // sees a capture at the bottom knows it was ranked there deliberately. "" for a hand-written doc.
 inline std::string formatDemotedNote( docparse::GeneratedDocReason reason )
 {
-    if( reason == docparse::GeneratedDocReason::None ) return {};
+    if( reason == docparse::GeneratedDocReason::None )
+    {
+        return {};
+    }
     return "  [generated_demoted: " + std::string( docparse::generatedReasonTag( reason ) ) + "]";
 }
 
@@ -406,10 +475,16 @@ inline std::string formatRecallCappedNote( const RecallShape& shape, std::size_t
     const std::size_t topKOmitted   = shape.matchedCount - shape.selectedCount;
     const std::size_t budgetOmitted = shape.selectedCount - shape.shownCount;
     std::string        why;
-    if( topKOmitted > 0 ) why += "raise --top-k (default 8) for " + std::to_string( topKOmitted ) + " more";
+    if( topKOmitted > 0 )
+    {
+        why += "raise --top-k (default 8) for " + std::to_string( topKOmitted ) + " more";
+    }
     if( budgetOmitted > 0 )
     {
-        if( !why.empty() ) why += "; ";
+        if( !why.empty() )
+        {
+            why += "; ";
+        }
         why += maxBytes ? ( "raise --max-tokens or narrow the query for " + std::to_string( budgetOmitted ) + " more (~" + std::to_string( maxBytes ) + "-byte budget)" )
                         : ( std::to_string( budgetOmitted ) + " unreadable on disk" );
     }
@@ -456,7 +531,10 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         // invariant was true and correctly a VERIFY, but the first read it protected had already happened.
         VERIFY( r.fileId < ing.files.size() );
         std::optional<std::string> loaded = loadRecallBody( ing, r.fileId, redact );
-        if( !loaded ) continue;
+        if( !loaded )
+        {
+            continue;
+        }
         std::string body = std::move( *loaded );
 
         const std::string demotedNote = formatDemotedNote( r.generated );
@@ -470,7 +548,10 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         {
             const std::size_t used  = payload.size();
             const std::size_t floor = sepBytes + 2 + kRecallMinBodyBytes;
-            if( used + floor > payloadBudget ) break;                      // no room for a meaningful slice
+            if( used + floor > payloadBudget )
+            {
+                break; // no room for a meaningful slice
+            }
             const std::size_t room = payloadBudget - used - sepBytes - 2;   // 2 = the separator's own newline + body's
             if( body.size() > room )
             {
@@ -494,7 +575,10 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         markupBytes += 2;
         bodyBytes   += body.size();
         ++shape.shownCount;
-        if( isTruncated ) break;   // the budget is spent — the next doc would be a 0-byte stub
+        if( isTruncated )
+        {
+            break; // the budget is spent — the next doc would be a 0-byte stub
+        }
     }
 
     // the closing note. "no relevant documents" is reserved for a ranking that FOUND none — a budget that
@@ -549,7 +633,10 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         shape.estTokens     = est;
         shape.isOverCeiling = maxBytes > 0 && header.size() + payload.size() > maxBytes;
         std::string next    = formatRecallHeader( task, shape, est );
-        if( next == header ) break;
+        if( next == header )
+        {
+            break;
+        }
         header = std::move( next );
     }
 
@@ -575,11 +662,17 @@ inline std::string withHeaderField( std::string_view fullHeaderLine, std::string
 {
     std::string       line( fullHeaderLine );
     const std::size_t pos = line.find( field );
-    if( pos == std::string::npos ) return line;   // defensive: header shape changed elsewhere — leave it be
+    if( pos == std::string::npos )
+    {
+        return line; // defensive: header shape changed elsewhere — leave it be
+    }
 
     const std::size_t digitsStart = pos + field.size();
     std::size_t       digitsEnd   = digitsStart;
-    while( digitsEnd < line.size() && line[digitsEnd] >= '0' && line[digitsEnd] <= '9' ) ++digitsEnd;
+    while( digitsEnd < line.size() && line[digitsEnd] >= '0' && line[digitsEnd] <= '9' )
+    {
+        ++digitsEnd;
+    }
     line.replace( digitsStart, digitsEnd - digitsStart, std::to_string( value ) );
     return line;
 }
@@ -615,7 +708,10 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
             {
                 const std::size_t est  = std::size_t( double( honest.size() + noteBytes ) / kBytesPerTokenDefault + 0.5 );
                 std::string       next = withHeaderField( honest, " est_tokens=", est );
-                if( next == honest ) break;
+                if( next == honest )
+                {
+                    break;
+                }
                 honest = std::move( next );
             }
             std::fwrite( honest.data(), 1, honest.size(), out );

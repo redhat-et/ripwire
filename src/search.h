@@ -93,11 +93,20 @@ struct TriQuery
 // Flattens nested Ands so the evaluator sees one level. Sound: result is true iff BOTH inputs are true.
 inline TriQuery andOf( TriQuery a, TriQuery b )
 {
-    if( a.op == TriQuery::Op::None || b.op == TriQuery::Op::None ) return TriQuery::none();
-    if( a.op == TriQuery::Op::All ) return b;
-    if( b.op == TriQuery::Op::All ) return a;
+    if( a.op == TriQuery::Op::None || b.op == TriQuery::Op::None )
+    {
+        return TriQuery::none();
+    }
+    if( a.op == TriQuery::Op::All )
+    {
+        return b;
+    }
+    if( b.op == TriQuery::Op::All )
+    {
+        return a;
+    }
     TriQuery q; q.op = TriQuery::Op::And;
-    auto absorb = [ &q ]( TriQuery& x ) { if( x.op == TriQuery::Op::And ) for( auto& k : x.kids ) q.kids.push_back( std::move( k ) ); else q.kids.push_back( std::move( x ) ); };
+    auto absorb = [ &q ]( TriQuery& x ) { if( x.op == TriQuery::Op::And ) { for( auto& k : x.kids ) { q.kids.push_back( std::move( k ) ); } } else { q.kids.push_back( std::move( x ) ); } };
     absorb( a ); absorb( b );
     return q;
 }
@@ -106,11 +115,20 @@ inline TriQuery andOf( TriQuery a, TriQuery b )
 // Ors. Sound: result is true iff EITHER input is true — so an ALL child makes the whole OR unconstrained.
 inline TriQuery orOf( TriQuery a, TriQuery b )
 {
-    if( a.op == TriQuery::Op::All || b.op == TriQuery::Op::All ) return TriQuery::all();
-    if( a.op == TriQuery::Op::None ) return b;
-    if( b.op == TriQuery::Op::None ) return a;
+    if( a.op == TriQuery::Op::All || b.op == TriQuery::Op::All )
+    {
+        return TriQuery::all();
+    }
+    if( a.op == TriQuery::Op::None )
+    {
+        return b;
+    }
+    if( b.op == TriQuery::Op::None )
+    {
+        return a;
+    }
     TriQuery q; q.op = TriQuery::Op::Or;
-    auto absorb = [ &q ]( TriQuery& x ) { if( x.op == TriQuery::Op::Or ) for( auto& k : x.kids ) q.kids.push_back( std::move( k ) ); else q.kids.push_back( std::move( x ) ); };
+    auto absorb = [ &q ]( TriQuery& x ) { if( x.op == TriQuery::Op::Or ) { for( auto& k : x.kids ) { q.kids.push_back( std::move( k ) ); } } else { q.kids.push_back( std::move( x ) ); } };
     absorb( a ); absorb( b );
     return q;
 }
@@ -119,9 +137,15 @@ inline TriQuery orOf( TriQuery a, TriQuery b )
 // constraint a known literal contributes. s shorter than 3 bytes carries no trigram ⇒ ALL (no constraint).
 inline TriQuery triQueryOfString( const std::string& s )
 {
-    if( s.size() < 3 ) return TriQuery::all();
+    if( s.size() < 3 )
+    {
+        return TriQuery::all();
+    }
     TriQuery q = TriQuery::all();
-    for( std::size_t i = 0; i + 3 <= s.size(); ++i ) q = andOf( std::move( q ), TriQuery::trigram( triAt( s, i ) ) );
+    for( std::size_t i = 0; i + 3 <= s.size(); ++i )
+    {
+        q = andOf( std::move( q ), TriQuery::trigram( triAt( s, i ) ) );
+    }
     return q;
 }
 
@@ -130,9 +154,15 @@ inline TriQuery triQueryOfString( const std::string& s )
 // the whole OR unconstrained (sound: a short alt can match with no trigram evidence). Empty set = NONE.
 inline TriQuery triQueryOfStringSet( const std::vector<std::string>& set )
 {
-    if( set.empty() ) return TriQuery::none();
+    if( set.empty() )
+    {
+        return TriQuery::none();
+    }
     TriQuery q = TriQuery::none();
-    for( const std::string& s : set ) q = orOf( std::move( q ), triQueryOfString( s ) );
+    for( const std::string& s : set )
+    {
+        q = orOf( std::move( q ), triQueryOfString( s ) );
+    }
     return q;
 }
 
@@ -168,10 +198,23 @@ inline bool normSet( std::vector<std::string>& v, std::size_t cap )
 // (sound) but stop tracking exact strings. prefix/suffix are seeded from the (now-frozen) exact set first.
 inline void dropExact( RegexInfo& r )
 {
-    if( !r.exactKnown ) return;
+    if( !r.exactKnown )
+    {
+        return;
+    }
     r.match  = andOf( std::move( r.match ), triQueryOfStringSet( r.exact ) );
-    r.prefix = r.exact;  normSet( r.prefix, kMaxAffixSet );  if( r.prefix.size() > kMaxAffixSet ) r.prefix.clear();
-    r.suffix = r.exact;  normSet( r.suffix, kMaxAffixSet );  if( r.suffix.size() > kMaxAffixSet ) r.suffix.clear();
+    r.prefix = r.exact;
+    normSet( r.prefix, kMaxAffixSet );
+    if( r.prefix.size() > kMaxAffixSet )
+    {
+        r.prefix.clear();
+    }
+    r.suffix = r.exact;
+    normSet( r.suffix, kMaxAffixSet );
+    if( r.suffix.size() > kMaxAffixSet )
+    {
+        r.suffix.clear();
+    }
     r.exact.clear();
     r.exactKnown = false;
 }
@@ -187,7 +230,10 @@ inline RegexInfo riEmpty()
 // A literal exact string (a run of ordinary chars). exact = {s}; the rest derive in the concat/finish step.
 inline RegexInfo riLiteral( const std::string& s )
 {
-    if( s.empty() ) return riEmpty();
+    if( s.empty() )
+    {
+        return riEmpty();
+    }
     RegexInfo r; r.exactKnown = true; r.exact = { s }; r.canEmpty = false; return r;
 }
 
@@ -202,7 +248,10 @@ inline RegexInfo riAnyChar()
 // set of 1-char strings — composes through concatenation to build cross-product trigrams at the seams.
 inline RegexInfo riCharSet( std::vector<std::string> oneChar )
 {
-    if( !normSet( oneChar, kMaxExactSet ) || oneChar.size() > kMaxExactSet ) return riAnyChar();
+    if( !normSet( oneChar, kMaxExactSet ) || oneChar.size() > kMaxExactSet )
+    {
+        return riAnyChar();
+    }
     RegexInfo r; r.canEmpty = false; r.exactKnown = true; r.exact = std::move( oneChar ); return r;
 }
 
@@ -225,14 +274,22 @@ inline bool matchesOnlyEmpty( const RegexInfo& r )
 // (e.g. `(ab|cd)(ef|gh)` → abef, abgh, cdef, cdgh, whose trigrams the AND can then require).
 inline bool crossProduct( const std::vector<std::string>& a, const std::vector<std::string>& b, std::vector<std::string>& out )
 {
-    if( a.size() * b.size() > kMaxExactSet ) return false;
+    if( a.size() * b.size() > kMaxExactSet )
+    {
+        return false;
+    }
     out.clear();
     for( const std::string& x : a )
+    {
         for( const std::string& y : b )
         {
-            if( x.size() + y.size() > kMaxExactLen ) return false;
+            if( x.size() + y.size() > kMaxExactLen )
+            {
+                return false;
+            }
             out.push_back( x + y );
         }
+    }
     return normSet( out, kMaxExactSet ) && out.size() <= kMaxExactSet;
 }
 
@@ -242,15 +299,26 @@ inline bool crossProduct( const std::vector<std::string>& a, const std::vector<s
 inline std::vector<std::string> affixCross( const std::vector<std::string>& a, const std::vector<std::string>& b )
 {
     std::vector<std::string> out;
-    if( a.empty() || b.empty() || a.size() * b.size() > kMaxAffixSet ) return out;   // empty ⇒ caller keeps no constraint
+    if( a.empty() || b.empty() || a.size() * b.size() > kMaxAffixSet )
+    {
+        return out; // empty ⇒ caller keeps no constraint
+    }
     for( const std::string& x : a )
+    {
         for( const std::string& y : b )
         {
             std::string s = x + y;
-            if( s.size() > kMaxExactLen ) return {};
+            if( s.size() > kMaxExactLen )
+            {
+                return {};
+            }
             out.push_back( std::move( s ) );
         }
-    if( !normSet( out, kMaxAffixSet ) || out.size() > kMaxAffixSet ) return {};
+    }
+    if( !normSet( out, kMaxAffixSet ) || out.size() > kMaxAffixSet )
+    {
+        return {};
+    }
     return out;
 }
 
@@ -293,7 +361,9 @@ inline RegexInfo riConcat( RegexInfo a, RegexInfo b )
     {
         const std::vector<std::string> seam = affixCross( a.suffix, b.prefix );
         if( !seam.empty() )
+        {
             r.match = andOf( std::move( r.match ), triQueryOfStringSet( seam ) );
+        }
     }
 
     // outer prefix: the front of x·y is x's front; y's front also reaches the front ONLY when x is pure ε
@@ -302,11 +372,23 @@ inline RegexInfo riConcat( RegexInfo a, RegexInfo b )
     if( matchesOnlyEmpty( a ) )
     {
         std::vector<std::string> pre = a.prefix;
-        for( const std::string& s : b.prefix ) pre.push_back( s );
-        if( normSet( pre, kMaxAffixSet ) && pre.size() <= kMaxAffixSet ) r.prefix = std::move( pre );
-        else r.prefix.clear();
+        for( const std::string& s : b.prefix )
+        {
+            pre.push_back( s );
+        }
+        if( normSet( pre, kMaxAffixSet ) && pre.size() <= kMaxAffixSet )
+        {
+            r.prefix = std::move( pre );
+        }
+        else
+        {
+            r.prefix.clear();
+        }
     }
-    else r.prefix = a.prefix;
+    else
+    {
+        r.prefix = a.prefix;
+    }
 
     // outer suffix: symmetric — y's suffix is the suffix of x·y; x's suffix also reaches the end ONLY when y
     // is pure ε. Otherwise (e.g. y = `.*`), x's suffix must NOT propagate (the bug `Foo.*Bar` ⇒ false
@@ -314,11 +396,23 @@ inline RegexInfo riConcat( RegexInfo a, RegexInfo b )
     if( matchesOnlyEmpty( b ) )
     {
         std::vector<std::string> suf = b.suffix;
-        for( const std::string& s : a.suffix ) suf.push_back( s );
-        if( normSet( suf, kMaxAffixSet ) && suf.size() <= kMaxAffixSet ) r.suffix = std::move( suf );
-        else r.suffix.clear();
+        for( const std::string& s : a.suffix )
+        {
+            suf.push_back( s );
+        }
+        if( normSet( suf, kMaxAffixSet ) && suf.size() <= kMaxAffixSet )
+        {
+            r.suffix = std::move( suf );
+        }
+        else
+        {
+            r.suffix.clear();
+        }
     }
-    else r.suffix = b.suffix;
+    else
+    {
+        r.suffix = b.suffix;
+    }
 
     return r;
 }
@@ -335,7 +429,10 @@ inline RegexInfo riAlternate( RegexInfo a, RegexInfo b )
     if( a.exactKnown && b.exactKnown )
     {
         std::vector<std::string> ex = a.exact;
-        for( const std::string& s : b.exact ) ex.push_back( s );
+        for( const std::string& s : b.exact )
+        {
+            ex.push_back( s );
+        }
         if( normSet( ex, kMaxExactSet ) && ex.size() <= kMaxExactSet )
         {
             r.exactKnown = true;
@@ -357,16 +454,34 @@ inline RegexInfo riAlternate( RegexInfo a, RegexInfo b )
     // prefix union (drop to "no constraint" on overflow — sound)
     {
         std::vector<std::string> pre = a.prefix;
-        for( const std::string& s : b.prefix ) pre.push_back( s );
-        if( a.prefix.empty() || b.prefix.empty() || !normSet( pre, kMaxAffixSet ) || pre.size() > kMaxAffixSet ) r.prefix.clear();
-        else r.prefix = std::move( pre );
+        for( const std::string& s : b.prefix )
+        {
+            pre.push_back( s );
+        }
+        if( a.prefix.empty() || b.prefix.empty() || !normSet( pre, kMaxAffixSet ) || pre.size() > kMaxAffixSet )
+        {
+            r.prefix.clear();
+        }
+        else
+        {
+            r.prefix = std::move( pre );
+        }
     }
     // suffix union
     {
         std::vector<std::string> suf = a.suffix;
-        for( const std::string& s : b.suffix ) suf.push_back( s );
-        if( a.suffix.empty() || b.suffix.empty() || !normSet( suf, kMaxAffixSet ) || suf.size() > kMaxAffixSet ) r.suffix.clear();
-        else r.suffix = std::move( suf );
+        for( const std::string& s : b.suffix )
+        {
+            suf.push_back( s );
+        }
+        if( a.suffix.empty() || b.suffix.empty() || !normSet( suf, kMaxAffixSet ) || suf.size() > kMaxAffixSet )
+        {
+            r.suffix.clear();
+        }
+        else
+        {
+            r.suffix = std::move( suf );
+        }
     }
     return r;
 }
@@ -395,7 +510,9 @@ inline RegexInfo riQuest( RegexInfo /*child*/ )   // a? : zero-or-one ⇒ option
 inline TriQuery finishQuery( RegexInfo r )
 {
     if( r.exactKnown )
+    {
         return andOf( std::move( r.match ), triQueryOfStringSet( r.exact ) );
+    }
     return std::move( r.match );
 }
 
@@ -418,7 +535,10 @@ public:
         pos_ = 0;
         RegexInfo r = parseAlt();
         // trailing unparsed input (shouldn't happen for valid regex) ⇒ be safe
-        if( pos_ != s_.size() ) return TriQuery::all();
+        if( pos_ != s_.size() )
+        {
+            return TriQuery::all();
+        }
         return finishQuery( std::move( r ) );
     }
 
@@ -452,7 +572,10 @@ private:
             RegexInfo piece = parseRepeat();
             acc = any ? riConcat( std::move( acc ), std::move( piece ) ) : std::move( piece );
             any = true;
-            if( pos_ == before ) break;   // no progress on malformed input (e.g. unterminated `a{2,`): stop —
+            if( pos_ == before )
+            {
+                break; // no progress on malformed input (e.g. unterminated `a{2,`): stop —
+            }
                                           // analyze() then sees pos_ != size and returns ALL (sound full-scan).
         }
         return any ? acc : riEmpty();
@@ -461,7 +584,10 @@ private:
     RegexInfo parseRepeat()
     {
         RegexInfo atom = parseAtom();
-        if( eof() ) return atom;
+        if( eof() )
+        {
+            return atom;
+        }
         const char c = peek();
         if( c == '*' ) { next(); return riStar(  std::move( atom ) ); }
         if( c == '+' ) { next(); return riPlus(  std::move( atom ) ); }
@@ -475,10 +601,23 @@ private:
             long lo = 0; bool sawLo = false;
             while( !eof() && std::isdigit( (unsigned char)peek() ) ) { lo = lo * 10 + ( next() - '0' ); sawLo = true; }
             // skip to closing '}' (we only need lo's zero-ness)
-            while( !eof() && peek() != '}' ) next();
-            if( !eof() && peek() == '}' ) next();
-            else { pos_ = save; return atom; }           // malformed → treat '{' as a literal atom already parsed
-            if( sawLo && lo >= 1 ) return riPlus( std::move( atom ) );   // ≥1 mandatory copy
+            while( !eof() && peek() != '}' )
+            {
+                next();
+            }
+            if( !eof() && peek() == '}' )
+            {
+                next();
+            }
+            else
+            {
+                pos_ = save;
+                return atom;
+            } // malformed → treat '{' as a literal atom already parsed
+            if( sawLo && lo >= 1 )
+            {
+                return riPlus( std::move( atom ) ); // ≥1 mandatory copy
+            }
             return riQuest( std::move( atom ) );                         // 0 mandatory copies ⇒ optional
         }
         return atom;
@@ -497,28 +636,55 @@ private:
                 // ε (anchor-like) — sound, since we can't rely on its content appearing literally.
                 // Consume to the matching ')'.
                 int depth = 1; next();                   // consume '?'
-                while( !eof() && depth > 0 ) { char d = next(); if( d == '(' ) ++depth; else if( d == ')' ) --depth; else if( d == '\\' && !eof() ) next(); }
+                while( !eof() && depth > 0 )
+                {
+                    char d = next();
+                    if( d == '(' ) { ++depth; }
+                    else if( d == ')' ) { --depth; }
+                    else if( d == '\\' && !eof() )
+                    {
+                        next();
+                    }
+                }
                 return riAnchor();
             }
             RegexInfo inner = parseAlt();
-            if( !eof() && peek() == ')' ) next();        // consume ')'
+            if( !eof() && peek() == ')' )
+            {
+                next(); // consume ')'
+            }
             return inner;
         }
-        if( c == '[' ) return parseClass();
+        if( c == '[' )
+        {
+            return parseClass();
+        }
         if( c == '.' ) { next(); return riAnyChar(); }
         if( c == '^' || c == '$' ) { next(); return riAnchor(); }
         if( c == '\\' )
         {
             next();                                      // consume '\'
-            if( eof() ) return riAnchor();
+            if( eof() )
+            {
+                return riAnchor();
+            }
             const char e = next();
             // word/space/digit classes and boundaries → unknown char or anchor (sound)
-            if( e == 'b' || e == 'B' || e == 'A' || e == 'Z' || e == 'z' ) return riAnchor();
-            if( e == 'w' || e == 'W' || e == 'd' || e == 'D' || e == 's' || e == 'S' ) return riAnyChar();
+            if( e == 'b' || e == 'B' || e == 'A' || e == 'Z' || e == 'z' )
+            {
+                return riAnchor();
+            }
+            if( e == 'w' || e == 'W' || e == 'd' || e == 'D' || e == 's' || e == 'S' )
+            {
+                return riAnyChar();
+            }
             // an escaped metacharacter / ordinary char → that literal byte
             return riLiteral( std::string( 1, unescape( e ) ) );
         }
-        if( c == ')' || c == '|' ) return riEmpty();     // shouldn't reach here (caller guards), be safe
+        if( c == ')' || c == '|' )
+        {
+            return riEmpty(); // shouldn't reach here (caller guards), be safe
+        }
         // ordinary literal char — but greedily absorb a RUN of ordinary chars NOT followed by a quantifier
         // that would bind only the last char. We must stop the run before a char that has a quantifier,
         // because `abc*` means `ab` then `c*` (the * binds only `c`). So peek the NEXT char's quantifier.
@@ -526,13 +692,22 @@ private:
         while( !eof() )
         {
             const char ch = peek();
-            if( std::strchr( ".[](){}|^$\\*+?", ch ) != nullptr ) break;   // a metachar ends the literal run
+            if( std::strchr( ".[](){}|^$\\*+?", ch ) != nullptr )
+            {
+                break; // a metachar ends the literal run
+            }
             // if the char AFTER ch is a quantifier, ch must be its own atom — stop the run before ch
             // (unless run is empty, in which case ch IS this atom and we let the run hold just ch).
             const bool nextIsQuant = ( pos_ + 1 < s_.size() ) && std::strchr( "*+?{", s_[ pos_ + 1 ] ) != nullptr;
-            if( nextIsQuant && !run.empty() ) break;
+            if( nextIsQuant && !run.empty() )
+            {
+                break;
+            }
             run += ch; next();
-            if( nextIsQuant ) break;                      // ch is a single-char atom that a quantifier will bind
+            if( nextIsQuant )
+            {
+                break; // ch is a single-char atom that a quantifier will bind
+            }
         }
         return riLiteral( run );
     }
@@ -545,8 +720,25 @@ private:
         if( !eof() && peek() == '^' )                    // negated class — unknown byte, sound
         {
             // consume to closing ']'
-            while( !eof() && peek() != ']' ) { if( peek() == '\\' ) { next(); if( !eof() ) next(); } else next(); }
-            if( !eof() ) next();
+            while( !eof() && peek() != ']' )
+            {
+                if( peek() == '\\' )
+                {
+                    next();
+                    if( !eof() )
+                    {
+                        next();
+                    }
+                }
+                else
+                {
+                    next();
+                }
+            }
+            if( !eof() )
+            {
+                next();
+            }
             return riAnyChar();
         }
         std::vector<std::string> chars;
@@ -555,19 +747,43 @@ private:
         {
             char lo;
             if( peek() == '\\' ) { next(); if( eof() ) { degrade = true; break; } char e = next(); if( std::strchr( "wWdDsS", e ) ) { degrade = true; } lo = unescape( e ); }
-            else lo = next();
+            else
+            {
+                lo = next();
+            }
             if( !eof() && peek() == '-' && pos_ + 1 < s_.size() && s_[ pos_ + 1 ] != ']' )   // a range lo-hi
             {
                 next();                                  // consume '-'
                 char hi = ( peek() == '\\' ) ? ( next(), unescape( next() ) ) : next();
-                if( hi < lo || ( hi - lo ) > 6 ) degrade = true;            // wide range ⇒ don't enumerate (ALL)
-                else for( char ch = lo; ch <= hi; ++ch ) chars.push_back( std::string( 1, ch ) );
+                if( hi < lo || ( hi - lo ) > 6 )
+                {
+                    degrade = true; // wide range ⇒ don't enumerate (ALL)
+                }
+                else
+                {
+                    for( char ch = lo; ch <= hi; ++ch )
+                    {
+                        chars.push_back( std::string( 1, ch ) );
+                    }
+                }
             }
-            else if( !degrade ) chars.push_back( std::string( 1, lo ) );
-            if( chars.size() > kMaxExactSet ) degrade = true;
+            else if( !degrade )
+            {
+                chars.push_back( std::string( 1, lo ) );
+            }
+            if( chars.size() > kMaxExactSet )
+            {
+                degrade = true;
+            }
         }
-        if( !eof() ) next();                             // consume ']'
-        if( degrade || chars.empty() || chars.size() > kMaxExactSet ) return riAnyChar();
+        if( !eof() )
+        {
+            next(); // consume ']'
+        }
+        if( degrade || chars.empty() || chars.size() > kMaxExactSet )
+        {
+            return riAnyChar();
+        }
         return riCharSet( std::move( chars ) );
     }
 
@@ -597,10 +813,22 @@ inline bool triQueryMatchesText( const TriQuery& q, std::string_view text ) noex
             return text.find( std::string_view( probe, 3 ) ) != std::string_view::npos;
         }
         case TriQuery::Op::And:
-            for( const TriQuery& k : q.kids ) if( !triQueryMatchesText( k, text ) ) return false;
+            for( const TriQuery& k : q.kids )
+            {
+                if( !triQueryMatchesText( k, text ) )
+                {
+                    return false;
+                }
+            }
             return true;
         case TriQuery::Op::Or:
-            for( const TriQuery& k : q.kids ) if(  triQueryMatchesText( k, text ) ) return true;
+            for( const TriQuery& k : q.kids )
+            {
+                if( triQueryMatchesText( k, text ) )
+                {
+                    return true;
+                }
+            }
             return false;
     }
     return true;   // unreachable; ALL (keep the file) is the SOUND default
@@ -622,7 +850,10 @@ inline bool triQueryMatchesText( const TriQuery& q, std::string_view text ) noex
 inline std::uint32_t grepRealLineCount( const std::string& s, const std::vector<std::size_t>& lineStarts ) noexcept
 {
     std::uint32_t lineCount = std::uint32_t( lineStarts.size() );
-    if( lineCount > 0 && lineStarts[ lineCount - 1 ] == s.size() && !s.empty() && s.back() == '\n' ) --lineCount;
+    if( lineCount > 0 && lineStarts[lineCount - 1] == s.size() && !s.empty() && s.back() == '\n' )
+    {
+        --lineCount;
+    }
     return lineCount;
 }
 
@@ -645,28 +876,49 @@ inline std::string grepLineRangeText( const std::string& s, const std::vector<st
     // was emitted as a lone 0xE2, which is not valid UTF-8 and killed `xmllint --noout` (G4) from inside
     // CDATA. `be == s.size()` is a boundary by definition, hence the `be < s.size()` guard.
     std::size_t bs = byteStart, be = byteEnd;
-    if( be > s.size() ) be = s.size();          // defensive (shouldn't happen: lineStarts derived from s)
-    while( bs < be && ( static_cast<unsigned char>( s[bs] ) & 0xC0 ) == 0x80 ) ++bs;         // skip into the first whole codepoint
-    while( be > bs && be < s.size() && ( static_cast<unsigned char>( s[be] ) & 0xC0 ) == 0x80 ) --be;   // cut only ON a boundary
+    if( be > s.size() )
+    {
+        be = s.size(); // defensive (shouldn't happen: lineStarts derived from s)
+    }
+    while( bs < be && ( static_cast<unsigned char>( s[bs] ) & 0xC0 ) == 0x80 )
+    {
+        ++bs; // skip into the first whole codepoint
+    }
+    while( be > bs && be < s.size() && ( static_cast<unsigned char>( s[be] ) & 0xC0 ) == 0x80 )
+    {
+        --be; // cut only ON a boundary
+    }
     return s.substr( bs, be - bs );
 }
 
 inline std::string grepContextSlice( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line, int count, bool before )
 {
-    if( count <= 0 ) return {};
+    if( count <= 0 )
+    {
+        return {};
+    }
     const std::uint32_t lineCount = grepRealLineCount( s, lineStarts );
-    if( line < 1 || line > lineCount ) return {};   // degrade: out-of-range hit line ⇒ no context, never OOB
+    if( line < 1 || line > lineCount )
+    {
+        return {}; // degrade: out-of-range hit line ⇒ no context, never OOB
+    }
 
     std::uint32_t lo, hi;   // inclusive 1-based line range to emit
     if( before )
     {
-        if( line == 1 ) return {};                                    // clamp at file start: 0 before-lines
+        if( line == 1 )
+        {
+            return {}; // clamp at file start: 0 before-lines
+        }
         hi = line - 1;
         lo = ( hi > std::uint32_t( count ) ) ? hi - std::uint32_t( count ) + 1 : 1;
     }
     else
     {
-        if( line >= lineCount ) return {};                            // clamp at file end: 0 after-lines
+        if( line >= lineCount )
+        {
+            return {}; // clamp at file end: 0 after-lines
+        }
         lo = line + 1;
         const std::uint32_t want = lo + std::uint32_t( count ) - 1;
         hi = ( want < lineCount ) ? want : lineCount;
@@ -684,12 +936,18 @@ inline constexpr std::size_t kGrepMatchedLineMaxBytes = 512;
 inline std::string grepMatchedLine( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line )
 {
     const std::uint32_t lineCount = grepRealLineCount( s, lineStarts );
-    if( line < 1 || line > lineCount ) return {};
+    if( line < 1 || line > lineCount )
+    {
+        return {};
+    }
     std::string text = grepLineRangeText( s, lineStarts, lineCount, line, line );
     if( text.size() > kGrepMatchedLineMaxBytes )
     {
         std::size_t cut = kGrepMatchedLineMaxBytes;
-        while( cut > 0 && ( static_cast<unsigned char>( text[cut] ) & 0xC0 ) == 0x80 ) --cut;   // never split a codepoint
+        while( cut > 0 && ( static_cast<unsigned char>( text[cut] ) & 0xC0 ) == 0x80 )
+        {
+            --cut; // never split a codepoint
+        }
         text.resize( cut );
     }
     return text;
@@ -721,7 +979,7 @@ inline void grepScanText( const std::string& text, const std::string& pat,
     std::uint32_t line    = 1;
     std::size_t   scanned = 0;
     const auto    lineAt  = [ & ]( std::size_t pos ) noexcept
-    { for( std::size_t i = scanned; i < pos; ++i ) if( text[i] == '\n' ) ++line; scanned = pos; return line; };
+    { for( std::size_t i = scanned; i < pos; ++i ) { if( text[i] == '\n' ) { ++line; } } scanned = pos; return line; };
 
     if( re != nullptr )
     {
@@ -736,7 +994,10 @@ inline void grepScanText( const std::string& text, const std::string& pat,
             {
                 const std::size_t pos = std::size_t( it->position() );
                 out.push_back( { lineAt( pos ), std::uint32_t( pos ) } );
-                if( out.size() >= hitCapCount ) break;
+                if( out.size() >= hitCapCount )
+                {
+                    break;
+                }
             }
         }
         catch( const std::regex_error& )
@@ -750,7 +1011,10 @@ inline void grepScanText( const std::string& text, const std::string& pat,
         while( pos != std::string::npos )
         {
             out.push_back( { lineAt( pos ), std::uint32_t( pos ) } );
-            if( out.size() >= hitCapCount ) break;
+            if( out.size() >= hitCapCount )
+            {
+                break;
+            }
             pos = text.find( pat, pos + 1 );
         }
     }
@@ -786,15 +1050,27 @@ inline std::optional<std::string> nonPortableRegexEscape( const std::string& pat
 {
     for( std::size_t i = 0; i + 1 < pat.size(); ++i )
     {
-        if( pat[i] != '\\' ) continue;
+        if( pat[i] != '\\' )
+        {
+            continue;
+        }
 
         const char escaped = pat[ i + 1 ];
         ++i;                                                                          // consume it: `\\Q` is an escaped backslash then a plain Q, not an escaped Q
         const bool isAsciiLetter =    ( escaped >= 'a' && escaped <= 'z' )
                                    || ( escaped >= 'A' && escaped <= 'Z' );
-        if( !isAsciiLetter )                                                         continue;
-        if( kPortableRegexLetterEscapes.find( escaped ) != std::string_view::npos )   continue;
-        if( kPortableRegexPrefixEscapes.find( escaped ) != std::string_view::npos )   continue;
+        if( !isAsciiLetter )
+        {
+            continue;
+        }
+        if( kPortableRegexLetterEscapes.find( escaped ) != std::string_view::npos )
+        {
+            continue;
+        }
+        if( kPortableRegexPrefixEscapes.find( escaped ) != std::string_view::npos )
+        {
+            continue;
+        }
 
         return   std::string( "unsupported escape sequence '\\" ) + escaped + "' — the portable ECMAScript escapes are "
                  "\\b \\B \\d \\D \\s \\S \\w \\W \\f \\n \\r \\t \\v \\cX \\xHH \\uHHHH (some C++ standard libraries accept '\\"
@@ -855,22 +1131,46 @@ struct RegexQuantifier { bool isPresent; bool isUnbounded; std::size_t lengthCou
 // that is not a well-formed '{' interval is not a quantifier at all, just a literal brace.
 inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at )
 {
-    if( at >= pat.size() )                            return { false, false, 0 };
-    if( pat[ at ] == '*' || pat[ at ] == '+' )        return { true,  true,  1 };
-    if( pat[ at ] == '?' )                            return { true,  false, 1 };
-    if( pat[ at ] != '{' )                            return { false, false, 0 };
+    if( at >= pat.size() )
+    {
+        return { false, false, 0 };
+    }
+    if( pat[at] == '*' || pat[at] == '+' )
+    {
+        return { true, true, 1 };
+    }
+    if( pat[at] == '?' )
+    {
+        return { true, false, 1 };
+    }
+    if( pat[at] != '{' )
+    {
+        return { false, false, 0 };
+    }
 
     std::size_t cursor         = at + 1;
     std::size_t lowerDigitCount = 0;
     while( cursor < pat.size() && pat[ cursor ] >= '0' && pat[ cursor ] <= '9' ) { ++cursor; ++lowerDigitCount; }
-    if( lowerDigitCount == 0 )                              return { false, false, 0 };
-    if( cursor < pat.size() && pat[ cursor ] == '}' )       return { true, false, ( cursor + 1 ) - at };   // {n} — exact, bounded
-    if( cursor >= pat.size() || pat[ cursor ] != ',' )      return { false, false, 0 };
+    if( lowerDigitCount == 0 )
+    {
+        return { false, false, 0 };
+    }
+    if( cursor < pat.size() && pat[cursor] == '}' )
+    {
+        return { true, false, ( cursor + 1 ) - at }; // {n} — exact, bounded
+    }
+    if( cursor >= pat.size() || pat[cursor] != ',' )
+    {
+        return { false, false, 0 };
+    }
 
     ++cursor;
     std::size_t upperDigitCount = 0;
     while( cursor < pat.size() && pat[ cursor ] >= '0' && pat[ cursor ] <= '9' ) { ++cursor; ++upperDigitCount; }
-    if( cursor >= pat.size() || pat[ cursor ] != '}' )      return { false, false, 0 };
+    if( cursor >= pat.size() || pat[cursor] != '}' )
+    {
+        return { false, false, 0 };
+    }
 
     return { true, upperDigitCount == 0, ( cursor + 1 ) - at };                                           // {n,} unbounded, {n,m} bounded
 }
@@ -914,42 +1214,71 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
 
         // the two contexts where a quantifier character is just a character
         if( c == '\\' )     { ++i; continue; }                                         // '\+' is a literal plus
-        if( isInsideClass ) { if( c == ']' ) isInsideClass = false; continue; }         // '[a+]' is a literal plus
+        if( isInsideClass )
+        {
+            if( c == ']' )
+            {
+                isInsideClass = false;
+            }
+            continue;
+        } // '[a+]' is a literal plus
         if( c == '[' )      { isInsideClass = true; continue; }
 
         // group open / close — the close is where the whole verdict is made
         if( c == '(' ) { hasQuantifierInsideGroup.push_back( 0 ); i += regexGroupModifierLength( pat, i ); continue; }
         if( c == ')' )
         {
-            if( hasQuantifierInsideGroup.empty() ) continue;                            // unbalanced: the compile probe below owns that error
+            if( hasQuantifierInsideGroup.empty() )
+            {
+                continue; // unbalanced: the compile probe below owns that error
+            }
 
             const bool isRepeatingInside = hasQuantifierInsideGroup.back() != 0;
             hasQuantifierInsideGroup.pop_back();
             const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
 
             if( quant.isPresent && quant.isUnbounded && isRepeatingInside )
+            {
                 return catastrophicRegexMessage( pat[ i + 1 ] );
+            }
 
             // the group is now an ATOM of its parent: a quantifier anywhere inside it — or ON it — is a
             // quantifier inside the parent too, which is what makes ((a+))+, ((a)+)+ and ((a)?)+ visible
             if( !hasQuantifierInsideGroup.empty() && ( isRepeatingInside || quant.isPresent ) )
+            {
                 hasQuantifierInsideGroup.back() = 1;
-            if( quant.isPresent ) i += quant.lengthCount;                               // step over the quantifier we just judged
+            }
+            if( quant.isPresent )
+            {
+                i += quant.lengthCount; // step over the quantifier we just judged
+            }
             continue;
         }
 
         // a plain quantifier: it marks the innermost enclosing group, if any (top-level repetition is fine)
         const RegexQuantifier quant = regexQuantifierAt( pat, i );
-        if( quant.isPresent && !hasQuantifierInsideGroup.empty() ) hasQuantifierInsideGroup.back() = 1;
-        if( quant.isPresent ) i += quant.lengthCount - 1;
+        if( quant.isPresent && !hasQuantifierInsideGroup.empty() )
+        {
+            hasQuantifierInsideGroup.back() = 1;
+        }
+        if( quant.isPresent )
+        {
+            i += quant.lengthCount - 1;
+        }
     }
     return std::nullopt;
 }
 
 inline std::optional<std::string> regexCompileError( const std::string& pat )
 {
-    if( std::optional<std::string> portability = nonPortableRegexEscape( pat ) ) return portability;   // L5: one verdict on every platform, so it runs first
-    if( std::optional<std::string> bomb        = catastrophicRegexConstruct( pat ) ) return bomb;      // M2: likewise — decided from the text, before any engine sees it
+    if( std::optional<std::string> portability = nonPortableRegexEscape( pat ) )
+    {
+        return portability; // L5: one verdict on every platform, so it runs first
+    }
+    if( std::optional<std::string> bomb = catastrophicRegexConstruct( pat ) )
+    {
+        return bomb; // M2: likewise — decided from the text, before any engine sees it
+    }
 
     try                                { const std::regex probe( pat, std::regex::ECMAScript | std::regex::optimize ); (void)probe; }
     catch( const std::regex_error& e ) { return std::string( e.what() ); }
@@ -1000,12 +1329,18 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
 {
     const std::uint32_t fileCount   = std::uint32_t( ing.files.size() );
     const std::size_t   budgetCount = kGrepCollectionBudget;
-    if( fileCount == 0 ) return {};
+    if( fileCount == 0 )
+    {
+        return {};
+    }
 
     // a pattern that doesn't compile is a user error, not a degrade — the CLI seam refuses it before we are
     // called (regexCompileError above). Kept as a belt-and-braces early REJECT for library/MCP callers that
     // did not ask; each worker compiles its own copy so no std::regex object is shared.
-    if( regex && regexCompileError( pat ) ) return {};   // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes
+    if( regex && regexCompileError( pat ) )
+    {
+        return {}; // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes
+    }
 
     // the sound regex→trigram query, computed once and evaluated per file (read-only across workers)
     const TriQuery prefilterQuery = ( regex && !noPrefilter ) ? RegexAnalyzer( pat ).analyze() : TriQuery::all();
@@ -1025,8 +1360,14 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
                 text.clear();
                 // unreadable file ⇒ degrade to empty bytes and keep going (what the index build did too:
                 // it left an empty `contents` entry rather than dropping the file from the corpus).
-                if( !docparse::detail::readWholeFile( diskPath( ing, f ), text ) ) text.clear();
-                if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) ) continue;
+                if( !docparse::detail::readWholeFile( diskPath( ing, f ), text ) )
+                {
+                    text.clear();
+                }
+                if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) )
+                {
+                    continue;
+                }
                 grepScanText( text, pat, regex ? &reLocal : nullptr, budgetCount, perFileSites[f] );
             }
         }
@@ -1039,24 +1380,38 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
         // symmetric bare scope: the workers live exactly as long as the scan
         const unsigned    hwThreadCount = std::thread::hardware_concurrency();
         const std::size_t workerCount   = std::min<std::size_t>( { hwThreadCount ? hwThreadCount : 1u, fileCount, 16 } );
-        if( workerCount <= 1 ) fileWorker();
+        if( workerCount <= 1 )
+        {
+            fileWorker();
+        }
         else
         {
             std::vector<std::thread> workers;
             workers.reserve( workerCount );
-            for( std::size_t w = 0; w < workerCount; ++w ) workers.emplace_back( fileWorker );
-            for( std::thread& worker : workers ) worker.join();
+            for( std::size_t w = 0; w < workerCount; ++w )
+            {
+                workers.emplace_back( fileWorker );
+            }
+            for( std::thread& worker : workers )
+            {
+                worker.join();
+            }
         }
     }
 
     // ── pass 2: apply the budget in ascending fileId order (thread-order-independent) ──────────────────
     std::vector<GrepRawHit> raw;
     for( std::uint32_t f = 0; f < fileCount && raw.size() < budgetCount; ++f )
+    {
         for( const GrepMatchSite& site : perFileSites[f] )
         {
             raw.push_back( { f, site.line, site.byteOffset } );
-            if( raw.size() >= budgetCount ) break;
+            if( raw.size() >= budgetCount )
+            {
+                break;
+            }
         }
+    }
 
     // §P11.1: the canonical order is TIER-then-path (see this function's header comment). The key is
     // materialized ONCE PER FILE, not evaluated inside the comparator: pathTierOf() lowercases an extension
@@ -1068,22 +1423,43 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     hitFileIds.reserve( fileCount );
     {
         std::vector<char> fileHasHitsForRank( fileCount, 0 );
-        for( const GrepRawHit& h : raw ) fileHasHitsForRank[ h.fileId ] = 1;
-        for( std::uint32_t f = 0; f < fileCount; ++f ) if( fileHasHitsForRank[f] ) hitFileIds.push_back( f );
+        for( const GrepRawHit& h : raw )
+        {
+            fileHasHitsForRank[h.fileId] = 1;
+        }
+        for( std::uint32_t f = 0; f < fileCount; ++f )
+        {
+            if( fileHasHitsForRank[f] )
+            {
+                hitFileIds.push_back( f );
+            }
+        }
     }
     std::sort( hitFileIds.begin(), hitFileIds.end(), [ & ]( std::uint32_t a, std::uint32_t b )
                {
                    const PathTier ta = pathTierOf( ing.files[a] ), tb = pathTierOf( ing.files[b] );
-                   if( ta != tb ) return ta < tb;
+                   if( ta != tb )
+                   {
+                       return ta < tb;
+                   }
                    return ing.files[a] < ing.files[b];
                } );
     std::vector<std::uint32_t> fileRank( fileCount, UINT32_MAX );
-    for( std::uint32_t rankIndex = 0; rankIndex < std::uint32_t( hitFileIds.size() ); ++rankIndex ) fileRank[ hitFileIds[ rankIndex ] ] = rankIndex;
+    for( std::uint32_t rankIndex = 0; rankIndex < std::uint32_t( hitFileIds.size() ); ++rankIndex )
+    {
+        fileRank[hitFileIds[rankIndex]] = rankIndex;
+    }
 
     std::sort( raw.begin(), raw.end(), [ & ]( const GrepRawHit& a, const GrepRawHit& b )
                {
-                   if( fileRank[ a.fileId ] != fileRank[ b.fileId ] ) return fileRank[ a.fileId ] < fileRank[ b.fileId ];
-                   if( a.line != b.line )                             return a.line < b.line;
+                   if( fileRank[a.fileId] != fileRank[b.fileId] )
+                   {
+                       return fileRank[a.fileId] < fileRank[b.fileId];
+                   }
+                   if( a.line != b.line )
+                   {
+                       return a.line < b.line;
+                   }
                    return a.byteOffset < b.byteOffset;                // total order: two hits on ONE line stay in scan order
                } );
 
@@ -1100,25 +1476,47 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
 inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const GrepRawHit> window, int ctxBefore = 0, int ctxAfter = 0 )
 {
     const std::uint32_t fileCount = std::uint32_t( ing.files.size() );
-    if( fileCount == 0 || window.empty() ) return {};
+    if( fileCount == 0 || window.empty() )
+    {
+        return {};
+    }
     const std::span<const GrepRawHit> raw = window;
 
     // ── pass 3: enclosing-symbol index, built ONLY for the windowed files that actually have hits ──────
     std::vector<char> fileHasHits( fileCount, 0 );
-    for( const GrepRawHit& h : raw ) fileHasHits[ h.fileId ] = 1;
+    for( const GrepRawHit& h : raw )
+    {
+        fileHasHits[h.fileId] = 1;
+    }
     std::vector<std::vector<NodeId>> fileSyms( fileCount );                  // per file, sorted by sigStartByte
-    for( const Symbol& s : ing.symbols ) if( s.fileId < fileCount && fileHasHits[ s.fileId ] ) fileSyms[ s.fileId ].push_back( s.id );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < fileCount && fileHasHits[s.fileId] )
+        {
+            fileSyms[s.fileId].push_back( s.id );
+        }
+    }
     for( std::uint32_t f = 0; f < fileCount; ++f )
+    {
         if( fileHasHits[f] )
+        {
             std::sort( fileSyms[f].begin(), fileSyms[f].end(), [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
+        }
+    }
     const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
     {
         const Symbol* best = nullptr;
         for( NodeId id : fileSyms[f] )
         {
             const Symbol& s = ing.symbols[id];
-            if( s.sigStartByte > off ) break;
-            if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) ) best = &s;
+            if( s.sigStartByte > off )
+            {
+                break;
+            }
+            if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
+            {
+                best = &s;
+            }
         }
         return best;
     };
@@ -1141,13 +1539,25 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
     std::vector<std::size_t> lineStarts;
     const auto ensureFileLoaded = [ & ]( std::uint32_t f )
     {
-        if( f == loadedFileId ) return;
+        if( f == loadedFileId )
+        {
+            return;
+        }
         loadedFileId = f;
         fileText.clear();
-        if( !docparse::detail::readWholeFile( diskPath( ing, f ), fileText ) ) fileText.clear();   // degrade: no text, never a crash
+        if( !docparse::detail::readWholeFile( diskPath( ing, f ), fileText ) )
+        {
+            fileText.clear(); // degrade: no text, never a crash
+        }
         lineStarts.clear();
         lineStarts.push_back( 0 );
-        for( std::size_t i = 0; i < fileText.size(); ++i ) if( fileText[i] == '\n' ) lineStarts.push_back( i + 1 );
+        for( std::size_t i = 0; i < fileText.size(); ++i )
+        {
+            if( fileText[i] == '\n' )
+            {
+                lineStarts.push_back( i + 1 );
+            }
+        }
     };
 
     std::vector<GrepHit> hits;
@@ -1156,12 +1566,21 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
     {
         const Symbol* e = enclosing( r.fileId, r.byteOffset );
         std::string   chain;
-        if( e ) chain = e->scope.empty() ? e->name : ( e->scope + "::" + e->name );
+        if( e )
+        {
+            chain = e->scope.empty() ? e->name : ( e->scope + "::" + e->name );
+        }
         GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {} };
         ensureFileLoaded( r.fileId );
         h.text = grepMatchedLine( fileText, lineStarts, r.line );
-        if( ctxBefore > 0 ) h.before = grepContextSlice( fileText, lineStarts, r.line, ctxBefore, /*before=*/true );
-        if( ctxAfter  > 0 ) h.after  = grepContextSlice( fileText, lineStarts, r.line, ctxAfter,  /*before=*/false );
+        if( ctxBefore > 0 )
+        {
+            h.before = grepContextSlice( fileText, lineStarts, r.line, ctxBefore, /*before=*/true );
+        }
+        if( ctxAfter > 0 )
+        {
+            h.after = grepContextSlice( fileText, lineStarts, r.line, ctxAfter, /*before=*/false );
+        }
         hits.push_back( std::move( h ) );
     }
     return hits;

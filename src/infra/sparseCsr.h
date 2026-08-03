@@ -47,7 +47,14 @@ namespace csrdetail
     inline constexpr std::align_val_t kAlign{ fastmath::hardware_constructive_interference_size };
 
     template<class U> inline U*   anew( std::size_t n ) { return n ? static_cast<U*>( ::operator new( n * sizeof( U ), kAlign ) ) : nullptr; }
-    template<class U> inline void adel( U* p ) noexcept { if( p ) ::operator delete( p, kAlign ); }
+    template<class U>
+    inline void adel( U* p ) noexcept
+    {
+        if( p )
+        {
+            ::operator delete( p, kAlign );
+        }
+    }
 
     // one SpMV row:  Σ_k val[k] * x[col[k]]   (vectorised FMA over a scalarised gather)
     template<class T>
@@ -69,7 +76,9 @@ namespace csrdetail
         }
 #endif
         for( ; k < n; ++k )
+        {
             acc += val[k] * x[col[k]];
+        }
         return acc;
     }
 
@@ -93,12 +102,16 @@ namespace csrdetail
             {
                 float32x4_t v = vdupq_n_f32( 0.f );
                 for( ; i + 4 <= end; i += 4 )
+                {
                     v = vfmaq_f32( v, vld1q_f32( a + i ), vld1q_f32( b + i ) );
+                }
                 part = vaddvq_f32( v );
             }
 #endif
             for( ; i < end; ++i )
+            {
                 part += a[i] * b[i];
+            }
 
             total += part;   // partials folded in increasing-block order → deterministic
         }
@@ -114,11 +127,15 @@ namespace csrdetail
         {
             const float32x4_t vs = vdupq_n_f32( s );
             for( ; i + 4 <= n; i += 4 )
+            {
                 vst1q_f32( x + i, vmulq_f32( vld1q_f32( x + i ), vs ) );
+            }
         }
 #endif
         for( ; i < n; ++i )
+        {
             x[i] *= s;
+        }
     }
 }
 
@@ -138,7 +155,9 @@ public:
         m_col    = csrdetail::anew<std::uint32_t>( nnz );
         m_val    = csrdetail::anew<T>( nnz );
         if( m_rowOff )
+        {
             std::memset( m_rowOff, 0, ( rows + 1 ) * sizeof( std::uint32_t ) );
+        }
     }
 
     ~sparseCsr()
@@ -214,7 +233,10 @@ public:
                     b2 += m_val[k+6] * x[ m_col[k+6] ];   b3 += m_val[k+7] * x[ m_col[k+7] ];
                 }
                 float acc = ( ( a0 + a1 ) + ( a2 + a3 ) ) + ( ( b0 + b1 ) + ( b2 + b3 ) );
-                for( ; k < e; ++k ) acc += m_val[k] * x[ m_col[k] ];
+                for( ; k < e; ++k )
+                {
+                    acc += m_val[k] * x[m_col[k]];
+                }
                 y[i] = acc;
             }
         }
@@ -249,7 +271,9 @@ inline T dominantEigenvector( const sparseCsr<T>& A, T* x, T tol = T( 1e-6 ), un
     VERIFY( A.rows() == A.cols() );
     const std::size_t N = A.rows();
     if( N == 0 )
+    {
         return T( 0 );
+    }
 
     T* y = csrdetail::anew<T>( N );
 
@@ -278,7 +302,9 @@ inline T dominantEigenvector( const sparseCsr<T>& A, T* x, T tol = T( 1e-6 ), un
             x[i] = nx;
         }
         if( std::sqrt( resid ) < tol )
+        {
             break;
+        }
     }
 
     csrdetail::adel( y );

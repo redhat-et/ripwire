@@ -56,11 +56,17 @@ struct ScipOverlay
             const std::size_t mid = lo + ( hi - lo ) / 2;
             const ScipCover&  c   = coveredFrom[ mid ];
             const bool less = c.from < from || ( c.from == from && std::string_view( c.calleeName ) < calleeName );
-            if( less ) lo = mid + 1; else hi = mid;
+            if( less ) { lo = mid + 1; }
+            else
+            {
+                hi = mid;
+            }
         }
         std::size_t endIdx = lo;
         while( endIdx < coveredFrom.size() && coveredFrom[ endIdx ].from == from && coveredFrom[ endIdx ].calleeName == calleeName )
+        {
             ++endIdx;
+        }
         return { lo, endIdx };
     }
 
@@ -72,8 +78,14 @@ struct ScipOverlay
         {
             const std::size_t mid = lo + ( hi - lo ) / 2;
             const ScipEdge&   e   = preciseEdges[ mid ];
-            if( e.from < from || ( e.from == from && e.to < to ) ) lo = mid + 1;
-            else                                                    hi = mid;
+            if( e.from < from || ( e.from == from && e.to < to ) )
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
         }
         return lo < preciseEdges.size() && preciseEdges[ lo ].from == from && preciseEdges[ lo ].to == to;
     }

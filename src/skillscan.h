@@ -70,7 +70,9 @@ namespace detail
 inline std::string_view trimRight( std::string_view s ) noexcept
 {
     while( !s.empty() && std::isspace( static_cast<unsigned char>( s.back() ) ) )
+    {
         s.remove_suffix( 1 );
+    }
     return s;
 }
 
@@ -221,7 +223,10 @@ inline bool isShownAsData( std::string_view line, std::size_t pos, bool quotesCo
         std::size_t spanStart = 0;
         for( std::size_t i = 0; i < N; ++i )
         {
-            if( line[i] != '`' ) continue;
+            if( line[i] != '`' )
+            {
+                continue;
+            }
             if( !inSpan )
             {
                 inSpan    = true;
@@ -232,7 +237,9 @@ inline bool isShownAsData( std::string_view line, std::size_t pos, bool quotesCo
                 // Closing tick at i: span covers [spanStart, i).
                 // The phrase at [pos, …) is "inside" if pos >= spanStart AND pos < i.
                 if( pos >= spanStart && pos < i )
+                {
                     return true;
+                }
                 inSpan = false;
             }
         }
@@ -246,7 +253,10 @@ inline bool isShownAsData( std::string_view line, std::size_t pos, bool quotesCo
         std::size_t spanStart = 0;
         for( std::size_t i = 0; i < N; ++i )
         {
-            if( line[i] != '"' ) continue;
+            if( line[i] != '"' )
+            {
+                continue;
+            }
             if( !inSpan )
             {
                 inSpan    = true;
@@ -255,7 +265,9 @@ inline bool isShownAsData( std::string_view line, std::size_t pos, bool quotesCo
             else
             {
                 if( pos >= spanStart && pos < i )
+                {
                     return true;
+                }
                 inSpan = false;
             }
         }
@@ -325,14 +337,23 @@ inline std::vector<std::string> parseAllowedTools( const std::vector<std::string
         const std::string& ln = lines[i];
         // Match "allowed-tools: Bash, Read, ..." (or "allowed-tools: [Bash, Read]")
         const std::size_t pos = ln.find( "allowed-tools:" );
-        if( pos == std::string::npos ) continue;
+        if( pos == std::string::npos )
+        {
+            continue;
+        }
 
         std::string rest = ln.substr( pos + 14 );   // after "allowed-tools:"
         // strip leading whitespace and optional [ ]
         std::size_t s = 0;
-        while( s < rest.size() && ( rest[s] == ' ' || rest[s] == '\t' || rest[s] == '[' ) ) ++s;
+        while( s < rest.size() && ( rest[s] == ' ' || rest[s] == '\t' || rest[s] == '[' ) )
+        {
+            ++s;
+        }
         std::size_t e = rest.size();
-        while( e > s && ( rest[e-1] == ' ' || rest[e-1] == '\t' || rest[e-1] == ']' || rest[e-1] == '\r' || rest[e-1] == '\n' ) ) --e;
+        while( e > s && ( rest[e - 1] == ' ' || rest[e - 1] == '\t' || rest[e - 1] == ']' || rest[e - 1] == '\r' || rest[e - 1] == '\n' ) )
+        {
+            --e;
+        }
         rest = rest.substr( s, e - s );
 
         // comma-split
@@ -341,9 +362,18 @@ inline std::vector<std::string> parseAllowedTools( const std::vector<std::string
         while( std::getline( ss, tok, ',' ) )
         {
             std::size_t ts = 0, te = tok.size();
-            while( ts < te && std::isspace( static_cast<unsigned char>( tok[ts] ) ) ) ++ts;
-            while( te > ts && std::isspace( static_cast<unsigned char>( tok[te-1] ) ) ) --te;
-            if( ts < te ) tools.push_back( tok.substr( ts, te - ts ) );
+            while( ts < te && std::isspace( static_cast<unsigned char>( tok[ts] ) ) )
+            {
+                ++ts;
+            }
+            while( te > ts && std::isspace( static_cast<unsigned char>( tok[te - 1] ) ) )
+            {
+                --te;
+            }
+            if( ts < te )
+            {
+                tools.push_back( tok.substr( ts, te - ts ) );
+            }
         }
         break;   // only the first allowed-tools: line matters
     }
@@ -352,7 +382,13 @@ inline std::vector<std::string> parseAllowedTools( const std::vector<std::string
 
 inline bool toolAllowed( const std::vector<std::string>& tools, std::string_view name ) noexcept
 {
-    for( const std::string& t : tools ) if( std::string_view( t ) == name ) return true;
+    for( const std::string& t : tools )
+    {
+        if( std::string_view( t ) == name )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -385,7 +421,10 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
             start = end + 1;
         }
         // If the last character was '\n', we get an empty trailing entry — trim it.
-        if( !lines.empty() && lines.back().empty() ) lines.pop_back();
+        if( !lines.empty() && lines.back().empty() )
+        {
+            lines.pop_back();
+        }
     }
 
     // ── frontmatter state: find the YAML block (first `---` to second `---`) ────────────────────
@@ -436,10 +475,19 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
     const auto isExampleFenceLang = []( std::string_view tag ) noexcept -> bool
     {
         // Normalise: strip leading/trailing whitespace.
-        while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.front() ) ) ) tag.remove_prefix( 1 );
-        while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.back()  ) ) ) tag.remove_suffix( 1 );
+        while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.front() ) ) )
+        {
+            tag.remove_prefix( 1 );
+        }
+        while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.back() ) ) )
+        {
+            tag.remove_suffix( 1 );
+        }
         // Empty tag → bare fence → NOT an example fence (treat as live prose → injection may fire).
-        if( tag.empty() ) return false;
+        if( tag.empty() )
+        {
+            return false;
+        }
         // Recognised data/example markers.
         return tag == "text"    || tag == "example"  || tag == "output"
             || tag == "none"    || tag == "plain"    || tag == "raw"
@@ -471,7 +519,10 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
             lineInFence        = inFence;
             lineInExampleFence = inExampleFence;
             std::string_view lv = ln;
-            while( !lv.empty() && ( lv.front() == ' ' || lv.front() == '\t' ) ) lv.remove_prefix( 1 );
+            while( !lv.empty() && ( lv.front() == ' ' || lv.front() == '\t' ) )
+            {
+                lv.remove_prefix( 1 );
+            }
             if( lv.size() >= 3 && ( lv.compare( 0, 3, "```" ) == 0 || lv.compare( 0, 3, "~~~" ) == 0 ) )
             {
                 if( !inFence )
@@ -557,7 +608,10 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
                 {
                     if( std::isspace( static_cast<unsigned char>( c ) ) )
                     {
-                        if( !prevWasSpace && !normalized.empty() ) normalized += ' ';
+                        if( !prevWasSpace && !normalized.empty() )
+                        {
+                            normalized += ' ';
+                        }
                         prevWasSpace = true;
                     }
                     else
@@ -566,11 +620,17 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
                         prevWasSpace = false;
                     }
                 }
-                while( !normalized.empty() && normalized.back() == ' ' ) normalized.pop_back();
+                while( !normalized.empty() && normalized.back() == ' ' )
+                {
+                    normalized.pop_back();
+                }
 
                 if( !normalized.empty() )
                 {
-                    if( !joinedBody.empty() ) joinedBody += ' ';
+                    if( !joinedBody.empty() )
+                    {
+                        joinedBody += ' ';
+                    }
                     joinedLineOffsets.push_back( { joinedBody.size(), lineNum } );
                     joinedBody += normalized;
                 }
@@ -582,9 +642,18 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
             // fenceOnly patterns (net-exfil) fire only inside a fenced code block — see buildExfilPatterns().
             for( const ExfilPattern& p : exfilPats )
             {
-                if( !std::regex_search( ln, p.re ) )                                   continue;
-                if( p.fenceOnly && !lineInFence )                                       continue;
-                if( p.requiresCmdContext && !( lineInFence || hasTransmitVerb( ln ) ) )  continue;
+                if( !std::regex_search( ln, p.re ) )
+                {
+                    continue;
+                }
+                if( p.fenceOnly && !lineInFence )
+                {
+                    continue;
+                }
+                if( p.requiresCmdContext && !( lineInFence || hasTransmitVerb( ln ) ) )
+                {
+                    continue;
+                }
                 addFinding( SkillSeverity::Critical, lineNum, p.rule, ln );
                 break;   // one EXFILTRATE finding per line
             }
@@ -607,7 +676,9 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
                 const bool startsWithDollar = !lv.empty() && lv[0] == '$';
                 const bool hasNetTool     = std::regex_search( std::string( lv ), kNetToolRe );
                 if( isShellFence || startsWithDollar || hasNetTool )
+                {
                     addFinding( SkillSeverity::Warn, lineNum, kScopeCreepRule, ln );
+                }
             }
         }
     }
@@ -622,9 +693,15 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
     for( const InjectionPattern& p : injPats )
     {
         std::smatch m;
-        if( !std::regex_search( joinedBody, m, p.re ) ) continue;
+        if( !std::regex_search( joinedBody, m, p.re ) )
+        {
+            continue;
+        }
         const std::size_t pos = std::size_t( m.position( 0 ) );
-        if( isShownAsData( joinedBody, pos ) ) continue;
+        if( isShownAsData( joinedBody, pos ) )
+        {
+            continue;
+        }
 
         // Map the match position back to a real line number: the start of the joined-body run whose
         // recorded offset is the greatest one not exceeding `pos`. Honest fallback: line 0 if somehow no
@@ -634,7 +711,10 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
         {
             const auto it = std::upper_bound( joinedLineOffsets.begin(), joinedLineOffsets.end(), pos,
                 []( std::size_t value, const std::pair<std::size_t,int>& entry ) noexcept { return value < entry.first; } );
-            if( it != joinedLineOffsets.begin() ) lineNum = std::prev( it )->second;
+            if( it != joinedLineOffsets.begin() )
+            {
+                lineNum = std::prev( it )->second;
+            }
         }
 
         std::string matched = m.str( 0 );
@@ -646,10 +726,10 @@ inline std::vector<SkillFinding> scanSkillText( std::string_view text )
     // entirely on one line is found per-line, then found again — same line, same rule — in the joined
     // buffer); collapse those to a single finding so output stays deterministic and non-redundant.
     std::sort( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
-    {
-        if( a.line != b.line ) return a.line < b.line;
-        return std::string_view( a.rule ) < std::string_view( b.rule );
-    } );
+               {
+        if( a.line != b.line ) { return a.line < b.line;
+}
+        return std::string_view( a.rule ) < std::string_view( b.rule ); } );
     findings.erase( std::unique( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
     {
         return a.line == b.line && std::string_view( a.rule ) == std::string_view( b.rule );
@@ -730,8 +810,14 @@ inline int skillScanExitCode( const std::vector<SkillFinding>& findings ) noexce
     int code = 0;
     for( const SkillFinding& f : findings )
     {
-        if( f.sev == SkillSeverity::Critical ) return 2;
-        if( f.sev == SkillSeverity::Warn && code < 1 ) code = 1;
+        if( f.sev == SkillSeverity::Critical )
+        {
+            return 2;
+        }
+        if( f.sev == SkillSeverity::Warn && code < 1 )
+        {
+            code = 1;
+        }
     }
     return code;
 }
@@ -759,6 +845,7 @@ inline std::string escapeXmlAttr( std::string_view s )
     std::string out;
     out.reserve( s.size() );
     for( char c : s )
+    {
         switch( c )
         {
             case '&':  out += "&amp;";  break;
@@ -767,6 +854,7 @@ inline std::string escapeXmlAttr( std::string_view s )
             case '"':  out += "&quot;"; break;
             default:   out += c;        break;
         }
+    }
     return out;
 }
 
@@ -789,7 +877,10 @@ inline std::string skillSeverityAttr( SkillSeverity s )
     std::string out;
     for( const char c : std::string_view( skillSeverityStr( s ) ) )
     {
-        if( c == ' ' ) break;
+        if( c == ' ' )
+        {
+            break;
+        }
         out += char( std::tolower( static_cast<unsigned char>( c ) ) );
     }
     return out;
@@ -811,7 +902,12 @@ inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanR
 {
     int maxSev = 0;
     for( const SkillScanRow& r : rows )
-        if( int( r.finding.sev ) > maxSev ) maxSev = int( r.finding.sev );
+    {
+        if( int( r.finding.sev ) > maxSev )
+        {
+            maxSev = int( r.finding.sev );
+        }
+    }
     const char* verdict = maxSev == 2 ? "critical" : ( maxSev == 1 ? "warn" : "clean" );
 
     const std::size_t total  = rows.size();
@@ -819,8 +915,14 @@ inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanR
     const bool         capped = shown < total;
 
     std::fprintf( out, "<skillscan files=\"%d\" findings=\"%zu\"", filesScanned, total );
-    if( filesSkipped > 0 ) std::fprintf( out, " skipped=\"%d\"", filesSkipped );
-    if( capped ) std::fprintf( out, " shown=\"%zu\" capped=\"1\"", shown );
+    if( filesSkipped > 0 )
+    {
+        std::fprintf( out, " skipped=\"%d\"", filesSkipped );
+    }
+    if( capped )
+    {
+        std::fprintf( out, " shown=\"%zu\" capped=\"1\"", shown );
+    }
     std::fprintf( out, " verdict=\"%s\">", verdict );
     for( std::size_t i = 0; i < shown; ++i )
     {

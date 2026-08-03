@@ -42,19 +42,34 @@ inline constexpr std::size_t   lexSigWord( std::uint64_t hash ) noexcept { retur
 // the name. Bounded at 16 lines; stops at the first non-comment line (no bridging across blank gaps).
 inline std::size_t docCommentStart( const std::string& src, std::size_t defStart ) noexcept
 {
-    if( defStart > src.size() ) defStart = src.size();
+    if( defStart > src.size() )
+    {
+        defStart = src.size();
+    }
     std::size_t ls = defStart;
-    while( ls > 0 && src[ ls - 1 ] != '\n' ) --ls;          // start of the def's own line
+    while( ls > 0 && src[ls - 1] != '\n' )
+    {
+        --ls; // start of the def's own line
+    }
     for( int guard = 0; guard < 16 && ls > 0; ++guard )     // up to 16 preceding comment lines
     {
         const std::size_t pe = ls - 1;                      // '\n' ending the previous line
         std::size_t       ps = pe;
-        while( ps > 0 && src[ ps - 1 ] != '\n' ) --ps;      // start of the previous line
+        while( ps > 0 && src[ps - 1] != '\n' )
+        {
+            --ps; // start of the previous line
+        }
         std::size_t t = ps;
-        while( t < pe && ( src[t] == ' ' || src[t] == '\t' ) ) ++t;   // skip indent
+        while( t < pe && ( src[t] == ' ' || src[t] == '\t' ) )
+        {
+            ++t; // skip indent
+        }
         const bool comment = ( t + 1 < pe && src[t] == '/' && ( src[t + 1] == '/' || src[t + 1] == '*' ) )
                           || ( t < pe && src[t] == '*' );   // // , /* , or a * continuation of a block
-        if( !comment ) break;
+        if( !comment )
+        {
+            break;
+        }
         ls = ps;
     }
     return ls;
@@ -82,9 +97,15 @@ inline void forEachLexSubtoken( std::string_view text, EmitFn&& emit )
             continue;
         }
         if( upper && tokStartByte != kNoTokenByte ) { emit( tokStartByte, k ); tokStartByte = k; continue; }   // camel boundary
-        if( tokStartByte == kNoTokenByte ) tokStartByte = k;
+        if( tokStartByte == kNoTokenByte )
+        {
+            tokStartByte = k;
+        }
     }
-    if( tokStartByte != kNoTokenByte ) emit( tokStartByte, text.size() );
+    if( tokStartByte != kNoTokenByte )
+    {
+        emit( tokStartByte, text.size() );
+    }
 }
 
 // FNV-1a 64 over the token's NORMALIZED bytes (first byte lowercased; the state machine guarantees every
@@ -148,7 +169,10 @@ inline void forEachLexSubtokenHashed( std::string_view text, EmitFn&& emit )
         h ^= c;                                                                                                // interior byte: already lowercase/digit
         h  = hashutil::fnv1aMultiply( h );
     }
-    if( tokStartByte != kNoTokenByte ) emit( tokStartByte, text.size(), h );
+    if( tokStartByte != kNoTokenByte )
+    {
+        emit( tokStartByte, text.size(), h );
+    }
 }
 
 // Build one def's stats from the SAME spans lexical.h Pass 2 scans: doc-comment [docCommentStart, bodyStart)
@@ -170,24 +194,36 @@ inline void buildDefLexStats( const std::string& src, std::uint32_t startByte, s
     {
         std::uint32_t fieldTokenWt = 0;
         forEachLexSubtokenHashed( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte, std::uint64_t tokenHash )
-        {
-            if( tokEndByte - tokStartByte < 2 ) return;
+                                  {
+            if( tokEndByte - tokStartByte < 2 ) { return;
+}
             fieldTokenWt += w;
-            scratch[ tokenHash ] += w;
-        } );
+            scratch[ tokenHash ] += w; } );
         out.dlWeighted += fieldTokenWt;
     };
-    if( bodyStart > docStart ) scanFieldStats( sv.substr( docStart, bodyStart - docStart ), std::uint32_t( kLexWeightDoc ) );
-    if( end > bodyStart )      scanFieldStats( sv.substr( bodyStart, end - bodyStart ), std::uint32_t( kLexWeightBody ) );
+    if( bodyStart > docStart )
+    {
+        scanFieldStats( sv.substr( docStart, bodyStart - docStart ), std::uint32_t( kLexWeightDoc ) );
+    }
+    if( end > bodyStart )
+    {
+        scanFieldStats( sv.substr( bodyStart, end - bodyStart ), std::uint32_t( kLexWeightBody ) );
+    }
 
     // extract sorted-by-hash pair arrays (HashMap iteration order must never reach persisted bytes)
     out.tokenHashes.clear();
     out.tokenTfs.clear();
     out.tokenHashes.reserve( scratch.size() );
-    for( const auto& [ hash, tf ] : scratch ) out.tokenHashes.push_back( hash );
+    for( const auto& [hash, tf] : scratch )
+    {
+        out.tokenHashes.push_back( hash );
+    }
     std::sort( out.tokenHashes.begin(), out.tokenHashes.end() );
     out.tokenTfs.reserve( out.tokenHashes.size() );
-    for( const std::uint64_t hash : out.tokenHashes ) out.tokenTfs.push_back( scratch.find( hash )->second );
+    for( const std::uint64_t hash : out.tokenHashes )
+    {
+        out.tokenTfs.push_back( scratch.find( hash )->second );
+    }
 }
 
 

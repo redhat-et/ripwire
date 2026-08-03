@@ -18,8 +18,15 @@ using namespace rw;
 static int g_fail = 0;
 static void check( bool cond, const char* what )
 {
-    if( cond ) std::printf( "  PASS  %s\n", what );
-    else       { std::printf( "  FAIL  %s\n", what ); g_fail = 1; }
+    if( cond )
+    {
+        std::printf( "  PASS  %s\n", what );
+    }
+    else
+    {
+        std::printf( "  FAIL  %s\n", what );
+        g_fail = 1;
+    }
 }
 
 static std::uint32_t fileEndingWith( const IngestResult& ing, std::string_view suffix )
@@ -29,7 +36,9 @@ static std::uint32_t fileEndingWith( const IngestResult& ing, std::string_view s
     {
         std::string_view p = ing.files[f];
         if( p.size() >= suffix.size() && p.compare( p.size() - suffix.size(), suffix.size(), suffix ) == 0 )
+        {
             hit = ( hit == kNoFile ) ? f : 0xFFFFFFFEu;
+        }
     }
     return hit;
 }
@@ -40,7 +49,10 @@ int main( int argc, char** argv )
     const IngestResult ing = ingest( argv[1] );
 
     HashMap<std::string, std::uint32_t> fileIndex;
-    for( std::uint32_t f = 0; f < ing.files.size(); ++f ) fileIndex.emplace( ing.files[f], f );
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        fileIndex.emplace( ing.files[f], f );
+    }
 
     const std::uint32_t geoMod    = fileEndingWith( ing, "rustimportprecisefix/src/geo/mod.rs" );
     const std::uint32_t utilRs    = fileEndingWith( ing, "rustimportprecisefix/src/util.rs" );
@@ -104,7 +116,13 @@ int main( int argc, char** argv )
     // ── (f) an inline `mod inner { … }` is captured with a body → NOT a mod: target → no file edge ────
     // (proven at ingest: no `mod:inner` include for the body-having mod; assert none was captured)
     bool sawInlineMod = false;
-    for( const Include& inc : ing.includes ) if( inc.target == "mod:inner" ) sawInlineMod = true;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.target == "mod:inner" )
+        {
+            sawInlineMod = true;
+        }
+    }
     check( !sawInlineMod, "inline `mod inner { … }` (with body) captured NO mod: target (no phantom file edge)" );
 
     if( g_fail ) { std::printf( "UNIT FAIL\n" ); return 1; }

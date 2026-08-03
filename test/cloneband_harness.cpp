@@ -45,7 +45,10 @@ static int g_fail = 0;
 static void check( bool cond, const char* msg )
 {
     std::printf( "  %s  %s\n", cond ? "PASS" : "FAIL", msg );
-    if( !cond ) g_fail = 1;
+    if( !cond )
+    {
+        g_fail = 1;
+    }
 }
 
 // write `src` to dir/name, return its absolute path + byte size.
@@ -99,9 +102,18 @@ static std::string chaffBody( std::uint32_t seed )
 static std::string nearBody( int salt, bool variant )
 {
     std::string s = "int g( int a, int b, int c, int d )\n{\n    int acc = 0;\n";
-    for( int k = 0; k < 14; ++k ) s += ( k % 2 == salt % 2 ) ? "    acc = acc + a * b - c + d;\n" : "    acc = acc * d + a - b;\n";
-    if( variant ) s += "    if( acc > a ) { acc = acc - b; } else { acc = acc + c; }\n    acc = acc ^ d;\n";
-    for( int k = 0; k < 12; ++k ) s += "    acc = acc - c * d + a;\n";
+    for( int k = 0; k < 14; ++k )
+    {
+        s += ( k % 2 == salt % 2 ) ? "    acc = acc + a * b - c + d;\n" : "    acc = acc * d + a - b;\n";
+    }
+    if( variant )
+    {
+        s += "    if( acc > a ) { acc = acc - b; } else { acc = acc + c; }\n    acc = acc ^ d;\n";
+    }
+    for( int k = 0; k < 12; ++k )
+    {
+        s += "    acc = acc - c * d + a;\n";
+    }
     s += "    return acc;\n}\n";
     return s;
 }
@@ -121,7 +133,10 @@ static std::string borderBody( bool variant )
     {
         const char* o1 = ops1[ k % 8 ];
         const char* o2 = ops2[ ( k / 2 ) % 8 ];
-        if( variant && ( k % 4 != 3 ) ) o1 = ops1[ ( k + 3 ) % 8 ];   // 12 single-token substitutions
+        if( variant && ( k % 4 != 3 ) )
+        {
+            o1 = ops1[( k + 3 ) % 8]; // 12 single-token substitutions
+        }
         s += std::string( "    acc = a " ) + o1 + " b " + o2 + " c;\n";
     }
     s += "    return acc;\n}\n";
@@ -144,12 +159,14 @@ int main( int argc, char** argv )
     }
     // 2 near-clone pairs → ids {60,61}, {62,63}
     for( int salt = 0; salt < 2; ++salt )
+    {
         for( int v = 0; v < 2; ++v )
         {
             const std::string name = std::string( "near" ) + std::to_string( salt ) + ( v ? "b" : "a" ) + ".cpp";
             auto [p, sz] = writeFile( dir, name.c_str(), nearBody( salt, v == 1 ) );
             addWholeFileFn( ing, p, sz );
         }
+    }
     // borderline pair → ids {64,65}
     {
         auto [pa, sa] = writeFile( dir, "border_a.cpp", borderBody( false ) );
@@ -166,17 +183,31 @@ int main( int argc, char** argv )
     // S1: canonical emit for the shell-side ON-vs-OFF byte-diff (recall parity).
     std::printf( "EMITTED %zu\n", t3.size() );
     for( const CloneGroup& cg : t3 )
+    {
         std::printf( "PAIR %u %u %.4f\n", unsigned( cg.members[0] ), unsigned( cg.members[1] ), double( cg.similarity ) );
+    }
 
     // S2: the engineered positives are present (parity can't pass vacuously).
     bool near0 = false, near1 = false, border = false, chaffPair = false;
     for( const CloneGroup& cg : t3 )
     {
         const NodeId x = cg.members[0], y = cg.members[1];
-        if( x == 60 && y == 61 ) near0 = true;
-        if( x == 62 && y == 63 ) near1 = true;
-        if( x == 64 && y == 65 ) border = true;
-        if( x < 60 && y < 60 )   chaffPair = true;
+        if( x == 60 && y == 61 )
+        {
+            near0 = true;
+        }
+        if( x == 62 && y == 63 )
+        {
+            near1 = true;
+        }
+        if( x == 64 && y == 65 )
+        {
+            border = true;
+        }
+        if( x < 60 && y < 60 )
+        {
+            chaffPair = true;
+        }
     }
     check( near0 && near1, "S2) both near-clone pairs emitted" );
     check( border,         "S2) borderline (fp-Jaccard 0.4884, just above the 0.40 gate) pair emitted — the sketch-gate recall tripwire" );
@@ -204,7 +235,9 @@ int main( int argc, char** argv )
     const std::vector<CloneGroup> t3b = findClonesType3( ing, minTokens, &st2 );
     bool detOk = ( t3.size() == t3b.size() );
     for( std::size_t i = 0; detOk && i < t3.size(); ++i )
+    {
         detOk = ( t3[i].members == t3b[i].members && t3[i].type == t3b[i].type && t3[i].similarity == t3b[i].similarity );
+    }
     detOk = detOk && st.rawPairVisits == st2.rawPairVisits && st.distinctPairs == st2.distinctPairs
                   && st.sketchRejects == st2.sketchRejects && st.jaccardMerges == st2.jaccardMerges && st.lcsRuns == st2.lcsRuns;
     check( detOk, "S5) two runs byte-identical (pairs + similarities + all counters)" );
