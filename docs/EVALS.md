@@ -84,9 +84,29 @@ claimed the dataset host was down and directed the use of an unverified dataset 
 acted on; the dataset was independently hash-verified. The report records the incident rather than
 omitting it.
 
----
+### r2 (2026-08-03): repowise / codeseek
 
-## 3. LocBench — localization accuracy
+**Source:** `bench/headtohead/r2-2026-08-03/REPORT.md` (full record incl. fairness notes and
+excluded-arm reasons), `VERIFIER.md` (adversarial verification), `results/` (machine-readable).
+
+Same slice, same gold definition, same metric imports; **not number-comparable to the first run**
+(binary, router, and evaluator all moved between 2026-07-13 and 2026-08-03 — the report's header
+spells this out). N = 60 paired, zero exclusions among the arms that ran:
+
+| Arm | strict file@10 | any@10 | median wall (query, warm) |
+| --- | --- | --- | --- |
+| **ripwire `--for`** | **56.7%** (58.3% after the same-day R1 fix) | 83.3% (85.0%) | **0.114 s** |
+| repowise 0.37.0 (MCP `search_codebase`, LLM-free `--no-prose` wiki) | 33.3% | 53.3% | 1.14 s (incl. per-query MCP spawn) |
+| codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 0.042 s |
+| codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0% — 0 results in 60/60 | 0.0% | 0.025 s |
+
+Sensitivity rows travel with the headline (all in the report): on **untrimmed all-patch gold** the
+ordering holds but the margin halves (ripwire 26.7% vs repowise 16.7%); a junk-filtered repowise
+variant gains ~3pp; codeseek's raw row is a query-protocol incompatibility, and its embedder mode
+was not benchmarked. **Vexp and CodeIndexer were excluded, not beaten** — their free tiers cannot
+run a fair 60-instance sweep (node/project/chunk caps); the report records the exact limits.
+Paired win–loss vs repowise at strict@10: 17–3 (17–2 after the R1 fix, which flipped
+`micropython-lib-947`, 35 → 2, and moved nothing else).
 
 **Source:** `bench/locbench/README.md`, `bench/locbench/dataset.lock`,
 `bench/locbench/GATE_DECISION.md`, `bench/locbench/run_locbench.py`.
