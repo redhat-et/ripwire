@@ -1,0 +1,14 @@
+{
+"q01": {"ladder": [["--for=When the database cache backend grows past its configured max size, where is the logic that deletes old/expired entries to bring it back under the limit, and what triggers it?"], ["EXPAND_TOP1"]]},
+"q02": {"ladder": [["--for=On a POST request, where does Django actually compare the CSRF token the client sent against the secret from the cookie, and where in request processing is that comparison invoked?"], ["EXPAND_TOP1"]]},
+"q03": {"ladder": [["--callers=resolve_url"], ["--uses=resolve_url"], ["--impact=resolve_url"]]},
+"q04": {"ladder": [["--callers=sanitize_strftime_format"], ["--uses=sanitize_strftime_format"], ["--impact=sanitize_strftime_format"]]},
+"q05": {"ladder": [["--affected=django/core/signing.py"]]},
+"q06": {"ladder": [["--affected=django/db/migrations/autodetector.py"]]},
+"q07": {"ladder": [["--for=When a request comes in, how does its URL path end up as a view callable — trace the chain from the request handler to where the match object is produced."], ["EXPAND_TOP1"], ["PATH_TOP2"], ["CONNECT_TOP3"]]},
+"q08": {"ladder": [["--for=When I call form.is_valid(), how does my submitted data actually reach each field's cleaning code and the form's per-field clean_<name> hooks — what's the call chain?"], ["EXPAND_TOP1"], ["PATH_TOP2"], ["CONNECT_TOP3"]]},
+"q09": {"ladder": [["--pack-task=I need to add a new built-in template filter to Django itself — which files and functions matter for implementing and testing it?"], ["--for=I need to add a new built-in template filter to Django itself — which files and functions matter for implementing and testing it?"]]},
+"q10": {"ladder": [["--pack-task=I want to ship a new password hasher in Django and make it selectable — what files and functions does a correct plan have to touch or account for?"], ["--for=I want to ship a new password hasher in Django and make it selectable — what files and functions does a correct plan have to touch or account for?"]]},
+"q11": {"ladder": [["--grep=Cannot filter a query once a slice has been taken"]]},
+"q12": {"ladder": [["--grep=Invalid HTTP_HOST header"], ["USES_RAISED_EXC"]]}
+}
