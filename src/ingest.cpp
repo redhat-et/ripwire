@@ -1535,6 +1535,36 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
     const std::string_view o = src.substr( a, b - a );
     return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
 }
+
+// ── O(children) child collection for whole-subtree walks ─────────────────────────────────────────────
+// ts_node_child( n, i ) restarts tree-sitter's child iterator from the FIRST child on every call, so an
+// indexed loop over a node's C children costs O(C²). Width is attacker-controlled: ONE 980 KB file of
+// 14 000 line comments hands the root 14 000 children and turned ingest into ~2 s of user CPU, quadratic
+// in line count (gate: test/padscalecheck.sh). Every unbounded-width walk below therefore collects the
+// child list ONCE per node with a TSTreeCursor — the same child set (named + anonymous + extras) in the
+// same left-to-right order, O(C) total. The cursor and the out vector are caller-owned and reused across
+// nodes, so a warm walk allocates nothing per node. Bounded-shape scans (base clauses, argument lists)
+// keep the indexed form — their widths come from the grammar, not from the input file.
+struct ChildCursor   // RAII — several walkers return mid-loop, so deletion must not depend on fallthrough
+{
+    TSTreeCursor cur;
+    explicit ChildCursor( TSNode n ) noexcept : cur( ts_tree_cursor_new( n ) ) {}
+    ChildCursor( const ChildCursor& ) = delete;
+    ChildCursor& operator=( const ChildCursor& ) = delete;
+    ~ChildCursor() { ts_tree_cursor_delete( &cur ); }
+};
+inline void collectChildren( TSNode n, TSTreeCursor& cur, std::vector<TSNode>& out )   // A4-F25: NOT noexcept — `out` allocates
+{
+    out.clear();
+    ts_tree_cursor_reset( &cur, n );
+    if( ts_tree_cursor_goto_first_child( &cur ) )
+    {
+        do
+            out.push_back( ts_tree_cursor_current_node( &cur ) );
+        while( ts_tree_cursor_goto_next_sibling( &cur ) );
+    }
+}
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
 inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, std::uint32_t& cog, std::uint32_t& cyclo, std::uint32_t& maxNest, int startDepth )
@@ -1546,6 +1576,9 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
     std::vector<CcFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { start, startNesting, static_cast<std::uint16_t>( startDepth ) } );
+    ChildCursor         cursor( start );
+    std::vector<TSNode> kids;       kids.reserve( 64 );
+    std::vector<TSNode> elifKids;   elifKids.reserve( 64 );   // the else-if grandchild descent below nests inside a kids iteration
 
     while( !stack.empty() )
     {
@@ -1585,26 +1618,26 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             const std::uint32_t childNest = elseIf ? nesting : nesting + 1;   // else-if doesn't deepen
             cog += elseIf ? 1u : ( 1u + nesting );                           // flat +1 for else-if, else +1+nesting
             if( childNest > maxNest ) maxNest = childNest;                    // Q4: deepest control nesting reached
-            const std::uint32_t cn = ts_node_child_count( n );
-            for( std::uint32_t i = cn; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), childNest, childDepth } );
+            collectChildren( n, cursor.cur, kids );
+            for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], childNest, childDepth } );
             continue;
         }
         if( isNamed && ( std::strcmp( t, "elif_clause" ) == 0 || std::strcmp( t, "else_clause" ) == 0
                          || std::strcmp( t, "elsif" ) == 0 ) )   // else / elif / else-if (+ Ruby `elsif`): flat +1 (cognitive)
         {
             cog += 1u;
-            const std::uint32_t cn = ts_node_child_count( n );
-            for( std::uint32_t i = cn; i > 0; --i )
+            collectChildren( n, cursor.cur, kids );
+            for( std::size_t i = kids.size(); i > 0; --i )
             {
-                const TSNode c  = ts_node_child( n, i - 1 );
+                const TSNode c  = kids[ i - 1 ];
                 const char*  ct = ts_node_type( c );
                 if( std::strcmp( ct, "if_statement" ) == 0 || std::strcmp( ct, "if_expression" ) == 0 )
                 {
                     // C-family `else if`: descend into the if's CHILDREN so cognitive doesn't re-score it as a
                     // fresh control — but cyclomatic still counts that `if` as a decision (parity with the old walk).
                     ++cyclo;
-                    const std::uint32_t gc = ts_node_child_count( c );
-                    for( std::uint32_t j = gc; j > 0; --j ) stack.push_back( { ts_node_child( c, j - 1 ), nesting, childDepth } );
+                    collectChildren( c, cursor.cur, elifKids );   // NOT kids — that iteration is still live
+                    for( std::size_t j = elifKids.size(); j > 0; --j ) stack.push_back( { elifKids[ j - 1 ], nesting, childDepth } );
                 }
                 else
                 {
@@ -1617,23 +1650,26 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         if( cc_isNestingOnly( t ) )
         {
             if( nesting + 1 > maxNest ) maxNest = nesting + 1;            // Q4: a lambda/closure body deepens nesting
-            const std::uint32_t cn = ts_node_child_count( n );
-            for( std::uint32_t i = cn; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), nesting + 1, childDepth } );
+            collectChildren( n, cursor.cur, kids );
+            for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], nesting + 1, childDepth } );
             continue;
         }
         const std::string_view bop = cc_boolOp( n, src );
         if( !bop.empty() && cc_boolOp( ts_node_parent( n ), src ) != bop ) ++cog;   // new boolean run (cognitive)
 
-        const std::uint32_t cn = ts_node_child_count( n );
-        for( std::uint32_t i = cn; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), nesting, childDepth } );
+        collectChildren( n, cursor.cur, kids );
+        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], nesting, childDepth } );
     }
 }
 struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; };
-inline Complexity complexityOf( TSNode root, std::string_view src ) noexcept   // one fused DFS → cx, ccx, AND max nesting (Q4)
-{
+inline Complexity complexityOf( TSNode root, std::string_view src )   // one fused DFS → cx, ccx, AND max nesting (Q4)
+{                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
     std::uint32_t cog = 0, cyclo = 0, maxNest = 0;
-    const std::uint32_t cn = ts_node_child_count( root );   // start INSIDE the def (the def node is neither control nor decision)
-    for( std::uint32_t i = 0; i < cn; ++i ) cc_walk( ts_node_child( root, i ), 0, src, cog, cyclo, maxNest, 0 );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
+    collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
+    for( const TSNode c : kids ) cc_walk( c, 0, src, cog, cyclo, maxNest, 0 );
     return { 1u + cyclo, cog, maxNest };   // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting
 }
 
@@ -1663,19 +1699,21 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
     std::vector<PF> stack;
     stack.reserve( 32 );
     stack.push_back( { defNode, 0 } );
+    ChildCursor         cursor( defNode );
+    std::vector<TSNode> kids;
+    kids.reserve( 32 );
     while( !stack.empty() )
     {
         const PF f = stack.back();
         stack.pop_back();
         if( f.depth > 12 ) continue;                        // params live near the signature; bound the search
         const char* t = ts_node_type( f.n );
+        collectChildren( f.n, cursor.cur, kids );           // one collection serves both arms below
         if( f.n.id != defNode.id && cc_isParamList( t ) )   // don't treat the def node itself as a param list
         {
             std::uint16_t count = 0;
-            const std::uint32_t cn = ts_node_child_count( f.n );
-            for( std::uint32_t i = 0; i < cn; ++i )
+            for( const TSNode c : kids )
             {
-                const TSNode c = ts_node_child( f.n, i );
                 if( !ts_node_is_named( c ) ) continue;       // skip '(', ')', ',' separators
                 const char* ct = ts_node_type( c );
                 if( std::strcmp( ct, "comment" ) == 0 ) continue;   // a comment inside the list is not a parameter
@@ -1683,8 +1721,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
             }
             return count;
         }
-        const std::uint32_t cn = ts_node_child_count( f.n );
-        for( std::uint32_t i = cn; i > 0; --i ) stack.push_back( { ts_node_child( f.n, i - 1 ), std::uint16_t( f.depth + 1 ) } );
+        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], std::uint16_t( f.depth + 1 ) } );
     }
     return 0;
 }
@@ -1734,6 +1771,9 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
     std::vector<PF> stack;
     stack.reserve( 32 );
     stack.push_back( { defNode, 0 } );
+    ChildCursor         cursor( defNode );
+    std::vector<TSNode> kids;
+    kids.reserve( 32 );
     while( !stack.empty() )
     {
         const PF f = stack.back();
@@ -1746,19 +1786,19 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
             std::vector<QF> q;
             q.reserve( 32 );
             q.push_back( { f.n, 0 } );
-            while( !q.empty() )
+            while( !q.empty() )                                 // never returns to the outer loop → reusing kids below is safe
             {
                 const QF g = q.back();
                 q.pop_back();
                 if( g.depth > 6 ) continue;                     // param forms live shallow inside the list
                 if( g.n.id != f.n.id && isElastic( ts_node_type( g.n ) ) ) return false;
-                const std::uint32_t gc = ts_node_child_count( g.n );
-                for( std::uint32_t i = 0; i < gc; ++i ) q.push_back( { ts_node_child( g.n, i ), std::uint16_t( g.depth + 1 ) } );
+                collectChildren( g.n, cursor.cur, kids );
+                for( const TSNode c : kids ) q.push_back( { c, std::uint16_t( g.depth + 1 ) } );
             }
             return true;                                        // a real parameter list, no elastic form → fixed arity
         }
-        const std::uint32_t cn = ts_node_child_count( f.n );
-        for( std::uint32_t i = cn; i > 0; --i ) stack.push_back( { ts_node_child( f.n, i - 1 ), std::uint16_t( f.depth + 1 ) } );
+        collectChildren( f.n, cursor.cur, kids );
+        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], std::uint16_t( f.depth + 1 ) } );
     }
     return false;   // no parameter-list node found at all → can't be sure → not filterable (safe)
 }
@@ -1935,8 +1975,20 @@ void captureBases( TSNode classNode, std::uint32_t fileId, Lang lang, std::strin
 // DERIVED type name is stashed in `qualifier` — because the impl block lives OUTSIDE the struct's def
 // span, byte-span attribution cannot bind fromSymbol = T; buildGraph resolves `qualifier` by name instead.
 // `impl T { … }` (inherent, no trait) is skipped. Recurses so `impl`s nested in `mod {}` are still seen.
-void captureRustImpls( TSNode node, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+void captureRustImpls( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
 {
+    // iterative pre-order DFS (reverse-push preserves the recursive version's left-to-right emission
+    // order) — the old recursion was both stack-overflow-prone on deep ASTs and O(children²) per node.
+    std::vector<TSNode> stack;
+    stack.reserve( 64 );
+    stack.push_back( root );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
+    while( !stack.empty() )
+    {
+    const TSNode node = stack.back();
+    stack.pop_back();
     if( std::strcmp( ts_node_type( node ), "impl_item" ) == 0 )
     {
         const TSNode traitNode = ts_node_child_by_field_name( node, "trait", 5 );
@@ -1960,9 +2012,10 @@ void captureRustImpls( TSNode node, std::uint32_t fileId, std::string_view src, 
             }
         }
     }
-    const uint32_t cc = ts_node_child_count( node );
-    for( uint32_t i = 0; i < cc; ++i )
-        captureRustImpls( ts_node_child( node, i ), fileId, src, refs );
+    collectChildren( node, cursor.cur, kids );
+    for( std::size_t i = kids.size(); i > 0; --i )
+        stack.push_back( kids[ i - 1 ] );
+    }
 }
 
 // S5-E HAS-A composition edges: walk a class/struct node's field_declaration_list and emit a
@@ -1976,19 +2029,20 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
 {
     if( lang != Lang::Cpp ) return;   // C++ only for S5-E; extend for Python/TS later
 
-    const uint32_t cc = ts_node_child_count( classNode );
-    for( uint32_t i = 0; i < cc; ++i )
+    ChildCursor         cursor( classNode );
+    std::vector<TSNode> kids;       kids.reserve( 32 );
+    std::vector<TSNode> fieldKids;                       // the body's member list — width is file-controlled (comments!)
+    collectChildren( classNode, cursor.cur, kids );
+    for( const TSNode child : kids )
     {
-        const TSNode child = ts_node_child( classNode, i );
-        const char*  ct    = ts_node_type( child );
+        const char* ct = ts_node_type( child );
 
         // C++ class body is under field_declaration_list
         if( std::strcmp( ct, "field_declaration_list" ) != 0 ) continue;
 
-        const uint32_t fc = ts_node_child_count( child );
-        for( uint32_t j = 0; j < fc; ++j )
+        collectChildren( child, cursor.cur, fieldKids );
+        for( const TSNode fdecl : fieldKids )
         {
-            const TSNode fdecl = ts_node_child( child, j );
             if( std::strcmp( ts_node_type( fdecl ), "field_declaration" ) != 0 ) continue;
 
             // The "type" field of a field_declaration. We look for:
@@ -2207,11 +2261,13 @@ std::string includePathOf( std::string_view spelling, bool& isAngleOut )
 // a top-level directive, and it NEVER enters the call graph (role != Call → skipped in buildGraph).
 void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs )
 {
-    const uint32_t cc = ts_node_child_count( root );
-    for( uint32_t i = 0; i < cc; ++i )
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
+    collectChildren( root, cursor.cur, kids );   // root's width is file-controlled — never index it (O(C²))
+    for( const TSNode n : kids )
     {
-        const TSNode n = ts_node_child( root, i );
-        const char*  t = ts_node_type( n );
+        const char* t = ts_node_type( n );
         std::string  target;
         bool         isAngle = false;   // C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote) — captured
                                         // here so path-precise resolution can leave angle includes unresolved.
@@ -2850,6 +2906,9 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     std::vector<BindFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { root, static_cast<std::uint16_t>( startDepth ) } );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
 
     while( !stack.empty() )
     {
@@ -2951,8 +3010,8 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
         }
     }
 
-    const std::uint32_t cc = ts_node_child_count( n );
-    for( std::uint32_t i = cc; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), static_cast<std::uint16_t>( frame.depth + 1 ) } );
+    collectChildren( n, cursor.cur, kids );
+    for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
     }
 }
 
@@ -2998,6 +3057,9 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
     std::vector<FfiFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { root, 0 } );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
     while( !stack.empty() )
     {
         const FfiFrame frame = stack.back();
@@ -3104,8 +3166,8 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
             }
         }
 
-        const std::uint32_t cc = ts_node_child_count( n );
-        for( std::uint32_t i = cc; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        collectChildren( n, cursor.cur, kids );
+        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
     }
 }
 
@@ -3244,6 +3306,9 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
     std::vector<RouteFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { root, 0 } );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
     while( !stack.empty() )
     {
         const RouteFrame frame = stack.back();
@@ -3375,8 +3440,8 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
             }
         }
 
-        const std::uint32_t cc = ts_node_child_count( n );
-        for( std::uint32_t i = cc; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        collectChildren( n, cursor.cur, kids );
+        for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
     }
 }
 
@@ -3519,6 +3584,9 @@ void captureUses( TSNode root, std::uint32_t fileId, Lang lang, std::string_view
     std::vector<UseFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { root, static_cast<std::uint16_t>( startDepth ) } );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
 
     while( !stack.empty() )
     {
@@ -3550,8 +3618,8 @@ void captureUses( TSNode root, std::uint32_t fileId, Lang lang, std::string_view
         }
     }
 
-    const std::uint32_t cc = ts_node_child_count( n );
-    for( std::uint32_t i = cc; i > 0; --i ) stack.push_back( { ts_node_child( n, i - 1 ), static_cast<std::uint16_t>( frame.depth + 1 ) } );
+    collectChildren( n, cursor.cur, kids );
+    for( std::size_t i = kids.size(); i > 0; --i ) stack.push_back( { kids[ i - 1 ], static_cast<std::uint16_t>( frame.depth + 1 ) } );
     }
 }
 
@@ -5566,6 +5634,9 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
     std::vector<UrFrame> stack;
     stack.reserve( 64 );
     stack.push_back( { root, 0 } );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
 
     while( !stack.empty() )
     {
@@ -5575,16 +5646,15 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
         const TSNode        n          = frame.node;
         const std::uint16_t childDepth = static_cast<std::uint16_t>( frame.depth + 1 );
         const char*         t          = ts_node_type( n );
+        collectChildren( n, cursor.cur, kids );              // one collection serves the block scan AND the descent
 
         // If this is a genuine block, scan its statement siblings for a post-terminator statement.
         if( ur_isBlockNode( t ) )
         {
-            const std::uint32_t cn = ts_node_child_count( n );
             bool sawTerminator = false;
-            for( std::uint32_t i = 0; i < cn; ++i )
+            for( const TSNode c : kids )
             {
-                const TSNode c  = ts_node_child( n, i );
-                const char*  ct = ts_node_type( c );
+                const char* ct = ts_node_type( c );
 
                 if( sawTerminator )
                 {
@@ -5615,9 +5685,8 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
 
         // Descend into every child (blocks nest — a function body holds inner blocks, and non-block
         // statements like if/for CONTAIN blocks we must still reach). Push in reverse for L-to-R order.
-        const std::uint32_t cn = ts_node_child_count( n );
-        for( std::uint32_t i = cn; i > 0; --i )
-            stack.push_back( { ts_node_child( n, i - 1 ), childDepth } );
+        for( std::size_t i = kids.size(); i > 0; --i )
+            stack.push_back( { kids[ i - 1 ], childDepth } );
     }
 }
 
