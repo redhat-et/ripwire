@@ -60,7 +60,7 @@ cat > "$WORK/test/test_engine.cpp" <<'EOF'
 int engineRun( int x );
 int testEngine() { return engineRun( 1 ); }
 EOF
-cat > "$WORK/docs/PLAN_engine_rework.md" <<'EOF'
+cat > "$WORK/docs/engine_rework_notes.md" <<'EOF'
 # PLAN: engine rework
 Notes on reworking the engine/scheduler pipeline for the handoff.
 EOF
@@ -127,7 +127,7 @@ mkdir -p "$CLEAN/src" "$CLEAN/docs"
 cat > "$CLEAN/src/main.c" <<'EOF'
 int main(void) { return 0; }
 EOF
-cat > "$CLEAN/docs/DESIGN_notes.md" <<'EOF'
+cat > "$CLEAN/docs/design_notes.md" <<'EOF'
 # DESIGN: notes
 Nothing pending.
 EOF
