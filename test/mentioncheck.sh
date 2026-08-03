@@ -12,6 +12,10 @@
 #   (iv)  SCOPE — --query and --for --no-route are untouched even with the boost active.
 #   (v)   DETERMINISM ×3, xmllint-clean, env (RIPWIRE_NO_MENTION=1) == flag (--no-mention-boost)
 #         byte-for-byte, and the flag alone refuses loudly.
+#   (vi)  PACKAGE-DIR MENTION — a backticked bare name or dotted chain that names a source DIRECTORY
+#         (not a file) lifts that package's index file (__init__.py & friends). Measured: r2 head-to-head
+#         loss micropython-lib-947 (gold requests/__init__.py at 35; the `requests` mention anchored
+#         nothing). Precision-first: only the dir's index file lifts, never the whole directory.
 #
 # Usage:  bash test/mentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/mentioncheck.sh
 
@@ -50,6 +54,16 @@ def flush_stale_cache(entries):
     """Evict stale cache entries."""
     return [e for e in entries if e.fresh]
 PY
+mkdir -p "$FIX/plugins/requests"
+cat > "$FIX/plugins/requests/__init__.py" <<'PY'
+def open_http_session(url):
+    """Create the session used for outbound calls."""
+    return url
+
+def encode_basic_credentials(user, pw):
+    """Base64 header assembly for outbound calls."""
+    return user + pw
+PY
 cat > "$FIX/delta.py" <<'PY'
 class Widget:
     def render(self):
@@ -75,6 +89,14 @@ sig "path mention"      "widget pipeline process records — the fix belongs in 
 sig "URL mention"       "widget pipeline process records, see https://github.com/x/y/blob/main/pkg/beta.py#L2"   flush_stale_cache
 sig "dotted module"     "widget pipeline process records regression traced to pkg.beta"                          flush_stale_cache
 sig "Scope.symbol"      "widget pipeline process records break inside Widget.render"                             render
+
+# ── (vi) package-dir mention: bare backticked name / dotted chain naming a DIRECTORY ─────────────────
+sig "pkg-dir backtick"  'widget pipeline process records leak inside the `requests` module'                      open_http_session
+sig "pkg-dir dotted"    "widget pipeline process records regression traced to plugins.requests"                   open_http_session
+# a backticked word matching NO directory stays inert (precision guard)
+ONX="$( cands 'widget pipeline process records inside the `nonexistentpkg` module' )"
+OFFX="$( cands 'widget pipeline process records inside the `nonexistentpkg` module' --no-mention-boost )"
+[ "$ONX" = "$OFFX" ] && ok "unmatched backtick stays inert" || no "unmatched backtick moved the ranking"
 
 # header note appears when (and only when) something anchored
 "$BIN" "$FIX" --for="widget pipeline in pkg/beta.py" --no-cache 2>/dev/null | grep -q 'mention anchor:' \

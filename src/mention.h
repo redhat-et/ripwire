@@ -127,6 +127,67 @@ inline bool pathSuffixMatches( std::string_view path, const std::vector<std::str
     return true;
 }
 
+// a package's contract file — the one file whose basename shares no token with the package's name, so
+// the suffix match above can never reach it from a directory mention
+inline bool isIndexBaseName( std::string_view base ) noexcept
+{
+    return base == "__init__.py" || base == "index.ts" || base == "index.tsx" || base == "index.js"
+        || base == "mod.rs" || base == "lib.rs";
+}
+
+// does the DIRECTORY of `path` end with the mention's segments as whole path components?
+// e.g. segments [vendor, requests] matches the dir of "vendor/requests/__init__.py".
+inline bool dirSuffixMatches( std::string_view path, const std::vector<std::string>& segments ) noexcept
+{
+    const std::string_view base = baseNameOf( path );
+    if( segments.empty() || base.size() >= path.size() )
+    {
+        return false;
+    }
+    std::string_view remaining = path.substr( 0, path.size() - base.size() - 1 );   // drop "/<base>"
+    for( std::size_t i = segments.size(); i > 0; )
+    {
+        --i;
+        const std::string_view comp = baseNameOf( remaining );
+        if( comp != segments[i] )
+        {
+            return false;
+        }
+        remaining = remaining.substr( 0, remaining.size() - comp.size() );
+        if( i > 0 )
+        {
+            if( remaining.empty() || remaining.back() != '/' )
+            {
+                return false;
+            }
+            remaining.remove_suffix( 1 );
+        }
+    }
+    return true;
+}
+
+// package-directory mention lift: a mention that named NO file and NO symbol may name a source
+// DIRECTORY — a backticked bare package name (`requests`) or a dotted chain (vendor.requests). Lift
+// ONLY the directory's index file (isIndexBaseName): the package contract lives there, and its
+// basename shares no token with the mention, so the path-suffix match can never reach it. No index
+// file → no lift; precision over recall by design.
+// (r2 head-to-head bucket R1: micropython-lib-947, gold requests/__init__.py at rank 35.)
+inline void liftPackageDirMention( const IngestResult& ing, const RawMention& m, std::vector<std::uint32_t>& mentionedFiles )
+{
+    const std::size_t fileCount = ing.files.size();
+    for( std::uint32_t f = 0; f < fileCount && mentionedFiles.size() < kMentionMaxFiles; ++f )
+    {
+        if( !isIndexBaseName( baseNameOf( ing.files[f] ) ) || !dirSuffixMatches( ing.files[f], m.segments ) )
+        {
+            continue;
+        }
+        if( std::find( mentionedFiles.begin(), mentionedFiles.end(), f ) == mentionedFiles.end() )
+        {
+            mentionedFiles.push_back( f );
+        }
+    }
+}
+
 // extract candidate mentions from the task text: '/'-joined path tokens, dot-joined identifier chains,
 // and `backticked` identifiers. Plain prose words never qualify — precision over recall by design.
 inline std::vector<RawMention> extractMentions( std::string_view task )
@@ -290,6 +351,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         // (b) scoped-symbol match for 2-segment dotted mentions (Scope.name — `DTypeSchema.validate`):
         //     exact name + exact enclosing scope. Only when no file matched (a module path that resolved
         //     to a file should anchor the file, not every same-named method).
+        bool matchedSymbol = false;
         if( !matchedFile && !m.isPath && m.segments.size() == 2 && directSymbols.size() < kMentionMaxDirectSymbols )
         {
             const std::string& scopeSeg = m.segments[0];
@@ -299,12 +361,19 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
                 if( s.name == nameSeg && s.scope == scopeSeg )
                 {
                     directSymbols.push_back( s.id );
+                    matchedSymbol = true;
                     if( directSymbols.size() >= kMentionMaxDirectSymbols )
                     {
                         break;
                     }
                 }
             }
+        }
+
+        // (c) package-directory match — see liftPackageDirMention.
+        if( !matchedFile && !matchedSymbol )
+        {
+            liftPackageDirMention( ing, m, mentionedFiles );
         }
     }
     if( mentionedFiles.empty() && directSymbols.empty() )
