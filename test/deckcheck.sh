@@ -14,6 +14,12 @@
 #                    same kind of generation pass, and in THIS tree they already carry real examples
 #                    (`--anchor`, `--cochange-boost`) that would have been false positives without the
 #                    allowlist below — proof the same fabrication risk lives here, not just in decks.
+#   paper/*.md     — the preprint draft and its index. MAXIMAL fabricated-flag risk: a paper is long,
+#                    written in one pass, quotes flags in running prose rather than in a command block,
+#                    and (unlike a deck) is the surface a reader is least likely to check against
+#                    `--help`. It is also the surface where a fabricated flag survives longest, since
+#                    a draft is re-read for argument rather than for syntax. Same rule as every other
+#                    prose family: every `--flag` it names must exist or be allowlisted with a reason.
 # NOT scanned: docs/captures/*.md is RECORDED OUTPUT, not prose — every flag in it was actually run,
 #                    and a capture of a refusal legitimately contains a deliberately-bogus flag.
 # HISTORY, and why this list is spelled out rather than globbed loosely: it used to name present/*.py,
@@ -127,11 +133,11 @@ done <"$TMP/allow_rows.txt"
 # stay silent forever if the other families later grow enough to cover for a vanished one. Each
 # addSource call below is tagged with its GLOB FAMILY, and each family is asserted non-empty on its
 # own, in addition to the total floor. That is what the total floor below (root docs, docs/*.md,
-# skills/*/*.md, prompts/*.md) always claimed to check; now it actually does.
+# skills/*/*.md, prompts/*.md, paper/*.md) always claimed to check; now it actually does.
 SOURCES=()
 seenKeys=""
-rootCount=0; docsCount=0; skillsCount=0; promptsCount=0
-addSource() {  # addSource <path> <family: root|docs|skills|prompts>
+rootCount=0; docsCount=0; skillsCount=0; promptsCount=0; paperCount=0
+addSource() {  # addSource <path> <family: root|docs|skills|prompts|paper>
     [ -f "$1" ] || return 0
     key="$( cd "$( dirname "$1" )" && pwd -P )/$( basename "$1" )"
     case "$seenKeys" in *"|$key|"*) return 0 ;; esac
@@ -142,6 +148,7 @@ addSource() {  # addSource <path> <family: root|docs|skills|prompts>
         docs)    docsCount=$((docsCount + 1)) ;;
         skills)  skillsCount=$((skillsCount + 1)) ;;
         prompts) promptsCount=$((promptsCount + 1)) ;;
+        paper)   paperCount=$((paperCount + 1)) ;;
     esac
 }
 addSource "$ROOT/README.md" root      # arrives with the public-README lane; addSource no-ops until then
@@ -162,6 +169,7 @@ done
 for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f" skills; done
 for f in "$ROOT"/skills/*/*.md;             do addSource "$f" skills; done
 for f in "$ROOT"/prompts/*.md;              do addSource "$f" prompts; done
+for f in "$ROOT"/paper/*.md;                do addSource "$f" paper;   done
 
 # A scan of nothing is not a pass. The old refusal threshold was a single TOTAL count, which one
 # surviving family could satisfy while another vanished entirely — the failure that let this gate go
@@ -171,8 +179,9 @@ for f in "$ROOT"/prompts/*.md;              do addSource "$f" prompts; done
 [ "$docsCount"    -ge 1 ] || { echo "deckcheck: 0 docs/*.md prose source(s) found — refusing to run"; exit 2; }
 [ "$skillsCount"  -ge 1 ] || { echo "deckcheck: 0 skills/*/*.md prose source(s) found — refusing to run"; exit 2; }
 [ "$promptsCount" -ge 1 ] || { echo "deckcheck: 0 prompts/*.md prose source(s) found — refusing to run"; exit 2; }
-[ "${#SOURCES[@]}" -ge 38 ] || {
-    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=38 (root docs, docs/*.md, skills/*/*.md, prompts/*.md)."
+[ "$paperCount"   -ge 1 ] || { echo "deckcheck: 0 paper/*.md prose source(s) found — refusing to run"; exit 2; }
+[ "${#SOURCES[@]}" -ge 40 ] || {
+    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=40 (root docs, docs/*.md, skills/*/*.md, prompts/*.md, paper/*.md)."
     printf '        found: %s\n' "${SOURCES[@]#$ROOT/}"
     echo "        A near-empty scan reads as a PASS while checking nothing; refusing to run."
     exit 2; }
