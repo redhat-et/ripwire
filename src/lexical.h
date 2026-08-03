@@ -184,6 +184,27 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
+    // pass 1.5 — path field (×RIPWIRE_PATHTOK_W): the symbol's file path scanned through the SAME state
+    // machine. INERT BY DEFAULT (env unset → this block never fires; output byte-identical): the weight
+    // exists for the r3 calibration sweep only (bench/locbench/results/r3_pathtok/PREREG.md), and a
+    // nonzero DEFAULT requires that pre-registered acceptance gate. Paths need no file text, so the pass
+    // sits before the branch below and runs identically over the scan and persisted-stats paths —
+    // postings parity holds by construction and the cache format is untouched.
+    if( const char* pathTokEnv = std::getenv( "RIPWIRE_PATHTOK_W" ) )
+    {
+        const int kwPath = std::clamp( std::atoi( pathTokEnv ), 0, 8 );
+        if( kwPath > 0 )
+        {
+            for( std::size_t i = 0; i < S; ++i )
+            {
+                if( const std::uint32_t f = ing.symbols[i].fileId; f < ing.files.size() )
+                {
+                    scanField( i, ing.files[f], kwPath );
+                }
+            }
+        }
+    }
+
     // pass 2 — doc-comment (×kwDoc) + body (×kwBody) evidence.
     //
     // B0.2 (R1 hypothesis #1): a RICH ingest carries per-symbol weighted subtoken statistics built ONCE at
