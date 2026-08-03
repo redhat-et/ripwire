@@ -400,7 +400,7 @@ Listed because the reason is more useful than the silence.
   referenced does not ship here. Until a source can be named, it is not a published number.
 - **"+66.7% held-out strict@10" for the mention anchor.** The 66.7% figure that circulates is an
   *absolute* strict file@10 belonging to the *baseline* arm of a *different* experiment
-  (anchor-hop expansion, train slice), and that experiment's candidate was **rejected and never
+  (anchor-hop expansion, held-out slice, n=243), and that experiment's candidate was **rejected and never
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says

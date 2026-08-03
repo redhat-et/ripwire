@@ -55,8 +55,8 @@ zero runtime dependencies, whose ranked output is a pure function of (repository
 binary version). The motivation is not to beat LLM agents at localization — it is to establish the
 **deterministic floor** they build on: (a) a reproducible public number for model-free retrieval at
 symbol granularity, (b) evidence that parse coverage is not the bottleneck (the ranker's ceiling is
-ordering, not visibility), and (c) a benchmark for the language the public localization sets do not
-cover: C++.
+ordering, not visibility), and (c) a benchmark for a language the public localization sets we are aware
+of do not cover: C++.
 
 **Contributions.**
 
@@ -65,7 +65,7 @@ cover: C++.
   a zero-silent-skip scoring contract and an offline CI fixture. The public localization sets we are
   aware of are Python-only (Loc-Bench [1], SWE-bench-Lite–derived sets) or do not isolate C++ with
   localization gold in a retrieval-ready harness. *This primacy claim is a literature claim, not a
-  measurement: no gate in this repository can check it, and it is stated as "to our knowledge" for
+  measurement: no gate in this repository can check it, and it is hedged (“we are aware of”, “available to us”) for
   that reason.*
 - **C2 — a corrected LocBench methodology for symbol-granularity rankers** (§3.1): exact
   repo-relative path identity (duplicate basenames never earn credit), a frozen repository-disjoint
@@ -151,8 +151,8 @@ baselines** in [1], and we do not claim they are (§4.5 keeps the two tables sep
 
 No public, human-verified, issue-report-shaped C++ localization benchmark was available to us. We
 built one (`bench/multiswe/run_multiswe.py`) by mining Multi-SWE-bench [2] — reported there as 1,632
-human-verified, test-passing PRs across 8 languages, curated by 68 expert annotators — down to its C
-and C++ splits (pinned Hugging Face dataset revision
+human-verified, test-passing PRs across 8 languages, curated by 68 expert annotators — down to its C++
+split (pinned Hugging Face dataset revision
 `56ff018c04a38e27ada1e9d0a6d5839a51f88f0d`, recorded with the dataset's license statement in
 `bench/multiswe/dataset.lock`).
 
@@ -170,8 +170,9 @@ issue (at least four words), non-empty patch touching at least one non-added fil
 extensions, and a hygiene rule excluding issue texts that embed a contributor's local home-directory
 path. The C++ split yields **n=122 mined / 121 scored** (one instance's gold is outside the indexable
 universe; the reason is printed, not silently dropped) across catchorg/Catch2, fmtlib/fmt,
-nlohmann/json, simdjson/simdjson, and yhirose/cpp-httplib. The mined C-split repositories (zstd, jq,
-ponyc) are in the lock as well; this paper scores the C++ split.
+nlohmann/json, simdjson/simdjson, and yhirose/cpp-httplib. The C split (zstd, jq, ponyc)
+is minable by the same harness (`--languages=c,cpp`) but is not in the committed lock; this paper
+mines and scores the C++ split.
 
 Scoring is identical in shape to §3.1 (strict file@k per [1] §4.1, lenient any@10, first-hit MRR);
 every arm run is verified byte-identical twice; an offline fixture gate (`test/multiswecheck.sh`, no
@@ -262,7 +263,7 @@ this paper shows.
 | `--query` (raw BM25) | 8.3% | 35.5% | 45.5% | 53.7% | 86.8% | 0.447 | 0.09 s |
 
 Strata (`--for`): **single-file instances (n=51): strict@10 86.3%**; **multi-file instances (n=70):
-strict@10 32.9%**, identical across all three arms.
+strict@10 32.9%** — the multi-file figure identical across all three arms.
 
 *Pinned by:* `bench/multiswe/results/cpp_scoreboard.md` (machine-generated), per-instance rows in
 `bench/multiswe/results/cpp.json`, frozen instance list in `bench/multiswe/dataset.lock`.
@@ -303,7 +304,7 @@ of this benchmark ran on a private corpus and scored far higher — roughly **89
 first-hit MRR** — against the public SFML figures above (31.3% strict file@10, 45.2% any@10, 0.22
 MRR). The private corpus was removed for public release and its numbers are **no longer reproducible
 from this tree**; `docs/EVALS.md` §8 accordingly declines to publish the private absolutes at all,
-and this paper does not restate them. The mechanism behind the gap is visible in the query shape: the
+this paper carries only the rounded framing §7 itself uses, and does not restate the private strict file@10 figure. The mechanism behind the gap is visible in the query shape: the
 private corpus's commit messages were long, identifier-dense technical notes (an easy retrieval
 shape); SFML's are terse changelog summaries whose vocabulary barely overlaps the code. **A benchmark
 that produced easier-looking numbers from a harder-to-publish corpus is not evidence, and the public
@@ -379,7 +380,7 @@ LARGER [4] reports lexical-anchor + confidence-filtered deterministic graph expa
 at Loc-Bench file Acc@5 89.1 against 49.3 for BM25, with expansion its largest single ablation
 component (+7.5 Acc@5) — the direct motivation for §6. Agentic costs in the literature are reported
 in the range of roughly $0.30–$1.50+ per instance [5, 6]; **that bracket is those papers' figure, not
-a measurement of ours.** ripwire's own per-instance cost, from the scoreboards in §4.2 and §4.3, is
+a measurement of ours.** ripwire's own per-instance cost, from the machine-generated scoreboards (`cpp_scoreboard.md`, `sfml_scoreboard.md`; the 0.78 s figure is the SFML wall/inst column, not reproduced in §4.3's table), is
 **0.17–0.78 s of local CPU** with no API call.
 
 **An arithmetic claim this port removed.** An earlier draft summarized the gap as "LocAgent-class
@@ -465,7 +466,7 @@ rule). Held-out (n=243, release timing protocol, one shot):
 binary. The 66.7% baseline is **not** the shipping figure of §4.1 (60.9%, a different binary and the
 one this project publishes), and `docs/EVALS.md` §8 exists partly because that 66.7% has circulated
 detached from this table. The experiment's result is the **delta**, and the delta is what the gate
-judged.
+judged. (One register correction landed with this port: `docs/EVALS.md` §8 previously mislabelled this baseline arm as the train slice; the pinning file's `heldout_acceptance` block is unambiguous and the register now says held-out, n=243.)
 
 Paired, 78 repository clusters: strict f@10 **+0.41pp, 95% lower bound +0.00pp**; lenient +0.82pp;
 warm p50 +2.8% / p95 +10.2%; token p50 +0.2%. Gate: tier-1 **PASS** (761.5 ms / 1,623.8 ms against
@@ -569,8 +570,8 @@ the negative result runnable, keep it out of the default surface, publish its nu
   binaries, and the only defense is that every table names the artifact that pins it. A reader
   comparing two numbers in this paper must first check they came from the same artifact.
 - **C++ held-out breadth.** Five repositories (one contributing a single instance) is thin for
-  clustered inference; the C-split (zstd/jq/ponyc) is mined into the lock but unscored here, and
-  widening the repository base is the benchmark's most valuable future increment. MULocBench [3] is
+  clustered inference; the C split (zstd/jq/ponyc) is minable by the same harness but not in the
+  committed lock, and widening the repository base is the benchmark's most valuable future increment. MULocBench [3] is
   documented in the harness as the next adoption for the non-code-gold axis (configs, docs), which
   every set here structurally omits.
 - **Query construction.** Verbatim issue text truncated at 1,200 characters, no boilerplate cleaning
