@@ -1,0 +1,232 @@
+[
+ {
+  "id": "q01",
+  "category": "C1",
+  "question": "When the database cache backend grows past its configured max size, where is the logic that deletes old/expired entries to bring it back under the limit, and what triggers it?",
+  "gold_files": [
+   "django/core/cache/backends/db.py"
+  ],
+  "gold_symbols": [
+   "_cull",
+   "_base_set"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "max_entries",
+   "DELETE FROM"
+  ]
+ },
+ {
+  "id": "q02",
+  "category": "C1",
+  "question": "On a POST request, where does Django actually compare the CSRF token the client sent against the secret from the cookie, and where in request processing is that comparison invoked?",
+  "gold_files": [
+   "django/middleware/csrf.py"
+  ],
+  "gold_symbols": [
+   "_does_token_match"
+  ],
+  "gold_any": [
+   [
+    "_check_token",
+    "process_view"
+   ]
+  ],
+  "naive_grep_terms": [
+   "csrfmiddlewaretoken",
+   "CSRF token"
+  ]
+ },
+ {
+  "id": "q03",
+  "category": "C2",
+  "question": "I want to add a keyword-only parameter to resolve_url in django/shortcuts.py \u2014 who calls it inside Django and would need updating if its signature changes?",
+  "gold_files": [
+   "django/shortcuts.py",
+   "django/contrib/auth/mixins.py",
+   "django/contrib/auth/views.py",
+   "django/contrib/auth/decorators.py"
+  ],
+  "gold_symbols": [
+   "resolve_url"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "resolve_url(",
+   "import resolve_url"
+  ]
+ },
+ {
+  "id": "q04",
+  "category": "C2",
+  "question": "I'm changing what sanitize_strftime_format accepts and returns \u2014 which code paths in Django call it and would break?",
+  "gold_files": [
+   "django/utils/formats.py",
+   "django/forms/widgets.py"
+  ],
+  "gold_symbols": [
+   "sanitize_strftime_format",
+   "localize_input",
+   "value_from_datadict"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "sanitize_strftime_format"
+  ]
+ },
+ {
+  "id": "q05",
+  "category": "C3",
+  "question": "I'm about to change the signature format produced by django/core/signing.py \u2014 which test files exercise this module, and which is the dedicated suite I should extend?",
+  "gold_files": [
+   "tests/signing/tests.py"
+  ],
+  "gold_symbols": [],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "core.signing",
+   "Signer("
+  ]
+ },
+ {
+  "id": "q06",
+  "category": "C3",
+  "question": "I'm changing how makemigrations detects model/field changes \u2014 which tests directly exercise the migration autodetector class?",
+  "gold_files": [
+   "tests/migrations/test_autodetector.py"
+  ],
+  "gold_symbols": [
+   "MigrationAutodetector"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "MigrationAutodetector",
+   "autodetector"
+  ]
+ },
+ {
+  "id": "q07",
+  "category": "C4",
+  "question": "When a request comes in, how does its URL path end up as a view callable \u2014 trace the chain from the request handler to where the match object is produced.",
+  "gold_files": [
+   "django/core/handlers/base.py",
+   "django/urls/resolvers.py"
+  ],
+  "gold_symbols": [
+   "resolve_request",
+   "ResolverMatch"
+  ],
+  "gold_any": [
+   [
+    "URLResolver",
+    "URLPattern"
+   ]
+  ],
+  "naive_grep_terms": [
+   "resolver_match",
+   "def resolve("
+  ]
+ },
+ {
+  "id": "q08",
+  "category": "C4",
+  "question": "When I call form.is_valid(), how does my submitted data actually reach each field's cleaning code and the form's per-field clean_<name> hooks \u2014 what's the call chain?",
+  "gold_files": [
+   "django/forms/forms.py",
+   "django/forms/fields.py"
+  ],
+  "gold_symbols": [
+   "full_clean",
+   "_clean_fields"
+  ],
+  "gold_any": [
+   [
+    "_clean_bound_field",
+    "to_python"
+   ]
+  ],
+  "naive_grep_terms": [
+   "def is_valid",
+   "full_clean"
+  ]
+ },
+ {
+  "id": "q09",
+  "category": "C5",
+  "question": "I need to add a new built-in template filter to Django itself \u2014 which files and functions matter for implementing and testing it?",
+  "gold_files": [
+   "django/template/defaultfilters.py",
+   "django/template/library.py",
+   "tests/template_tests/filter_tests/"
+  ],
+  "gold_symbols": [
+   "register",
+   "Library",
+   "filter"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "register.filter",
+   "defaultfilters"
+  ]
+ },
+ {
+  "id": "q10",
+  "category": "C5",
+  "question": "I want to ship a new password hasher in Django and make it selectable \u2014 what files and functions does a correct plan have to touch or account for?",
+  "gold_files": [
+   "django/contrib/auth/hashers.py",
+   "django/conf/global_settings.py",
+   "tests/auth_tests/test_hashers.py"
+  ],
+  "gold_symbols": [
+   "BasePasswordHasher",
+   "PASSWORD_HASHERS"
+  ],
+  "gold_any": [
+   [
+    "get_hashers",
+    "identify_hasher"
+   ]
+  ],
+  "naive_grep_terms": [
+   "PASSWORD_HASHERS",
+   "PasswordHasher"
+  ]
+ },
+ {
+  "id": "q11",
+  "category": "C6",
+  "question": "My code hit \"TypeError: Cannot filter a query once a slice has been taken.\" \u2014 where is that exact message raised, and which QuerySet method guards it?",
+  "gold_files": [
+   "django/db/models/query.py"
+  ],
+  "gold_symbols": [
+   "_filter_or_exclude"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "Cannot filter a query once a slice has been taken",
+   "once a slice has been taken"
+  ]
+ },
+ {
+  "id": "q12",
+  "category": "C6",
+  "question": "Where does the \"Invalid HTTP_HOST header\" error come from \u2014 which method builds that message, what exception type does it raise, and who catches that exception elsewhere in Django?",
+  "gold_files": [
+   "django/http/request.py",
+   "django/core/exceptions.py",
+   "django/middleware/csrf.py"
+  ],
+  "gold_symbols": [
+   "get_host",
+   "DisallowedHost"
+  ],
+  "gold_any": [],
+  "naive_grep_terms": [
+   "Invalid HTTP_HOST header",
+   "DisallowedHost"
+  ]
+ }
+]
