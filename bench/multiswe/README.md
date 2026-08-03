@@ -1,4 +1,4 @@
-# bench/multiswe — the first public C++ localization eval mined from Multi-SWE-bench
+# bench/multiswe — a public C++ localization eval mined from Multi-SWE-bench (to our knowledge the first)
 
 `bench/cppbench/` mines commit-message queries from one repo's own history (SFML). `bench/locbench/`
 is Python-only public data (LocBench / SWE-bench-Lite). Neither is a public, human-verified, **issue-
