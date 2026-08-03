@@ -54,8 +54,8 @@ the paper argued *for* a mechanism, the measurement here did not reproduce the g
 was rejected rather than shipped on the paper's authority. That is the LARGER row, and it is the one
 worth reading first.
 
-Three rows rest on sources that are not peer-reviewed — a vendor specification, a book, and a
-practitioner article. They are labelled as such in the row rather than left to look like papers.
+Two rows rest on three sources that are not peer-reviewed — a vendor specification, a book, and a
+practitioner article. Each is labelled as such in its own row rather than left to look like a paper.
 
 | Work | Lesson taken | Where it lives |
 | --- | --- | --- |
@@ -135,8 +135,9 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 
 **Read and not folded, and worth naming because they are the near misses.** A scoped-snippet view
 with scope breadcrumbs — the one rung of the detail ladder that is still missing here — was designed
-against `grep-ast`'s TreeContext and never shipped. A head-to-head arm contributed a measured
-comparison and no design lesson, so it appears in [`EVALS.md`](EVALS.md) and not here.
+against `grep-ast`'s TreeContext and never shipped. `graphify` contributed a measured head-to-head
+comparison and no design lesson, so it appears in [`EVALS.md`](EVALS.md) §2 and not in §3a — it is
+still in the surveyed table below, where a catalogued-and-not-borrowed-from tool belongs.
 
 And [pdqsort](https://github.com/orlp/pdqsort) is the near miss that is actually *in the tree*: it is
 vendored at `third_party/pdqsort.hpp`, licensed and attributed in [`THIRD_PARTY.md`](../THIRD_PARTY.md)
