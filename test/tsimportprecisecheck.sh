@@ -25,6 +25,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/tsimportprecisefix"
+. "$ROOT/test/lib/headbinlib.sh"                       # shared sha-keyed cache of the HEAD comparison binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -90,17 +91,11 @@ monotonic_check()
     command -v cmake >/dev/null 2>&1 || { skip "monotonicity: cmake absent"; return; }
     ( cd "$ROOT" && git rev-parse --verify HEAD >/dev/null 2>&1 ) || { skip "monotonicity: not a git repo"; return; }
 
-    local WT="$TMP/head"
-    ( cd "$ROOT" && git worktree add -q --detach "$WT" HEAD ) 2>"$TMP/wt.err" \
-        || { skip "monotonicity: cannot create HEAD worktree ($(head -1 "$TMP/wt.err"))"; return; }
-    trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
-
-    local OLDB="$TMP/oldbuild"
-    if ! ( cmake -S "$WT" -B "$OLDB" -DRIPWIRE_NATIVE=ON >/dev/null 2>&1 && cmake --build "$OLDB" -j >/dev/null 2>&1 ); then
-        skip "monotonicity: pre-change build failed"; return
-    fi
-    local OLDBIN="$OLDB/ripwire"
-    [ -x "$OLDBIN" ] || { skip "monotonicity: pre-change binary missing"; return; }
+    # pre-change binary from the shared sha-keyed cache (test/lib/headbinlib.sh): built at most once per
+    # HEAD sha, then reused by all four monotonicity gates and every rerun until HEAD moves.
+    local OLDBIN
+    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" \
+        || { skip "monotonicity: pre-change build failed"; return; }
 
     local ao an
     ao="$( "$OLDBIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 | grep -oE '[0-9]+' )"

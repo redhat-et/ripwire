@@ -29,6 +29,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/crossdirincludefix"
+. "$ROOT/test/lib/headbinlib.sh"                       # shared sha-keyed cache of the HEAD comparison binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -88,12 +89,11 @@ monotonic_check()
     # ensure cleanup of the worktree
     trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
 
-    local OLDB="$TMP/oldbuild"
-    if ! ( cmake -S "$WT" -B "$OLDB" -DRIPWIRE_NATIVE=ON >/dev/null 2>&1 && cmake --build "$OLDB" -j >/dev/null 2>&1 ); then
-        skip "monotonicity: pre-change build failed"; return
-    fi
-    local OLDBIN="$OLDB/ripwire"
-    [ -x "$OLDBIN" ] || { skip "monotonicity: pre-change binary missing"; return; }
+    # pre-change binary from the shared sha-keyed cache (test/lib/headbinlib.sh); the worktree above is
+    # still needed as the held-constant INPUT corpus (HEAD's src/), but no longer as a build tree.
+    local OLDBIN
+    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" \
+        || { skip "monotonicity: pre-change build failed"; return; }
 
     # SAME input (HEAD's src/) for both binaries → isolates the resolver change from any working-tree edits.
     local IN="$WT/src"
