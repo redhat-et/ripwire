@@ -53,6 +53,7 @@
 #include "gitmine.h"
 #include "ownersview.h"      // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with mcpverbs.h's `owners` verb
 #include "mention.h"        // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
+#include "siblift.h"        // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
 #include "tracein.h"        // L2: --from-trace=FILE — table-driven stack-trace/sanitizer/compiler frame extraction
 #include "clones.h"
 #include "skillscan.h"
@@ -1565,6 +1566,17 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
                            mentionInfo.fileCount, mentionInfo.fileCount == 1 ? "" : "s", mentionInfo.symbolCount );
             out.mentionNote  = nb;
             out.anchorLifts  = mentionInfo.fileCount + mentionInfo.symbolCount;   // §A4f: the count the candidates root emits
+        }
+    }
+
+    // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
+    // strongest query-relevant same-directory siblings of the top-ranked files into the slot ladder. INERT
+    // (byte-identical) unless RIPWIRE_SIBLIFT="<seed>,<sib>" parses in range. Routed path only.
+    if( !cfg.noRoute )
+    {
+        if( const auto [ sibSeed, sibPer ] = sibliftParams(); sibSeed > 0 )
+        {
+            applySiblingLift( ing, lensRank, sibSeed, sibPer );
         }
     }
 
