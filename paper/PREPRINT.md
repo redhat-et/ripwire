@@ -171,7 +171,7 @@ extensions, and a hygiene rule excluding issue texts that embed a contributor's 
 path. The C++ split yields **n=122 mined / 121 scored** (one instance's gold is outside the indexable
 universe; the reason is printed, not silently dropped) across catchorg/Catch2, fmtlib/fmt,
 nlohmann/json, simdjson/simdjson, and yhirose/cpp-httplib. The C split (zstd, jq, ponyc)
-is minable by the same harness (`--languages=c,cpp`) but is not in the committed lock; this paper
+is minable by the same harness (its language selection covers both) but is not in the committed lock; this paper
 mines and scores the C++ split.
 
 Scoring is identical in shape to §3.1 (strict file@k per [1] §4.1, lenient any@10, first-hit MRR);
