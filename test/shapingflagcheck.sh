@@ -93,6 +93,7 @@ argvFor()
         --report)      printf '%s\0' --report ;;
         --edit-check)  printf '%s\0' --edit-check=parseArgs ;;
         --situ)        printf '%s\0' --situ ;;
+        --handoff)     printf '%s\0' --handoff ;;
         --scan-skills) printf '%s\0' --scan-skills ;;
         --merge-scout) printf '%s\0' --merge-scout=HEAD,HEAD~1 ;;
         --connect)     printf '%s\0' --connect=parseArgs,serialize,rankGraph ;;

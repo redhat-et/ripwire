@@ -100,3 +100,14 @@ Handoff brief: (1) what the subsystem does in 2 sentences, (2) the 3 key entry-p
 with file:line and their signatures (from `--expand`), (3) the design decisions the recipient
 must know (from `--recall`), (4) any hotspot files to be careful with, flagged if churn/complexity data
 looks stale (no git history, non-git root). Aim for under 600 tokens.
+
+## Mid-task session handoff — `--handoff`
+
+Handing off an INTERRUPTED WORKING SESSION (not a subsystem summary)? `ripwire <dir> --handoff` emits
+the whole continuation packet in one deterministic call: a `<verified>` section (branch, HEAD sha with
+`+dirty` marker, changed files + their symbols, transitive blast-radius size, tests-to-run) that is pure
+disk truth, and a `<heuristic>` section (co-change partners not in the diff, committed `--note-add`
+notes on the touched files, plan/design doc pointers ranked by a branch+commit-subject query) that is
+labeled suggestion, never presented as fact. Composes with `--token-budget=N` — heuristic rows drop
+tail-first and the header discloses `withheld=`; verified rows never drop. Single-root only; paste the
+packet to the next agent as-is.

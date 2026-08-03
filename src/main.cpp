@@ -19,6 +19,7 @@
 #include "lexical.h"
 #include "recall.h"
 #include "situ.h"
+#include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
@@ -5566,6 +5567,13 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     const bool                        multiRoot    = d.multiRoot;
     const std::vector<WorkspaceRoot>& ws           = d.ws;
 
+    // --handoff: the continuation packet for the NEXT session (handoff.h). Multi-root refused earlier in
+    // main() with its siblings; this handler only ever sees one root.
+    if( cfg.handoff )
+    {
+        return writeHandoffPacket( stdout, root, ing, g, cfg.tokenBudget );
+    }
+
     // --situ[=FILES]: situational awareness for a change set — blast radius + tests to run + co-change misses,
     // in one call. The daily-driver "what should I know after this edit" verb. Default change set = git diff.
     if( cfg.situ )
@@ -9884,6 +9892,10 @@ int main( int argc, char** argv )
         if( cfg.testGate )
         {
             return refuse( "--test-gate", "its HEAD-keyed contract is per-repo; run it per root" );
+        }
+        if( cfg.handoff )
+        {
+            return refuse( "--handoff", "its branch/sha/diff provenance is keyed to ONE repo's HEAD; run it per root" );
         }
         if( cfg.eval || cfg.evalRetrieval || !cfg.evalMined.empty() || !cfg.evalSkills.empty() )
         {
