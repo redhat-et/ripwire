@@ -1,0 +1,5 @@
+# git blame ignore list — mechanical, behavior-neutral rewrites. Enable once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style(braces): every control-statement body takes braces — mechanical sweep (2026-08-03)
+208611f8e4996c98d62e05dbf488b7e470cf07ff

@@ -111,12 +111,12 @@ scripts/formatcheck.sh --advisory   # REPORT over the whole first-party set; alw
 `.clang-format` encodes §3's house style as closely as clang-format can express it, and the gate runs
 over a short, explicit `GATED` list inside `scripts/formatcheck.sh` — nine files that already agree
 with `.clang-format` byte for byte. It is short on purpose. §3's style is hand-formatted in ways
-clang-format has no option to preserve: multi-statement one-liners, `for( … ) if( … ) return i;`,
-several initialiser rows or `case` labels packed per line, wrap seams chosen by hand at 160–200
-columns. Reformatting all 98 first-party C++ files changes 11837 lines that survive `git diff -w` —
-real joins and splits — across 89 of them, so a whole-tree check would be red on a *correctly* styled
-tree. The advisory mode prints that gap on every run, so its size stays on the record instead of
-being forgotten.
+clang-format has no option to preserve: multi-statement one-liners, several initialiser rows or
+`case` labels packed per line, wrap seams chosen by hand at 160–200 columns, `[ & ]` lambda intros.
+Reformatting all 98 first-party C++ files changes 14235 lines that survive `git diff -w` — real
+joins and splits — across 89 of them (re-measured after the 2026-08-03 always-braces sweep), so a
+whole-tree check would be red on a *correctly* styled tree. The advisory mode prints that gap on
+every run, so its size stays on the record instead of being forgotten.
 
 Two consequences, and the second is the one that matters:
 
@@ -171,6 +171,10 @@ Two failure modes this project has actually shipped, and now gates against:
 ### Formatting
 
 - **Allman braces** — `{` and `}` on their own lines, for functions, `if`, `for`, and lambdas.
+- **Every control-statement body takes braces** — no braceless `if( x ) f();` / `for( … ) g();`
+  one-liners (rule landed 2026-08-03; `.clang-format` enforces it on new code via `InsertBraces`).
+  On its own line, the body gets the full Allman form. Inside a one-line lambda the braces go
+  inline — `[ & ] { if( ok ) { f(); } g(); }` — keeping the terse-lambda idiom legal.
 - **Spaces inside parens** — `f( x )`, `for( std::size_t i = 0; i < n; ++i )`, `if( ok )`.
 - **Wrap at ~160–200 columns**, not 80 or 120. Break on logical-operator seams, never mid-expression.
 - **Blank-line groups**, each led by a `//` comment naming the group.

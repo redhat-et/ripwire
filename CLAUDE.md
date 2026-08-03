@@ -82,6 +82,7 @@ the same commit — `test/manifestcheck.sh` fails otherwise.
 
 ## Style
 
-Allman braces, spaces inside parens (`f( x )`), ~160–200 column wraps, index-vs-count naming,
+Allman braces, braces on every control-statement body (no braceless `if( x ) f();` — inline
+`{ … }` inside one-line lambdas), spaces inside parens (`f( x )`), ~160–200 column wraps, index-vs-count naming,
 structured-binding returns, tolerance-band float tests. The full rules — with the reasoning — are in
 **`CONTRIBUTING.md` §3**. Read that before writing C++ here; it is self-contained.

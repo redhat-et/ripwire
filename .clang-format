@@ -7,12 +7,13 @@
 #
 # SCOPE — read this before wiring it as a gate.
 # The house style is deliberately hand-formatted in ways clang-format normalises away: multi-statement
-# one-liners (`{ oc.ok = false; oc.errCode = -32603; }`), `for( ... ) if( ... ) return i;`, several packed
-# initialiser rows or `case` labels per line, and wrap seams chosen by hand at 160-200 columns. Measured
-# over the 98 first-party C++ files at 098fe52: reformatting the whole tree changes 11837 lines that are
-# NOT whitespace — real joins and splits — under the best config found, so a repo-wide `--dry-run --Werror`
-# check cannot be a gate here without first rewriting the code. `scripts/formatcheck.sh` therefore gates
-# only the files that already agree with this config byte for byte, and reports the rest advisorily.
+# one-liners (`{ oc.ok = false; oc.errCode = -32603; }`), several packed initialiser rows or `case` labels
+# per line, wrap seams chosen by hand at 160-200 columns, and `[ & ]` lambda intros (no clang-format option
+# spaces the intro without also spacing every subscript). Measured over the 98 first-party C++ files after
+# the 2026-08-03 always-braces sweep: reformatting the whole tree still changes 14235 lines across 89 files
+# — real joins and splits — under the best config found, so a repo-wide `--dry-run --Werror` check cannot
+# be a gate here without first rewriting the code. `scripts/formatcheck.sh` therefore gates only the files
+# that already agree with this config byte for byte, and reports the rest advisorily.
 # Use this file as an editor formatter for NEW code, and expect to hand-repack tables and one-liners after.
 #
 # ColumnLimit is 0 on measurement, not on taste: a finite limit re-breaks the hand-set logical-operator
@@ -120,9 +121,13 @@ AlignTrailingComments:
   Kind: Never
   OverEmptyLines: 0
 
+# Every control-statement body takes braces (house rule since 2026-08-03; the whole tree was swept with
+# clang-tidy readability-braces-around-statements in the same change, so InsertBraces only ever fires on
+# NEW code). This is the one deliberate exception to the "never silently edit code" block below.
+InsertBraces: true
+
 # Never silently edit code under the guise of formatting
 FixNamespaceComments: false
-InsertBraces: false
 InsertNewlineAtEOF: false
 RemoveSemicolon: false
 RemoveParentheses: Leave
