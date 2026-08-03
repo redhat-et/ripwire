@@ -198,7 +198,19 @@ esac
 for flags in "--doctor" "--doc-drift" "--hotspots" "--quality-delta" "--pr-context" "--test-gate"; do
     a="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
     b="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
-    [ "$a" = "$b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
+    cmp_a="$a"; cmp_b="$b"
+    if [ "$flags" = "--doctor" ]; then
+        # --doctor's cache-dir check reports LIVE counters (blobs=/bytes=) of the shared per-user temp
+        # cache dir. That dir is machine-global, so any concurrent ripwire activity (another agent
+        # session, another worktree's test run) can grow those counters between these two back-to-back
+        # runs even though the binary itself is perfectly deterministic. This arm asserts output-SHAPE
+        # determinism of the binary, not that the whole machine held still — so normalize just those two
+        # volatile attributes out of BOTH sides before comparing; everything else still has to match
+        # byte-for-byte.
+        cmp_a="$( printf '%s' "$a" | sed -E 's/blobs="[0-9]+" bytes="[0-9]+"/blobs="N" bytes="N"/' )"
+        cmp_b="$( printf '%s' "$b" | sed -E 's/blobs="[0-9]+" bytes="[0-9]+"/blobs="N" bytes="N"/' )"
+    fi
+    [ "$cmp_a" = "$cmp_b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
     printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"
 done
 
