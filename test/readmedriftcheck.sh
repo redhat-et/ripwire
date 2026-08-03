@@ -31,8 +31,19 @@
 #   (E) the LINEAGE arm — README.md's "M repositories and P papers … survey of N tools" sentence must
 #       equal the row counts of docs/LINEAGE.md's own tables. Same discipline as (B), different
 #       ground truth: an advertised number is an ENUMERATED number, so the enumeration is the
-#       authority and the prose is checked against it. Sub-arms E1-E5 below; E4 is (E)'s mutation
-#       control, exactly as (C) is (B)'s.
+#       authority and the prose is checked against it. Sub-arms E1-E8 below; E4 is (E)'s mutation
+#       control, exactly as (C) is (B)'s, and E6/E7 carry their own.
+#
+# WHY E6-E8 EXIST. A count can be arithmetically correct and still be a lie about a SET. LINEAGE.md
+# claims its folded tables and its surveyed table are DISJOINT — that is what makes "27 folded plus
+# 220 surveyed" an addition rather than a subset relation, and it is the whole justification for
+# printing both numbers in one sentence. Nothing checked it, and it was false in four places at once
+# (Aider, Cody and octocode were folded rows repeated in the survey; RepoGraph was a §2 paper row
+# repeated there too). E7's failure mode is cheaper still: `comby` was listed in two different
+# surveyed rows, so N counted one tool twice and every row's n stayed internally consistent while
+# doing it — E3 cannot see that, because E3 only ever looks at one row. E8 checks the other half of
+# the honesty rule: a folded row must point at a real flag or source file, so the paths it points at
+# have to exist.
 #
 # WHY (E) EXISTS AT ALL. Three counts in one README sentence, each justified by a different table in
 # a different file, is the drift shape this suite has been bitten by twice (the flag count above; the
@@ -125,10 +136,15 @@ fi
 # and **27 papers**`) and README.md bolds the pair (`**27 repositories and 27 papers**`), so `*` is
 # stripped before matching and ONE regex covers both spellings. Anchoring on the WORDS rather than on
 # a line number or a bold-marker position means a rewrap or a re-bold cannot silently disarm the arm.
+# The whole file is flattened to ONE line before matching, because prose wraps: an editor that broke
+# "survey of\n220 tools" across a line boundary would otherwise make a line-oriented grep report "no
+# sentence found" — loud, but for the wrong reason, and one reflow away from a maintainer deleting the
+# arm as broken. Flattening makes the claimed rewrap-immunity actually true.
 counts_from() {                      # $1 = file → prints "M P N" (empty field = not found)
-    local f="$1" pair survey
-    pair="$(   sed 's/\*//g' "$f" | grep -oE '[0-9]+ repositories and [0-9]+ papers' | head -1 )"
-    survey="$( sed 's/\*//g' "$f" | grep -oE 'survey of [0-9]+ tools'                | head -1 )"
+    local f="$1" flat pair survey
+    flat="$( sed 's/\*//g' "$f" | tr '\n' ' ' | tr -s ' ' )"
+    pair="$(   printf '%s' "$flat" | grep -oE '[0-9]+ repositories and [0-9]+ papers' | head -1 )"
+    survey="$( printf '%s' "$flat" | grep -oE 'survey of [0-9]+ tools'                | head -1 )"
     printf '%s %s %s\n' \
         "$( printf '%s' "$pair"   | grep -oE '^[0-9]+' )" \
         "$( printf '%s' "$pair"   | sed -E 's/^[0-9]+ repositories and ([0-9]+) papers$/\1/' )" \
@@ -216,6 +232,113 @@ elif [ "$l_repos" = "$d_folded" ] && [ "$l_papers" = "$d_papers" ] && [ "$l_tool
     ok "(E5) docs/LINEAGE.md's header ($l_repos / $l_papers / $l_tools) agrees with its own tables"
 else
     no "(E5) docs/LINEAGE.md's header states $l_repos / $l_papers / $l_tools but its own tables enumerate $d_folded / $d_papers / $d_surveyed"
+fi
+
+# ── (E6/E7) the DISJOINTNESS arms — the set claim behind the counts ─────────────────────────────────
+# NAME EXTRACTION, and why it is not a plain string compare. A folded row spells a tool the way its
+# own project does ("[Sourcegraph / Cody]", "[aider repo-map]"); the survey table spells the same tool
+# the way a catalogue does ("Cody", "Aider"). A whole-cell comparison sees no overlap and passes while
+# the document counts one tool twice — which is exactly how Aider and Cody survived review. So each
+# folded entry expands to a KEY SET: its normalised whole name, each slash-separated alternative, and
+# (for §3a repository rows only) each space-separated word of four characters or more. Normalisation
+# is lowercase-and-drop-everything-but-alphanumerics, so "grep.app" and "tree-sitter" compare as one
+# token each and punctuation style cannot hide a duplicate.
+#
+# The word-split is deliberately NOT applied to §2, whose first column is prose ("Metric feedback into
+# the loop"): splitting that into words would put common nouns in the key set and invite a false
+# positive, and it is not needed — the §2 duplicate this arm was written for, RepoGraph, is the entire
+# cell before the em dash. §2 therefore contributes only whole-name and slash-alternative keys.
+LINEAGE_NAMES_AWK='
+    function norm( s )      { s = tolower( s ); gsub( /[^a-z0-9]/, "", s ); return s }
+    function trim( s )      { gsub( /^[ \t]+|[ \t]+$/, "", s ); return s }
+    function linktext( c )  { if( match( c, /\[[^]]*\]/ ) ) return substr( c, RSTART + 1, RLENGTH - 2 ); return c }
+    function emit( key, src ) { if( length( key ) >= 3 ) print "FOLDKEY\t" key "\t" src }
+    function foldnames( raw, src,   parts, i, words, j, n, m, w ) {
+        emit( norm( raw ), src )
+        n = split( raw, parts, /[\/]/ )
+        for( i = 1; i <= n; i++ ) {
+            emit( norm( parts[ i ] ), src )
+            if( src == "3a" ) {
+                m = split( trim( parts[ i ] ), words, /[ ]+/ )
+                if( m > 1 ) for( j = 1; j <= m; j++ ) { w = norm( words[ j ] ); if( length( w ) >= 4 ) emit( w, src ) }
+            }
+        }
+    }
+    /^#{2,3}[ ]/ { sec = $0; next }
+    /^\|/ {
+        if( $0 ~ /^\|[ :|-]+\|[ :|-]*$/ ) next
+        if( seen[ sec ]++ == 0 ) next
+        split( $0, col, /\|/ )
+        cell = trim( col[ 2 ] )
+        if( sec ~ /Folded/ ) { c = linktext( cell ); gsub( /\*/, "", c ); foldnames( trim( c ), "3a" ) }
+        if( sec ~ /Modern research/ ) {
+            idx = index( cell, "—" )
+            if( idx > 0 ) cell = substr( cell, 1, idx - 1 )
+            gsub( /\*/, "", cell )
+            foldnames( trim( cell ), "2" )
+        }
+        if( sec ~ /Surveyed/ ) {
+            n = split( trim( col[ 3 ] ), nm, /,[ ]*/ )
+            for( i = 1; i <= n; i++ ) print "SURVEY\t" norm( nm[ i ] ) "\t" trim( nm[ i ] )
+        }
+    }
+'
+
+# $1 = lineage file, $2 = output prefix → writes "$2.overlap" and "$2.dupes"
+disjointness_of() {
+    awk "$LINEAGE_NAMES_AWK" "$1" > "$2.names"
+    join -t"$( printf '\t' )" -1 1 -2 1 \
+        <( grep '^FOLDKEY' "$2.names" | cut -f2,3 | sort -u ) \
+        <( grep '^SURVEY'  "$2.names" | cut -f2,3 | sort -u ) > "$2.overlap"
+    grep '^SURVEY' "$2.names" | cut -f2 | sort | uniq -d > "$2.dupes"
+}
+
+disjointness_of "$LINEAGE" "$TMP/live"
+fold_keys="$(   grep -c '^FOLDKEY' "$TMP/live.names" )"
+survey_names="$( grep -c '^SURVEY'  "$TMP/live.names" )"
+
+# (E6) no name may be both folded and surveyed. RED-FIRST: a copy with a folded name planted into a
+#      surveyed row must be caught, or a green E6 proves only that two lists were read.
+disjointness_of <( sed -E 's/^\| Sanitizers \| /| Sanitizers | Serena, /' "$LINEAGE" ) "$TMP/planted"
+if [ ! -s "$TMP/planted.overlap" ]; then
+    no "(E6) mutation control is vacuous: a folded name (Serena) planted into a surveyed row was NOT detected as an overlap — the arm cannot see the thing it exists for"
+elif [ -s "$TMP/live.overlap" ]; then
+    no "(E6) docs/LINEAGE.md counts a tool twice — these names are both folded (§2/§3a) and surveyed (§3b), so the two counts overlap instead of adding:"
+    cut -f2,3 "$TMP/live.overlap" | sed 's/^/          /'
+else
+    ok "(E6) §2+§3a and §3b are disjoint: $fold_keys folded keys vs $survey_names surveyed names, zero overlap (control: a planted 'Serena' is caught)"
+fi
+
+# (E7) no surveyed name may appear twice ANYWHERE in the surveyed table. E3 checks a row against
+#      itself and is blind to this: `comby` sat in two rows, both rows' n were correct, and N was one
+#      too high. RED-FIRST control as above.
+disjointness_of <( sed -E 's/^\| Sanitizers \| /| Sanitizers | Valgrind, /' "$LINEAGE" ) "$TMP/dup"
+if [ ! -s "$TMP/dup.dupes" ]; then
+    no "(E7) mutation control is vacuous: a name duplicated inside the surveyed table was NOT detected — the arm cannot see the thing it exists for"
+elif [ -s "$TMP/live.dupes" ]; then
+    no "(E7) surveyed name(s) listed in more than one row of §3b — N counts them once per listing, so the total is inflated:"
+    sed 's/^/          /' "$TMP/live.dupes"
+else
+    ok "(E7) all $survey_names surveyed names are globally unique across §3b's rows (control: a planted duplicate is caught)"
+fi
+
+# (E8) every repo-relative path docs/LINEAGE.md points at must exist. The honesty rule the document
+#      states in its own header is that a folded lesson is "pointed at a real flag or source file", so
+#      a dead pointer is a broken claim, not a typo. Deliberately EXISTENCE only: asserting that the
+#      file also CONTAINS some identifier from the row was considered and rejected — a row's prose is
+#      a lesson in English ("determinism is a product feature"), shares no tokens with the source it
+#      cites, and any such rule would be a false-positive generator. Existence is cheap and exact.
+missing_paths=""
+for p in $( grep -oE '`(src|test|bench|third_party|docs)/[A-Za-z0-9_./-]+`' "$LINEAGE" | tr -d '`' | sort -u ); do
+    [ -e "$ROOT/$p" ] || missing_paths="$missing_paths $p"
+done
+path_count="$( grep -oE '`(src|test|bench|third_party|docs)/[A-Za-z0-9_./-]+`' "$LINEAGE" | tr -d '`' | sort -u | wc -l | tr -d ' ' )"
+if [ "$path_count" -lt 10 ]; then
+    no "(E8) only $path_count repo-relative paths found in docs/LINEAGE.md — the rows cite source files, so this is implausibly few and the scrape has probably broken"
+elif [ -n "$missing_paths" ]; then
+    no "(E8) docs/LINEAGE.md points at path(s) that do not exist:$missing_paths"
+else
+    ok "(E8) all $path_count repo-relative paths cited by docs/LINEAGE.md exist in the tree"
 fi
 
 if [ "$fail" -eq 0 ]; then
