@@ -20,10 +20,16 @@ The report auto-prints at exit (a `#PROF_TSV_BEGIN…END` block carries the raw 
 Apple Silicon (kperf/kpep — needs root or the kperf entitlement to ARM; event-name resolution
 verified through M5 Pro, whose last-level alias resolves via `PL2_CACHE_MISS_LD`) and Linux
 (`perf_event_open` — one pinned, atomically-scheduled event group per thread, whole group read in
-one syscall; `exclude_kernel` so the stock `perf_event_paranoid=2` admits it, no root needed, but
-the box must expose a PMU — most VMs do not, bare metal and `*.metal` instances do). Either
-backend degrades to plain timing, silently, when counters are unavailable;
-`test/pmccheck.sh` asserts whichever arm (active/inactive) the machine can express.
+one syscall; `exclude_kernel` so the stock `perf_event_paranoid=2` admits it, no root needed).
+On Linux the graceful per-event skip applies to the group leader too: a box whose kernel refuses
+the hardware events (most VMs have no vPMU — every `PERF_TYPE_HARDWARE` open fails `ENOENT` there;
+bare metal and `*.metal` instances expose the real thing) still arms the trailing
+`PERF_TYPE_SOFTWARE` rows — `task-clock` (on-CPU ns; its gap against the wall column is off-CPU
+time) and `page-faults` — so a cloud-VM profile keeps honest per-scope counter columns instead of
+timing only. Distinct column names, raw integers, never a stand-in for the hardware counts. Only
+when the kernel offers nothing at all (`perf_event_paranoid>=3`, seccomp) does a backend degrade
+to plain timing, silently; `test/pmccheck.sh` asserts whichever arm (active/inactive) the machine
+can express, and its inactive arm now also proves the kernel truly offered no counter.
 
 **Historical, private corpus (not reproducible publicly):** every table below labeled against a
 large ~1500-2000-file private C++ corpus was measured on the owner's own codebase, which is not
