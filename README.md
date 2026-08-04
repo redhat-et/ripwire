@@ -322,6 +322,31 @@ frame); one machine, one corpus — re-run on yours. Backend contract is gated b
 [`test/pmccheck.sh`](test/pmccheck.sh); M5 Pro event names verified (the last-level alias resolves
 via `PL2_CACHE_MISS_LD`).
 
+**And on machines with no PMU at all — most cloud VMs and CI boxes — the counter columns no longer
+vanish.** A kernel that refuses every hardware event (`ENOENT`; no vPMU is the common cloud case)
+still offers software counters, so the Linux backend's per-event graceful skip now extends to the
+group leader and falls through to two `PERF_TYPE_SOFTWARE` rows — `task-clock` (on-CPU ns) and
+`page-faults` — under their own column names, never as a stand-in for the hardware counts. Below,
+ripwire mapping its own tree, cold, on the 2-vCPU vPMU-less Intel Xeon VM this was validated live
+on:
+
+| scope | calls | wall | task-clock (on-CPU) | page-faults |
+| --- | --- | --- | --- | --- |
+| tree-sitter parse | 799 | 1,773 ms | 1,134 ms | 6.4 k |
+| tags query exec + captures | 799 | 1,084 ms | 1,071 ms | 6.7 k |
+| doc post-pass (main-thread wait on the pool) | 1 | 2,174 ms | 0.50 ms | 0 |
+| resolve refs + build CSR | 1 | 12.32 ms | 12.31 ms | 7 |
+
+Two things this buys that wall-clock alone cannot say. The wall−task-clock gap is *off-CPU time*:
+the parse phase's 36% gap is 2-vCPU oversubscription made visible (a pool parsing 799 files on two
+cores), and the doc post-pass row is honest about being a wait — 2.17 s of wall, half a millisecond
+on-CPU, because its work runs on the pool threads (the same per-thread caveat as the M5 table).
+And the CSR row is a live cross-check: `task-clock` is the kernel's clock, the wall column is the
+profiler's own — two independent clocks agreeing to 0.05% on a single-threaded scope. (Short
+hot scopes diverge by the documented read-bracket overhead instead: the counter bracket encloses
+the tick bracket.) Only a kernel that offers nothing at all — `perf_event_paranoid>=3`, seccomp —
+still degrades to timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
+
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from

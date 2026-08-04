@@ -25,7 +25,40 @@
 #include <cstdint>
 #include <cstdio>
 
+#if defined( __linux__ )
+  #include <linux/perf_event.h>
+  #include <sys/syscall.h>
+  #include <unistd.h>
+#endif
+
 static int g_fail = 0;
+
+#if defined( __linux__ )
+// Does the kernel offer ANY self-profiling counter to this process? Mirrors the backend's exact attr
+// posture (exclude_kernel/hv, pid=0, cpu=-1). PERF_COUNT_SW_TASK_CLOCK is the canonical always-there
+// software event: it needs no PMU and no privilege at perf_event_paranoid<=2, so it opens on
+// vPMU-less VMs/containers where every PERF_TYPE_HARDWARE open fails with ENOENT. If this opens while
+// the backend sits INACTIVE, the backend left an offered counter unused — the graceful-skip contract
+// ("bail to active()==false only if NOTHING opens") is being violated, not honestly degraded.
+static bool kernelOffersSoftwareCounter()
+{
+    perf_event_attr attr {};
+    attr.size           = sizeof( attr );
+    attr.type           = PERF_TYPE_SOFTWARE;
+    attr.config         = PERF_COUNT_SW_TASK_CLOCK;
+    attr.exclude_kernel = 1;
+    attr.exclude_hv     = 1;
+
+    const long fd = ::syscall( __NR_perf_event_open, &attr, 0, -1, -1, 0 );
+    if( fd < 0 )
+    {
+        return false;
+    }
+
+    ::close( int( fd ) );
+    return true;
+}
+#endif
 
 static void check( bool cond, const char* msg )
 {
@@ -109,6 +142,15 @@ int main()
             allZero = allZero && snapshot.values[ slot ] == 0;
         }
         check( allZero, "inactive: read() returns all-zero Snapshots (the timing path stays untouched)" );
+
+#if defined( __linux__ )
+        // INACTIVE is only honest when the kernel truly offers nothing. Software events (task-clock,
+        // page-faults) exist on every Linux, PMU or not — a backend that goes dark while one of those
+        // opens has dropped counters it could have armed, which the per-event graceful-skip contract
+        // forbids ("bail to active()==false only if NOTHING opens").
+        check( !kernelOffersSoftwareCounter(),
+               "inactive: the kernel offers no counter at all (software fallback armed when available)" );
+#endif
     }
 
     // the report must render in both states (counter columns present iff active); stderr silence is

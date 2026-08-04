@@ -1154,7 +1154,7 @@ inline void report()
 #if PROFILE_PMC
     if( prof::pmc::active() )
     {
-        std::printf( "PMC (per-scope HW counters, inclusive totals): " );
+        std::printf( "PMC (per-scope counters, inclusive totals): " );
         for( unsigned e = 0, n = prof::pmc::event_count(); e < n; ++e )
         {
             std::printf( "%s%s", e ? ", " : "", prof::pmc::event_name( e ) );

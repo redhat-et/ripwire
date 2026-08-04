@@ -472,8 +472,12 @@ ALWAYS_INLINE Snapshot read() noexcept
 //    * The leader is PINNED: the group is either truly on the PMU or in error state — the kernel is
 //      never allowed to multiplex it, so a reported delta is always a raw truth, never a silent scale.
 //      An over-budget group is detected at arm time (a pinned group in error reads back 0 bytes) and
-//      handled by dropping the LAST event and re-arming — a column disappears, honestly, per the same
-//      graceful-skip rule the kperf side applies per event.
+//      handled by dropping the last PMU-consuming event and re-arming — a column disappears, honestly,
+//      per the same graceful-skip rule the kperf side applies per event. That skip applies to the
+//      LEADER too: leadership just falls to the first event that opens, so a box whose kernel refuses
+//      `cycles` (vPMU-less VMs refuse every hardware event) still arms whatever it does offer — the
+//      trailing PERF_TYPE_SOFTWARE rows (task-clock, page-faults) in the worst case, which exist on
+//      every Linux and keep per-scope counts flowing where the old shape went silently dark.
 //    * exclude_kernel + exclude_hv, so the default perf_event_paranoid=2 admits us: no root, no
 //      CAP_PERFMON. EACCES / ENOENT (no PMU — most VMs) degrade to active()==false, silently.
 //    * The FIRST thread to arm (main, per profileScope.h's registration order) decides the surviving
@@ -511,14 +515,22 @@ inline constexpr std::uint64_t hw_cache_config( std::uint64_t cache, std::uint64
     return cache | ( op << 8 ) | ( result << 16 );
 }
 
+// The two trailing rows are PERF_TYPE_SOFTWARE — kernel-maintained counts that exist on every Linux,
+// PMU or not, and never occupy a hardware counter slot. On bare metal they ride along for free inside
+// the hardware group; on the vPMU-less VMs most cloud/CI boxes are (every PERF_TYPE_HARDWARE open
+// fails with ENOENT there) they are what keeps the backend ACTIVE, so a profile still carries honest
+// per-scope task-clock (on-CPU ns — its gap against the wall column is off-CPU time) and page-fault
+// counts instead of dropping every counter column. Distinctly named columns, never a silent stand-in.
 inline constexpr EventDesc kEvents[] =
 {
-    { "cycles",           "cyc",    PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES },
-    { "instructions",     "inst",   PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS },
-    { "branch-misses",    "br-ms",  PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES },
-    { "l1d-cache-misses", "l1d-ms", PERF_TYPE_HW_CACHE, hw_cache_config( PERF_COUNT_HW_CACHE_L1D, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_MISS ) },
-    { "l1i-cache-misses", "l1i-ms", PERF_TYPE_HW_CACHE, hw_cache_config( PERF_COUNT_HW_CACHE_L1I, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_MISS ) },
-    { "llc-misses",       "llc-ms", PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES },
+    { "cycles",           "cyc",      PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES },
+    { "instructions",     "inst",     PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS },
+    { "branch-misses",    "br-ms",    PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES },
+    { "l1d-cache-misses", "l1d-ms",   PERF_TYPE_HW_CACHE, hw_cache_config( PERF_COUNT_HW_CACHE_L1D, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_MISS ) },
+    { "l1i-cache-misses", "l1i-ms",   PERF_TYPE_HW_CACHE, hw_cache_config( PERF_COUNT_HW_CACHE_L1I, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_MISS ) },
+    { "llc-misses",       "llc-ms",   PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES },
+    { "task-clock",       "task-clk", PERF_TYPE_SOFTWARE, PERF_COUNT_SW_TASK_CLOCK },
+    { "page-faults",      "pgflt",    PERF_TYPE_SOFTWARE, PERF_COUNT_SW_PAGE_FAULTS },
 };
 
 inline constexpr unsigned kEventTableCount = unsigned( sizeof( kEvents ) / sizeof( kEvents[ 0 ] ) );
@@ -582,9 +594,12 @@ inline long sys_perf_event_open( perf_event_attr* attr, pid_t pid, int cpu, int 
 }
 
 // open one selection (rows tableIndices[0..selectedCount)) as a pinned group for the calling thread.
-// Per-event graceful skip: a follower the kernel refuses outright just drops its column. Returns false
-// only when the LEADER cannot open (nothing to measure) — budget overflows surface later, at the
-// arm-time self check, because a pinned group only goes to error state when it first fails to schedule.
+// Per-event graceful skip — for EVERY event, the would-be leader included: an event the kernel refuses
+// outright just drops its column, and leadership falls to the first event that actually opens (on a
+// vPMU-less VM that is the first software row, after every hardware open fails with ENOENT). Returns
+// false only when NOTHING opens (no PMU and no software events = paranoid/seccomp lockdown) — budget
+// overflows surface later, at the arm-time self check, because a pinned group only goes to error state
+// when it first fails to schedule.
 inline bool open_group( ThreadCounters& tc, const unsigned* tableIndices, unsigned selectedCount, unsigned* openedRows, unsigned* openedCount ) noexcept
 {
     tc.close_all();
@@ -610,12 +625,8 @@ inline bool open_group( ThreadCounters& tc, const unsigned* tableIndices, unsign
         const long fd     = sys_perf_event_open( &attr, 0, -1, groupFd, 0 );
         if( fd < 0 )
         {
-            PMC_DIAG( "open '%s' failed (errno=%d)%s\n", desc.alias, errno, isLeader ? " — leader, giving up" : " — column dropped" );
-            if( isLeader )
-            {
-                return false;                      // EACCES (paranoid) / ENOENT (no PMU): quiet degrade
-            }
-            continue;                              // graceful per-event skip, same rule as the kperf side
+            PMC_DIAG( "open '%s' failed (errno=%d) — column dropped%s\n", desc.alias, errno, isLeader ? ", leadership passes to the next event that opens" : "" );
+            continue;                              // graceful per-event skip, leader included — same rule as the kperf side
         }
 
         tc.fds[ tc.fd_count ]        = int( fd );
@@ -726,13 +737,33 @@ inline void select_and_arm_first_thread( ThreadCounters& tc ) noexcept
             return;
         }
 
-        // over budget: drop the LAST event and retry — a disclosed missing column, never a scaled one
-        candidateCount = openedCount > 0 ? openedCount - 1 : candidateCount - 1;
-        for( unsigned i = 0; i < candidateCount; ++i )
+        // over budget: drop the LAST PMU-consuming event and retry — a disclosed missing column, never
+        // a scaled one. Software rows are skipped over when picking the victim: they occupy no hardware
+        // counter slot, so dropping one can never make a pinned group fit (it would just burn a retry
+        // and lose a free column).
+        unsigned dropIndex = openedCount;                  // index into openedRows[] to remove
+        for( unsigned i = openedCount; i-- > 0; )
         {
-            candidates[ i ] = openedRows[ i ];
+            if( kEvents[ openedRows[ i ] ].type != PERF_TYPE_SOFTWARE )
+            {
+                dropIndex = i;
+                break;
+            }
         }
-        PMC_DIAG( "retrying with %u events\n", candidateCount );
+        if( dropIndex == openedCount )                     // defensive: nothing PMU-consuming left to shed
+        {
+            dropIndex = openedCount - 1;
+        }
+
+        candidateCount = 0;
+        for( unsigned i = 0; i < openedCount; ++i )
+        {
+            if( i != dropIndex )
+            {
+                candidates[ candidateCount++ ] = openedRows[ i ];
+            }
+        }
+        PMC_DIAG( "dropped '%s', retrying with %u events\n", kEvents[ openedRows[ dropIndex ] ].alias, candidateCount );
     }
 
     tc.close_all();

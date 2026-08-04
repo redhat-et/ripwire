@@ -383,6 +383,22 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ### Fixed
 
+- **The self-profiler's Linux counter backend no longer goes dark on vPMU-less machines** — which is
+  most cloud VMs and CI boxes (`src/infra/profilePmc.h`; visible only under `-DRIPWIRE_PROFILE=ON`).
+  Two defects, found and fixed live on an x86 Xeon VM whose kernel refuses every hardware event with
+  `ENOENT`: (1) the documented per-event graceful skip did not apply to the group *leader* — if the
+  first event (`cycles`) failed to open, the whole backend went inactive even when later events would
+  have opened; leadership now falls to the first event that actually opens. (2) The event table was
+  hardware-only, so a PMU-less kernel had nothing to offer; two `PERF_TYPE_SOFTWARE` rows —
+  `task-clock` (on-CPU ns) and `page-faults` — now trail the table. They cost no hardware counter
+  slot on bare metal and keep per-scope counter columns alive on VMs, under their own names, never as
+  a stand-in for hardware counts. The over-budget shrink loop also now drops the last *PMU-consuming*
+  event rather than blindly the last row (dropping a software event can never make a pinned group
+  fit). Gate: `test/pmccheck.sh`'s inactive arm now additionally proves the kernel offered no counter
+  at all — the arm that used to pass vacuously on VMs fails on the old code and exercises the live
+  path on the new. *(Measured on the 2-vCPU VM: single-thread scopes' `task-clock` agrees with the
+  independent wall column to 0.05–1.6%, and the parse pool's wall-vs-task-clock gap put a number on
+  CPU oversubscription — ~36% of the parse phase's wall time was spent off-CPU.)*
 - **Rust whole-impl span** — an `impl` block's span covered the whole block, minting phantom clone
   reports.
 - **Merge-aware churn.** The churn walks now follow merges, so a history landed through merge commits
