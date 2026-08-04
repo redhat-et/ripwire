@@ -81,15 +81,17 @@ PY
     && ok "N=2: shared/union ($SH2/$UN2) == overlap_mean ($OM2) — the pairwise identity the legend now claims" \
     || no "N=2 identity broken: $( cat "$TMP/p2id" )"
 
-# (1b) the definition SEPARATOR: "two or more" must be >= "every". At N>=3 an EVERY-count is a global
-#      intersection and can only be <= the two-or-more count; on a real corpus it is strictly smaller, and
-#      shared_symbols must therefore also exceed the N=2 value rather than collapsing toward it.
+# (1b) the definition SEPARATOR: an EVERY-count is a global intersection, so it can only shrink (or hold)
+#      as N rises — it can NEVER grow. One strict increase anywhere in the N=2->3->4 sequence therefore
+#      separates two-or-more from every. (The original assertion demanded strict growth at EVERY step,
+#      which is a property of the live corpus's community shape, not of the definition: adding unrelated
+#      source files produced a legitimate 16 -> 13 -> 29 two-or-more sequence and broke it.)
 SH3="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p3" | attr shared_symbols )"
 SH4="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p4" | attr shared_symbols )"
-if [ "${SH3:-0}" -gt "${SH2:-0}" ] && [ "${SH4:-0}" -gt "${SH3:-0}" ]; then
-    ok "shared_symbols GROWS with the partition count ($SH2 -> $SH3 -> $SH4) — two-or-more semantics, not a global intersection"
+if [ "${SH3:-0}" -gt "${SH2:-0}" ] || [ "${SH4:-0}" -gt "${SH3:-0}" ]; then
+    ok "shared_symbols grows somewhere in the N sweep ($SH2 -> $SH3 -> $SH4) — two-or-more semantics; a global intersection can never grow"
 else
-    no "shared_symbols did not grow with N ($SH2 -> ${SH3:-<none>} -> ${SH4:-<none>}): an EVERY-partition intersection would shrink"
+    no "shared_symbols never grew across N ($SH2 -> ${SH3:-<none>} -> ${SH4:-<none>}): consistent with an EVERY-partition intersection"
 fi
 
 # (1c) the divergence the legend promises from 3 partitions on.

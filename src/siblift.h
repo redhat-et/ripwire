@@ -13,8 +13,8 @@
 
 #include "model.h"
 #include "mention.h"   // kMentionTopGapStep / kMentionMaxSymbolsPerFile — the ONE slot-ladder vocabulary
+#include "envpair.h"   // the ONE "<a>,<b>" experiment-env parser (shared with r5 nameboost)
 #include <algorithm>
-#include <cstdlib>
 #include <string_view>
 #include <vector>
 
@@ -27,35 +27,7 @@ inline constexpr std::size_t kSibliftMaxSib  = 4;
 // parse "<seedFiles>,<sibPerSeed>" — returns (0,0) = off for anything malformed or out of range.
 inline std::pair<std::size_t, std::size_t> sibliftParams()
 {
-    const char* env = std::getenv( "RIPWIRE_SIBLIFT" );
-    if( !env )
-    {
-        return { 0, 0 };
-    }
-    const std::string_view s( env );
-    const std::size_t comma = s.find( ',' );
-    if( comma == std::string_view::npos || comma == 0 || comma + 1 >= s.size() )
-    {
-        return { 0, 0 };
-    }
-    std::size_t seed = 0, sib = 0;
-    for( const char c : s.substr( 0, comma ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        seed = seed * 10 + std::size_t( c - '0' );
-        if( seed > 99 ) { break; }
-    }
-    for( const char c : s.substr( comma + 1 ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        sib = sib * 10 + std::size_t( c - '0' );
-        if( sib > 99 ) { break; }
-    }
-    if( seed < 1 || seed > kSibliftMaxSeed || sib < 1 || sib > kSibliftMaxSib )
-    {
-        return { 0, 0 };
-    }
-    return { seed, sib };
+    return parseEnvSizePair( "RIPWIRE_SIBLIFT", 1, kSibliftMaxSeed, 1, kSibliftMaxSib );
 }
 
 namespace siblift_detail

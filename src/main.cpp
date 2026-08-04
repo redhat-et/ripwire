@@ -54,6 +54,7 @@
 #include "ownersview.h"      // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with mcpverbs.h's `owners` verb
 #include "mention.h"        // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
 #include "siblift.h"        // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
+#include "nameboost.h"      // r5 EXPERIMENT: env-gated query-noun-in-name lift (inert by default)
 #include "tracein.h"        // L2: --from-trace=FILE — table-driven stack-trace/sanitizer/compiler frame extraction
 #include "clones.h"
 #include "skillscan.h"
@@ -1505,6 +1506,15 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         forPruneK = cfg.candidates ? ( cfg.topK > 0 ? std::size_t( cfg.topK ) : 0 )
                                    : std::size_t( cfg.packTopN > 0 ? cfg.packTopN : 40 );
+        // r5 nameboost (pre-registered, env-gated): the boost orders FIRED symbols by their exact scores,
+        // and a MaxScore-pruned symbol outside the provable top-K carries 0.0f instead — exactly the
+        // buried q07-shaped symbol the mechanism exists to surface. Pruning is provably output-identical,
+        // so forcing the exhaustive branch changes no bytes, only cost — which the acceptance run's tier-1
+        // timing then measures honestly. Env unset (the default): this branch never triggers.
+        if( nameboostParams().first > 0 )
+        {
+            forPruneK = 0;
+        }
         if( forPruneK > 0 && !cfg.candidates )     // candidates bypasses the lens bundle → no lego set
         {
             ifaceExact.assign( ing.symbols.size(), 0 );
@@ -1578,6 +1588,16 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         {
             applySiblingLift( ing, lensRank, sibSeed, sibPer );
         }
+    }
+
+    // r5 nameboost (EXPERIMENTAL, pre-registered — bench/locbench/results/r5_nameboost/PREREG.md incl. the
+    // 2026-08-04 amendments): a symbol whose NAME carries a >= minTokLen query token at camel/snake subtoken
+    // boundaries, with positive body/doc evidence, lands on the slot ladder BELOW the mention band. INERT
+    // (byte-identical) unless RIPWIRE_NAMEBOOST="<minTokLen>,<maxLifted>" parses in range. Routed path only,
+    // CONCEPTUAL (subtoken+body) route only — the name-exact route already handles queries that ARE names.
+    if( const auto [ nbMinTok, nbMaxLift ] = nameboostParams(); nbMinTok > 0 && !cfg.noRoute && out.routeTag == "subtoken+body" )
+    {
+        applyNameBoost( ing, task, lensRank, nbMinTok, nbMaxLift );
     }
 
     // B3 co-change prior boost (OPT-IN, EXPERIMENTAL): files that historically change WITH the top seeds get a

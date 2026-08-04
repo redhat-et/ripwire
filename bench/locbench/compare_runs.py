@@ -32,10 +32,20 @@ def main():
                       help="tier 2: weight of warm p50 latency delta in the cost scalar (sane default)" )
     ap.add_argument( "--cost-weight-token", type=float, default=0.5,
                       help="tier 2: weight of token p50 delta in the cost scalar (sane default)" )
+    # r5_nameboost amendment 1 (bench/locbench/results/r5_nameboost/PREREG.md, 2026-08-04): a round may
+    # PRE-REGISTER the multi-file stratum's strict file@10 as its primary quality metric. Opt-in and
+    # two-tier-only; the default ("aggregate") leaves every existing output byte-identical. When "multi",
+    # tier 2's quality LB is the repo-clustered bootstrap lower bound over the MULTI-FILE instances only
+    # (clusters = repos holding >=1 multi-file instance), and one extra [stratum-primary] line says so.
+    ap.add_argument( "--primary-stratum", choices=( "aggregate", "multi" ), default="aggregate",
+                      help="which stratum's strict file@10 LB drives tier 2 (pre-registered per round)" )
     a = ap.parse_args()
     if a.gate == "two-tier" and ( a.abs_warm_p95_ms is None or a.abs_cold_p95_ms is None or a.min_quality_per_cost is None ):
         raise SystemExit( "--gate=two-tier requires --abs-warm-p95-ms, --abs-cold-p95-ms, and --min-quality-per-cost "
                            "(no built-in default: these are a policy choice pending policy review, see GATE_DECISION.md)" )
+    if a.primary_stratum != "aggregate" and a.gate != "two-tier":
+        raise SystemExit( "--primary-stratum=multi requires --gate=two-tier (the stratum-primary quality LB is a "
+                           "tier-2 input; the legacy flat-AND predicate is frozen)" )
     before, after = json.load( open( a.before ) ), json.load( open( a.after ) )
     for key in ( "dataset", "split", "split_contract" ):
         if before.get(key) != after.get(key): raise SystemExit( f"{key} differs; paired comparison refused" )
@@ -121,6 +131,22 @@ def main():
         tier1_ok = tier1_warm_ok and tier1_cold_ok
 
         quality_lb = lower  # 95% clustered-bootstrap lower bound of the mean strict file@10 delta, already computed above
+        if a.primary_stratum == "multi":
+            # Repo-clustered bootstrap over the MULTI-FILE stratum only. Own deterministic seed so the
+            # aggregate bootstrap above (still printed, now secondary) stays byte-identical.
+            multi_repos = sorted( { b[i]["repo"] for i in multi } )
+            multi_by_repo = { r: [ i for i in multi if b[i]["repo"] == r ] for r in multi_repos }
+            srng = random.Random( "ripwire-r5-stratum-bootstrap-v1" )
+            sboots = []
+            for _ in range( a.bootstrap ):
+                sampled = [ srng.choice( multi_repos ) for _ in multi_repos ]
+                vals = [ strict_by_id[i] for r in sampled for i in multi_by_repo[r] ]
+                sboots.append( mean( vals ) )
+            sboots.sort()
+            quality_lb = sboots[ max( 0, int( 0.025 * len( sboots ) ) ) ] if sboots else 0.0
+            print( f"  [stratum-primary] multi-file strict@10 delta {pct(mean(multi_delta))}; clustered bootstrap "
+                   f"95% lower {pct(quality_lb)} (n={len(multi)}, repos={len(multi_repos)}) - pre-registered "
+                   f"primary; the aggregate lines above are secondary this round" )
         weighted_cost_delta = a.cost_weight_warm * wall_delta + a.cost_weight_token * token_p50
         if weighted_cost_delta <= 0:
             # Quality up (or flat), cost flat or down: Pareto-dominant, auto-accept on tier 2 iff quality improved.

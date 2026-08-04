@@ -1,0 +1,2320 @@
+{
+  "gate_pass": true,
+  "n_missed": 97,
+  "summary": {
+    "4": {
+      "gold_fire_rate_file": 0.6907216494845361,
+      "gold_fire_rate_func": 0.44329896907216493,
+      "mean_nongold_fired_syms": 1819.8762886597938,
+      "mean_nongold_fire_rate": 0.16632630936400197,
+      "mean_gold_share_of_fired": 0.011104406814656539
+    },
+    "5": {
+      "gold_fire_rate_file": 0.6082474226804123,
+      "gold_fire_rate_func": 0.422680412371134,
+      "mean_nongold_fired_syms": 1170.5257731958764,
+      "mean_nongold_fire_rate": 0.10595827476354418,
+      "mean_gold_share_of_fired": 0.0127858960657512
+    }
+  },
+  "instances": [
+    {
+      "instance_id": "UXARRAY__uxarray-1117",
+      "repo": "UXARRAY/uxarray",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "uxarray/grid/connectivity.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 12,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 276,
+          "positive_nongold_syms": 1040
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 59,
+          "positive_nongold_syms": 1040
+        }
+      }
+    },
+    {
+      "instance_id": "internetarchive__openlibrary-7929",
+      "repo": "internetarchive/openlibrary",
+      "for_route": "subtoken+body",
+      "n_primary": 5,
+      "missed_files": [
+        "openlibrary/macros/LoanStatus.html"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 309,
+          "positive_nongold_syms": 5112
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 179,
+          "positive_nongold_syms": 5112
+        }
+      }
+    },
+    {
+      "instance_id": "rwth-i6__sisyphus-191",
+      "repo": "rwth-i6/sisyphus",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "sisyphus/aws_batch_engine.py",
+        "sisyphus/load_sharing_facility_engine.py",
+        "sisyphus/simple_linux_utility_for_resource_management_engine.py",
+        "sisyphus/son_of_grid_engine.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 16,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 116,
+          "positive_nongold_syms": 863
+        },
+        "5": {
+          "gold_file_fired_syms": 11,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 52,
+          "positive_nongold_syms": 863
+        }
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-6836",
+      "repo": "modin-project/modin",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "modin/core/dataframe/algebra/binary.py",
+        "modin/core/dataframe/pandas/dataframe/dataframe.py",
+        "modin/core/dataframe/pandas/partitioning/partition_manager.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 57,
+          "positive_nongold_syms": 3715
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 55,
+          "positive_nongold_syms": 3715
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-5473",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 5,
+      "missed_files": [
+        "vllm/config.py",
+        "vllm/distributed/device_communicators/custom_all_reduce.py",
+        "vllm/distributed/device_communicators/custom_all_reduce_utils.py",
+        "vllm/executor/multiproc_gpu_executor.py",
+        "vllm/utils.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 24,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 585,
+          "positive_nongold_syms": 10270
+        },
+        "5": {
+          "gold_file_fired_syms": 8,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 334,
+          "positive_nongold_syms": 10270
+        }
+      }
+    },
+    {
+      "instance_id": "tardis-sn__tardis-2782",
+      "repo": "tardis-sn/tardis",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "benchmarks/opacities_opacity.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 55,
+          "positive_nongold_syms": 1764
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 52,
+          "positive_nongold_syms": 1764
+        }
+      }
+    },
+    {
+      "instance_id": "gammasim__simtools-1183",
+      "repo": "gammasim/simtools",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "simtools/applications/db_get_parameter_from_db.py",
+        "simtools/db/db_array_elements.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 4,
+          "nongold_fired_syms": 869,
+          "positive_nongold_syms": 1866
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 4,
+          "nongold_fired_syms": 255,
+          "positive_nongold_syms": 1866
+        }
+      }
+    },
+    {
+      "instance_id": "ray-project__ray-26818",
+      "repo": "ray-project/ray",
+      "for_route": "subtoken+body",
+      "n_primary": 7,
+      "missed_files": [
+        "dashboard/client/src/api.ts",
+        "dashboard/client/src/pages/dashboard/node-info/NodeInfo.tsx",
+        "dashboard/client/src/pages/dashboard/node-info/dialogs/logs/Logs.tsx",
+        "dashboard/client/src/pages/dashboard/node-info/features/Logs.tsx",
+        "dashboard/datacenter.py",
+        "dashboard/modules/actor/actor_head.py",
+        "dashboard/modules/node/node_head.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 7229,
+          "positive_nongold_syms": 50997
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 3403,
+          "positive_nongold_syms": 50997
+        }
+      }
+    },
+    {
+      "instance_id": "huggingface__optimum-benchmark-266",
+      "repo": "huggingface/optimum-benchmark",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "optimum_benchmark/trackers/latency.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 107,
+          "positive_nongold_syms": 471
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 56,
+          "positive_nongold_syms": 471
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-12019",
+      "repo": "PrefectHQ/prefect",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "src/prefect/_internal/concurrency/calls.py",
+        "src/prefect/_internal/concurrency/cancellation.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 4397,
+          "positive_nongold_syms": 15698
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 1581,
+          "positive_nongold_syms": 15698
+        }
+      }
+    },
+    {
+      "instance_id": "pm4-graders__3ES-72",
+      "repo": "pm4-graders/3ES",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "backend/app/core/cv_result.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 8,
+          "positive_nongold_syms": 65
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 0,
+          "positive_nongold_syms": 65
+        }
+      }
+    },
+    {
+      "instance_id": "fortra__impacket-1636",
+      "repo": "fortra/impacket",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "examples/ntlmrelayx.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 496,
+          "positive_nongold_syms": 5321
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 461,
+          "positive_nongold_syms": 5321
+        }
+      }
+    },
+    {
+      "instance_id": "mathesar-foundation__mathesar-3117",
+      "repo": "mathesar-foundation/mathesar",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "db/install.py",
+        "docs/docs/installation/build-from-source/index.md",
+        "docs/docs/installation/docker/index.md",
+        "docs/docs/snippets/docker-compose-prerequisites.md"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 21,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 570,
+          "positive_nongold_syms": 3580
+        },
+        "5": {
+          "gold_file_fired_syms": 19,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 384,
+          "positive_nongold_syms": 3580
+        }
+      }
+    },
+    {
+      "instance_id": "JackPlowman__repo_standards_validator-137",
+      "repo": "JackPlowman/repo_standards_validator",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "validator/__main__.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 2,
+          "positive_nongold_syms": 19
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 2,
+          "positive_nongold_syms": 19
+        }
+      }
+    },
+    {
+      "instance_id": "internetarchive__openlibrary-3196",
+      "repo": "internetarchive/openlibrary",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "openlibrary/templates/lists/widget.html",
+        "openlibrary/templates/type/edition/view.html"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 238,
+          "positive_nongold_syms": 5598
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 165,
+          "positive_nongold_syms": 5598
+        }
+      }
+    },
+    {
+      "instance_id": "webcompat__webcompat.com-2731",
+      "repo": "webcompat/webcompat.com",
+      "for_route": "subtoken+body",
+      "n_primary": 8,
+      "missed_files": [
+        "webcompat/static/js/lib/comments.js",
+        "webcompat/static/js/lib/models/comment.js",
+        "webcompat/static/js/lib/models/issue.js",
+        "webcompat/templates/issue.html",
+        "webcompat/templates/layout.html"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 88,
+          "positive_nongold_syms": 984
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 47,
+          "positive_nongold_syms": 984
+        }
+      }
+    },
+    {
+      "instance_id": "airbnb__knowledge-repo-558",
+      "repo": "airbnb/knowledge-repo",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "knowledge_repo/app/routes/comment.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 197,
+          "positive_nongold_syms": 1223
+        },
+        "5": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 125,
+          "positive_nongold_syms": 1223
+        }
+      }
+    },
+    {
+      "instance_id": "scipy__scipy-5647",
+      "repo": "scipy/scipy",
+      "for_route": "subtoken+body",
+      "n_primary": 10,
+      "missed_files": [
+        "benchmarks/benchmarks/spatial.py",
+        "scipy/spatial/ckdtree/src/build.cxx",
+        "scipy/spatial/ckdtree/src/ckdtree_decl.h",
+        "scipy/spatial/ckdtree/src/ckdtree_methods.h",
+        "scipy/spatial/ckdtree/src/count_neighbors.cxx",
+        "scipy/spatial/ckdtree/src/query_ball_point.cxx",
+        "scipy/spatial/ckdtree/src/query_ball_tree.cxx",
+        "scipy/spatial/ckdtree/src/query_pairs.cxx",
+        "scipy/spatial/ckdtree/src/sparse_distances.cxx"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 47,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 1815,
+          "positive_nongold_syms": 25244
+        },
+        "5": {
+          "gold_file_fired_syms": 24,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 830,
+          "positive_nongold_syms": 25244
+        }
+      }
+    },
+    {
+      "instance_id": "matchms__matchms-backup-187",
+      "repo": "matchms/matchms-backup",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "matchms/filtering/derive_inchi_from_smiles.py",
+        "matchms/filtering/derive_inchikey_from_inchi.py",
+        "matchms/filtering/derive_smiles_from_inchi.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1,
+          "positive_nongold_syms": 7
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1,
+          "positive_nongold_syms": 7
+        }
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-25114",
+      "repo": "jax-ml/jax",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "CHANGELOG.md",
+        "jax/_src/config.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 366,
+          "positive_nongold_syms": 17587
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 260,
+          "positive_nongold_syms": 17587
+        }
+      }
+    },
+    {
+      "instance_id": "fractal-analytics-platform__fractal-tasks-core-889",
+      "repo": "fractal-analytics-platform/fractal-tasks-core",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "CHANGELOG.md"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 129,
+          "positive_nongold_syms": 580
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 56,
+          "positive_nongold_syms": 580
+        }
+      }
+    },
+    {
+      "instance_id": "OpenEnergyPlatform__open-MaStR-598",
+      "repo": "OpenEnergyPlatform/open-MaStR",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "CHANGELOG.md"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 4,
+          "nongold_fired_syms": 88,
+          "positive_nongold_syms": 531
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 4,
+          "nongold_fired_syms": 54,
+          "positive_nongold_syms": 531
+        }
+      }
+    },
+    {
+      "instance_id": "kedro-org__kedro-4367",
+      "repo": "kedro-org/kedro",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "RELEASE.md"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 31,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1725,
+          "positive_nongold_syms": 2880
+        },
+        "5": {
+          "gold_file_fired_syms": 30,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 474,
+          "positive_nongold_syms": 2880
+        }
+      }
+    },
+    {
+      "instance_id": "Qiskit__qiskit-13052",
+      "repo": "Qiskit/qiskit",
+      "for_route": "subtoken+body",
+      "n_primary": 7,
+      "missed_files": [
+        "crates/accelerate/src/remove_diagonal_gates_before_measure.rs",
+        "crates/circuit/src/packed_instruction.rs",
+        "crates/pyext/src/lib.rs",
+        "qiskit/__init__.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 6,
+          "positive_nongold_syms": 9164
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 0,
+          "positive_nongold_syms": 9164
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-7209",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/core/evictor.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 738,
+          "positive_nongold_syms": 10690
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 450,
+          "positive_nongold_syms": 10690
+        }
+      }
+    },
+    {
+      "instance_id": "ckan__ckan-8226",
+      "repo": "ckan/ckan",
+      "for_route": "subtoken+body",
+      "n_primary": 9,
+      "missed_files": [
+        "ckan/config/middleware/flask_app.py",
+        "ckan/templates/group/read.html",
+        "ckan/templates/organization/bulk_process.html",
+        "ckan/templates/organization/read.html",
+        "ckan/templates/package/search.html",
+        "ckan/templates/package/snippets/package_form.html",
+        "ckan/templates/package/snippets/resource_form.html"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1364,
+          "positive_nongold_syms": 6697
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 955,
+          "positive_nongold_syms": 6697
+        }
+      }
+    },
+    {
+      "instance_id": "nautobot__nautobot-6364",
+      "repo": "nautobot/nautobot",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "nautobot/core/models/tree_queries.py",
+        "nautobot/core/signals.py",
+        "nautobot/extras/models/groups.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 21,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 3277,
+          "positive_nongold_syms": 12042
+        },
+        "5": {
+          "gold_file_fired_syms": 19,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 2710,
+          "positive_nongold_syms": 12042
+        }
+      }
+    },
+    {
+      "instance_id": "UXARRAY__uxarray-1144",
+      "repo": "UXARRAY/uxarray",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "uxarray/formatting_html.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 11,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 115,
+          "positive_nongold_syms": 997
+        },
+        "5": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 33,
+          "positive_nongold_syms": 997
+        }
+      }
+    },
+    {
+      "instance_id": "nautobot__nautobot-6837",
+      "repo": "nautobot/nautobot",
+      "for_route": "subtoken+body",
+      "n_primary": 5,
+      "missed_files": [
+        "nautobot/core/views/utils.py",
+        "nautobot/dcim/templates/dcim/device.html",
+        "nautobot/dcim/views.py",
+        "nautobot/extras/models/customfields.py",
+        "nautobot/extras/signals.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 159,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 2808,
+          "positive_nongold_syms": 12809
+        },
+        "5": {
+          "gold_file_fired_syms": 154,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2092,
+          "positive_nongold_syms": 12809
+        }
+      }
+    },
+    {
+      "instance_id": "hyeneung__tech-blog-hub-site-49",
+      "repo": "hyeneung/tech-blog-hub-site",
+      "for_route": "subtoken+body",
+      "n_primary": 10,
+      "missed_files": [
+        "serverless/apis/recommend/lambda_function.py",
+        "serverless/apis/recommend/opensearch/article_analyze.py",
+        "serverless/apis/recommend/recommend.py",
+        "serverless/apis/search/main.go",
+        "serverless/crawler/config/config.go",
+        "serverless/crawler/internal/crawler/crawler.go",
+        "serverless/crawler/internal/db/opensearch.go",
+        "serverless/crawler/main.go"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 10,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 94,
+          "positive_nongold_syms": 382
+        },
+        "5": {
+          "gold_file_fired_syms": 6,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 46,
+          "positive_nongold_syms": 382
+        }
+      }
+    },
+    {
+      "instance_id": "home-assistant__core-136739",
+      "repo": "home-assistant/core",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "homeassistant/components/fritzbox/climate.py",
+        "homeassistant/components/fritzbox/cover.py",
+        "homeassistant/components/fritzbox/light.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 14680,
+          "positive_nongold_syms": 114837
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 11443,
+          "positive_nongold_syms": 114837
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-9338",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 645,
+          "positive_nongold_syms": 7977
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 175,
+          "positive_nongold_syms": 7977
+        }
+      }
+    },
+    {
+      "instance_id": "Standard-Labs__real-intent-102",
+      "repo": "Standard-Labs/real-intent",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "real_intent/deliver/followupboss/vanilla.py",
+        "real_intent/deliver/kvcore/__init__.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 0,
+          "positive_nongold_syms": 0
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 0,
+          "positive_nongold_syms": 0
+        }
+      }
+    },
+    {
+      "instance_id": "cupy__cupy-3730",
+      "repo": "cupy/cupy",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "cupy/fft/config.py",
+        "cupy_setup_build.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 3,
+          "nongold_fired_syms": 554,
+          "positive_nongold_syms": 4777
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 187,
+          "positive_nongold_syms": 4777
+        }
+      }
+    },
+    {
+      "instance_id": "Qiskit__qiskit-13141",
+      "repo": "Qiskit/qiskit",
+      "for_route": "subtoken+body",
+      "n_primary": 8,
+      "missed_files": [
+        "crates/accelerate/src/euler_one_qubit_decomposer.rs",
+        "crates/accelerate/src/lib.rs",
+        "crates/accelerate/src/two_qubit_decompose.rs",
+        "crates/circuit/src/dag_circuit.rs",
+        "crates/circuit/src/imports.rs",
+        "crates/pyext/src/lib.rs",
+        "qiskit/__init__.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 25,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1230,
+          "positive_nongold_syms": 16105
+        },
+        "5": {
+          "gold_file_fired_syms": 10,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 537,
+          "positive_nongold_syms": 16105
+        }
+      }
+    },
+    {
+      "instance_id": "oppia__oppia-14784",
+      "repo": "oppia/oppia",
+      "for_route": "subtoken+body",
+      "n_primary": 4,
+      "missed_files": [
+        "core/domain/opportunity_services.py",
+        "core/domain/suggestion_services.py",
+        "core/storage/suggestion/gae_models.py",
+        "core/templates/pages/contributor-dashboard-page/opportunities-list-item/opportunities-list-item.component.html"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 58,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 4384,
+          "positive_nongold_syms": 26550
+        },
+        "5": {
+          "gold_file_fired_syms": 39,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2745,
+          "positive_nongold_syms": 26550
+        }
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-3438",
+      "repo": "modin-project/modin",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "modin/backends/pandas/parsers.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 290,
+          "positive_nongold_syms": 4557
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 129,
+          "positive_nongold_syms": 4557
+        }
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-4391",
+      "repo": "modin-project/modin",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "modin/core/dataframe/pandas/dataframe/dataframe.py",
+        "modin/core/execution/ray/implementations/pandas_on_ray/partitioning/partition_manager.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 31,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1046,
+          "positive_nongold_syms": 6562
+        },
+        "5": {
+          "gold_file_fired_syms": 29,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 723,
+          "positive_nongold_syms": 6562
+        }
+      }
+    },
+    {
+      "instance_id": "paperless-ngx__paperless-ngx-1227",
+      "repo": "paperless-ngx/paperless-ngx",
+      "for_route": "subtoken+body",
+      "n_primary": 2,
+      "missed_files": [
+        "gunicorn.conf.py",
+        "src/paperless/settings.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 7,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 373,
+          "positive_nongold_syms": 1938
+        },
+        "5": {
+          "gold_file_fired_syms": 7,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 304,
+          "positive_nongold_syms": 1938
+        }
+      }
+    },
+    {
+      "instance_id": "NatLibFi__Annif-610",
+      "repo": "NatLibFi/Annif",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "annif/project.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 3,
+          "nongold_fired_syms": 75,
+          "positive_nongold_syms": 814
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 3,
+          "nongold_fired_syms": 74,
+          "positive_nongold_syms": 814
+        }
+      }
+    },
+    {
+      "instance_id": "alexa-pi__AlexaPi-188",
+      "repo": "alexa-pi/AlexaPi",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "CHANGELOG.md"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 19,
+          "positive_nongold_syms": 152
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 16,
+          "positive_nongold_syms": 152
+        }
+      }
+    },
+    {
+      "instance_id": "Agenta-AI__agenta-1639",
+      "repo": "Agenta-AI/agenta",
+      "for_route": "subtoken+body",
+      "n_primary": 3,
+      "missed_files": [
+        "agenta-backend/agenta_backend/models/converters.py",
+        "agenta-backend/agenta_backend/routers/configs_router.py",
+        "agenta-backend/agenta_backend/services/db_manager.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 51,
+          "gold_func_fired": 3,
+          "nongold_fired_syms": 486,
+          "positive_nongold_syms": 2513
+        },
+        "5": {
+          "gold_file_fired_syms": 48,
+          "gold_func_fired": 3,
+          "nongold_fired_syms": 421,
+          "positive_nongold_syms": 2513
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-16328",
+      "repo": "PrefectHQ/prefect",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "src/prefect/task_engine.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 4895,
+          "positive_nongold_syms": 15783
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1732,
+          "positive_nongold_syms": 15783
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-13367",
+      "repo": "PrefectHQ/prefect",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "src/prefect/cli/deployment.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1848,
+          "positive_nongold_syms": 11365
+        },
+        "5": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1258,
+          "positive_nongold_syms": 11365
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-13366",
+      "repo": "PrefectHQ/prefect",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "src/prefect/cli/deployment.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1861,
+          "positive_nongold_syms": 11363
+        },
+        "5": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1291,
+          "positive_nongold_syms": 11363
+        }
+      }
+    },
+    {
+      "instance_id": "getmoto__moto-8401",
+      "repo": "getmoto/moto",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "moto/dynamodb/models/utilities.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 11693,
+          "positive_nongold_syms": 30457
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 3690,
+          "positive_nongold_syms": 30457
+        }
+      }
+    },
+    {
+      "instance_id": "getmoto__moto-8390",
+      "repo": "getmoto/moto",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "moto/athena/responses.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 3395,
+          "positive_nongold_syms": 29777
+        },
+        "5": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2242,
+          "positive_nongold_syms": 29777
+        }
+      }
+    },
+    {
+      "instance_id": "ray-project__ray-49118",
+      "repo": "ray-project/ray",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "python/ray/dag/dag_node_operation.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 9,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 12050,
+          "positive_nongold_syms": 62197
+        },
+        "5": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 8190,
+          "positive_nongold_syms": 62197
+        }
+      }
+    },
+    {
+      "instance_id": "bridgecrewio__checkov-6909",
+      "repo": "bridgecrewio/checkov",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "checkov/serverless/graph_builder/local_graph.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 5603,
+          "positive_nongold_syms": 26908
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 4788,
+          "positive_nongold_syms": 26908
+        }
+      }
+    },
+    {
+      "instance_id": "bridgecrewio__checkov-6828",
+      "repo": "bridgecrewio/checkov",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "checkov/dockerfile/parser.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 7639,
+          "positive_nongold_syms": 22229
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1566,
+          "positive_nongold_syms": 22229
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10198",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/spec_decode/batch_expansion.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 769,
+          "positive_nongold_syms": 10341
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 464,
+          "positive_nongold_syms": 10341
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-9846",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "examples/offline_inference_vision_language.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1092,
+          "positive_nongold_syms": 5683
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 208,
+          "positive_nongold_syms": 5683
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11438",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/aes.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 755,
+          "positive_nongold_syms": 8356
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 572,
+          "positive_nongold_syms": 8356
+        }
+      }
+    },
+    {
+      "instance_id": "py-pdf__pypdf-2934",
+      "repo": "py-pdf/pypdf",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "pypdf/_cmap.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 632,
+          "positive_nongold_syms": 1836
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 358,
+          "positive_nongold_syms": 1836
+        }
+      }
+    },
+    {
+      "instance_id": "py-pdf__pypdf-2644",
+      "repo": "py-pdf/pypdf",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "pypdf/filters.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 389,
+          "positive_nongold_syms": 1800
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 184,
+          "positive_nongold_syms": 1800
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5930",
+      "repo": "prowler-cloud/prowler",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "prowler/lib/check/models.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 10,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 9024,
+          "positive_nongold_syms": 22757
+        },
+        "5": {
+          "gold_file_fired_syms": 10,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 8058,
+          "positive_nongold_syms": 22757
+        }
+      }
+    },
+    {
+      "instance_id": "networkx__networkx-7729",
+      "repo": "networkx/networkx",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "networkx/classes/coreviews.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 2030,
+          "positive_nongold_syms": 7956
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1448,
+          "positive_nongold_syms": 7956
+        }
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-24823",
+      "repo": "jax-ml/jax",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "jax/_src/lax/lax.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 36,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1805,
+          "positive_nongold_syms": 25641
+        },
+        "5": {
+          "gold_file_fired_syms": 24,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1037,
+          "positive_nongold_syms": 25641
+        }
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-20862",
+      "repo": "jax-ml/jax",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2355,
+          "positive_nongold_syms": 22385
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1690,
+          "positive_nongold_syms": 22385
+        }
+      }
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-6444",
+      "repo": "sqlfluff/sqlfluff",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1326,
+          "positive_nongold_syms": 3602
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1094,
+          "positive_nongold_syms": 3602
+        }
+      }
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-6391",
+      "repo": "sqlfluff/sqlfluff",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "src/sqlfluff/core/helpers/string.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 489,
+          "positive_nongold_syms": 3313
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 351,
+          "positive_nongold_syms": 3313
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5961",
+      "repo": "prowler-cloud/prowler",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "prowler/providers/aws/services/rds/rds_service.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 4873,
+          "positive_nongold_syms": 22204
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 3922,
+          "positive_nongold_syms": 22204
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5856",
+      "repo": "prowler-cloud/prowler",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "prowler/providers/aws/services/ec2/lib/instance.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 6630,
+          "positive_nongold_syms": 21213
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 3719,
+          "positive_nongold_syms": 21213
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5653",
+      "repo": "prowler-cloud/prowler",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "prowler/providers/common/provider.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 6219,
+          "positive_nongold_syms": 21519
+        },
+        "5": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 4558,
+          "positive_nongold_syms": 21519
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-11073",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1816,
+          "positive_nongold_syms": 9843
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 1488,
+          "positive_nongold_syms": 9843
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10903",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/v1/worker/gpu_model_runner.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 817,
+          "positive_nongold_syms": 10758
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 462,
+          "positive_nongold_syms": 10758
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10778",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/model_executor/models/idefics3.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 690,
+          "positive_nongold_syms": 10219
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 431,
+          "positive_nongold_syms": 10219
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10620",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/plugins/__init__.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 595,
+          "positive_nongold_syms": 10164
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 333,
+          "positive_nongold_syms": 10164
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10536",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/model_executor/models/qwen2_audio.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1532,
+          "positive_nongold_syms": 11749
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1192,
+          "positive_nongold_syms": 11749
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10398",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/entrypoints/openai/tool_parsers/hermes_tool_parser.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 4,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2673,
+          "positive_nongold_syms": 11280
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1419,
+          "positive_nongold_syms": 11280
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10347",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/model_executor/models/falcon.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 11,
+          "gold_func_fired": 5,
+          "nongold_fired_syms": 1894,
+          "positive_nongold_syms": 9910
+        },
+        "5": {
+          "gold_file_fired_syms": 11,
+          "gold_func_fired": 5,
+          "nongold_fired_syms": 1552,
+          "positive_nongold_syms": 9910
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10076",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/entrypoints/openai/serving_engine.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 905,
+          "positive_nongold_syms": 12424
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 561,
+          "positive_nongold_syms": 12424
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11734",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/bilibili.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 45,
+          "gold_func_fired": 20,
+          "nongold_fired_syms": 2912,
+          "positive_nongold_syms": 8276
+        },
+        "5": {
+          "gold_file_fired_syms": 45,
+          "gold_func_fired": 20,
+          "nongold_fired_syms": 2798,
+          "positive_nongold_syms": 8276
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11711",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/bilibili.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 20,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 706,
+          "positive_nongold_syms": 8273
+        },
+        "5": {
+          "gold_file_fired_syms": 20,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 538,
+          "positive_nongold_syms": 8273
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11683",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/mitele.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 968,
+          "positive_nongold_syms": 8591
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 696,
+          "positive_nongold_syms": 8591
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11667",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/bilibili.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 46,
+          "gold_func_fired": 20,
+          "nongold_fired_syms": 2963,
+          "positive_nongold_syms": 8341
+        },
+        "5": {
+          "gold_file_fired_syms": 45,
+          "gold_func_fired": 20,
+          "nongold_fired_syms": 2722,
+          "positive_nongold_syms": 8341
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11645",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/tiktok.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 758,
+          "positive_nongold_syms": 8364
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 2,
+          "nongold_fired_syms": 597,
+          "positive_nongold_syms": 8364
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11644",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/dacast.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 744,
+          "positive_nongold_syms": 8350
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 586,
+          "positive_nongold_syms": 8350
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11636",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/dropbox.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 950,
+          "positive_nongold_syms": 8458
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 792,
+          "positive_nongold_syms": 8458
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11624",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/chaturbate.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 539,
+          "positive_nongold_syms": 8037
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 382,
+          "positive_nongold_syms": 8037
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11596",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/stripchat.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 773,
+          "positive_nongold_syms": 8432
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 608,
+          "positive_nongold_syms": 8432
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11555",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/chaturbate.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 538,
+          "positive_nongold_syms": 8014
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 380,
+          "positive_nongold_syms": 8014
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11542",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/spankbang.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 748,
+          "positive_nongold_syms": 8362
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 570,
+          "positive_nongold_syms": 8362
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11534",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/ctvnews.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 802,
+          "positive_nongold_syms": 8392
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 522,
+          "positive_nongold_syms": 8392
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11530",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/patreon.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 732,
+          "positive_nongold_syms": 8367
+        },
+        "5": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 566,
+          "positive_nongold_syms": 8367
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11527",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/archiveorg.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 767,
+          "positive_nongold_syms": 8523
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 590,
+          "positive_nongold_syms": 8523
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11513",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/facebook.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 10,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 901,
+          "positive_nongold_syms": 8395
+        },
+        "5": {
+          "gold_file_fired_syms": 10,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 725,
+          "positive_nongold_syms": 8395
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11478",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/cloudflarestream.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 834,
+          "positive_nongold_syms": 8388
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 669,
+          "positive_nongold_syms": 8388
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11472",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/adobepass.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 749,
+          "positive_nongold_syms": 8491
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 591,
+          "positive_nongold_syms": 8491
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11466",
+      "repo": "yt-dlp/yt-dlp",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "yt_dlp/extractor/goplay.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2925,
+          "positive_nongold_syms": 8418
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 2814,
+          "positive_nongold_syms": 8418
+        }
+      }
+    },
+    {
+      "instance_id": "phidatahq__phidata-1582",
+      "repo": "phidatahq/phidata",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "phi/tools/function.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 5,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1288,
+          "positive_nongold_syms": 4079
+        },
+        "5": {
+          "gold_file_fired_syms": 2,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1058,
+          "positive_nongold_syms": 4079
+        }
+      }
+    },
+    {
+      "instance_id": "kedro-org__kedro-4299",
+      "repo": "kedro-org/kedro",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "kedro/framework/cli/cli.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 412,
+          "positive_nongold_syms": 2462
+        },
+        "5": {
+          "gold_file_fired_syms": 1,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 374,
+          "positive_nongold_syms": 2462
+        }
+      }
+    },
+    {
+      "instance_id": "flet-dev__flet-4425",
+      "repo": "flet-dev/flet",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "sdk/python/packages/flet/src/flet/core/date_picker.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 24,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 977,
+          "positive_nongold_syms": 6200
+        },
+        "5": {
+          "gold_file_fired_syms": 18,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 698,
+          "positive_nongold_syms": 6200
+        }
+      }
+    },
+    {
+      "instance_id": "flet-dev__flet-4314",
+      "repo": "flet-dev/flet",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "sdk/python/packages/flet/src/flet/core/segmented_button.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 21,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 1456,
+          "positive_nongold_syms": 6388
+        },
+        "5": {
+          "gold_file_fired_syms": 19,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 991,
+          "positive_nongold_syms": 6388
+        }
+      }
+    },
+    {
+      "instance_id": "langchain-ai__langgraph-2735",
+      "repo": "langchain-ai/langgraph",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "libs/checkpoint/langgraph/checkpoint/serde/jsonplus.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 796,
+          "positive_nongold_syms": 3569
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 1,
+          "nongold_fired_syms": 631,
+          "positive_nongold_syms": 3569
+        }
+      }
+    },
+    {
+      "instance_id": "langchain-ai__langgraph-2724",
+      "repo": "langchain-ai/langgraph",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "libs/langgraph/langgraph/prebuilt/tool_node.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 6,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 837,
+          "positive_nongold_syms": 3618
+        },
+        "5": {
+          "gold_file_fired_syms": 3,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 668,
+          "positive_nongold_syms": 3618
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-9617",
+      "repo": "vllm-project/vllm",
+      "for_route": "subtoken+body",
+      "n_primary": 1,
+      "missed_files": [
+        "vllm/engine/llm_engine.py"
+      ],
+      "by_mintok": {
+        "4": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 252,
+          "positive_nongold_syms": 5730
+        },
+        "5": {
+          "gold_file_fired_syms": 0,
+          "gold_func_fired": 0,
+          "nongold_fired_syms": 192,
+          "positive_nongold_syms": 5730
+        }
+      }
+    }
+  ]
+}
