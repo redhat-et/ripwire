@@ -198,6 +198,34 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ### Added — languages
 
+- **TypeScript gains three definition shapes that only a real repo produces.** Validated by mapping
+  `github.com/openclaw/openclaw` @`1aedd8f3` (24 658 `.ts` files, 261 760 symbols, 2026-08-04) and
+  diffing the emitted `n="` set against a ground truth enumerated independently — grep over *blanked*
+  source (comments and template literals stripped; that repo embeds Kotlin, Swift and JS fixtures
+  inside `String.raw` templates, which otherwise fake thousands of phantom hits), then confirmed at
+  AST level with `--match`. Three shapes came back at ~0 % recall, none of them present in any
+  fixture: `abstract_method_signature` (76 sites) — an abstract base published its own name and
+  nothing a caller could bind to; `public_field_definition` bound to an arrow (287 sites) — the
+  bound-method idiom, which is a class's callable surface exactly as `method_definition` is; and a
+  declarator whose value is an `as`/`satisfies` cast *wrapping* the arrow (105 sites) — the
+  lazy-facade idiom that openclaw's entire public `src/plugin-sdk/` surface is written in, so every
+  one of those was an exported API entry point `--for` structurally could not surface. All three now
+  extract: +468 symbols and +593 edges on that corpus, **0 removed**, and byte-identical output on
+  non-TypeScript trees. Deliberately still out: the object-literal `pair` form of the same syntax
+  (>5000 sites there — a `--match` floor — overwhelmingly inline callbacks and mock tables, not a
+  navigable surface). Known limits, disclosed in the gate: ambient `declare const/let/var` bindings
+  (37 sites) do not extract, and `declare module "x"` / `declare namespace X` *container* names are
+  not symbols — their members are, which is what navigation needs. Gate: `test/tsshapecheck.sh`.
+- **Known limit, measured and disclosed:** the pinned `tree-sitter-typescript` (v0.23.2) cannot parse
+  `typeof import("…")` once it appears in a nested type position — inside a parenthesized type
+  (`(typeof import("./m.js").xs)[number]`, 235 sites) or a call's type arguments
+  (`importOriginal<typeof import("./m.js")>()`, 2 087 sites, the vitest mock idiom). 1 222 of
+  openclaw's 24 658 `.ts` files contain at least one. The *cost* is far smaller than the site count,
+  which is the reason this is disclosed rather than paid for with a grammar-pin bump: tree-sitter
+  error recovery scopes the loss to the enclosing declaration, so across all 1 222 files the total is
+  ~15 definitions out of 261 760 (type-alias recall 1 607/1 614 and function recall 6 805/6 813 *within
+  the affected files*). Pinned in both directions by `test/tsshapecheck.sh` §4d — if a future grammar
+  bump fixes the parse, that arm fires.
 - **CUDA (`.cu`/`.cuh`) is indexed**, parsed with the vendored `tree-sitter-cuda` grammar (v0.21.1,
   a generated superset of tree-sitter-cpp) under the C++ tags — no CUDA-specific query patterns,
   because the grammar aliases `kernel_call_expression` to `call_expression`. *(Measured before
