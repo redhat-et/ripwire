@@ -54,6 +54,28 @@ probe (report only, not a gate): the two r3-headroom reproducers — `--for=<q07
 `ResolverMatch`, `--for=<q08 text>` must rank `is_valid` inside the emitted bundle — on the pinned
 django@70f39e46 checkout.
 
+## 2026-08-04 pre-run amendments (registered before any candidate code exists or ran)
+
+The r3_pathtok and r4_siblift verdicts (both REJECT — `../r3_pathtok/gate_verdict.txt`,
+`../r4_siblift/gate_verdict.txt`, required reading before running this round) set three house
+precedents this registration adopts now, while amendment is still legitimate:
+
+1. **Primary metric is the multi-file stratum** strict file@10 (aggregate reported as secondary,
+   never switched to). Both prior rounds showed these mechanisms only touch the multi-file
+   stratum; r3 died on an aggregate that its real +5.66pp stratum effect could not carry.
+2. **Targeting audit BEFORE the grid** (the r4 lesson: score-adjacent ≠ gold-adjacent — its
+   chooser never picked gold at any setting, making the whole grid moot). On train, before any
+   cell runs: for every instance whose gold is currently missed, report whether this candidate's
+   trigger (query token ≥ minTokLen matching a gold-symbol name-subtoken, positive evidence)
+   actually FIRES on a gold symbol, and its fire rate on non-gold (precision proxy). If gold
+   fire-rate on the missed set is under 20%, the round is dead before the grid — archive and stop.
+   Note the design distinction this audit tests: nameboost targets by *direct name evidence* (the
+   r3 side of the bracket), not by adjacency to a scored neighbor (the r4 side).
+3. **Amortize before accept**: tier-1 timing runs only against an implementation whose
+   name-subtoken pass is amortized into the existing postings build (no per-query corpus rescan);
+   r3's tier-1 tails were an unamortized scan recorded as a deviation, and that mistake is not
+   repeated here.
+
 ## Outcome
 
 (unfilled at registration — the verdict lands here)
