@@ -1,0 +1,32 @@
+r4 same-directory sibling lift — pre-registered verdict (2026-08-03)
+
+REJECT AT CALIBRATION — no held-out run was spent. Binary sha256 41d15b2f… @ 7aca765
+(detached-worktree pinned), train split, baseline + the full pre-registered 2x2 grid:
+
+  cell   strict@10   single-file   multi-file(n=49)
+  base     61.81%      70.73%        24.49%
+  1,1      61.81%      70.73%        24.49%     <- fires, moves nothing across @10
+  1,2      61.42%      70.73%        22.45%
+  2,1      61.42%      70.24%        24.49%
+  2,2      60.24%      69.27%        22.45%     <- monotone degradation as the lift widens
+
+Frozen selection rule: no cell exceeds baseline -> no candidate advances. Default stays off;
+env scaffolding retained.
+
+Out-of-domain probes (PROBES.md, informational): q01 gold db.py rank 83 and q09 gold
+defaultfilters.py rank 70 are IDENTICAL with the lift off / 1,1 / 2,2 — the lift never touched
+the gold files even on the hand-picked mechanism-reachable cases.
+
+Mechanism post-mortem (the finding worth the round): sibling CHOICE by highest best-symbol
+score is the weak link. Real directories hold many query-relevant siblings (cache/backends/:
+base, locmem, redis, memcached, db) and the top-scoring one is rarely the gold one —
+score-adjacent is not gold-adjacent. When the chooser guesses right the gold was already close;
+when wrong, wider settings displace legitimate rows. Same @10-frontier immobility as the two
+anchor-hop rounds, caught one stage earlier and cheaper.
+
+What survives for the next pre-registration: r3's held-out multi-file signal (+5.66pp) shows
+EVIDENCE-bearing mechanisms touch this stratum; r4 shows evidence-free PLACEMENT does not; the
+q09 dilution caveat (63 tiny same-decorator functions) plus this chooser failure both point at
+FILE-LEVEL EVIDENCE POOLING — rank files by pooled symbol evidence rather than lifting guessed
+neighbors — as the shaped hypothesis, with multi-file-primary as the registered metric per the
+r3 verdict's note.

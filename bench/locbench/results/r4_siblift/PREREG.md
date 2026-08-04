@@ -56,4 +56,4 @@ Known limit, stated up front: the zulip-31168 loss is a *cross*-directory pair
 
 ## Outcome
 
-(unfilled at registration — the verdict lands here)
+**REJECT at calibration (2026-08-03)** — see `gate_verdict.txt`: no grid cell beat baseline; probes q01/q09 unmoved at every setting; chooser post-mortem (score-adjacent ≠ gold-adjacent) recorded for the file-pooling follow-up.
