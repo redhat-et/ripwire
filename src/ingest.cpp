@@ -64,6 +64,7 @@ extern "C"
     const TSLanguage* tree_sitter_json( void );
     const TSLanguage* tree_sitter_c_sharp( void );
     const TSLanguage* tree_sitter_c( void );
+    const TSLanguage* tree_sitter_cuda( void );
 }
 
 namespace rw
@@ -90,7 +91,7 @@ struct LangEntry
 };
 
 // Order does not matter (linear scan); kept grouped by language for readability.
-constexpr std::array<LangEntry, 30> kLangTable = {{
+constexpr std::array<LangEntry, 32> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -113,6 +114,25 @@ constexpr std::array<LangEntry, 30> kLangTable = {{
     // silently drop out of every `lang == Lang::Cpp` C-family behaviour (scope qualification, clone
     // detection, C-family lint) for no benefit.
     { ".metal", Lang::Cpp,       &tree_sitter_cpp,        "cpp"        },   // Metal Shading Language (MSL) — see above
+    // `.cu`/`.cuh` = CUDA C++, on the VENDORED tree-sitter-cuda grammar — NOT the Metal-style ride on
+    // the C++ grammar, and that difference is MEASURED, not assumed (2026-08-04 probe, the fixture now
+    // at test/cudafix/): under tree_sitter_cpp every definition survived error recovery (__global__/
+    // __device__/__launch_bounds__/template kernels — all 12 defs extracted) and device-side call edges
+    // resolved, but every `kernel<<<grid, block>>>( args )` LAUNCH site produced no call reference at
+    // all — `--callers=rk_reduceSum` returned count=0 — and a `__constant__` module table failed to
+    // extract. Losing every host→kernel edge is the exact failure the Metal entry exists to prevent
+    // (`--callers=ml_styleFor` = 0), so CUDA earns the real grammar Metal measurably did not need.
+    // STILL-OPEN LIMIT (disclosed in test/cudacheck.sh §7b): the grammar now PARSES `__constant__
+    // float T[ 64 ];` cleanly, but the shared cpp tags.scm module-constant pattern keys on
+    // const/constexpr, so the table still yields no symbol (plain constexpr in .cu/.cuh does).
+    // tree-sitter-cuda is a GENERATED superset of tree-sitter-cpp (grammar.js requires cpp's): its
+    // `kernel_call_expression` is aliased to `call_expression` with a `function:` field, so the C++
+    // tags.scm ("cpp" below) compiles against it unchanged and launches extract as ordinary calls.
+    // Lang::Cpp (not a new Lang::Cuda) for the same deliberate reason as Metal: host and device share
+    // ONE call namespace through dual-compile headers (`#ifdef __CUDACC__`), and a separate Lang would
+    // need a bridge in langCompatible while dropping out of every C-family behaviour for no benefit.
+    { ".cu",   Lang::Cpp,        &tree_sitter_cuda,       "cpp"        },   // CUDA C++ — see above
+    { ".cuh",  Lang::Cpp,        &tree_sitter_cuda,       "cpp"        },   // CUDA header (dual-compile lives here)
     // `.h` stays C++-owned (deliberate, L3): a C header parses acceptably under the C++ grammar and
     // `.h` ownership between C/C++/ObjC is inherently ambiguous without a project-config signal this
     // tool doesn't have (an .m/.mm sibling reroutes via looksObjC() below; there is no analogous C
@@ -950,7 +970,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 36;           // bump on any grammar/.scm/extraction change (36: H4 W3 V3-verifier
+constexpr std::uint32_t kParserVer    = 37;           // bump on any grammar/.scm/extraction change (37: +CUDA (.cu/.cuh)
+                                                      //    on the vendored tree-sitter-cuda grammar (kLangTable) — the
+                                                      //    crawl SET changed (two new extensions) and `<<<>>>` launch
+                                                      //    sites now extract as call references, so a v36 blob on a
+                                                      //    CUDA-bearing tree describes a different graph and must be
+                                                      //    rejected; the on-disk RECORD SHAPE did not change, so only
+                                                      //    parserVer moves, not kCacheVersion — the +Metal (30)
+                                                      //    precedent exactly; 36: H4 W3 V3-verifier
                                                       //    fixup L-1 — a Rust CONTAINER no longer scopes ITSELF.
                                                       //    rustEnclosingScopeOf started its ancestor walk at the node's
                                                       //    parent, and a `mod util`/`trait Shape` definition node IS that

@@ -77,7 +77,8 @@ loop that survives them.
 Concurrency: one tree-sitter parser per worker thread (parsers are not thread-safe), files
 dispatched as work items.
 
-Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), Python,
+Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), CUDA (parsed
+with the vendored tree-sitter-cuda grammar, a generated superset of tree-sitter-cpp), Python,
 TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, plus JSON configuration keys.
 
 ### graph — resolve references into edges

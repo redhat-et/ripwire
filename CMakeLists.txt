@@ -256,6 +256,14 @@ add_ts_grammar(csharp https://github.com/tree-sitter/tree-sitter-c-sharp.git    
 # parser.c). `.h` deliberately stays routed to the C++ grammar (kLangTable, ingest.cpp) — see the
 # comment there and in model.h's Lang enum for the ownership rationale.
 add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git           7fa1be1b694b6e763686793d97da01f36a0e5c12)  # v0.24.1
+# CUDA (.cu/.cuh): tree-sitter-grammars/tree-sitter-cuda, a GENERATED superset of tree-sitter-cpp
+# (grammar.js requires cpp's and adds __global__/__device__/… qualifiers, __launch_bounds__, and the
+# `<<<grid, block>>>` kernel-call — ALIASED to call_expression, so the C++ tags.scm captures launches
+# with no CUDA-specific patterns; see test/cudacheck.sh for the measured failure that justified a real
+# grammar over Metal-style C++-grammar riding). v0.21.1 → ABI 15, in [MIN_COMPATIBLE,
+# LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (inherited from cpp: raw strings)
+# which the macro picks up. The tag is lightweight, so the SHA below IS the tagged commit.
+add_ts_grammar(cuda   https://github.com/tree-sitter-grammars/tree-sitter-cuda.git 48b066f334f4cf2174e05a50218ce2ed98b6fd01)  # v0.21.1
 
 # TypeScript: ONE repo cloned once (SOURCE_SUBDIR _none_ skips its CMakeLists), then TWO
 # OBJECT libs (ts_tsts from typescript/src, ts_tstsx from tsx/src). Both share common/scanner.c
@@ -300,6 +308,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_json>
   $<TARGET_OBJECTS:ts_csharp>
   $<TARGET_OBJECTS:ts_c>
+  $<TARGET_OBJECTS:ts_cuda>
 )
 
 # ---- threading: std::thread / std::mutex need an explicit link on most Unixes ----
@@ -399,7 +408,7 @@ endforeach()
 # ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
-  ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c)
+  ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c ts_cuda)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so

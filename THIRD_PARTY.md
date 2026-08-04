@@ -48,6 +48,7 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/tree_sitter` | tree-sitter (core runtime, v0.26.9) | Max Brunsfeld | MIT | `7f534862c3ec939c3a6ee147f7600ef5c1bf900f` | https://github.com/tree-sitter/tree-sitter | 0.9 MB |
 | `deps/cpp` | tree-sitter-cpp (v0.23.4) | Max Brunsfeld | MIT | `f41e1a044c8a84ea9fa8577fdd2eab92ec96de02` | https://github.com/tree-sitter/tree-sitter-cpp | 17 MB |
 | `deps/c` | tree-sitter-c (v0.24.1) | Max Brunsfeld | MIT | `7fa1be1b694b6e763686793d97da01f36a0e5c12` | https://github.com/tree-sitter/tree-sitter-c | 3.7 MB |
+| `deps/cuda` | tree-sitter-cuda (v0.21.1) | Stephan Seitz | MIT | `48b066f334f4cf2174e05a50218ce2ed98b6fd01` | https://github.com/tree-sitter-grammars/tree-sitter-cuda | 19 MB |
 | `deps/python` | tree-sitter-python (v0.23.6) | Max Brunsfeld | MIT | `bffb65a8cfe4e46290331dfef0dbf0ef3679de11` | https://github.com/tree-sitter/tree-sitter-python | 3.3 MB |
 | `deps/go` | tree-sitter-go (v0.23.4) | Max Brunsfeld | MIT | `3c3775faa968158a8b4ac190a7fda867fd5fb748` | https://github.com/tree-sitter/tree-sitter-go | 1.5 MB |
 | `deps/rust` | tree-sitter-rust (v0.23.2) | Maxim Sokolov | MIT | `cad8a206f2e4194676b9699f26f6560d07130d3f` | https://github.com/tree-sitter/tree-sitter-rust | 5.9 MB |

@@ -198,6 +198,19 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ### Added — languages
 
+- **CUDA (`.cu`/`.cuh`) is indexed**, parsed with the vendored `tree-sitter-cuda` grammar (v0.21.1,
+  a generated superset of tree-sitter-cpp) under the C++ tags — no CUDA-specific query patterns,
+  because the grammar aliases `kernel_call_expression` to `call_expression`. *(Measured before
+  adopting, 2026-08-04 probe on the fixture now at `test/cudafix/`: under the plain C++ grammar all
+  12 definitions survived error recovery, but every `kernel<<<grid, block>>>( … )` launch site
+  produced no call reference — `--callers` of a kernel returned 0 — and a `__constant__` module
+  table failed to extract. Losing every host→kernel edge is the Metal failure mode over again, which
+  is why CUDA gets a real grammar where Metal measurably did not need one.)* `.cu`/`.cuh` map to the
+  C++ language, not a language of their own, so dual-compile headers (`#ifdef __CUDACC__`) resolve
+  from both the host and device halves. Known limit, disclosed in the gate: a `__constant__ float
+  T[64];` module table still does not extract — the shared C++ tags constant pattern keys on
+  `const`/`constexpr`, not the `__constant__` qualifier (plain `constexpr` constants in `.cu`/`.cuh`
+  do extract). Gate: `test/cudacheck.sh`.
 - **Qualified-call resolution across C++, Rust, C#, TypeScript, JavaScript, Java and Objective-C.**
   C++ gained qualified calls of three or more segments and explicit-template calls at any depth (with
   cast exclusion), canonically precise; Rust gained scoped, turbofish and `Self::` calls with a real
