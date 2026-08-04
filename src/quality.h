@@ -720,7 +720,7 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 38;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 39;   // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 36 = H4 W3 V3-fixup L-1: a Rust container no longer scopes ITSELF
                                                           // (`mod util` was published as `util::util`) — per-def `scope` is a
                                                           // cached field, so v35 blobs carry the old ids and must be retired.

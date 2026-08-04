@@ -46,6 +46,56 @@
   key: (property_identifier) @name
   value: [ (arrow_function) (function_expression) ]) @definition.function
 
+; ---- JS shape round (test/jsshapecheck.sh — webpack@957bf3a + node@427d2e1 lib/, 2026-08-04) ----
+
+; class field bound to an arrow/function — the bound-method idiom, the JS spelling of the TS shape
+; closed in d2854f4 (the two tags.scm are separate; the TS fix did not cover this file). Scoped to
+; callable VALUES for the same reason as TS: plain data fields are 98 (webpack) / 542 (node lib)
+; sites of pure noise. `static` is an optional anonymous token, so this matches static fields too.
+; The property alternation carries #private fields (`#drain = () => {..}`) — same idiom, same map row.
+(field_definition
+  property: [ (property_identifier) (private_property_identifier) ] @name
+  value: [ (arrow_function) (function_expression) ]) @definition.method
+
+; #private method — `#push(x) {..}` is a method_definition whose name is a
+; private_property_identifier, which the property_identifier pattern above never matched:
+; 232 invisible methods in node lib/ alone. The name keeps its `#`.
+(method_definition
+  name: (private_property_identifier) @name) @definition.method
+
+; CJS export assignment — `module.exports.NAME = fn` / `exports.NAME = fn` mints a function ON the
+; export object (47 webpack/lib sites, 0 extracted before this round). Structurally these patterns
+; capture EVERY `a.b = fn` / `a.b.c = fn`; the object-text scoping (exports / module.exports) lives
+; in ingest.cpp (isCjsExportTarget) because tags-pass predicates never run — see the SCREAMING_SNAKE
+; precedent above. `!name`-scoped to ANONYMOUS values: a named function expression already defines
+; its inner name, and capturing both would double the row.
+(assignment_expression
+  left: (member_expression
+    object: (identifier)
+    property: (property_identifier) @name)
+  right: [ (arrow_function) (function_expression !name) ]) @definition.cjsexport
+
+(assignment_expression
+  left: (member_expression
+    object: (member_expression
+      object: (identifier)
+      property: (property_identifier))
+    property: (property_identifier) @name)
+  right: [ (arrow_function) (function_expression !name) ]) @definition.cjsexport
+
+; prototype method — `Foo.prototype.bar = function (..) {..}`, the pre-class idiom node lib/ still
+; carries 332 sites of; the 163 with ANONYMOUS values were invisible (the rest rode a named inner
+; function expression, hence the same `!name` scope). The inner `object:` is unconstrained so any
+; qualifier depth matches (`net.exports.Socket.prototype.x`); the `.prototype.` text test is the
+; ingest.cpp gate (isPrototypeMemberTarget) — instance-slot assignments (`sock.onclose = fn`,
+; `this.state.h = fn`) share the shape and must stay out.
+(assignment_expression
+  left: (member_expression
+    object: (member_expression
+      property: (property_identifier))
+    property: (property_identifier) @name)
+  right: [ (arrow_function) (function_expression !name) ]) @definition.protomethod
+
 ; ---- module-level settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03) ----
 ; Mirrors queries/typescript/tags.scm (same rationale, same --match-verified shapes; the JS grammar
 ; shares the program/lexical_declaration/export_statement nodes). The legacy `var CONFIG = {...}`
@@ -84,6 +134,13 @@
 (call_expression
   function: (member_expression
     property: (property_identifier) @name)) @reference.call
+
+; #private method call — `this.#push(x)` / `Transport.#register(y)`. Without this the #private
+; defs above would enter the graph as unreachable islands (the property_identifier pattern one up
+; never matches a private_property_identifier).
+(call_expression
+  function: (member_expression
+    property: (private_property_identifier) @name)) @reference.call
 
 (new_expression
   constructor: (identifier) @name) @reference.call

@@ -232,6 +232,14 @@ SymKind defKind( std::string_view tail ) noexcept
     {
         return SymKind::Var;
     }
+    if( tail == "cjsexport" )      // JS `module.exports.NAME = fn` / `exports.NAME = fn` — gated (isCjsExportTarget)
+    {
+        return SymKind::Function;
+    }
+    if( tail == "protomethod" )    // JS `Foo.prototype.NAME = fn` — gated (isPrototypeMemberTarget)
+    {
+        return SymKind::Method;
+    }
     if( tail == "module" )
     {
         return SymKind::Other;
@@ -970,7 +978,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 38;           // bump on any grammar/.scm/extraction change (38: TypeScript
+constexpr std::uint32_t kParserVer    = 39;           // bump on any grammar/.scm/extraction change
+                                                      // 39: JavaScript gains four definition shapes measured missing
+                                                      //    against real repos (webpack@957bf3a, node@427d2e1 lib/) —
+                                                      //    field_definition bound to an arrow/function, #private
+                                                      //    methods (+ their call references), gated CJS export
+                                                      //    assignments, gated prototype assignments. A v38 blob on a
+                                                      //    JS-bearing tree is missing those rows → reject.
+                                                      // (38: TypeScript
                                                       //    gains three definition shapes measured missing against a real
                                                       //    repo (openclaw, 24 658 .ts files) — abstract_method_signature,
                                                       //    public_field_definition bound to an arrow, and a declarator
@@ -3616,13 +3631,86 @@ inline bool constCaptureNeedsScreamingGate( Lang lang ) noexcept
     }
 }
 
-// The whole drop decision for a @definition.constant capture, kept out of captureTagsFacts (which is
-// already the file's densest dispatch point): drop when the language's convention gate applies and the
-// name is not SCREAMING_SNAKE.
-inline bool dropConstCapture( bool isConstCapture, Lang lang, std::string_view name ) noexcept
+// forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
+inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
+inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
+
+// The whole drop decision for every GATED definition capture, kept out of captureTagsFacts (which is
+// already the file's densest dispatch point) behind ONE call, keyed on the @definition capture's own
+// name. Three gated classes: @definition.constant drops when the language's convention gate applies
+// and the name is not SCREAMING_SNAKE (r3 q10); @definition.cjsexport / @definition.protomethod (the
+// JS shape round, test/jsshapecheck.sh) drop when the assignment's LEFT side is not really
+// exports/module.exports/.prototype. — the query captures every `a.b = fn` shape and cannot
+// text-test, because tags-pass predicates never run (see constCaptureNeedsScreamingGate above).
+inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode nameNode, std::string_view src ) noexcept
 {
-    return isConstCapture && constCaptureNeedsScreamingGate( lang ) && !isScreamingSnakeName( name );
+    if( defCapSv == "definition.constant" )
+    {
+        return constCaptureNeedsScreamingGate( lang ) && !isScreamingSnakeName( name );
+    }
+    if( defCapSv == "definition.cjsexport" )
+    {
+        return !isCjsExportTarget( nameNode, src );
+    }
+    if( defCapSv == "definition.protomethod" )
+    {
+        return !isPrototypeMemberTarget( nameNode, src );
+    }
+    return false;
 }
+
+// JS shape round (test/jsshapecheck.sh): the two assignment-shape gates dropGatedCapture dispatches to.
+// Both helpers take the @name capture — the `property:` field of the assignment's LEFT
+// member_expression — and inspect that node's `object:` sibling.
+
+// `exports.NAME = fn` (object is the bare identifier `exports`) or `module.exports.NAME = fn` (object is
+// the member_expression `module.exports`, tested segment-by-segment, not as flat text — `module . exports`
+// with interior spacing would still pass, a decoy like `moduleLike.exports` cannot).
+inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode member = ts_node_parent( nameNode );
+    if( ts_node_is_null( member ) )
+    {
+        return false;
+    }
+    const TSNode obj = ts_node_child_by_field_name( member, "object", 6 );
+    if( ts_node_is_null( obj ) )
+    {
+        return false;
+    }
+    const char* objType = ts_node_type( obj );
+    if( std::strcmp( objType, "identifier" ) == 0 )
+    {
+        return nodeTextOf( obj, src ) == "exports";
+    }
+    if( std::strcmp( objType, "member_expression" ) == 0 )
+    {
+        const TSNode oo = ts_node_child_by_field_name( obj, "object", 6 );
+        return std::strcmp( ts_node_type( oo ), "identifier" ) == 0
+            && nodeTextOf( oo, src ) == "module"
+            && nodeTextOf( ts_node_child_by_field_name( obj, "property", 8 ), src ) == "exports";
+    }
+    return false;
+}
+
+// `Foo.prototype.NAME = fn` at any qualifier depth: the member_expression under `object:` must name
+// `prototype` as its property. Instance-slot assignments (`sock.onclose = fn`, `this.state.h = fn`)
+// share the captured shape and fail exactly this test.
+inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode member = ts_node_parent( nameNode );
+    if( ts_node_is_null( member ) )
+    {
+        return false;
+    }
+    const TSNode obj = ts_node_child_by_field_name( member, "object", 6 );
+    if( ts_node_is_null( obj ) || std::strcmp( ts_node_type( obj ), "member_expression" ) != 0 )
+    {
+        return false;
+    }
+    return nodeTextOf( ts_node_child_by_field_name( obj, "property", 8 ), src ) == "prototype";
+}
+
 
 // P2-D RECEIVER capture: classify the call-site receiver of `recv.method()` / `recv->method()` so
 // resolve.h can narrow before the ambiguous §2a name spray. `nameNode` is the @name capture (the called
@@ -4838,7 +4926,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             SymKind          kind     = SymKind::Other;
             bool             isDef    = false;
             bool             isRef    = false;
-            bool             isConstCapture = false;   // @definition.constant — the module-level settings-constant patterns (r3 q10)
+            std::string_view defCapSv;   // the @definition capture's name — dropGatedCapture keys the constant/cjsexport/protomethod gates on it
             TSNode           roleNode {};
             bool             haveRole = false;
             std::string_view nameTxt;
@@ -4862,7 +4950,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     {
                         isDef          = true;
                         kind           = k;
-                        isConstCapture = ( capSv == "definition.constant" );
+                        defCapSv       = capSv;
                         roleNode       = cap.node;
                         haveRole       = true;
                     }
@@ -4938,10 +5026,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 continue;
             }
 
-            // r3 q10: scope the new module-level constant captures to settings/config constants — the
-            // SCREAMING_SNAKE name gate (see dropConstCapture for the per-language rationale and why this
-            // cannot live in the query as a #match? predicate).
-            if( isDef && dropConstCapture( isConstCapture, le.lang, nameTxt ) )
+            // the gated capture classes — r3 q10 constants, JS export/prototype assignments — in one
+            // drop decision (see dropGatedCapture for the per-class rationale and why none of this can
+            // live in the query as a #match?/#eq? predicate).
+            if( isDef && dropGatedCapture( defCapSv, le.lang, nameTxt, nameNode, src ) )
             {
                 continue;
             }
