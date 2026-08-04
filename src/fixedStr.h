@@ -7,8 +7,8 @@
 // no heap pointer to chase. Strings longer than 31 bytes truncate (a `truncated()` probe is provided) —
 // intended for identifiers (e.g. final-segment symbol names, ~all < 31 chars), NOT arbitrary text or paths.
 //
-// Layout: { len:1, data:31 } = exactly 32 bytes, alignas(16) → two NEON 16-byte loads cover it. Vendorable:
-// depends only on the standard library + (optionally) <arm_neon.h>.
+// Layout: { len:1, data:31 } = exactly 32 bytes, alignas(16) → two 16-byte SIMD loads (NEON or SSE2)
+// cover it. Vendorable: depends only on the standard library + (optionally) <arm_neon.h>/<emmintrin.h>.
 
 #include "hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 
@@ -17,6 +17,8 @@
 #include <string_view>
 #if defined( __ARM_NEON )
     #include <arm_neon.h>
+#elif defined( __SSE2__ ) || defined( _M_X64 )
+    #include <emmintrin.h>
 #endif
 
 namespace rw
@@ -48,6 +50,12 @@ struct alignas( 16 ) FixedStr
         const uint8x16_t eq = vandq_u8( vceqq_u8( vld1q_u8( pa ), vld1q_u8( pb ) ),
                                         vceqq_u8( vld1q_u8( pa + 16 ), vld1q_u8( pb + 16 ) ) );
         return vminvq_u8( eq ) == 0xFF;                 // all 32 bytes equal (len byte included)
+#elif defined( __SSE2__ ) || defined( _M_X64 )
+        const auto* pa = reinterpret_cast<const __m128i*>( this );
+        const auto* pb = reinterpret_cast<const __m128i*>( &o );
+        const __m128i eq = _mm_and_si128( _mm_cmpeq_epi8( _mm_load_si128( pa ),     _mm_load_si128( pb ) ),
+                                          _mm_cmpeq_epi8( _mm_load_si128( pa + 1 ), _mm_load_si128( pb + 1 ) ) );
+        return _mm_movemask_epi8( eq ) == 0xFFFF;       // all 32 bytes equal (len byte included)
 #else
         std::uint64_t w[ 4 ], v[ 4 ];
         std::memcpy( w, this, 32 );  std::memcpy( v, &o, 32 );

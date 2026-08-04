@@ -9,7 +9,8 @@
 //  "count keys vs x" kernel from the static S+ tree
 //  (https://en.algorithmica.org/hpc/data-structures/s-tree/), with both a
 //  strictly-less (rank_lt) and a less-or-equal (rank_le) variant. On AArch64 the
-//  scan compiles to NEON; elsewhere it is a portable scalar loop.
+//  scan compiles to NEON; on x86_64 to SSE (SSE2 for 32-bit and float keys, SSE4.2
+//  for 64-bit integer keys); elsewhere it is a portable scalar loop.
 //
 //  Properties:
 //    * NO PER-OPERATION DYNAMIC ALLOCATION. Two node pools are allocated exactly
@@ -69,6 +70,16 @@
     #define DYNMAP_HAS_NEON 1
 #else
     #define DYNMAP_HAS_NEON 0
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+    #include <emmintrin.h>           // SSE2 -- baseline on x86_64, always present
+    #if defined(__SSE4_2__)
+        #include <nmmintrin.h>       // SSE4.2 -- _mm_cmpgt_epi64 for the 64-bit integer kernels
+    #endif
+    #define DYNMAP_HAS_SSE2 1
+#else
+    #define DYNMAP_HAS_SSE2 0
 #endif
 
 // Precondition guard. In the game build the project's VERIFY (math/Diagnostics.h)
@@ -251,6 +262,176 @@ DYNMAP_DEFINE_RANK_64(double,        vdupq_n_f64, vld1q_f64, vcltq_f64, vcleq_f6
 
 #endif // DYNMAP_HAS_NEON
 
+#if DYNMAP_HAS_SSE2
+
+// x86 kernels: same count-of-true-lanes structure as NEON (a true compare lane reads as -1, so the
+// negated horizontal sum is the count) with two x86-specific twists. (1) SSE has no unsigned integer
+// compares, so unsigned keys are XOR-biased by the sign bit into signed order first -- the bias vector
+// is all-zero for signed keys and the XOR folds away. (2) SSE2 has no integer <=, so rank_le counts
+// the STRICT > lanes instead and returns B minus that ("<= x" == "not > x"; padding sentinels compare
+// > x for every x below the sentinel, exactly matching the scalar contract). Rank order under the
+// sign-bit bias is preserved because std::less on the unsigned type is (static_assert'd) the ordering.
+
+// horizontal sums of 4x32 / 2x64 accumulated lane sums (SSE2-only shuffles, no SSE3 hadd).
+inline int dynmap_sse_hsum32(__m128i acc)
+{
+    __m128i sum = _mm_add_epi32(acc, _mm_shuffle_epi32(acc, _MM_SHUFFLE(1, 0, 3, 2)));
+    sum         = _mm_add_epi32(sum, _mm_shuffle_epi32(sum, _MM_SHUFFLE(2, 3, 0, 1)));
+    return _mm_cvtsi128_si32(sum);
+}
+
+inline long long dynmap_sse_hsum64(__m128i acc)
+{
+    const __m128i sum = _mm_add_epi64(acc, _mm_shuffle_epi32(acc, _MM_SHUFFLE(1, 0, 3, 2)));
+    return _mm_cvtsi128_si64(sum);
+}
+
+// 32-bit-lane integer keys: four lanes per vector; BIAS is the sign bit for unsigned, zero for signed.
+#define DYNMAP_DEFINE_RANK_SSE_I32(KEY, BIAS)                                  \
+    template <int B>                                                          \
+    struct node_rank<KEY, B, void>                                            \
+    {                                                                         \
+        static unsigned lt(const KEY* k, KEY x)                               \
+        {                                                                     \
+            const __m128i bias = BIAS;                                        \
+            const __m128i xv   = _mm_xor_si128(_mm_set1_epi32(int(x)), bias); \
+            __m128i acc        = _mm_setzero_si128();                         \
+            for (int j = 0; j < B; j += 4)                                    \
+            {                                                                 \
+                const __m128i kv = _mm_xor_si128(                             \
+                    _mm_load_si128(reinterpret_cast<const __m128i*>(k + j)),  \
+                    bias);                                                    \
+                acc = _mm_add_epi32(acc, _mm_cmplt_epi32(kv, xv));            \
+            }                                                                 \
+            return static_cast<unsigned>(-dynmap_sse_hsum32(acc));            \
+        }                                                                     \
+                                                                              \
+        static unsigned le(const KEY* k, KEY x)                               \
+        {                                                                     \
+            const __m128i bias = BIAS;                                        \
+            const __m128i xv   = _mm_xor_si128(_mm_set1_epi32(int(x)), bias); \
+            __m128i acc        = _mm_setzero_si128();                         \
+            for (int j = 0; j < B; j += 4)                                    \
+            {                                                                 \
+                const __m128i kv = _mm_xor_si128(                             \
+                    _mm_load_si128(reinterpret_cast<const __m128i*>(k + j)),  \
+                    bias);                                                    \
+                acc = _mm_add_epi32(acc, _mm_cmpgt_epi32(kv, xv));            \
+            }                                                                 \
+            return static_cast<unsigned>(B + dynmap_sse_hsum32(acc));         \
+        }                                                                     \
+    };
+
+DYNMAP_DEFINE_RANK_SSE_I32(std::int32_t,  _mm_setzero_si128())
+DYNMAP_DEFINE_RANK_SSE_I32(std::uint32_t, _mm_set1_epi32(int(0x80000000)))
+
+#undef DYNMAP_DEFINE_RANK_SSE_I32
+
+// floats: direct SSE2 compares exist for both < and <=, so no bias and no B-minus-gt detour.
+template <int B>
+struct node_rank<float, B, void>
+{
+    static unsigned lt(const float* k, float x)
+    {
+        const __m128 xv = _mm_set1_ps(x);
+        __m128i acc     = _mm_setzero_si128();
+        for (int j = 0; j < B; j += 4)
+        {
+            acc = _mm_add_epi32(acc, _mm_castps_si128(_mm_cmplt_ps(_mm_load_ps(k + j), xv)));
+        }
+        return static_cast<unsigned>(-dynmap_sse_hsum32(acc));
+    }
+
+    static unsigned le(const float* k, float x)
+    {
+        const __m128 xv = _mm_set1_ps(x);
+        __m128i acc     = _mm_setzero_si128();
+        for (int j = 0; j < B; j += 4)
+        {
+            acc = _mm_add_epi32(acc, _mm_castps_si128(_mm_cmple_ps(_mm_load_ps(k + j), xv)));
+        }
+        return static_cast<unsigned>(-dynmap_sse_hsum32(acc));
+    }
+};
+
+template <int B>
+struct node_rank<double, B, void>
+{
+    static unsigned lt(const double* k, double x)
+    {
+        const __m128d xv = _mm_set1_pd(x);
+        __m128i acc      = _mm_setzero_si128();
+        for (int j = 0; j < B; j += 2)
+        {
+            acc = _mm_add_epi64(acc, _mm_castpd_si128(_mm_cmplt_pd(_mm_load_pd(k + j), xv)));
+        }
+        return static_cast<unsigned>(-dynmap_sse_hsum64(acc));
+    }
+
+    static unsigned le(const double* k, double x)
+    {
+        const __m128d xv = _mm_set1_pd(x);
+        __m128i acc      = _mm_setzero_si128();
+        for (int j = 0; j < B; j += 2)
+        {
+            acc = _mm_add_epi64(acc, _mm_castpd_si128(_mm_cmple_pd(_mm_load_pd(k + j), xv)));
+        }
+        return static_cast<unsigned>(-dynmap_sse_hsum64(acc));
+    }
+};
+
+#if defined(__SSE4_2__)
+
+// 64-bit-lane integer keys need _mm_cmpgt_epi64 (SSE4.2). Below x86-64-v2 these stay on the scalar
+// template -- build with -march=x86-64-v2 (or RIPWIRE_NATIVE=ON) to light them up; the production
+// instantiation (quality.h ScratchMap, uint64_t keys) is the one that benefits. Only > exists, so
+// lt counts x > k and le counts B minus (k > x).
+#define DYNMAP_DEFINE_RANK_SSE_I64(KEY, BIAS)                                  \
+    template <int B>                                                          \
+    struct node_rank<KEY, B, void>                                            \
+    {                                                                         \
+        static unsigned lt(const KEY* k, KEY x)                               \
+        {                                                                     \
+            const __m128i bias = BIAS;                                        \
+            const __m128i xv   = _mm_xor_si128(                               \
+                _mm_set1_epi64x(static_cast<long long>(x)), bias);            \
+            __m128i acc        = _mm_setzero_si128();                         \
+            for (int j = 0; j < B; j += 2)                                    \
+            {                                                                 \
+                const __m128i kv = _mm_xor_si128(                             \
+                    _mm_load_si128(reinterpret_cast<const __m128i*>(k + j)),  \
+                    bias);                                                    \
+                acc = _mm_add_epi64(acc, _mm_cmpgt_epi64(xv, kv));            \
+            }                                                                 \
+            return static_cast<unsigned>(-dynmap_sse_hsum64(acc));            \
+        }                                                                     \
+                                                                              \
+        static unsigned le(const KEY* k, KEY x)                               \
+        {                                                                     \
+            const __m128i bias = BIAS;                                        \
+            const __m128i xv   = _mm_xor_si128(                               \
+                _mm_set1_epi64x(static_cast<long long>(x)), bias);            \
+            __m128i acc        = _mm_setzero_si128();                         \
+            for (int j = 0; j < B; j += 2)                                    \
+            {                                                                 \
+                const __m128i kv = _mm_xor_si128(                             \
+                    _mm_load_si128(reinterpret_cast<const __m128i*>(k + j)),  \
+                    bias);                                                    \
+                acc = _mm_add_epi64(acc, _mm_cmpgt_epi64(kv, xv));            \
+            }                                                                 \
+            return static_cast<unsigned>(B + dynmap_sse_hsum64(acc));         \
+        }                                                                     \
+    };
+
+DYNMAP_DEFINE_RANK_SSE_I64(std::int64_t,  _mm_setzero_si128())
+DYNMAP_DEFINE_RANK_SSE_I64(std::uint64_t, _mm_set1_epi64x(static_cast<long long>(0x8000000000000000ull)))
+
+#undef DYNMAP_DEFINE_RANK_SSE_I64
+
+#endif // __SSE4_2__
+
+#endif // DYNMAP_HAS_SSE2
+
 // =============================================================================
 //  Node layouts (templated on width B).
 //
@@ -321,15 +502,15 @@ class dynamic_map
                   "under the numeric ordering. Any other comparator would count "
                   "padding slots into every rank and silently corrupt the tree.");
 
-    // Number of key lanes in a 128-bit NEON vector for this key (4 for 32-bit,
-    // 2 for 64-bit). B must be a whole multiple so the SIMD scan divides the
-    // node evenly with no tail.
+    // Number of key lanes in a 128-bit vector (NEON or SSE) for this key (4 for
+    // 32-bit, 2 for 64-bit). B must be a whole multiple so the SIMD scan divides
+    // the node evenly with no tail.
     static constexpr int kVectorLanes =
         (sizeof(Key) <= 16) ? static_cast<int>(16 / sizeof(Key)) : 1;
 
     static_assert(B % kVectorLanes == 0,
-                  "node width B must be a multiple of the NEON lane count for "
-                  "Key (16 / sizeof(Key)) so the SIMD scan fits evenly.");
+                  "node width B must be a multiple of the 128-bit SIMD lane count "
+                  "for Key (16 / sizeof(Key)) so the SIMD scan fits evenly.");
     static_assert(B >= 4 && (B % 2 == 0),
                   "node width B must be even and at least 4.");
 
