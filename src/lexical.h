@@ -100,7 +100,7 @@ inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
-                                               const std::vector<float>* symbolScoreMul )
+                                               const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0 )
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
@@ -184,15 +184,22 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
-    // pass 1.5 — path field (×RIPWIRE_PATHTOK_W): the symbol's file path scanned through the SAME state
-    // machine. INERT BY DEFAULT (env unset → this block never fires; output byte-identical): the weight
-    // exists for the r3 calibration sweep only (bench/locbench/results/r3_pathtok/PREREG.md), and a
-    // nonzero DEFAULT requires that pre-registered acceptance gate. Paths need no file text, so the pass
-    // sits before the branch below and runs identically over the scan and persisted-stats paths —
-    // postings parity holds by construction and the cache format is untouched.
-    if( const char* pathTokEnv = std::getenv( "RIPWIRE_PATHTOK_W" ) )
+    // pass 1.5 — path field (×kwPath): the symbol's file path scanned through the SAME state machine.
+    // pathFieldDefaultW is the CALLER's lens decision: the RECALL lens (docs) passes 1 — a query naming a
+    // "readme" / "report" / "paired table" should be able to hit the doc whose PATH says exactly that, and
+    // bench/recalleval/ is the instrument that measured the +0.03 lenient-MRR / doc-sibling recovery this
+    // buys (2026-08-03, gate: test/recallevalcheck.sh). The CODE lenses (--for and friends) still pass 0:
+    // a nonzero default THERE requires the pre-registered locbench acceptance gate
+    // (bench/locbench/results/r3_pathtok/PREREG.md), unchanged. RIPWIRE_PATHTOK_W overrides either default
+    // for calibration sweeps only. Paths need no file text, so the pass sits before the branch below and
+    // runs identically over the scan and persisted-stats paths — postings parity holds by construction and
+    // the cache format is untouched.
     {
-        const int kwPath = std::clamp( std::atoi( pathTokEnv ), 0, 8 );
+        int kwPath = pathFieldDefaultW;
+        if( const char* pathTokEnv = std::getenv( "RIPWIRE_PATHTOK_W" ) )
+        {
+            kwPath = std::clamp( std::atoi( pathTokEnv ), 0, 8 );
+        }
         if( kwPath > 0 )
         {
             for( std::size_t i = 0; i < S; ++i )
@@ -610,9 +617,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 // byte-identical scores (a null multiplier is the identity in both scoring branches above).
 inline std::vector<float> lexicalScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                          const std::vector<NodeId>& outTargets, std::string_view query,
-                                         std::size_t pruneTopK = 0, const std::vector<char>* alwaysExact = nullptr )
+                                         std::size_t pruneTopK = 0, const std::vector<char>* alwaysExact = nullptr,
+                                         int pathFieldDefaultW = 0 )
 {
-    return lexicalScoresTiered( ing, outOff, outTargets, query, pruneTopK, alwaysExact, nullptr );
+    return lexicalScoresTiered( ing, outOff, outTargets, query, pruneTopK, alwaysExact, nullptr, pathFieldDefaultW );
 }
 
 // ─── whole-name / name-exact BM25 (EXPERIMENTAL, --route's identifier-query ranker) ──────────────────
