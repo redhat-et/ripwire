@@ -203,8 +203,36 @@ def test_missing_two_tier_flags_rejected_before_reading_input():
     assert "requires --abs-warm-p95-ms" in err, err
 
 
+def test_stratum_primary_multi():
+    """--primary-stratum=multi (r5 amendment 1): tier 2's quality LB comes from the multi-file stratum's
+    own clustered bootstrap; the [stratum-primary] line is printed; the flag is refused outside two-tier;
+    and the aggregate legacy lines stay byte-identical to the same run without the flag."""
+    with tempfile.TemporaryDirectory() as d:
+        before, after = build_pair( seed="stratum-primary-v1", n_repos=20, n_per_repo=6, quality_gain=0.35,
+                                     cost_mult_warm=1.05, cost_mult_cold=1.02, cost_mult_token=1.05 )
+        bp = write_json( before, d, "before.json" ); ap = write_json( after, d, "after.json" )
+        base_args = [ "--gate", "two-tier", "--abs-warm-p95-ms", "100", "--abs-cold-p95-ms", "200",
+                      "--min-quality-per-cost", "1.0" ]
+        rc0, out0, _ = run_compare( bp, ap, extra_args=base_args )
+        rc1, out1, _ = run_compare( bp, ap, extra_args=base_args + [ "--primary-stratum", "multi" ] )
+        assert "[stratum-primary] multi-file strict@10 delta" in out1, out1
+        assert "[stratum-primary]" not in out0
+        # every non-stratum, non-tier2 line is unchanged (tier2 may differ: its LB input changed)
+        keep = [ line for line in out1.splitlines() if "[stratum-primary]" not in line and "tier2 utility" not in line and line not in ( "ACCEPT", "REJECT" ) ]
+        base = [ line for line in out0.splitlines() if "tier2 utility" not in line and line not in ( "ACCEPT", "REJECT" ) ]
+        assert keep == base, ( keep, base )
+        # the tier2 line's LB must equal the stratum line's LB, not the aggregate's
+        stratum_lb = [ line for line in out1.splitlines() if "[stratum-primary]" in line ][0].split( "95% lower " )[1].split( "pp" )[0]
+        tier2_lb = [ line for line in out1.splitlines() if "tier2 utility" in line ][0].split( "quality LB " )[1].split( "pp" )[0]
+        assert stratum_lb == tier2_lb, ( stratum_lb, tier2_lb )
+        # refused outside two-tier
+        rc2, out2, err2 = run_compare( bp, ap, extra_args=[ "--primary-stratum", "multi" ] )
+        assert rc2 != 0 and "requires --gate=two-tier" in err2, ( out2, err2 )
+
+
 TESTS = [
     test_legacy_byte_identity_golden,
+    test_stratum_primary_multi,
     test_tier1_absolute_rejection,
     test_tier2_accept_big_quality_small_cost,
     test_tier2_reject_small_quality_big_cost,
