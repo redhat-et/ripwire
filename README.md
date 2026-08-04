@@ -337,15 +337,22 @@ on:
 | doc post-pass (main-thread wait on the pool) | 1 | 2,174 ms | 0.50 ms | 0 |
 | resolve refs + build CSR | 1 | 12.32 ms | 12.31 ms | 7 |
 
-Two things this buys that wall-clock alone cannot say. The wall−task-clock gap is *off-CPU time*:
+Four things this buys that wall-clock alone cannot say. The wall−task-clock gap is *off-CPU time*:
 the parse phase's 36% gap is 2-vCPU oversubscription made visible (a pool parsing 799 files on two
-cores), and the doc post-pass row is honest about being a wait — 2.17 s of wall, half a millisecond
-on-CPU, because its work runs on the pool threads (the same per-thread caveat as the M5 table).
-And the CSR row is a live cross-check: `task-clock` is the kernel's clock, the wall column is the
-profiler's own — two independent clocks agreeing to 0.05% on a single-threaded scope. (Short
+cores). The CSR row is a live cross-check: `task-clock` is the kernel's clock, the wall column is
+the profiler's own — two independent clocks agreeing to 0.05% on a single-threaded scope. (Short
 hot scopes diverge by the documented read-bracket overhead instead: the counter bracket encloses
-the tick bracket.) Only a kernel that offers nothing at all — `perf_event_paranoid>=3`, seccomp —
-still degrades to timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
+the tick bracket.) The `page-faults` column is a **G2 witness**: PageRank's power iteration retires
+with **zero** page faults and the CSR build with **7**, against ~3,100 in the allocation-heavy
+model-build scopes — the no-allocation rule inside the ranked loop, watchable on a box with no PMU.
+And the doc post-pass row caught something real: 2.17 s of wall on **0.5 ms** of CPU is work
+happening *outside the process* — with `markitdown` installed, the showcase PDF and PPTX are
+re-extracted by subprocess on **every** run, cache or no cache, which on this box is ~97% of a warm
+run's wall (2.05 s of 2.11 s); child CPU is invisible to every per-thread counter, and the
+wall-vs-task-clock gap is precisely the signature that flags it. (The extraction is already
+documented in-tree as a pure function of the file bytes — a cache candidate, now measured.) Only a
+kernel that offers nothing at all — `perf_event_paranoid>=3`, seccomp — still degrades to
+timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 
 ## Standing on the whole field
 

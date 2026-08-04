@@ -448,6 +448,13 @@ These are stated, not hidden, and each is measurable from the output itself:
   which-target matters.
 - **Token estimates are calibrated, never exact.** The `--pr-context` estimate in particular is known
   to under-charge relative to a real tokenizer; treat it as a lower bound.
+- **Binary-doc extraction (`markitdown` bridge) is uncached and re-runs every ingest.** The doc
+  post-pass is deliberately outside the parse cache, so on a machine with `markitdown` installed a
+  corpus containing PDF/PPTX/DOCX/XLSX pays the full subprocess extraction on *warm* runs too —
+  measured at ~97% of a warm run's wall (2.05 s of 2.11 s) on a 2-vCPU VM against this repository's
+  own showcase PDF+PPTX, found by the self-profiler's wall-vs-task-clock gap (child-process CPU is
+  invisible to per-thread counters). The extraction is a pure function of the file bytes, so it is a
+  clean cache candidate; until then, the cost scales with the corpus's binary docs, not its code.
 - **`--for`'s `--token-budget` shaping is not strictly binding at very small budgets** — the header
   floor (envelope, legend, verbatim task echo) is bytes no trim can shrink, and the lens labels the
   result `over_ceiling` rather than claiming a trim it did not perform.
