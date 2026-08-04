@@ -57,6 +57,18 @@
 (macro_definition
     name: (identifier) @name) @definition.macro
 
+; module-level settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03; a ripwire
+; addition, same divergence discipline as the header notes). `const MAX_CONNECTIONS: usize = …` /
+; `static DEFAULT_TIMEOUT_MS: u64 = …` are constants BY CONSTRUCTION — the keyword is the evidence,
+; so unlike the convention-based grammars these are NOT SCREAMING_SNAKE-gated in ingest.cpp.
+; Shapes verified with --match on the constcheck fixture.
+
+(const_item
+    name: (identifier) @name) @definition.constant
+
+(static_item
+    name: (identifier) @name) @definition.constant
+
 ; references (calls)
 
 (call_expression

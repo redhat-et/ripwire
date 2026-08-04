@@ -11,7 +11,8 @@
 ;
 ; Deliberately NOT captured (noise): fields, local variables, annotations, `@name` on
 ; every type mention. Only defs + calls + imports become graph nodes/edges — matching
-; every other language here.
+; every other language here. ONE exception (r3 q10): SCREAMING_SNAKE constant fields —
+; see the settings-constant pattern below.
 
 ; ---- definitions ----
 
@@ -30,6 +31,15 @@
 ; `Foo( .. ) { .. }` — a constructor; name is the type identifier
 (constructor_declaration
   name: (identifier) @name) @definition.method
+
+; settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03): `static final int
+; MAX_POOL_SIZE = 32;` — the config-constant idiom. The pattern captures every field declarator
+; (the grammar exposes no cheap static+final discriminant), and the SCREAMING_SNAKE gate in
+; ingest.cpp (constCaptureNeedsScreamingGate) keeps the field-noise exclusion above intact:
+; camelCase instance fields stay unindexed. Shape verified with --match on the constcheck fixture.
+(field_declaration
+  declarator: (variable_declarator
+    name: (identifier) @name)) @definition.constant
 
 ; ---- references (calls + imports) ----
 

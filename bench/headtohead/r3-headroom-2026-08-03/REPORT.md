@@ -178,3 +178,24 @@ of its transform marker); with that ML path active we make no determinism claim 
   FROZEN LADDERS (2–4 rungs, no adaptive reading), not an interactive agent; the q06/q12 buckets
   show a real agent recovers two of the seven misses for a few hundred tokens.
 - History-dependent ripwire verbs (churn, hotspots) unmeasured (depth-1 checkout).
+
+---
+
+## Addendum (2026-08-03, post-run): q10 mechanism correction + fix landed
+
+The frozen sections above are unchanged. Re-verification while fixing §(v) item 1 showed the q10
+LOSS is real but the stated MECHANISM was wrong: Python module-level constants ARE extracted (the
+vendored tree-sitter-python tags capture every module-level assignment — the django@base index
+holds ~956 `var` symbols, PASSWORD_HASHERS among them, and `--grep` shows `in="PASSWORD_HASHERS"`).
+The "t=var fired once" observation was the default map's rank-truncated WINDOW, not the index. Two
+distinct causes, and §(v) item 1's fix shape only covers the second:
+
+1. **Ranking (Python residual, still open):** with q10's exact phrasing the constant sits at
+   lexical rank ~175 — outside every lens window. A config-phrased query ("which setting lists the
+   selectable password hashers…") surfaces it. This is a calibration item for the pre-registered
+   locbench stream (same lane as §(v) items 2–3), NOT shippable from this n=12 audit.
+2. **Extraction (fixed):** the audit's generalized claim was TRUE for TypeScript, JavaScript,
+   Rust, Ruby, Java, C#, C and C++ — none captured module-level constants, so a settings module in
+   those languages contributed zero rankable symbols. Fixed by the `@definition.constant` patterns
+   (queries/*/tags.scm) + the SCREAMING_SNAKE capture gate (src/ingest.cpp), gated red-first by
+   test/constcheck.sh (18 assertions red at b6068c3, all green post-fix).

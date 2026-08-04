@@ -46,6 +46,34 @@
   key: (property_identifier) @name
   value: [ (arrow_function) (function_expression) ]) @definition.function
 
+; ---- module-level settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03) ----
+; Mirrors queries/typescript/tags.scm (same rationale, same --match-verified shapes; the JS grammar
+; shares the program/lexical_declaration/export_statement nodes). The legacy `var CONFIG = {...}`
+; spelling is included — pre-ES6 settings tables are exactly the config-module target — but `let`
+; is not (a mutable counter, not config). SCREAMING_SNAKE-gated in ingest.cpp like TS.
+
+(program
+  (lexical_declaration
+    "const"
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
+(export_statement
+  (lexical_declaration
+    "const"
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
+(program
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
+(export_statement
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
 ; ---- references (calls) ----
 ; A bare `require("x")` / `import()` is itself a call_expression with an (identifier) function,
 ; so it is captured by the first rule below — no separate import rule needed for the call graph.

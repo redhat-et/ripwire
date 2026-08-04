@@ -3529,6 +3529,65 @@ inline bool isSwiftLocalBinding( TSNode declNode ) noexcept
     return false;
 }
 
+// r3 q10 (bench/headtohead/r3-headroom-2026-08-03 REPORT.md §(v) item 1): SCREAMING_SNAKE — an
+// ALL-CAPS identifier of ≥2 chars ([A-Z][A-Z0-9_]+), the cross-language naming convention for a
+// module-level settings/config constant. The ≥2 floor drops single-letter names (a top-level `X = …`
+// is a scratch binding, not a settings table). Pure ASCII on purpose: the convention IS ASCII.
+inline bool isScreamingSnakeName( std::string_view name ) noexcept
+{
+    if( name.size() < 2 || name[0] < 'A' || name[0] > 'Z' )
+    {
+        return false;
+    }
+    for( const char c : name )
+    {
+        const bool ok = ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
+        if( !ok )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Which languages' @definition.constant captures are gated on SCREAMING_SNAKE. These grammars' new
+// constant patterns (queries/*/tags.scm, r3 q10) structurally capture EVERY module-level binding of the
+// right shape — the name gate is what scopes extraction to settings modules / feature-flag tables
+// instead of every literal. Enforced HERE because tags-pass predicates never run (#match? is wired into
+// --match/--lint only — measured; see the note in queries/cpp/tags.scm). Deliberately NOT gated:
+// Python (vendored upstream pattern, case-blind since import — existing behavior pinned by constcheck),
+// Go (const/var patterns predate this and Go constants are conventionally CamelCase), Rust (const_item/
+// static_item are constants by construction — the keyword, not the case, is the evidence), Swift
+// (property_declaration predates this, filtered by isSwiftLocalBinding instead).
+inline bool constCaptureNeedsScreamingGate( Lang lang ) noexcept
+{
+    switch( lang )
+    {
+        case Lang::TypeScript:
+        case Lang::JavaScript:
+        case Lang::Ruby:
+        case Lang::Java:
+        case Lang::CSharp:
+        case Lang::C:
+        case Lang::Cpp:
+        {
+            return true;
+        }
+        default:
+        {
+            return false;
+        }
+    }
+}
+
+// The whole drop decision for a @definition.constant capture, kept out of captureTagsFacts (which is
+// already the file's densest dispatch point): drop when the language's convention gate applies and the
+// name is not SCREAMING_SNAKE.
+inline bool dropConstCapture( bool isConstCapture, Lang lang, std::string_view name ) noexcept
+{
+    return isConstCapture && constCaptureNeedsScreamingGate( lang ) && !isScreamingSnakeName( name );
+}
+
 // P2-D RECEIVER capture: classify the call-site receiver of `recv.method()` / `recv->method()` so
 // resolve.h can narrow before the ambiguous §2a name spray. `nameNode` is the @name capture (the called
 // identifier). When it is the `.field`/`.attribute` of a member-access node, inspect that node's
@@ -4743,6 +4802,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             SymKind          kind     = SymKind::Other;
             bool             isDef    = false;
             bool             isRef    = false;
+            bool             isConstCapture = false;   // @definition.constant — the module-level settings-constant patterns (r3 q10)
             TSNode           roleNode {};
             bool             haveRole = false;
             std::string_view nameTxt;
@@ -4764,10 +4824,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 {
                     case CapRole::Def:
                     {
-                        isDef    = true;
-                        kind     = k;
-                        roleNode = cap.node;
-                        haveRole = true;
+                        isDef          = true;
+                        kind           = k;
+                        isConstCapture = ( capSv == "definition.constant" );
+                        roleNode       = cap.node;
+                        haveRole       = true;
                     }
                     break;
 
@@ -4841,6 +4902,14 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 continue;
             }
 
+            // r3 q10: scope the new module-level constant captures to settings/config constants — the
+            // SCREAMING_SNAKE name gate (see dropConstCapture for the per-language rationale and why this
+            // cannot live in the query as a #match? predicate).
+            if( isDef && dropConstCapture( isConstCapture, le.lang, nameTxt ) )
+            {
+                continue;
+            }
+
             if( isDef )
             {
                 RawDef d;
@@ -4854,7 +4923,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // Grammars whose @definition node already owns the body (class/struct/enum) don't climb.
             TSNode defNode = roleNode;
             TSNode body    = ts_node_child_by_field_name( roleNode, "body", 4 );
-            if( ts_node_is_null( body ) )
+            // A Var's span is its own declaration — never climb. The climb exists to find a FUNCTION's
+            // body; for a var it can only steal a container's span (a Ruby class-level constant's parent
+            // chain is body_statement → class, and class owns a "body" field, so the climb would hand the
+            // constant THE WHOLE CLASS — the exact Rust-method span bug the H4 W3 note above describes).
+            // No-op for every pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the
+            // file root before any "body"-owning ancestor — verified byte-identical on the gate corpora).
+            if( ts_node_is_null( body ) && kind != SymKind::Var )
             {
                 TSNode child = roleNode;
                 TSNode p     = ts_node_parent( roleNode );
