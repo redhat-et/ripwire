@@ -69,12 +69,12 @@ function stat(s, big, label, x, y, w, color, opts={}){
   ], { x: MX, y: 1.95, w: 6.1, h: 3.2, fontFace: SANS, fontSize: 16.5, color: TEXT, margin: 0 });
 
   card(s, 7.25, 1.95, 5.35, 2.15);
-  stat(s, "0.074 s", "median answer, warm index — head-to-head, N = 60", 7.35, 2.2, 5.15, CYAN, {});
+  stat(s, "0.114 s", "median answer, warm index — latest head-to-head round, N = 60", 7.35, 2.2, 5.15, CYAN, {});
   card(s, 7.25, 4.3, 5.35, 2.15);
   stat(s, "−39.4%", "token ceiling vs the un-routed baseline — LocBench cost ledger, N = 243", 7.35, 4.55, 5.15, GREEN, {});
   s.addText("Speed caveat travels with the number: ripwire answers from a warm, pre-built index; competitor medians include their per-question work. Same instances, same gold, same metric code.",
     { x: MX, y: 5.5, w: 6.1, h: 1.2, fontFace: SANS, fontSize: 11.5, color: MUTED, margin: 0 });
-  foot(s, "bench/headtohead/REPORT.md · bench/locbench/ — every figure on this deck names its instrument");
+  foot(s, "bench/headtohead/r2-2026-08-03/ · bench/locbench/ — every figure on this deck names its instrument");
 }
 
 /* ── S3 · what it is ────────────────────────────────────────────────────── */
@@ -167,28 +167,37 @@ function stat(s, big, label, x, y, w, color, opts={}){
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// same instances, same gold, same metric code", AMBER);
-  title(s, "Head-to-head: strict localization, four tools");
+  title(s, "Head-to-head: strict localization, latest round");
   s.addChart("bar", [{
     name: "strict file@10",
-    labels: ["ripwire --for", "codebase-memory-mcp", "graphify", "Aider repo-map"],
-    values: [36.7, 26.7, 21.7, 13.3],
+    labels: ["ripwire --for", "repowise 0.37.0", "codeseek 0.1.31 (ident arm)", "codeseek 0.1.31 (raw fallback)"],
+    values: [58.3, 33.3, 15.0, 0.0],
   }], {
-    x: MX, y: 1.95, w: 7.3, h: 4.3, barDir: "bar",
+    x: MX, y: 1.95, w: 7.3, h: 3.9, barDir: "bar",
     chartColors: [CYAN, "3A4353", "3A4353", "3A4353"],
     showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", dataLabelColor: TEXT, dataLabelFontSize: 13, dataLabelFontFace: SANS,
     catAxisLabelColor: TEXT, catAxisLabelFontSize: 12.5, catAxisLabelFontFace: SANS,
-    valAxisLabelColor: MUTED, valAxisLabelFontSize: 10, valAxisMaxVal: 40, valAxisMinVal: 0,
+    valAxisLabelColor: MUTED, valAxisLabelFontSize: 10, valAxisMaxVal: 70, valAxisMinVal: 0,
     valGridLine: { color: "232D3D", size: 0.5 }, catGridLine: { style: "none" },
     showLegend: false, showTitle: false, plotArea: { fill: { color: BG } }, chartArea: { fill: { color: BG }, border: { color: BG } },
     barGapWidthPct: 60,
   });
-  card(s, 8.2, 1.95, 4.4, 1.95);
-  stat(s, "36.7%", "strict file@10 — every gold file in the top ten\nN = 60 paired, zero exclusions", 8.3, 2.15, 4.2, CYAN, { lsize: 11.5 });
-  card(s, 8.2, 4.1, 4.4, 2.15);
-  s.addText("Median wall clock", { x: 8.4, y: 4.25, w: 4.0, h: 0.32, fontFace: SANS, fontSize: 12.5, bold: true, color: TEXT, margin: 0 });
-  s.addText("ripwire 0.074 s · cmm 1.14 s · Aider 2.5 s · graphify 5.8 s\n\n≈34× vs Aider is derived from those medians — and the caveat ships with it: ripwire is warm on a pre-built index.",
-    { x: 8.4, y: 4.6, w: 4.05, h: 1.55, fontFace: SANS, fontSize: 11.5, color: MUTED, margin: 0 });
-  foot(s, "bench/headtohead/REPORT.md — versions pinned, binary sha256 recorded, frozen LocBench slice (dataset.lock)");
+  s.addText("codeseek's keyless raw-text arm scored 0.0% (0 results on 60/60) — a query-protocol boundary, not its embedder mode. Vexp and CodeIndexer were excluded by free-tier caps, not beaten; the report records the exact limits.",
+    { x: MX, y: 5.95, w: 7.3, h: 0.85, fontFace: SANS, fontSize: 10.5, color: MUTED, margin: 0 });
+  card(s, 8.2, 1.95, 4.4, 1.7);
+  stat(s, "58.3%", "strict file@10 — every gold file in the top ten\nN = 60 paired, zero exclusions · 17–2 paired vs repowise", 8.3, 2.1, 4.2, CYAN, { lsize: 11 });
+  card(s, 8.2, 3.8, 4.4, 1.5);
+  s.addText([
+    { text: "Median wall (query, warm): ", options: { color: TEXT, bold: true } },
+    { text: "ripwire 0.114 s · repowise 1.14 s (incl. a fresh MCP-server spawn per query).\n", options: { color: MUTED } },
+    { text: "Round 1, four tools: 36.7% vs cmm 26.7 · graphify 21.7 · Aider 13.3 — each round is internally paired; rounds are not number-comparable.", options: { color: MUTED } },
+  ], { x: 8.4, y: 3.93, w: 4.05, h: 1.3, fontFace: SANS, fontSize: 10.5, margin: 0 });
+  card(s, 8.2, 5.45, 4.4, 1.15);
+  s.addText([
+    { text: "Round 3, different instrument: ", options: { color: TEXT, bold: true } },
+    { text: "headroom (the compression layer) passed code through byte-identical; ripwire answered at 7.3% of the naive baseline's tokens. Its own losses ship first in that report.", options: { color: MUTED } },
+  ], { x: 8.4, y: 5.56, w: 4.05, h: 0.98, fontFace: SANS, fontSize: 10.5, margin: 0 });
+  foot(s, "bench/headtohead/r2-2026-08-03/ · r3-headroom-2026-08-03/ · docs/EVALS.md §2 — versions pinned, an adversarial VERIFIER.md ships with each round");
 }
 
 /* ── S7 · locbench ──────────────────────────────────────────────────────── */
