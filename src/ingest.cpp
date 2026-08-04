@@ -970,7 +970,16 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 37;           // bump on any grammar/.scm/extraction change (37: +CUDA (.cu/.cuh)
+constexpr std::uint32_t kParserVer    = 38;           // bump on any grammar/.scm/extraction change (38: TypeScript
+                                                      //    gains three definition shapes measured missing against a real
+                                                      //    repo (openclaw, 24 658 .ts files) — abstract_method_signature,
+                                                      //    public_field_definition bound to an arrow, and a declarator
+                                                      //    whose value is an as/satisfies cast WRAPPING the arrow. A v37
+                                                      //    blob on a TS-bearing tree is missing those rows, so it
+                                                      //    describes a different graph and must be rejected; the on-disk
+                                                      //    RECORD SHAPE did not change, so only parserVer moves, not
+                                                      //    kCacheVersion — the CUDA (37) precedent exactly.
+                                                      //    37: +CUDA (.cu/.cuh)
                                                       //    on the vendored tree-sitter-cuda grammar (kLangTable) — the
                                                       //    crawl SET changed (two new extensions) and `<<<>>>` launch
                                                       //    sites now extract as call references, so a v36 blob on a
