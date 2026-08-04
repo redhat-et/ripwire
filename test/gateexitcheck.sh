@@ -227,6 +227,8 @@ FAILFAST = {
     "lintprecisioncheck.sh":    ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "mcpcontractcheck.sh":      ( "python3 heredoc's rc captured into `rc`, propagated by a brace group", 1 ),
     "type3clonecheck.sh":       ( "cap_run helper; every assertion is `|| { echo FAIL; exit 2; }`",      2 ),
+    "dynmapsimdcheck.sh":       ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
+    "pmccheck.sh":              ( "compile-and-run PMC harness; every arm is `echo FAIL; exit 2`",       2 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────

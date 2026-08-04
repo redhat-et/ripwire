@@ -16,6 +16,15 @@ sudo build_prof/ripwire <repo> --no-cache > /tmp/p.txt 2>&1
 ```
 The report auto-prints at exit (a `#PROF_TSV_BEGIN…END` block carries the raw integers for tooling).
 
+**Counter backends.** Two real PMC backends sit behind one surface (`src/infra/profilePmc.h`):
+Apple Silicon (kperf/kpep — needs root or the kperf entitlement to ARM; event-name resolution
+verified through M5 Pro, whose last-level alias resolves via `PL2_CACHE_MISS_LD`) and Linux
+(`perf_event_open` — one pinned, atomically-scheduled event group per thread, whole group read in
+one syscall; `exclude_kernel` so the stock `perf_event_paranoid=2` admits it, no root needed, but
+the box must expose a PMU — most VMs do not, bare metal and `*.metal` instances do). Either
+backend degrades to plain timing, silently, when counters are unavailable;
+`test/pmccheck.sh` asserts whichever arm (active/inactive) the machine can express.
+
 **Historical, private corpus (not reproducible publicly):** every table below labeled against a
 large ~1500-2000-file private C++ corpus was measured on the owner's own codebase, which is not
 public. Re-run the `Reproduce` commands above against your own large repo to reproduce the shape;
