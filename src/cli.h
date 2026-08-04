@@ -20,6 +20,7 @@ namespace rw
 {
 
 enum class RankBy { PageRank, Authority, Hub, Rrf, Churn };   // --rank-by=pagerank|authority|hub|rrf|churn
+enum class ColorBy { Lang, Community, Cx, Churn, Tested };    // --color-by=lang|community|cx|churn|tested (with --html)
 
 struct Config
 {
@@ -178,6 +179,8 @@ struct Config
     bool             force       = false;                  // --force: proceed even if scan finds CRITICAL issues (wrap hook only)
     bool             html        = false;                  // --html[=FILE]: emit self-contained HTML force-directed graph (P2-A)
     std::string_view htmlFile;                             // --html=FILE: write to FILE (else stdout)
+    ColorBy          colorBy     = ColorBy::Lang;          // --color-by=MODE: initial node-colour mode of the --html page (all five embedded)
+    bool             colorByExplicit = false;              // did the user pass --color-by=? (gates the --html-required guard)
     bool             owners      = false;                  // --owners[=SYM]: bus-factor — recency-weighted author ownership per file (S5-C)
     std::string_view ownersSym;                            // --owners=SYM: restrict to the file containing SYM
     bool             compress        = false;              // --compress: strip comments + blank runs from --expand/--outline body output (P2-B)
@@ -658,6 +661,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               marker|size+fences] on its own line and the header tallies generated_demoted=N\n"
         "    --tree                     file-by-file orientation map (top symbols per file)\n"
         "    --html[=FILE]              self-contained HTML force-directed call graph (no CDN — redirect or write FILE)\n"
+        "    --color-by=MODE            (with --html) node colour: lang (default) | community | cx | churn | tested — the page embeds all\n"
+        "                               five and keeps a live selector; the flag only sets the initial mode\n"
         "    --order=MODE               emit order: stable (path/id order — provider KV-cache hits across re-runs) |\n"
         "                               important-first (rank order, the default; no auto-flip) | important-last\n"
         "                               (highest-rank content emitted last — recency bias for an LLM). Large default\n"
@@ -1676,13 +1681,13 @@ inline constexpr IntFlag kIntFlags[] =
 //   • a VECTOR member          --exclude= (push_back), --expand= / --outline= (comma-split into vector)
 //   • a PARSE, not an assign   --token-budget= / --max-file-size= / --pack-budget-bytes= (byte sizes into a
 //                              size_t/u64), --limit= / --offset= (their own out-of-range sentence)
-//   • an ENUM value            --order= / --rank-by= / --format= / --export= (a value SET, and a refusal
-//                              that must list it)
+//   • an ENUM value            --order= / --rank-by= / --color-by= / --format= / --export= (a value SET,
+//                              and a refusal that must list it)
 //   • a WARNING on accept      --most-important-last / --stable / --no-auto-order (deprecated aliases that
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
-inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 150;   // +1: --handoff (kBoolFlags row)
+inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
+inline constexpr std::size_t kTotalFlagArms       = 151;   // +1: --color-by= (hand-written arm)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2352,6 +2357,14 @@ inline void validateModifierGuards( Config& c ) noexcept
                               "(e.g. ripwire <dir> --expand=SYM --compress)\n" );
         c.ok = false;
     }
+
+    // --color-by bakes the initial node-colour mode of the --html page — writeHtml is its only reader.
+    // Alone it silently no-ops; refuse loudly (same shape as --with-graph/--compress above).
+    if( c.colorByExplicit && !c.html )
+    {
+        std::fprintf( stderr, "ripwire: --color-by=MODE colors the --html export — pass both (e.g. ripwire <dir> --html=g.html --color-by=community)\n" );
+        c.ok = false;
+    }
 }
 
 inline void validateConfig( Config& c ) noexcept
@@ -2689,6 +2702,41 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 else
                 {
                     std::fprintf( stderr, "ripwire: --rank-by: unknown value '%.*s' (supported: pagerank|authority|hub|rrf|churn)\n", int( v.size() ), v.data() );
+                    c.ok = false;
+                    return c;
+                }
+            }
+            else if( startsWith( a, "--color-by=" ) )
+            {
+                const std::string_view v = a.substr( 11 );
+                if( v == "lang" )
+                {
+                    c.colorBy = ColorBy::Lang;         // explicit lang still requires --html (the modifier guard below)
+                    c.colorByExplicit = true;
+                }
+                else if( v == "community" )
+                {
+                    c.colorBy = ColorBy::Community;
+                    c.colorByExplicit = true;
+                }
+                else if( v == "cx" )
+                {
+                    c.colorBy = ColorBy::Cx;
+                    c.colorByExplicit = true;
+                }
+                else if( v == "churn" )
+                {
+                    c.colorBy = ColorBy::Churn;
+                    c.colorByExplicit = true;
+                }
+                else if( v == "tested" )
+                {
+                    c.colorBy = ColorBy::Tested;
+                    c.colorByExplicit = true;
+                }
+                else
+                {
+                    std::fprintf( stderr, "ripwire: --color-by: unknown value '%.*s' (supported: lang|community|cx|churn|tested)\n", int( v.size() ), v.data() );
                     c.ok = false;
                     return c;
                 }
