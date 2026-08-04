@@ -71,6 +71,105 @@
         (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
       ])) @definition.constant)
 
+; ---- CUDA memory-space module bindings (ripwire addition — the cudacheck §7b close-out) ----
+; `__constant__ float rk_scaleTable[ 64 ];` carries NO initializer (host fills it via
+; cudaMemcpyToSymbol), so the init_declarator patterns above can never match it — that, not the
+; qualifier, was the measured 2026-08-04 gap. These two patterns take the UNINITIALIZED shape: a
+; module-scope declaration with a plain (non-init, non-function) declarator. They carry NO qualifier
+; constraint at all, for two stacked reasons measured on the vendored grammars: (1) the query cannot
+; name the `__constant__` token — this file also compiles against tree-sitter-cpp (.cpp/.h/.metal),
+; which lacks it, and ts_query_new would reject the whole query there; (2) a `(type_qualifier)` child
+; constraint sees only `__constant__`/`__managed__` — tree-sitter-cuda parses `__device__` as an
+; ANONYMOUS token child of the declaration (its only named children are the type and the declarator),
+; invisible to any named-node constraint. The whole qualifier test therefore lives in ingest.cpp
+; (cudaMemorySpaceQualifierOf), the same capture-time home as isCppCastKeyword, because tags-pass
+; predicates never run (see the cast-keyword note below). Policy enforced there: `__constant__`
+; extracts case-blind (the keyword is the evidence — the Rust const_item rationale);
+; `__device__`/`__managed__` are mutable device globals and stay behind the SCREAMING gate; no
+; memory-space token drops. Noise measured on a private 1500-file C++/ObjC++ game tree (2026-08-04):
+; the unconstrained shape raw-matches 169 non-CUDA sites at the two scope anchors (118
+; translation_unit + 51 declaration_list — extern-const table declarations, static/alignas/volatile
+; globals) plus 577 under the four preproc wrappers below (319/156/23/79 ifdef/if/else/elif) — every
+; one is dropped by the ingest test, zero new symbols outside CUDA (the tree's full map is
+; byte-identical to a clean HEAD build's); the cost is ~750 capture callbacks across ~1500 files.
+; Function prototypes never match (their declarator is a function_declarator); function-local
+; `__shared__` tiles never match (their scope is a compound_statement, not
+; translation_unit/declaration_list).
+
+(translation_unit
+  (declaration
+    declarator: [
+      (identifier) @name
+      (pointer_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (array_declarator declarator: (identifier) @name))
+      (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+    ]) @definition.constant)
+
+(declaration_list
+  (declaration
+    declarator: [
+      (identifier) @name
+      (pointer_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (array_declarator declarator: (identifier) @name))
+      (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+    ]) @definition.constant)
+
+; The same uninitialized shape under a PREPROCESSOR CONDITIONAL — measured against NVIDIA/cuda-samples
+; (2026-08-04): the header-guard idiom (`#ifndef X_CUH` around the whole file) and the dual-compile
+; `#ifdef __CUDACC__` region both make the declaration a child of preproc_ifdef/preproc_if (else/elif
+; branches are their own node kinds), so the translation_unit/declaration_list anchors above never see
+; it — volumeRender's `__constant__ float3x4 c_invViewMatrix;` and particles' `__constant__ SimParams
+; cudaParams;` were measured misses. These four wrappers are deliberately UNANCHORED (guards nest:
+; `#ifndef` guard + `#if` region is two levels), so they also fire on function-local declarations under
+; a conditional — safe because legal CUDA allows the three memory-space qualifiers ONLY at namespace
+; scope, so every function-local match lacks the qualifier and drops in ingest. 2-D tables
+; (quasirandomGenerator's `c_Table[A][B]`) get the nested array_declarator alternative. The INITIALIZED
+; patterns above deliberately do NOT gain preproc wrappers: that would newly extract #if-gated
+; SCREAMING constants in plain C++ — a real behavior change for non-CUDA code that needs its own
+; r3-q10-style measurement round, not a rider on this one.
+
+(preproc_ifdef
+  (declaration
+    declarator: [
+      (identifier) @name
+      (pointer_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (array_declarator declarator: (identifier) @name))
+      (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+    ]) @definition.constant)
+
+(preproc_if
+  (declaration
+    declarator: [
+      (identifier) @name
+      (pointer_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (array_declarator declarator: (identifier) @name))
+      (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+    ]) @definition.constant)
+
+(preproc_else
+  (declaration
+    declarator: [
+      (identifier) @name
+      (pointer_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (array_declarator declarator: (identifier) @name))
+      (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+    ]) @definition.constant)
+
+(preproc_elif
+  (declaration
+    declarator: [
+      (identifier) @name
+      (pointer_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (identifier) @name)
+      (array_declarator declarator: (array_declarator declarator: (identifier) @name))
+      (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+    ]) @definition.constant)
+
 ; ---- references (ripwire addition — calls drive the PageRank edges) ----
 
 (call_expression

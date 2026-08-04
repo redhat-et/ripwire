@@ -122,9 +122,12 @@ constexpr std::array<LangEntry, 32> kLangTable = {{
     // all — `--callers=rk_reduceSum` returned count=0 — and a `__constant__` module table failed to
     // extract. Losing every host→kernel edge is the exact failure the Metal entry exists to prevent
     // (`--callers=ml_styleFor` = 0), so CUDA earns the real grammar Metal measurably did not need.
-    // STILL-OPEN LIMIT (disclosed in test/cudacheck.sh §7b): the grammar now PARSES `__constant__
-    // float T[ 64 ];` cleanly, but the shared cpp tags.scm module-constant pattern keys on
-    // const/constexpr, so the table still yields no symbol (plain constexpr in .cu/.cuh does).
+    // The former §7b limit (a `__constant__ float T[ 64 ];` module table yielded no symbol) is CLOSED
+    // as of kParserVer 38: the real gap was the missing initializer — the r3 q10 patterns required an
+    // init_declarator, and the cudaMemcpyToSymbol idiom never has one. tags.scm now carries structural
+    // uninitialized-declaration patterns and cudaMemorySpaceQualifierOf gates them at capture time
+    // (`__constant__` case-blind; `__device__`/`__managed__` behind the SCREAMING gate) — pinned
+    // positive in test/cudacheck.sh §7b.
     // tree-sitter-cuda is a GENERATED superset of tree-sitter-cpp (grammar.js requires cpp's): its
     // `kernel_call_expression` is aliased to `call_expression` with a `function:` field, so the C++
     // tags.scm ("cpp" below) compiles against it unchanged and launches extract as ordinary calls.
@@ -970,7 +973,15 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 37;           // bump on any grammar/.scm/extraction change (37: +CUDA (.cu/.cuh)
+constexpr std::uint32_t kParserVer    = 38;           // bump on any grammar/.scm/extraction change (38: CUDA memory-space
+                                                      //    module bindings — queries/cpp/tags.scm gained the UNINITIALIZED
+                                                      //    qualified-declaration patterns and ingest gained the
+                                                      //    cudaMemorySpaceQualifierOf gate (cudacheck §7b close-out:
+                                                      //    `__constant__` case-blind, `__device__`/`__managed__` behind
+                                                      //    the SCREAMING gate). A v37 blob on a CUDA-bearing tree is
+                                                      //    missing symbols this version extracts — extraction change,
+                                                      //    bump required; record shape unchanged, kCacheVersion stays.
+                                                      //    37: +CUDA (.cu/.cuh)
                                                       //    on the vendored tree-sitter-cuda grammar (kLangTable) — the
                                                       //    crawl SET changed (two new extensions) and `<<<>>>` launch
                                                       //    sites now extract as call references, so a v36 blob on a
@@ -3607,12 +3618,105 @@ inline bool constCaptureNeedsScreamingGate( Lang lang ) noexcept
     }
 }
 
+// Was this @name bound through an init_declarator (the r3 q10 initialized-binding patterns), or through
+// the UNINITIALIZED CUDA memory-space patterns (cudacheck §7b close-out)? The two pattern families share
+// one capture name, and pattern_index would be brittle against .scm reordering — the name node's ancestry
+// up to the captured declaration is the robust discriminator.
+inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexcept
+{
+    for( TSNode walk = ts_node_parent( nameNode ); !ts_node_is_null( walk ) && !ts_node_eq( walk, declNode ); walk = ts_node_parent( walk ) )
+    {
+        if( std::strcmp( ts_node_type( walk ), "init_declarator" ) == 0 )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
+// patterns in queries/cpp/tags.scm are STRUCTURAL and unconstrained on purpose — that query also
+// compiles against tree-sitter-cpp (.cpp/.h/.metal), which has no `__constant__` token, so naming it
+// there would make ts_query_new reject the whole query; tags-pass predicates never run (measured; see
+// the cast-keyword note in tags.scm); and a `(type_qualifier)` child constraint cannot see `__device__`
+// anyway — tree-sitter-cuda parses `__constant__`/`__managed__` as NAMED type_qualifier nodes but
+// `__device__` as an ANONYMOUS token child of the declaration. The qualifier test therefore lives here,
+// isCppCastKeyword's home, scanning ALL children and accepting the three spellings from exactly two node
+// shapes: a named type_qualifier, or an anonymous token. The anonymous-only restriction on the second
+// arm is a correctness guard, not pedantry: tree-sitter-cpp error-recovers `__device__ float x;` in a
+// plain .cpp by parsing `__device__` as a NAMED type_identifier — text alone would false-positive there.
+// Measured on a private 1500-file C++/ObjC++ game tree (2026-08-04): the unconstrained patterns
+// raw-match ~750 non-CUDA sites (169 at the scope anchors + 577 under the preproc wrappers —
+// extern-const table declarations, static/alignas/volatile globals, #if-gated variants) — every one
+// returns "" here and drops. Adopted noise verified ZERO the strong way: the full map of that tree
+// AND of ripwire's own src/ is BYTE-IDENTICAL to a clean HEAD build's. Recall verified against
+// NVIDIA/cuda-samples: all 18 `__constant__` names / 24 declaration sites extract. (Measurement
+// trap, recorded so it isn't re-tripped: the PATH-installed ripwire predated the r3 q10 patterns and
+// showed a phantom +97-symbol delta — baseline against a HEAD build, never the installed binary.)
+inline std::string_view cudaMemorySpaceQualifierOf( TSNode declNode, std::string_view src ) noexcept
+{
+    const uint32_t childCount = ts_node_child_count( declNode );
+    for( uint32_t childIx = 0; childIx < childCount; ++childIx )
+    {
+        const TSNode child   = ts_node_child( declNode, childIx );
+        const bool   isNamed = ts_node_is_named( child );
+        if( isNamed && std::strcmp( ts_node_type( child ), "type_qualifier" ) != 0 )
+        {
+            continue;
+        }
+        const uint32_t beginByte = ts_node_start_byte( child );
+        const uint32_t endByte   = ts_node_end_byte( child );
+        if( endByte > src.size() || beginByte >= endByte )
+        {
+            continue;
+        }
+        const std::string_view text = src.substr( beginByte, endByte - beginByte );
+        if( text == "__constant__" || text == "__device__" || text == "__managed__" )
+        {
+            return text;
+        }
+    }
+    return {};
+}
+
 // The whole drop decision for a @definition.constant capture, kept out of captureTagsFacts (which is
 // already the file's densest dispatch point): drop when the language's convention gate applies and the
-// name is not SCREAMING_SNAKE.
-inline bool dropConstCapture( bool isConstCapture, Lang lang, std::string_view name ) noexcept
+// name is not SCREAMING_SNAKE. §7b close-out, C++ only, ONE policy for both declaration shapes:
+// `__constant__` keeps case-blind whether initialized or not (constant by construction:
+// device-read-only, host-filled via cudaMemcpyToSymbol or an initializer — the Rust const_item
+// rationale; measured against NVIDIA/cuda-samples, where dxtc's initialized `kColorMetric = {…}` and
+// bilateralFilter's uninitialized `cGaussian[64]` are the same kind of table). `__device__`/
+// `__managed__` are MUTABLE device globals and keep only under the convention gate. An uninitialized
+// capture with NO memory-space qualifier drops (the extern-const/alignas/volatile shapes plain C++
+// produces — those reach here only via the structural CUDA patterns). Cost ordering: the common plain
+// C++ cases resolve before any node scan (initialized+SCREAMING keeps, and the scan runs only where
+// the old gate would have decided the same way or the CUDA patterns matched).
+inline bool dropConstCapture( bool isConstCapture, Lang lang, std::string_view name,
+                              TSNode nameNode, TSNode roleNode, std::string_view src ) noexcept
 {
-    return isConstCapture && constCaptureNeedsScreamingGate( lang ) && !isScreamingSnakeName( name );
+    if( !isConstCapture )
+    {
+        return false;
+    }
+    if( lang == Lang::Cpp )
+    {
+        const bool initialized = nameBoundByInitDeclarator( nameNode, roleNode );
+        if( initialized && isScreamingSnakeName( name ) )
+        {
+            return false;                                                       // the r3 q10 convention keep — no node scan
+        }
+        const std::string_view memSpace = cudaMemorySpaceQualifierOf( roleNode, src );
+        if( memSpace == "__constant__" )
+        {
+            return false;                                                       // constant by construction — case-blind
+        }
+        if( initialized )
+        {
+            return true;                                                        // initialized, not SCREAMING, not __constant__
+        }
+        return !( !memSpace.empty() && isScreamingSnakeName( name ) );          // uninitialized: __device__/__managed__ gated
+    }
+    return constCaptureNeedsScreamingGate( lang ) && !isScreamingSnakeName( name );
 }
 
 // P2-D RECEIVER capture: classify the call-site receiver of `recv.method()` / `recv->method()` so
@@ -4929,10 +5033,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 continue;
             }
 
-            // r3 q10: scope the new module-level constant captures to settings/config constants — the
-            // SCREAMING_SNAKE name gate (see dropConstCapture for the per-language rationale and why this
-            // cannot live in the query as a #match? predicate).
-            if( isDef && dropConstCapture( isConstCapture, le.lang, nameTxt ) )
+            // r3 q10 + §7b: scope the module-level constant captures to settings/config constants — the
+            // SCREAMING_SNAKE name gate, plus the CUDA memory-space policy for the uninitialized C++ shape
+            // (see dropConstCapture for the per-language rationale and why none of this can live in the
+            // query as a #match? predicate).
+            if( isDef && dropConstCapture( isConstCapture, le.lang, nameTxt, nameNode, roleNode, src ) )
             {
                 continue;
             }
