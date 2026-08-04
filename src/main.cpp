@@ -2656,7 +2656,9 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // §P2 — the two budget flags obey the documented two-personality rule (D10): --max-tokens SHAPES (byte
         // ceiling at the map family's densest rate × headroom — the old ×4 B/tok overshot ~85×), --token-budget
         // GATES inside emitRecallBudgeted (exit 3, header line only — never the artifact it rejected).
-        const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall );
+        // pathFieldDefaultW=1: the recall lens ranks DOCS, where the filename often IS the answer's name
+        // ("readme", "report", "paired_table") — measured by bench/recalleval (gate: recallevalcheck.sh).
+        const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall, 0, nullptr, 1 );
         const std::size_t        budget = cfg.maxTokens > 0 ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom ) : 0;
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.

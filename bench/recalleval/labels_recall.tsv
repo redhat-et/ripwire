@@ -17,6 +17,13 @@
 # queries only AFTER this file was complete. The eval is therefore allowed to say the ranker is wrong,
 # and a label is only ever edited afterwards by RE-READING the documents, with the reason recorded here.
 #
+# 2026-08-03 label extension (protocol-compliant, by re-reading): when bench/headtohead/
+# r3-headroom-2026-08-03/REPORT.md landed it became a document that ANSWERS two existing queries — it
+# IS a head-to-head report against another context tool (added primary, same move as r2's REPORT on
+# its landing day) and it CONTAINS the per-instance paired table in §(iii) (added acceptable).
+# paper/PREPRINT.md added acceptable on the head-to-head query because its §4.4 is the full n=60
+# head-to-head report (versions, table, win/loss) — verified by reading the section, not by rank.
+#
 # RE-AUTHORED 2026-07-31 for the public tree. The previous label set targeted the private development
 # tree's document set — 27 of its 39 labels named plan, design, audit and research documents this
 # repository deliberately does not ship, so the harness skipped them and the lane measured almost
@@ -43,14 +50,14 @@ architecture pipeline data model determinism contract	docs/ARCHITECTURE.md	docs/
 evaluation instruments and published numbers with provenance	docs/EVALS.md	docs/README.md	name
 documentation index which document is for which reader	docs/README.md	-	name
 self profile where does the time go in the pipeline	bench/PROFILE.md	-	name
-head to head report against other context tools	bench/headtohead/REPORT.md,bench/headtohead/r2-2026-08-03/REPORT.md	bench/headtohead/README.md	name
+head to head report against other context tools	bench/headtohead/REPORT.md,bench/headtohead/r2-2026-08-03/REPORT.md,bench/headtohead/r3-headroom-2026-08-03/REPORT.md	bench/headtohead/README.md,paper/PREPRINT.md	name
 locbench localization harness readme	bench/locbench/README.md	-	name
 agent in the loop eval harness	bench/agentloop/README.md	-	name
 answer quality co-change recall evaluation	bench/ANSWERQUALITY.md	-	name
 benchmark token reduction and speed measurements	bench/BENCHMARK.md	-	name
 skills consolidation into routable skills	skills/CONSOLIDATION.md	-	name
 the gate suite how the tests are organised	test/README.md	-	name
-per instance paired win loss table	bench/headtohead/paired_table.md	bench/headtohead/REPORT.md	name
+per instance paired win loss table	bench/headtohead/paired_table.md	bench/headtohead/REPORT.md,bench/headtohead/r3-headroom-2026-08-03/REPORT.md	name
 multi swe bench cpp localization scoreboard	bench/multiswe/README.md	bench/multiswe/results/cpp_scoreboard.md	name
 why does continuous integration build twice release and plain	docs/ARCHITECTURE.md	CONTRIBUTING.md	concept
 never use std map which container should I reach for instead	CONTRIBUTING.md	CLAUDE.md,AGENTS.md	concept
