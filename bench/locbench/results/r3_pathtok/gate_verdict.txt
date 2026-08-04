@@ -1,0 +1,41 @@
+r3 path-token BM25 field — pre-registered gate verdict (2026-08-03)
+
+Candidate: RIPWIRE_PATHTOK_W=3 (selected on train by the frozen rule: 61.81 -> 63.78% strict@10,
+monotone across W=1/2/3, single-file UP +1.47pp — no displacement). Binary sha256
+8ea487723d9b994b3e32dfe26091b75f088bb4625ac59830f5098a6ebfc3522d @ d5773f4, detached-worktree
+pinned; one held-out acceptance run, both arms same binary, --measure-cold.
+
+paired corrected LocBench: arm=for n=306 repos=88
+  strict file@10 delta +1.31pp; clustered bootstrap 95% lower -0.96pp   <- the PRIMARY, pre-registered
+  lenient file@10 delta +0.65pp; symbol MRR delta +0.0095 (no @1/MRR damage — the cross-session
+  recall-lane tradeoff anecdote did NOT reproduce on the code lens)
+  single-file strict@10 +0.40pp; multi-file strict@10 +5.66pp (n=53)
+  all-patch secondary strict@10 +0.33pp
+  warm p50 +5.5% / p95 +45.1%; cold p50 +2.5% / p95 +46.6%; token ceiling p50 +0.0% / p95 +41.9%
+  [two-tier] tier1 absolute SLA: warm p95 899.8ms (ceiling 775.0ms) FAIL; cold p95 1882.0ms
+             (ceiling 1650.0ms) FAIL
+  [two-tier] tier2 utility: quality LB -0.96pp / weighted cost +2.75% = -0.351 vs min 2.5 FAIL
+
+VERDICT: REJECT — decided by the quality tier (LB straddles zero); the default stays 0 and the
+env-gated scaffolding remains for a future retry. Train result did not generalize at aggregate
+level; the effect concentrates in the multi-file stratum (+5.66pp), consistent with the r2
+head-to-head diagnosis, but is not separable from zero overall at n=306.
+
+Deviations, for the ledger (recorded the way r1cpp recorded its own):
+1. The PREREG's own perf clause ("if it breaks a budget, amortize per file BEFORE the acceptance
+   run") was not exercised: no perfgate run with the env set preceded acceptance. The +45% p95
+   tails are the predicted unamortized per-symbol path scan. This does not change the verdict —
+   tier 2 fails on quality alone — but the timing half of this acceptance measures an
+   implementation known-unoptimized, and tier-1 numbers here must not be quoted as the mechanism's
+   cost floor.
+2. Scored-n differs from the historical 243 label (current evaluator scores 306 of the 560-row
+   held-out partition); both arms used the identical slice, so pairing is unaffected.
+
+Honest reading, for the next attempt:
+- The signal is REAL WHERE THE HYPOTHESIS SAID IT WOULD BE (multi-file +5.66pp) and absent where
+  path vocabulary adds nothing (single-file +0.40pp). A retry that pre-registers the MULTI-FILE
+  stratum as primary — or a mechanism that applies path evidence only when the query implies
+  multiple files — has a defensible shape. Per-file amortization is mandatory before any retry's
+  acceptance run.
+- The r4_siblift candidate attacks the same stratum by a different mechanism and its train
+  calibration is unaffected by this verdict.

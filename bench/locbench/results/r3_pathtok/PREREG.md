@@ -52,4 +52,8 @@ is *lexical evidence*, not graph mass; the failure mode to watch is instead gene
 
 ## Outcome
 
-(unfilled at registration — the verdict lands here)
+**REJECT (2026-08-03)** — see `gate_verdict.txt`. Train (+1.97pp, monotone) did not generalize:
+held-out +1.31pp aggregate with clustered-bootstrap 95% LB −0.96pp; the effect concentrates in the
+multi-file stratum (+5.66pp, n=53). Tier-1 also failed on the predicted unamortized path-scan tails
+(a recorded deviation — the perf clause above was not exercised before acceptance). Default stays 0;
+scaffolding retained; any retry pre-registers multi-file-primary and amortizes first.
