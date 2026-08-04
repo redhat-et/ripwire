@@ -91,7 +91,7 @@ struct LangEntry
 };
 
 // Order does not matter (linear scan); kept grouped by language for readability.
-constexpr std::array<LangEntry, 32> kLangTable = {{
+constexpr std::array<LangEntry, 33> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -144,6 +144,7 @@ constexpr std::array<LangEntry, 32> kLangTable = {{
     { ".hh",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".c",    Lang::C,          &tree_sitter_c,          "c"          },   // plain C (L3) — was entirely invisible before this table gained its own row
     { ".py",   Lang::Python,     &tree_sitter_python,     "python"     },
+    { ".pyi",  Lang::Python,     &tree_sitter_python,     "python"     },   // typing stub — often a library's ONLY Python-visible API (pydantic-core's 1 115-line _pydantic_core.pyi)
     { ".go",   Lang::Go,         &tree_sitter_go,         "go"         },
     { ".rs",   Lang::Rust,       &tree_sitter_rust,       "rust"       },
     { ".ts",   Lang::TypeScript, &tree_sitter_typescript, "typescript" },
@@ -239,6 +240,10 @@ SymKind defKind( std::string_view tail ) noexcept
     if( tail == "protomethod" )    // JS `Foo.prototype.NAME = fn` — gated (isPrototypeMemberTarget)
     {
         return SymKind::Method;
+    }
+    if( tail == "enummember" )     // Python `NAME = value` in an enum-family class — gated (isPyEnumMemberTarget)
+    {
+        return SymKind::Var;
     }
     if( tail == "module" )
     {
@@ -978,8 +983,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 39;           // bump on any grammar/.scm/extraction change
-                                                      // 39: JavaScript gains four definition shapes measured missing
+constexpr std::uint32_t kParserVer    = 40;           // bump on any grammar/.scm/extraction change
+                                                      // 40: Python gains the shapes real repos taught us
+                                                      //    (django@7d75c0b, pydantic@2e5f0e2): annotated class
+                                                      //    attributes, gated enum-family members, class lambda
+                                                      //    attrs, one-guard-deep + tuple-unpack module bindings,
+                                                      //    and .pyi routing. A v39 blob on a Python-bearing tree
+                                                      //    is missing those rows → reject.
+                                                      // (39: JavaScript gains four definition shapes measured missing
                                                       //    against real repos (webpack@957bf3a, node@427d2e1 lib/) —
                                                       //    field_definition bound to an arrow/function, #private
                                                       //    methods (+ their call references), gated CJS export
@@ -3634,6 +3645,7 @@ inline bool constCaptureNeedsScreamingGate( Lang lang ) noexcept
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
+inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
 
 // The whole drop decision for every GATED definition capture, kept out of captureTagsFacts (which is
 // already the file's densest dispatch point) behind ONE call, keyed on the @definition capture's own
@@ -3655,6 +3667,10 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     if( defCapSv == "definition.protomethod" )
     {
         return !isPrototypeMemberTarget( nameNode, src );
+    }
+    if( defCapSv == "definition.enummember" )
+    {
+        return !isPyEnumMemberTarget( nameNode, src );
     }
     return false;
 }
@@ -3709,6 +3725,55 @@ inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noe
         return false;
     }
     return nodeTextOf( ts_node_child_by_field_name( obj, "property", 8 ), src ) == "prototype";
+}
+
+// Python `NAME = value` in a class body is a definition only when the class IS an enum table —
+// otherwise it is the plain data attr the tags.scm scope line keeps out (12 987 django sites).
+// Enum-ness is read off the base NAME list (the class_definition's `superclasses` argument_list):
+// the stdlib enum family plus django's Choices family, which is enum.Enum-derived and OUTNUMBERS
+// stdlib enums in django itself (91 vs 60 member sites, 2026-08-04 — test/pyshapecheck.sh §2).
+// A base the name does not reveal (a subclass-of-a-subclass behind an alias) stays out: base
+// names are checked statically, never resolved — the gate pins that direction too.
+inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode assign = ts_node_parent( nameNode );                                  // assignment
+    const TSNode stmt   = ts_node_is_null( assign ) ? assign : ts_node_parent( assign ); // expression_statement
+    const TSNode body   = ts_node_is_null( stmt )   ? stmt   : ts_node_parent( stmt );   // block
+    const TSNode cls    = ts_node_is_null( body )   ? body   : ts_node_parent( body );   // class_definition
+    if( ts_node_is_null( cls ) || std::strcmp( ts_node_type( cls ), "class_definition" ) != 0 )
+    {
+        return false;
+    }
+    const TSNode bases = ts_node_child_by_field_name( cls, "superclasses", 12 );
+    if( ts_node_is_null( bases ) )
+    {
+        return false;
+    }
+    const std::uint32_t baseCount = ts_node_named_child_count( bases );
+    for( std::uint32_t baseIndex = 0; baseIndex < baseCount; ++baseIndex )
+    {
+        TSNode base = ts_node_named_child( bases, baseIndex );
+        if( std::strcmp( ts_node_type( base ), "attribute" ) == 0 )                    // models.TextChoices → TextChoices
+        {
+            base = ts_node_child_by_field_name( base, "attribute", 9 );
+            if( ts_node_is_null( base ) )
+            {
+                continue;
+            }
+        }
+        if( std::strcmp( ts_node_type( base ), "identifier" ) != 0 )
+        {
+            continue;
+        }
+        const std::string_view baseName = nodeTextOf( base, src );
+        if( baseName == "Enum" || baseName == "IntEnum" || baseName == "StrEnum"
+         || baseName == "Flag" || baseName == "IntFlag" || baseName == "ReprEnum"
+         || baseName == "Choices" || baseName == "TextChoices" || baseName == "IntegerChoices" )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 
