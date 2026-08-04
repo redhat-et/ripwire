@@ -42,6 +42,35 @@
 
 (class_specifier name: (type_identifier) @name) @definition.class
 
+; ---- module-level settings constants (ripwire addition — r3 q10) ----
+; Same rationale and --match-verified declarator shapes as queries/c/tags.scm (the C++ grammar
+; extends tree-sitter-c): file-scope `static const char* DEFAULT_HOSTS[] = { … }` tables and
+; namespace-scope `inline constexpr int MAX_DEPTH = 12;`. Two scope wrappers because namespace
+; (and extern "C") bodies are declaration_list, not translation_unit; class members are
+; field_declaration_list, so member fields never match either pattern. SCREAMING_SNAKE-gated in
+; ingest.cpp (constCaptureNeedsScreamingGate) — kCamelCase constants stay unindexed, matching the
+; house convention that ALL-CAPS marks a settings/config constant.
+
+(translation_unit
+  (declaration
+    declarator: (init_declarator
+      declarator: [
+        (identifier) @name
+        (pointer_declarator declarator: (identifier) @name)
+        (array_declarator declarator: (identifier) @name)
+        (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+      ])) @definition.constant)
+
+(declaration_list
+  (declaration
+    declarator: (init_declarator
+      declarator: [
+        (identifier) @name
+        (pointer_declarator declarator: (identifier) @name)
+        (array_declarator declarator: (identifier) @name)
+        (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+      ])) @definition.constant)
+
 ; ---- references (ripwire addition — calls drive the PageRank edges) ----
 
 (call_expression

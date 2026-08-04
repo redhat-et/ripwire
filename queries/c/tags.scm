@@ -50,6 +50,24 @@
 (preproc_function_def
   name: (identifier) @name) @definition.macro
 
+; settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03): file-scope
+; `static const int C_MAX_BUFFER_BYTES = 4096;` and the pointer/array table forms
+; (`static const char* DEFAULT_HOSTS[] = { … };`) — feature-flag/settings tables at
+; translation-unit scope. The (translation_unit …) wrapper keeps function-local declarations out;
+; the declarator alternation covers the three --match-verified nestings (identifier /
+; pointer→identifier / array→identifier) plus array-of-pointers (pointer→array→identifier).
+; SCREAMING_SNAKE-gated in ingest.cpp, so `int c_mutable_global = 3;` stays unindexed — the
+; "plain variables" noise exclusion above still holds for everything convention marks mutable.
+(translation_unit
+  (declaration
+    declarator: (init_declarator
+      declarator: [
+        (identifier) @name
+        (pointer_declarator declarator: (identifier) @name)
+        (array_declarator declarator: (identifier) @name)
+        (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
+      ])) @definition.constant)
+
 ; ---- references (calls) ----
 
 (call_expression

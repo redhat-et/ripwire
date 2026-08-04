@@ -37,6 +37,28 @@
     name: (identifier) @name
     value: [ (arrow_function) (function_expression) ])) @definition.function
 
+; ---- module-level settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03) ----
+; `const PASSWORD_HASHERS = [...]` at module scope: a settings/config constant is a real, rankable
+; symbol — before these patterns a whole settings module contributed ZERO symbols to the map, so
+; --for structurally could not surface it (the r3 head-to-head's only unrecoverable loss).
+; Shape verified with --match: the (program …) wrapper keeps function-local consts out; the export
+; form nests (program (export_statement (lexical_declaration …))) so it needs its own pattern.
+; "const"-keyword-anchored (a top-level `let` is a mutable counter, not config). Scoped to
+; SCREAMING_SNAKE names in ingest.cpp (constCaptureNeedsScreamingGate — tags predicates never run),
+; so `const retryBudget = 3` stays unindexed and an ALL-CAPS arrow const dedups to its Function def.
+
+(program
+  (lexical_declaration
+    "const"
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
+(export_statement
+  (lexical_declaration
+    "const"
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
 ; declaration-file signatures (kept so .d.ts still yields symbols)
 (function_signature
   name: (identifier) @name) @definition.function

@@ -214,6 +214,16 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   which is the entire point of indexing shaders. *Known residual, documented rather than hidden:* an
   anonymous `enum : uint { … }` recovers as a named enum, minting 18 junk `t="type"` symbols named
   `uint` across those 45 files, 0.04% of that repository's 47,074-symbol index.
+- **Module-level settings constants are first-class ranked `var` symbols in TypeScript, JavaScript,
+  Rust, Ruby, Java, C#, C and C++** (the r3 head-to-head's q10 loss — a settings/feature-flag table
+  in those languages previously contributed zero rankable symbols, so `--for` structurally could not
+  surface it). Scoped to settings-shaped constants, not every literal: module/file/namespace-level
+  capture only, gated on SCREAMING_SNAKE names for the convention-based grammars (Rust `const`/
+  `static` items are constants by construction and are taken as-is). Python (case-blind module
+  assignments, vendored upstream) and Go (CamelCase consts) were already captured and are unchanged
+  — the r3 audit's "not extracted at all" reading is corrected in that report's addendum. Gate:
+  `test/constcheck.sh`, written red-first against the pre-fix binary (18 red assertions at
+  b6068c3).
 - The current set: C++, C, Objective-C/Objective-C++, Metal, Python, TypeScript, JavaScript, Java,
   Ruby, Bash, Go, Rust, Swift, C#, plus JSON configuration keys.
 

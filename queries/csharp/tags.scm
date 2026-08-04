@@ -44,6 +44,16 @@
 (property_declaration
   name: (identifier) @name) @definition.var
 
+; settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03): `public const int
+; MAX_RETRIES = 5;` / `public static readonly string[] DEFAULT_HOSTS = { … };` — the C# config
+; idioms. Same posture as Java: the pattern sees every field declarator, and the SCREAMING_SNAKE
+; gate in ingest.cpp (constCaptureNeedsScreamingGate) keeps the field-noise exclusion above intact.
+; Shape verified with --match on the constcheck fixture.
+(field_declaration
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name))) @definition.constant
+
 ; ---- references (calls) ----
 
 ; foo( .. )  — bare call (local/static method)
