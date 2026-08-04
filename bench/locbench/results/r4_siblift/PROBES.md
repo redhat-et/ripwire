@@ -23,4 +23,4 @@ ranks; any outcome is recorded.
 
 ## Outcome
 
-(unfilled — lands with the r4 verdict)
+**REJECT at calibration (2026-08-03)** — see `gate_verdict.txt`: no grid cell beat baseline; probes q01/q09 unmoved at every setting; chooser post-mortem (score-adjacent ≠ gold-adjacent) recorded for the file-pooling follow-up.
