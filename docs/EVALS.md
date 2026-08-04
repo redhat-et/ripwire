@@ -108,6 +108,33 @@ run a fair 60-instance sweep (node/project/chunk caps); the report records the e
 Paired win–loss vs repowise at strict@10: 17–3 (17–2 after the R1 fix, which flipped
 `micropython-lib-947`, 35 → 2, and moved nothing else).
 
+### r3 (2026-08-03): headroom — a compression layer, so a different instrument
+
+**Source:** `bench/headtohead/r3-headroom-2026-08-03/` — `PREREGISTRATION.md` (frozen at
+`f3f2053` **before any arm ran**), `REPORT.md`, `VERIFIER.md` (the adversarial pass materially
+corrected the draft: the harness had charged its own packaging bytes to the competitor),
+`results.json`, `harness.py` (the single metric implementation).
+
+headroom (`headroom-ai==0.33.0`) compresses context already fetched; it retrieves nothing — so
+LocBench does not apply. Instrument: **tokens-to-correct-answer** (tiktoken `cl100k_base`) on 12
+pre-registered mid-task questions against `django/django @ 70f39e46`, five arms (naive grep+read
+floor A; A through headroom default B; a labeled non-default override B′; ripwire's frozen verb
+ladders C; C through headroom D). N=12, zero exclusions.
+
+Headline, both framings published: headroom default **passed every code chunk through
+byte-identical** (its own protective guards fired throughout; net −410 t on 685,682 — its docs
+say "Code — Passthrough" and this run confirms it), and added **exactly 0 t** to ripwire output
+(composition is pointless for ripwire's already-minified XML). Ripwire spent **7.3%** of the naive
+arm's tokens overall — **1.7% (58×) on the both-satisfied subset**, but the strict criterion was
+satisfied on only **5/12 under the frozen 2–4-rung ladders vs the naive arm's 11/12**, and 92.5%
+of ripwire's tokens were spent on the seven misses; the deployment-realistic C-then-naive-fallback
+composite is **39% of the naive cost at equal satisfaction**. Loss buckets: 4 ranking defects
+(sibling-file confusion; verbatim-named symbol ranked 112th; file-of-63-tiny-siblings invisible;
+`XxxMatch` name never surfaced), 1 missing symbol kind (module-level constants not ranked —
+`global_settings.py` invisible to `--for`), 2 protocol/criterion artifacts. What this does NOT
+show: headroom's JSON/log home turf was not measured; single-shot library mode stood in for its
+proxy; one corpus, one language, fixed idealized agents on every arm.
+
 ---
 
 ## 3. LocBench — localization accuracy

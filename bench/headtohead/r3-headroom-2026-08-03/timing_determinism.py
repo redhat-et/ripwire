@@ -14,17 +14,19 @@ Determinism:
 """
 
 import json
+import os
 import statistics
 import subprocess
 import time
 from pathlib import Path
 
+# Path note: the byte-frozen original (commit f3f2053, sha256
+# 9f1b51a7aba1932161c671a1bf60a808933e1f98b135cfca2e881097f0944230) hard-coded the run
+# machine's absolute paths; only these two constants changed (env lookups, no logic change)
+# to satisfy the repo's personal-identifier gate.
 HERE = Path(__file__).resolve().parent
-CORPUS = Path(
-    "/private/tmp/claude-501/-Users-qgames-AppDevelopLocal-project2-ripwire/"
-    "8ebe7d31-1cf3-4a60-aa6c-cafea943c4df/scratchpad/repos/django__django"
-)
-RIPWIRE = "/Users/qgames/AppDevelopLocal/project2/ripwire/build/ripwire"
+CORPUS = Path(os.environ.get("R3H_CORPUS", str(HERE / "repos" / "django__django")))
+RIPWIRE = os.environ.get("R3H_RIPWIRE", str(HERE / "../../../build/ripwire"))
 N = 5
 
 

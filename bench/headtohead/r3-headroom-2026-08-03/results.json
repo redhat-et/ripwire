@@ -1,0 +1,972 @@
+[
+ {
+  "id": "q01",
+  "category": "C1",
+  "A": {
+   "arm": "A",
+   "tokens": 28342,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.4505,
+   "n_chunks": 3
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 29110,
+   "hr_tokens_after": 29054,
+   "hr_ratio": 0.0019237375472346272,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:mixed:0.78"
+   ],
+   "compressed_tokens": 28350,
+   "charged_tokens": 28350,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.3734
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 29110,
+   "hr_tokens_after": 29054,
+   "hr_ratio": 0.0019237375472346272,
+   "transforms": [
+    "router:protected:user_message",
+    "router:mixed:0.78"
+   ],
+   "compressed_tokens": 28350,
+   "charged_tokens": 28350,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0561
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 11974,
+   "satisfied": false,
+   "missing": [
+    "django/core/cache/backends/db.py",
+    "_base_set"
+   ],
+   "wall_s": 0.5802,
+   "rungs_used": 2,
+   "ladder": [
+    "--for=When the database cache backend grows past its configured max size, where is the logic that deletes old/expired entries to bring it back under the limit, and what triggers it?",
+    "EXPAND_TOP1"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 12421,
+   "hr_tokens_after": 12421,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 12060,
+   "charged_tokens": 12060,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0344
+  }
+ },
+ {
+  "id": "q02",
+  "category": "C1",
+  "A": {
+   "arm": "A",
+   "tokens": 111376,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.3292,
+   "n_chunks": 7
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 112942,
+   "hr_tokens_after": 112893,
+   "hr_ratio": 0.00043385100316976856,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:error_output",
+    "router:protected:recent_code",
+    "router:mixed:0.88"
+   ],
+   "compressed_tokens": 111444,
+   "charged_tokens": 111444,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.162
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 112942,
+   "hr_tokens_after": 32835,
+   "hr_ratio": 0.7092755573657276,
+   "transforms": [
+    "router:protected:user_message",
+    "router:mixed:0.88",
+    "router:protected:error_output",
+    "router:code_aware:0.01"
+   ],
+   "compressed_tokens": 32098,
+   "charged_tokens": 32098,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.2107
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 1636,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.382,
+   "rungs_used": 1,
+   "ladder": [
+    "--for=On a POST request, where does Django actually compare the CSRF token the client sent against the secret from the cookie, and where in request processing is that comparison invoked?"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 1739,
+   "hr_tokens_after": 1739,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 1708,
+   "charged_tokens": 1708,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.009
+  }
+ },
+ {
+  "id": "q03",
+  "category": "C2",
+  "A": {
+   "arm": "A",
+   "tokens": 721,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.2462,
+   "n_chunks": 1
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 782,
+   "hr_tokens_after": 782,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 761,
+   "charged_tokens": 761,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0039
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 782,
+   "hr_tokens_after": 782,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 761,
+   "charged_tokens": 761,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.006
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 819,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.1472,
+   "rungs_used": 1,
+   "ladder": [
+    "--callers=resolve_url"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 889,
+   "hr_tokens_after": 889,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 860,
+   "charged_tokens": 860,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0082
+  }
+ },
+ {
+  "id": "q04",
+  "category": "C2",
+  "A": {
+   "arm": "A",
+   "tokens": 27385,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.2501,
+   "n_chunks": 3
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 27907,
+   "hr_tokens_after": 27907,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 27445,
+   "charged_tokens": 27445,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0299
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 27907,
+   "hr_tokens_after": 27907,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 27445,
+   "charged_tokens": 27445,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0501
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 518,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.1443,
+   "rungs_used": 1,
+   "ladder": [
+    "--callers=sanitize_strftime_format"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 565,
+   "hr_tokens_after": 565,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 552,
+   "charged_tokens": 552,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0074
+  }
+ },
+ {
+  "id": "q05",
+  "category": "C3",
+  "A": {
+   "arm": "A",
+   "tokens": 16414,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.4216,
+   "n_chunks": 7
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 16797,
+   "hr_tokens_after": 16797,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 16526,
+   "charged_tokens": 16526,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0363
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 16797,
+   "hr_tokens_after": 16797,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 16526,
+   "charged_tokens": 16526,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0344
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 522,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.15,
+   "rungs_used": 1,
+   "ladder": [
+    "--affected=django/core/signing.py"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 617,
+   "hr_tokens_after": 617,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 566,
+   "charged_tokens": 566,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0072
+  }
+ },
+ {
+  "id": "q06",
+  "category": "C3",
+  "A": {
+   "arm": "A",
+   "tokens": 433,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.2071,
+   "n_chunks": 1
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 468,
+   "hr_tokens_after": 332,
+   "hr_ratio": 0.2905982905982906,
+   "transforms": [
+    "router:protected:user_message",
+    "router:mixed:0.70"
+   ],
+   "compressed_tokens": 332,
+   "charged_tokens": 332,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0077
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 468,
+   "hr_tokens_after": 332,
+   "hr_ratio": 0.2905982905982906,
+   "transforms": [
+    "router:protected:user_message",
+    "router:mixed:0.70"
+   ],
+   "compressed_tokens": 332,
+   "charged_tokens": 332,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.003
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 142,
+   "satisfied": false,
+   "missing": [
+    "MigrationAutodetector"
+   ],
+   "wall_s": 0.1516,
+   "rungs_used": 1,
+   "ladder": [
+    "--affected=django/db/migrations/autodetector.py"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 192,
+   "hr_tokens_after": 192,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 183,
+   "charged_tokens": 183,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0005
+  }
+ },
+ {
+  "id": "q07",
+  "category": "C4",
+  "A": {
+   "arm": "A",
+   "tokens": 115900,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.497,
+   "n_chunks": 17
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 117358,
+   "hr_tokens_after": 117358,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 116130,
+   "charged_tokens": 116130,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.1356
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 117358,
+   "hr_tokens_after": 117358,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 116130,
+   "charged_tokens": 116130,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.2356
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 13198,
+   "satisfied": false,
+   "missing": [
+    "ResolverMatch"
+   ],
+   "wall_s": 0.9484,
+   "rungs_used": 4,
+   "ladder": [
+    "--for=When a request comes in, how does its URL path end up as a view callable \u2014 trace the chain from the request handler to where the match object is produced.",
+    "EXPAND_TOP1",
+    "PATH_TOP2",
+    "CONNECT_TOP3"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 13647,
+   "hr_tokens_after": 13647,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:error_output"
+   ],
+   "compressed_tokens": 13308,
+   "charged_tokens": 13308,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0289
+  }
+ },
+ {
+  "id": "q08",
+  "category": "C4",
+  "A": {
+   "arm": "A",
+   "tokens": 248578,
+   "satisfied": false,
+   "missing": [
+    "django/forms/fields.py"
+   ],
+   "wall_s": 0.4955,
+   "n_chunks": 24
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 252540,
+   "hr_tokens_after": 252540,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:error_output",
+    "router:protected:analysis_context",
+    "router:protected:error_output",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:error_output",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:analysis_context",
+    "router:protected:error_output",
+    "router:protected:error_output",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:error_output"
+   ],
+   "compressed_tokens": 248913,
+   "charged_tokens": 248913,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.2579
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 252540,
+   "hr_tokens_after": 252540,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:error_output",
+    "router:protected:error_output",
+    "router:protected:error_output",
+    "router:protected:error_output",
+    "router:protected:error_output",
+    "router:protected:error_output"
+   ],
+   "compressed_tokens": 248913,
+   "charged_tokens": 248913,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.4532
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 11192,
+   "satisfied": false,
+   "missing": [
+    "full_clean",
+    "_clean_fields",
+    "any-of:_clean_bound_field|to_python"
+   ],
+   "wall_s": 0.8384,
+   "rungs_used": 4,
+   "ladder": [
+    "--for=When I call form.is_valid(), how does my submitted data actually reach each field's cleaning code and the form's per-field clean_<name> hooks \u2014 what's the call chain?",
+    "EXPAND_TOP1",
+    "PATH_TOP2",
+    "CONNECT_TOP3"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 11660,
+   "hr_tokens_after": 11660,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 11306,
+   "charged_tokens": 11306,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0245
+  }
+ },
+ {
+  "id": "q09",
+  "category": "C5",
+  "A": {
+   "arm": "A",
+   "tokens": 25044,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.4735,
+   "n_chunks": 13
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 25587,
+   "hr_tokens_after": 25587,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:error_output",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 25254,
+   "charged_tokens": 25254,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0711
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 25587,
+   "hr_tokens_after": 25587,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:error_output"
+   ],
+   "compressed_tokens": 25254,
+   "charged_tokens": 25254,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0575
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 4873,
+   "satisfied": false,
+   "missing": [
+    "django/template/defaultfilters.py",
+    "tests/template_tests/filter_tests/",
+    "register",
+    "Library"
+   ],
+   "wall_s": 0.6088,
+   "rungs_used": 2,
+   "ladder": [
+    "--pack-task=I need to add a new built-in template filter to Django itself \u2014 which files and functions matter for implementing and testing it?",
+    "--for=I need to add a new built-in template filter to Django itself \u2014 which files and functions matter for implementing and testing it?"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 5097,
+   "hr_tokens_after": 5097,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 4962,
+   "charged_tokens": 4962,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0216
+  }
+ },
+ {
+  "id": "q10",
+  "category": "C5",
+  "A": {
+   "arm": "A",
+   "tokens": 30798,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.2218,
+   "n_chunks": 4
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 31396,
+   "hr_tokens_after": 31226,
+   "hr_ratio": 0.005414702509873869,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:mixed:0.85"
+   ],
+   "compressed_tokens": 30704,
+   "charged_tokens": 30704,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0647
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 31396,
+   "hr_tokens_after": 31226,
+   "hr_ratio": 0.005414702509873869,
+   "transforms": [
+    "router:protected:user_message",
+    "router:mixed:0.85"
+   ],
+   "compressed_tokens": 30704,
+   "charged_tokens": 30704,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0874
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 4721,
+   "satisfied": false,
+   "missing": [
+    "django/conf/global_settings.py",
+    "PASSWORD_HASHERS"
+   ],
+   "wall_s": 0.6057,
+   "rungs_used": 2,
+   "ladder": [
+    "--pack-task=I want to ship a new password hasher in Django and make it selectable \u2014 what files and functions does a correct plan have to touch or account for?",
+    "--for=I want to ship a new password hasher in Django and make it selectable \u2014 what files and functions does a correct plan have to touch or account for?"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 4930,
+   "hr_tokens_after": 4930,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 4825,
+   "charged_tokens": 4825,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0187
+  }
+ },
+ {
+  "id": "q11",
+  "category": "C6",
+  "A": {
+   "arm": "A",
+   "tokens": 63327,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.2592,
+   "n_chunks": 3
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 64463,
+   "hr_tokens_after": 64463,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code"
+   ],
+   "compressed_tokens": 63397,
+   "charged_tokens": 63397,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0666
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 64463,
+   "hr_tokens_after": 64463,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 63397,
+   "charged_tokens": 63397,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.1151
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 280,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.2438,
+   "rungs_used": 1,
+   "ladder": [
+    "--grep=Cannot filter a query once a slice has been taken"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 342,
+   "hr_tokens_after": 342,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 329,
+   "charged_tokens": 329,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0092
+  }
+ },
+ {
+  "id": "q12",
+  "category": "C6",
+  "A": {
+   "arm": "A",
+   "tokens": 17364,
+   "satisfied": true,
+   "missing": [],
+   "wall_s": 0.415,
+   "n_chunks": 4
+  },
+  "B": {
+   "arm": "B",
+   "hr_tokens_before": 17697,
+   "hr_tokens_after": 17697,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:recent_code",
+    "router:protected:recent_code",
+    "router:protected:error_output"
+   ],
+   "compressed_tokens": 17439,
+   "charged_tokens": 17439,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0231
+  },
+  "Bp": {
+   "arm": "Bp",
+   "hr_tokens_before": 17697,
+   "hr_tokens_after": 17697,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message",
+    "router:protected:error_output"
+   ],
+   "compressed_tokens": 17439,
+   "charged_tokens": 17439,
+   "satisfied": true,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0214
+  },
+  "C": {
+   "arm": "C",
+   "tokens": 263,
+   "satisfied": false,
+   "missing": [
+    "django/core/exceptions.py",
+    "django/middleware/csrf.py",
+    "DisallowedHost"
+   ],
+   "wall_s": 0.177,
+   "rungs_used": 1,
+   "ladder": [
+    "--grep=Invalid HTTP_HOST header"
+   ]
+  },
+  "D": {
+   "arm": "B",
+   "hr_tokens_before": 320,
+   "hr_tokens_after": 320,
+   "hr_ratio": 0.0,
+   "transforms": [
+    "router:protected:user_message"
+   ],
+   "compressed_tokens": 308,
+   "charged_tokens": 308,
+   "satisfied": false,
+   "survival": "all-retained",
+   "n_lost_chunks": 0,
+   "n_recoverable_chunks": 0,
+   "compress_wall_s": 0.0064
+  }
+ }
+]

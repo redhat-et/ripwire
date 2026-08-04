@@ -17,7 +17,15 @@ Metric 2 gold survival (B/Bp): retained / recoverable-via-CCR-marker / lost.
 Metric 3 wall time: median of N_TIMING runs per command.
 Metric 4 determinism: byte-identity of two runs (both tools).
 
-Run with the hrenv venv python. Env for headroom set in run_all.sh.
+Run with a venv python holding headroom-ai==0.33.0 + tiktoken + onnxruntime, env
+HEADROOM_TELEMETRY=off HEADROOM_UPDATE_CHECK=off (see PREREGISTRATION.md §Pins and
+VERIFIER.md F5/F10 for the environment record). Point R3H_CORPUS at a django checkout
+of 70f39e46 and R3H_RIPWIRE at a ripwire binary built from bf8e90e.
+
+Path note: the byte-frozen original of this file (commit f3f2053, sha256
+c9eab4777a5b43a0fcf934ad81a4a7c78c71b97a3eebb1cd6f6a27409d742d6d) hard-coded the run
+machine's absolute paths; this committed copy replaces ONLY those two constants with the
+env lookups below (no logic change) to satisfy the repo's personal-identifier gate.
 """
 
 import json
@@ -30,11 +38,8 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-CORPUS = Path(
-    "/private/tmp/claude-501/-Users-qgames-AppDevelopLocal-project2-ripwire/"
-    "8ebe7d31-1cf3-4a60-aa6c-cafea943c4df/scratchpad/repos/django__django"
-)
-RIPWIRE = Path("/Users/qgames/AppDevelopLocal/project2/ripwire/build/ripwire")
+CORPUS = Path(os.environ.get("R3H_CORPUS", str(HERE / "repos" / "django__django")))
+RIPWIRE = Path(os.environ.get("R3H_RIPWIRE", str(HERE / "../../../build/ripwire")))
 N_TIMING = 5
 NAIVE_FILE_CAP = 15  # idealized-naive stops after this many whole-file reads per grep term
 
