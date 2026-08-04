@@ -167,37 +167,40 @@ function stat(s, big, label, x, y, w, color, opts={}){
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// same instances, same gold, same metric code", AMBER);
-  title(s, "Head-to-head: strict localization, latest round");
-  s.addChart("bar", [{
-    name: "strict file@10",
-    labels: ["ripwire --for", "repowise 0.37.0", "codeseek 0.1.31 (ident arm)", "codeseek 0.1.31 (raw fallback)"],
-    values: [58.3, 33.3, 15.0, 0.0],
-  }], {
-    x: MX, y: 1.95, w: 7.3, h: 3.9, barDir: "bar",
-    chartColors: [CYAN, "3A4353", "3A4353", "3A4353"],
-    showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", dataLabelColor: TEXT, dataLabelFontSize: 13, dataLabelFontFace: SANS,
-    catAxisLabelColor: TEXT, catAxisLabelFontSize: 12.5, catAxisLabelFontFace: SANS,
-    valAxisLabelColor: MUTED, valAxisLabelFontSize: 10, valAxisMaxVal: 70, valAxisMinVal: 0,
-    valGridLine: { color: "232D3D", size: 0.5 }, catGridLine: { style: "none" },
-    showLegend: false, showTitle: false, plotArea: { fill: { color: BG } }, chartArea: { fill: { color: BG }, border: { color: BG } },
-    barGapWidthPct: 60,
-  });
-  s.addText("codeseek's keyless raw-text arm scored 0.0% (0 results on 60/60) — a query-protocol boundary, not its embedder mode. Vexp and CodeIndexer were excluded by free-tier caps, not beaten; the report records the exact limits.",
-    { x: MX, y: 5.95, w: 7.3, h: 0.85, fontFace: SANS, fontSize: 10.5, color: MUTED, margin: 0 });
+  title(s, "Head-to-head: every round, every tool");
+  const H2H_CHART = (label, arms, vals, colors, yTop, hChart, vMax) => {
+    s.addText(label, { x: MX, y: yTop, w: 7.3, h: 0.28, fontFace: SANS, fontSize: 11.5, bold: true, color: TEXT, margin: 0 });
+    s.addChart("bar", [{ name: "strict file@10", labels: arms, values: vals }], {
+      x: MX, y: yTop+0.3, w: 7.3, h: hChart, barDir: "bar",
+      chartColors: colors,
+      showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", dataLabelColor: TEXT, dataLabelFontSize: 11, dataLabelFontFace: SANS,
+      catAxisLabelColor: TEXT, catAxisLabelFontSize: 10.5, catAxisLabelFontFace: SANS,
+      valAxisLabelColor: MUTED, valAxisLabelFontSize: 9, valAxisMaxVal: vMax, valAxisMinVal: 0,
+      valGridLine: { color: "232D3D", size: 0.5 }, catGridLine: { style: "none" },
+      showLegend: false, showTitle: false, plotArea: { fill: { color: BG } }, chartArea: { fill: { color: BG }, border: { color: BG } },
+      barGapWidthPct: 50,
+    });
+  };
+  H2H_CHART("Round 2 (2026-08-03) — strict file@10, N = 60",
+    ["ripwire --for", "repowise 0.37.0", "codeseek 0.1.31 (ident arm)", "codeseek 0.1.31 (raw fallback)"],
+    [58.3, 33.3, 15.0, 0.0], [CYAN, "3A4353", "3A4353", "3A4353"], 1.82, 2.25, 70);
+  H2H_CHART("Round 1 — strict file@10, N = 60 (own binary + evaluator; rounds are not number-comparable)",
+    ["ripwire --for", "codebase-memory-mcp", "graphify", "Aider repo-map"],
+    [36.7, 26.7, 21.7, 13.3], [CYAN, "3A4353", "3A4353", "3A4353"], 4.5, 2.25, 45);
   card(s, 8.2, 1.95, 4.4, 1.7);
   stat(s, "58.3%", "strict file@10 — every gold file in the top ten\nN = 60 paired, zero exclusions · 17–2 paired vs repowise", 8.3, 2.1, 4.2, CYAN, { lsize: 11 });
-  card(s, 8.2, 3.8, 4.4, 1.5);
+  card(s, 8.2, 3.75, 4.4, 1.7);
   s.addText([
     { text: "Median wall (query, warm): ", options: { color: TEXT, bold: true } },
-    { text: "ripwire 0.114 s · repowise 1.14 s (incl. a fresh MCP-server spawn per query).\n", options: { color: MUTED } },
-    { text: "Round 1, four tools: 36.7% vs cmm 26.7 · graphify 21.7 · Aider 13.3 — each round is internally paired; rounds are not number-comparable.", options: { color: MUTED } },
-  ], { x: 8.4, y: 3.93, w: 4.05, h: 1.3, fontFace: SANS, fontSize: 10.5, margin: 0 });
-  card(s, 8.2, 5.45, 4.4, 1.15);
+    { text: "ripwire 0.114 s · repowise 1.14 s (incl. a per-query server spawn) — round 1: Aider 2.5 s · graphify 5.8 s, cold per run.\n", options: { color: MUTED } },
+    { text: "codeseek's raw arm: 0 results on 60/60 — a query-protocol boundary, not its embedder mode. Vexp and CodeIndexer were excluded by free-tier caps, not beaten.", options: { color: MUTED } },
+  ], { x: 8.4, y: 3.88, w: 4.05, h: 1.5, fontFace: SANS, fontSize: 10, margin: 0 });
+  card(s, 8.2, 5.6, 4.4, 1.1);
   s.addText([
     { text: "Round 3, different instrument: ", options: { color: TEXT, bold: true } },
-    { text: "headroom (the compression layer) passed code through byte-identical; ripwire answered at 7.3% of the naive baseline's tokens. Its own losses ship first in that report.", options: { color: MUTED } },
-  ], { x: 8.4, y: 5.56, w: 4.05, h: 0.98, fontFace: SANS, fontSize: 10.5, margin: 0 });
-  foot(s, "bench/headtohead/r2-2026-08-03/ · r3-headroom-2026-08-03/ · docs/EVALS.md §2 — versions pinned, an adversarial VERIFIER.md ships with each round");
+    { text: "headroom (the compression layer) passed code through byte-identical; ripwire answered at 7.3% of the naive baseline's tokens.", options: { color: MUTED } },
+  ], { x: 8.4, y: 5.71, w: 4.05, h: 0.92, fontFace: SANS, fontSize: 10, margin: 0 });
+  foot(s, "bench/headtohead/REPORT.md (r1) · r2-2026-08-03/ · r3-headroom-2026-08-03/ · docs/EVALS.md §2 — an adversarial VERIFIER.md ships with each round");
 }
 
 /* ── S7 · locbench ──────────────────────────────────────────────────────── */
