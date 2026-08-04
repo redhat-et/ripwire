@@ -38,7 +38,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 ## Contents
 
-**understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--for`](#for-task) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
+**understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--for`](#for-task) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
 
 **navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--match`](#match-query) · [`--query`](#query-terms)
 
@@ -402,6 +402,14 @@ _Self-contained HTML force-directed call graph._
 $ ./build/ripwire . --html=<scratch>/aux/map2.html
 (empty)
 ```
+
+**Shaped by:** `--color-by`
+
+### `--color-by=MODE`
+
+**Answers:** (with --html) node colour: lang (default) | community | cx | churn | tested — the page embeds all five and keeps a live selector;
+
+the flag only sets the initial mode
 
 ### `--order=MODE`
 
