@@ -817,7 +817,11 @@ static bool eat_raw_str_part(
         lexer->mark_end(lexer); // We always want to parse thru the start of the string so far
         // Advance through anything that isn't a hash symbol, because we want to count those.
         while (lexer->lookahead != '#' && lexer->lookahead != '\0') {
-            last_char = lexer->lookahead;
+            // ripwire local patch: lookahead is a 32-bit codepoint; last_char only ever feeds
+            // ASCII comparisons ('\\', '"'), so truncation is intended — make it explicit or
+            // UBSan (implicit-integer-truncation, -fno-sanitize-recover=all) aborts on any
+            // non-ASCII char inside a raw #"..."# string.
+            last_char = (uint8_t)lexer->lookahead;
             advance(lexer);
             if (last_char != '\\' || lexer->lookahead == '\\') {
                 // Mark a new end, but only if we didn't just advance past a `\` symbol, since we

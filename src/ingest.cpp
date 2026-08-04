@@ -313,8 +313,10 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
     // bare form (`Base`/`Wrapper`) is what byName keys on. The strip MUST precede the "::"/"." split,
     // or a `::` INSIDE the args (`Foo<A::B>`) would be mistaken for the segment separator. A name never
     // legitimately contains a bare '<' (only a type-argument list opens one), so truncating at the FIRST
-    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical).
-    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos )
+    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical). One carve-out:
+    // a type-argument list always FOLLOWS an identifier, so a name that STARTS with '<' is not a generic
+    // — it is a Swift operator function (`<`, `<=`, `<+>`), which the strip would erase to "".
+    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos && lt > 0 )
     {
         raw = raw.substr( 0, lt );
     }
@@ -983,7 +985,7 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 40;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 41;           // bump on any grammar/.scm/extraction change
                                                       // 40: Python gains the shapes real repos taught us
                                                       //    (django@7d75c0b, pydantic@2e5f0e2): annotated class
                                                       //    attributes, gated enum-family members, class lambda

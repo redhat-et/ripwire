@@ -31,6 +31,13 @@
 (method_definition
   name: (property_identifier) @name) @definition.method
 
+; `#render() {..}` — an ES #private method is a distinct node the pattern above never matched
+; (same gap jsshapecheck closed for JS: the two tags.scm files are separate). 120 sites in
+; openclaw @7a0a4c5f, 2026-08-04, with 326 `this.#x(...)` call sites — a class's whole internal
+; call graph went missing.
+(method_definition
+  name: (private_property_identifier) @name) @definition.method
+
 ; `abstract foo(): T;` — the contract half of an abstract base. method_signature above only covers
 ; .d.ts-style signatures; an abstract member is its own node, so before this pattern an abstract
 ; class published its name and nothing a caller could bind to. 76 sites in openclaw — and --lego
@@ -45,7 +52,7 @@
 ; data members, and taking those would bury the map. Same reason the object-literal `pair` form
 ; stays out — see test/tsshapefix/objectliteral.ts.
 (public_field_definition
-  name: (property_identifier) @name
+  name: [ (property_identifier) (private_property_identifier) ] @name
   value: [ (arrow_function) (function_expression) ]) @definition.method
 
 ; const foo = (..) => {..}  /  const foo = function(){..}  -> a named function
@@ -103,6 +110,12 @@
 (call_expression
   function: (member_expression
     property: (property_identifier) @name)) @reference.call
+
+; `this.#retry()` — the ref half of the #private method pattern above (326 openclaw sites;
+; property_identifier never matches a private_property_identifier).
+(call_expression
+  function: (member_expression
+    property: (private_property_identifier) @name)) @reference.call
 
 (new_expression
   constructor: (identifier) @name) @reference.call
