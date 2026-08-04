@@ -30,11 +30,14 @@
 #       A speculative row (".png" in a repo with no images) is a hole with a plausible name on it, so the
 #       allowlist is ENUMERATED from the tree, and this arm fails when a row stops being backed by a real file.
 #
-# THE ALLOWLIST is deliberately short and evidence-based: at the time of writing, `git ls-files` turns up
+# THE ALLOWLIST is deliberately short and evidence-based: at the time of writing, `git ls-files` turned up
 # exactly one extension carrying NUL bytes — .tgz (2 locbench fixtures) — and no
 # .png/.jpg/.ico exists in this repo at all, so none is pre-allowlisted. If a future round adds a genuinely
 # binary file type, this gate FAILS naming the file, and the fix is one row plus the reason. That failure is
 # the feature: an allowlist that grows by guess is how the next `.md` full of control bytes gets waved through.
+# The mechanism has since fired once as designed: ed24daa tracked the showcase deck deliverables
+# (present/ripwire-showcase.pdf / .pptx — genuinely binary formats), the gate went red naming both, and
+# .pdf/.pptx earned their rows below.
 #
 #   bash test/nulbytecheck.sh                                   # scans the working tree
 #   bash test/nulbytecheck.sh /path/to/base/ripwire             # BIN is accepted and unused (see below)
@@ -73,6 +76,8 @@ import sys
 # gate header: a new binary type is meant to fail here once and gain a row with a reason.
 BINARY_EXTENSIONS = {
     ".tgz",    # bench/locbench/results/*/*.tgz — gzipped gate+fixture bundles
+    ".pdf",    # present/ripwire-showcase.pdf — the rendered showcase deck (ed24daa)
+    ".pptx",   # present/ripwire-showcase.pptx — the deck's PowerPoint deliverable (ed24daa)
 }
 
 def scan(paths, label):
