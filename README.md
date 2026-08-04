@@ -50,8 +50,13 @@ contract, gated on every pull request and every push to main, not a tendency.
 On the latest 60-instance head-to-head against other context tools — same instances, same gold, same
 metric code — it puts **all** gold files in the top 10 on **58.3%** of them, against **33.3%** for the
 best competitor (repowise), at a **0.114 s** median (warm, with a pre-built index). An earlier round
-measured it against graphify, Aider's repo-map and codebase-memory-mcp; it won every round run so
-far. [The full tables, and the caveats that belong with them →](#against-other-tools)
+measured it against graphify, Aider's repo-map and codebase-memory-mcp; a third round measured it
+against **headroom**, the context-*compression* layer: on real coding questions headroom's default
+config passed code through untouched while ripwire answered at **7.3%** of a grep-and-read
+baseline's tokens — upstream selection beat downstream compression on every measure the two tools
+share (and the round's losses to the *naive baseline* are published first, with fix dispositions).
+It has won every round run so far.
+[The full tables, and the caveats that belong with them →](#against-other-tools)
 
 ---
 
@@ -232,6 +237,25 @@ ripwire cannot index — the ordering holds and the margin narrows: **28.3%** vs
 run a fair 60-instance sweep; the report records the exact limits. An independent adversarial pass
 attacked the comparison's design and its findings — and their dispositions — ship with the report
 ([`VERIFIER.md`](bench/headtohead/r2-2026-08-03/VERIFIER.md)).
+
+**Round three (2026-08-03): headroom — the compression-layer competitor.** headroom
+(`headroom-ai==0.33.0`, 64k★) compresses context an agent already fetched; it retrieves nothing —
+so this round's instrument is **tokens-to-correct-answer** on 12 pre-registered mid-task questions
+(django @ pinned commit, five arms, one tokenizer), not file@k. **ripwire won every measure the two
+tools share.** headroom's default config passed every code chunk through **byte-identical** — its
+own protective guards fired throughout, netting −410 tokens on a 685,682-token workload (its own
+limitations page says "Code — Passthrough"; this run confirms it live) — and stacking it on
+ripwire's output added **exactly 0 tokens** of savings: the map is already past the density
+compression targets. ripwire answered at **7.3%** of the naive grep-and-read baseline's tokens
+(**1.7%** on the subset both arms fully answered), warm in ~0.14 s per verb. **The losses in this
+round are ripwire's own, and they are published first**: under the frozen no-human verb ladders it
+strictly satisfied only **5/12** questions vs the naive baseline's 11/12 — four ranking defects,
+one missing symbol kind, two harness artifacts, each bucketed with its fix disposition in the
+report. What the round does **not** show: headroom's home turf (JSON/log tool-output compression,
+provider-cache economics) was deliberately not measured — ripwire does not compete there.
+Provenance: [`docs/EVALS.md` §2](docs/EVALS.md), full record + adversarial verification (which
+materially corrected the draft's arithmetic in headroom's favor) in
+[`bench/headtohead/r3-headroom-2026-08-03/`](bench/headtohead/r3-headroom-2026-08-03/).
 
 **LocBench held-out, N = 243 across 78 repositories.** Strict file@10 **60.9%**, against **27.6%** for
 the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
