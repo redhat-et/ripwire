@@ -293,6 +293,35 @@ appendix.
 
 ---
 
+### Where its own cycles go — hardware counters, per scope
+
+The self-profiler (`-DRIPWIRE_PROFILE=ON`; `src/infra/profileScope.h` + `profilePmc.h`) brackets every
+pipeline phase with two hardware-counter reads — kperf on Apple Silicon, a pinned `perf_event_open`
+group on Linux. Below: ripwire mapping **its own public tree** on an Apple M5 Pro, cold
+(`--no-cache`) except the last row. Counters are raw integers, never scaled; reproduce steps in
+[`bench/PROFILE.md`](bench/PROFILE.md) (arming needs root; unprivileged runs print the same table
+with timing columns only — the honest degrade).
+
+| scope | calls | instructions | IPC | L1D MPKI | wall |
+| --- | --- | --- | --- | --- | --- |
+| tree-sitter parse | 803 | 8.74 B | 3.52 | 4.0 | 731 ms |
+| tags query exec + captures | 803 | 8.65 B | 3.22 | 3.0 | 635 ms |
+| resolve refs + build CSR | 1 | 54.6 M | 3.27 | 35.4 | 3.6 ms |
+| PageRank (power iteration) | 1 | 13.7 M | 3.17 | 32.4 | 0.93 ms |
+| serialize ranked map | 1 | 3.24 M | 2.43 | 6.1 | 0.29 ms |
+| **warm run** — loadCache (read + deserialize) | 1 | 52.3 M | 3.18 | 7.5 | 3.6 ms |
+
+Three things the counters say that wall-clock alone cannot. The parse/query phases are
+compute-dense, not stall-bound: 3.2–3.5 instructions retired per cycle at ~3–4 L1D misses per
+thousand. The graph phases stream hard — 32–35 L1D MPKI — yet hold IPC above 3.1, which is the
+DOD/SoA/CSR layout (G2) doing its visible job. And the auto-cache's whole story in two rows: a warm
+run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load, ≈167×
+fewer instructions. Caveats travel with the table: counters are per-thread and aggregated per
+scope, so rows must not be summed across scopes (a recursive site samples only its outermost
+frame); one machine, one corpus — re-run on yours. Backend contract is gated by
+[`test/pmccheck.sh`](test/pmccheck.sh); M5 Pro event names verified (the last-level alias resolves
+via `PL2_CACHE_MISS_LD`).
+
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
