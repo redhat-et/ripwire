@@ -1,0 +1,35 @@
+{
+ "n_runs": 5,
+ "ripwire_warm_map": {
+  "median_s": 0.1549,
+  "min_s": 0.1532,
+  "max_s": 0.1668
+ },
+ "ripwire_warm_verb_callers": {
+  "median_s": 0.1353,
+  "min_s": 0.1341,
+  "max_s": 0.1546
+ },
+ "ripwire_cold_map": {
+  "median_s": 0.4002,
+  "min_s": 0.3799,
+  "max_s": 0.4752
+ },
+ "grep_naive": {
+  "median_s": 0.2514,
+  "min_s": 0.2424,
+  "max_s": 0.2708
+ },
+ "headroom_compress_50k": {
+  "median_s": 0.0108,
+  "min_s": 0.0103,
+  "max_s": 0.1495,
+  "transforms": [
+   "router:protected:user_message",
+   "router:protected:recent_code"
+  ],
+  "ratio": 0.0
+ },
+ "headroom_deterministic": true,
+ "ripwire_deterministic": true
+}
