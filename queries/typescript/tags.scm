@@ -31,11 +31,40 @@
 (method_definition
   name: (property_identifier) @name) @definition.method
 
+; `abstract foo(): T;` — the contract half of an abstract base. method_signature above only covers
+; .d.ts-style signatures; an abstract member is its own node, so before this pattern an abstract
+; class published its name and nothing a caller could bind to. 76 sites in openclaw — and --lego
+; reads exactly this shape when it lists an interface's method contract beside its implementors.
+(abstract_method_signature
+  name: (property_identifier) @name) @definition.method
+
+; `send = async (payload) => {..}` — a class field bound to a callable IS the class's callable
+; surface: reachable as `obj.send(...)` exactly like a method_definition, and the whole point of the
+; bound-method idiom. 287 sites in openclaw. Scoped to arrow/function VALUES on purpose: a
+; public_field_definition with any value at all is >5000 sites there (a --match floor), i.e. mostly
+; data members, and taking those would bury the map. Same reason the object-literal `pair` form
+; stays out — see test/tsshapefix/objectliteral.ts.
+(public_field_definition
+  name: (property_identifier) @name
+  value: [ (arrow_function) (function_expression) ]) @definition.method
+
 ; const foo = (..) => {..}  /  const foo = function(){..}  -> a named function
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
     value: [ (arrow_function) (function_expression) ])) @definition.function
+
+; the lazy-facade export: `export const f: M["f"] = ((...args) => ..) as M["f"];`. The cast puts an
+; as_expression (or satisfies_expression) where the pattern above looks for the arrow itself, so
+; every one of these read as an unnamed const and — not being SCREAMING_SNAKE — was dropped by the
+; convention gate. 105 sites in openclaw, and they are not marginal: that idiom is how its entire
+; public `src/plugin-sdk/` surface is written, so each miss was an exported API entry point --for
+; structurally could not surface.
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: [ (as_expression        (parenthesized_expression [ (arrow_function) (function_expression) ]))
+             (satisfies_expression (parenthesized_expression [ (arrow_function) (function_expression) ])) ])) @definition.function
 
 ; ---- module-level settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03) ----
 ; `const PASSWORD_HASHERS = [...]` at module scope: a settings/config constant is a real, rankable
