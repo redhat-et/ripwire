@@ -14,7 +14,8 @@ of milliseconds from a warm index — and labels every count it cannot prove is 
 [Measured](#measured) · [Tokens saved](#what-it-saves-you-in-tokens) ·
 [Lineage](#standing-on-the-whole-field) · [Honesty contract](#the-honesty-contract) ·
 [Agent setup](#set-it-up-in-your-coding-agent) ·
-[Prompt loops](#improve-it-with-your-agent) · [Docs](#documentation)
+[Prompt loops](#improve-it-with-your-agent) · [Docs](#documentation) ·
+[Slides](present/ripwire-showcase.pdf)
 
 ---
 
@@ -472,6 +473,7 @@ behind `--mentions`; Office and PDF join them through an optional bridge.
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
+| The whole tool in 18 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 

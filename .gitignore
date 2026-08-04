@@ -15,6 +15,9 @@ tsan*/
 .ripwire_*
 *.pptx.inspect.ndjson
 
+# present/: the deck generator's npm tree (rebuild with `npm install` in present/)
+/present/node_modules/
+
 # macOS
 .DS_Store
 
