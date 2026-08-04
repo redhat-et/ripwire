@@ -323,6 +323,15 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   and `--eval-skills` run the instruments from the binary.
 - **A differential argv harness** that replays a large fixed set of command lines against two binaries
   and requires every diff to be provably intended.
+- **A Linux hardware-counter backend for the self-profiler** (`-DRIPWIRE_PROFILE=ON` builds only),
+  behind the same one-surface contract as the existing Apple Silicon kperf/kpep backend: one
+  `perf_event_open` group per thread, **pinned** so the kernel never multiplexes it — a reported delta
+  is a raw truth or the column is absent, never a silent scale — read whole in one syscall, and
+  `exclude_kernel` so the stock `perf_event_paranoid=2` admits it without root. Where the kernel
+  exposes no PMU at all it arms software counters rather than going dark — see the vPMU-less entry
+  below — and degrades silently to plain timing only when the kernel offers nothing whatsoever.
+  `test/pmccheck.sh` asserts whichever arm (active/inactive) the
+  machine can express; see `bench/PROFILE.md` for the availability and validation story.
 - See `docs/EVALS.md` for what each instrument measures and every published number's provenance.
 
 ### Changed
@@ -334,6 +343,12 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   is now applied only when configuring on Apple Silicon; elsewhere the default is plain
   `-O2 -ffast-math -fno-finite-math-only`. `RIPWIRE_NATIVE=ON` (`-march=native`, a dev-machine opt-in)
   is unchanged, as is the PageRank no-reassociation contract and the sanitizer target.
+- **x86 SIMD kernels, output-identical.** The `dynamic_map` per-node rank scan and `FixedStr`'s
+  `operator==` now compile to SSE on x86_64, alongside the NEON kernels that already existed on
+  aarch64 — same count-of-true-lanes contract, no node-layout, width or API change, and a portable
+  scalar path everywhere else. `test/dynmapsimdcheck.sh` proves SIMD-vs-scalar parity under the full
+  sanitizer set and **fails a scalar-only build on a SIMD architecture**, so the gate cannot pass by
+  measuring nothing.
 - **BREAKING (output): canonical symbol IDs corrected.** A parse-recovery artifact published a
   function's *return type* as its class scope. *(Measured on one repository: 80 wrong canonical IDs in
   ordinary C++ corrected, plus 5 newly-correct IDs where the real enclosing namespace took over.)*
@@ -460,3 +475,13 @@ These are stated, not hidden, and each is measurable from the output itself:
   result `over_ceiling` rather than claiming a trim it did not perform.
 - **Release automation has never been executed end-to-end.** The tag-triggered build-and-attach
   workflow and the release-binary installer are untested until the first real tag push.
+- **The x86 64-bit-key rank kernels need SSE4.2.** `_mm_cmpgt_epi64` is not in the SSE2 baseline, so on
+  a stock `-march=x86-64` build the `int64`/`uint64` specializations — including the production
+  `dynamic_map<std::uint64_t, …>` instantiation — fall back to the scalar template. Build with
+  `-march=x86-64-v2` or `RIPWIRE_NATIVE=ON` to light them up. Correctness is identical either way; only
+  the scan width changes.
+- **The Linux counter backend's *active* path has not been run against real PMU hardware.** It is
+  validated for correctness, degrade behavior and the sanitizer set under x86-64 emulation and on
+  PMU-less VMs, where `perf_event_open` fails and the backend goes inactive as designed — which
+  exercises the inactive arm only. The live counting path awaits a bare-metal box; `bench/PROFILE.md`
+  carries the probe that tells you whether a candidate machine qualifies.

@@ -31,6 +31,29 @@ when the kernel offers nothing at all (`perf_event_paranoid>=3`, seccomp) does a
 to plain timing, silently; `test/pmccheck.sh` asserts whichever arm (active/inactive) the machine
 can express, and its inactive arm now also proves the kernel truly offered no counter.
 
+**Validation status, stated rather than implied.** The Apple backend's active path is exercised by the
+`sudo` run above, and its event-name resolution is verified through M5 Pro. The Linux backend's
+**active** path is not yet validated on real hardware: it has been run for correctness, degrade
+behavior and the full sanitizer set under x86-64 emulation and on PMU-less VMs, both of which can only
+express the *inactive* arm (`perf_event_open` fails, the backend reports `active()==false`, timing
+continues). Until it runs on a bare-metal box, treat Linux counter columns as unproven; the timing
+columns are unaffected either way.
+
+**Does this box have a PMU?** Ask before writing code against it — most virtualized hosts expose none.
+
+```sh
+perf stat -e cycles,instructions,branch-misses,cache-misses true   # `<not supported>` ⇒ no PMU, stop here
+cat /proc/sys/kernel/perf_event_paranoid                            # 2 is the stock value, and is enough
+```
+
+The first is the real discriminator: if the kernel reports `<not supported>` for the hardware events,
+no amount of privilege will help and the backend will correctly go inactive. `perf_event_paranoid` at
+its stock `2` suffices because every event is opened `exclude_kernel` — only the Debian/Ubuntu
+downstream `3`, which denies unprivileged perf entirely, forces the inactive arm on an otherwise
+capable box. There is nothing to check about `rdpmc`: the userspace mmap+`rdpmc` fast-path read is a
+bench-gated follow-up that does not exist yet, and today's backend always reads through the `read()`
+syscall on the group leader.
+
 **Historical, private corpus (not reproducible publicly):** every table below labeled against a
 large ~1500-2000-file private C++ corpus was measured on the owner's own codebase, which is not
 public. Re-run the `Reproduce` commands above against your own large repo to reproduce the shape;
