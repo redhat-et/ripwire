@@ -451,8 +451,11 @@ study, a sibling sweep, a live command tour, a showcase build — are listed wit
 
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
-GPU and CPU halves), Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON
-(config keys). Fifteen tree-sitter grammars, all vendored.
+GPU and CPU halves), **CUDA** (`.cu`/`.cuh` — indexed with the vendored `tree-sitter-cuda` grammar,
+so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--callers` of a kernel names
+its host-side launchers; dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
+JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON (config keys). Sixteen tree-sitter
+grammars, all vendored.
 
 Markdown, notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges
 behind `--mentions`; Office and PDF join them through an optional bridge.

@@ -338,7 +338,7 @@ inline std::string_view takeQualifiedIdent( std::string_view src, std::size_t& i
 inline bool isCFamilyPath( std::string_view path )
 {
     static constexpr std::string_view kExt[] = { ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
-                                                 ".inl", ".ipp", ".m", ".mm", ".metal" };
+                                                 ".inl", ".ipp", ".m", ".mm", ".metal", ".cu", ".cuh" };
     const std::size_t dot = path.rfind( '.' );
     if( dot == std::string_view::npos )
     {
