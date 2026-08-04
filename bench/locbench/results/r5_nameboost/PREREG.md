@@ -78,4 +78,10 @@ precedents this registration adopts now, while amendment is still legitimate:
 
 ## Outcome
 
-(unfilled at registration — the verdict lands here)
+**REJECT AT CALIBRATION (2026-08-04)** — no held-out run spent; see `gate_verdict.txt` for the full
+table, the flip ledger, and the choice post-mortem. The amendment-2 targeting audit passed twice
+(66.0%/58.8% exact-predicate gold fire-rate on the missed set), but no grid cell moved the
+multi-file primary off baseline: the trigger reaches gold, and the (score desc) choice among the
+~1,000+ fired symbols re-buries it (gold's median rank within the fired order: 33; top-maxLifted:
+1/97). Both django probes null. Default stays off; scaffolding retained. The next registration must
+audit the CHOICE statistic, not just the trigger fire-rate.

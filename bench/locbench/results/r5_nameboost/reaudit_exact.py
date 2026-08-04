@@ -12,7 +12,7 @@
 # Usage:
 #   python3 reaudit_exact.py --audit-json audit.json --work-dir <baseline work dir> \
 #       --ripwire /path/to/build/ripwire --out-json reaudit.json
-import argparse, json, pathlib, subprocess, sys
+import argparse, json, os, pathlib, subprocess, sys
 
 MIN_TOK_LENS = ( 4, 5 )
 
@@ -42,17 +42,23 @@ def main():
         row = dict( instance_id=inst_id, by_mintok={} )
         for mt in MIN_TOK_LENS:
             env = dict( RIPWIRE_NAMEBOOST=f"{mt},1", RIPWIRE_NAMEBOOST_AUDIT="1" )
-            import os
             proc = subprocess.run( [ a.ripwire, str( repo_path ), f"--for={query}", f"--top-k={a.top_k}",
                                      "--format=candidates", f"--cache={rich}" ],
                                    capture_output=True, text=True, timeout=600, env={ **os.environ, **env } )
             if proc.returncode != 0:
                 raise SystemExit( f"{inst_id}: ripwire rc={proc.returncode}: {proc.stderr[:300]}" )
             fired = []
+            base = os.path.realpath( repo_path )
             for line in proc.stderr.splitlines():
                 if line.startswith( "nameboost-audit:\t" ):
                     _, path, name = line.split( "\t", 2 )
-                    fired.append( ( path, name ) )
+                    # the audit tap prints the INDEXED path (absolute / work-dir form); missed_files are
+                    # repo-relative — normalize exactly like run_locbench.parse_candidates does
+                    real = os.path.realpath( path if os.path.isabs( path ) else os.path.join( base, path ) )
+                    rel = os.path.relpath( real, base ).replace( os.sep, "/" )
+                    if rel == ".." or rel.startswith( "../" ):
+                        rel = path.replace( os.sep, "/" )
+                    fired.append( ( rel, name ) )
             gold_fired = sum( 1 for p, _ in fired if p in missed )
             row["by_mintok"][str( mt )] = dict( fired=len( fired ), gold_file_fired_syms=gold_fired,
                                                 nongold_fired_syms=len( fired ) - gold_fired )

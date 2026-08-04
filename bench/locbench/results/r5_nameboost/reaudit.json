@@ -1,0 +1,1471 @@
+{
+  "gate_pass": true,
+  "n_missed": 97,
+  "summary": {
+    "4": {
+      "gold_fire_rate_file": 0.6597938144329897,
+      "mean_nongold_fired_syms": 1376.2164948453608
+    },
+    "5": {
+      "gold_fire_rate_file": 0.5876288659793815,
+      "mean_nongold_fired_syms": 857.3298969072165
+    }
+  },
+  "instances": [
+    {
+      "instance_id": "UXARRAY__uxarray-1117",
+      "by_mintok": {
+        "4": {
+          "fired": 236,
+          "gold_file_fired_syms": 12,
+          "nongold_fired_syms": 224
+        },
+        "5": {
+          "fired": 53,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 53
+        }
+      }
+    },
+    {
+      "instance_id": "internetarchive__openlibrary-7929",
+      "by_mintok": {
+        "4": {
+          "fired": 241,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 241
+        },
+        "5": {
+          "fired": 134,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 134
+        }
+      }
+    },
+    {
+      "instance_id": "rwth-i6__sisyphus-191",
+      "by_mintok": {
+        "4": {
+          "fired": 127,
+          "gold_file_fired_syms": 15,
+          "nongold_fired_syms": 112
+        },
+        "5": {
+          "fired": 59,
+          "gold_file_fired_syms": 11,
+          "nongold_fired_syms": 48
+        }
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-6836",
+      "by_mintok": {
+        "4": {
+          "fired": 37,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 34
+        },
+        "5": {
+          "fired": 34,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 32
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-5473",
+      "by_mintok": {
+        "4": {
+          "fired": 468,
+          "gold_file_fired_syms": 24,
+          "nongold_fired_syms": 444
+        },
+        "5": {
+          "fired": 254,
+          "gold_file_fired_syms": 8,
+          "nongold_fired_syms": 246
+        }
+      }
+    },
+    {
+      "instance_id": "tardis-sn__tardis-2782",
+      "by_mintok": {
+        "4": {
+          "fired": 40,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 39
+        },
+        "5": {
+          "fired": 40,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 39
+        }
+      }
+    },
+    {
+      "instance_id": "gammasim__simtools-1183",
+      "by_mintok": {
+        "4": {
+          "fired": 747,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 744
+        },
+        "5": {
+          "fired": 209,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 206
+        }
+      }
+    },
+    {
+      "instance_id": "ray-project__ray-26818",
+      "by_mintok": {
+        "4": {
+          "fired": 4730,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 4730
+        },
+        "5": {
+          "fired": 2133,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 2133
+        }
+      }
+    },
+    {
+      "instance_id": "huggingface__optimum-benchmark-266",
+      "by_mintok": {
+        "4": {
+          "fired": 66,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 65
+        },
+        "5": {
+          "fired": 26,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 26
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-12019",
+      "by_mintok": {
+        "4": {
+          "fired": 3849,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 3847
+        },
+        "5": {
+          "fired": 1164,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 1162
+        }
+      }
+    },
+    {
+      "instance_id": "pm4-graders__3ES-72",
+      "by_mintok": {
+        "4": {
+          "fired": 3,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 3
+        },
+        "5": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        }
+      }
+    },
+    {
+      "instance_id": "fortra__impacket-1636",
+      "by_mintok": {
+        "4": {
+          "fired": 143,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 140
+        },
+        "5": {
+          "fired": 136,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 133
+        }
+      }
+    },
+    {
+      "instance_id": "mathesar-foundation__mathesar-3117",
+      "by_mintok": {
+        "4": {
+          "fired": 389,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 387
+        },
+        "5": {
+          "fired": 260,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 258
+        }
+      }
+    },
+    {
+      "instance_id": "JackPlowman__repo_standards_validator-137",
+      "by_mintok": {
+        "4": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        },
+        "5": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        }
+      }
+    },
+    {
+      "instance_id": "internetarchive__openlibrary-3196",
+      "by_mintok": {
+        "4": {
+          "fired": 148,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 148
+        },
+        "5": {
+          "fired": 105,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 105
+        }
+      }
+    },
+    {
+      "instance_id": "webcompat__webcompat.com-2731",
+      "by_mintok": {
+        "4": {
+          "fired": 69,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 69
+        },
+        "5": {
+          "fired": 29,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 29
+        }
+      }
+    },
+    {
+      "instance_id": "airbnb__knowledge-repo-558",
+      "by_mintok": {
+        "4": {
+          "fired": 157,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 155
+        },
+        "5": {
+          "fired": 102,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 100
+        }
+      }
+    },
+    {
+      "instance_id": "scipy__scipy-5647",
+      "by_mintok": {
+        "4": {
+          "fired": 1417,
+          "gold_file_fired_syms": 35,
+          "nongold_fired_syms": 1382
+        },
+        "5": {
+          "fired": 661,
+          "gold_file_fired_syms": 14,
+          "nongold_fired_syms": 647
+        }
+      }
+    },
+    {
+      "instance_id": "matchms__matchms-backup-187",
+      "by_mintok": {
+        "4": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        },
+        "5": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        }
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-25114",
+      "by_mintok": {
+        "4": {
+          "fired": 133,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 132
+        },
+        "5": {
+          "fired": 79,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 78
+        }
+      }
+    },
+    {
+      "instance_id": "fractal-analytics-platform__fractal-tasks-core-889",
+      "by_mintok": {
+        "4": {
+          "fired": 97,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 97
+        },
+        "5": {
+          "fired": 47,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 47
+        }
+      }
+    },
+    {
+      "instance_id": "OpenEnergyPlatform__open-MaStR-598",
+      "by_mintok": {
+        "4": {
+          "fired": 73,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 73
+        },
+        "5": {
+          "fired": 45,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 45
+        }
+      }
+    },
+    {
+      "instance_id": "kedro-org__kedro-4367",
+      "by_mintok": {
+        "4": {
+          "fired": 1235,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1235
+        },
+        "5": {
+          "fired": 213,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 213
+        }
+      }
+    },
+    {
+      "instance_id": "Qiskit__qiskit-13052",
+      "by_mintok": {
+        "4": {
+          "fired": 3,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 3
+        },
+        "5": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-7209",
+      "by_mintok": {
+        "4": {
+          "fired": 561,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 561
+        },
+        "5": {
+          "fired": 340,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 340
+        }
+      }
+    },
+    {
+      "instance_id": "ckan__ckan-8226",
+      "by_mintok": {
+        "4": {
+          "fired": 1078,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 1075
+        },
+        "5": {
+          "fired": 750,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 749
+        }
+      }
+    },
+    {
+      "instance_id": "nautobot__nautobot-6364",
+      "by_mintok": {
+        "4": {
+          "fired": 2407,
+          "gold_file_fired_syms": 19,
+          "nongold_fired_syms": 2388
+        },
+        "5": {
+          "fired": 1973,
+          "gold_file_fired_syms": 17,
+          "nongold_fired_syms": 1956
+        }
+      }
+    },
+    {
+      "instance_id": "UXARRAY__uxarray-1144",
+      "by_mintok": {
+        "4": {
+          "fired": 74,
+          "gold_file_fired_syms": 6,
+          "nongold_fired_syms": 68
+        },
+        "5": {
+          "fired": 30,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 26
+        }
+      }
+    },
+    {
+      "instance_id": "nautobot__nautobot-6837",
+      "by_mintok": {
+        "4": {
+          "fired": 2152,
+          "gold_file_fired_syms": 154,
+          "nongold_fired_syms": 1998
+        },
+        "5": {
+          "fired": 1525,
+          "gold_file_fired_syms": 151,
+          "nongold_fired_syms": 1374
+        }
+      }
+    },
+    {
+      "instance_id": "hyeneung__tech-blog-hub-site-49",
+      "by_mintok": {
+        "4": {
+          "fired": 75,
+          "gold_file_fired_syms": 7,
+          "nongold_fired_syms": 68
+        },
+        "5": {
+          "fired": 33,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 28
+        }
+      }
+    },
+    {
+      "instance_id": "home-assistant__core-136739",
+      "by_mintok": {
+        "4": {
+          "fired": 10485,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 10482
+        },
+        "5": {
+          "fired": 8828,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 8825
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-9338",
+      "by_mintok": {
+        "4": {
+          "fired": 494,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 494
+        },
+        "5": {
+          "fired": 122,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 122
+        }
+      }
+    },
+    {
+      "instance_id": "Standard-Labs__real-intent-102",
+      "by_mintok": {
+        "4": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        },
+        "5": {
+          "fired": 0,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 0
+        }
+      }
+    },
+    {
+      "instance_id": "cupy__cupy-3730",
+      "by_mintok": {
+        "4": {
+          "fired": 166,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 165
+        },
+        "5": {
+          "fired": 38,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 37
+        }
+      }
+    },
+    {
+      "instance_id": "Qiskit__qiskit-13141",
+      "by_mintok": {
+        "4": {
+          "fired": 1085,
+          "gold_file_fired_syms": 15,
+          "nongold_fired_syms": 1070
+        },
+        "5": {
+          "fired": 477,
+          "gold_file_fired_syms": 6,
+          "nongold_fired_syms": 471
+        }
+      }
+    },
+    {
+      "instance_id": "oppia__oppia-14784",
+      "by_mintok": {
+        "4": {
+          "fired": 3291,
+          "gold_file_fired_syms": 58,
+          "nongold_fired_syms": 3233
+        },
+        "5": {
+          "fired": 2204,
+          "gold_file_fired_syms": 39,
+          "nongold_fired_syms": 2165
+        }
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-3438",
+      "by_mintok": {
+        "4": {
+          "fired": 134,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 134
+        },
+        "5": {
+          "fired": 79,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 79
+        }
+      }
+    },
+    {
+      "instance_id": "modin-project__modin-4391",
+      "by_mintok": {
+        "4": {
+          "fired": 974,
+          "gold_file_fired_syms": 31,
+          "nongold_fired_syms": 943
+        },
+        "5": {
+          "fired": 705,
+          "gold_file_fired_syms": 29,
+          "nongold_fired_syms": 676
+        }
+      }
+    },
+    {
+      "instance_id": "paperless-ngx__paperless-ngx-1227",
+      "by_mintok": {
+        "4": {
+          "fired": 279,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 275
+        },
+        "5": {
+          "fired": 218,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 214
+        }
+      }
+    },
+    {
+      "instance_id": "NatLibFi__Annif-610",
+      "by_mintok": {
+        "4": {
+          "fired": 70,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 68
+        },
+        "5": {
+          "fired": 69,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 67
+        }
+      }
+    },
+    {
+      "instance_id": "alexa-pi__AlexaPi-188",
+      "by_mintok": {
+        "4": {
+          "fired": 7,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 7
+        },
+        "5": {
+          "fired": 6,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 6
+        }
+      }
+    },
+    {
+      "instance_id": "Agenta-AI__agenta-1639",
+      "by_mintok": {
+        "4": {
+          "fired": 412,
+          "gold_file_fired_syms": 51,
+          "nongold_fired_syms": 361
+        },
+        "5": {
+          "fired": 371,
+          "gold_file_fired_syms": 48,
+          "nongold_fired_syms": 323
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-16328",
+      "by_mintok": {
+        "4": {
+          "fired": 4490,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 4489
+        },
+        "5": {
+          "fired": 1474,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1474
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-13367",
+      "by_mintok": {
+        "4": {
+          "fired": 1081,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 1076
+        },
+        "5": {
+          "fired": 665,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 660
+        }
+      }
+    },
+    {
+      "instance_id": "PrefectHQ__prefect-13366",
+      "by_mintok": {
+        "4": {
+          "fired": 1099,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 1094
+        },
+        "5": {
+          "fired": 703,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 698
+        }
+      }
+    },
+    {
+      "instance_id": "getmoto__moto-8401",
+      "by_mintok": {
+        "4": {
+          "fired": 11503,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 11503
+        },
+        "5": {
+          "fired": 3584,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 3584
+        }
+      }
+    },
+    {
+      "instance_id": "getmoto__moto-8390",
+      "by_mintok": {
+        "4": {
+          "fired": 3199,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 3195
+        },
+        "5": {
+          "fired": 2098,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 2094
+        }
+      }
+    },
+    {
+      "instance_id": "ray-project__ray-49118",
+      "by_mintok": {
+        "4": {
+          "fired": 9042,
+          "gold_file_fired_syms": 9,
+          "nongold_fired_syms": 9033
+        },
+        "5": {
+          "fired": 6446,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 6441
+        }
+      }
+    },
+    {
+      "instance_id": "bridgecrewio__checkov-6909",
+      "by_mintok": {
+        "4": {
+          "fired": 2077,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 2077
+        },
+        "5": {
+          "fired": 1481,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1481
+        }
+      }
+    },
+    {
+      "instance_id": "bridgecrewio__checkov-6828",
+      "by_mintok": {
+        "4": {
+          "fired": 5642,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 5641
+        },
+        "5": {
+          "fired": 480,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 479
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10198",
+      "by_mintok": {
+        "4": {
+          "fired": 593,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 592
+        },
+        "5": {
+          "fired": 340,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 339
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-9846",
+      "by_mintok": {
+        "4": {
+          "fired": 681,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 681
+        },
+        "5": {
+          "fired": 98,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 98
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11438",
+      "by_mintok": {
+        "4": {
+          "fired": 615,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 615
+        },
+        "5": {
+          "fired": 452,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 452
+        }
+      }
+    },
+    {
+      "instance_id": "py-pdf__pypdf-2934",
+      "by_mintok": {
+        "4": {
+          "fired": 428,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 427
+        },
+        "5": {
+          "fired": 187,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 187
+        }
+      }
+    },
+    {
+      "instance_id": "py-pdf__pypdf-2644",
+      "by_mintok": {
+        "4": {
+          "fired": 300,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 298
+        },
+        "5": {
+          "fired": 122,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 121
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5930",
+      "by_mintok": {
+        "4": {
+          "fired": 4745,
+          "gold_file_fired_syms": 10,
+          "nongold_fired_syms": 4735
+        },
+        "5": {
+          "fired": 3835,
+          "gold_file_fired_syms": 10,
+          "nongold_fired_syms": 3825
+        }
+      }
+    },
+    {
+      "instance_id": "networkx__networkx-7729",
+      "by_mintok": {
+        "4": {
+          "fired": 1943,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 1939
+        },
+        "5": {
+          "fired": 1381,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1381
+        }
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-24823",
+      "by_mintok": {
+        "4": {
+          "fired": 1541,
+          "gold_file_fired_syms": 32,
+          "nongold_fired_syms": 1509
+        },
+        "5": {
+          "fired": 891,
+          "gold_file_fired_syms": 21,
+          "nongold_fired_syms": 870
+        }
+      }
+    },
+    {
+      "instance_id": "jax-ml__jax-20862",
+      "by_mintok": {
+        "4": {
+          "fired": 1613,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1613
+        },
+        "5": {
+          "fired": 1141,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1141
+        }
+      }
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-6444",
+      "by_mintok": {
+        "4": {
+          "fired": 1177,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1177
+        },
+        "5": {
+          "fired": 1035,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1035
+        }
+      }
+    },
+    {
+      "instance_id": "sqlfluff__sqlfluff-6391",
+      "by_mintok": {
+        "4": {
+          "fired": 450,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 450
+        },
+        "5": {
+          "fired": 324,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 324
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5961",
+      "by_mintok": {
+        "4": {
+          "fired": 4001,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 4000
+        },
+        "5": {
+          "fired": 3121,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 3120
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5856",
+      "by_mintok": {
+        "4": {
+          "fired": 3988,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 3988
+        },
+        "5": {
+          "fired": 2813,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 2813
+        }
+      }
+    },
+    {
+      "instance_id": "prowler-cloud__prowler-5653",
+      "by_mintok": {
+        "4": {
+          "fired": 3986,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 3983
+        },
+        "5": {
+          "fired": 2616,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 2613
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-11073",
+      "by_mintok": {
+        "4": {
+          "fired": 1651,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1651
+        },
+        "5": {
+          "fired": 1362,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1362
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10903",
+      "by_mintok": {
+        "4": {
+          "fired": 680,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 678
+        },
+        "5": {
+          "fired": 374,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 373
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10778",
+      "by_mintok": {
+        "4": {
+          "fired": 524,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 524
+        },
+        "5": {
+          "fired": 312,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 312
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10620",
+      "by_mintok": {
+        "4": {
+          "fired": 431,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 431
+        },
+        "5": {
+          "fired": 223,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 223
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10536",
+      "by_mintok": {
+        "4": {
+          "fired": 1292,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 1292
+        },
+        "5": {
+          "fired": 996,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 996
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10398",
+      "by_mintok": {
+        "4": {
+          "fired": 2335,
+          "gold_file_fired_syms": 4,
+          "nongold_fired_syms": 2331
+        },
+        "5": {
+          "fired": 1151,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 1149
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10347",
+      "by_mintok": {
+        "4": {
+          "fired": 1826,
+          "gold_file_fired_syms": 10,
+          "nongold_fired_syms": 1816
+        },
+        "5": {
+          "fired": 1506,
+          "gold_file_fired_syms": 10,
+          "nongold_fired_syms": 1496
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-10076",
+      "by_mintok": {
+        "4": {
+          "fired": 777,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 775
+        },
+        "5": {
+          "fired": 481,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 480
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11734",
+      "by_mintok": {
+        "4": {
+          "fired": 2655,
+          "gold_file_fired_syms": 40,
+          "nongold_fired_syms": 2615
+        },
+        "5": {
+          "fired": 2562,
+          "gold_file_fired_syms": 40,
+          "nongold_fired_syms": 2522
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11711",
+      "by_mintok": {
+        "4": {
+          "fired": 596,
+          "gold_file_fired_syms": 20,
+          "nongold_fired_syms": 576
+        },
+        "5": {
+          "fired": 448,
+          "gold_file_fired_syms": 20,
+          "nongold_fired_syms": 428
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11683",
+      "by_mintok": {
+        "4": {
+          "fired": 808,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 808
+        },
+        "5": {
+          "fired": 569,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 569
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11667",
+      "by_mintok": {
+        "4": {
+          "fired": 2845,
+          "gold_file_fired_syms": 45,
+          "nongold_fired_syms": 2800
+        },
+        "5": {
+          "fired": 2632,
+          "gold_file_fired_syms": 44,
+          "nongold_fired_syms": 2588
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11645",
+      "by_mintok": {
+        "4": {
+          "fired": 629,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 627
+        },
+        "5": {
+          "fired": 485,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 483
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11644",
+      "by_mintok": {
+        "4": {
+          "fired": 613,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 612
+        },
+        "5": {
+          "fired": 470,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 470
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11636",
+      "by_mintok": {
+        "4": {
+          "fired": 785,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 784
+        },
+        "5": {
+          "fired": 643,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 642
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11624",
+      "by_mintok": {
+        "4": {
+          "fired": 405,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 404
+        },
+        "5": {
+          "fired": 264,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 263
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11596",
+      "by_mintok": {
+        "4": {
+          "fired": 616,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 615
+        },
+        "5": {
+          "fired": 471,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 470
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11555",
+      "by_mintok": {
+        "4": {
+          "fired": 399,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 398
+        },
+        "5": {
+          "fired": 258,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 257
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11542",
+      "by_mintok": {
+        "4": {
+          "fired": 594,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 594
+        },
+        "5": {
+          "fired": 450,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 450
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11534",
+      "by_mintok": {
+        "4": {
+          "fired": 656,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 656
+        },
+        "5": {
+          "fired": 413,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 413
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11530",
+      "by_mintok": {
+        "4": {
+          "fired": 600,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 595
+        },
+        "5": {
+          "fired": 454,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 449
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11527",
+      "by_mintok": {
+        "4": {
+          "fired": 649,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 647
+        },
+        "5": {
+          "fired": 489,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 487
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11513",
+      "by_mintok": {
+        "4": {
+          "fired": 756,
+          "gold_file_fired_syms": 10,
+          "nongold_fired_syms": 746
+        },
+        "5": {
+          "fired": 614,
+          "gold_file_fired_syms": 10,
+          "nongold_fired_syms": 604
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11478",
+      "by_mintok": {
+        "4": {
+          "fired": 697,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 697
+        },
+        "5": {
+          "fired": 552,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 552
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11472",
+      "by_mintok": {
+        "4": {
+          "fired": 626,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 625
+        },
+        "5": {
+          "fired": 483,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 483
+        }
+      }
+    },
+    {
+      "instance_id": "yt-dlp__yt-dlp-11466",
+      "by_mintok": {
+        "4": {
+          "fired": 2769,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 2767
+        },
+        "5": {
+          "fired": 2673,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 2671
+        }
+      }
+    },
+    {
+      "instance_id": "phidatahq__phidata-1582",
+      "by_mintok": {
+        "4": {
+          "fired": 1018,
+          "gold_file_fired_syms": 5,
+          "nongold_fired_syms": 1013
+        },
+        "5": {
+          "fired": 870,
+          "gold_file_fired_syms": 2,
+          "nongold_fired_syms": 868
+        }
+      }
+    },
+    {
+      "instance_id": "kedro-org__kedro-4299",
+      "by_mintok": {
+        "4": {
+          "fired": 152,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 151
+        },
+        "5": {
+          "fired": 125,
+          "gold_file_fired_syms": 1,
+          "nongold_fired_syms": 124
+        }
+      }
+    },
+    {
+      "instance_id": "flet-dev__flet-4425",
+      "by_mintok": {
+        "4": {
+          "fired": 797,
+          "gold_file_fired_syms": 22,
+          "nongold_fired_syms": 775
+        },
+        "5": {
+          "fired": 606,
+          "gold_file_fired_syms": 16,
+          "nongold_fired_syms": 590
+        }
+      }
+    },
+    {
+      "instance_id": "flet-dev__flet-4314",
+      "by_mintok": {
+        "4": {
+          "fired": 1353,
+          "gold_file_fired_syms": 21,
+          "nongold_fired_syms": 1332
+        },
+        "5": {
+          "fired": 962,
+          "gold_file_fired_syms": 19,
+          "nongold_fired_syms": 943
+        }
+      }
+    },
+    {
+      "instance_id": "langchain-ai__langgraph-2735",
+      "by_mintok": {
+        "4": {
+          "fired": 621,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 618
+        },
+        "5": {
+          "fired": 477,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 474
+        }
+      }
+    },
+    {
+      "instance_id": "langchain-ai__langgraph-2724",
+      "by_mintok": {
+        "4": {
+          "fired": 605,
+          "gold_file_fired_syms": 6,
+          "nongold_fired_syms": 599
+        },
+        "5": {
+          "fired": 468,
+          "gold_file_fired_syms": 3,
+          "nongold_fired_syms": 465
+        }
+      }
+    },
+    {
+      "instance_id": "vllm-project__vllm-9617",
+      "by_mintok": {
+        "4": {
+          "fired": 132,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 132
+        },
+        "5": {
+          "fired": 83,
+          "gold_file_fired_syms": 0,
+          "nongold_fired_syms": 83
+        }
+      }
+    }
+  ]
+}

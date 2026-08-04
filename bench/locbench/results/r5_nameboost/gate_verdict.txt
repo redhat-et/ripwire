@@ -1,0 +1,47 @@
+r5 query-noun-in-name lift (nameboost) — pre-registered verdict (2026-08-04)
+
+REJECT AT CALIBRATION — no held-out run was spent. Binary sha256 52e2d7dcc0001abb… @ d0e3018
+(worktree-pinned; byte-identical to the 786bf7a reference with the env unset), train split re-run on
+this binary lineage (train_base.json, n=254 — r4's baseline was pre-019ic constants and is stale),
+baseline + the full pre-registered 2x2 grid, amendment-1 PRIMARY = multi-file stratum strict@10:
+
+  cell    strict@10   single-file(n=205)   multi-file(n=49)  <- PRIMARY
+  base      61.81%       70.73%              24.49%
+  4,2       61.42%       70.24%              24.49%
+  4,4       61.42%       70.24%              24.49%
+  5,2       61.42%       70.24%              24.49%
+  5,4       61.81%       70.73%              24.49%
+
+Frozen selection rule: no cell exceeds baseline on the primary -> no candidate advances. Default
+stays off; env scaffolding retained (RIPWIRE_NAMEBOOST + the RIPWIRE_NAMEBOOST_AUDIT tap).
+
+Flip ledger (the entire @10 movement across all four cells): every cell LOSES yt-dlp-11827
+(single-file gold displaced 9 -> 10 by lifted non-gold rows); only 5,4 GAINS flet-4425 (10 -> 5,
+a genuine q07-shaped rescue) which exactly cancels its loss. The primary stratum never moved.
+
+The amendment-2 targeting audit PASSED before the grid — twice (Python mirror 69.1%/60.8%;
+production predicate via the audit tap 66.0%/58.8% at minTokLen 4/5, audit.json / reaudit.json) —
+so this round died one stage LATER than r4: the trigger reaches gold, the CHOICE re-buries it.
+
+Choice post-mortem (the finding worth the round): on the 97-instance missed set the trigger fires
+on a missed-gold-file symbol in 64/97 instances, but that symbol's median rank WITHIN the fired
+(score desc, id asc) order is 33 — top-2: 0/97, top-4: 1/97 (the single top-4 case IS the flet-4425
+gain). Ordering the fired set by current lens score re-ranks it by exactly the diluted subtoken-BM25
+signal whose failure the mechanism was registered to correct; the 2-4 ladder slots go to generic
+high-scoring fired symbols sitting just below the slot band. Probe illustration (django@70f39e46,
+q07, report-only): 1,588 symbols fire — "path"/"view"/"handler"/"chain"/"match" are all common code
+nouns at minTokLen=4 — and ResolverMatch is fired rank ~192. Both PREREG probes are null at every
+cell (q07 ResolverMatch never surfaces; q08 is_valid unchanged from baseline).
+
+What survives for the next pre-registration:
+- The r4 verdict precedents WORKED as designed (multi-file primary; audit before grid; no held-out
+  spend on a dead candidate) — but the audit gated on TRIGGER fire-rate, which passed while the
+  round was already dead at CHOICE. The next registration must audit the full mechanism statistic:
+  "gold within the top-maxLifted of the candidate ORDERING", computable on train for free before
+  any cell. A 0/97 there would have killed this round before the grid ran.
+- Name evidence LOCALIZES (66% of missed instances have a fired gold-file symbol) — detection is
+  not the gap; ordering within the fired set is. Two shaped directions, each with a measured
+  obstacle recorded here: (a) order fired symbols by name-match specificity (matched-token idf /
+  name-coverage) — but q07 shows full-coverage favors generic short names (View); (b) the
+  r3/r4-flagged FILE-LEVEL EVIDENCE POOLING, which sidesteps per-symbol choice entirely and
+  remains the strongest unspent hypothesis for the multi-file stratum.
