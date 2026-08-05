@@ -36,11 +36,13 @@ jobs:
             asset_arch: arm64
             asset_os: macos
           - name: macos-x64
-            os: macos-13 # Intel (x86-64) hosted runner — GitHub has been retiring Intel macOS runners;
-                         # if `macos-13` is gone by the time this first runs, replace this leg with a
-                         # cross-compile (`-arch x86_64` on a macos-14 runner) or drop the macos-x64 asset.
+            os: macos-14 # cross-compiled: the macos-13 Intel runner pool is retired — the v0.1.0 and
+                         # first v0.2.0 runs both left its leg queued until the 24h auto-cancel. Built
+                         # as x86_64 on the arm64 runner; the smoke-test still executes for real via
+                         # Rosetta 2 (installed on GitHub's macos-14 images).
             asset_arch: x64
             asset_os: macos
+            cmake_extra: -DCMAKE_OSX_ARCHITECTURES=x86_64
           - name: linux-x64
             os: ubuntu-24.04
             asset_arch: x64
@@ -61,7 +63,7 @@ jobs:
 
 
       - name: Configure (portable — no RIPWIRE_NATIVE, this binary ships to other machines)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra || '' }}
 
       - name: Build
         run: cmake --build build -j --target ripwire
