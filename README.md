@@ -7,57 +7,19 @@
 
 # ripwire
 
-**The ripgrep of AI context.** Point it at a repository and it answers structural questions in tens
-of milliseconds from a warm index — and labels every count it cannot prove is a total.
+**The ripgrep of AI context.** Point it at a repository; your coding agent gets a ranked,
+deterministic call graph instead of grepping around and reading whole files — orientation, blast
+radius, and which tests to run, answered in tens of milliseconds from a warm index.
 
-[Quickstart](#quickstart) · [What it answers](#what-it-answers) · [Real runs](#real-runs) ·
-[Measured](#measured) · [Tokens saved](#what-it-saves-you-in-tokens) ·
-[Lineage](#standing-on-the-whole-field) · [Honesty contract](#the-honesty-contract) ·
-[Agent setup](#set-it-up-in-your-coding-agent) ·
-[Prompt loops](#improve-it-with-your-agent) · [Docs](#documentation) ·
-[Slides](present/ripwire-showcase.pdf)
+On real mid-task coding questions it answers at **7.3%** of the tokens a grep-and-read pass costs,
+with warm queries at ~0.1 s. On the latest 60-instance head-to-head it puts **all** gold files in
+the top 10 on **58.3%** of instances, against **33.3%** for the best competitor tested — and it has
+won every benchmark round run so far. Zero runtime dependencies, C++23, builds with the network
+off. [The full tables, and the caveats that belong with them →](#measured)
 
----
-
-**Ten seconds.** No index server, no embeddings, no API key — a parse and a call graph, built on the
-spot:
-
-```
-$ ripwire . --callers=rankGraphTeleport
-<callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
-<s t="fn" n="runEval" p="./src/eval.h:133"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:1303"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1552"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:7246"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:7276"/>
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
-</callers>
-```
-
-`counts_floor="1"` is the point. Call edges are extracted from source text by name, so dynamic
-dispatch, callbacks and macro-generated call sites contribute no edge: `count="6"` is a **floor**,
-and the element says so before you read a single row. (Real output, wrapped for reading — it ships as
-one minified line, preceded by a legend comment that spells this out in full.)
-
-The name is the design. **rip**grep for the retrieval half: a zero-runtime-dependency C++23 binary
-that crawls a tree, extracts symbols with tree-sitter, resolves references into a call graph, ranks
-that graph with Personalized PageRank, and streams a deterministic minified XML map to stdout.
-Trip**wire** for the honesty half: every count it cannot prove is a total ships labelled a floor,
-every truncation is disclosed in the header, and a zero means *none found*, never *none exists*.
-
-Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
-contract, gated on every pull request and every push to main, not a tendency.
-
-On the latest 60-instance head-to-head against other context tools — same instances, same gold, same
-metric code — it puts **all** gold files in the top 10 on **58.3%** of them, against **33.3%** for the
-best competitor (repowise), at a **0.114 s** median (warm, with a pre-built index). An earlier round
-measured it against graphify, Aider's repo-map and codebase-memory-mcp; a third round measured it
-against **headroom**, the context-*compression* layer: on real coding questions headroom's default
-config passed code through untouched while ripwire answered at **7.3%** of a grep-and-read
-baseline's tokens — upstream selection beat downstream compression on every measure the two tools
-share (and the round's losses to the *naive baseline* are published first, with fix dispositions).
-It has won every round run so far.
-[The full tables, and the caveats that belong with them →](#against-other-tools)
+[Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
+[Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
+[Docs](#documentation) · [Slides](present/ripwire-showcase.pdf)
 
 ---
 
@@ -72,7 +34,7 @@ package manager to satisfy. Prove that with the network off: add
 git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
 cmake -S . -B build && cmake --build build -j
-./build/ripwire --help
+./build/ripwire .          # the ranked map — start here on an unfamiliar repo
 ```
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
@@ -81,7 +43,7 @@ present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
 Four commands worth learning first:
 
 ```bash
-ripwire .                                          # the ranked map — start here on an unfamiliar repo
+ripwire .                                          # the ranked map — start here
 ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
@@ -90,6 +52,17 @@ ripwire . --test-gate                              # before you commit: which te
 > **Do not** configure a local tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`,
 > which compiles the degrade-path alerts out and blinds the gates that assert them. CI builds both
 > flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+**The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
+floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
+contract, gated on every pull request and every push to main, not a tendency.
+[The full discipline — and the losses published next to the wins →](#the-honesty-contract)
+
+<!-- The name is the design: rip-grep for the retrieval half — a zero-runtime-dependency C++23
+     binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
+     graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
+     stdout — and trip-wire for the honesty half. -->
 
 ---
 
@@ -128,6 +101,25 @@ PageRank `k=` values, and the test-gate example's
 grows: **the ranked map** elides those specifically, and says so again at the point of use, and **the
 test gate** additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a
 trailing `…`.
+
+**Ten seconds, no index server, no embeddings, no API key** — a parse and a call graph, built on the
+spot:
+
+```
+$ ripwire . --callers=rankGraphTeleport
+<callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
+<s t="fn" n="runEval" p="./src/eval.h:133"/>
+<s t="fn" n="rankGraph" p="./src/graph.h:1303"/>
+<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1552"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:7246"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:7276"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
+</callers>
+```
+
+`counts_floor="1"` is the point. Call edges are extracted from source text by name, so dynamic
+dispatch, callbacks and macro-generated call sites contribute no edge: `count="6"` is a **floor**,
+and the element says so before you read a single row.
 
 **The ranked map** — the default run, capped to three symbols so it fits here:
 
