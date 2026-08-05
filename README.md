@@ -144,7 +144,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 ## What it answers
 
-Around the core sit 124 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 126 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
 [`docs/COMMANDS.md`](docs/COMMANDS.md) documents 101 of the flags with a real invocation and its
@@ -187,8 +187,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:8807"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:8843"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:8973"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9009"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -425,7 +425,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**27 repositories and 27 papers** into one deterministic executable, alongside a labelled
+**28 repositories and 30 papers** into one deterministic executable, alongside a labelled
 survey of 220 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables

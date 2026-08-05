@@ -3280,6 +3280,15 @@ inline constexpr const char* kCochangeRepoLegend =
     "<!-- ripwire cochange: file pairs that change together in git but share no transitive static dependency (surprising=1) = hidden coupling. "
     "together= is the number of commits in window= that touched BOTH files (3 or more, or the pair is not reported); "
     "deg= is that count over the commit count of the LESS-CHANGED of the two files, so 1.00 means the quieter file never changed without the other. "
+    "conf_ab= is that same fraction over a='s OWN commit count and conf_ba= over b='s, which is the asymmetric form: "
+    "conf_ab=1.00 means a never changed without b. deg= is by construction the larger of the two, and driver= names which side it came from "
+    "(\"a\" or \"b\") — the file whose changes most reliably imply the other's, and therefore the one to look at first. "
+    "driver= is OMITTED when the two directions are equal, because a tie is not a finding. "
+    "recur= is how many of sub_windows= the pair actually co-changed in: the mined window is cut into that many equal-COMMIT-COUNT slices "
+    "(not equal time — a calendar slice can hold 400 commits or 4), so recur=1 at any together= is one burst of activity and not a persistent "
+    "coupling, which is the distinction a single window cannot make. sub_windows= is the denominator and is never omitted; it is smaller than "
+    "the nominal 3 only when the window holds fewer commits than that. min_recur= appears when cochange-recur=K (the flag) filtered the rows, so a short "
+    "list is explained rather than silent. "
     "window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. "
     "surprising= is only defined where BOTH sides could carry a static dependency at all (the same "
     "dependency-capable predicate deps <health dep_files=> uses: source languages yes; sh, md, json, "
@@ -3290,9 +3299,126 @@ inline constexpr const char* kCochangeFileLegend =
     "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
     "together= is the number of commits in window= that touched BOTH this file and the partner (3 or more, or the partner is not reported); "
     "deg= is that count over commits=, THIS file's own commit count — a different denominator from the repo-wide pair form, which divides by the less-changed side. "
+    "deg= is therefore already DIRECTIONAL here (this file => partner: of your commits, the fraction that also touched the partner); conf_rev= is the other direction, "
+    "that same count over the PARTNER's own commit count. deg=1.00 means you never touch this file alone; conf_rev=1.00 means the partner never moves without you. "
+    "recur= is how many of sub_windows= equal-COMMIT-COUNT slices of window= the pair actually co-changed in, so recur=1 is one burst rather than a standing coupling; "
+    "sub_windows= is that denominator and min_recur= appears when cochange-recur=K (the flag) filtered the list. "
     "window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. "
     "surprising= is only defined where BOTH sides could carry a static dependency at all (the dependency-capable "
     "predicate deps <health dep_files=> uses); a pair with a dep-incapable side carries dep_capable=0 instead. raise the default cap with limit=N (offset=M pages) -->";
+
+// §CLIO — --cochange-groups' own legend. Mo/Cai/Kazman's Modularity Violation Group is the minimal set of
+// GROUPS covering all violating pairs (f_core, f_j), not a pair list: "X co-changes with {A,B,C}, none of
+// which it depends on" is one row that names the file to fix, where three pair rows leave the actionable
+// part implicit. The minimal cover is set cover and set cover is NP-hard, so what ships is the greedy
+// approximation — and the legend says so rather than letting groups= read as a proven minimum. Honesty
+// rule #3: a number that cannot be a minimum must not be spelled like one.
+inline constexpr const char* kCochangeGroupLegend =
+    "<!-- ripwire cochange groups: the surprising=1 violating pairs, collapsed around the file each group names. "
+    "core= is the file to look at; each <f p=> under it is a partner it co-changes with and has no transitive static dependency on, "
+    "so one group replaces its partners= pair rows. together=/recur=/conf_core= are that pair's own numbers: together= is the shared commit count, "
+    "recur= how many of sub_windows= equal-commit-count slices of window= it recurs in, and conf_core= is conf(core => partner) — of the CORE's commits, "
+    "the fraction that also touched this partner. groups= is a GREEDY cover, not a proven minimal one (minimum set cover is NP-hard): it is an upper "
+    "bound on the smallest number of groups, and repeatedly picking the file covering the most still-uncovered pairs is what produced it. "
+    "pairs_covered= is the total membership count and equals the number of surprising=1 pairs, because every violating pair lands in exactly one group. "
+    "min_recur= appears when cochange-recur=K (the flag) filtered the pairs BEFORE they were grouped. "
+    "Pairs that are not surprising=1, and pairs with a dep-incapable side (dep_capable=0), are not violations and are absent here — "
+    "drop the cochange-groups flag for the full pair list. raise the default cap with limit=N (offset=M pages) -->";
+
+// §CLIO — min_recur= is emitted by all three --cochange exits and was built three times. One builder, so a
+// later edit cannot teach one exit a spelling the others do not use (§P9.1's lesson, one attribute over).
+// Returns `buf` so it drops straight into a printf argument list; empty string when the filter is off.
+inline const char* coMinRecurAttr( char* buf, std::size_t cap, int minRecur )
+{
+    buf[ 0 ] = '\0';
+    if( minRecur > 0 )
+    {
+        std::snprintf( buf, cap, " min_recur=\"%d\"", minRecur );
+    }
+    return buf;
+}
+
+// §CLIO — one repo-wide co-change pair, and the document that renders them. `PR` used to be a struct local
+// to the --cochange branch; it moved out with the loop for the same reason the legends and the group form did.
+struct CoPairRow { std::uint32_t a, b, n; double deg, confAb, confBa; std::uint32_t recur; bool surprising; bool depCapable; };
+
+inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cfg, const std::vector<CoPairRow>& prs,
+                               const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
+                               int cap, const std::string& root )
+{
+    std::vector<char> esc;
+    const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
+
+    // §P8: this is the verb the audit caught red-handed — pairs="363" with 30 rows, and --limit=3 still
+    // emitted all 30, so a paging loop re-read page 0 forever. The window is honest now, and shown= /
+    // capped= reconcile pairs= against the rows that follow even with no --limit at all.
+    const rw::PageWindow prpw = rw::pageWindow( prs.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
+    char                 prab[ 192 ];
+    std::printf( "%s%s", kCochangeRepoLegend, rw::kAtStampLegend );   // sweep: ditto
+    std::printf( "<cochange pairs=\"%zu\" window=\"%s\" sub_windows=\"%u\"%s%s%s>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
+                 rw::pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
+                                     cfg.pageLimit, cfg.pageOffset, true ),
+                 rw::gitstamp::atAttr( root ).c_str() );   // §P8: same anchor as the per-file path above
+    for( std::size_t pairIndex = prpw.begin; pairIndex < prpw.end; ++pairIndex )
+    {
+        const CoPairRow& pr = prs[ pairIndex ];
+        // §CLIO driver=: the antecedent of the stronger rule. A TIE emits nothing — breaking it by fiat
+        // would hand the reader a claim the history does not make.
+        const char* driverAttr = ( pr.confAb > pr.confBa ) ? " driver=\"a\""
+                               : ( pr.confBa > pr.confAb ) ? " driver=\"b\""
+                                                           : "";
+        std::printf( "<pair a=\"%s\" b=\"%s\" together=\"%u\" deg=\"%.2f\" conf_ab=\"%.2f\" conf_ba=\"%.2f\"%s recur=\"%u\"%s/>",
+                     ex( ing.files[ pr.a ] ).c_str(), ex( ing.files[ pr.b ] ).c_str(),
+                     pr.n, pr.deg, pr.confAb, pr.confBa, driverAttr, pr.recur,
+                     rw::coPairAttr( pr.depCapable, pr.surprising ) );
+    }
+    std::printf( "</cochange>" );
+}
+
+// §CLIO — the --cochange-groups document, hoisted out of runMaintenanceViews for the reason the legends
+// above were: a 180-branch dispatcher is not where a rendering loop belongs, and the group form's own
+// disclosure rules (cover="greedy", pairs_covered= reconciling with the membership rows, conf_core= fixed
+// to the core's direction) are easier to check when they sit together. Pure output: the cover is already
+// computed by gitmine.h's cochangeViolationGroups, and `viol` is the vector its members index into.
+inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& cfg,
+                                const std::vector<rw::CoViolation>& viol, const std::vector<rw::CoGroup>& groups,
+                                const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
+                                int cap, const std::string& root )
+{
+    std::vector<char> esc;
+    const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
+
+    const rw::PageWindow gpw = rw::pageWindow( groups.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
+    char                 gab[ 192 ];
+    std::size_t          coveredTotal = 0;
+    for( const rw::CoGroup& g : groups )
+    {
+        coveredTotal += g.members.size();
+    }
+    std::printf( "%s%s", kCochangeGroupLegend, rw::kAtStampLegend );
+    std::printf( "<cochange groups=\"%zu\" pairs_covered=\"%zu\" cover=\"greedy\" window=\"%s\" sub_windows=\"%u\"%s%s%s>",
+                 groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr,
+                 rw::pageDisclosure( gab, sizeof( gab ), gpw.end - gpw.begin, groups.size(), gpw.end,
+                                     cfg.pageLimit, cfg.pageOffset, true ),
+                 rw::gitstamp::atAttr( root ).c_str() );
+    for( std::size_t gi = gpw.begin; gi < gpw.end; ++gi )
+    {
+        const rw::CoGroup& g = groups[ gi ];
+        std::printf( "<group core=\"%s\" partners=\"%zu\">", ex( ing.files[ g.core ] ).c_str(), g.members.size() );
+        for( std::size_t vi : g.members )
+        {
+            const rw::CoViolation& v       = viol[ vi ];
+            const std::uint32_t    partner = ( v.a == g.core ) ? v.b : v.a;
+            // conf_core= is always conf(core => partner): the group's subject IS the core, so the direction is
+            // fixed by the row rather than left for the reader to infer from an a/b ordering this form never prints.
+            const double           confCore = ( v.a == g.core ) ? v.confA : v.confB;
+            std::printf( "<f p=\"%s\" together=\"%u\" recur=\"%u\" conf_core=\"%.2f\"/>",
+                         ex( ing.files[ partner ] ).c_str(), v.together, v.recur, confCore );
+        }
+        std::printf( "</group>" );
+    }
+    std::printf( "</cochange>" );
+}
 
 std::optional<int> runMaintenanceViews( const MainDispatch& d )
 {
@@ -3516,27 +3642,41 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             const std::uint32_t fidRoot  = multiRoot ? ing.fileRoot[ fid ] : UINT32_MAX;
             const std::string&  fidRepo  = multiRoot ? ws[ fidRoot ].arg : root;
             const rw::SinceScope fidScope = multiRoot ? rw::resolveSinceScope( fidRepo, cfg.since ) : sinceScope;
-            std::uint32_t                commits = 0;
-            const std::vector<CoPartner> ps      = cochangePartners( fidRepo, ing, cfg.cochangeFile, commits,
-                                                                     cfg.since.empty() ? nullptr : &fidScope, fidRoot );
+            std::uint32_t                commits    = 0;
+            std::uint32_t                subWindows = 0;
+            std::vector<CoPartner>       ps         = cochangePartners( fidRepo, ing, cfg.cochangeFile, commits,
+                                                                        cfg.since.empty() ? nullptr : &fidScope, fidRoot, &subWindows );
+            // §CLIO: --cochange-recur=K drops the partners whose co-change does not RECUR across the mined
+            // window's sub-windows. Applied BEFORE partners= is counted, so partners= keeps meaning "the rows
+            // this run is reporting" and reconciles with shown=/capped= exactly as it always has; the reason
+            // the number shrank is published as min_recur= on the element rather than left to be inferred.
+            if( cfg.cochangeRecur > 0 )
+            {
+                const std::uint32_t minRecur = std::uint32_t( cfg.cochangeRecur );
+                ps.erase( std::remove_if( ps.begin(), ps.end(), [ & ]( const CoPartner& p ) { return p.recur < minRecur; } ), ps.end() );
+            }
             // §P8: partners= is the true total; shown=/capped= say how many of them actually follow, and
             // --limit/--offset window the (already deterministically sorted) partner list.
             const PageWindow  ppw = pageWindow( ps.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
             char              pab[ 192 ];
+            char              pminrec[ 40 ];
+            coMinRecurAttr( pminrec, sizeof( pminrec ), cfg.cochangeRecur );
             std::printf( "%s%s", kCochangeFileLegend, rw::kAtStampLegend );   // sweep: at= was undefined on this screen
             // §P8 vocabulary: at="<sha>[+dirty]" — cochange is a PURE git-history product (every number in
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
             // verb already calls, placed LAST on the element to match --hotspots' existing attribute order.
-            std::printf( "<cochange of=\"%s\" commits=\"%u\" window=\"%s\" partners=\"%zu\"%s%s>", ex( ing.files[fid] ).c_str(), commits, coWindowLabel.c_str(), ps.size(),
+            std::printf( "<cochange of=\"%s\" commits=\"%u\" window=\"%s\" sub_windows=\"%u\"%s partners=\"%zu\"%s%s>",
+                         ex( ing.files[fid] ).c_str(), commits, coWindowLabel.c_str(), subWindows, pminrec, ps.size(),
                          pageDisclosure( pab, sizeof( pab ), ppw.end - ppw.begin, ps.size(), ppw.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
                          gitstamp::atAttr( root ).c_str() );
             for( std::size_t partnerIndex = ppw.begin; partnerIndex < ppw.end; ++partnerIndex )
             {
-                std::printf( "<f p=\"%s\" together=\"%u\" deg=\"%.2f\"%s/>",
+                std::printf( "<f p=\"%s\" together=\"%u\" deg=\"%.2f\" conf_rev=\"%.2f\" recur=\"%u\"%s/>",
                              ex( ing.files[ ps[ partnerIndex ].fileId ] ).c_str(), ps[ partnerIndex ].together,
-                             ps[ partnerIndex ].deg, coPairAttr( ps[ partnerIndex ] ) );
+                             ps[ partnerIndex ].deg, ps[ partnerIndex ].degRev, ps[ partnerIndex ].recur,
+                             coPairAttr( ps[ partnerIndex ] ) );
             }
             std::printf( "</cochange>" );
             return 0;
@@ -3573,16 +3713,26 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 std::printf( "<!-- ripwire cochange: the since-window matched no commits — empty result, not an error (git history exists) -->" );
                 // The at= stamp belongs on the EMPTY result too — "no pairs at this HEAD" is itself a claim
                 // about a specific HEAD, and --hotspots' own zero-row path already stamps for that reason.
-                std::printf( "<cochange pairs=\"0\" commits=\"0\" window=\"%s\" shown=\"0\" capped=\"0\"%s></cochange>", coWindowLabel.c_str(), gitstamp::atAttr( root ).c_str() );
+                // sub_windows="0" is the literal truth on this path: no commit was mined, so no partition was
+                // made. Emitting the nominal 3 here would name a denominator that never existed.
+                std::printf( "<cochange pairs=\"0\" commits=\"0\" window=\"%s\" sub_windows=\"0\" shown=\"0\" capped=\"0\"%s></cochange>", coWindowLabel.c_str(), gitstamp::atAttr( root ).c_str() );
                 return 0;
             }
             std::fprintf( stderr, "ripwire --cochange: git unavailable / no history (need a git repo)\n" );
             return 1;
         }
+        // §CLIO: one cell per pair carrying BOTH the support count and the sub-window bitmask, rather than a
+        // second parallel map — the inner loop below is O(files-per-commit^2) under the 30-file bulk cap, so
+        // one hash probe per pair per commit instead of two is the difference that stays inside the warm
+        // latency budget on a big history.
+        struct CoCell { std::uint32_t n = 0; std::uint32_t subWindowMask = 0; };
+        const std::uint32_t                    subWindows = coEffectiveSubWindows( sets.size() );
         std::vector<std::uint32_t>             freq( ing.files.size(), 0 );
-        HashMap<std::uint64_t, std::uint32_t>  pair;                       // (lo<<32|hi) → co-change count
-        for( const auto& cs : sets )
+        HashMap<std::uint64_t, CoCell>         pair;                       // (lo<<32|hi) → co-change count + recurrence mask
+        for( std::size_t commitIndex = 0; commitIndex < sets.size(); ++commitIndex )
         {
+            const std::vector<std::uint32_t>& cs  = sets[ commitIndex ];
+            const std::uint32_t               bit = std::uint32_t( 1u ) << coSubWindowOf( commitIndex, sets.size(), subWindows );
             for( std::uint32_t f : cs )
             {
                 ++freq[f];
@@ -3591,7 +3741,9 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             {
                 for( std::size_t j = i + 1; j < cs.size(); ++j )
                 { // cs is sorted+unique → cs[i] < cs[j]
-                    ++pair[ ( std::uint64_t( cs[i] ) << 32 ) | cs[j] ];
+                    CoCell& cell = pair[ ( std::uint64_t( cs[i] ) << 32 ) | cs[j] ];
+                    ++cell.n;
+                    cell.subWindowMask |= bit;
                 }
             }
         }
@@ -3603,20 +3755,30 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         constexpr std::uint32_t kSupport = 3;                              // need ≥3 shared commits (kill coincidence)
 
         // repo-wide: the surprising couplings (high co-change, no static dep) — hidden architectural debt
-        struct PR { std::uint32_t a, b, n; double deg; bool surprising; bool depCapable; };
-        std::vector<PR> prs;
-        for( const auto& [k, n] : pair )
+        std::vector<CoPairRow>      prs;   // CoPairRow + its emitter are hoisted above — see emitCochangePairs
+        const std::uint32_t         minRecur = cfg.cochangeRecur > 0 ? std::uint32_t( cfg.cochangeRecur ) : 0u;
+        for( const auto& [k, cell] : pair )
         {
-            if( n < kSupport )
+            if( cell.n < kSupport )
             {
                 continue;
             }
+            const std::uint32_t recur = coRecurrenceOf( cell.subWindowMask );
+            if( recur < minRecur )
+            {
+                continue;   // §CLIO: filtered here so pairs= counts what is reported, and min_recur= on the element says why
+            }
             const std::uint32_t a = std::uint32_t( k >> 32 ), b = std::uint32_t( k );
             const std::uint32_t mn = std::min( freq[a], freq[b] );
+            // §CLIO directional confidence: conf(a=>b) over a's OWN commit count, conf(b=>a) over b's. deg=
+            // divides by the SMALLER count, so it is by construction max(confAb, confBa) — the same magnitude
+            // it has always been, now with the direction it came from recoverable.
             const bool isDepCapable = coPairDependencyCapable( ing, a, b );   // §A9.3, the same predicate the per-file path uses
-            prs.push_back( { a, b, n, mn ? double( n ) / mn : 0.0, isDepCapable && !staticDep( a, b ), isDepCapable } );
+            prs.push_back( { a, b, cell.n, mn ? double( cell.n ) / mn : 0.0,
+                             coConfidence( cell.n, freq[a] ), coConfidence( cell.n, freq[b] ), recur,
+                             isDepCapable && !staticDep( a, b ), isDepCapable } );
         }
-        std::sort( prs.begin(), prs.end(), [ & ]( const PR& x, const PR& y ) { // surprising-and-strong first
+        std::sort( prs.begin(), prs.end(), [ & ]( const CoPairRow& x, const CoPairRow& y ) { // surprising-and-strong first
             if( x.surprising != y.surprising )
             {
                 return x.surprising;
@@ -3627,24 +3789,28 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             }
             return x.n > y.n;
         } );
-        // §P8: this is the verb the audit caught red-handed — pairs="363" with 30 rows, and --limit=3 still
-        // emitted all 30, so a paging loop re-read page 0 forever. The window is honest now, and shown= /
-        // capped= reconcile pairs= against the rows that follow even with no --limit at all.
-        const PageWindow  prpw = pageWindow( prs.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
-        char              prab[ 192 ];
-        std::printf( "%s%s", kCochangeRepoLegend, rw::kAtStampLegend );   // sweep: ditto
-        std::printf( "<cochange pairs=\"%zu\" window=\"%s\"%s%s>", prs.size(), coWindowLabel.c_str(),
-                     pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
-                                     cfg.pageLimit, cfg.pageOffset, true ),
-                     gitstamp::atAttr( root ).c_str() );   // §P8: same anchor as the per-file path above
-        for( std::size_t pairIndex = prpw.begin; pairIndex < prpw.end; ++pairIndex )
+        char coMinRec[ 40 ];
+        coMinRecurAttr( coMinRec, sizeof( coMinRec ), cfg.cochangeRecur );   // shared with the per-file exit above
+
+        // --cochange-groups: the Modularity Violation GROUP form. The cover itself is gitmine.h's
+        // cochangeViolationGroups (domain logic, and the place its determinism argument belongs); this
+        // branch selects the violating pairs, hands them over, and renders the result.
+        if( cfg.cochangeGroups )
         {
-            std::printf( "<pair a=\"%s\" b=\"%s\" together=\"%u\" deg=\"%.2f\"%s/>",
-                         ex( ing.files[ prs[ pairIndex ].a ] ).c_str(), ex( ing.files[ prs[ pairIndex ].b ] ).c_str(),
-                         prs[ pairIndex ].n, prs[ pairIndex ].deg,
-                         coPairAttr( prs[ pairIndex ].depCapable, prs[ pairIndex ].surprising ) );
+            std::vector<CoViolation> viol;
+            for( const CoPairRow& p : prs )
+            {
+                if( p.surprising )
+                {
+                    viol.push_back( { p.a, p.b, p.n, p.recur, p.confAb, p.confBa } );
+                }
+            }
+            const std::vector<CoGroup> groups = cochangeViolationGroups( viol, ing.files.size() );
+            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, coMinRec, cap, root );
+            return 0;
         }
-        std::printf( "</cochange>" );
+
+        emitCochangePairs( ing, cfg, prs, coWindowLabel, subWindows, coMinRec, cap, root );
         return 0;
     }
 

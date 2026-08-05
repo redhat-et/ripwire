@@ -20,7 +20,7 @@ section, and it is not an afterthought.
 | **C++ localization benchmarks** | `bench/cppbench/`, `bench/multiswe/` | The same localization metric on C++ corpora, since the public localization datasets are Python-heavy. |
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 334 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 335 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -366,7 +366,7 @@ and these numbers prove **cheaper and faster, not better outcomes**.
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **334 gate scripts**, all of which exist on disk.
+naming **335 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -468,6 +468,41 @@ retrieval shape); SFML's are terse changelog summaries whose vocabulary barely o
 benchmark that produced *easier-looking* numbers from a *harder-to-publish* corpus is exactly the
 non-portable claim the caveats warn about. **The public number is the baseline going forward.**
 
+**`--cochange surprising="1"` was calibrated against the paper it reimplements, and a third of what
+it flags is intentional coupling.** The predicate is Clio's modularity violation (Wong/Cai/Kim/Dalton,
+ICSE 2011 — [`LINEAGE.md`](LINEAGE.md) §2), and Clio publishes **66% precision on Hadoop Common**
+(152/231 confirmed) and **40% on Eclipse JDT** (161/399). Those are the expected band, so the
+predicate was measured against it rather than assumed to clear it.
+
+Corpus: a private 1,648-commit, 2,718-file C++/Objective-C++ tree, default 18-month window,
+`together>=3`. Method: `--cochange --pack-top-n=200000 --no-cache`, categories assigned by path
+(a pair counts as test-coupling when exactly one side matches `test`/`spec`/`harness`/`bench`).
+
+| | pairs above the floor | `surprising="1"` | dependency-capable | flagged share |
+| --- | ---: | ---: | ---: | ---: |
+| no recurrence filter | 935 | 253 | 423 | **59.8%** |
+| `--cochange-recur=2` | 315 | 140 | 221 | 63.3% |
+| `--cochange-recur=3` | 98 | 47 | 86 | 54.7% |
+
+**That 59.8% is a *yield*, not a precision, and the two must not be compared directly.** Precision
+needs confirmed-defect ground truth — Clio used issue trackers and developer confirmation — and no
+such oracle exists for this corpus. What the composition *does* support is an upper bound. Of the 253
+flagged pairs, **82 (32.4%) are test↔subject or test↔test pairs**: a test moving with the code it
+tests is intentional coupling, not a design defect, and Clio would not count it. Excluding that class
+alone caps precision at **≤67.6%** — bracketing Clio's Hadoop figure from above and sitting well
+above its JDT figure. At least one further false positive has an independent, confirmed cause: the
+include extractor does not see an `#include` nested inside a `#if`/`#ifdef`, so a file whose body is
+wrapped in a feature guard reads as having almost no dependencies (one file in this corpus contributes
+1 of its ~29 includes to the graph, and its own header pairs with it as `surprising="1"`). **So the
+honest verdict is "consistent with the published band, with an upper bound that only just clears the
+better of the two figures" — not "better than Clio".**
+
+**Recurrence cuts volume, not composition — the two filters are orthogonal.** `--cochange-recur=2`
+removes 45% of the flagged pairs (253 → 140), but the test-coupling share is 32.4% before and 32.9%
+after. Recurrence is therefore not a substitute for excluding intentional relations, and the largest
+remaining precision gain available is classifying test↔subject pairs rather than filtering harder on
+time. That is recorded here as open headroom, not as a shipped filter.
+
 **Two ranking experiments produced no confirmed lift and did not ship.** `--anchor` and
 `--cochange-boost` are dropped from `--help` and refuse to run without an explicit development
 environment variable. One anchor-expansion candidate scored **+0.41pp** paired with a 95% lower bound
@@ -490,7 +525,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 334. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 335. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
