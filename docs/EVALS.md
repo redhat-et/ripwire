@@ -135,6 +135,41 @@ composite is **39% of the naive cost at equal satisfaction**. Loss buckets: 4 ra
 show: headroom's JSON/log home turf was not measured; single-shot library mode stood in for its
 proxy; one corpus, one language, fixed idealized agents on every arm.
 
+### Agent-in-the-loop: the Codex CLI pilot (2026-08-04/05)
+
+**Source:** `bench/agentloop/` (harness, README, tasks.lock); result records committed at
+[`bench/agentloop/results/pilot-6run.json`](../bench/agentloop/results/pilot-6run.json) and
+[`pilot-postguard.json`](../bench/agentloop/results/pilot-postguard.json), raw per-run Codex JSONL
+retained outside the tree (paths inside the records).
+
+**Setup.** `codex exec` (codex-cli 0.144.0-alpha.4, CLI default model), two arms on the same
+SWE-bench-Lite instances, seed-1 prompts, MCP disabled in both, per-run isolated `CODEX_HOME`;
+baseline has no skills and is told not to use ripwire, the treatment gets this checkout's skills
+and is required to make at least one ripwire CLI call. Three repos round-robin (Astropy, Requests,
+Xarray), `--evaluator none` — so these runs support **localization / token / wall claims only**,
+no resolve rates.
+
+**Round 1 (pre-guard skills).** Localization parity: both arms put a gold-patch file in the
+candidate diff on 6/6 runs, and `--for` ranked the gold file first in 3/3 treatment runs at ~600
+est tokens per reply. Cost was the loss: tokens_out ratio p50/p95 **+80.2% / +105.2%**, wall
+**+40.7% / +72.1%** (analyze.py, repo-clustered pairing). Diagnosis from the retained command
+streams: the retrieval was cheap and right — the overhead was the agent reading whole 2–6k-token
+SKILL.md bodies mid-task and adding ritual verbs a small fix never needed (three extra skill reads
+on a one-line change; `--quality-delta` three times on the Xarray feature fix).
+
+**The fix, unverified.** The stop rules moved into the skill FRONTMATTER the agent sees for free
+(commit `4fdaf48`: find-bug's evidence-sufficiency stop; quality-bar/change-check's
+single-line-leaf-fix skip). A same-day re-run of the two easy-task treatment runs was **aborted
+and is not published**: the Codex account's usage quota ran out during the verification, so its
+runs are not comparable to round 1. Until a clean re-run lands, the +80.2%/+105.2% loss above is
+the published state of the agent-loop pilot, and the guards are a fix *direction*, not a measured
+result.
+
+**What round 1 does NOT show:** one seed, three instances, `--evaluator none` (no resolve rates),
+Codex's model nondeterminism between runs, and a mid-pilot confound: the guard commit landed while
+the pilot ran, so the Xarray treatment run used guarded skills while the other two did not (its
+task is a multi-line fix the one-line skips deliberately do not cover).
+
 ---
 
 ## 3. LocBench — localization accuracy
