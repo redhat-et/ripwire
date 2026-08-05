@@ -59,6 +59,7 @@
 #include "skillscan.h"
 #include "htmlexport.h"
 #include "lintrules.h"
+#include "naminglens.h"     // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
 #include "prcontext.h"
 #include "ccjson.h"
 #include "cli.h"
@@ -8456,6 +8457,13 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
+        // naming-* (identifier-naming lens v1) — the rules, their lineage and their KNOWN-fact discipline are
+        // documented in src/naminglens.h; a rule that spent its budget comes back here to be disclosed as a floor.
+        for( std::string& namingRule : naminglens::appendNamingFindings( ing, kLintMaxPerRule, ms ) )
+        {
+            saturatedRules.push_back( { std::move( namingRule ), false } );
+        }
+
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
                    {
@@ -8472,6 +8480,8 @@ std::optional<int> runLint( const MainDispatch& d )
             "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
             "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
             "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
+            "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
+            "naming-predicate", "naming-setter", "naming-confusable", "naming-body-mismatch",
         };
 
         // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
