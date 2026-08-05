@@ -122,6 +122,19 @@ KL5="$( field "$RNK" lenient_r5 )"; KMRR="$( field "$RNK" mrr_lenient )"; KPOL="
 # 5→6. Ranker neutrality verified: with the new directory removed this lane scores lenient_r5=85.7%
 # on the same binary. New baseline 35/42=83.3%; EVALS-outranks-reports on exact-term queries is a
 # future ranking task, not a label edit.
+# 2026-08-04 floor 83→78: corpus growth again, not a ranker move — present/ (the showcase deck,
+# ed24daa) joined the doc corpus. Its README is a new same-class decoy for the task query "what is
+# deliberately not published and why": present/README.md (5.129) lands above gold docs/EVALS.md
+# (4.605), pushing it rank 5→6 — exactly one query, 35/42→34/42 = 83.3→81.0. Ranker neutrality
+# verified on the same binary: this tree with present/ removed AND a clean 786bf7a checkout both
+# score lenient_r5=83.3% with an otherwise-identical miss set. (bench/locbench/test_compare_gate.py,
+# blamed for an identical 81.0 in the r5 worktree, is exonerated at HEAD: it is tracked since the
+# initial import, sits in the 83.3% baseline tree, and removing it from HEAD leaves the lane at
+# 81.0.) New baseline 34/42=81.0%. Floor set at 78 — 3.0pt ≈ 1.3 queries under baseline — because
+# the r5 lesson is that a floor within one query (2.38pt) of baseline goes red on every same-class
+# doc the corpus gains. EVALS-outranks-decoy-READMEs on "publish"-term queries stays a future
+# ranking task, not a label edit.
+#
 #
 # 2026-08-05 floor 83→78, AND THE REASON THE MARGIN IS WIDER THIS TIME. Same mechanism, second
 # occurrence: the §CLIO --cochange round added a CHANGELOG.md entry that names a gate script ("Gate:
@@ -140,7 +153,7 @@ KL5="$( field "$RNK" lenient_r5 )"; KMRR="$( field "$RNK" mrr_lenient )"; KPOL="
 #   today's 81.0% while still catching a real collapse (the honest floor for a broken docs lens is
 #   2.1%, per the header above), and pollution5 — which IS the ranker-quality signal here — is
 #   unmoved at 3.3% on the affected class and stays pinned by its own ceiling.
-floor "$RL5" 78   && ok "recall lane lenient recall@5 ($RL5%) >= floor 78% (baseline 97.4%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 78%"
+floor "$RL5" 78   && ok "recall lane lenient recall@5 ($RL5%) >= floor 78% (baseline 81.0%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 78%"
 floor "$RMRR" 0.60 && ok "recall lane lenient MRR ($RMRR) >= floor 0.60 (exported-tree baseline 0.720)" || no "recall lane lenient MRR ($RMRR) under floor 0.60"
 ceil  "$RPOL" 16   && ok "recall lane pollution@5 ($RPOL%) <= ceiling 16% (exported-tree baseline 10.0%; see the composition note above)" || no "recall lane pollution@5 ($RPOL%) over ceiling 16% — generated/fixture docs are retaking --recall"
 floor "$KL5" 70   && ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (post-§P4 84.4%)"  || no "ranking lane lenient recall@5 ($KL5%) under floor 70%"
