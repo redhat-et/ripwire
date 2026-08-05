@@ -169,10 +169,26 @@ sections your question needs.
 6. **Behavioural coupling** — `ripwire <dir> --cochange`
    Bare `--cochange` emits ONLY the *surprising* pairs — files that change together in git but share **no
    static dependency** either way:
-   `<cochange pairs="N"><pair a="…" b="…" together="17" deg="1.00" surprising="1"/>…`
+   `<cochange pairs="N" sub_windows="3"><pair a="…" b="…" together="17" deg="1.00" conf_ab="1.00"
+   conf_ba="0.34" driver="a" recur="3" surprising="1"/>…`
    (`together` = commits co-appearing, `deg` = fraction of the rarer file's commits). Pure behavioural
    coupling — shared global state, parallel ownership, or an implicit protocol; statically-linked pairs are
    filtered out as expected. For ONE file's full partner list, `--cochange=FILE`.
+
+   **Read `recur=` before you act on a row.** It is how many of the header's `sub_windows=` equal-commit-count
+   slices of the window the pair actually co-changed in. `recur="1"` at any `together=` is a *single burst* —
+   a refactor sprint, a rename wave — not a standing coupling, and it is the biggest source of rows that look
+   alarming and are not. `ripwire <dir> --cochange --cochange-recur=2` drops them; the header then carries
+   `min_recur=` so the shorter list is explained rather than mysterious.
+
+   **`driver=` names the file to look at.** `conf_ab` is "of a's commits, the fraction that also touched b";
+   `conf_ba` is the reverse. `driver="a"` means a is the one that never moves alone, so a is where the
+   implicit dependency lives. `deg=` is just the larger of the two, and `driver=` is omitted on a tie.
+
+   **`ripwire <dir> --cochange --cochange-groups`** collapses the violating pairs around the file each one
+   implicates: `<group core="…" partners="3">` says "this file co-changes with three files it does not depend
+   on" in one row instead of three. That is the row to act on — it names the fix target. The cover is greedy
+   (`cover="greedy"`), so `groups=` is an upper bound on the minimum, not the minimum.
 
 7. **Structural coupling** — `ripwire <dir> --deps`
    `<deps>` with god-files ranked by `afferent` (dependents) and each file's `instab` (1 = leaf, 0 = core).

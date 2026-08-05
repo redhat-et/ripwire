@@ -13,6 +13,44 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Added — `--cochange` grows the three things the papers behind it already had
+
+`--cochange`'s `surprising="1"` predicate is an independent implementation of published work, now
+cited in [`docs/LINEAGE.md`](docs/LINEAGE.md) §2 (Wong/Cai/Kim/Dalton, ICSE 2011 — the Clio tool;
+Mo/Cai/Kazman/Xiao, IEEE TSE 2019; Gall/Hajek/Jazayeri, ICSM 1998; Code Maat in §3a). Reading those
+against the shipped predicate produced three additions:
+
+- **`recur=` and `sub_windows=` on every row.** Clio does not report a discrepancy the first time it
+  appears — it mines frequent patterns over the last five releases and reports only recurring ones.
+  ripwire mined one window, in which a one-week refactor sprint and an eighteen-month structural
+  defect both score `together=4`. The window is now cut into equal-**commit-count** sub-windows
+  (equal time would make the number a function of when the team took holiday) and `recur=` counts how
+  many contain a joint commit. `--cochange-recur=K` filters on it and the header publishes
+  `min_recur=` so a shortened list is explained. Measured on a 1,648-commit, 2,718-file C++/ObjC++
+  corpus: `recur>=2` removes **45%** of the surprising pairs (253 → 140) and `recur>=3` removes
+  **81%** (253 → 47).
+- **`--cochange-groups`.** Mo's Modularity Violation Group is the minimal set of *groups* covering the
+  violating pairs, not a pair list — "X co-changes with {A,B,C}, none of which it depends on" is one
+  row that names the file to fix. Same corpus: 253 pair rows collapse to **65 groups** (3.9 pairs per
+  group). The cover is greedy and says so (`cover="greedy"`); minimum set cover is NP-hard, so
+  `groups=` is an upper bound on the minimum, never the minimum.
+- **`conf_ab=` / `conf_ba=` / `driver=`, and `conf_rev=` on the per-file form.** Clio's confidence is
+  asymmetric — `conf = frq(x1 ∪ x2)/frq(x1)` — so "A always drags B" is distinguishable from the
+  reverse. ripwire's `deg=` divides by the quieter file, which is exactly the *larger* of the two
+  directions with the direction discarded; both are now emitted, `deg=` is documented as their max,
+  and `driver=` names the antecedent of the stronger rule. A tie emits no `driver=`.
+
+Calibration is published with the feature rather than after it. Clio reports 66% precision on Hadoop
+Common and 40% on Eclipse JDT; ripwire's measurable analogue on the corpus above is a **yield** of
+59.8% (flagged pairs over dependency-capable candidate pairs), which is not the same quantity — see
+[`docs/EVALS.md`](docs/EVALS.md) §7 for what was measured, what was not, and the upper bound on
+precision it supports.
+
+Gate: `test/cochangecliocheck.sh` (29 arms over a scripted 24-commit fixture repo whose oversized base
+commit also proves the 30-file bulk cap still fires).
+
 ## [0.2.1] — 2026-08-05
 
 Linux portability patch. The v0.2.0 Linux archives were built on `ubuntu-24.04` and required

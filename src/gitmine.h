@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <atomic>   // the join's once-per-process disclosure flags
+#include <bit>      // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -1851,6 +1852,157 @@ private:
     mutable HashMap<std::uint32_t, std::vector<char>>  memo_;
 };
 
+// ─── recurrence across sub-windows (Clio, ICSE 2011) ──────────────────────────────────────────────
+//
+// THE DEFECT THIS CLOSES. `--cochange` mined ONE window (18 months by default) and reported any pair
+// that cleared `together>=3` inside it. In that view a one-off refactor sprint — two files touched
+// together four times in one week, never again — is INDISTINGUISHABLE from a structural defect that
+// has bled for eighteen months. Both score together=4, both score deg=1.00, and the row says nothing
+// that separates them.
+//
+// Wong/Cai/Kim/Dalton's Clio (docs/LINEAGE.md §2) does not have that problem, because it does not
+// report a discrepancy the first time it appears: it mines frequent patterns over the LAST FIVE
+// RELEASES and reports only the ones that RECUR. Releases are not a concept this tool has — it reads
+// `git log`, not a tag taxonomy, and inferring releases from tags would be a per-project convention
+// dressed up as a measurement. The equivalent that IS derivable from the history alone is to cut the
+// mined window into equal-commit-count sub-windows and ask in how many of them the pair actually
+// co-changed. That is `recur=`.
+//
+// EQUAL COUNT, NOT EQUAL TIME, and the choice is load-bearing. A calendar third of an 18-month window
+// can contain 400 commits or 4 (holidays, a release freeze, a job change), so a time cut makes
+// recur= a function of when the team took time off. An equal-commit-count cut asks the question that
+// was meant: "did this pair keep coming back as the project moved", where "moved" is measured in
+// commits. It is also the deterministic choice — the chunk boundaries are a pure function of the
+// commit list the miner already holds, with no second clock read.
+//
+// THREE, and why the number is disclosed rather than tuned. Three is the smallest cut that can tell
+// "all in one place" from "spread out" at the support floor of 3 — with two sub-windows a genuinely
+// clustered pair still has an even chance of straddling the boundary. It is NOT swept, calibrated or
+// claimed optimal, which is exactly why every emitter publishes `sub_windows=` next to `recur=`: a
+// recurrence of 1 is uninterpretable until the reader knows the denominator, and the honesty rule
+// here is that a number mined over a partition names its partition.
+inline constexpr std::uint32_t kCoRecurSubWindows = 3;
+
+// The number of sub-windows actually used: fewer commits than sub-windows means the extra ones would
+// be empty, and an empty sub-window a pair could never appear in is a denominator that lies. Emitters
+// publish THIS, not the constant.
+inline std::uint32_t coEffectiveSubWindows( std::size_t commitCount ) noexcept
+{
+    return std::uint32_t( std::min<std::size_t>( kCoRecurSubWindows, commitCount ) );
+}
+
+// Sub-window index of commit `commitIndex` of `commitCount`, in the miner's own commit order. The
+// multiply-then-divide form spreads the remainder instead of piling it onto the last chunk, so with
+// 25 commits the cut is 9/8/8 rather than 8/8/9 — and it never indexes past `windows-1`, which is
+// what the mask below relies on. Order is git-log order (newest first); recur= counts DISTINCT
+// sub-windows, so which end is which cannot change the number and is not part of the contract.
+inline std::uint32_t coSubWindowOf( std::size_t commitIndex, std::size_t commitCount, std::uint32_t windows ) noexcept
+{
+    if( commitCount == 0 || windows == 0 )
+    {
+        return 0;
+    }
+    return std::uint32_t( ( commitIndex * windows ) / commitCount );
+}
+
+// recur= from the accumulated sub-window bitmask. A pair over the support floor has at least one
+// joint commit, so a zero mask is unreachable from a real pair — but VERIFY would be wrong here (a
+// caller may legitimately ask about a pair with no joint commit), so the clamp is silent and the
+// callers below only ever build masks from commits they actually saw.
+inline std::uint32_t coRecurrenceOf( std::uint32_t subWindowMask ) noexcept
+{
+    return std::uint32_t( std::popcount( subWindowMask ) );
+}
+
+// ─── directional (asymmetric) confidence — Clio's conf = frq(x1 U x2)/frq(x1) ──────────────────────
+//
+// `deg=` has always been support over the QUIETER of the two files, which is Code-Maat-shaped and is
+// exactly max(conf(a=>b), conf(b=>a)) — the right magnitude with the direction thrown away. A reader
+// met `deg="1.00"` and could not tell whether it meant "a never changes without b" or the reverse,
+// which is the difference between "fix a" and "fix b".
+//
+// conf(a=>b) = together / commits(a): of the commits that touched a, the fraction that also touched
+// b. The DRIVER is the antecedent of the stronger rule — the file whose changes most reliably imply
+// the other's, i.e. the one that cannot move alone. A tie is reported as a tie: `driver=` is omitted
+// rather than broken by an arbitrary rule a reader would take for a finding.
+inline double coConfidence( std::uint32_t together, std::uint32_t antecedentCommits ) noexcept
+{
+    return antecedentCommits ? double( together ) / double( antecedentCommits ) : 0.0;
+}
+
+// ─── Modularity Violation Groups (Mo/Cai/Kazman, IEEE TSE 2019) ───────────────────────────────────
+//
+// A pair list answers "which pairs are violating"; an MVG answers "which FILE do I fix", which is the
+// question the reader arrived with. Mo defines it as the MINIMAL SET OF GROUPS covering all violating
+// pairs (f_core, f_j) — so "X co-changes with {A,B,C}, none of which it depends on" is one actionable
+// row where three pair rows leave the actionable part implicit.
+//
+// Minimal cover is set cover, and set cover is NP-hard, so what ships is the textbook greedy
+// approximation: repeatedly take the file incident to the most still-uncovered violating pairs, emit
+// it as a core with exactly those partners, mark them covered. Every violating pair therefore lands
+// in exactly ONE group and the membership total reconciles with the violation count — the arithmetic
+// the emitter's legend promises. `groups.size()` is an UPPER BOUND on the minimum, never the minimum,
+// and the emitter says `cover="greedy"` for that reason: honesty rule #3 forbids spelling a number
+// that cannot be a minimum the way a minimum is spelled.
+//
+// DETERMINISM. Greedy has ties and a tie broken by hash order is a byte-unstable document. Degrees
+// are counted into a dense per-fileId vector and the winner is the LOWEST fileId among the maxima;
+// fileIds are assigned in sorted crawl order, so that is the lexicographically smallest path. The
+// input is sorted on (a, b) first, which is a total order because a pair's two fileIds are distinct.
+// The whole cover is thus a pure function of the violation set.
+struct CoViolation { std::uint32_t a, b, together, recur; double confA, confB; };
+struct CoGroup     { std::uint32_t core; std::vector<std::size_t> members; };   // members index into the input vector
+
+inline std::vector<CoGroup> cochangeViolationGroups( std::vector<CoViolation>& viol, std::size_t fileCount )
+{
+    std::sort( viol.begin(), viol.end(), []( const CoViolation& x, const CoViolation& y )
+               { return x.a != y.a ? x.a < y.a : x.b < y.b; } );
+
+    std::vector<CoGroup>       groups;
+    std::vector<char>          covered( viol.size(), 0 );
+    std::vector<std::uint32_t> degree( fileCount, 0 );
+    std::size_t                remaining = viol.size();
+    while( remaining > 0 )
+    {
+        std::fill( degree.begin(), degree.end(), 0u );
+        for( std::size_t vi = 0; vi < viol.size(); ++vi )
+        {
+            if( !covered[vi] )
+            {
+                ++degree[ viol[vi].a ];
+                ++degree[ viol[vi].b ];
+            }
+        }
+        std::uint32_t core = UINT32_MAX, best = 0;
+        for( std::uint32_t f = 0; f < degree.size(); ++f )
+        {   // strict > keeps the LOWEST fileId (= smallest path) among equal maxima
+            if( degree[f] > best )
+            {
+                best = degree[f];
+                core = f;
+            }
+        }
+        if( core == UINT32_MAX )
+        {   // unreachable while `remaining` counts the same set the degrees are built from — but a silent
+            // infinite loop is the failure mode if it ever is, so degrade loudly and stop covering.
+            DEGRADED_PATH_ALERT( "cochangeViolationGroups: uncovered pairs remain but no file carries one — cover abandoned" );
+            break;
+        }
+        CoGroup g{ core, {} };
+        for( std::size_t vi = 0; vi < viol.size(); ++vi )
+        {
+            if( !covered[vi] && ( viol[vi].a == core || viol[vi].b == core ) )
+            {
+                covered[vi] = 1;
+                g.members.push_back( vi );
+                --remaining;
+            }
+        }
+        groups.push_back( std::move( g ) );
+    }
+    return groups;
+}
+
 // ─── co-change partner ────────────────────────────────────────────────────────────────────────────
 
 // §A9.3 — surprising= means "changes together, yet NO static dependency explains it". For a pair where at
@@ -1872,7 +2024,11 @@ inline bool coPairDependencyCapable( const IngestResult& ing, std::uint32_t a, s
 
 // one co-change partner of a file (changes together in git history). `surprising` can only ever be true
 // when `depCapable` is — see coPairDependencyCapable above.
-struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; bool surprising; bool depCapable; };
+//   deg     = conf(probed => partner): of the PROBED file's commits, the fraction the partner shares.
+//   degRev  = conf(partner => probed): the other direction, over the PARTNER's own commit count.
+//             The pair form's symmetric deg= is max(deg, degRev) — see coConfidence above.
+//   recur   = how many of `subWindows` sub-windows contain a joint commit (Clio recurrence).
+struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable; };
 
 // The row's verdict attribute, rendered ONCE for all four emitters (--cochange repo-wide `<pair>`, its
 // per-file `<f>`, --pr-context's `<partner>`, and — via the JSON pair below — the MCP verb). Three states,
@@ -1900,10 +2056,16 @@ inline const char* coPairAttr( const CoPartner& p ) noexcept { return coPairAttr
 // spawning its own `git log` popen. A --situ / --pr-context call probes MANY files; mining once and sharing
 // `sets` across every probe kills the O(probes) subprocess storm (the same fix gitFileAuthors got). Pure: no
 // git, no I/O. Callers that probe one file (the CLI --cochange / MCP verb) use the git-driven wrapper below.
+// `outSubWindows` (optional): the recurrence denominator this call actually used, for the emitter's
+// `sub_windows=` disclosure. Nobody may publish recur= without it — see kCoRecurSubWindows above.
 inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::string_view fileSubstr, std::uint32_t& outCommits,
-                                                const std::vector<std::vector<std::uint32_t>>& sets )
+                                                const std::vector<std::vector<std::uint32_t>>& sets, std::uint32_t* outSubWindows = nullptr )
 {
     outCommits = 0;
+    if( outSubWindows )
+    {
+        *outSubWindows = coEffectiveSubWindows( sets.size() );
+    }
     std::vector<CoPartner> res;
     const std::uint32_t fid = resolveFileSuffix( ing, fileSubstr );
     if( fid == UINT32_MAX )
@@ -1915,10 +2077,16 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
         return res;
     }
 
+    // Clio recurrence: the SAME partition the repo-wide scan uses, from the shared helpers above, so
+    // the two paths cannot report different recur= for one pair (§P9.1's lesson, one attribute over).
+    const std::uint32_t subWindows = coEffectiveSubWindows( sets.size() );
+
     std::vector<std::uint32_t>            freq( ing.files.size(), 0 );
     HashMap<std::uint32_t, std::uint32_t> together;                          // other file id → shared commits
-    for( const auto& cs : sets )
+    HashMap<std::uint32_t, std::uint32_t> recurMask;                         // other file id → sub-windows containing a joint commit
+    for( std::size_t commitIndex = 0; commitIndex < sets.size(); ++commitIndex )
     {
+        const std::vector<std::uint32_t>& cs = sets[ commitIndex ];
         const bool has = std::binary_search( cs.begin(), cs.end(), fid );    // cs is sorted+unique
         for( std::uint32_t f : cs )
         {
@@ -1928,11 +2096,13 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
         {
             continue;
         }
+        const std::uint32_t bit = std::uint32_t( 1u ) << coSubWindowOf( commitIndex, sets.size(), subWindows );
         for( std::uint32_t f : cs )
         {
             if( f != fid )
             {
                 ++together[f];
+                recurMask[f] |= bit;
             }
         }
     }
@@ -1949,7 +2119,9 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
         {
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
             const bool isDepCapable = coPairDependencyCapable( ing, fid, other );
-            res.push_back( { other, n, freq[fid] ? double( n ) / freq[fid] : 0.0,
+            const auto maskIt       = recurMask.find( other );
+            res.push_back( { other, n, coConfidence( n, freq[fid] ), coConfidence( n, freq[other] ),
+                             coRecurrenceOf( maskIt == recurMask.end() ? 0u : maskIt->second ),
                              isDepCapable && !coupling.isStaticallyCoupled( fid, other ), isDepCapable } );
         }
     }
@@ -1963,16 +2135,21 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
 // (--situ / --pr-context) must hoist gitCommitFileSets("18 months ago", 30, scope) out of their loop and use
 // the overload above instead — see A4-P10.
 inline std::vector<CoPartner> cochangePartners( const std::string& root, const IngestResult& ing, std::string_view fileSubstr, std::uint32_t& outCommits, const SinceScope* scope = nullptr,
-                                                std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: mine ONLY within that root
+                                                std::uint32_t onlyRoot = UINT32_MAX,   // multi-root §5: mine ONLY within that root
+                                                std::uint32_t* outSubWindows = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: cochangePartners (--cochange)" );
     outCommits = 0;
+    if( outSubWindows )
+    {
+        *outSubWindows = 0;   // unknown file / no history ⇒ no partition was made, and the emitter must say 0, not 3
+    }
     if( resolveFileSuffix( ing, fileSubstr ) == UINT32_MAX )
     {
         return {}; // unknown file → no git call, as before
     }
     const auto sets = gitCommitFileSets( root, ing, "18 months ago", 30, scope, onlyRoot );
-    return cochangePartners( ing, fileSubstr, outCommits, sets );
+    return cochangePartners( ing, fileSubstr, outCommits, sets, outSubWindows );
 }
 
 // B3: cheap "could there be ANY git history above this root?" pre-check — a stat() walk up the directory
