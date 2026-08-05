@@ -82,7 +82,10 @@ jobs:
           cp build/ripwire "dist/${asset}/ripwire"
           cp README.md LICENSE "dist/${asset}/" 2>/dev/null || cp README.md "dist/${asset}/"
           tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
-          shasum -a 256 "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"
+          # basename inside the checksum file — `shasum -a 256 "dist/..."` bakes the dist/ prefix into
+          # the published .sha256, which breaks `shasum -c` beside the downloaded pair (and therefore
+          # scripts/install.sh's verification step, which checks exactly that way)
+          ( cd dist && shasum -a 256 "${asset}.tar.gz" > "${asset}.tar.gz.sha256" )
           echo "asset=${asset}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
