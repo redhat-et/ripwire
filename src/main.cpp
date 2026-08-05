@@ -8481,7 +8481,7 @@ std::optional<int> runLint( const MainDispatch& d )
             "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
             "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
             "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
-            "naming-predicate", "naming-setter", "naming-confusable", "naming-body-mismatch",
+            "naming-predicate", "naming-setter", "naming-confusable",
         };
 
         // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
