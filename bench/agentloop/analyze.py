@@ -40,15 +40,15 @@ def pair_by_task_seed( records ):
     for pairs where BOTH arms have status=='ok' (a completed run with real metrics). Anything else — a
     stub/not_implemented/errored run, or a one-sided completion — is reported separately, never silently
     dropped into the paired set (that would bias the paired comparison toward whichever arm happened to
-    finish more often)."""
+    finish more often). resolved=None (--evaluator none) still pairs: that stage's supported claims are
+    localization/token/wall, and analyze() reports the resolved stats themselves as n/a."""
     by_key = {}
     for r in records:
         by_key.setdefault( ( r["instance_id"], r["seed"] ), {} )[ r["arm"] ] = r
     paired, incomplete = [], []
     for ( instance_id, seed ), arms in sorted( by_key.items() ):
         base, ctx = arms.get( ARM_BASELINE ), arms.get( ARM_RIPWIRE )
-        if base and ctx and base["status"] == "ok" and ctx["status"] == "ok" \
-           and base["resolved"] is not None and ctx["resolved"] is not None:
+        if base and ctx and base["status"] == "ok" and ctx["status"] == "ok":
             paired.append( ( instance_id, base["repo"], seed, base, ctx ) )
         else:
             incomplete.append( ( instance_id, seed,
@@ -100,14 +100,18 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
     if not paired:
         out["note"] = "zero complete paired (baseline,ripwire_cli) runs — nothing to analyze yet"
         return out
-    rdeltas = [ resolved_delta( b, c ) for *_ , b, c in paired ]
+    # Resolution stats only over pairs BOTH arms actually scored (--evaluator swebench); an unscored
+    # run must surface as n/a, never as a fabricated 0.0 delta.
+    scored = [ p for p in paired if p[3]["resolved"] is not None and p[4]["resolved"] is not None ]
+    out["n_resolved_pairs"] = len( scored )
+    rdeltas = [ resolved_delta( b, c ) for *_ , b, c in scored ]
     ldeltas = [ loc_hit_delta( b, c ) for *_ , b, c in paired ]
-    lower, _ = clustered_bootstrap_lower( paired, resolved_delta, n_boot, bootstrap_seed )
+    lower = clustered_bootstrap_lower( scored, resolved_delta, n_boot, bootstrap_seed )[0] if scored else None
     tok_p50, tok_p95 = paired_ratio( paired, "tokens_out" )
     wall_p50, wall_p95 = paired_ratio( paired, "wall_seconds" )
     cost_p50, cost_p95 = paired_ratio( paired, "cost_usd" )
     out.update(
-        resolved_delta_mean=mean( rdeltas ),
+        resolved_delta_mean=mean( rdeltas ) if scored else None,
         resolved_delta_bootstrap_95_lower=lower,
         localization_hit_delta_mean=mean( ldeltas ),
         tokens_out_ratio_p50=tok_p50, tokens_out_ratio_p95=tok_p95,
@@ -124,7 +128,8 @@ def print_report( out ):
     if "note" in out:
         print( f"  {out['note']}" ); return
     print( f"  resolved-rate delta {pct(out['resolved_delta_mean'])}; "
-           f"repo-clustered bootstrap 95% lower {pct(out['resolved_delta_bootstrap_95_lower'])}" )
+           f"repo-clustered bootstrap 95% lower {pct(out['resolved_delta_bootstrap_95_lower'])} "
+           f"(over {out['n_resolved_pairs']} resolution-scored pairs)" )
     print( f"  localization-hit delta {pct(out['localization_hit_delta_mean'])}" )
     print( f"  tokens_out ratio p50/p95 {rat(out['tokens_out_ratio_p50'])}/{rat(out['tokens_out_ratio_p95'])}" )
     print( f"  wall_seconds ratio p50/p95 {rat(out['wall_seconds_ratio_p50'])}/{rat(out['wall_seconds_ratio_p95'])}" )
@@ -180,6 +185,20 @@ def self_test():
     if out["tokens_out_ratio_p50"] is None or abs( out["tokens_out_ratio_p50"] - 0.08 ) > 1e-6:
         failures.append( f"expected tokens_out ratio p50 == +8.0% exactly (fixture is deterministic), "
                           f"got {out['tokens_out_ratio_p50']}" )
+    if out.get( "n_resolved_pairs" ) != 27:
+        failures.append( f"expected all 27 pairs resolution-scored, got {out.get('n_resolved_pairs')}" )
+    # evaluator=none pilot mode: resolved is None in BOTH arms — pairs must still form so the
+    # localization/token/wall claims that stage supports remain analyzable; resolved stats say n/a.
+    unscored = [ dict( r, resolved=None ) for r in records ]
+    out2 = analyze( unscored, n_boot=100 )
+    if out2["n_pairs"] != 27:
+        failures.append( f"evaluator-none: expected 27 pairs, got {out2['n_pairs']}" )
+    if out2["n_resolved_pairs"] != 0:
+        failures.append( f"evaluator-none: expected 0 resolution-scored pairs, got {out2['n_resolved_pairs']}" )
+    if out2["resolved_delta_mean"] is not None or out2["resolved_delta_bootstrap_95_lower"] is not None:
+        failures.append( "evaluator-none: resolved stats must be n/a (None), never a fabricated zero" )
+    if out2["tokens_out_ratio_p50"] is None or abs( out2["tokens_out_ratio_p50"] - 0.08 ) > 1e-6:
+        failures.append( "evaluator-none: tokens_out ratio must still compute on unscored pairs" )
     if failures:
         print( "\nSELF-TEST FAIL:" )
         for f in failures: print( f"  - {f}" )
