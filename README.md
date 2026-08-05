@@ -76,9 +76,8 @@ wrong queries, so both numbers are published together. Reproduce with `ripwire <
 
 ## Quickstart
 
-**Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, glibc 2.28 floor:
-**RHEL / Alma / Rocky 8+**, CentOS Stream, Fedora, Ubuntu 20.04+, Debian 11+ — every release is
-smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
+**Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
+every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
 to `~/.local/bin`:
 
