@@ -371,15 +371,48 @@ def evaluate_patch( task, gold_row, patch, evaluator ):
     raise SystemExit( f"unknown --evaluator {evaluator!r}; expected 'swebench' or 'none'" )
 
 # ── the one seam a real harness fills in ──────────────────────────────────────────────────────────
+def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin ):
+    """Retain raw Codex JSONL under events/ and parse its token/command accounting into record fields.
+
+    Accepts str, bytes (TimeoutExpired hands over undecoded partial output), or None; anything
+    unparseable degrades field-by-field to nulls, never a crash — the retained file is the evidence."""
+    if isinstance( stdout, bytes ):
+        stdout = stdout.decode( "utf-8", errors="replace" )
+    stdout = stdout or ""
+    events_dir = pathlib.Path( work_dir ) / "events"
+    events_dir.mkdir( parents=True, exist_ok=True )
+    events_file = events_dir / f"{task['instance_id']}-{arm}-{seed}.jsonl"
+    events_file.write_text( stdout )
+    ( tokens_in, tokens_out, command_calls,
+      ripwire_calls, ripwire_commands ) = parse_codex_jsonl_metrics( stdout, ripwire_bin )
+    return dict( tokens_in=tokens_in, tokens_out=tokens_out, command_calls=command_calls,
+                 ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands,
+                 events_path=str( events_file ) )
+
+def _claude_metrics( stdout ):
+    """Parse the `claude -p --output-format json` single-result trailer into record fields.
+
+    TODO-verify: field names match the documented schema (top-level total_cost_usd;
+    usage.input_tokens/usage.output_tokens) as of the Claude Code CLI installed when this was written
+    (2.1.209) — re-check against a real trailer (e.g. via --live-one) before trusting these numbers in
+    an actual pilot; schema drift degrades accounting to nulls (make_record defaults), not a crash."""
+    try:
+        payload = json.loads( stdout )
+    except ValueError:
+        return {}
+    usage = payload.get( "usage" ) or {}
+    return dict( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
+                 cost_usd=payload.get( "total_cost_usd" ) )
+
 def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
              timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None ):
     """Execute ONE (task, arm, seed) run through the selected harness and return a filled record.
 
     Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
     for this run (checkout_repo()); (b) invoke the harness in that workspace with an arm-specific CLI
-    retrieval contract and no MCP servers; (c) capture wall-clock, the
-    --output-format json trailer's token/cost accounting (best-effort — see TODO-verify below), and the
-    workspace's final `git diff` as the candidate patch; (d) score it via evaluate_patch()."""
+    retrieval contract and no MCP servers; (c) capture wall-clock, token/cost accounting
+    (_codex_metrics()/_claude_metrics(), best-effort), and the workspace's final `git diff` as the
+    candidate patch; (d) score it via evaluate_patch()."""
     started = time.time()
     def _fail( status, error, **overrides ):
         return make_record( task, arm, seed, harness, model, status=status, error=error,
@@ -419,26 +452,10 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     except subprocess.TimeoutExpired as exc:
         diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout
         resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
-        partial = exc.stdout or ""
-        if isinstance( partial, bytes ):
-            partial = partial.decode( "utf-8", errors="replace" )
-        events_path = None
-        command_calls = ripwire_calls = None
-        ripwire_commands = None
-        tokens_in = tokens_out = None
-        if harness == "codex-exec":
-            events_dir = pathlib.Path( work_dir ) / "events"
-            events_dir.mkdir( parents=True, exist_ok=True )
-            events_file = events_dir / f"{task['instance_id']}-{arm}-{seed}.jsonl"
-            events_file.write_text( partial )
-            events_path = str( events_file )
-            ( tokens_in, tokens_out, command_calls, ripwire_calls,
-              ripwire_commands ) = parse_codex_jsonl_metrics( partial, ripwire_bin )
+        metrics = ( _codex_metrics( exc.stdout, work_dir, task, arm, seed, ripwire_bin )
+                    if harness == "codex-exec" else {} )
         return _fail( "timeout", f"{harness} exceeded {timeout_s}s", resolved=resolved,
-                      localization_hit=localization_hit, tokens_in=tokens_in, tokens_out=tokens_out,
-                      command_calls=command_calls, ripwire_calls=ripwire_calls,
-                      ripwire_commands=ripwire_commands,
-                      events_path=events_path, wall_seconds=float( timeout_s ) )
+                      localization_hit=localization_hit, wall_seconds=float( timeout_s ), **metrics )
     wall = time.perf_counter() - t0
 
     diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout   # candidate patch: working tree vs base_commit
@@ -447,39 +464,12 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
         return _fail( "error", f"{harness} exit {proc.returncode}: {(proc.stderr or '')[:2000]}",
                        wall_seconds=wall )
 
-    # TODO-verify: field names below match the documented `claude -p --output-format json` single-result
-    # schema (top-level total_cost_usd; usage.input_tokens/usage.output_tokens) as of the Claude Code CLI
-    # installed when this was written (2.1.209) — re-check against a real trailer (e.g. via --live-one)
-    # before trusting these numbers in an actual pilot; a schema drift here degrades to nulls, not a crash.
-    tokens_in = tokens_out = cost_usd = None
-    command_calls = ripwire_calls = None
-    ripwire_commands = events_path = None
-    if harness == "codex-exec":
-        events_dir = pathlib.Path( work_dir ) / "events"
-        events_dir.mkdir( parents=True, exist_ok=True )
-        events_file = events_dir / f"{task['instance_id']}-{arm}-{seed}.jsonl"
-        events_file.write_text( proc.stdout )
-        ( tokens_in, tokens_out, command_calls,
-          ripwire_calls, ripwire_commands ) = parse_codex_jsonl_metrics( proc.stdout, ripwire_bin )
-        events_path = str( events_file )
-    else:
-        try:
-            payload = json.loads( proc.stdout )
-            usage = payload.get( "usage" ) or {}
-            tokens_in = usage.get( "input_tokens" )
-            tokens_out = usage.get( "output_tokens" )
-            cost_usd = payload.get( "total_cost_usd" )
-        except ValueError:
-            pass   # schema drift degrades accounting to nulls; patch + evaluator status still stand
-
+    metrics = ( _codex_metrics( proc.stdout, work_dir, task, arm, seed, ripwire_bin )
+                if harness == "codex-exec" else _claude_metrics( proc.stdout ) )
     resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
     return make_record( task, arm, seed, harness, model, status="ok",
-                         resolved=resolved, localization_hit=localization_hit,
-                         tokens_in=tokens_in, tokens_out=tokens_out,
-                         wall_seconds=wall, cost_usd=cost_usd,
-                         command_calls=command_calls, ripwire_calls=ripwire_calls,
-                         ripwire_commands=ripwire_commands, events_path=events_path,
-                         started_unix=started, finished_unix=time.time() )
+                         resolved=resolved, localization_hit=localization_hit, wall_seconds=wall,
+                         started_unix=started, finished_unix=time.time(), **metrics )
 
 def main():
     ap = argparse.ArgumentParser( description="Phase B4 agent-in-the-loop eval runner (scaffolding)" )

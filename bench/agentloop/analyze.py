@@ -131,37 +131,34 @@ def print_report( out ):
     print( f"  cost_usd ratio p50/p95 {rat(out['cost_usd_ratio_p50'])}/{rat(out['cost_usd_ratio_p95'])}" )
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
+def _fixture_record( repo, instance_id, seed, arm, resolved, tokens_out, wall_seconds, cost_usd ):
+    return dict( instance_id=instance_id, repo=repo, base_commit="deadbeef",
+                 arm=arm, seed=seed, harness="fixture", model="fixture",
+                 status="ok", resolved=resolved, localization_hit=resolved,
+                 tokens_in=1000, tokens_out=tokens_out, wall_seconds=wall_seconds, cost_usd=cost_usd,
+                 command_calls=1,
+                 ripwire_calls=0 if arm == ARM_BASELINE else 1,
+                 ripwire_commands=[] if arm == ARM_BASELINE else [ "ripwire . --for=fixture" ],
+                 events_path=None,
+                 error=None, started_unix=0, finished_unix=0 )
+
 def synthetic_fixture():
     # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ripwire_cli resolves ~2/3 of the time,
     # baseline ~1/3 — a manufactured, unambiguous positive lift, so the bootstrap lower bound MUST be
     # positive (that's the assertion --self-test checks) and tokens/wall/cost are set to a mild,
     # deterministic ripwire_cli overhead (+8%) so the ratio math has something non-trivial to compute.
     rng = random.Random( "agentloop-selftest-fixture-v1" )
-    repos = [ "fake/repoA", "fake/repoB", "fake/repoC" ]
     records = []
-    for repo in repos:
+    for repo in ( "fake/repoA", "fake/repoB", "fake/repoC" ):
         for i in range( 3 ):
             instance_id = f"{repo.split('/')[1]}-{i}"
             for seed in ( 1, 2, 3 ):
-                base_resolved = rng.random() < 1/3
-                ctx_resolved  = rng.random() < 2/3
-                base_tokens, ctx_tokens = 10000, 10800
-                base_wall, ctx_wall = 120.0, 129.6
-                base_cost, ctx_cost = 0.50, 0.54
-                for arm, resolved, tokens, wall, cost in (
-                    ( ARM_BASELINE, base_resolved, base_tokens, base_wall, base_cost ),
-                    ( ARM_RIPWIRE,  ctx_resolved,  ctx_tokens,  ctx_wall,  ctx_cost ),
-                ):
-                    records.append( dict(
-                        instance_id=instance_id, repo=repo, base_commit="deadbeef",
-                        arm=arm, seed=seed, harness="fixture", model="fixture",
-                        status="ok", resolved=resolved, localization_hit=resolved,
-                        tokens_in=1000, tokens_out=tokens, wall_seconds=wall, cost_usd=cost,
-                        command_calls=1,
-                        ripwire_calls=0 if arm == ARM_BASELINE else 1,
-                        ripwire_commands=[] if arm == ARM_BASELINE else [ "ripwire . --for=fixture" ],
-                        events_path=None,
-                        error=None, started_unix=0, finished_unix=0 ) )
+                base_resolved = rng.random() < 1/3   # rng draw order is part of the fixture contract:
+                ctx_resolved  = rng.random() < 2/3   # baseline first, treatment second, per (instance, seed)
+                records.append( _fixture_record( repo, instance_id, seed, ARM_BASELINE, base_resolved,
+                                                 tokens_out=10000, wall_seconds=120.0, cost_usd=0.50 ) )
+                records.append( _fixture_record( repo, instance_id, seed, ARM_RIPWIRE, ctx_resolved,
+                                                 tokens_out=10800, wall_seconds=129.6, cost_usd=0.54 ) )
     # one deliberately incomplete pair (baseline never finished) — must land in n_incomplete, not paired.
     records.append( dict( instance_id="repoA-orphan", repo="fake/repoA", base_commit="deadbeef",
                           arm=ARM_RIPWIRE, seed=1, harness="fixture", model="fixture", status="ok",
