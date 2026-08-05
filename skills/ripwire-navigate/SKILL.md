@@ -5,8 +5,9 @@ description: >
   symbol reaches another, a full-body deep-dive of a named symbol with its callers/callees/design-docs, or
   find a literal / regex / AST-shape with its enclosing symbol. Use when you know (or can name) the symbol
   and need the call graph, its contract, or to locate code precisely — instead of grepping and guessing.
-  Also the answer to "is it safe to change X?" (blast radius, not just 1-hop callers).
-  Backed by ripwire (deterministic, on PATH).
+  Also the answer to "is it safe to change X?" (blast radius, not just 1-hop callers). Run the ONE verb
+  that matches the question; when its answer is unambiguous, stop — don't stack callers + callees +
+  impact as a ritual. Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

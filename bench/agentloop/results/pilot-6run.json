@@ -56,11 +56,11 @@
       "command_calls": 11,
       "ripwire_calls": 5,
       "ripwire_commands": [
-        "/bin/zsh -lc \"sed -n '1,240p' /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-find-bug/SKILL.md\"",
+        "/bin/zsh -lc \"sed -n '1,240p' <checkout>/skills/ripwire-find-bug/SKILL.md\"",
         "/bin/zsh -lc 'ripwire . --for=\"nested CompoundModel separability matrix computes independent branches as coupled\" --max-tokens=4000'",
-        "/bin/zsh -lc \"sed -n '1,220p' /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-reuse-first/SKILL.md\"",
+        "/bin/zsh -lc \"sed -n '1,220p' <checkout>/skills/ripwire-reuse-first/SKILL.md\"",
         "/bin/zsh -lc 'ripwire . --for=\"embed an existing coordinate matrix in the right block of a larger stacked matrix\"'",
-        "/bin/zsh -lc \"sed -n '1,240p' /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-quality-bar/SKILL.md && sed -n '1,280p' /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-change-check/SKILL.md\""
+        "/bin/zsh -lc \"sed -n '1,240p' <checkout>/skills/ripwire-quality-bar/SKILL.md && sed -n '1,280p' <checkout>/skills/ripwire-change-check/SKILL.md\""
       ],
       "events_path": "/private/tmp/ripwire-codex-cli-agentloop-v2/events/astropy__astropy-12907-ripwire_cli-1.jsonl",
       "error": null,
@@ -108,7 +108,7 @@
       "command_calls": 16,
       "ripwire_calls": 2,
       "ripwire_commands": [
-        "/bin/zsh -lc \"sed -n '1,240p' /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-find-bug/SKILL.md\"",
+        "/bin/zsh -lc \"sed -n '1,240p' <checkout>/skills/ripwire-find-bug/SKILL.md\"",
         "/bin/zsh -lc 'ripwire . --for=\"resolve redirects copies original request causing wrong method after 303 then 307\" --max-tokens=4000'"
       ],
       "events_path": "/private/tmp/ripwire-codex-cli-agentloop-v2/events/psf__requests-1963-ripwire_cli-1.jsonl",
@@ -157,9 +157,9 @@
       "command_calls": 26,
       "ripwire_calls": 6,
       "ripwire_commands": [
-        "/bin/zsh -lc 'cat /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-find-bug/SKILL.md'",
+        "/bin/zsh -lc 'cat <checkout>/skills/ripwire-find-bug/SKILL.md'",
         "/bin/zsh -lc 'ripwire . --for=\"concatenate datasets with different missing variables outer join\" --max-tokens=4000'",
-        "/bin/zsh -lc 'cat /Users/qgames/AppDevelopLocal/project2/ripwire/skills/ripwire-quality-bar/SKILL.md'",
+        "/bin/zsh -lc 'cat <checkout>/skills/ripwire-quality-bar/SKILL.md'",
         "/bin/zsh -lc 'ripwire . --quality-delta'",
         "/bin/zsh -lc 'ripwire . --quality-delta'",
         "/bin/zsh -lc 'ripwire . --quality-delta'"
