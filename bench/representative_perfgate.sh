@@ -35,7 +35,9 @@ while [ "$copyIndex" -lt 80 ]; do
     copyIndex=$(( copyIndex + 1 ))
 done
 fileCount="$( find "$CORPUS" -type f | wc -l | tr -d ' ' )"
-byteCount="$( find "$CORPUS" -type f -exec stat -f %z {} \; | awk '{s+=$1} END{print s+0}' )"
+# cat|wc -c, not stat: `stat -f %z` is BSD-only — GNU stat errors on it, byteCount summed to 0, and
+# this preflight exited 2 on every Linux CI runner (the flavour trap the cache gates document).
+byteCount="$( find "$CORPUS" -type f -exec cat {} + | wc -c | tr -d ' ' )"
 [ "$fileCount" = 480 ] || { echo "representative_perfgate: corpus shape mismatch: files=$fileCount"; exit 2; }
 [ "$byteCount" = 183040 ] || { echo "representative_perfgate: corpus shape mismatch: bytes=$byteCount"; exit 2; }
 "$BIN" "$CORPUS" --no-cache > "$TMP/default.out" 2>/dev/null || { echo "representative_perfgate: default preflight failed"; exit 1; }
