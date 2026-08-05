@@ -1554,6 +1554,40 @@ void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
     for( const std::string_view rule : rw::atoms::kAtomRuleNames ) { allRuleNames.emplace_back( rule ); }
 }
 
+// Fold the identifier-naming lens (src/naminglens.h) into the built-in lint set: its findings go straight
+// into ms, and a rule that spent its per-rule budget comes back here to be disclosed as a floor. Its rule
+// names are NOT appended — unlike the atoms pack they are spelled in runLint's allRuleNames table, because
+// the naming rules are symbol-level built-ins that were declared there before the pack existed. Lifted out
+// of runLint for the same reason mergeAtomsPack and lintSymbolLevelChecks were.
+void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules )
+{
+    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms ) )
+    {
+        saturatedRules.push_back( { std::move( namingRule ), false } );
+    }
+}
+
+// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text). sev and text are part of
+// the KEY, not decoration. (file, startByte, rule) alone is NOT a total order — one rule can emit two
+// findings at the same byte (naming-confusable pairs `rbegin` with both `begin` and `cbegin`, both
+// anchored at the symbol's own offset) — and std::sort is unstable, so tied rows came out in whatever
+// order the producers happened to have appended them. That made a VISIBLE part of the output depend on
+// the order the checks run in rather than on the data: a determinism contract held by accident, and it
+// flipped the moment the two built-in packs were merged from one call site instead of two. Everything a
+// reader can SEE is now in the key, so rows that still tie are byte-identical and dedupeLintFindings
+// collapses them. Lifted out of runLint for the same reason dedupeLintFindings was.
+void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
+{
+    std::sort( outs.begin(), outs.end(), [ & ]( const LintOut& x, const LintOut& y )
+    {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId]; }
+        if( x.startByte != y.startByte )                 { return x.startByte < y.startByte; }
+        if( x.rule != y.rule )                           { return x.rule < y.rule; }
+        if( x.sev != y.sev )                             { return x.sev < y.sev; }
+        return x.text < y.text;
+    } );
+}
+
 // §P6.1: two DIFFERENT AST captures (different startByte — e.g. the same magic-number value
 // spelled twice on one line, `h >> 33` appearing twice in the same expression) can still render
 // as a byte-identical <f> row, because the row carries only file:line — no column — so a reader
@@ -8264,6 +8298,18 @@ std::optional<int> runLint( const MainDispatch& d )
 
         std::vector<RuleCap> saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
 
+        // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
+        // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
+        // Declared BEFORE the --lint block so the atoms pack can append its own names from inside it (one
+        // guarded region instead of two, which is also what keeps runLint's branch count from growing per pack).
+        std::vector<std::string> allRuleNames = {
+            "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
+            "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
+            "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
+            "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
+            "naming-predicate", "naming-setter", "naming-confusable",
+        };
+
         if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
         {
         const std::vector<AstQuerySpec> checks = {
@@ -8486,12 +8532,12 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
-        // naming-* (identifier-naming lens v1) — the rules, their lineage and their KNOWN-fact discipline are
-        // documented in src/naminglens.h; a rule that spent its budget comes back here to be disclosed as a floor.
-        for( std::string& namingRule : naminglens::appendNamingFindings( ing, kLintMaxPerRule, ms ) )
-        {
-            saturatedRules.push_back( { std::move( namingRule ), false } );
-        }
+        // The two packs that live outside this function: the atoms-of-confusion pack (src/atoms.h) and the
+        // identifier-naming lens (src/naminglens.h). Each merges its own findings, its own floor disclosures
+        // and — for atoms, whose rule list is owned by the pack — its own rule names. Both run here, inside
+        // the one --lint guard, so the sort below covers every built-in finding regardless of its source.
+        mergeAtomsPack( ing, ms, saturatedRules, allRuleNames );
+        mergeNamingLens( ing, ms, saturatedRules );
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
@@ -8502,17 +8548,6 @@ std::optional<int> runLint( const MainDispatch& d )
 }
             return x.tag < y.tag; } );
         }   // if( cfg.lint ) — built-in checks
-
-        // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
-        // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
-        std::vector<std::string> allRuleNames = {
-            "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
-            "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
-            "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
-            "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
-            "naming-predicate", "naming-setter", "naming-confusable",
-        };
-        if( cfg.lint ) { mergeAtomsPack( ing, ms, saturatedRules, allRuleNames ); }   // the atoms pack appends last
 
         // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
         // at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
@@ -8546,14 +8581,9 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
-        // Final deterministic order over the COMBINED set: (file path, startByte, rule).
-        std::sort( outs.begin(), outs.end(), [ & ]( const LintOut& x, const LintOut& y )
-                   {
-            if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-            if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
-}
-            return x.rule < y.rule; } );
+        // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
+        // way out to the row's own text.
+        sortLintRows( ing, outs );
 
         // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
         // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
