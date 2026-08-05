@@ -7,81 +7,76 @@
 
 # ripwire
 
-**The ripgrep of AI context.** Point it at a repository and it answers structural questions in tens
-of milliseconds from a warm index — and labels every count it cannot prove is a total.
+## Give your coding agent a map before it reads the repo.
 
-[Quickstart](#quickstart) · [What it answers](#what-it-answers) · [Real runs](#real-runs) ·
-[Measured](#measured) · [Tokens saved](#what-it-saves-you-in-tokens) ·
-[Lineage](#standing-on-the-whole-field) · [Honesty contract](#the-honesty-contract) ·
-[Agent setup](#set-it-up-in-your-coding-agent) ·
-[Prompt loops](#improve-it-with-your-agent) · [Docs](#documentation) ·
-[Slides](present/ripwire-showcase.pdf)
+**ripwire is the ripgrep of AI context:** one zero-runtime-dependency binary that ranks the code,
+traces the call graph, measures change impact, and identifies the tests your coding agent should run.
 
----
+Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
 
-**Ten seconds.** No index server, no embeddings, no API key — a parse and a call graph, built on the
-spot:
-
-```
-$ ripwire . --callers=rankGraphTeleport
-<callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
-<s t="fn" n="runEval" p="./src/eval.h:133"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:1303"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1552"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:7246"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:7276"/>
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
-</callers>
+```bash
+ripwire . --for="incremental cache invalidation"
 ```
 
-`counts_floor="1"` is the point. Call edges are extracted from source text by name, so dynamic
-dispatch, callbacks and macro-generated call sites contribute no edge: `count="6"` is a **floor**,
-and the element says so before you read a single row. (Real output, wrapped for reading — it ships as
-one minified line, preceded by a legend comment that spells this out in full.)
+Instead of a grep-and-read expedition, the agent gets the relevant symbols, callers, change risks,
+and tests in one deterministic, token-budgeted answer.
 
-The name is the design. **rip**grep for the retrieval half: a zero-runtime-dependency C++23 binary
-that crawls a tree, extracts symbols with tree-sitter, resolves references into a call graph, ranks
-that graph with Personalized PageRank, and streams a deterministic minified XML map to stdout.
-Trip**wire** for the honesty half: every count it cannot prove is a total ships labelled a floor,
-every truncation is disclosed in the header, and a zero means *none found*, never *none exists*.
+| Measured result | ripwire |
+| --- | ---: |
+| Tokens vs a naive grep/read pass | **7.3%** |
+| Warm task query | **~0.1 s** |
+| All gold files in the top 10 | **58.3%** |
+| Best competitor in that paired round | **33.3%** |
+| Runtime dependencies | **0** |
 
-Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
-contract, gated on every pull request and every push to main, not a tendency.
+Those numbers have different instruments and important caveats; the losses ship beside the wins in
+[Measured](#measured) and [`docs/EVALS.md`](docs/EVALS.md). C++23, builds with the network off.
 
-On the latest 60-instance head-to-head against other context tools — same instances, same gold, same
-metric code — it puts **all** gold files in the top 10 on **58.3%** of them, against **33.3%** for the
-best competitor (repowise), at a **0.114 s** median (warm, with a pre-built index). An earlier round
-measured it against graphify, Aider's repo-map and codebase-memory-mcp; a third round measured it
-against **headroom**, the context-*compression* layer: on real coding questions headroom's default
-config passed code through untouched while ripwire answered at **7.3%** of a grep-and-read
-baseline's tokens — upstream selection beat downstream compression on every measure the two tools
-share (and the round's losses to the *naive baseline* are published first, with fix dispositions).
-It has won every round run so far.
-[The full tables, and the caveats that belong with them →](#against-other-tools)
+[Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
+[Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
+[Docs](#documentation) · [Slides](present/ripwire-showcase.pdf)
 
 ---
 
 ## Quickstart
 
-Requirements: CMake 3.24+ and a C++23 compiler. Nothing else — tree-sitter's core, all 15 grammars
-and the test framework are vendored under `third_party/deps`, so there is no download step and no
-package manager to satisfy. Prove that with the network off: add
-`-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
+**Prebuilt binary** (macOS / Linux, arm64 / x86-64) — downloads the latest
+[GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
+to `~/.local/bin`:
+
+```bash
+RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+```
+
+**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
+tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
+so there is no download step and no package manager to satisfy. Prove that with the network off:
+add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
 ```bash
 git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
 cmake -S . -B build && cmake --build build -j
-./build/ripwire --help
+./build/ripwire .          # the ranked map — start here on an unfamiliar repo
 ```
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
 
+Using OpenAI Codex? Put the binary on `PATH`, then install the bundled task-shaped skills so Codex
+knows which CLI query to use and when to stop reading:
+
+```bash
+skills/install.sh --codex       # canonical shared skills: ${AGENTS_HOME:-~/.agents}/skills
+```
+
+The CLI is the recommended baseline because it works in every shell-capable agent. An optional MCP
+server is also available for agents whose workflow benefits from persistent tool registration.
+
 Four commands worth learning first:
 
 ```bash
-ripwire .                                          # the ranked map — start here on an unfamiliar repo
+ripwire .                                          # the ranked map — start here
 ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
@@ -90,6 +85,17 @@ ripwire . --test-gate                              # before you commit: which te
 > **Do not** configure a local tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`,
 > which compiles the degrade-path alerts out and blinds the gates that assert them. CI builds both
 > flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+**The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
+floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
+contract, gated on every pull request and every push to main, not a tendency.
+[The full discipline — and the losses published next to the wins →](#the-honesty-contract)
+
+<!-- The name is the design: rip-grep for the retrieval half — a zero-runtime-dependency C++23
+     binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
+     graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
+     stdout — and trip-wire for the honesty half. -->
 
 ---
 
@@ -128,6 +134,25 @@ PageRank `k=` values, and the test-gate example's
 grows: **the ranked map** elides those specifically, and says so again at the point of use, and **the
 test gate** additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a
 trailing `…`.
+
+**Ten seconds, no index server, no embeddings, no API key** — a parse and a call graph, built on the
+spot:
+
+```
+$ ripwire . --callers=rankGraphTeleport
+<callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
+<s t="fn" n="runEval" p="./src/eval.h:168"/>
+<s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
+<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:8807"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:8843"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
+</callers>
+```
+
+`counts_floor="1"` is the point. Call edges are extracted from source text by name, so dynamic
+dispatch, callbacks and macro-generated call sites contribute no edge: `count="6"` is a **floor**,
+and the element says so before you read a single row.
 
 **The ranked map** — the default run, capped to three symbols so it fits here:
 
@@ -401,7 +426,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **312 gate scripts** and is the authoritative list;
+`test/regression.sh` names **334 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -426,7 +451,7 @@ config — you read the line, then run it.
 ```bash
 ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
 ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
-ripwire wrap codex       # MCP:      the [mcp_servers.ripwire] stanza for ~/.codex/config.toml
+ripwire wrap codex       # MCP:      codex mcp add ripwire -- ripwire --mcp (+ TOML fallback)
 ripwire wrap windsurf    # MCP:      that client's stanza
 ripwire wrap gemini      # MCP:      that client's stanza
 ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
@@ -468,12 +493,13 @@ immediately:
 
 ```bash
 skills/install.sh                 # → ~/.claude/skills
+skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canonical Codex/agent path)
+skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather
 ```
 
-The script's own header documents its other modes, including Codex and an opt-in advisory PreToolUse
-hook.
+The script's own header documents its other modes, including the opt-in advisory PreToolUse hook.
 
 ---
 

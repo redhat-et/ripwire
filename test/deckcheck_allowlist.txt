@@ -37,3 +37,5 @@
 --scan-skillsdir	GitHub heading-anchor slug in README.md's deep link to docs/COMMANDS.md's --scan-skills[=DIR] section (github-slugger strips [=]); an anchor, not a flag claim
 --depth	git's own flag ("git clone --depth 1", GitHub actions/checkout's default) named in CONTRIBUTING.md §1's Linux note where a shallow clone is called out as what reddens the churn gates, not a ripwire flag
 --no-prose	repowise (competitor) flag, quoted in docs/EVALS.md §2 r2 head-to-head arm description — not a ripwire flag
+--codex	skills/install.sh's canonical Codex destination mode, not a ripwire binary flag
+--codex-legacy	skills/install.sh's compatibility mode for older CODEX_HOME skill installs, not a ripwire binary flag

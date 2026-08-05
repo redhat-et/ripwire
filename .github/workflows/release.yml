@@ -36,11 +36,13 @@ jobs:
             asset_arch: arm64
             asset_os: macos
           - name: macos-x64
-            os: macos-13 # Intel (x86-64) hosted runner — GitHub has been retiring Intel macOS runners;
-                         # if `macos-13` is gone by the time this first runs, replace this leg with a
-                         # cross-compile (`-arch x86_64` on a macos-14 runner) or drop the macos-x64 asset.
+            os: macos-14 # cross-compiled: the macos-13 Intel runner pool is retired — the v0.1.0 and
+                         # first v0.2.0 runs both left its leg queued until the 24h auto-cancel. Built
+                         # as x86_64 on the arm64 runner; the smoke-test still executes for real via
+                         # Rosetta 2 (installed on GitHub's macos-14 images).
             asset_arch: x64
             asset_os: macos
+            cmake_extra: -DCMAKE_OSX_ARCHITECTURES=x86_64
           - name: linux-x64
             os: ubuntu-24.04
             asset_arch: x64
@@ -61,7 +63,7 @@ jobs:
 
 
       - name: Configure (portable — no RIPWIRE_NATIVE, this binary ships to other machines)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra || '' }}
 
       - name: Build
         run: cmake --build build -j --target ripwire
@@ -80,7 +82,10 @@ jobs:
           cp build/ripwire "dist/${asset}/ripwire"
           cp README.md LICENSE "dist/${asset}/" 2>/dev/null || cp README.md "dist/${asset}/"
           tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
-          shasum -a 256 "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"
+          # basename inside the checksum file — `shasum -a 256 "dist/..."` bakes the dist/ prefix into
+          # the published .sha256, which breaks `shasum -c` beside the downloaded pair (and therefore
+          # scripts/install.sh's verification step, which checks exactly that way)
+          ( cd dist && shasum -a 256 "${asset}.tar.gz" > "${asset}.tar.gz.sha256" )
           echo "asset=${asset}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4

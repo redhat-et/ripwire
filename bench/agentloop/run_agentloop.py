@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# run_agentloop.py — Phase B4 agent-in-the-loop eval RUNNER (SKELETON — no paid LLM calls yet).
+# run_agentloop.py — Phase B4 agent-in-the-loop eval runner.
 #
 # WHAT THIS IS. The Phase B4 / R4 eval-methodology design: the
 # stack currently measures retrieval quality (LocBench) but never the thing that actually matters —
@@ -11,7 +11,7 @@
 #
 # DESIGN (from R4-eval-methodology.md "Minimal agent-in-the-loop eval design"):
 #   Arms:   baseline    = agent with grep/read/glob only (no ripwire)
-#           ripwire_mcp = same agent + ripwire wired in as an MCP server
+#           ripwire_cli = same agent required to begin retrieval with ripwire's CLI
 #   Seeds:  K=3 per (task, arm) — single-seed SWE-bench numbers are an unreliable "lucky pass"
 #           (https://arxiv.org/pdf/2605.12925); vary only the RNG/sampling seed, hold model+prompt fixed
 #           (Terminal-Bench "vary only the harness" template, https://arxiv.org/html/2601.11868v1).
@@ -31,17 +31,13 @@
 #   error          — str|null
 #   started_unix / finished_unix
 #
-# EXEC STUB — candidate (A) is now WIRED (see run_one()); (B) documented but not implemented:
+# EXEC HARNESSES — Claude Code and Codex are wired; SWE-agent remains deliberately unimplemented:
 #   (A) `claude -p` (Claude Code print/non-interactive mode) with a tool allowlist — IMPLEMENTED below.
-#       The exact invocation per arm (see ALLOWED_TOOLS_BASELINE/ALLOWED_TOOLS_RIPWIRE and run_one()):
+#       Both arms expose the same ordinary shell/read/edit tools and no MCP server. The treatment prompt
+#       requires ripwire's CLI; retained command evidence is currently Codex-only.
 #         claude -p "<task prompt built from problem_statement + seed suffix>" \
 #           --permission-mode acceptEdits --output-format json --strict-mcp-config \
-#           --allowedTools "Bash,Read,Glob,Grep,Edit,Write"                              # baseline arm
-#           --allowedTools "Bash,Read,Glob,Grep,Edit,Write,mcp__ripwire__*" \
-#           --mcp-config <generated ripwire-mcp.json>                                    # ripwire_mcp arm
-#       The MCP config registers `ripwire --mcp` (verified against skills/ripwire-mcp/SKILL.md +
-#       src/cli.h — NOT `ripwire --mcp <workspace>`; the server is stdio with no positional root, each
-#       MCP verb call carries its own path/paths per request — see write_mcp_config()).
+#           --allowedTools "Bash,Read,Glob,Grep,Edit,Write"
 #       No Docker sandbox here: each run gets a plain git checkout (see checkout_repo(), adapted from
 #       bench/locbench/run_locbench.py's checkout()) — the SWE-bench conda/dep environment is NOT
 #       installed, so `resolved` scoring needs --evaluator=swebench (Docker, official harness) to be
@@ -50,6 +46,9 @@
 #       (https://github.com/SWE-agent/mini-swe-agent): purpose-built SWE-bench harnesses with their own
 #       Docker orchestration and scoring already wired to `swebench`'s evaluator. NOT implemented — (A)
 #       was chosen; do not half-wire both.
+#   (C) `codex exec --json --ephemeral` — IMPLEMENTED. Both arms ignore user config/rules, point
+#       AGENTS_HOME at an empty per-run directory, and replace the MCP table with `{}`. The treatment
+#       requires the absolute ripwire CLI before grep/read; retained JSONL proves whether Codex invoked it.
 #
 # USAGE:
 #   python3 bench/agentloop/run_agentloop.py --dry-run --tasks-lock bench/agentloop/tasks.lock \
@@ -62,16 +61,13 @@ import argparse, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, time
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
 import select_tasks   # reuse fetch_rows()'s HF datasets-server fetch + cache — see load_gold_rows()
 
-SCHEMA = "ripwire-agentloop-results-v1"
-ARMS   = ( "baseline", "ripwire_mcp" )
+SCHEMA = "ripwire-agentloop-results-v2"
+ARMS   = ( "baseline", "ripwire_cli" )
 DEFAULT_SEEDS = ( 1, 2, 3 )
 COST_LOW_PER_INSTANCE, COST_HIGH_PER_INSTANCE = 0.30, 1.50   # arXiv 2412.21139, per R4
 DEFAULT_TIMEOUT_SECONDS = 900
 
-# tool allowlists per arm (module docstring EXEC STUB) — ripwire_mcp adds the MCP server's tools only;
-# everything else about the two arms is identical (Terminal-Bench "vary only the harness" template).
 ALLOWED_TOOLS_BASELINE = "Bash,Read,Glob,Grep,Edit,Write"
-ALLOWED_TOOLS_RIPWIRE  = ALLOWED_TOOLS_BASELINE + ",mcp__ripwire__*"
 
 # ripwire binary path: same env-var convention bench/locbench/run_locbench.py uses (CTX), so a single
 # RIPWIRE env var configures both harnesses; --ripwire-bin overrides it per-invocation.
@@ -80,7 +76,8 @@ RIPWIRE_BIN_DEFAULT = os.environ.get( "RIPWIRE", "ripwire" )
 RECORD_FIELDS = (
     "instance_id", "repo", "base_commit", "arm", "seed", "harness", "model",
     "status", "resolved", "localization_hit", "tokens_in", "tokens_out",
-    "wall_seconds", "cost_usd", "error", "started_unix", "finished_unix",
+    "wall_seconds", "cost_usd", "command_calls", "ripwire_calls", "ripwire_commands", "events_path",
+    "error", "started_unix", "finished_unix",
 )
 
 def load_tasks_lock( path ):
@@ -105,6 +102,7 @@ def make_record( task, arm, seed, harness, model, status="not_implemented", **ov
         arm=arm, seed=seed, harness=harness, model=model,
         status=status, resolved=None, localization_hit=None,
         tokens_in=None, tokens_out=None, wall_seconds=None, cost_usd=None,
+        command_calls=None, ripwire_calls=None, ripwire_commands=None, events_path=None,
         error=None, started_unix=now, finished_unix=now,
     )
     rec.update( overrides )
@@ -114,9 +112,33 @@ def make_record( task, arm, seed, harness, model, status="not_implemented", **ov
 def run_matrix( tasks, arms, seeds ):
     return [ ( t, arm, seed ) for t in tasks for arm in arms for seed in seeds ]
 
+def limit_tasks_repo_round_robin( tasks, limit ):
+    """Take a deterministic, repository-diverse prefix for pilots instead of N adjacent lock rows."""
+    if not limit or limit >= len( tasks ):
+        return list( tasks )
+    by_repo = {}
+    for task in tasks:
+        by_repo.setdefault( task["repo"], [] ).append( task )
+    selected = []
+    row_index = 0
+    repos = sorted( by_repo )
+    while len( selected ) < limit:
+        added = False
+        for repo in repos:
+            rows = by_repo[repo]
+            if row_index < len( rows ):
+                selected.append( rows[row_index] )
+                added = True
+                if len( selected ) == limit:
+                    break
+        if not added:
+            break
+        row_index += 1
+    return selected
+
 # ── shell + repo checkout (adapted from bench/locbench/run_locbench.py) ──────────────────────────────
-def sh( args, cwd=None, timeout=1800 ):
-    return subprocess.run( args, capture_output=True, text=True, timeout=timeout, cwd=cwd )
+def sh( args, cwd=None, timeout=1800, env=None ):
+    return subprocess.run( args, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env )
 
 def checkout_repo( repo, base_commit, repos_dir ):
     """Adapted from bench/locbench/run_locbench.py's checkout(): the same one-clone-per-repo shallow-
@@ -162,23 +184,9 @@ def patch_files( patch ):
     return sorted( set( re.findall( r'^\+\+\+ b/(.+)$', patch, re.M ) )
                  | set( re.findall( r'^--- a/(.+)$', patch, re.M ) ) )
 
-# ── MCP wiring for the ripwire_mcp arm ────────────────────────────────────────────────────────────────
-def write_mcp_config( ripwire_bin, out_path ):
-    """Write a --mcp-config JSON file registering ripwire as an MCP server for `claude -p`.
-
-    Verified (not guessed) against this repo: `ripwire wrap claude` (skills/ripwire-mcp/SKILL.md) prints
-    exactly `claude mcp add ripwire -- ripwire --mcp` — the server is `ripwire --mcp` over STDIO with NO
-    positional workspace/root argument. src/cli.h confirms: "--mcp may run without a path ... stdio
-    --mcp does not [need a root] — its clients name a path per request" (each MCP verb call carries its
-    own `path`/`paths`). This corrects the task brief's assumed `ripwire --mcp <workspace>` form, which
-    is not what the binary implements."""
-    out_path.parent.mkdir( parents=True, exist_ok=True )
-    out_path.write_text( json.dumps( { "mcpServers": { "ripwire": { "command": ripwire_bin, "args": [ "--mcp" ] } } } ) )
-    return out_path
-
-def build_prompt( gold_row, seed ):
+def build_prompt( gold_row, seed, arm, ripwire_bin ):
     stmt = ( gold_row.get( "problem_statement" ) or "" ).strip()
-    return (
+    prompt = (
         "You are working directly in a git checkout of this repository, at the commit the following "
         "issue was filed against. Read the issue, locate the responsible code, and make the minimal "
         "fix. Do not modify any test files. Stop once you believe the fix is complete.\n\n"
@@ -188,6 +196,97 @@ def build_prompt( gold_row, seed ):
         # field regardless of whether this suffix measurably perturbs sampling.
         f"[run-seed:{seed}]"
     )
+    if arm == "baseline":
+        return prompt + ( "\n\nRETRIEVAL ARM — BASELINE: Do not use ripwire or ctxpack. Use the agent's "
+                          "ordinary repository search and file-reading tools." )
+    if arm == "ripwire_cli":
+        return prompt + ( "\n\nRETRIEVAL ARM — RIPWIRE CLI: Do not use a ripwire MCP server. Before "
+                          "grep/find or opening implementation files, use the shell to run this exact CLI "
+                          "binary at least once:\n"
+                          f"  {ripwire_bin} . --for=\"<short issue description>\" --max-tokens=4000\n"
+                          "Use its ranked output and any additional ripwire CLI verbs that help, then "
+                          "continue with ordinary editing and validation tools." )
+    raise ValueError( f"unknown arm {arm!r}; expected one of {ARMS}" )
+
+def build_codex_command( prompt, model ):
+    """Build an isolated Codex invocation; build_prompt() owns the arm-specific CLI contract."""
+    cmd = [ "codex", "exec", "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules",
+            "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
+            "-c", 'web_search="disabled"', "-c", "mcp_servers={}" ]
+    if model:
+        cmd += [ "--model", model ]
+    cmd.append( prompt )
+    return cmd
+
+def parse_codex_jsonl_usage( stdout ):
+    """Return the final turn's (input_tokens, output_tokens), or nulls on schema drift."""
+    tokens_in = tokens_out = None
+    for line in stdout.splitlines():
+        try:
+            event = json.loads( line )
+        except ValueError:
+            continue
+        if event.get( "type" ) != "turn.completed":
+            continue
+        usage = event.get( "usage" ) or {}
+        tokens_in = usage.get( "input_tokens" )
+        tokens_out = usage.get( "output_tokens" )
+    return tokens_in, tokens_out
+
+def parse_codex_jsonl_metrics( stdout, ripwire_bin ):
+    """Return token usage plus explicit command/ripwire-CLI evidence from retained Codex JSONL."""
+    tokens_in, tokens_out = parse_codex_jsonl_usage( stdout )
+    command_calls = ripwire_calls = 0
+    ripwire_commands = []
+    for line in stdout.splitlines():
+        try:
+            event = json.loads( line )
+        except ValueError:
+            continue
+        item = event.get( "item" ) or {}
+        if event.get( "type" ) != "item.completed" or item.get( "type" ) != "command_execution":
+            continue
+        command_calls += 1
+        command = item.get( "command" ) or ""
+        if isinstance( command, list ):
+            command = " ".join( str( part ) for part in command )
+        command = str( command )
+        if ripwire_bin and ripwire_bin in command:
+            ripwire_calls += 1
+            ripwire_commands.append( command )
+    return tokens_in, tokens_out, command_calls, ripwire_calls, ripwire_commands
+
+def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
+    """Create an auth-preserving but skill-isolated CODEX_HOME for one benchmark run.
+
+    Baseline gets no skills. The treatment gets only this checkout's ripwire skills, so globally
+    installed skills cannot add hidden tools or retrieval steps to either arm."""
+    env = os.environ.copy()
+    source_home = pathlib.Path( env.get( "CODEX_HOME", pathlib.Path.home() / ".codex" ) )
+    run_home = pathlib.Path( work_dir ) / "codex-home" / arm / f"{instance_id}-{seed}"
+    run_home.mkdir( parents=True, exist_ok=True )
+    source_auth = source_home / "auth.json"
+    run_auth = run_home / "auth.json"
+    if source_auth.exists() and not run_auth.exists():
+        run_auth.symlink_to( source_auth )
+
+    if arm == "ripwire_cli":
+        source_skills = pathlib.Path( __file__ ).resolve().parents[2] / "skills"
+        run_skills = run_home / "skills"
+        run_skills.mkdir( parents=True, exist_ok=True )
+        for skill_dir in sorted( source_skills.iterdir() ):
+            if skill_dir.is_dir() and ( skill_dir / "SKILL.md" ).is_file():
+                link = run_skills / skill_dir.name
+                if not link.exists():
+                    link.symlink_to( skill_dir, target_is_directory=True )
+
+    agents_home = pathlib.Path( work_dir ) / "agent-home" / arm / f"{instance_id}-{seed}"
+    agents_home.mkdir( parents=True, exist_ok=True )
+    env["CODEX_HOME"] = str( run_home )
+    env["AGENTS_HOME"] = str( agents_home )
+    ripwire_dir = str( pathlib.Path( ripwire_bin ).resolve().parent )
+    env["PATH"] = ripwire_dir + os.pathsep + env.get( "PATH", "" )
+    return env, run_home
 
 # ── evaluation (--evaluator swebench|none) ─────────────────────────────────────────────────────────────
 def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
@@ -272,24 +371,55 @@ def evaluate_patch( task, gold_row, patch, evaluator ):
     raise SystemExit( f"unknown --evaluator {evaluator!r}; expected 'swebench' or 'none'" )
 
 # ── the one seam a real harness fills in ──────────────────────────────────────────────────────────
+def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin ):
+    """Retain raw Codex JSONL under events/ and parse its token/command accounting into record fields.
+
+    Accepts str, bytes (TimeoutExpired hands over undecoded partial output), or None; anything
+    unparseable degrades field-by-field to nulls, never a crash — the retained file is the evidence."""
+    if isinstance( stdout, bytes ):
+        stdout = stdout.decode( "utf-8", errors="replace" )
+    stdout = stdout or ""
+    events_dir = pathlib.Path( work_dir ) / "events"
+    events_dir.mkdir( parents=True, exist_ok=True )
+    events_file = events_dir / f"{task['instance_id']}-{arm}-{seed}.jsonl"
+    events_file.write_text( stdout )
+    ( tokens_in, tokens_out, command_calls,
+      ripwire_calls, ripwire_commands ) = parse_codex_jsonl_metrics( stdout, ripwire_bin )
+    return dict( tokens_in=tokens_in, tokens_out=tokens_out, command_calls=command_calls,
+                 ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands,
+                 events_path=str( events_file ) )
+
+def _claude_metrics( stdout ):
+    """Parse the `claude -p --output-format json` single-result trailer into record fields.
+
+    TODO-verify: field names match the documented schema (top-level total_cost_usd;
+    usage.input_tokens/usage.output_tokens) as of the Claude Code CLI installed when this was written
+    (2.1.209) — re-check against a real trailer (e.g. via --live-one) before trusting these numbers in
+    an actual pilot; schema drift degrades accounting to nulls (make_record defaults), not a crash."""
+    try:
+        payload = json.loads( stdout )
+    except ValueError:
+        return {}
+    usage = payload.get( "usage" ) or {}
+    return dict( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
+                 cost_usd=payload.get( "total_cost_usd" ) )
+
 def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
              timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None ):
-    """Execute ONE (task, arm, seed) run through candidate harness (A) — `claude -p` — and return a
-    filled record (RECORD_FIELDS schema). See the module docstring's EXEC STUB section for the exact
-    invocation per arm and write_mcp_config()'s docstring for the verified ripwire MCP wiring.
+    """Execute ONE (task, arm, seed) run through the selected harness and return a filled record.
 
     Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
-    for this run (checkout_repo()); (b) invoke `claude -p` in that workspace with a tool allowlist per
-    arm, plus a generated --mcp-config for the ripwire_mcp arm only; (c) capture wall-clock, the
-    --output-format json trailer's token/cost accounting (best-effort — see TODO-verify below), and the
-    workspace's final `git diff` as the candidate patch; (d) score it via evaluate_patch()."""
+    for this run (checkout_repo()); (b) invoke the harness in that workspace with an arm-specific CLI
+    retrieval contract and no MCP servers; (c) capture wall-clock, token/cost accounting
+    (_codex_metrics()/_claude_metrics(), best-effort), and the workspace's final `git diff` as the
+    candidate patch; (d) score it via evaluate_patch()."""
     started = time.time()
     def _fail( status, error, **overrides ):
         return make_record( task, arm, seed, harness, model, status=status, error=error,
                              started_unix=started, finished_unix=time.time(), **overrides )
 
-    if harness != "claude-code-p":
-        return _fail( "error", f"unsupported harness {harness!r}; only 'claude-code-p' (candidate A) is wired" )
+    if harness not in ( "claude-code-p", "codex-exec" ):
+        return _fail( "error", f"unsupported harness {harness!r}; expected 'claude-code-p' or 'codex-exec'" )
     if arm not in ARMS:
         return _fail( "error", f"unknown arm {arm!r}; expected one of {ARMS}" )
 
@@ -303,54 +433,43 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     if repo_dir is None:
         return _fail( "error", f"checkout failed for {task['repo']}@{task['base_commit']}" )
 
-    allowed_tools = ALLOWED_TOOLS_BASELINE
-    cmd = [ "claude", "-p", build_prompt( gold_row, seed ),
-            "--permission-mode", "acceptEdits",
-            "--output-format", "json",
-            "--strict-mcp-config" ]   # baseline arm: no --mcp-config passed => zero MCP servers, even if
-                                      # the target repo/user config would otherwise register one ambiently
-    if arm == "ripwire_mcp":
-        allowed_tools = ALLOWED_TOOLS_RIPWIRE
-        cfg_dir = pathlib.Path( work_dir ) / "mcp-config"
-        mcp_config_path = write_mcp_config( ripwire_bin, cfg_dir / f"{task['instance_id']}-{seed}.json" )
-        cmd += [ "--mcp-config", str( mcp_config_path ) ]
-    cmd += [ "--allowedTools", allowed_tools ]
-    if model:
-        cmd += [ "--model", model ]
+    prompt = build_prompt( gold_row, seed, arm, ripwire_bin )
+    child_env = None
+    if harness == "claude-code-p":
+        cmd = [ "claude", "-p", prompt,
+                "--permission-mode", "acceptEdits",
+                "--output-format", "json",
+                "--strict-mcp-config", "--allowedTools", ALLOWED_TOOLS_BASELINE ]
+        if model:
+            cmd += [ "--model", model ]
+    else:
+        cmd = build_codex_command( prompt, model )
+        child_env, _ = prepare_codex_environment( work_dir, task["instance_id"], arm, seed, ripwire_bin )
 
     t0 = time.perf_counter()
     try:
-        proc = sh( cmd, cwd=repo_dir, timeout=timeout_s )
-    except subprocess.TimeoutExpired:
-        return _fail( "timeout", f"claude -p exceeded {timeout_s}s", wall_seconds=float( timeout_s ) )
+        proc = sh( cmd, cwd=repo_dir, timeout=timeout_s, env=child_env )
+    except subprocess.TimeoutExpired as exc:
+        diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout
+        resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
+        metrics = ( _codex_metrics( exc.stdout, work_dir, task, arm, seed, ripwire_bin )
+                    if harness == "codex-exec" else {} )
+        return _fail( "timeout", f"{harness} exceeded {timeout_s}s", resolved=resolved,
+                      localization_hit=localization_hit, wall_seconds=float( timeout_s ), **metrics )
     wall = time.perf_counter() - t0
 
     diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout   # candidate patch: working tree vs base_commit
 
     if proc.returncode != 0:
-        return _fail( "error", f"claude -p exit {proc.returncode}: {(proc.stderr or '')[:2000]}",
+        return _fail( "error", f"{harness} exit {proc.returncode}: {(proc.stderr or '')[:2000]}",
                        wall_seconds=wall )
 
-    # TODO-verify: field names below match the documented `claude -p --output-format json` single-result
-    # schema (top-level total_cost_usd; usage.input_tokens/usage.output_tokens) as of the Claude Code CLI
-    # installed when this was written (2.1.209) — re-check against a real trailer (e.g. via --live-one)
-    # before trusting these numbers in an actual pilot; a schema drift here degrades to nulls, not a crash.
-    tokens_in = tokens_out = cost_usd = None
-    try:
-        payload = json.loads( proc.stdout )
-        usage = payload.get( "usage" ) or {}
-        tokens_in = usage.get( "input_tokens" )
-        tokens_out = usage.get( "output_tokens" )
-        cost_usd = payload.get( "total_cost_usd" )
-    except ValueError:
-        pass   # non-JSON stdout — non-fatal, tokens/cost stay null; the patch + resolved status still stand
-
+    metrics = ( _codex_metrics( proc.stdout, work_dir, task, arm, seed, ripwire_bin )
+                if harness == "codex-exec" else _claude_metrics( proc.stdout ) )
     resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
     return make_record( task, arm, seed, harness, model, status="ok",
-                         resolved=resolved, localization_hit=localization_hit,
-                         tokens_in=tokens_in, tokens_out=tokens_out,
-                         wall_seconds=wall, cost_usd=cost_usd,
-                         started_unix=started, finished_unix=time.time() )
+                         resolved=resolved, localization_hit=localization_hit, wall_seconds=wall,
+                         started_unix=started, finished_unix=time.time(), **metrics )
 
 def main():
     ap = argparse.ArgumentParser( description="Phase B4 agent-in-the-loop eval runner (scaffolding)" )
@@ -358,17 +477,18 @@ def main():
     ap.add_argument( "--arms", default=",".join( ARMS ) )
     ap.add_argument( "--seeds", default=",".join( str( s ) for s in DEFAULT_SEEDS ) )
     ap.add_argument( "--harness", default="claude-code-p",
-                     help="which candidate harness runs the task; only 'claude-code-p' (candidate A, "
-                          "`claude -p`) is wired — any other value fails each run's record with status=error" )
-    ap.add_argument( "--model", default="claude-sonnet-5" )
+                     choices=( "claude-code-p", "codex-exec" ),
+                     help="agent harness: Claude Code print mode or OpenAI Codex non-interactive mode" )
+    ap.add_argument( "--model", default="",
+                     help="model id; omitted uses the selected harness's current default" )
     ap.add_argument( "--limit", type=int, default=0, help="cap tasks used to build the matrix (0=all); "
                      "use --limit 3 for the pilot run size named in README.md" )
     ap.add_argument( "--results-out", default="", help="where to write the results JSON" )
     ap.add_argument( "--work-dir", default="/tmp/agentloop",
                      help="scratch dir for repo checkouts, the SWE-bench gold-row cache (shared with "
-                          "select_tasks.py's --work-dir), and generated --mcp-config files" )
+                          "select_tasks.py's --work-dir), retained Codex JSONL, and isolated agent homes" )
     ap.add_argument( "--ripwire-bin", default=RIPWIRE_BIN_DEFAULT,
-                     help="ripwire binary path the ripwire_mcp arm's --mcp-config points at "
+                     help="absolute ripwire binary the ripwire_cli arm is required to invoke "
                           "(default: $RIPWIRE env var, else 'ripwire' on PATH)" )
     ap.add_argument( "--evaluator", default="none", choices=( "swebench", "none" ),
                      help="'swebench' scores resolved= via the official swebench PyPI harness (Docker "
@@ -390,8 +510,7 @@ def main():
     a = ap.parse_args()
 
     lock = load_tasks_lock( a.tasks_lock )
-    tasks = lock["instances"]
-    if a.limit: tasks = tasks[: a.limit]
+    tasks = limit_tasks_repo_round_robin( lock["instances"], a.limit )
     arms = [ x.strip() for x in a.arms.split( "," ) if x.strip() ]
     seeds = [ int( x ) for x in a.seeds.split( "," ) if x.strip() ]
     for arm in arms:
@@ -444,16 +563,23 @@ def main():
     print( "Read bench/agentloop/README.md's safety note; a live run requires explicit human approval "
            "per task run, not just this flag.", file=sys.stderr )
     gold_rows = load_gold_rows( a.work_dir )
-    records = [ run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ripwire_bin=a.ripwire_bin,
-                          timeout_s=a.timeout_seconds, evaluator=a.evaluator, gold_rows=gold_rows )
-                for t, arm, seed in matrix ]
-    out = dict( schema=SCHEMA, tasks_lock_content_sha256=lock["content_sha256"],
-                arms=arms, seeds=seeds, harness=a.harness, model=a.model,
-                n_runs=len( records ), dry_run=False, records=records )
-    if a.results_out:
-        outp = pathlib.Path( a.results_out ); outp.parent.mkdir( parents=True, exist_ok=True )
-        outp.write_text( json.dumps( out, indent=2 ) )
-        print( f"# wrote results: {outp} ({len(records)} records)", file=sys.stderr )
+    records = []
+    outp = pathlib.Path( a.results_out ) if a.results_out else None
+    if outp:
+        outp.parent.mkdir( parents=True, exist_ok=True )
+    for run_index, ( t, arm, seed ) in enumerate( matrix, 1 ):
+        records.append( run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir,
+                                 ripwire_bin=a.ripwire_bin, timeout_s=a.timeout_seconds,
+                                 evaluator=a.evaluator, gold_rows=gold_rows ) )
+        print( f"# completed {run_index}/{len(matrix)}: {t['instance_id']} {arm} "
+               f"status={records[-1]['status']}", file=sys.stderr )
+        if outp:
+            checkpoint = dict( schema=SCHEMA, tasks_lock_content_sha256=lock["content_sha256"],
+                               arms=arms, seeds=seeds, harness=a.harness, model=a.model,
+                               n_runs=len( matrix ), completed_runs=len( records ),
+                               complete=( run_index == len( matrix ) ), dry_run=False, records=records )
+            outp.write_text( json.dumps( checkpoint, indent=2 ) )
+            print( f"# checkpoint: {outp} ({len(records)}/{len(matrix)} records)", file=sys.stderr )
     n_ok = sum( 1 for r in records if r["status"] == "ok" )
     print( f"LIVE RUN done: {n_ok}/{len(records)} status=ok", file=sys.stderr )
     return 0

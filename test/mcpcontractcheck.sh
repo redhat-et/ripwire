@@ -84,7 +84,8 @@ REFUSAL_H = open( os.path.join( ROOT, "src", "mcprefusal.h" ), encoding = "utf-8
 def parseVerbFields():
     blk = REFUSAL_H[ REFUSAL_H.index( "kMcpVerbFields[] = {" ) : ]
     blk = blk[ : blk.index( "\n};" ) ]
-    return { v: f.split() for v, f in re.findall( r'\{\s*"([a-z_]+)",\s*"([a-z_ ]+)"\s*\}', blk ) }
+    return { v: f.split() for v, f in re.findall(
+        r'\{\s*"([a-z_]+)",\s*"([a-z_ ]+)"(?:,\s*McpVerbFields::Effect::[A-Za-z]+)?\s*\}', blk ) }
 
 def parseUniversal():
     m = re.search( r"kMcpUniversalFields\[\]\s*=\s*\{([^}]*)\}", REFUSAL_H )

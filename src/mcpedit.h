@@ -224,14 +224,18 @@ namespace mcpedit
     // created and never unlinked, so every MCP edit left permanent litter in the user's repo (git-status
     // noise). The cache-dir path is a deterministic pure function of the target path, so two ripwire processes
     // editing the SAME file still open the SAME lock file and flock still serializes them cross-process (the F1
-    // guarantee is preserved) — it just never lands in the repo tree. Same cache-dir ladder as mcpCachePath.
+    // guarantee is preserved) — it just never lands in the repo tree. Locks have their own sharded subtree:
+    // cache eviction never scans or removes a possibly-live advisory-lock inode.
     inline std::string editLockPath( const std::string& targetPath )
     {
         std::uint64_t h = 1469598103934665603ULL;      // FNV-1a-64 of the target path → a stable per-file lock name
         for( char c : targetPath ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
         char name[ 64 ];
         std::snprintf( name, sizeof( name ), "ripwire-edit-%016llx.lock", (unsigned long long)h );
-        return quality::cacheDirLadder() + "/" + name;   // shared per-user cache-dir ladder (no repo-tree sidecar)
+        const std::string lockDir = quality::cacheDirLadder() + "/locks";
+        ::mkdir( lockDir.c_str(), 0700 );
+        ::chmod( lockDir.c_str(), 0700 );
+        return quality::resolveCacheBlobPath( lockDir, name );
     }
 
     // F1: per-file advisory edit lock — serializes two COOPERATING ripwire MCP edit operations on one file so

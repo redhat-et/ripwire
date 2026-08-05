@@ -530,6 +530,144 @@ bool isUniversalOrAllowlistedNumber( std::string_view spelling ) noexcept
     return parsed == -2.0 || parsed == -1.0 || parsed == 0.0 || parsed == 1.0 || parsed == 2.0;
 }
 
+// A number captured inside a local const/constexpr initializer is named policy, not a magic number. Walk
+// only to the current statement/block boundary: a `const` in an earlier statement must not pardon this one.
+bool isConstantInitializerNumber( std::string_view src, std::size_t numberByte ) noexcept
+{
+    if( numberByte > src.size() )
+    {
+        return false;
+    }
+    std::size_t statementStart = numberByte;
+    while( statementStart > 0 )
+    {
+        const char c = src[ statementStart - 1 ];
+        if( c == ';' || c == '{' || c == '}' )
+        {
+            break;
+        }
+        --statementStart;
+    }
+    const std::string_view head = src.substr( statementStart, numberByte - statementStart );
+    const std::size_t      eq   = head.rfind( '=' );
+    if( eq == std::string_view::npos || ( eq > 0 && std::strchr( "=!<>+-*/%&|^~", head[ eq - 1 ] ) != nullptr ) )
+    {
+        return false;
+    }
+    return rw::darkflags::containsWord( head.substr( 0, eq ), "constexpr" ) || rw::darkflags::containsWord( head.substr( 0, eq ), "const" );
+}
+
+// The raw-body return scanner deliberately avoids a second AST pass. A nested lambda body is the one C++
+// callable shape an outer function's byte span contains without a separately indexed Symbol; recognise its
+// capture list between the previous statement/block boundary and this opening brace.
+bool opensLambdaBody( std::string_view src, std::size_t bodyStart, std::size_t braceByte ) noexcept
+{
+    std::size_t headStart = braceByte;
+    while( headStart > bodyStart )
+    {
+        const char c = src[ headStart - 1 ];
+        if( c == ';' || c == '{' || c == '}' )
+        {
+            break;
+        }
+        --headStart;
+    }
+    const std::string_view head  = src.substr( headStart, braceByte - headStart );
+    const std::size_t      close = head.rfind( ']' );
+    if( close == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::size_t open = head.rfind( '[', close );
+    if( open == std::string_view::npos )
+    {
+        return false;
+    }
+    std::string_view prefix = rw::darkflags::trimView( head.substr( 0, open ) );
+    if( prefix.empty() )
+    {
+        return true; // immediately-invoked `[]{ ... }()`
+    }
+    if( rw::darkflags::identByte( (unsigned char)prefix.back() ) )
+    {
+        const std::size_t returnAt = prefix.size() >= 6 ? prefix.size() - 6 : std::string_view::npos;
+        return returnAt != std::string_view::npos && prefix.substr( returnAt ) == "return"
+            && ( returnAt == 0 || !rw::darkflags::identByte( (unsigned char)prefix[ returnAt - 1 ] ) );
+    }
+    return prefix.back() != ']' && prefix.back() != ')';   // `flags[i]` / `(array)[i]` are subscripts, not captures
+}
+
+// Return the first bare-return line only when this callable also owns a value return. Nested lambda returns
+// are outside that contract even though their bytes lie inside the outer function's indexed span.
+std::optional<std::uint32_t> inconsistentReturnLine( std::string_view src, std::uint32_t bodyStart, std::uint32_t bodyEnd ) noexcept
+{
+    bool hasValue = false, hasBare = false;
+    std::uint32_t bareLine = 1, currentLine = rw::layout::lineOf( src, bodyStart );
+    std::uint32_t braceDepth = 0, lambdaRootDepth = 0;
+    bool          sawOuterBrace = false;
+    for( std::uint32_t i = bodyStart; i < bodyEnd; )
+    {
+        const char c = src[i];
+        const std::size_t inertEnd = rw::layout::skipInert( src, i );
+        if( inertEnd != i )
+        {
+            const std::size_t scanEnd = std::min<std::size_t>( inertEnd, bodyEnd );
+            currentLine += static_cast<std::uint32_t>( std::count( src.begin() + i, src.begin() + scanEnd, '\n' ) );
+            i = static_cast<std::uint32_t>( scanEnd );
+            continue;
+        }
+        if( c == '\n' ) { ++currentLine; ++i; continue; }
+        if( c == '{' )
+        {
+            const bool isLambdaRoot = sawOuterBrace && lambdaRootDepth == 0 && opensLambdaBody( src, bodyStart, i );
+            ++braceDepth;
+            if( isLambdaRoot )
+            {
+                lambdaRootDepth = braceDepth;
+            }
+            sawOuterBrace = true;
+            ++i;
+            continue;
+        }
+        if( c == '}' )
+        {
+            if( lambdaRootDepth == braceDepth )
+            {
+                lambdaRootDepth = 0;
+            }
+            if( braceDepth > 0 )
+            {
+                --braceDepth;
+            }
+            ++i;
+            continue;
+        }
+        if( lambdaRootDepth == 0 && c == 'r' && i + 6 <= bodyEnd
+            && src[i+1]=='e' && src[i+2]=='t' && src[i+3]=='u' && src[i+4]=='r' && src[i+5]=='n'
+            && ( i + 6 == bodyEnd || !std::isalnum( (unsigned char)src[i+6] ) && src[i+6] != '_' ) )
+        {
+            std::uint32_t j = i + 6;
+            while( j < bodyEnd && ( src[j] == ' ' || src[j] == '\t' ) )
+            {
+                ++j;
+            }
+            if( j < bodyEnd && src[j] == ';' )
+            {
+                hasBare = true;
+                bareLine = currentLine;
+            }
+            else if( j < bodyEnd && src[j] != '}' )
+            {
+                hasValue = true;
+            }
+            i = j;
+            continue;
+        }
+        ++i;
+    }
+    return hasValue && hasBare ? std::optional<std::uint32_t>( bareLine ) : std::nullopt;
+}
+
 // octocode partial-fetch + the §P8 seam-1 selector: split one --expand/--outline token into the SELECTOR
 // it resolves through and an optional 1-based [start,end] line range. The grammar (documented in --help):
 //
@@ -897,6 +1035,66 @@ inline DoctorGrammarProbe doctorProbeGrammars()
     return out;
 }
 
+struct DoctorCacheStats { std::size_t blobCount = 0; std::uintmax_t totalBytes = 0; bool truncated = false; };
+
+// Count legacy flat blobs plus the current one-level, two-hex shard layout. The 4K cap matches cache
+// hygiene's retained-blob cap; truncated= makes an I/O error or over-cap result an honest floor.
+inline DoctorCacheStats doctorCacheStats( const std::string& dir )
+{
+    namespace fs = std::filesystem;
+    DoctorCacheStats out;
+    const auto account = [ & ]( const fs::directory_entry& entry )
+    {
+        const std::string name = entry.path().filename().string();
+        if( name.rfind( "ripwire-", 0 ) != 0 ) { return; }
+        std::error_code ec;
+        if( !entry.is_regular_file( ec ) ) { if( ec ) { out.truncated = true; } return; }
+        if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; return; }
+        ++out.blobCount;
+        const auto byteSize = entry.file_size( ec );
+        if( ec ) { out.truncated = true; return; }
+        out.totalBytes += byteSize;
+    };
+    const auto scanShard = [ & ]( const fs::path& shard )
+    {
+        std::error_code ec;
+        fs::directory_iterator it( shard, ec ), end;
+        if( ec ) { out.truncated = true; return; }
+        while( it != end && !out.truncated )
+        {
+            account( *it );
+            it.increment( ec );
+            if( ec ) { out.truncated = true; }
+        }
+    };
+    const auto isShardName = []( const std::string& name )
+    {
+        return name.size() == 2 && std::isxdigit( static_cast<unsigned char>( name[0] ) )
+             && std::isxdigit( static_cast<unsigned char>( name[1] ) );
+    };
+
+    std::error_code ec;
+    fs::directory_iterator it( dir, ec ), end;
+    if( ec ) { out.truncated = true; return out; }
+    while( it != end && !out.truncated )
+    {
+        const std::string name = it->path().filename().string();
+        if( name.rfind( "ripwire-", 0 ) == 0 )
+        {
+            account( *it );
+        }
+        else if( isShardName( name ) )
+        {
+            std::error_code sec;
+            if( it->is_directory( sec ) ) { scanShard( it->path() ); }
+            else if( sec ) { out.truncated = true; }
+        }
+        it.increment( ec );
+        if( ec ) { out.truncated = true; }
+    }
+    return out;
+}
+
 inline std::string doctorCacheDirHint( bool writable, const std::string& dir, std::vector<char>& esc )
 {
     if( writable )
@@ -1021,35 +1219,12 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
             writable = ( ::unlink( probe.c_str() ) == 0 );
         }
 
-        long      blobCount  = 0;
-        long long totalBytes = 0;
-        {
-            namespace fs = std::filesystem;
-            std::error_code ec;
-            for( const auto& entry : fs::directory_iterator( dir, ec ) )
-            {
-                if( ec )
-                {
-                    break;
-                }
-                const std::string fn = entry.path().filename().string();
-                if( fn.rfind( "ripwire-", 0 ) != 0 )
-                {
-                    continue; // only our own blob family
-                }
-                std::error_code sec;
-                const auto sz = entry.file_size( sec );
-                if( !sec )
-                {
-                    totalBytes += static_cast<long long>( sz );
-                }
-                ++blobCount;
-            }
-        }
+        const DoctorCacheStats stats = doctorCacheStats( dir );
         std::string attrs = "dir=\"" + std::string( escapeXml( dir, esc ) ) + "\"";
-        attrs += " blobs=\"" + std::to_string( blobCount ) + "\"";
-        attrs += " bytes=\"" + std::to_string( totalBytes ) + "\"";
-        attrs += " many=\"" + std::string( blobCount > 50 ? "1" : "0" ) + "\"";   // eviction sanity flag, informational (never fails the check)
+        attrs += " blobs=\"" + std::to_string( stats.blobCount ) + "\"";
+        attrs += " bytes=\"" + std::to_string( stats.totalBytes ) + "\"";
+        attrs += " many=\"" + std::string( stats.blobCount > 50 ? "1" : "0" ) + "\"";   // eviction sanity flag, informational (never fails the check)
+        attrs += " truncated=\"" + std::string( stats.truncated ? "1" : "0" ) + "\"";
         attrs += doctorCacheDirHint( writable, dir, esc );
         row( "cache-dir", writable, attrs );
     }
@@ -1318,77 +1493,17 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
                     }
                 }
 
-                // inconsistent-return: scan `return ;` (bare) vs `return <non-ws>;` in the same body.
-                // Skip string/char literals and comments to avoid false positives from embedded text.
+                // inconsistent-return: the scanner owns the lexical callable-boundary rules; this loop
+                // only translates its optional bare-return line into the shared lint finding shape.
                 {
-                    bool hasValue = false, hasBare = false;
-                    std::uint32_t bareReturnLine = s.line;
-                    bool inLineComment = false, inBlockComment = false;
-                    char inString = 0;
-                    for( std::uint32_t i = bodyA; i < bodyB; )
-                    {
-                        const char c = src[i];
-                        if( c == '\n' ) { inLineComment = false; ++i; continue; }
-                        if( inLineComment ) { ++i; continue; }
-                        if( inBlockComment )
-                        {
-                            if( c == '*' && i + 1 < bodyB && src[i + 1] == '/' ) { inBlockComment = false; i += 2; }
-                            else
-                            {
-                                ++i;
-                            }
-                            continue;
-                        }
-                        if( inString != 0 )
-                        {
-                            if( c == '\\' ) { i += 2; continue; }
-                            if( c == inString )
-                            {
-                                inString = 0;
-                            }
-                            ++i; continue;
-                        }
-                        if( c == '/' && i + 1 < bodyB && src[i + 1] == '/' ) { inLineComment = true; i += 2; continue; }
-                        if( c == '/' && i + 1 < bodyB && src[i + 1] == '*' ) { inBlockComment = true; i += 2; continue; }
-                        if( c == '"' || c == '\'' ) { inString = c; ++i; continue; }
-                        // look for `return` keyword
-                        if( c == 'r' && i + 6 <= bodyB
-                            && src[i+1]=='e' && src[i+2]=='t' && src[i+3]=='u' && src[i+4]=='r' && src[i+5]=='n'
-                            && ( i + 6 == bodyB || !std::isalnum( (unsigned char)src[i+6] ) && src[i+6] != '_' ) )
-                        {
-                            std::uint32_t j = i + 6;
-                            while( j < bodyB && ( src[j] == ' ' || src[j] == '\t' ) )
-                            {
-                                ++j; // skip spaces after `return`
-                            }
-                            if( j < bodyB && src[j] == ';' )
-                            {
-                                // bare return — count the line for reporting
-                                std::uint32_t bl = s.line;
-                                for( std::uint32_t k = bodyA; k < i; ++k )
-                                {
-                                    if( src[k] == '\n' )
-                                    {
-                                        ++bl;
-                                    }
-                                }
-                                hasBare = true;  bareReturnLine = bl;
-                            }
-                            else if( j < bodyB && src[j] != '}' )
-                            { // ignore `return}` (impossible in well-formed code, defensive)
-                                hasValue = true;
-                            }
-                            i = j; continue;
-                        }
-                        ++i;
-                    }
-                    if( hasValue && hasBare )
+                    const std::optional<std::uint32_t> bareReturnLine = inconsistentReturnLine( src, bodyA, bodyB );
+                    if( bareReturnLine )
                     {
                         AstMatch hit;
                         hit.fileId    = s.fileId;
                         hit.startByte = s.sigStartByte;
                         hit.endByte   = s.endByte;
-                        hit.line      = bareReturnLine;
+                        hit.line      = *bareReturnLine;
                         hit.tag       = "inconsistent-return";
                         hit.text      = s.name + " (bare return in a value-returning function)";
                         symHits.push_back( std::move( hit ) );
@@ -8133,7 +8248,7 @@ std::optional<int> runLint( const MainDispatch& d )
             { "(type_definition declarator: (type_identifier) @c)",                                         "typedef-over-using" },    // C-style typedef struct/union in C++ — prefer using T = ...
             { "(number_literal) @c",                                                                        "magic-number" },          // numeric literal outside const/constexpr init (post-filtered below)
             { "(catch_clause body: (compound_statement) @c)",                                               "empty-catch" },           // catch block with empty/comment-only body (post-filtered below)
-            { "(assignment_expression left: (_) @lhs right: (_) @rhs)",                                    "self-assign" },           // x = x — always a bug (post-filtered: keep only lhs text == rhs text)
+            { "(assignment_expression left: (_) @lhs right: (_) @rhs (#eq? @lhs @rhs))",                   "self-assign" },           // x = x — predicate rejects unequal pairs before post-filtering
         };
         // §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
         // by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed below.
@@ -8213,6 +8328,18 @@ std::optional<int> runLint( const MainDispatch& d )
                                   } ),
                   ms.end() );
 
+        std::vector<std::string> magicFileBytes( ing.files.size() );
+        std::vector<char>        magicFileRead( ing.files.size(), 0 );
+        const auto magicBytes = [ & ]( std::uint32_t fileId ) -> const std::string&
+        {
+            if( !magicFileRead[fileId] )
+            {
+                darkflags::readWhole( diskPath( ing, fileId ), magicFileBytes[fileId] );
+                magicFileRead[fileId] = 1;
+            }
+            return magicFileBytes[fileId];
+        };
+
         // magic-number: drop literals that are:
         //   (a) semantic -2..2 forms (universal idioms) or base-prefixed masks/protocol constants
         //   (b) inside a const/constexpr variable initializer (that's exactly the right place for numbers)
@@ -8229,6 +8356,11 @@ std::optional<int> runLint( const MainDispatch& d )
                                       {
                                           return true;
                                       }
+                                      const std::string& src = magicBytes( m.fileId );
+                                      if( !src.empty() && isConstantInitializerNumber( src, m.startByte ) )
+                                      {
+                                          return true;
+                                      }
                                       // must be inside a function/method body to be a magic-number finding
                                       const Symbol* e = enclosing( m.fileId, m.startByte );
                                       if( !e || ( e->kind != SymKind::Function && e->kind != SymKind::Method ) )
@@ -8239,35 +8371,27 @@ std::optional<int> runLint( const MainDispatch& d )
                                   } ),
                   ms.end() );
 
-        // self-assign: the "(assignment_expression left: @lhs right: @rhs)" query captures BOTH captures as
-        // two AstMatch entries with the same fileId/line but different startByte. We need to pair them up
-        // and keep only pairs where lhs text == rhs text (trimmed). astQuery returns them in byte order.
-        // Strategy: pair consecutive captures that share the same enclosing assignment (same parent startByte).
-        // Simpler: the two captures of a single match have the same LINE; group by (fileId, line) and check.
+        // #eq? rejected unequal assignment pairs inside tree-sitter, so the remaining captures arrive as
+        // lhs/rhs twins in byte order. Collapse every complete twin pair into one finding; unlike the old
+        // (file,line) bucket this cannot cross-wire two independent assignments sharing a source line.
         {
             std::vector<AstMatch> saKeep;
-            // Group self-assign candidates by (fileId, line) — one match produces exactly one @lhs and one @rhs.
-            struct SA { std::uint32_t f, line; std::string lhs, rhs; bool hasLhs = false, hasRhs = false; std::uint32_t lhsByte = 0; };
-            HashMap<std::uint64_t, SA> saMap;   // key = (fileId<<32)|line
+            std::vector<AstMatch> saCaptured;
             for( const AstMatch& m : ms )
             {
-                if( m.tag != "self-assign" )
+                if( m.tag == "self-assign" )
                 {
-                    continue;
+                    saCaptured.push_back( m );
                 }
-                const std::uint64_t key = ( std::uint64_t( m.fileId ) << 32 ) | m.line;
-                SA& sa = saMap[ key ];
-                sa.f = m.fileId;  sa.line = m.line;
-                if( !sa.hasLhs ) { sa.lhs = m.text; sa.hasLhs = true; sa.lhsByte = m.startByte; }
-                else             { sa.rhs = m.text; sa.hasRhs = true; }
             }
-            // Remove all self-assign candidates from ms; re-add only where lhs text == rhs text.
             ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m ) { return m.tag == "self-assign"; } ), ms.end() );
-            for( auto& [ key, sa ] : saMap )
+            for( std::size_t i = 0; i + 1 < saCaptured.size(); i += 2 )
             {
-                if( !sa.hasLhs || !sa.hasRhs )
+                const AstMatch& lhs = saCaptured[i];
+                const AstMatch& rhs = saCaptured[i + 1];
+                if( lhs.fileId != rhs.fileId || lhs.text != rhs.text )
                 {
-                    continue; // incomplete pair → skip
+                    continue; // defensive: an incomplete/crossed capture pair is never evidence
                 }
                 const auto trim = []( std::string_view t ) -> std::string
                 {
@@ -8282,19 +8406,14 @@ std::optional<int> runLint( const MainDispatch& d )
                     }
                     return std::string( t );
                 };
-                const std::string lhsTrimmed = trim( sa.lhs ), rhsTrimmed = trim( sa.rhs );
-                if( lhsTrimmed != rhsTrimmed )
-                {
-                    continue; // different identifiers → not a self-assign
-                }
-                // Re-insert a single merged finding at the lhs position.
+                const std::string expression = trim( lhs.text );
                 AstMatch hit;
-                hit.fileId    = sa.f;
-                hit.startByte = sa.lhsByte;
-                hit.endByte   = sa.lhsByte;                 // not needed downstream
-                hit.line      = sa.line;
+                hit.fileId    = lhs.fileId;
+                hit.startByte = lhs.startByte;
+                hit.endByte   = lhs.endByte;
+                hit.line      = lhs.line;
                 hit.tag       = "self-assign";
-                hit.text      = lhsTrimmed + " = " + rhsTrimmed;
+                hit.text      = expression + " = " + expression;
                 saKeep.push_back( std::move( hit ) );
             }
             // Sort saKeep for determinism before appending.
@@ -10070,7 +10189,7 @@ int main( int argc, char** argv )
         // §B13.3 — WHAT COUNTS AS A SKILL FILE, and why this walk no longer says ".md".
         // It used to collect `.md` only. `files="22"` was honest about what it scanned and silent about what
         // it did not: this repo's skills/ holds 24 files, and the two it never opened are `skills/install.sh`
-        // and `skills/hooks/ripwire-nudge.sh` — under `verdict="clean"`, with no counter and no legend clause.
+        // and `hooks/ripwire-nudge.sh` — under `verdict="clean"`, with no counter and no legend clause.
         // An injection scanner's directory verdict silently excluded that directory's two EXECUTABLES, which
         // are the files most worth scanning. The single-file form has no such filter (`--scan-skill=<any
         // file>` scans it), so the two entry points disagreed about their own subject.

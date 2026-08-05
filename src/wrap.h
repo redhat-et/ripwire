@@ -50,7 +50,7 @@ inline std::vector<std::string> wrapVerbGroupLines()
 }
 
 // Append the install command only where this repo owns a verified discovery path. Claude is the installer
-// default; Codex uses its explicit mode so `wrap codex` cannot silently populate the wrong agent home.
+// default; Codex uses the cross-agent ~/.agents/skills discovery root documented by current Codex.
 inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent )
 {
     if( agent == "claude" )
@@ -59,7 +59,7 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent )
     }
     else if( agent == "codex" )
     {
-        std::fprintf( out, "bash skills/install.sh --codex   # deploy to ${CODEX_HOME:-~/.codex}/skills (drift-gated)\n" );
+        std::fprintf( out, "bash skills/install.sh --codex   # deploy to ${AGENTS_HOME:-~/.agents}/skills (drift-gated)\n" );
     }
 }
 
@@ -242,7 +242,9 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     {
         const std::string command = wrapTomlString( executablePath );
         std::printf(
-            "# ripwire -> OpenAI Codex CLI — add to ~/.codex/config.toml\n"
+            "# ripwire -> OpenAI Codex CLI (supported one-command registration)\n"
+            "codex mcp add ripwire -- ripwire --mcp\n"
+            "# Fallback for Codex Desktop or a non-interactive PATH — add this absolute command to ~/.codex/config.toml:\n"
             "[mcp_servers.ripwire]\n"
             "command = \"%s\"\n"
             "args = [\"--mcp\"]\n", command.c_str() );

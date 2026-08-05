@@ -7,6 +7,8 @@ small, fast, and self-checking on purpose, and the rules below are what keep it 
 Read this file before writing C++ here. It is self-contained — you do not need any other document
 to follow it.
 
+If you are about to write C++ here, §3 is the authoritative style-rules checklist.
+
 - **What the tool does / which flag answers which question** → `README.md`, `docs/COMMANDS.md`, or
   `./build/ripwire --help` (the binary self-documents and is always current).
 - **How it is built internally** → `docs/ARCHITECTURE.md`.
@@ -166,7 +168,7 @@ Two failure modes this project has actually shipped, and now gates against:
 
 ---
 
-## 3. House style
+## 3. C++ style rules
 
 ### Formatting
 

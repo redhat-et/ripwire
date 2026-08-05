@@ -1,15 +1,16 @@
 ---
 name: ripwire-fresh-eyes
 description: >
-  Assess risk in code you did NOT write — a whole repo or one unfamiliar subsystem: "review this codebase /
-  what's gnarly here / where's the rot / is this area safe to touch?". Also the entry point when you're
-  PLANNING A REFACTOR or suspect a god object — find the high-complexity cluster, its blast radius, and its
-  co-change seams. One structured pass over maintenance hotspots, dead code, duplicate bodies, AST smells,
-  ownership / bus-factor risk, and hidden (co-change) coupling — scope any pass to a subsystem with a DIR
-  argument. Use when inheriting a repo, sizing up an unfamiliar module before editing it, planning a
-  refactor, hunting consolidation, deciding who should review, or producing a health snapshot. Everything
-  emits FACTS, not verdicts — you judge. Backed by ripwire (deterministic, on PATH). For any DIFF — yours or
-  an incoming PR — use ripwire-change-check; this skill is whole subsystems, not diffs.
+  Assess maintenance risk in code you did NOT write — an already identified subsystem: "what's gnarly
+  here / where's the rot / is this area safe to touch?". Use it when PLANNING A REFACTOR or investigating
+  a suspected god object — find the high-complexity cluster, its blast radius, and its co-change
+  seams. One structured pass over maintenance hotspots, dead code, duplicate bodies, AST smells, ownership
+  / bus-factor risk, and hidden (co-change) coupling — scope any pass to a subsystem with a DIR argument.
+  Use when taking ownership of an existing module, planning a refactor, hunting consolidation, deciding who
+  should review, or producing a health snapshot. Everything emits FACTS, not verdicts — you judge. Backed
+  by ripwire (deterministic, on PATH). This is for an explicit risk/rot/refactor question after the target
+  area is identified; cold structure mapping belongs to ripwire-orient. For any DIFF — yours or an incoming
+  PR — use ripwire-change-check; this skill is whole subsystems, not diffs.
 allowed-tools: Bash, Read
 ---
 

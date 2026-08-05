@@ -5,7 +5,7 @@ description: >
   here?". Different moment from judging your own diff (ripwire-change-check) or your own code's quality
   (ripwire-quality-bar): this is about FINDING what lacks a safety net and writing the test that closes the
   gap, before or without touching the code itself. Ranks candidates by `--seams` (untested cross-module call
-  edges) and the `tested=0` lens, gives you the symbol's outside contract via `--callers`, then verifies the
+  edges) and the `tested=1` coverage lens, gives you the symbol's outside contract via `--callers`, then verifies the
   new test actually registers with `--affected`. Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
@@ -26,11 +26,14 @@ not "is my diff safe" (that's change-check).
 1. **Untested integration seams** — `ripwire <dir> --seams` → `<seams>` lists cross-module call edges no
    test reaches. These are the highest-value targets: a bug here crosses a boundary silently, and one test
    per seam buys the most coverage per line written. Scope with `<dir>` = a subsystem to focus the seam list.
-2. **The `tested=0` lens** — `ripwire <dir> --metrics --top-k=50` (or `--for="<area>"`, which carries the
-   same lens inline) → any symbol with `tested="0"` has no test-path file reaching it at all. Cross with
-   `in=` (fan-in): a high-`in`, `tested="0"` symbol is a widely-relied-on function with zero safety net —
-   the sharpest priority, sharper than an untested leaf function nothing calls.
-3. **Pick the target** — prefer a seam over a lone `tested=0` symbol when both are candidates; a seam test
+2. **The `tested=1` coverage lens** — `ripwire <dir> --metrics --top-k=50` (or `--for="<area>"`, which
+   carries the same lens inline) → `tested="1"` means an indexed test-path symbol transitively reaches this
+   production symbol. On these explicit metric surfaces the attribute is omitted when no indexed test
+   reaches it; the binary never prints a fabricated zero. Cross an omitted `tested` with `in=` (fan-in): a
+   widely-relied-on function with no indexed safety net is a sharper priority than an uncovered leaf.
+   Shell/subprocess test coverage remains outside the call graph, so absence is a structural finding, not
+   proof that no external test exists.
+3. **Pick the target** — prefer a seam over a symbol lacking `tested=1` when both are candidates; a seam test
    proves two modules cooperate correctly, a unit test on one function does not.
 
 ## Write it with the right contract
@@ -59,6 +62,6 @@ not "is my diff safe" (that's change-check).
 
 ## Output
 
-Name the seam or `tested=0` symbol chosen and why (seam > high-fan-in symbol > leaf), the contract drawn from
+Name the seam or symbol lacking `tested=1` chosen and why (seam > high-fan-in symbol > leaf), the contract drawn from
 `--callers`, and confirmation from `--affected` that the new test registers. Re-run `--seams`/`--metrics`
 afterward — the gap you targeted should be gone.

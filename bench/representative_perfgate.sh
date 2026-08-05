@@ -8,7 +8,13 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 RUNS="${RIPWIRE_REP_PERF_RUNS:-5}"
-FIXTURE_HASH="a22b4425ff9750e75d35fb510443a65f54c3cc0c"
+FIXTURE_HASH="08352db35d9c93c4fc7e3af7f38469af8f8b86d1"
+PREFLIGHT_ONLY=0
+case "${1:-}" in
+    "") ;;
+    --preflight-only) PREFLIGHT_ONLY=1 ;;
+    *) echo "usage: bench/representative_perfgate.sh [--preflight-only]"; exit 2 ;;
+esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
 
@@ -81,6 +87,11 @@ richAfter="$( shasum "$INDEX.rich.ripwirecache" | awk '{print $1}' )"
 [ -s "$TMP/retrieval.out" ] && grep -q '^# ripwire architecture report' "$TMP/report.out" \
     && grep -q 'quality-delta' "$TMP/quality.out" && grep -q 'dead-code' "$TMP/dead.out" \
     || { echo "representative_perfgate: semantic preflight failed"; exit 1; }
+
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+    echo "representative_perfgate: all semantic preflights passed."
+    exit 0
+fi
 
 coldMs="$( median_ms "$BIN" "$CORPUS" --no-cache )" || exit 1
 retrievalMs="$( median_ms "$BIN" "$CORPUS" --for=distance --cache="$INDEX.rich.ripwirecache" )" || exit 1

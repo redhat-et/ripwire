@@ -7,18 +7,12 @@ solves the task.** This directory is that harness.
 
 Design source: the Phase B4 research and R4 eval-methodology notes ("Minimal agent-in-the-loop eval design").
 
-**Status: EXEC STEP WIRED, NOT YET RUN.** `select_tasks.py` and `analyze.py` are complete and runnable
-today. `run_agentloop.py`'s run-matrix/schema/`--dry-run` machinery is complete and runnable, and
-`run_one()` is now wired to candidate harness (A) — `claude -p` with a per-arm tool allowlist and a
-generated `--mcp-config` for the `ripwire_mcp` arm (see the module docstring's EXEC STUB section and
-`write_mcp_config()`'s docstring for the verified `ripwire --mcp` invocation). `--evaluator=swebench`
-(resolved= via the official swebench PyPI harness + Docker) is coded to the documented CLI interface but
-UNEXERCISED — neither Docker nor the `swebench` package is installed anywhere this was built, so several
-field/flag names carry an explicit `TODO-verify` in `run_swebench_harness()`; `--evaluator=none` needs
-neither and lets the rest of the pipeline run today. Nothing in this directory has spent any money yet:
-`--dry-run` still makes zero external calls, and the new `--live-one` smoke flag (run exactly ONE real
-`(task, arm, seed)`, print the record) has been coded but deliberately not executed here — see the SAFETY
-NOTE below before ever passing `--live-one` or `--live`.
+**Status: CODEX CLI PILOT RUN; RESOLUTION SCORING STILL UNEXERCISED.** `run_agentloop.py` supports
+`codex exec` and `claude -p`. Both arms disable MCP; the treatment uses ripwire through the ordinary CLI.
+Codex runs get isolated homes, baseline gets no skills, treatment gets only this checkout's ripwire skills,
+and raw JSONL proves which ripwire commands actually ran. One locked Astropy pair plus one post-skill-fix
+treatment rerun completed on 2026-08-04; see [`PLAN.md`](../../PLAN.md). The official SWE-bench Docker
+evaluator remains unavailable here, so these runs measure localization/tokens/wall time, not solve rate.
 
 ## The protocol
 
@@ -28,7 +22,7 @@ https://arxiv.org/html/2601.11868v1):
 | arm | what the agent has |
 |---|---|
 | `baseline` | grep / read / glob only |
-| `ripwire_mcp` | same agent + ripwire wired in as an MCP server |
+| `ripwire_cli` | same agent + isolated ripwire skills driving the ripwire CLI; MCP disabled |
 
 **Seeds:** K=3 per (task, arm). A single-seed SWE-bench number is an unreliable "lucky pass"
 (https://arxiv.org/pdf/2605.12925) — always report across seeds, never a single run.
@@ -58,9 +52,9 @@ comment for the exact attribution; `compare_runs.py` itself is not imported or m
 
 Mirrors the two-tier gate the Phase B1 design proposes for LocBench, adapted here:
 
-1. **Hard floor:** resolved-rate delta bootstrap 95% lower bound must be `> 0` (ripwire_mcp beats
+1. **Hard floor:** resolved-rate delta bootstrap 95% lower bound must be `> 0` (ripwire_cli beats
    baseline with high confidence, not just on the point estimate).
-2. **Soft utility check:** the cost/wall-clock/token overhead of the `ripwire_mcp` arm must not erase
+2. **Soft utility check:** the cost/wall-clock/token overhead of the `ripwire_cli` arm must not erase
    the win — report the paired ratio deltas (`analyze.py`'s `tokens_out_ratio_p50/p95`, etc.) alongside
    the resolved-rate delta and make the call by inspection; a fixed cost ceiling is deliberately not
    hard-coded here (R4's whole point is quality-adjusted acceptance, not a flat cap).
@@ -124,13 +118,10 @@ python3 bench/agentloop/analyze.py --self-test
 python3 bench/agentloop/analyze.py --results /tmp/agentloop/dry.json
 ```
 
-## Running the pilot (harness (A) is wired; NOT yet run — see SAFETY NOTE)
+## Running the Codex CLI pilot
 
-`run_agentloop.py`'s `run_one()` is wired to candidate **(A)** — `claude -p` (Claude Code
-print/non-interactive mode) with a tool allowlist per arm and a generated `--mcp-config` for the
-`ripwire_mcp` arm only (module docstring EXEC STUB section has the exact invocation). Candidate **(B)**
-(SWE-agent / mini-swe-agent) remains undocumented-as-unimplemented — (A) was chosen, per the module
-docstring's "pick ONE, do not half-wire both."
+Use the Codex harness for the requested comparison. `--limit` selects repositories round-robin, so the
+three-task pilot spans Astropy, Requests, and Xarray instead of taking three adjacent Astropy rows.
 
 First, smoke-test with exactly ONE real run (`--live-one`) before ever touching the full matrix:
 
@@ -149,8 +140,8 @@ spending anything on the 6-run pilot:
 ```sh
 python3 bench/agentloop/run_agentloop.py --live \
     --tasks-lock bench/agentloop/tasks.lock \
-    --limit 3 --seeds 1 --arms baseline,ripwire_mcp \
-    --harness claude-code-p --model <model-id> \
+    --limit 3 --seeds 1 --arms baseline,ripwire_cli \
+    --harness codex-exec --model <model-id> \
     --work-dir /tmp/agentloop --evaluator none \
     --results-out /tmp/agentloop/pilot.json
 
@@ -158,8 +149,7 @@ python3 bench/agentloop/analyze.py --results /tmp/agentloop/pilot.json
 ```
 
 That's **3 tasks x 2 arms x 1 seed = 6 runs**, ~$2-9 at the $0.30-$1.50/instance estimate — small
-enough to sanity-check the harness plumbing (checkout succeeds, patch applies, MCP server registers
-in the `ripwire_mcp` arm only, cost/token accounting comes back non-null) before committing to the
+enough to sanity-check checkout, patch capture, CLI-use evidence, skill isolation, and token accounting before committing to the
 full run. Pass `--evaluator swebench` once Docker + `pip install swebench` are available to get real
 `resolved=` scores instead of `null`.
 
@@ -179,5 +169,5 @@ without:
    own gate ("harness runs end-to-end on 3 pilot tasks with zero silent skips before the paid full
    run") — no jumping straight to the full matrix.
 
-`run_agentloop.py` currently cannot spend anything: `run_one()` raises `NotImplementedError`
-unconditionally. This note stays here for when that changes.
+The runner checkpoints after every call. A timeout retains partial JSONL and gold-file localization rather
+than losing the whole matrix.

@@ -218,6 +218,7 @@ if seen == len( FIXTURES ):
 # is "a number that is printed but not checked". If you add a row, force the gate to fail and read the
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
+    "agentloopcodexcheck.sh":  ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "clonebandcheck.sh":        ( "every check is `echo FAIL; exit 2` at the site",                      2 ),
     "clonelexcheck.sh":         ( "single terminal if/else on the harness binary, `exit 2` on failure",  2 ),
     "communitylabelcheck.sh":   ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
@@ -229,6 +230,13 @@ FAILFAST = {
     "type3clonecheck.sh":       ( "cap_run helper; every assertion is `|| { echo FAIL; exit 2; }`",      2 ),
     "dynmapsimdcheck.sh":       ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
     "pmccheck.sh":              ( "compile-and-run PMC harness; every arm is `echo FAIL; exit 2`",       2 ),
+    "codexplugincheck.sh":      ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
+    "codexwrapcheck.sh":        ( "each setup-contract assertion is fail-fast with explicit exit 1",    1 ),
+    "deckclaimcheck.sh":        ( "each generated-claim assertion is fail-fast with explicit exit 1",   1 ),
+    "docdriftcommentcheck.sh":  ( "shell/Python contract assertions fail fast and propagate rc 1",       1 ),
+    "lintscopecheck.sh":        ( "fixture assertions fail fast and propagate their nonzero status",     1 ),
+    "mcpcodexmetacheck.sh":     ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
+    "readmeexamplecheck.sh":    ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────
