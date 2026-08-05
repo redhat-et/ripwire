@@ -40,3 +40,4 @@
 --codex	skills/install.sh's canonical Codex destination mode, not a ripwire binary flag
 --codex-legacy	skills/install.sh's compatibility mode for older CODEX_HOME skill installs, not a ripwire binary flag
 --evaluator	bench/agentloop/run_agentloop.py harness flag ("--evaluator none|swebench") quoted in docs/EVALS.md §2 agent-loop pilot setup — not a ripwire binary flag
+--max-changeset-size	Code Maat's own flag ("code-maat --max-changeset-size 30"), quoted in docs/LINEAGE.md where ripwire's independently-derived 30-file bulk-commit cap is compared to the published value — not a ripwire flag
