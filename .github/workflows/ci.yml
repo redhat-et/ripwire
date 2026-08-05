@@ -2,7 +2,8 @@ name: CI
 
 # Guardrails as automated gates (CLAUDE.md "The guardrails as automated gates"):
 #   - release job:  configure (portable default, no RIPWIRE_NATIVE — CI hardware is not "this dev machine")
-#                    + build + full test/regression.sh (170+ gates incl. determinism/G4/quality) per OS.
+#                    + build + the full gate suite (170+ gates incl. determinism/G4/quality) per OS, run
+#                    in parallel via test/pargates.py -j 3 (same authoritative list as regression.sh).
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
 #                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
 #                    uses on the (Apple Silicon) dev machines this repo is normally built on.
@@ -135,8 +136,12 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
-      - name: "test/regression.sh (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
-        run: RIPWIRE_BIN=build/ripwire bash test/regression.sh
+      # test/pargates.py runs the SAME authoritative gate list regression.sh holds (manifestcheck.sh
+      # keeps that list honest) in parallel, with the timing-sensitive edit-check budget isolated via
+      # its `exclusive` group — the exact runner CLAUDE.md prescribes locally. Sequential regression.sh
+      # here cost ~15-20 min per suite pass; the release job runs the suite twice (Release + plain).
+      - name: "gate suite, parallel (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
+        run: python3 test/pargates.py . build/ripwire -j 3
 
       # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so a degrade-path
       # gate run against it cannot observe the alert it asserts. The e7405e7 qsnap fix was invisible to CI
@@ -158,8 +163,8 @@ jobs:
       - name: Build (plain)
         run: cmake --build build-debugalerts -j
 
-      - name: "test/regression.sh against the non-Release build (degrade paths visible)"
-        run: RIPWIRE_BIN=build-debugalerts/ripwire bash test/regression.sh
+      - name: "gate suite, parallel, against the non-Release build (degrade paths visible)"
+        run: python3 test/pargates.py . build-debugalerts/ripwire -j 3
 
       - name: det-gate — 2-run byte-identical diff
         run: |
