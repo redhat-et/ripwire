@@ -1,4 +1,4 @@
-// dynmapsimd_harness.cpp — SIMD-vs-scalar parity gate for the two vectorized kernels ripwire vendors.
+// dynmapsimd_harness.cpp — SIMD-vs-scalar parity gate for the vectorized kernels ripwire vendors.
 //
 //   A  stree::dyn::node_rank<Key,B>::lt/le (src/infra/dynamic_map.hpp) — "count of slots with key < x
 //      (resp. <= x) over all B slots, sentinel-padded". The scalar loops in THIS file restate that
@@ -10,15 +10,22 @@
 //   B  rw::FixedStr (src/fixedStr.h) — 32-byte branchless equality vs a bytewise len+data reference,
 //      the zero-pad construction invariant, len-byte participation, truncation semantics at CAP, and
 //      a==b => hash(a)==hash(b) over the full case-set cross product.
+//   C  sparseCsr<T> kernels (src/infra/sparseCsr.h) — blockReduceDot / scaleVec / spmvRow / applyInto
+//      vs independent scalar oracles. Two float regimes per kernel: an EXACT arm (values drawn from
+//      {1,2,4}, every partial sum an integer < 2^24 — any lane/tail bug shows as a bit-exact mismatch,
+//      no tolerance to hide behind) and a RANDOM arm (double-accumulated oracle, relative tolerance
+//      band — the house float-test style, since SIMD reassociation legitimately changes rounding).
+//      Plus dominantEigenvector on a known eigenpair, and same-input-same-bits determinism.
 //
-// NON-VACUITY: the banner names the compiled kernels ("rank kernel: NEON|SSE|scalar", "fixedstr eq: ...").
-// On arm64/x86_64 the gate script REQUIRES the vector kernel to have engaged — a scalar-only build there
-// would compare the contract to itself and pass vacuously, which is exactly the green-but-blind shape the
-// gate exists to prevent.
+// NON-VACUITY: the banner names the compiled kernels ("rank kernel: NEON|SSE|scalar", "fixedstr eq: ...",
+// "csr kernels: ..."). On arm64/x86_64 the gate script REQUIRES the vector kernels to have engaged — a
+// scalar-only build there would compare the contract to itself and pass vacuously, which is exactly the
+// green-but-blind shape the gate exists to prevent.
 //
 // Exit 0 = all pass; nonzero = failure (per-arm PASS/FAIL lines on stdout, first mismatch detailed).
 
 #include "dynamic_map.hpp"
+#include "sparseCsr.h"
 
 #include "../src/fixedStr.h"
 
@@ -327,7 +334,172 @@ static void fixedStrParity()
 }
 
 // ============================================================================
-// main — banner (non-vacuity evidence for the gate script) + both arms
+// Arm C — sparseCsr kernel parity (blockReduceDot / scaleVec / spmvRow / applyInto)
+// ============================================================================
+
+// Sequential double-accumulated dot — the independent oracle for every float sum below.
+static double refDot( const float* a, const float* b, std::size_t n )
+{
+    double acc = 0.0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        acc += double( a[ i ] ) * double( b[ i ] );
+    }
+    return acc;
+}
+
+// EXACT regime: values from {1,2,4} — products <= 16, partial sums integers < 2^24, so every
+// association order yields the identical float. A lane or tail bug cannot hide in rounding.
+static float drawExact( DeterministicRng& gen )
+{
+    const float pool[ 3 ] = { 1.0f, 2.0f, 4.0f };
+    return pool[ gen.next() % 3u ];
+}
+
+// RANDOM regime: floats in roughly [-1,1) — reassociation changes rounding, so parity is a
+// relative tolerance band against the double oracle (house float-test style).
+static float drawUnit( DeterministicRng& gen )
+{
+    return float( double( std::int64_t( gen.next() ) ) / 9.3e18 );
+}
+
+static bool withinRel( double got, double want, double relTol )
+{
+    const double mag = ( want < 0.0 ? -want : want );
+    const double err = ( got - want < 0.0 ? want - got : got - want );
+    return err <= relTol * ( mag > 1.0 ? mag : 1.0 );
+}
+
+static void csrReduceParity()
+{
+    const std::size_t sizes[] = { 0, 1, 3, 4, 5, 7, 8, 31, 1023, 1024, 1025, 2051 };   // straddle the 1024 block seam + every tail shape
+
+    DeterministicRng gen{ 0xC5EED5ull };
+    bool exactClean = true, randomClean = true, selfClean = true, deterministic = true, scaleClean = true;
+
+    for( std::size_t n : sizes )
+    {
+        std::vector< float > a( n ), b( n );
+
+        for( std::size_t i = 0; i < n; ++i ) { a[ i ] = drawExact( gen ); b[ i ] = drawExact( gen ); }
+        const float gotExact = csrdetail::blockReduceDot( a.data(), b.data(), n );
+        exactClean = exactClean && ( double( gotExact ) == refDot( a.data(), b.data(), n ) );
+
+        for( std::size_t i = 0; i < n; ++i ) { a[ i ] = drawUnit( gen ); b[ i ] = drawUnit( gen ); }
+        const float gotRandom = csrdetail::blockReduceDot( a.data(), b.data(), n );
+        randomClean   = randomClean && withinRel( double( gotRandom ), refDot( a.data(), b.data(), n ), 1e-4 );
+        selfClean     = selfClean && withinRel( double( csrdetail::blockReduceDot( a.data(), a.data(), n ) ), refDot( a.data(), a.data(), n ), 1e-4 );
+        deterministic = deterministic && ( gotRandom == csrdetail::blockReduceDot( a.data(), b.data(), n ) );
+
+        // scaleVec: one float multiply per element in both the vector and scalar paths — bit-exact parity required.
+        for( float s : { 0.37f, -2.5f } )
+        {
+            std::vector< float > x = a;
+            csrdetail::scaleVec( x.data(), s, n );
+            for( std::size_t i = 0; i < n; ++i ) { scaleClean = scaleClean && ( x[ i ] == a[ i ] * s ); }
+        }
+    }
+
+    checkf( exactClean,   "csr blockReduceDot: bit-exact on integer-exact values across the 1024 block seam" );
+    checkf( randomClean,  "csr blockReduceDot: within 1e-4 rel of double oracle on random values" );
+    checkf( selfClean,    "csr blockReduceDot: a==b (norm) aliasing arm within band" );
+    checkf( deterministic,"csr blockReduceDot: same input, same bits" );
+    checkf( scaleClean,   "csr scaleVec: bit-exact vs scalar multiply (all tail shapes)" );
+}
+
+static void csrSpmvParity()
+{
+    constexpr std::size_t kCols = 97;
+    const std::size_t rowLens[] = { 0, 1, 3, 4, 5, 8, 9, 16, 23, 40 };   // straddle the 4-wide (spmvRow) and 8-wide (applyInto) unroll seams
+    constexpr std::size_t kRows = sizeof( rowLens ) / sizeof( rowLens[ 0 ] );
+
+    DeterministicRng gen{ 0x5EAF00Dull };
+
+    for( int regime = 0; regime < 2; ++regime )   // 0 = exact, 1 = random
+    {
+        std::size_t nnz = 0;
+        for( std::size_t r = 0; r < kRows; ++r ) { nnz += rowLens[ r ]; }
+
+        sparseCsr< float > A( kRows, kCols, nnz );
+        std::vector< float > x( kCols );
+        for( std::size_t c = 0; c < kCols; ++c ) { x[ c ] = regime == 0 ? drawExact( gen ) : drawUnit( gen ); }
+
+        std::size_t k = 0;
+        for( std::size_t r = 0; r < kRows; ++r )
+        {
+            A.rowOffsets()[ r ] = std::uint32_t( k );
+            for( std::size_t j = 0; j < rowLens[ r ]; ++j, ++k )
+            {
+                A.colIndices()[ k ] = std::uint32_t( gen.next() % kCols );
+                A.values()[ k ]     = regime == 0 ? drawExact( gen ) : drawUnit( gen );
+            }
+        }
+        A.rowOffsets()[ kRows ] = std::uint32_t( nnz );
+
+        // spmvRow, called directly per row (the applyInto float path bypasses it by design)
+        bool rowClean = true;
+        for( std::size_t r = 0; r < kRows; ++r )
+        {
+            const std::uint32_t b0 = A.rowOffsets()[ r ], e0 = A.rowOffsets()[ r + 1 ];
+            const float got = csrdetail::spmvRow( A.values() + b0, A.colIndices() + b0, x.data(), std::size_t( e0 - b0 ) );
+            double want = 0.0;
+            for( std::uint32_t j = b0; j < e0; ++j ) { want += double( A.values()[ j ] ) * double( x[ A.colIndices()[ j ] ] ); }
+            rowClean = rowClean && ( regime == 0 ? double( got ) == want : withinRel( double( got ), want, 1e-4 ) );
+        }
+        checkf( rowClean, "csr spmvRow: %s parity across unroll seams", regime == 0 ? "bit-exact" : "tolerance" );
+
+        // applyInto (the shipped SpMV — 8-accumulator float path incl. the prefetch bounds guard)
+        std::vector< float > y( kRows, -1.0f );
+        A.applyInto( x.data(), y.data() );
+        bool applyClean = true;
+        for( std::size_t r = 0; r < kRows; ++r )
+        {
+            double want = 0.0;
+            for( std::uint32_t j = A.rowOffsets()[ r ]; j < A.rowOffsets()[ r + 1 ]; ++j ) { want += double( A.values()[ j ] ) * double( x[ A.colIndices()[ j ] ] ); }
+            applyClean = applyClean && ( regime == 0 ? double( y[ r ] ) == want : withinRel( double( y[ r ] ), want, 1e-4 ) );
+        }
+        checkf( applyClean, "csr applyInto<float>: %s parity (0..40-long rows)", regime == 0 ? "bit-exact" : "tolerance" );
+    }
+
+    // the non-float template path (spmvRow scalar branch) — double, tolerance vs double oracle
+    {
+        sparseCsr< double > A( 2, 2, 4 );
+        const std::uint32_t off[ 3 ] = { 0, 2, 4 };
+        const std::uint32_t col[ 4 ] = { 0, 1, 0, 1 };
+        const double        val[ 4 ] = { 2.0, 1.0, 1.0, 2.0 };
+        std::memcpy( A.rowOffsets(), off, sizeof( off ) );
+        std::memcpy( A.colIndices(), col, sizeof( col ) );
+        std::memcpy( A.values(),     val, sizeof( val ) );
+        const double x[ 2 ] = { 0.25, -3.0 };
+        double y[ 2 ] = { 0.0, 0.0 };
+        A.applyInto( x, y );
+        checkf( y[ 0 ] == 2.0 * 0.25 + 1.0 * -3.0 && y[ 1 ] == 1.0 * 0.25 + 2.0 * -3.0, "csr applyInto<double>: scalar template path exact on a 2x2" );
+    }
+}
+
+static void csrEigenParity()
+{
+    // [[2,1],[1,2]] — dominant eigenpair lambda=3, v=(1,1)/sqrt(2). Exercises the full
+    // blockReduceDot + scaleVec + applyInto composition the PageRank kernel leans on.
+    sparseCsr< float > A( 2, 2, 4 );
+    const std::uint32_t off[ 3 ] = { 0, 2, 4 };
+    const std::uint32_t col[ 4 ] = { 0, 1, 0, 1 };
+    const float         val[ 4 ] = { 2.0f, 1.0f, 1.0f, 2.0f };
+    std::memcpy( A.rowOffsets(), off, sizeof( off ) );
+    std::memcpy( A.colIndices(), col, sizeof( col ) );
+    std::memcpy( A.values(),     val, sizeof( val ) );
+
+    float x[ 2 ] = { 1.0f, 0.0f };
+    const float lambda = dominantEigenvector( A, x, 1e-6f, 1000 );
+
+    const double invSqrt2 = 0.70710678118654752;
+    checkf( withinRel( double( lambda ), 3.0, 1e-4 ), "csr dominantEigenvector: lambda within band of 3 (got %.8f)", double( lambda ) );
+    checkf( withinRel( double( x[ 0 ] ), invSqrt2, 1e-3 ) && withinRel( double( x[ 1 ] ), invSqrt2, 1e-3 ),
+            "csr dominantEigenvector: eigenvector within band of (1,1)/sqrt(2)" );
+}
+
+// ============================================================================
+// main — banner (non-vacuity evidence for the gate script) + all arms
 // ============================================================================
 
 int main()
@@ -346,7 +518,14 @@ int main()
 #else
     const char* fixedStrKernel = "scalar";
 #endif
-    std::printf( "dynmapsimd: rank kernel: %s   fixedstr eq: %s\n", rankKernel, fixedStrKernel );
+#if defined( SPARSECSR_NEON ) && SPARSECSR_NEON
+    const char* csrKernel = "NEON";
+#elif defined( SPARSECSR_SSE2 ) && SPARSECSR_SSE2
+    const char* csrKernel = "SSE";
+#else
+    const char* csrKernel = "scalar";
+#endif
+    std::printf( "dynmapsimd: rank kernel: %s   fixedstr eq: %s   csr kernels: %s\n", rankKernel, fixedStrKernel, csrKernel );
 
     // 32-bit lanes (4 per 128-bit vector): B must be a multiple of 4
     rankParity< std::int32_t,  4  >( "i32" );
@@ -371,6 +550,10 @@ int main()
     rankParity< double,        32 >( "f64" );
 
     fixedStrParity();
+
+    csrReduceParity();
+    csrSpmvParity();
+    csrEigenParity();
 
     return g_fail;
 }
