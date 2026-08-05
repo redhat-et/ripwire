@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # Install ripwire's agent skills (symlinks back to this repo's skills/, so they stay version-controlled and
-# edits here take effect immediately). Default: Claude. Codex: skills/install.sh --codex. An explicit path
-# remains supported for CI and other clients: skills/install.sh PATH. OPT-IN PreToolUse hook (advisory
+# edits here take effect immediately). Default: Claude. Codex: skills/install.sh --codex installs to the
+# current cross-agent ~/.agents/skills discovery root; --codex-legacy retains the older CODEX_HOME/skills
+# destination. An explicit path remains supported for CI and other clients: skills/install.sh PATH. OPT-IN PreToolUse hook (advisory
 # grep->ripwire nudge B5.2): skills/install.sh --hook — a SEPARATE action,
 # never bundled into the flags above, so it only ever runs on explicit invocation.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
-# ── --hook: register skills/hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
+# ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
 # Advisory-only (see the script's own header): never blocks/denies/rewrites a tool call, fires at most
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
 install_hook()
 {
     settings="$HOME/.claude/settings.json"
-    hookScript="$src/hooks/ripwire-nudge.sh"
+    hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     chmod +x "$hookScript" 2>/dev/null || true
 
     if ! command -v jq >/dev/null 2>&1; then
@@ -49,7 +50,8 @@ install_hook()
 
 case "${1:-}" in
     --hook)   install_hook; exit 0 ;;
-    --codex)  dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
+    --codex)  dst="${AGENTS_HOME:-$HOME/.agents}/skills" ;;
+    --codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
     --claude) dst="$HOME/.claude/skills" ;;
     "")       dst="$HOME/.claude/skills" ;;
     *)        dst="$1" ;;

@@ -2310,9 +2310,9 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
 //               member TYPES (composeEdges, deduped by typeSym). The best-validated coupling form ripwire
 //               lacked (§1a: CBO is the #1 OO defect predictor, size-controlled). External/unresolved calls
 //               are absent from the graph, so cbo counts only in-repo coupling — the honest, computable set.
-//   tested[i] — Q2: 1 iff symbol i is referenced from ANY test-path file (filter.h isTestPath), across ALL
-//               reference kinds (call/read/write/import/extends/compose/doc). The cheapest "a safety net
-//               exists" signal; a deterministic post-pass over the reference set.
+//   tested[i] — Q2: 1 iff symbol i is transitively reachable from ANY test-path symbol over the resolved
+//               out-edge call graph. This is the same coverage set --exercises and --seams use. Dynamic
+//               dispatch, callbacks and subprocess-driven shell tests remain outside the graph.
 //   lcom4[i]  — Q4 class cohesion (LCOM4 = # connected components of the method graph, edge = two methods
 //               CALL each other OR SHARE a field). Emitted ONLY for Class/Struct/Interface WITH ≥1 method
 //               (kLcom4NA = "not applicable" for free functions / method-less types — we NEVER fabricate 1).
@@ -2323,11 +2323,15 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
 struct QMetrics
 {
     std::vector<std::uint32_t> cbo;          // distinct in-repo dependency targets per symbol
-    std::vector<std::uint8_t>  tested;       // 1 = referenced from a test-path file, else 0
+    std::vector<std::uint8_t>  tested;       // 1 = transitively reachable from a test-path symbol, else 0
     std::vector<std::uint32_t> lcom4;        // # connected components (class-kinds w/ methods); kLcom4NA otherwise
     std::vector<std::uint32_t> callerCount;  // |direct callers| (in-edge CSR) — the symbol-level half of change-amplification
 };
 inline constexpr std::uint32_t kLcom4NA = 0xFFFFFFFFu;   // LCOM4 not applicable (not a class-kind, or no methods)
+
+// Defined with the other reachability helpers below. QMetrics uses the same traversal as --exercises and
+// --seams so every surface answers the same question about whether an indexed test reaches a symbol.
+inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds );
 
 // union-find (LCOM4 components). Deterministic: unions in a fixed order over id-sorted method slots.
 struct UnionFind
@@ -2395,37 +2399,24 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
         }
     }
 
-    // ── tested=: any reference (any role) FROM a test-path file marks the referenced symbol as tested. We
-    //    resolve each ref's callee name to its definition(s) by name and, if the ref's file is a test path,
-    //    flag those defs. Deterministic: references are in a fixed order; byName is insertion-order stable.
-    std::vector<char> fileIsTest( ing.files.size(), 0 );
-    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    // ── tested=: the same transitive test-seed reach used by --exercises and --seams. A direct-reference
+    //    pass silently marked outer() but not outer()->leaf(), contradicting those verbs and the documented
+    //    "a test reaches it" contract. Test-path symbols are seeds, not production coverage rows themselves.
+    std::vector<NodeId> testSeeds;
+    testSeeds.reserve( S );
+    for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        fileIsTest[f] = isTestPath( ing.files[f] ) ? 1 : 0;
-    }
-    HashMap<std::string, std::vector<NodeId>> byNameDefs;
-    byNameDefs.reserve( S );
-    for( const Symbol& s : ing.symbols )
-    {
-        byNameDefs[s.name].push_back( s.id );
-    }
-    for( const Reference& r : ing.references )
-    {
-        if( r.fileId >= fileIsTest.size() || !fileIsTest[r.fileId] )
+        if( isTestPath( ing.files[ing.symbols[i].fileId] ) )
         {
-            continue; // only refs living in a test file
+            testSeeds.push_back( i );
         }
-        const auto it = byNameDefs.find( r.calleeName );
-        if( it == byNameDefs.end() )
+    }
+    const std::vector<char> testReach = forwardReach( g, testSeeds );
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        if( testReach[i] && !isTestPath( ing.files[ing.symbols[i].fileId] ) )
         {
-            continue;
-        }
-        for( NodeId def : it->second )
-        {
-            if( !fileIsTest[ing.symbols[def].fileId] )
-            { // a test referencing a PRODUCTION symbol = that symbol is tested
-                q.tested[ def ] = 1u;
-            }
+            q.tested[i] = 1u;
         }
     }
 

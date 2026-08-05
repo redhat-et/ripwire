@@ -6,7 +6,9 @@ description: >
   WORSE across 10 measured kinds (complexity, verbosity, nesting, params, duplication, dead-code,
   API-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper — the measured agent-code
   failure modes), exiting non-zero on new debt. Fix the real regressions, re-run, converge. Reach for this at
-  every "I think this is done" moment on non-trivial work. For merge-safety / blast-radius / tests-to-run →
+  every "I think this is done" moment on non-trivial work — but a single-line leaf fix with no new
+  branch/symbol/signature does NOT need this pass (or this file): run the focused test and move on. For
+  merge-safety / blast-radius / tests-to-run →
   **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Backed by
   ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
@@ -22,6 +24,11 @@ allowed-tools: Bash, Read
 
 Don't eyeball quality — **measure the delta your change introduced**, with a deterministic oracle, in a
 bounded loop. A file that was already complex is not your regression.
+
+Apply the "non-trivial work" trigger literally. A single-line leaf fix that preserves the signature and
+adds no branch, symbol, dependency, or abstraction does not need a standalone quality-delta pass unless
+the repository requires it; run the focused behavioral test and diff checks instead. This skill earns its
+cost when the edit can change measured structure, not merely whenever the working tree is dirty.
 
 ## The loop
 1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta` before you call it

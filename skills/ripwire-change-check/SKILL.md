@@ -13,7 +13,8 @@ description: >
   surfaces tests to run (--affected/--situ), flags lint smells and hotspot risk in touched files, interprets
   --metrics coupling/cohesion/size on what you touched, and shows the diff's footprint via --map-diff. For
   code QUALITY (better or worse) → **ripwire-quality-bar** instead — this skill judges merge safety, not
-  quality. Backed by ripwire (deterministic, on PATH). Sizing work not yet written → ripwire-before-you-build.
+  quality. Backed by ripwire (deterministic, on PATH). A one-line leaf fix is not a merge audit — run the
+  focused test and skip this skill (and this file). Sizing work not yet written → ripwire-before-you-build.
   Risk in a subsystem you did NOT write → ripwire-fresh-eyes.
 allowed-tools: Bash, Read
 ---
@@ -46,6 +47,12 @@ ripwire <dir> --pr-context=main           # vs a base branch/ref
   <changed-symbols count="K"><s t="fn" n="…" p="…:L" callers="…"/> …
 ```
 Use this first for the evidence dump; steps 1–5 below are the same ground as a narrated, one-pass walkthrough.
+
+**Scope guard:** Do not turn a focused fix into a full merge audit merely because a diff now exists. Invoke
+this skill when the user is actually at the submit/review/merge-safety moment, or when the edit changes a
+contract or has unclear reach. For an obvious leaf-level implementation fix with no signature/API change,
+the focused test plus `git diff --check` is enough unless repository instructions require a broader gate.
+Never run `--pr-context` and then repeat its component steps without a specific unanswered question.
 
 **The header is stamped `at="<sha>[+dirty]"`** — the commit the evidence was measured at (`--pr-context`,
 `--test-gate`, `--quality-delta` and `--map-diff` all carry it). Quote it whenever you paste findings into a
@@ -101,7 +108,7 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
    | `nest` | max block-nesting depth | `>~4`, or above the file's local median → deep-branch smell → guard clauses / extract the inner block into a named fn |
    | `loc` | lines in the symbol | well above the local median for its kind → size smell → split; a giant new fn is the #1 agent verbosity failure mode |
    | `params` | parameter count | `>~5` → bundle related params into a struct rather than widening the signature |
-   | `tested` | is any test reaching it | `tested="0"` on a symbol you changed = **no safety net** → add a test *before* you change it further |
+   | `tested` | is any indexed test reaching it | `tested="1"` = a safety net is present; omission on this explicit metrics surface means no indexed test reaches it → add one before changing it further |
    These are size-correlated signals (coupling is the validated one; complexity/size are heuristics) — read
    the delta against the file's own median, not an absolute bar. A number that was already high before your
    diff is not your regression (that judgment is **ripwire-quality-bar**'s `--quality-delta`).
@@ -182,7 +189,7 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
 
 Impact summary: blast-radius count, test coverage (zero = blocking concern), whether any changed file is a
 top-10 hotspot, any lint findings in changed files, and any `--metrics` red flags (high/rising `cbo`,
-`lcom4>1`, `tested=0`) on a touched symbol. A green change passes: radius understood, tests exist, no new
+`lcom4>1`, or missing `tested=1`) on a touched symbol. A green change passes: radius understood, tests exist, no new
 lint smells, no hotspot surprise, no coupling/cohesion regression. Recommend one of: **safe to merge** /
 **needs tests** / **review the hotspot** / **lint issues to fix** / **decouple before merge**. (Ran
 quality-bar first? Both green = ship — see the Routing note above.)

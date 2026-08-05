@@ -73,6 +73,8 @@ import sys
 # gate header: a new binary type is meant to fail here once and gain a row with a reason.
 BINARY_EXTENSIONS = {
     ".tgz",    # bench/locbench/results/*/*.tgz — gzipped gate+fixture bundles
+    ".pdf",    # present/ripwire-showcase.pdf — generated binary slide export
+    ".pptx",   # present/ripwire-showcase.pptx — generated Office Open XML slide deck
 }
 
 def scan(paths, label):
@@ -82,6 +84,8 @@ def scan(paths, label):
     for path in paths:
         if os.path.splitext(path)[1].lower() in BINARY_EXTENSIONS:
             continue
+        if not os.path.lexists(path):
+            continue  # tracked deletion in a dirty review tree; there are no working-tree bytes to scan
         # A tracked SYMLINK's content is its target PATH (git mode 120000), which cannot hold a NUL, and the
         # bytes it points at belong to whatever tree owns them — following it would scan files this repo does
         # not track. Counted rather than silently dropped.

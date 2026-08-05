@@ -146,7 +146,7 @@ if [ "$rc" = "0" ]; then ok "--scan-skills on a dir with one clean file exits 0"
 # ══ §B13.3 — the DIRECTORY form's population must be its whole subject ═════════════════════════════
 # --scan-skills walked `.md` ONLY. files="22" was honest about what it scanned and silent about what it
 # did not: this repo's skills/ holds 24 files and the two it never opened are skills/install.sh and
-# skills/hooks/ripwire-nudge.sh — the directory's two EXECUTABLES — under verdict="clean", with no counter
+# hooks/ripwire-nudge.sh — the directory's two EXECUTABLES — under verdict="clean", with no counter
 # and no legend clause. The single-file form has no such filter (--scan-skill=<any file> scans it), so the
 # two entry points disagreed about their own subject. This section pins the agreement, and pins that the
 # remaining exclusions (binary / unreadable / denylisted subtree) are COUNTED rather than silent.

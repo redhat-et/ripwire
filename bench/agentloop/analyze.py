@@ -2,7 +2,7 @@
 # analyze.py — paired per-task/seed analysis for Phase B4 agent-in-the-loop eval results.
 #
 # WHAT THIS DOES. Consumes the record schema written by run_agentloop.py (SCHEMA
-# "ripwire-agentloop-results-v1") and computes paired arm deltas (baseline vs ripwire_mcp) per
+# "ripwire-agentloop-results-v2") and computes paired arm deltas (baseline vs ripwire_cli) per
 # (instance_id, seed), then a REPOSITORY-CLUSTERED bootstrap 95% lower bound on the resolved-rate
 # delta — because multiple SWE-bench instances from one repo are not independent trials any more than
 # multiple LocBench issues from one repo are.
@@ -15,7 +15,7 @@
 # independent re-implementation of the same statistical method for the agentloop record schema.
 #
 # SELF-TEST (`--self-test`): builds a tiny synthetic in-memory fixture (a handful of fake repos/
-# instances/seeds with a manufactured resolved-rate lift for ripwire_mcp) and asserts the pipeline
+# instances/seeds with a manufactured resolved-rate lift for ripwire_cli) and asserts the pipeline
 # produces the expected sign and a positive bootstrap lower bound — proves the math runs correctly
 # without needing any real (paid) run data.
 #
@@ -24,8 +24,8 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
-SCHEMA = "ripwire-agentloop-results-v1"
-ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_mcp"
+SCHEMA = "ripwire-agentloop-results-v2"
+ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
 
 def mean( xs ): return sum( xs ) / len( xs ) if xs else 0.0
 
@@ -40,15 +40,15 @@ def pair_by_task_seed( records ):
     for pairs where BOTH arms have status=='ok' (a completed run with real metrics). Anything else — a
     stub/not_implemented/errored run, or a one-sided completion — is reported separately, never silently
     dropped into the paired set (that would bias the paired comparison toward whichever arm happened to
-    finish more often)."""
+    finish more often). resolved=None (--evaluator none) still pairs: that stage's supported claims are
+    localization/token/wall, and analyze() reports the resolved stats themselves as n/a."""
     by_key = {}
     for r in records:
         by_key.setdefault( ( r["instance_id"], r["seed"] ), {} )[ r["arm"] ] = r
     paired, incomplete = [], []
     for ( instance_id, seed ), arms in sorted( by_key.items() ):
         base, ctx = arms.get( ARM_BASELINE ), arms.get( ARM_RIPWIRE )
-        if base and ctx and base["status"] == "ok" and ctx["status"] == "ok" \
-           and base["resolved"] is not None and ctx["resolved"] is not None:
+        if base and ctx and base["status"] == "ok" and ctx["status"] == "ok":
             paired.append( ( instance_id, base["repo"], seed, base, ctx ) )
         else:
             incomplete.append( ( instance_id, seed,
@@ -98,16 +98,20 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
     repos = sorted( { repo for _, repo, *_ in paired } )
     out = dict( n_pairs=len( paired ), n_repos=len( repos ), n_incomplete=len( incomplete ) )
     if not paired:
-        out["note"] = "zero complete paired (baseline,ripwire_mcp) runs — nothing to analyze yet"
+        out["note"] = "zero complete paired (baseline,ripwire_cli) runs — nothing to analyze yet"
         return out
-    rdeltas = [ resolved_delta( b, c ) for *_ , b, c in paired ]
+    # Resolution stats only over pairs BOTH arms actually scored (--evaluator swebench); an unscored
+    # run must surface as n/a, never as a fabricated 0.0 delta.
+    scored = [ p for p in paired if p[3]["resolved"] is not None and p[4]["resolved"] is not None ]
+    out["n_resolved_pairs"] = len( scored )
+    rdeltas = [ resolved_delta( b, c ) for *_ , b, c in scored ]
     ldeltas = [ loc_hit_delta( b, c ) for *_ , b, c in paired ]
-    lower, _ = clustered_bootstrap_lower( paired, resolved_delta, n_boot, bootstrap_seed )
+    lower = clustered_bootstrap_lower( scored, resolved_delta, n_boot, bootstrap_seed )[0] if scored else None
     tok_p50, tok_p95 = paired_ratio( paired, "tokens_out" )
     wall_p50, wall_p95 = paired_ratio( paired, "wall_seconds" )
     cost_p50, cost_p95 = paired_ratio( paired, "cost_usd" )
     out.update(
-        resolved_delta_mean=mean( rdeltas ),
+        resolved_delta_mean=mean( rdeltas ) if scored else None,
         resolved_delta_bootstrap_95_lower=lower,
         localization_hit_delta_mean=mean( ldeltas ),
         tokens_out_ratio_p50=tok_p50, tokens_out_ratio_p95=tok_p95,
@@ -124,40 +128,42 @@ def print_report( out ):
     if "note" in out:
         print( f"  {out['note']}" ); return
     print( f"  resolved-rate delta {pct(out['resolved_delta_mean'])}; "
-           f"repo-clustered bootstrap 95% lower {pct(out['resolved_delta_bootstrap_95_lower'])}" )
+           f"repo-clustered bootstrap 95% lower {pct(out['resolved_delta_bootstrap_95_lower'])} "
+           f"(over {out['n_resolved_pairs']} resolution-scored pairs)" )
     print( f"  localization-hit delta {pct(out['localization_hit_delta_mean'])}" )
     print( f"  tokens_out ratio p50/p95 {rat(out['tokens_out_ratio_p50'])}/{rat(out['tokens_out_ratio_p95'])}" )
     print( f"  wall_seconds ratio p50/p95 {rat(out['wall_seconds_ratio_p50'])}/{rat(out['wall_seconds_ratio_p95'])}" )
     print( f"  cost_usd ratio p50/p95 {rat(out['cost_usd_ratio_p50'])}/{rat(out['cost_usd_ratio_p95'])}" )
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
+def _fixture_record( repo, instance_id, seed, arm, resolved, tokens_out, wall_seconds, cost_usd ):
+    return dict( instance_id=instance_id, repo=repo, base_commit="deadbeef",
+                 arm=arm, seed=seed, harness="fixture", model="fixture",
+                 status="ok", resolved=resolved, localization_hit=resolved,
+                 tokens_in=1000, tokens_out=tokens_out, wall_seconds=wall_seconds, cost_usd=cost_usd,
+                 command_calls=1,
+                 ripwire_calls=0 if arm == ARM_BASELINE else 1,
+                 ripwire_commands=[] if arm == ARM_BASELINE else [ "ripwire . --for=fixture" ],
+                 events_path=None,
+                 error=None, started_unix=0, finished_unix=0 )
+
 def synthetic_fixture():
-    # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ripwire_mcp resolves ~2/3 of the time,
+    # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ripwire_cli resolves ~2/3 of the time,
     # baseline ~1/3 — a manufactured, unambiguous positive lift, so the bootstrap lower bound MUST be
     # positive (that's the assertion --self-test checks) and tokens/wall/cost are set to a mild,
-    # deterministic ripwire_mcp overhead (+8%) so the ratio math has something non-trivial to compute.
+    # deterministic ripwire_cli overhead (+8%) so the ratio math has something non-trivial to compute.
     rng = random.Random( "agentloop-selftest-fixture-v1" )
-    repos = [ "fake/repoA", "fake/repoB", "fake/repoC" ]
     records = []
-    for repo in repos:
+    for repo in ( "fake/repoA", "fake/repoB", "fake/repoC" ):
         for i in range( 3 ):
             instance_id = f"{repo.split('/')[1]}-{i}"
             for seed in ( 1, 2, 3 ):
-                base_resolved = rng.random() < 1/3
-                ctx_resolved  = rng.random() < 2/3
-                base_tokens, ctx_tokens = 10000, 10800
-                base_wall, ctx_wall = 120.0, 129.6
-                base_cost, ctx_cost = 0.50, 0.54
-                for arm, resolved, tokens, wall, cost in (
-                    ( ARM_BASELINE, base_resolved, base_tokens, base_wall, base_cost ),
-                    ( ARM_RIPWIRE,  ctx_resolved,  ctx_tokens,  ctx_wall,  ctx_cost ),
-                ):
-                    records.append( dict(
-                        instance_id=instance_id, repo=repo, base_commit="deadbeef",
-                        arm=arm, seed=seed, harness="fixture", model="fixture",
-                        status="ok", resolved=resolved, localization_hit=resolved,
-                        tokens_in=1000, tokens_out=tokens, wall_seconds=wall, cost_usd=cost,
-                        error=None, started_unix=0, finished_unix=0 ) )
+                base_resolved = rng.random() < 1/3   # rng draw order is part of the fixture contract:
+                ctx_resolved  = rng.random() < 2/3   # baseline first, treatment second, per (instance, seed)
+                records.append( _fixture_record( repo, instance_id, seed, ARM_BASELINE, base_resolved,
+                                                 tokens_out=10000, wall_seconds=120.0, cost_usd=0.50 ) )
+                records.append( _fixture_record( repo, instance_id, seed, ARM_RIPWIRE, ctx_resolved,
+                                                 tokens_out=10800, wall_seconds=129.6, cost_usd=0.54 ) )
     # one deliberately incomplete pair (baseline never finished) — must land in n_incomplete, not paired.
     records.append( dict( instance_id="repoA-orphan", repo="fake/repoA", base_commit="deadbeef",
                           arm=ARM_RIPWIRE, seed=1, harness="fixture", model="fixture", status="ok",
@@ -179,6 +185,20 @@ def self_test():
     if out["tokens_out_ratio_p50"] is None or abs( out["tokens_out_ratio_p50"] - 0.08 ) > 1e-6:
         failures.append( f"expected tokens_out ratio p50 == +8.0% exactly (fixture is deterministic), "
                           f"got {out['tokens_out_ratio_p50']}" )
+    if out.get( "n_resolved_pairs" ) != 27:
+        failures.append( f"expected all 27 pairs resolution-scored, got {out.get('n_resolved_pairs')}" )
+    # evaluator=none pilot mode: resolved is None in BOTH arms — pairs must still form so the
+    # localization/token/wall claims that stage supports remain analyzable; resolved stats say n/a.
+    unscored = [ dict( r, resolved=None ) for r in records ]
+    out2 = analyze( unscored, n_boot=100 )
+    if out2["n_pairs"] != 27:
+        failures.append( f"evaluator-none: expected 27 pairs, got {out2['n_pairs']}" )
+    if out2["n_resolved_pairs"] != 0:
+        failures.append( f"evaluator-none: expected 0 resolution-scored pairs, got {out2['n_resolved_pairs']}" )
+    if out2["resolved_delta_mean"] is not None or out2["resolved_delta_bootstrap_95_lower"] is not None:
+        failures.append( "evaluator-none: resolved stats must be n/a (None), never a fabricated zero" )
+    if out2["tokens_out_ratio_p50"] is None or abs( out2["tokens_out_ratio_p50"] - 0.08 ) > 1e-6:
+        failures.append( "evaluator-none: tokens_out ratio must still compute on unscored pairs" )
     if failures:
         print( "\nSELF-TEST FAIL:" )
         for f in failures: print( f"  - {f}" )

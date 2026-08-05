@@ -51,6 +51,20 @@ git -C "$REPO" commit -qm init >/dev/null
 BINDIR="$TMP/bin"; mkdir -p "$BINDIR"; cp "$BIN" "$BINDIR/ripwire"; chmod +x "$BINDIR/ripwire"
 HAPPYCACHE="$TMP/happycache"; mkdir -p "$HAPPYCACHE"
 
+# Cache accounting fixture: one legacy flat blob + one current one-level sharded blob are live. Locks,
+# cache-owned temporary directories, a non-hex directory, and a nested-beyond-the-shard decoy are not.
+# Sizes are deliberately unequal so a coincidentally-correct count cannot hide incorrect byte accounting.
+PRIVATECACHE="$HAPPYCACHE/ripwire"
+mkdir -p "$PRIVATECACHE/0a/nested" "$PRIVATECACHE/locks/0b" "$PRIVATECACHE/ripwire-temp-a" \
+         "$PRIVATECACHE/ripwire-temp-b" "$PRIVATECACHE/zz"
+printf 'flat'    >"$PRIVATECACHE/ripwire-flat.bin"
+printf 'sharded' >"$PRIVATECACHE/0a/ripwire-sharded.cache"
+printf 'nested'  >"$PRIVATECACHE/0a/nested/ripwire-too-deep.bin"
+printf 'lock'    >"$PRIVATECACHE/locks/0b/ripwire-edit-test.lock"
+printf 'temp-a'  >"$PRIVATECACHE/ripwire-temp-a/ripwire-decoy.bin"
+printf 'temp-b'  >"$PRIVATECACHE/ripwire-temp-b/ripwire-decoy.cache"
+printf 'nonhex'  >"$PRIVATECACHE/zz/ripwire-decoy.bin"
+
 OUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ripwire" "$REPO" --doctor --no-cache 2>/dev/null )"
 RC=$?
 echo "happy-path output:"; echo "$OUT"; echo "(exit=$RC)"; echo
@@ -79,6 +93,11 @@ echo "$OUT" | xmllint --noout - 2>/dev/null && ok "xmllint clean" || no "xmllint
 echo "$OUT" | grep -q 'hint=' \
     && no "happy path (all checks ok) wrongly carries a hint= somewhere" \
     || ok "happy path carries no hint= (hint= is failure-only)"
+
+CACHE_ROW="$( echo "$OUT" | grep -oE '<c n="cache-dir"[^<]*/>' )"
+echo "$CACHE_ROW" | grep -q 'blobs="2" bytes="11" many="0" truncated="0"' \
+    && ok "cache-dir counts flat + one-level 2-hex shards, excluding locks/temp/non-shards/deeper nesting" \
+    || no "cache-dir accounting is not exact and honest: $CACHE_ROW"
 
 # (D) non-vacuity via count assertion: checks="N" must equal the number of emitted <c rows.
 DECLARED="$( echo "$OUT" | grep -o 'checks="[0-9]*"' | grep -o '[0-9]*' )"

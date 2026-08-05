@@ -41,6 +41,7 @@
 #include <atomic>
 #include <regex>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -78,6 +79,21 @@ namespace
 // threaded through collectSources so --max-file-size can override it. Kept here as the last-resort
 // fallback for any caller that somehow crawls with a zero ceiling.
 constexpr std::size_t kBinarySniffCap = 4096;       // NUL-byte sniff window
+
+// saveCache's balanced lexical-index merge carries odd runs with memcpy. Keep the
+// payload's byte-copy contract explicit while preserving the former pair ordering.
+struct LexPair
+{
+    std::uint64_t hash;
+    std::uint32_t slot;
+
+    friend constexpr bool operator<( const LexPair& lhs, const LexPair& rhs )
+    {
+        return lhs.hash < rhs.hash || ( lhs.hash == rhs.hash && lhs.slot < rhs.slot );
+    }
+};
+
+static_assert( std::is_trivially_copyable_v<LexPair> );
 
 // ---- the extension -> {lang, grammar fn, query file} table (DOD, no per-file switch) ----
 using LangFn = const TSLanguage* (*)( void );
@@ -1758,7 +1774,6 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     w.u32( std::uint32_t( F ) );
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
-        using LexPair = std::pair<std::uint64_t, std::uint32_t>;               // H3 (v10): (hash, global pair slot within the file)
         std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
         std::vector<LexPair>       mergeA, mergeB;                             // ping-pong buffers of the balanced run-merge, reused
         std::vector<std::size_t>   runOffsets, nextRunOffsets;                 // sorted-run bounds inside the ping-pong buffer
@@ -1790,7 +1805,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                     const std::vector<std::uint64_t>& row = defs[i].lex.tokenHashes;
                     for( const std::uint64_t hash : row )
                     {
-                        mergeA.emplace_back( hash, slotCount++ );
+                        mergeA.push_back( LexPair{ hash, slotCount++ } );   // braced, not emplace_back( a, b ): aggregate emplace needs P0960, absent in Clang < 20 (CI's Xcode 15.4)
                     }
                     if( !row.empty() )
                     {

@@ -248,8 +248,8 @@ warm_zero="$( grep -c 'reparsed=0' "$TMP/warm.err" || true )"
 if [ "$warm_lines" = "2" ] && [ "$warm_zero" = "2" ]; then ok "G-cache: warm run reparses nothing in either root"
 else no "G-cache: warm run stats unexpected: $( tr '\n' ';' <"$TMP/warm.err" )"; fi
 # identify svc's blob: only two blobs exist; snapshot both, then dirty ONE cli file.
-# Y4: shard-aware lookup — blobs may be flat under $GC or under $GC/<xx>/ (2-hex shard).
-blobsum(){ find "$GC" -maxdepth 2 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs -I{} md5 -q {} 2>/dev/null || find "$GC" -maxdepth 2 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs md5sum; }
+# Private-root + shard-aware lookup: $GC/ripwire/<xx>/blob.
+blobsum(){ find "$GC" -maxdepth 3 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs -I{} md5 -q {} 2>/dev/null || find "$GC" -maxdepth 3 -type f -name 'ripwire-*.bin' 2>/dev/null | sort | xargs md5sum; }
 blobsum >"$TMP/blobs.before"
 printf '\n// dirty\n' >> "$WS/cli/src/cli_helper.cpp"
 TMPDIR="$GC" RIPWIRE_CACHE_STATS=1 "$BIN" "$WS/svc" "$WS/cli" >/dev/null 2>"$TMP/dirty.err"

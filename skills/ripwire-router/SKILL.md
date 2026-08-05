@@ -28,7 +28,7 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 | **Mid-implementation** — about to open several files just to learn something | **ripwire-efficient** | cheapest verb, then read 2-3 files |
 | **Reviewing MY diff** — "am I ready to push / is this safe to merge" | **ripwire-change-check** | `--quality-delta` (that's the quality-bar reflex) → `--pr-context` |
 | **Which tests should I run for this change? Did I run the right ones?** | **ripwire-change-check** | `--affected=F1,F2` / `--situ` → `--test-gate` |
-| **Writing tests for existing (untested) code** | **ripwire-write-tests** | `--seams` + `tested=0` lens + `--callers=SYM` |
+| **Writing tests for existing (untested) code** | **ripwire-write-tests** | `--seams` + `tested=1` coverage lens + `--callers=SYM` |
 | **Reviewing code I did NOT write** — unfamiliar subsystem, "what's gnarly here" | **ripwire-fresh-eyes** | `--hotspots` + `--clones` + `--owners` (scope to the subsystem) |
 | **Debugging** — a symptom, a suspect subsystem, or "I changed X and it broke" | **ripwire-find-bug** | `--for=symptom` / `--situ` |
 | **I HAVE a stack trace / sanitizer report / compiler error** — paste it, don't hand-translate it | **ripwire-find-bug** | `--from-trace=FILE` (or `-` from stdin) — frames → ranked in-corpus suspects, innermost first |

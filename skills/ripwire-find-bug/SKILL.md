@@ -5,8 +5,9 @@ description: >
   an exception, wrong output, a failing test, an error string) and need to find the responsible symbol —
   whether you have no idea where it is, suspect a subsystem, or just broke it with a change of your own
   (even a deploy). Pick the path that fits what you know: pure symptom → rank candidates; a hunch → narrow
-  to a subsystem; "I changed X and it broke" → --situ regression trace. Backed by ripwire's call graph +
-  hotspots + co-change (deterministic, on PATH).
+  to a subsystem; "I changed X and it broke" → --situ regression trace. One clear --for hit plus one focused
+  source read that explains the symptom is enough — implement the fix; don't chain more verbs or open other
+  skills first. Backed by ripwire's call graph + hotspots + co-change (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 
@@ -24,6 +25,13 @@ allowed-tools: Bash, Read
 what you already know**; each converges on the same evidence trail (relevance × maintenance pain × blast
 radius), so you can escalate between them.
 
+**Evidence-sufficiency stop:** escalate only while the responsible code is still ambiguous. If `--for`
+ranks one file/symbol clearly and a focused source read explains the symptom with a minimal fix, stop
+retrieval and implement/validate it. Do not automatically add `--hotspots`, `--impact`, another skill, or a
+whole-file read after the defect is already proven; those answer different questions and can cost more than
+the original localization. Resume the ladder only when the source contradicts the candidate, several
+candidates remain plausible, or the change's blast radius is itself part of the task.
+
 ## Branch A — "I have a symptom, no idea where it lives"
 
 1. **Symptom search** — `ripwire <dir> --for="<symptom in plain words>"`
@@ -31,13 +39,15 @@ radius), so you can escalate between them.
    and `cx=` complexity are inline; **prefer high-`cx`, high-`in` matches** — complex, widely-called code
    fails in more ways. If the bundle says `weak="1"`, reformulate — split camelCase terms, add synonyms
    from the domain, or quote an exact path/symbol from the issue — before trusting the ranking below it.
-2. **Maintenance hotspots** — `ripwire <dir> --hotspots`
+2. **If several candidates remain, maintenance hotspots** — `ripwire <dir> --hotspots`
    `<hotspots>` ranked by `score = churn × ccx`; `top=` names the worst function per file. Bugs cluster in
    high-score files — **cross with step 1: a symbol in both lists is your prime suspect.**
-3. **Blast radius of each candidate** — `ripwire <dir> --impact=SYM` for the top 2–3 from step 1.
+3. **If the symptom is broad, blast radius of each remaining candidate** — `ripwire <dir> --impact=SYM`
+   for the top 2–3 from step 1.
    `<impact of="SYM" defs="D" reaches="N">` lists everything that reaches SYM. A large `reaches` count is
    consistent with a symptom that appears in many places — that's the root, not a downstream effect.
-4. **Read** the sources that appear in BOTH the `--for` result and the hotspot list, highest first.
+4. **Read narrowly** — start with the top symbol/body or the smallest source range that can confirm or
+   reject it. Use the hotspot intersection only when step 1 did not already isolate a defensible candidate.
 
 ## Branch B — "I suspect a subsystem — narrow it"
 

@@ -142,6 +142,7 @@ fi
 
 # ── (e) RESTORE-EQUIVALENCE: warm == fully cold, on a non-empty regression set ─────────────────────────────
 run >"$TMP/warm2" 2>/dev/null; rcw=$?
+mkdir -p "$TMP/coldxdg"
 env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg" "$BIN" "$REPO" --quality-delta >"$TMP/cold" 2>/dev/null; rcc=$?
 grep -q 'kind="complexity"' "$TMP/cold" \
     && ok "the fixture reports a real regression (comparison is non-vacuous)" \

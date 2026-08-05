@@ -79,6 +79,13 @@ prior_timings = _load_timings(_timings_path())
 # gate starting late would.
 gates.sort(key=lambda g: -prior_timings.get(g, float("inf")))
 
+# A wall-clock budget cannot be interpreted while five unrelated compiler/git-heavy gates are saturating
+# the machine beside it. Keep the measured gate in this same authoritative run, but give its timing window
+# exclusive ownership after the parallel correctness wave.
+exclusive = {"editcheckcheck.sh"}
+parallel_gates = [g for g in gates if g not in exclusive]
+exclusive_gates = [g for g in gates if g in exclusive]
+
 
 def run(g):
     env = dict(os.environ, RIPWIRE_BIN=binp)
@@ -101,10 +108,15 @@ def run(g):
 t0 = time.time()
 results = []
 with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
-    for r in ex.map(run, gates):
+    for r in ex.map(run, parallel_gates):
         results.append(r)
         sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
         sys.stderr.flush()
+for g in exclusive_gates:
+    r = run(g)
+    results.append(r)
+    sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
+    sys.stderr.flush()
 sys.stderr.write("\n")
 
 fails = [r for r in results if r[1] != 0]

@@ -48,7 +48,7 @@ no(){ echo "  FAIL  $1"; fail=1; }
 command -v truncate >/dev/null 2>&1 || { echo "truncate required (sparse-file filler)"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
-CACHEDIR="$TMP/cachedir"; mkdir -p "$CACHEDIR"
+CACHEBASE="$TMP/cachebase"; CACHEDIR="$CACHEBASE/ripwire"; mkdir -p "$CACHEDIR"
 REPO="$TMP/repo"; mkdir -p "$REPO"
 
 # apparent (logical) byte size of a file — what fs::file_size measures, NOT `du`'s block-usage view
@@ -116,7 +116,7 @@ beforebytes="$( dirapparentbytes )"
 
 # Run pointed at the seeded dir via TMPDIR (the first rung of cacheDirLadder()) — no --cache/--no-cache,
 # so ripwire takes its normal auto-cache path (defaultCachePath) and saveCache's hygiene hook fires for real.
-env -u XDG_CACHE_HOME TMPDIR="$CACHEDIR" "$BIN" "$REPO" >"$TMP/run1.xml" 2>"$TMP/run1.err"
+env -u XDG_CACHE_HOME TMPDIR="$CACHEBASE" "$BIN" "$REPO" >"$TMP/run1.xml" 2>"$TMP/run1.err"
 rc1=$?
 
 [ "$rc1" -eq 0 ] && ok "run against the seeded dir exits 0" || { no "run exited $rc1"; cat "$TMP/run1.err"; }
@@ -153,9 +153,9 @@ FILLER2="$CACHEDIR/ripwire-deadbeef0000eeee-lean.bin"
 printf 'stale-old-cache-blob-2' > "$OLD2"; touch -t 202001010000 "$OLD2"
 truncate -s 2600M "$FILLER2"
 
-env -u XDG_CACHE_HOME TMPDIR="$CACHEDIR" "$BIN" "$REPO" >"$TMP/run2a.xml" 2>"$TMP/run2a.err" &
+env -u XDG_CACHE_HOME TMPDIR="$CACHEBASE" "$BIN" "$REPO" >"$TMP/run2a.xml" 2>"$TMP/run2a.err" &
 pid_a=$!
-env -u XDG_CACHE_HOME TMPDIR="$CACHEDIR" "$BIN" "$REPO" >"$TMP/run2b.xml" 2>"$TMP/run2b.err" &
+env -u XDG_CACHE_HOME TMPDIR="$CACHEBASE" "$BIN" "$REPO" >"$TMP/run2b.xml" 2>"$TMP/run2b.err" &
 pid_b=$!
 wait "$pid_a"; rc_a=$?
 wait "$pid_b"; rc_b=$?
