@@ -5,8 +5,18 @@
 // LENS over facts the index already holds (symbol name / kind / lang / scope / spans) plus the raw
 // signature and body bytes — never a verdict. The false-positive discipline is the whole game:
 // a rule fires ONLY when its needed fact is KNOWN (an unresolvable return type keeps
-// naming-predicate / naming-setter silent; an un-indexed loop local can never be flagged), and the
-// weakest-confidence rule (naming-body-mismatch) says so on the row itself.
+// naming-predicate / naming-setter silent; an un-indexed loop local can never be flagged).
+//
+// WITHDRAWN — naming-body-mismatch (name↔body zero-vocabulary-overlap). Measured on ripwire's own
+// src/ at the commit that shipped it, the rule produced 159 of the lens's 217 naming findings — 73% of
+// the whole signal from the rule labelled weakest-confidence — and the flagged set was dominated by the
+// BEST names in the tree (didYouMean, transitiveCallers, symbolAdjacency, contractGraph): a good
+// abstraction name states INTENT while its body states MECHANISM, so zero overlap is the signature of
+// successful abstraction, not of a bad name. The axis is non-monotonic with quality — near-0 holds
+// great abstractions AND genuine lies — so no threshold on it has a defensible direction and it cannot
+// be a lint rule at any cut. Do not re-add it. The substrate it needed (splitIdentifier, toLowerAscii,
+// tokensAgree) is kept below; a corpus-IDF informativeness lens is the successor candidate, and it must
+// clear a rename-history precision gate BEFORE it ships — this rule is the proof of why.
 //
 // The rules (each cites the empirical work it mechanizes; bracketed tags are the lineage):
 //   naming-short         — 1–2 letter Function/Method/Var name (Var = module/global role; a
@@ -19,7 +29,6 @@
 //   naming-setter        — set-prefixed name whose KNOWN return type is not void-like [LAPD A3]
 //   naming-confusable    — co-visible pair: edit distance ≤2 (both ≥5 chars), same tokens reordered,
 //                          or a bare/digit-suffixed twin [Namesake]
-//   naming-body-mismatch — ≥10-line body sharing ZERO vocabulary with the name [MNire-proxy / CIC]
 //
 // Findings flow through the SAME lint tally/listing as every other built-in rule (AstMatch → runLint),
 // under the same per-rule budget semantics: a rule that hits its budget — or a confusable scan too big
@@ -419,8 +428,8 @@ struct RuleSink
     };
     std::vector<AstMatch> hits;
     std::size_t           maxHitsPerRule = 0;
-    Tally                 tallies[9]     = { { "naming-short" }, { "naming-wordy" }, { "naming-series" }, { "naming-underscore" }, { "naming-case" },
-                                             { "naming-predicate" }, { "naming-setter" }, { "naming-confusable" }, { "naming-body-mismatch" } };
+    Tally                 tallies[8]     = { { "naming-short" }, { "naming-wordy" }, { "naming-series" }, { "naming-underscore" }, { "naming-case" },
+                                             { "naming-predicate" }, { "naming-setter" }, { "naming-confusable" } };
 
     Tally& tallyFor( std::string_view tag )
     {
@@ -597,7 +606,13 @@ inline void checkRoleReturnTypes( const Symbol& s, std::string_view sig, RuleSin
 
 // two lowercased tokens "agree" when equal, or when one is a ≥4-char prefix of the other — the
 // deterministic, dictionary-free stand-in for plural/inflection morphology ("candidates" agrees with
-// candidate, "building" with build). Direction of error: MORE agreement ⇒ FEWER findings — safe.
+// candidate, "building" with build).
+//
+// KEPT ON PURPOSE, with no caller today: this is the token-agreement half of the substrate the withdrawn
+// naming-body-mismatch rule was built on (splitIdentifier, its other half, is still live under
+// checkScopeGroups). What was measured wrong was the RULE's direction, not this predicate — and comparing
+// two spellings of one concept is exactly what the corpus-CONSISTENCY work (synonym / abbreviation
+// unification) needs, so it is the part of that rule worth keeping. See the WITHDRAWN note at the top.
 inline bool tokensAgree( std::string_view a, std::string_view b ) noexcept
 {
     if( a == b )
@@ -609,109 +624,6 @@ inline bool tokensAgree( std::string_view a, std::string_view b ) noexcept
         return false;
     }
     return a.size() < b.size() ? b.substr( 0, a.size() ) == a : a.substr( 0, b.size() ) == b;
-}
-
-// N8: a ≥10-line body sharing ZERO vocabulary with the name. Comments and strings in the body are
-// deliberately IN the vocabulary, and so is the enclosing scope's name (a method's class supplies
-// context its body legitimately leans on) — anything that can only create overlap can only suppress
-// a finding.
-inline void checkBodyMismatch( const Symbol& s, const std::vector<std::string>& toks, std::string_view fileBytes, RuleSink& sink )
-{
-    if( s.kind != SymKind::Function && s.kind != SymKind::Method )
-    {
-        return;
-    }
-    const std::uint32_t bodyA = std::min( s.sigEndByte, std::uint32_t( fileBytes.size() ) );
-    const std::uint32_t bodyB = std::min( s.endByte,    std::uint32_t( fileBytes.size() ) );
-    if( bodyB <= bodyA )
-    {
-        return;
-    }
-    std::uint32_t lineCount = 0;
-    for( std::uint32_t i = bodyA; i < bodyB; ++i )
-    {
-        if( fileBytes[i] == '\n' )
-        {
-            ++lineCount;
-        }
-    }
-    if( lineCount < 10 )
-    {
-        return;
-    }
-    // name vocabulary: alphabetic tokens of ≥2 chars, lowercased. No usable tokens ⇒ fact unknown ⇒ silent.
-    std::vector<std::string> nameVocab;
-    for( const std::string& tok : toks )
-    {
-        bool allAlpha = tok.size() >= 2;
-        for( const char c : tok )
-        {
-            allAlpha = allAlpha && ncAlpha( c );
-        }
-        if( allAlpha )
-        {
-            nameVocab.push_back( toLowerAscii( tok ) );
-        }
-    }
-    if( nameVocab.empty() )
-    {
-        return;
-    }
-    // the enclosing scope's name is body-side vocabulary: a method named for its class agrees with it.
-    std::vector<std::string> runToks;
-    if( !s.scope.empty() && ncAllAscii( s.scope ) )
-    {
-        splitIdentifier( s.scope, runToks );
-        for( const std::string& tok : runToks )
-        {
-            const std::string lowered = toLowerAscii( tok );
-            for( const std::string& nameTok : nameVocab )
-            {
-                if( tokensAgree( lowered, nameTok ) )
-                {
-                    return;
-                }
-            }
-        }
-    }
-    // stream the definition's identifier runs — SIGNATURE included (parameter names and types are
-    // vocabulary the name may legitimately lean on), the name's own occurrences excluded (else the
-    // rule could never fire). The FIRST agreeing subtoken proves overlap and ends the scan.
-    const std::uint32_t defA     = std::min( s.sigStartByte, std::uint32_t( fileBytes.size() ) );
-    std::uint32_t       runStart = defA;
-    bool                inRun    = false;
-    for( std::uint32_t i = defA; i <= bodyB; ++i )
-    {
-        const bool identChar = i < bodyB && ncIdent( fileBytes[i] );
-        if( identChar && !inRun )
-        {
-            inRun    = true;
-            runStart = i;
-        }
-        else if( !identChar && inRun )
-        {
-            inRun = false;
-            const std::string_view run = fileBytes.substr( runStart, i - runStart );
-            if( run == s.name )
-            {
-                continue;   // the name itself is not evidence of agreement
-            }
-            splitIdentifier( run, runToks );
-            for( const std::string& tok : runToks )
-            {
-                const std::string lowered = toLowerAscii( tok );
-                for( const std::string& nameTok : nameVocab )
-                {
-                    if( tokensAgree( lowered, nameTok ) )
-                    {
-                        return;     // shared vocabulary — the name and definition agree somewhere
-                    }
-                }
-            }
-        }
-    }
-    sink.add( "naming-body-mismatch", s, s.line,
-              s.name + " (" + std::to_string( lineCount ) + "-line body shares no vocabulary with the name; weakest-confidence lens)" );
 }
 
 // N3 + N7: the pair rules over names co-visible in one (file, scope) group.
@@ -922,7 +834,6 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
             const std::uint32_t sigA = std::min( s.sigStartByte, std::uint32_t( bytes.size() ) );
             const std::uint32_t sigB = std::min( s.sigEndByte,   std::uint32_t( bytes.size() ) );
             detail::checkRoleReturnTypes( s, std::string_view( bytes ).substr( sigA, sigB - sigA ), sink );
-            detail::checkBodyMismatch( s, toks, bytes, sink );
         }
     }
     detail::checkScopeGroups( ing, sink );

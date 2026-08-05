@@ -3,6 +3,12 @@
 # violations, stays SILENT on every near-miss negative, and only ever fires when its needed fact is
 # KNOWN (unknown return type ⇒ naming-predicate / naming-setter say nothing). Deterministic output,
 # well-formed XML, and G5: the lens exists only under --lint — a flagless run never spells "naming-".
+#
+# It also guards the WITHDRAWAL of naming-body-mismatch: that rule was measured inverted (it flagged the
+# BEST names in the tree — a good abstraction names intent while its body names mechanism, so zero
+# name↔body vocabulary overlap is the signature of successful abstraction), so it is gone from the emitted
+# rule set. The two fixtures that used to trigger it are KEPT below as the regression guard: if a future
+# change re-adds the rule, they fire again and this gate goes red.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -93,7 +99,7 @@ int stageAlpha2( int amount )                             // naming-series sibli
     return amount + 901;
 }
 
-int orchestrateMigrationWave( int amount )                // naming-body-mismatch: >=10-line body, zero shared vocabulary
+int orchestrateMigrationWave( int amount )                // WITHDRAWN-rule guard: >=10-line body, zero shared vocabulary -> must stay silent
 {
     int total = amount;
     total += 11;
@@ -109,7 +115,7 @@ int orchestrateMigrationWave( int amount )                // naming-body-mismatc
     return total;
 }
 
-int accumulateStreamTotals( int amount )                  // near-miss: long body but "stream" is shared vocabulary -> silent
+int accumulateStreamTotals( int amount )                  // long body, "stream" IS shared vocabulary -> silent under the withdrawn rule too
 {
     int streamTotal = amount;
     streamTotal += 21;
@@ -154,7 +160,7 @@ def set_velocity_level(level):
 def totally__spaced(level):
     return level
 
-def weave_cadence_report(rows):
+def weave_cadence_report(rows):          # WITHDRAWN-rule guard: >=10-line body, zero shared vocabulary -> must stay silent
     left = 0
     left += 31
     left += 32
@@ -187,6 +193,9 @@ if cmp -s "$TMP/a" "$TMP/b"; then ok "naming lens output is deterministic"; else
 "$BIN" "$FIXTURE" --no-cache >"$TMP/flagless" 2>/dev/null
 if grep -q "naming-" "$TMP/flagless"; then no "flagless run mentions naming- (G5: the lens must be additive)"; else ok "flagless run is untouched by the naming lens"; fi
 
+# ── the withdrawn rule is gone from the SURFACE too — not a tally row, not a legend entry, not a byte ──
+if grep -q "naming-body-mismatch" "$TMP/a"; then no "lint output still spells naming-body-mismatch (the withdrawn rule is back)"; else ok "naming-body-mismatch is absent from the lint surface"; fi
+
 # ── the findings themselves: exact owners per rule, exact counts, and every near-miss silent ──────
 python3 - "$TMP/a" <<'PY'
 import sys
@@ -200,10 +209,19 @@ findings = [ node for node in root.findall("f") if node.get("rule", "").startswi
 # presence guard: assert the rows we are about to count actually exist (a gate must be able to
 # observe what it asserts — an absent rule row would make every count-0 check pass for the wrong reason)
 expected_rules = [ "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
-                   "naming-predicate", "naming-setter", "naming-confusable", "naming-body-mismatch" ]
+                   "naming-predicate", "naming-setter", "naming-confusable" ]
 missing = [ r for r in expected_rules if r not in rules ]
 if missing:
     raise SystemExit(f"FAIL missing <rule> tally rows for {missing}")
+
+# WITHDRAWAL guard: naming-body-mismatch was measured INVERTED (it flagged the best abstractions in the
+# tree) and has no defensible threshold direction, so it is not an emitted rule at all — no tally row, no
+# finding, on a fixture that used to trigger it twice. Re-adding it turns this red.
+if "naming-body-mismatch" in rules:
+    raise SystemExit("FAIL naming-body-mismatch has a <rule> tally row — the withdrawn rule is back")
+resurrected = [ (node.get("in"), node.text) for node in findings if node.get("rule") == "naming-body-mismatch" ]
+if resurrected:
+    raise SystemExit(f"FAIL naming-body-mismatch emitted findings: {resurrected}")
 
 expected_owners = {
     "naming-short":         { "q", "M" },
@@ -214,7 +232,6 @@ expected_owners = {
     "naming-predicate":     { "isBrokenState", "is_missing_marker" },
     "naming-setter":        { "setLimitValue", "set_capacity_level" },
     "naming-confusable":    { "receiveBuffed" },
-    "naming-body-mismatch": { "orchestrateMigrationWave", "weave_cadence_report" },
 }
 for rule, owners in expected_owners.items():
     got = { node.get("in") for node in findings if node.get("rule") == rule }
@@ -229,20 +246,19 @@ for rule, owners in expected_owners.items():
         raise SystemExit(f"FAIL {rule}: capped= on a fixture nowhere near the per-rule budget")
 
 # near-miss negatives: each proves a specific silence (bool-returning predicate, void setter, unknown
-# return type, descriptive names, shared body vocabulary, dunder underscores, un-indexed loop local)
+# return type, descriptive names, shared body vocabulary, dunder underscores, un-indexed loop local).
+# orchestrateMigrationWave / weave_cadence_report are the WITHDRAWN-rule guards: both are ≥10-line bodies
+# with zero name↔body vocabulary overlap, i.e. exactly what naming-body-mismatch used to flag — by NAME as
+# well as by rule, so a resurrection under a renamed tag is caught too.
 never_flagged = [ "isValidState", "isMysteryState", "setSpeedValue", "is_present_marker", "is_untyped_marker",
-                  "set_velocity_level", "module_capacity", "accumulateStreamTotals", "__init__", "Snapshot" ]
+                  "set_velocity_level", "module_capacity", "accumulateStreamTotals", "__init__", "Snapshot",
+                  "orchestrateMigrationWave", "weave_cadence_report" ]
 for name in never_flagged:
     hits = [ (node.get("rule"), node.get("p")) for node in findings if node.get("in") == name ]
     if hits:
         raise SystemExit(f"FAIL near-miss {name} was flagged: {hits}")
 
-# the weakest-confidence rule says so on the row itself
-for node in findings:
-    if node.get("rule") == "naming-body-mismatch" and "weakest-confidence" not in (node.text or ""):
-        raise SystemExit(f"FAIL naming-body-mismatch row is not labeled weakest-confidence: {node.text}")
-
-print("PASS planted violations flagged, every near-miss silent, tallies truthful")
+print("PASS planted violations flagged, every near-miss silent, withdrawn rule stays withdrawn, tallies truthful")
 PY
 [ $? -eq 0 ] && ok "owners + counts + near-miss silences" || no "owners/counts/near-miss assertions (see FAIL line above)"
 
