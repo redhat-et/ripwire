@@ -2,8 +2,9 @@ name: CI
 
 # Guardrails as automated gates (CLAUDE.md "The guardrails as automated gates"):
 #   - release job:  configure (portable default, no RIPWIRE_NATIVE — CI hardware is not "this dev machine")
-#                    + build + the full gate suite (170+ gates incl. determinism/G4/quality) per OS, run
-#                    in parallel via test/pargates.py -j 3 (same authoritative list as regression.sh).
+#                    + build + the full gate suite (170+ gates incl. determinism/G4/quality) per
+#                    OS x build-flavour (Release / plain — see the job comment), run in parallel via
+#                    test/pargates.py -j 3 (same authoritative list as regression.sh).
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
 #                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
 #                    uses on the (Apple Silicon) dev machines this repo is normally built on.
@@ -104,11 +105,21 @@ jobs:
             src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp
 
   release:
-    name: release (${{ matrix.os }})
+    # Two independent flavours per OS, each on its OWN runner — they used to run stacked in one job,
+    # doubling wall time for no coverage gain:
+    #   Release — defines NDEBUG, which compiles DEGRADED_PATH_ALERT out; the optimizer-visible build.
+    #   plain   — NDEBUG off, so DEGRADED_PATH_ALERT compiles in and the degrade-path gates can observe
+    #             the alert they assert. The e7405e7 qsnap fix was invisible to CI before this flavour
+    #             existed. estchargecheck #14 / qualitystalecheck arms 7/8c probe the flavour (an
+    #             already-gated degrade path + --version's build-type token) and SKIP honestly on the
+    #             Release leg, pointing at the plain leg as where the alert is proven; a missing alert
+    #             on the plain flavour still FAILS. Neither flavour alone is enough.
+    name: release (${{ matrix.os }}, ${{ matrix.flavor }})
     strategy:
       fail-fast: false
       matrix:
         os: [macos-14, ubuntu-24.04]
+        flavor: [Release, plain]
     runs-on: ${{ matrix.os }}
     steps:
       # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
@@ -130,8 +141,8 @@ jobs:
         run: brew install ripgrep
 
 
-      - name: Configure (portable default — no RIPWIRE_NATIVE)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Configure (portable — no RIPWIRE_NATIVE; empty build type = the plain flavour)
+        run: cmake -S . -B build ${{ matrix.flavor == 'Release' && '-DCMAKE_BUILD_TYPE=Release' || '' }}
 
       - name: Build
         run: cmake --build build -j
@@ -139,32 +150,11 @@ jobs:
       # test/pargates.py runs the SAME authoritative gate list regression.sh holds (manifestcheck.sh
       # keeps that list honest) in parallel, with the timing-sensitive edit-check budget isolated via
       # its `exclusive` group — the exact runner CLAUDE.md prescribes locally. Sequential regression.sh
-      # here cost ~15-20 min per suite pass; the release job runs the suite twice (Release + plain).
+      # cost ~26 min per suite pass; parallel at -j 3 measures ~15-18 min (the 4-vCPU runners saturate —
+      # many gates are internally multi-threaded), and the flavour matrix keeps the two passes off each
+      # other's critical path.
       - name: "gate suite, parallel (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
         run: python3 test/pargates.py . build/ripwire -j 3
-
-      # The Release build above defines NDEBUG, which compiles DEGRADED_PATH_ALERT out — so a degrade-path
-      # gate run against it cannot observe the alert it asserts. The e7405e7 qsnap fix was invisible to CI
-      # before it landed, and the 2026-07-27 round added several more degrade gates (shallow-clone
-      # v="unknown", the pr-context ref refusal, the doc-drift VERIFY demotion). Build a SECOND time with
-      # the plain local flavour and re-run the suite against it, so both the optimizer-visible Release
-      # behaviour and the degrade paths are covered — neither alone is enough.
-      #
-      # 2026-08-01: the two gates that assert an alert directly (estchargecheck #14, qualitystalecheck
-      # arms 7/8c) no longer pass — or fail — silently on the Release leg. Each probes the flavour with
-      # TWO independent readings (an unrelated already-gated degrade path, plus --version's build-type
-      # token) and, only when both agree the binary is NDEBUG, prints a SKIP naming what is unobservable
-      # and pointing at THIS second leg as where it is proven. If the alert is missing on a flavour that
-      # should see it, they still FAIL. So the Release leg is honestly green rather than either
-      # vacuously green (the 2026-07-27 trap) or unconditionally red (the same trap inverted).
-      - name: Configure (plain — NDEBUG off, so DEGRADED_PATH_ALERT compiles in)
-        run: cmake -S . -B build-debugalerts
-
-      - name: Build (plain)
-        run: cmake --build build-debugalerts -j
-
-      - name: "gate suite, parallel, against the non-Release build (degrade paths visible)"
-        run: python3 test/pargates.py . build-debugalerts/ripwire -j 3
 
       - name: det-gate — 2-run byte-identical diff
         run: |
