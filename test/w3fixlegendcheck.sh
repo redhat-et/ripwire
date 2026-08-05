@@ -81,15 +81,24 @@ PY
     && ok "N=2: shared/union ($SH2/$UN2) == overlap_mean ($OM2) — the pairwise identity the legend now claims" \
     || no "N=2 identity broken: $( cat "$TMP/p2id" )"
 
-# (1b) the definition SEPARATOR: "two or more" must be >= "every". At N>=3 an EVERY-count is a global
-#      intersection and can only be <= the two-or-more count; on a real corpus it is strictly smaller, and
-#      shared_symbols must therefore also exceed the N=2 value rather than collapsing toward it.
+# (1b) the definition SEPARATOR: "two or more" must be >= "every". An EVERY-count is a global intersection,
+#      so it can only SHRINK as N grows; a two-or-more count can only grow or hold. The arm therefore asserts
+#      the shape an intersection cannot have: MONOTONE NON-DECREASING across N=2,3,4, and strictly LARGER at
+#      N=4 than at N=2. Both halves are needed — non-decreasing alone would pass a constant, and "larger at
+#      N=4" alone would pass a dip-then-recover that no semantics produces.
+#
+#      IT USED TO DEMAND STRICT GROWTH AT EVERY STEP, and that was a corpus-sensitive proxy, not the
+#      property. Measured on this repo the day feat/readability-lens landed: adding ONE header to src/ moved
+#      the sequence from 8 -> 17 -> 24 to 8 -> 23 -> 23. Nothing about the semantics changed — the partition
+#      boundaries moved, so the N=3 and N=4 cuts happened to share the same set. A gate that reds because a
+#      source file was added is a gate nobody keeps (legendcoveragecheck.sh's arm (B) makes the same
+#      argument), and the strict form was never what "two-or-more, not every" means.
 SH3="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p3" | attr shared_symbols )"
 SH4="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p4" | attr shared_symbols )"
-if [ "${SH3:-0}" -gt "${SH2:-0}" ] && [ "${SH4:-0}" -gt "${SH3:-0}" ]; then
-    ok "shared_symbols GROWS with the partition count ($SH2 -> $SH3 -> $SH4) — two-or-more semantics, not a global intersection"
+if [ "${SH3:-0}" -ge "${SH2:-0}" ] && [ "${SH4:-0}" -ge "${SH3:-0}" ] && [ "${SH4:-0}" -gt "${SH2:-0}" ]; then
+    ok "shared_symbols is non-decreasing in N and strictly larger at 4 than at 2 ($SH2 -> $SH3 -> $SH4) — two-or-more semantics, not a global intersection"
 else
-    no "shared_symbols did not grow with N ($SH2 -> ${SH3:-<none>} -> ${SH4:-<none>}): an EVERY-partition intersection would shrink"
+    no "shared_symbols is not non-decreasing-and-wider ($SH2 -> ${SH3:-<none>} -> ${SH4:-<none>}): an EVERY-partition intersection would shrink"
 fi
 
 # (1c) the divergence the legend promises from 3 partitions on.
