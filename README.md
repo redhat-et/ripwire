@@ -9,8 +9,15 @@
 
 ## Give your coding agent a map before it reads the repo.
 
-**ripwire is the ripgrep of AI context:** one zero-runtime-dependency binary that ranks the code,
-traces the call graph, measures change impact, and identifies the tests your coding agent should run.
+**ripwire is the ripgrep of AI context.** Point it at a repository and your coding agent gets a
+ranked, deterministic call graph instead of grepping around and reading whole files — orientation,
+blast radius, and which tests to run, answered in **~0.1 s** from a warm index.
+
+On a fresh thread in an unfamiliar codebase, the agent answers at **7.3%** of the tokens a
+grep-and-read pass costs. Head-to-head, ripwire put all gold files in the top 10 on **58.3%** of
+instances, against **33.3%** for the best competitor tested. Zero runtime dependencies, C++23,
+builds with the network off. Those numbers have different instruments and important caveats — the
+losses ship beside the wins in [Measured](#measured) and [`docs/EVALS.md`](docs/EVALS.md).
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
 
@@ -18,19 +25,8 @@ Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent
 ripwire . --for="incremental cache invalidation"
 ```
 
-Instead of a grep-and-read expedition, the agent gets the relevant symbols, callers, change risks,
-and tests in one deterministic, token-budgeted answer.
-
-| Measured result | ripwire |
-| --- | ---: |
-| Tokens vs a naive grep/read pass | **7.3%** |
-| Warm task query | **~0.1 s** |
-| All gold files in the top 10 | **58.3%** |
-| Best competitor in that paired round | **33.3%** |
-| Runtime dependencies | **0** |
-
-Those numbers have different instruments and important caveats; the losses ship beside the wins in
-[Measured](#measured) and [`docs/EVALS.md`](docs/EVALS.md). C++23, builds with the network off.
+One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks,
+and the tests that reach them.
 
 [Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
 [Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
