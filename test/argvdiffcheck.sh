@@ -27,13 +27,15 @@ cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
-
+# The sanctioned skip is decided BEFORE the binary guard: with no RIPWIRE_BASE the gate cannot run at all,
+# so a missing build/ripwire in that state is irrelevant — exit 2 there turned the skip into a failure in
+# any tree without a build dir (gateexitcheck arm D asserts this skip is exit 0).
 if [ -z "$BASE" ] || [ ! -x "$BASE" ]; then
     echo "argvdiffcheck: SKIP — no RIPWIRE_BASE reference binary"
     echo "  (set RIPWIRE_BASE=build_base/ripwire after building the pre-change source to activate)"
     exit 0
 fi
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 echo "argvdiffcheck: BASE=$BASE"
 echo "argvdiffcheck: BIN =$BIN"
 git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.before"
