@@ -40,10 +40,18 @@ Those numbers have different instruments and important caveats; the losses ship 
 
 ## Quickstart
 
-Requirements: CMake 3.24+ and a C++23 compiler. Nothing else — tree-sitter's core, all 15 grammars
-and the test framework are vendored under `third_party/deps`, so there is no download step and no
-package manager to satisfy. Prove that with the network off: add
-`-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
+**Prebuilt binary** (macOS / Linux, arm64 / x86-64) — downloads the latest
+[GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
+to `~/.local/bin`:
+
+```bash
+RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+```
+
+**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
+tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
+so there is no download step and no package manager to satisfy. Prove that with the network off:
+add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
 ```bash
 git clone https://github.com/redhat-et/ripwire.git
