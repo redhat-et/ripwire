@@ -72,6 +72,34 @@ with tempfile.TemporaryDirectory() as td:
     assert any( ( ctx_home / "skills" ).iterdir() )
     assert ctx_env["PATH"].split( os.pathsep )[0] == str( pathlib.Path( ripwire ).parent )
 
+# ── run_one's extracted accounting helpers: same events + trailer behavior the inline code had ─────────
+with tempfile.TemporaryDirectory() as td:
+    task = { "instance_id": "x1" }
+    m = module._codex_metrics( events, td, task, "baseline", 1, "/repo/build/ripwire" )
+    events_file = pathlib.Path( td ) / "events" / "x1-baseline-1.jsonl"
+    assert events_file.is_file() and events_file.read_text() == events, "raw Codex JSONL must be retained verbatim"
+    assert ( m["tokens_in"], m["tokens_out"] ) == ( 1234, 56 ), m
+    assert ( m["command_calls"], m["ripwire_calls"] ) == ( 1, 1 ), m
+    assert m["ripwire_commands"] == [ "/repo/build/ripwire . --for=issue" ], m
+    assert m["events_path"] == str( events_file ), m
+    # TimeoutExpired hands over bytes (possibly invalid UTF-8) or None — both must degrade, not crash
+    mb = module._codex_metrics( b"\xff" + events.encode( "utf-8" ), td, task, "baseline", 2, "/repo/build/ripwire" )
+    assert ( mb["tokens_in"], mb["tokens_out"] ) == ( 1234, 56 ), mb
+    mn = module._codex_metrics( None, td, task, "baseline", 3, "/repo/build/ripwire" )
+    assert mn["tokens_in"] is None and pathlib.Path( mn["events_path"] ).read_text() == "", mn
+
+trailer = '{"usage":{"input_tokens":10,"output_tokens":2},"total_cost_usd":0.05}'
+cm = module._claude_metrics( trailer )
+assert cm == dict( tokens_in=10, tokens_out=2, cost_usd=0.05 ), cm
+assert module._claude_metrics( "not json" ) == {}, "trailer schema drift must degrade to nulls, not crash"
+
+# ── analyze.py self-test: pins pairing, clustering, bootstrap sign, and the exact fixture ratios ───────
+analyze_path = root / "bench" / "agentloop" / "analyze.py"
+analyze_spec = importlib.util.spec_from_file_location( "agentloop_analyze", analyze_path )
+analyze_module = importlib.util.module_from_spec( analyze_spec )
+analyze_spec.loader.exec_module( analyze_module )
+assert analyze_module.self_test() == 0, "analyze.py --self-test regressed"
+
 find_bug = ( root / "skills" / "ripwire-find-bug" / "SKILL.md" ).read_text()
 change_check = ( root / "skills" / "ripwire-change-check" / "SKILL.md" ).read_text()
 quality_bar = ( root / "skills" / "ripwire-quality-bar" / "SKILL.md" ).read_text()
