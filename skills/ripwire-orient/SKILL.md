@@ -10,7 +10,8 @@ description: >
   communities, nested zoom, and a rendered diagram — instead of blind grep + whole-file reads. Prefer this
   over reading many files when orienting. A NAMED symbol's deep-dive (its own contract/callers/callees, not
   the whole subsystem) → ripwire-navigate instead. For architecture HEALTH/enforcement (propagation cost,
-  layering violations, CI gates) → ripwire-layers instead.
+  layering violations, CI gates) → ripwire-layers instead. Stop at the first rung that answers — the
+  one-screen report usually does; climb the ladder only while the question is still open.
 allowed-tools: Bash, Read
 ---
 

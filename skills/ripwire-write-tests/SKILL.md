@@ -6,7 +6,8 @@ description: >
   (ripwire-quality-bar): this is about FINDING what lacks a safety net and writing the test that closes the
   gap, before or without touching the code itself. Ranks candidates by `--seams` (untested cross-module call
   edges) and the `tested=1` coverage lens, gives you the symbol's outside contract via `--callers`, then verifies the
-  new test actually registers with `--affected`. Backed by ripwire (deterministic, on PATH).
+  new test actually registers with `--affected`. For one target one --seams or --callers pass suffices —
+  don't audit repo-wide coverage to write a single test. Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

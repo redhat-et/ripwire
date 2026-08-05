@@ -6,7 +6,8 @@ description: >
   call-graph modules, propagation cost (the change-amplification tax of touching a file), and optional
   `--arch` layering rules with a baseline/CI gate — in one pass, and for every metric it reports, what to DO
   about a bad number: formalize a boundary, write a `deny` rule, gate it. This is the enforcement/gates lens
-  on architecture; for the one-screen structure/overview lens (no gating) → ripwire-orient. Backed by
+  on architecture; for the one-screen structure/overview lens (no gating) → ripwire-orient. One pass
+  answers the health question — re-run only after you change the rules or the code. Backed by
   ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---

@@ -10,7 +10,8 @@ description: >
   should review, or producing a health snapshot. Everything emits FACTS, not verdicts — you judge. Backed
   by ripwire (deterministic, on PATH). This is for an explicit risk/rot/refactor question after the target
   area is identified; cold structure mapping belongs to ripwire-orient. For any DIFF — yours or an incoming
-  PR — use ripwire-change-check; this skill is whole subsystems, not diffs.
+  PR — use ripwire-change-check; this skill is whole subsystems, not diffs. A single-lens question is a
+  single call — run only the lenses the question names, not the whole battery.
 allowed-tools: Bash, Read
 ---
 
