@@ -159,6 +159,23 @@ created by today's own gate-suite runs — the leak is ONGOING (~31k files/day o
   download, checksum "OK", install, `--version` correct. Its TODO(P6) default repo stays unset
   pending the fresh-history export decision.
 
+## v0.2.1 — Linux portability patch (2026-08-05)
+
+- Found while answering "does it run on RHEL": the v0.2.0 Linux archives (built on ubuntu-24.04)
+  require `GLIBCXX_3.4.31` and die on RHEL 9 — verified on ubi9. Fix (`d2c1d51`-era commits, tag
+  `v0.2.1`): the Linux release legs build inside AlmaLinux-8 `manylinux_2_28` containers with Red
+  Hat gcc-toolset 14, so newer libstdc++ symbols link statically — one binary per arch for
+  RHEL/Alma/Rocky 8+, CentOS Stream, Fedora, Ubuntu 20.04+, Debian 11+ (glibc 2.28 floor). A new
+  `smoke-rhel` job runs the packaged tarball on ubi9 and gates publish.
+- Verified: release run 31006116964 all 7 jobs green; all four v0.2.1 archives pass strict
+  `shasum -c`; the published linux-arm64 asset runs `--version` + a full fixture map + xmllint on
+  ubi9 and `--version` on ubi8; `scripts/install.sh` (latest = v0.2.1) end-to-end with checksum OK.
+- CI-on-main was red since 2026-08-04 06:22 for an unrelated reason: `stat -f %z` (BSD-only) in
+  `bench/representative_perfgate.sh` zeroed the corpus-shape preflight on GNU stat — every
+  ubuntu-24.04 leg exited 2. Fixed with POSIX `find -exec cat {} + | wc -c`, verified in an
+  ubuntu:24.04 container. (The Aug-4 recall-floor and deck NUL-byte failures were already fixed on
+  this branch.) The v0.2.0 tag/assets are left untouched.
+
 ## Remaining launch work
 
 - Skill-body head-first restructure + pilot re-run (experiments 1–4 above).

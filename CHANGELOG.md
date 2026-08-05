@@ -13,6 +13,18 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [0.2.1] — 2026-08-05
+
+Linux portability patch. The v0.2.0 Linux archives were built on `ubuntu-24.04` and required
+`GLIBCXX_3.4.31`, so they died on RHEL 9 and older (verified on ubi9). The Linux release legs now
+build inside AlmaLinux-8-based `manylinux_2_28` containers with Red Hat gcc-toolset 14 — newer
+libstdc++ symbols link statically (the devtoolset model), so **one binary per arch covers
+RHEL/Alma/Rocky 8+, CentOS Stream, Fedora, Ubuntu 20.04+, and Debian 11+** (glibc 2.28 floor;
+verified on ubi8, ubi9, ubuntu:22.04, ubuntu:24.04). A new `smoke-rhel` CI job runs the packaged
+tarball on a RHEL 9 (ubi9) userland and gates publish. Also: `bench/representative_perfgate.sh`
+byte counting is now GNU-portable (`stat -f %z` is BSD-only and zeroed the corpus-shape preflight
+on every Linux CI leg). No library or CLI behavior changes.
+
 ## [0.2.0] — 2026-08-04
 
 The first binary release: portable archives for macOS arm64/x64 and Linux arm64/x64, each with a
