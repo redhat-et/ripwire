@@ -229,6 +229,7 @@ FAILFAST = {
     "type3clonecheck.sh":       ( "cap_run helper; every assertion is `|| { echo FAIL; exit 2; }`",      2 ),
     "dynmapsimdcheck.sh":       ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
     "pmccheck.sh":              ( "compile-and-run PMC harness; every arm is `echo FAIL; exit 2`",       2 ),
+    "radixsimdcheck.sh":        ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────

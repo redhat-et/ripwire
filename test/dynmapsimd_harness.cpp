@@ -21,9 +21,9 @@
 #include "dynamic_map.hpp"
 
 #include "../src/fixedStr.h"
+#include "harnesscommon.h"      // checkf / g_fail / DeterministicRng / drawKey — shared with radixsimd_harness.cpp
 
 #include <algorithm>
-#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -32,22 +32,6 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
-
-static int g_fail = 0;
-
-static void checkf( bool cond, const char* fmt, ... )
-{
-    std::va_list args;
-    va_start( args, fmt );
-    char msg[ 256 ];
-    std::vsnprintf( msg, sizeof( msg ), fmt, args );
-    va_end( args );
-    std::printf( "  %s  %s\n", cond ? "PASS" : "FAIL", msg );
-    if( !cond )
-    {
-        g_fail = 1;
-    }
-}
 
 // ============================================================================
 // Arm A — node_rank parity
@@ -102,39 +86,6 @@ static std::vector< Key > interestingValues()
               Key( std::numeric_limits< Key >::max() - 1 ), std::numeric_limits< Key >::max() };
     }
     return v;
-}
-
-// Deterministic generator built on the house sanitizer-clean multiply (hashutil::multiplyModulo64) —
-// libc++'s mt19937 trips G1's unsigned-shift-base check inside its own header, so it cannot run under
-// this gate's -fno-sanitize-recover=all. XOR (never wraps) replaces the usual LCG add; murmur-style
-// right-shift mixing is UB-free by construction. Fixed seed ⇒ failure reports reproduce anywhere.
-struct DeterministicRng
-{
-    std::uint64_t state;
-
-    std::uint64_t next() noexcept
-    {
-        state = rw::hashutil::multiplyModulo64( state, 6364136223846793005ull ) ^ 1442695040888963407ull;
-        std::uint64_t mixed = state;
-        mixed ^= mixed >> 33;
-        mixed = rw::hashutil::multiplyModulo64( mixed, 0xFF51AFD7ED558CCDull );
-        mixed ^= mixed >> 33;
-        return mixed;
-    }
-};
-
-// One deterministic key drawn from the generator.
-template< typename Key >
-static Key drawKey( DeterministicRng& gen )
-{
-    if constexpr( std::is_floating_point_v< Key > )
-    {
-        return Key( double( std::int64_t( gen.next() ) ) / 1e12 );
-    }
-    else
-    {
-        return Key( gen.next() );   // C++20+ two's-complement wrap: well-defined for signed targets
-    }
 }
 
 template< typename Key, int B >
