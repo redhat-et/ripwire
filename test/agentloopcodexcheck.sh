@@ -107,5 +107,15 @@ assert "Evidence-sufficiency stop" in find_bug
 assert "Do not turn a focused fix" in change_check
 assert "single-line leaf fix" in quality_bar
 
+# The 2026-08-04 pilot showed the dominant treatment loss is skill-POLICY: the agent pays a full
+# SKILL.md body read (2-6k tokens, replayed every later turn) to learn a scope guard that says the
+# read was unnecessary. The guard must live in the FRONTMATTER the agent sees for free.
+def frontmatter( text ):
+    parts = text.split( "---" )
+    return parts[1] if len( parts ) >= 3 else ""
+assert "is enough" in frontmatter( find_bug ), "find-bug: evidence-sufficiency stop must be advertised in frontmatter"
+assert "single-line leaf fix" in frontmatter( quality_bar ), "quality-bar: scope guard must be advertised in frontmatter"
+assert "one-line leaf fix" in frontmatter( change_check ), "change-check: scope guard must be advertised in frontmatter"
+
 print( "agentloopcodexcheck: PASS — Codex arms are config-isolated and JSONL usage is captured" )
 PY
