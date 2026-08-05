@@ -25,10 +25,7 @@ blast radius, and which tests to run.
 
 Zero runtime dependencies, C++23, builds with the network off. Those numbers have different
 instruments and important caveats — the losses ship beside the wins in [Measured](#measured) and
-[`docs/EVALS.md`](docs/EVALS.md). Freshest example: the first Codex agent-loop pilot cost **+80%**
-tokens on easy tasks even while localizing perfectly; the diagnosis (the agent kept reading skill
-files after the first answer) and the fix (stop rules the agent sees for free) are published with
-it, verification re-run pending.
+[`docs/EVALS.md`](docs/EVALS.md).
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
 
