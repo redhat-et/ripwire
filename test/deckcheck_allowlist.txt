@@ -39,3 +39,4 @@
 --no-prose	repowise (competitor) flag, quoted in docs/EVALS.md §2 r2 head-to-head arm description — not a ripwire flag
 --codex	skills/install.sh's canonical Codex destination mode, not a ripwire binary flag
 --codex-legacy	skills/install.sh's compatibility mode for older CODEX_HOME skill installs, not a ripwire binary flag
+--evaluator	bench/agentloop/run_agentloop.py harness flag ("--evaluator none|swebench") quoted in docs/EVALS.md §2 agent-loop pilot setup — not a ripwire binary flag
