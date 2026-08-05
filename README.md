@@ -1,6 +1,7 @@
 <p align="center"><img src="docs/assets/banner.svg" alt="ripwire — the ripgrep of AI context" width="880"></p>
 
 [![CI](https://github.com/redhat-et/ripwire/actions/workflows/ci.yml/badge.svg)](https://github.com/redhat-et/ripwire/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/redhat-et/ripwire)](https://github.com/redhat-et/ripwire/releases/latest)
 [![Licence](https://img.shields.io/badge/licence-Apache%202.0-blue.svg)](LICENSE)
 [![Standard](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](CONTRIBUTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
@@ -11,13 +12,23 @@
 
 **ripwire is the ripgrep of AI context.** Point it at a repository and your coding agent gets a
 ranked, deterministic call graph instead of grepping around and reading whole files — orientation,
-blast radius, and which tests to run, answered in **~0.1 s** from a warm index.
+blast radius, and which tests to run.
 
-On a fresh thread in an unfamiliar codebase, the agent answers at **7.3%** of the tokens a
-grep-and-read pass costs. Head-to-head, ripwire put all gold files in the top 10 on **58.3%** of
-instances, against **33.3%** for the best competitor tested. Zero runtime dependencies, C++23,
-builds with the network off. Those numbers have different instruments and important caveats — the
-losses ship beside the wins in [Measured](#measured) and [`docs/EVALS.md`](docs/EVALS.md).
+- **Saves tokens** — on a fresh thread in an unfamiliar codebase, the agent answers at **7.3%** of
+  what a grep-and-read pass costs; head-to-head, all gold files landed in the top 10 on **58.3%**
+  of instances against **33.3%** for the best competitor tested.
+- **Goes faster** — a 1,560-file repository parses in **~1 s** cold; every warm query after that
+  answers in **~0.1 s**.
+- **Writes better code** — the quality verbs measure what a change made *worse*
+  (`--quality-delta`), surface the repo's best-in-class pattern to imitate (`--exemplar`), and
+  name the tests that must run before "done" (`--test-gate`).
+
+Zero runtime dependencies, C++23, builds with the network off. Those numbers have different
+instruments and important caveats — the losses ship beside the wins in [Measured](#measured) and
+[`docs/EVALS.md`](docs/EVALS.md). Freshest example: the first Codex agent-loop pilot cost **+80%**
+tokens on easy tasks even while localizing perfectly; the diagnosis (the agent kept reading skill
+files after the first answer) and the fix (stop rules the agent sees for free) are published with
+it, verification re-run pending.
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
 
@@ -27,6 +38,30 @@ ripwire . --for="incremental cache invalidation"
 
 One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks,
 and the tests that reach them.
+
+<details>
+<summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed</summary>
+
+```xml
+<ctx task="incremental cache invalidation" est_tokens="2934">
+  <f p="./src/quality.h">
+    <d l="440" n="cacheDirLadder"       cx="16" ccx="14" in="11" churn="10" amp="49" tested="1">inline std::string cacheDirLadder()</d>
+    <d l="810" n="resolveCacheBlobPath" cx="4"  ccx="3"  in="4"  churn="10" amp="42">inline std::string resolveCacheBlobPath( const std::string&amp; dir, const std::string&amp; filename )</d>
+    <d l="835" n="shaKeyedCachePath"    cx="1"  ccx="0"  in="6"  churn="10" amp="44">inline std::string shaKeyedCachePath( const char* family, const std::string&amp; repoHex, … )</d>
+    <d l="844" n="headSnapCachePath"    cx="1"  ccx="0"  in="2"  churn="10" amp="40">inline std::string headSnapCachePath( const std::string&amp; repoHex, const std::string&amp; exclHex, … )</d>
+  </f>
+  <f p="./src/ingest.h">
+    <d l="90" n="ingest" churn="4" amp="4"><doc>for vendored/generated trees not caught by the built-in dir denylist (--exclude=SUBSTR). cacheFi…</doc>IngestResult ingest( const char* rootDir, … )</d>
+  </f>
+  …
+</ctx>
+```
+
+The cache-path cluster, ranked and annotated in place: `cx`/`ccx` complexity, `in` reuse count,
+`churn` recent commits, `amp` change amplification, `tested` coverage — the fragile spots are
+visible *before* the agent touches them, in a few thousand tokens instead of five whole files.
+
+</details>
 
 [Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
 [Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
@@ -49,6 +84,9 @@ tree-sitter's core, all 15 grammars and the test framework are vendored under `t
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
+Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
+Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+
 ```bash
 git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
@@ -59,15 +97,18 @@ cmake -S . -B build && cmake --build build -j
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
 
-Using OpenAI Codex? Put the binary on `PATH`, then install the bundled task-shaped skills so Codex
-knows which CLI query to use and when to stop reading:
+Wiring it into your agent takes one more minute — `wrap` **prints** the recipe for your client, it
+never edits your config:
 
 ```bash
-skills/install.sh --codex       # canonical shared skills: ${AGENTS_HOME:-~/.agents}/skills
+ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
+ripwire wrap --all              # detect every installed agent, print each one's recipe
+skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
 ```
 
-The CLI is the recommended baseline because it works in every shell-capable agent. An optional MCP
-server is also available for agents whose workflow benefits from persistent tool registration.
+The CLI is the recommended baseline because it works in every shell-capable agent; the MCP server is
+optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
+all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
 
 Four commands worth learning first:
 
