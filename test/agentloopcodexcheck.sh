@@ -112,10 +112,28 @@ assert "single-line leaf fix" in quality_bar
 # read was unnecessary. The guard must live in the FRONTMATTER the agent sees for free.
 def frontmatter( text ):
     parts = text.split( "---" )
-    return parts[1] if len( parts ) >= 3 else ""
+    fm = parts[1] if len( parts ) >= 3 else ""
+    return " ".join( fm.split() )   # whitespace-normalized: guards must not depend on line-wrap positions
 assert "is enough" in frontmatter( find_bug ), "find-bug: evidence-sufficiency stop must be advertised in frontmatter"
 assert "single-line leaf fix" in frontmatter( quality_bar ), "quality-bar: scope guard must be advertised in frontmatter"
 assert "one-line leaf fix" in frontmatter( change_check ), "change-check: scope guard must be advertised in frontmatter"
+
+# Every skill whose body offers a MENU of verbs gets a one-sentence stop rule in frontmatter too —
+# the pilot's ritual expansion (multiple calls where the first sufficed) is not find-bug-specific.
+stop_guards = {
+    "ripwire-reuse-first":      "at most",
+    "ripwire-orient":           "first rung",
+    "ripwire-navigate":         "one verb",
+    "ripwire-before-you-build": "needs none of this",
+    "ripwire-fresh-eyes":       "single call",
+    "ripwire-write-tests":      "one target",
+    "ripwire-perf-target":      "the profile names",
+    "ripwire-security-scan":    "one scan pass",
+    "ripwire-layers":           "one pass",
+}
+for skill_name, marker in stop_guards.items():
+    text = ( root / "skills" / skill_name / "SKILL.md" ).read_text()
+    assert marker in frontmatter( text ).lower(), f"{skill_name}: stop rule ({marker!r}) must be advertised in frontmatter"
 
 print( "agentloopcodexcheck: PASS — Codex arms are config-isolated and JSONL usage is captured" )
 PY

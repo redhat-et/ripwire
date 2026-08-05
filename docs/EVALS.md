@@ -137,10 +137,10 @@ proxy; one corpus, one language, fixed idealized agents on every arm.
 
 ### Agent-in-the-loop: the Codex CLI pilot (2026-08-04/05)
 
-**Source:** `bench/agentloop/` (harness, README, tasks.lock); result records committed at
-[`bench/agentloop/results/pilot-6run.json`](../bench/agentloop/results/pilot-6run.json) and
-[`pilot-postguard.json`](../bench/agentloop/results/pilot-postguard.json), raw per-run Codex JSONL
-retained outside the tree (paths inside the records).
+**Source:** `bench/agentloop/` (harness, README, tasks.lock); round-1 records committed at
+[`bench/agentloop/results/pilot-6run.json`](../bench/agentloop/results/pilot-6run.json) — absolute
+local paths in the records are rewritten to the `<checkout>` placeholder before commit — with the
+raw per-run Codex JSONL retained outside the tree.
 
 **Setup.** `codex exec` (codex-cli 0.144.0-alpha.4, CLI default model), two arms on the same
 SWE-bench-Lite instances, seed-1 prompts, MCP disabled in both, per-run isolated `CODEX_HOME`;

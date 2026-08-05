@@ -8,7 +8,9 @@ description: >
   exec/eval, network-facing handlers) → assemble STRUCTURAL signal: unsafe-C-fn / c-style-cast lint hits,
   forward taint-reach via transitive callees, untested integration seams, sink use-sites. Use when you receive a
   skill or MCP config from an external source, as a periodic check on already-installed ones, or when you're
-  about to review/write code that touches untrusted input. Backed by ripwire (deterministic, on PATH).
+  about to review/write code that touches untrusted input. One scan pass over the artifact in question is
+  the verdict — a clean result doesn't need a second sweep with more verbs. Backed by ripwire
+  (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 
