@@ -82,6 +82,17 @@ The xarray task is a multi-line feature fix, so the one-line skip guards legitim
   archaeology; 26 commands vs baseline's 14. Inside a token-metered benchmark these are
   uncompensated; the benchmark scores the patch only.
 
+### Round 2 — the fix, attempted; INVALID, do not publish
+
+A 2026-08-05 re-run of the two easy-task treatment runs with the guarded skills (`4fdaf48`)
+produced apparently strong numbers (astropy overhead +103.7% → +8.0%, requests +158.4% → +33.3%,
+localization intact, one skill read + zero ritual reads in the command streams), **but the Codex
+account's usage quota ran out during the verification, so the runs are not comparable to round 1
+and are NOT published** (reviewer call, this session). The raw records live outside the tree at
+`/private/tmp/ripwire-codex-cli-agentloop-v2/pilot-postguard.json` with pre-guard events preserved
+in `events-preguard/`; treat them as an encouraging *direction* only. The clean re-run (fresh
+quota, both arms, all three instances, seeds expanded) is the first item of the next round.
+
 ### Next experiments (in order)
 
 1. **Restructure the four hot skill bodies head-first** so a `sed -n '1,40p'` read suffices: TL;DR
