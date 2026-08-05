@@ -6,7 +6,9 @@ description: >
   WORSE across 10 measured kinds (complexity, verbosity, nesting, params, duplication, dead-code,
   API-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper — the measured agent-code
   failure modes), exiting non-zero on new debt. Fix the real regressions, re-run, converge. Reach for this at
-  every "I think this is done" moment on non-trivial work. For merge-safety / blast-radius / tests-to-run →
+  every "I think this is done" moment on non-trivial work — but a single-line leaf fix with no new
+  branch/symbol/signature does NOT need this pass (or this file): run the focused test and move on. For
+  merge-safety / blast-radius / tests-to-run →
   **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Backed by
   ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read

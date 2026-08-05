@@ -13,7 +13,8 @@ description: >
   surfaces tests to run (--affected/--situ), flags lint smells and hotspot risk in touched files, interprets
   --metrics coupling/cohesion/size on what you touched, and shows the diff's footprint via --map-diff. For
   code QUALITY (better or worse) → **ripwire-quality-bar** instead — this skill judges merge safety, not
-  quality. Backed by ripwire (deterministic, on PATH). Sizing work not yet written → ripwire-before-you-build.
+  quality. Backed by ripwire (deterministic, on PATH). A one-line leaf fix is not a merge audit — run the
+  focused test and skip this skill (and this file). Sizing work not yet written → ripwire-before-you-build.
   Risk in a subsystem you did NOT write → ripwire-fresh-eyes.
 allowed-tools: Bash, Read
 ---

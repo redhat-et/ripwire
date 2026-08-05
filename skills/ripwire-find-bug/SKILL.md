@@ -5,8 +5,9 @@ description: >
   an exception, wrong output, a failing test, an error string) and need to find the responsible symbol —
   whether you have no idea where it is, suspect a subsystem, or just broke it with a change of your own
   (even a deploy). Pick the path that fits what you know: pure symptom → rank candidates; a hunch → narrow
-  to a subsystem; "I changed X and it broke" → --situ regression trace. Backed by ripwire's call graph +
-  hotspots + co-change (deterministic, on PATH).
+  to a subsystem; "I changed X and it broke" → --situ regression trace. One clear --for hit plus one focused
+  source read that explains the symptom is enough — implement the fix; don't chain more verbs or open other
+  skills first. Backed by ripwire's call graph + hotspots + co-change (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 
