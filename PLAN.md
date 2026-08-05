@@ -1,120 +1,137 @@
-# Audit follow-up plan — 2026-08-04
+# Audit follow-up plan — updated 2026-08-04 (second pass)
 
-This is the handoff for the next task. The broad audit implementation is complete; this file records the
-remaining reviewer decisions, the Codex CLI experiment, and the external release work that could not be
-finished in the same context window.
+Continuation of the 2026-08-04 audit handoff, executed on `docs/readme-frontpage`. This file records
+what was completed this pass, the exact evidence, and what genuinely remains. Prior handoff text is
+superseded; measured claims below name their instruments.
 
-## Verified audit state
+## Completed this pass (commit SHAs on `docs/readme-frontpage`)
 
-- Full gate run before the final documentation/evaluator edits: **338 pass, 1 expected skip, 0 fail**.
-- ASan/UBSan, determinism, XML, plugin validation, deck render/visual review, and clang-format passed.
-- New cache isolation, honest lint/docdrift behavior, transitive test reachability, skill routing, Codex
-  plugin/CLI setup, compile-time `LexPair` memcpy eligibility, and 13 registered gates are implemented.
-- Run the full foreground gate again after this handoff's Python/skill/README changes:
-  `python3 test/pargates.py . ./build/ripwire -j 6`.
+- `987a1bf` — evaluator refactor per the reviewer decision: `run_one` ccx 23 → 15 (extracted
+  `_codex_metrics`/`_claude_metrics`, shared by the timeout and success paths), `synthetic_fixture`
+  nesting cut via `_fixture_record`. Gate first: `test/agentloopcodexcheck.sh` pins the helpers'
+  behavior (verbatim JSONL retention, bytes/None degradation, trailer-drift-to-nulls) and now runs
+  `analyze.py`'s self-test.
+- `9ce286a` — version 0.1.0 → 0.2.0 in `CMakeLists.txt`; CHANGELOG `[Unreleased]` → `[0.2.0]`, and
+  the stale "no release has been cut" preamble corrected (a `v0.1.0` tag + assetless GitHub Release
+  have existed since 2026-08-02).
+- `4fdaf48` — pilot-evidence-driven skill change: the evidence-sufficiency stop (find-bug) and the
+  single-line-leaf-fix skip (quality-bar, change-check) are now in the FRONTMATTER descriptions the
+  agent sees for free at advertisement time, not only in the 2–6k-token bodies it must pay to open.
+  Gate asserts the guards stay in frontmatter.
+- `ededc13` — `analyze.py` defect found by running the pilot: pairing required `resolved != None`,
+  but `--evaluator none` (the documented pre-Docker mode) always records `resolved=None`, so the
+  pilot analyzed as zero pairs. Pairs now form on `status=='ok'`; resolution stats print n/a over an
+  honest `n_resolved_pairs` count, never a fabricated 0.0. Self-test extended first (red → green).
 
-## Codex baseline versus ripwire CLI
+Gate evidence this pass: `python3 test/pargates.py . ./build/ripwire -j 6` run three times
+(baseline, post-version-bump, post-skill-edits): **gates=340 pass=339 skip=1 fail=0** every time.
+Determinism (byte-identical double run), `xmllint --noout`, and
+`LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire .` all clean on the release tree.
+The four "SLOWER" import-precision gate timings in the first run were cold-cache artifacts of the
+fresh rebuild (rustimportprecisecheck 47.3s cold vs 1.5s warm re-run), not regressions.
 
-The MCP experiment is invalid and must never be quoted. The requested treatment is the CLI.
+Quality-delta discipline followed: the transient gating rows this pass were two deliberate-revisit
+churn pairs (`run_one`/`synthetic_fixture`, then `analyze`/`pair_by_task_seed`) plus `self_test`
+ccx 10 → 17 — the latter is the new gate assertions themselves (each check is an `if`); a
+predicate-table refactor would trade self-test readability for a number, so it was accepted.
+Acks, where used, were narrow `--ack-only=<ids>`; never bare `--quality-ack`.
 
-The corrected harness is `bench/agentloop/run_agentloop.py` schema v2:
+## Codex CLI pilot — 6 runs, 3 repos, seed 1, 2026-08-04
 
-- arms: `baseline` and `ripwire_cli`;
-- MCP table empty in both arms;
-- per-run isolated `CODEX_HOME`; baseline has no skills, treatment gets only this checkout's ripwire skills;
-- absolute ripwire binary prepended to `PATH`;
-- raw Codex JSONL retained; records include command count, ripwire CLI count, and exact commands;
-- task limiting is repository-round-robin; results checkpoint after every call; timeouts retain partial
-  command evidence and gold-file localization.
+Harness: `bench/agentloop/run_agentloop.py` schema v2, `--harness codex-exec`, codex-cli
+0.144.0-alpha.4 (the ChatGPT.app-bundled binary; a `codex` PATH shim is required — symlinks break
+its sibling-executable resolution [`codex-code-mode-host`], use an `exec` wrapper script), model
+left at the CLI default (recorded as `""`, same as the prior diagnostic; the default per
+models_cache is `gpt-5.6-sol`). Isolation preserved exactly: empty MCP table both arms, per-run
+`CODEX_HOME`, baseline no skills, treatment only this checkout's skills.
+Evidence: `/private/tmp/ripwire-codex-cli-agentloop-v2/pilot-6run.json` + per-run JSONL under
+`events/`. Smoke `--live-one` first reproduced the prior baseline diagnostic within 0.15%
+(170,317 vs 170,567 input tokens, 8 commands, ~56s).
 
-Locked diagnostic: `astropy__astropy-12907`, seed 1. The SWE-bench reference patch changes
-`astropy/modeling/separable.py`, replacing `_cstack`'s scalar `1` assignment with the right-hand matrix.
-Both arms independently made that exact one-line fix.
+| Instance | Arm | Gold-file hit | Input tokens | Output tokens | Wall | Cmds | ripwire calls |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| astropy-12907 | baseline | yes | 160,057 | 1,524 | 53 s | 7 | 0 |
+| astropy-12907 | ripwire_cli | yes | 326,054 | 3,128 | 92 s | 11 | 5 |
+| requests-1963 | baseline | yes | 176,049 | 3,201 | 109 s | 9 | 0 |
+| requests-1963 | ripwire_cli | yes | 454,980 | 3,734 | 118 s | 16 | 2 |
+| xarray-3364 | baseline | yes | 529,038 | 7,648 | 240 s | 14 | 0 |
+| xarray-3364 | ripwire_cli | yes | 1,249,026 | 13,779 | 338 s | 26 | 6 |
 
-| Arm | Gold-file hit | Input tokens | Output tokens | Wall | Commands |
-| --- | --- | ---: | ---: | ---: | ---: |
-| baseline | yes | 170,567 | 1,856 | 55.99 s | 8 |
-| ripwire CLI, globally contaminated skills | yes | 257,007 | 2,661 | 89.47 s | 17 |
-| ripwire CLI, isolated + corrected skills | yes | 197,637 | 1,953 | 64.91 s | 8 |
+`analyze.py`: n_pairs=3, localization-hit delta +0.00pp (parity — both arms localized 6/6),
+tokens_out ratio p50/p95 **+80.2% / +105.2%**, wall p50/p95 **+40.7% / +72.1%**. `cost_usd` is
+null in codex JSONL (no cost field emitted); resolution unscored (`--evaluator none`).
 
-The initial ripwire CLI query immediately ranked the gold file. The large first loss came afterward:
-globally installed ctxpack skills forced redundant hotspots/impact/PR/quality passes. Skill fixes removed
-about 69% of that token overhead and 74% of that time overhead. The isolated arm remains an easy-task loss
-versus grep/read: +15.9% input tokens and +15.9% wall time, with no localization gain.
+**Confound, disclosed:** commit `4fdaf48` (frontmatter guards) landed mid-pilot; the astropy and
+requests treatment runs used pre-guard skills, the xarray treatment run used post-guard skills.
+The xarray task is a multi-line feature fix, so the one-line skip guards legitimately did not fire.
 
-### Next skill/binary experiments
+### Loss taxonomy (per the treat-losses-as-evidence rule)
 
-1. Preserve the new **evidence-sufficiency stop** in `ripwire-find-bug`: when one ranked source read proves
-   the defect, do not automatically run hotspots, impact, another skill, or a whole-file read.
-2. Preserve the scope guards in `ripwire-change-check` and `ripwire-quality-bar`; a one-line leaf fix is not
-   automatically a full merge/quality audit.
-3. Reduce the treatment's remaining overhead. Measure separately:
-   - skill-body injection/read cost;
-   - `--for --max-tokens=4000` output cost versus `--adaptive --detail=1 --max-tokens=2000`;
-   - whether a compact bug-localization skill can route directly from the ranked result to a narrow source
-     range without losing difficult-task recall.
-4. Run the bounded three-repository pilot only after step 3: Astropy, Requests, Xarray; two arms; one seed;
-   six calls; projected $2–$9. Treat every loss as ranking, output-shape, skill-policy, missing-feature, or
-   genuinely-unnecessary-tool evidence. Do not force a win.
-5. Install/verify the official SWE-bench Docker evaluator before claiming solve rate. Current runs support
-   localization/token/wall claims only. Then expand seeds and use repository-clustered analysis.
-6. Refactor `run_one` before expanding the matrix; current quality-delta correctly reports its growth from
-   ccx 12→23 and LOC 79→111.
+- **Not ranking:** `--for` ranked the gold file first in all three treatment runs, and the agent
+  went from ranked output to a narrow source-range read directly (requests: cmd 2 → `sed 70,190p`).
+- **Not output shape:** each `--for --max-tokens=4000` reply was ~600 est tokens. Measured directly
+  on astropy: `--for --max-tokens=4000` = 1,436 B (~574 est tokens) vs
+  `--adaptive --detail=1 --max-tokens=2000` = 3,257 B (~814). The prior plan's hypothesis that
+  adaptive-detail would be cheaper is **wrong on this task** — `--for` is already smaller.
+- **Skill policy (dominant):** mid-task full SKILL.md body reads (find-bug ~1.8k tok, reuse-first
+  ~2k, quality-bar ~2.5k, change-check ~4.1k) are re-billed in every later turn's context; with
+  8–26 turns that alone reconstructs most of the +27k..+720k input-token gaps. Advertisement is a
+  second fixed tax: 17 skills ≈ 3.4k tokens of frontmatter per turn (measured over `skills/`).
+- **Ritual expansion:** treatment runs add validation turns baseline never spends — xarray ran
+  `ripwire . --quality-delta` **three times** (the converge loop working as designed) plus repo
+  archaeology; 26 commands vs baseline's 14. Inside a token-metered benchmark these are
+  uncompensated; the benchmark scores the patch only.
 
-## Quality-delta reviewer decision
+### Next experiments (in order)
 
-Current run against git HEAD:
+1. **Restructure the four hot skill bodies head-first** so a `sed -n '1,40p'` read suffices: TL;DR
+   contract + stop rule in the first ~40 lines, reference detail below. Measure body-read bytes in
+   the events JSONL before/after.
+2. **Task-scoped skill linking** in the harness (e.g. `--skills=find-bug,efficient` allowlist in
+   `prepare_codex_environment`) to measure the advertisement tax directly — keep the default
+   all-skills arm as the honest "real install" condition; a scoped arm is a separate labeled arm,
+   not a replacement.
+3. **Benchmark-mode guidance**: decide whether quality rituals (quality-delta loops) belong in the
+   benchmark prompt contract at all, or only in real-use contexts; if kept, cap the converge loop.
+4. Re-run the 6-run pilot post-restructure (same seed, same tasks) and compare; only then consider
+   more seeds/repos with repository-clustered analysis.
+5. **SWE-bench evaluator still not installed** (no `swebench` package, Docker state unverified).
+   Until then no resolve-rate claims; localization/token/wall only. `run_swebench_harness()`'s
+   TODO-verify notes (CLI flags, predictions schema, report key) remain unexercised.
 
-`regressions=48 minor=15 acked=0 preexisting-worse=38 new-symbol=10 gating=27`.
+## Legacy temporary files — CLEANED
 
-Gating rows are 23 short-horizon-churn, two complexity, one nesting, and one verbosity. The real structural
-regressions are in the new evaluator work: `run_one` (complexity + verbosity) and `synthetic_fixture`
-(complexity + nesting). The 23 churn rows say this audit revisited code changed recently; that is a useful
-review signal but not proof those fixes are wrong. The ten new-symbol rows do not gate by design; review the
-high-complexity `doctorCacheStats` and `inconsistentReturnLine`, while the `LexPair`/constructor dead-code
-rows appear to be parser/model false positives.
+Measured before cleanup (matching the prior handoff): 132,246 direct `ripwire-*` files in
+`$TMPDIR`, 460.4 MiB. Process validation first: the only pre-today ripwire process (a stale Aug-3
+`--listen` fixture server from the `ripwire-wt-lineage` worktree, holding only a `tmp.*/http.log`)
+was stopped; the live current-session MCP server (`ripwire --mcp`, started today) holds no tmp
+handles and was left running. Deleted only direct FILES at depth 1 matching `ripwire-*` with
+mtime > 24 h: **100,629 files, 314.3 MiB reclaimed** (find's `-delete` failed silently — the
+removal needed `-print0 | xargs -0 rm -f`). Remaining 31,617 files (146.1 MiB) are all <24 h old,
+created by today's own gate-suite runs — the leak is ONGOING (~31k files/day of heavy gate use):
+`src/mcpindex.h:538` / `src/mcpedit.h:234` still write direct files and `quality.h`'s
+`evictOldCacheFamily` evidently doesn't bound these families. Follow-up task chip filed
+("Scope ripwire tmp-cache evictor to direct-file families").
 
-Recommendation: **keep quality-delta, do not blanket-ack.** Accept the audited C++ changes only after a
-reviewer inspects the churn list; refactor the evaluator's two Python hotspots in a follow-up or explicitly
-record that debt. If acknowledgements are needed, use narrow `--ack-only` facets/ids, never bare
-`--quality-ack`.
+## Release v0.2.0
 
-Research comparison: [arXiv:2505.23953](https://arxiv.org/abs/2505.23953) feeds the five most predictive
-complexity metrics back only after failed code and iterates at most five times. It reports a 35.71% Pass@1
-improvement versus 12.5% for execution-only feedback on one GPT-3.5/HumanEval setting, but agent gains on
-BigCodeBench were only marginally above the baseline. Its threats include benchmark generalizability,
-top-five SHAP selection, and LLM-generated tests. That supports an itemized, bounded feedback loop; it does
-not support rejecting a passing patch solely because one complexity number rose. The repo's
-[`quality-metrics.md`](skills/ripwire-quality-bar/quality-metrics.md) correctly weakens complexity to a
-size-confounded correlate and trusts coupling/churn more strongly.
-
-## Legacy temporary files
-
-Measured in the macOS `$TMPDIR`: **132,246** direct legacy `ripwire-*` files: 71,908 caches, 60,328 locks,
-about **460.4 MiB** total. Deleting them frees that disk space and directory entries/inodes and should make
-temp-directory scans/backup/indexing less painful. It does not delete source or committed data. The cost is
-that any still-relevant cache has one cold rebuild; deleting a live lock/cache while an old ripwire process
-is active can cause duplicate work or a race. Stop ripwire/MCP processes first, then remove only the exact
-legacy direct-file pattern. New private/sharded cache data is separate and should not be swept blindly.
-
-## README and release
-
-- README now opens with “Give your coding agent a map before it reads the repo,” a one-command example, and
-  a compact measured-results table. “What it answers” remains immediately after Quickstart.
-- GitHub topics still need adding, including `openai-codex` and `codex`.
-- A local `v0.1.0` tag already points to old commit `c7364de`; do not move/delete it casually. Choose and bump
-  the next version before tagging this audit (likely `v0.2.0`, reviewer decision).
-- `.github/workflows/release.yml` builds four portable archives: macOS arm64/x64 and Linux arm64/x64, each
-  with a SHA-256 file, then attaches them to the GitHub Release. **Do not commit executables to the repo.**
-  Release assets belong on the tag's GitHub Release; Git history keeps source/workflows only.
-- GitHub CLI authentication was invalid during this task. Re-authenticate, push the branch, add topics,
-  push the new tag, watch all four build legs, download the assets, verify checksums and smoke-test at least
-  the native archive before calling the release shipped.
+- Version bumped in source (`9ce286a`), CHANGELOG cut, full gates + ASan green at the tag (see
+  above). Tag `v0.2.0` pushed from this branch's HEAD (a clean fast-forward of `origin/main`,
+  5 commits ahead, 0 behind at tag time).
+- GitHub CLI is authenticated again (`joyful-ii-V-I`, repo+workflow scopes) — the prior pass's
+  auth blocker is gone. Topics `codex`/`openai-codex` were already applied.
+- `v0.1.0` (2026-08-02, commit `c7364de`) remains as-is: tag untouched, its Release has **zero
+  assets** — v0.2.0 is the first run of `.github/workflows/release.yml`'s four archive legs.
+- Release verification results (workflow legs, SHA-256 checks, native-archive smoke test) are
+  appended below once the tag build completes — see "Release verification".
+- `scripts/install.sh` still requires explicit `RIPWIRE_REPO=redhat-et/ripwire`; its TODO(P6)
+  default stays unset pending the fresh-history export decision.
 
 ## Remaining launch work
 
-- Publish the GitHub topics and verified binary release.
-- Re-run the updated Codex CLI pilot and publish honest losses beside wins.
-- Turn the final audit into a concise issue/roadmap; then do outreach only after install-from-release works.
-- Do not convert more shell gates to C++ without a measured payoff: the sampled shell-launch share was only
-  about 0.09–3.1% of relevant gate time.
+- Skill-body head-first restructure + pilot re-run (experiments 1–4 above).
+- SWE-bench Docker evaluator install/verify before any resolve-rate claim.
+- Turn this audit trail into a concise public issue/roadmap; outreach only after
+  install-from-release is verified end-to-end.
+- Do not convert more shell gates to C++ without a measured payoff (sampled shell-launch share was
+  ~0.09–3.1% of gate time).
