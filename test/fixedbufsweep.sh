@@ -254,7 +254,7 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 166, "calls": 148, "sites": 34, "rows": 23, "widthforms": 3 }   # 2026-08-03: +2 calls/mentions — handoff.h degBuf/sBuf (bounded floats, truncate-safe snprintf)
+EXPECTED = { "mentions": 167, "calls": 149, "sites": 34, "rows": 23, "widthforms": 3 }   # 2026-08-05: +1 call/mention — the ONE min_recur= builder in main.cpp (coMinRecurAttr, §CLIO), shared by all three --cochange exits. Re-derived from the diff, not the delta: the branch first grew TWO copies of the same snprintf and they were then folded into one helper, so the net is +1 and the +2 this line briefly carried was the duplicate. sites/rows are UNMOVED on purpose: it interpolates a bare %d, so it is not a string-interpolating site and needs no TABLE row — the same signature the 2026-07-30 re-pin records
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
 drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
 if drift:

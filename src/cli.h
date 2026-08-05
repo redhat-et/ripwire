@@ -135,6 +135,8 @@ struct Config
     bool             clones            = false;            // --clones: token-normalized duplicate function bodies
     bool             cochange          = false;            // --cochange[=FILE]: files that change together in git (hidden coupling)
     std::string_view cochangeFile;                         // --cochange=FILE: lockstep partners of one file
+    int              cochangeRecur     = 0;                // --cochange-recur=K (with --cochange): report only pairs whose co-change RECURS in >= K of the mined window's sub-windows (Clio, ICSE 2011 — a discrepancy is not a violation the first time it appears). 0 = unfiltered (every row still carries recur=). Disclosed as min_recur= in the header when set.
+    bool             cochangeGroups    = false;            // --cochange-groups (with --cochange): emit Mo/Cai/Kazman's Modularity Violation GROUPS — "X co-changes with {A,B,C}, none of which it depends on" as ONE row naming the file to fix — instead of the pair list. Greedy cover, disclosed as such; the pair form stays the default.
     std::string_view archRules;                            // --arch=FILE: enforce layering rules (exit 2 on violation)
     bool             communities = false;                  // --communities: cluster the call graph into cohesive modules
     bool             communityFlag = false;                // --community was given at all (a bare/empty value still routes to the
@@ -785,6 +787,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               selector from p=/top_l=/top=, not from top= alone — it no longer carries a :line suffix)\n"
         "    --clones                   token-normalized duplicate bodies\n"
         "    --cochange[=FILE]          files that change together in git (hidden coupling; the rows' own legend defines surprising=)\n"
+        "    --cochange-recur=K         (with --cochange) report only pairs whose co-change RECURS in K or more of the mined\n"
+        "                               window's sub-windows, so a one-off refactor sprint stops reading like an eighteen-month\n"
+        "                               structural defect (Clio, ICSE 2011). Every row carries recur= with or without this flag;\n"
+        "                               the header publishes sub_windows= (the denominator) and min_recur= when the filter is on\n"
+        "    --cochange-groups          (with --cochange, repo-wide only) emit Modularity Violation GROUPS instead of pairs:\n"
+        "                               \"X co-changes with {A,B,C}, none of which it depends on\" is ONE row that names the file\n"
+        "                               to fix (Mo/Cai/Kazman, IEEE TSE 2019). A greedy cover, disclosed as greedy — set cover is\n"
+        "                               NP-hard, so the group count is an upper bound on the minimum, not the minimum\n"
         "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn to commits after this point:\n"
         "                               a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate\n"
         "                               (\"2 weeks ago\" — wall-clock-relative). e.g. --hotspots --since=\"1 week ago\"\n"
@@ -795,10 +805,10 @@ inline void printUsage( std::FILE* out ) noexcept
         // covered the whole history. The 12-vs-18 split itself is a RECORDED residual and is not re-litigated
         // here; what is fixed is that --help now names the real numbers and says which verbs publish them.
         "                               bounded default window, NOT all history: --hotspots 12 months,\n"
-        "                               --rank-by=churn 18 months, --cochange 18 months. --hotspots and\n"
-        "                               --rank-by=churn STAMP the window they used (window=\"12mo\"/\"18mo\", or\n"
-        "                               the resolved --since value); --cochange emits no window= attribute, so\n"
-        "                               its 18-month default is readable only here. An UNRESOLVABLE value is\n"
+        "                               --rank-by=churn 18 months, --cochange 18 months. All three STAMP the\n"
+        "                               window they used (window=\"12mo\"/\"18mo\", or the resolved --since\n"
+        "                               value) — --cochange gained its window= in the same round that gave it\n"
+        "                               sub_windows=, and this clause used to say it had none. An UNRESOLVABLE value is\n"
         "                               refused by --hotspots (exit 1 — its window is part of the measurement)\n"
         "                               and degrades to the verb's own default window elsewhere\n"
         "    --arch=FILE                enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a\n"
@@ -1384,6 +1394,8 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--hotspots",           &Config::hotspots           },
     { "--clones",             &Config::clones             },
     { "--cochange",           &Config::cochange           },
+    { "--cochange-groups",    &Config::cochangeGroups     },   // matched by EQUALITY, scanned before the prefix table, so it can
+                                                                // never shadow --cochange nor be shadowed by --cochange=FILE
     { "--communities",        &Config::communities        },
     { "--community",          &Config::communityFlag      },   // bare flag → empty ID → handler refuses loudly. Matched by
                                                                 // EQUALITY and scanned before the prefix table, so it can never
@@ -1640,6 +1652,10 @@ inline constexpr IntFlag kIntFlags[] =
     { "--pack-top-n=",       &Config::packTopN,      false, kIntFlagMax,       "a positive integer",         "--pack-top-n=10",
       "ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchanged behavior for now)\n" },
     { "--detail=",           &Config::detail,        true,  kIntFlagMax,       "a non-negative integer (0 = off)", "--detail=2" },
+    // --cochange-recur=K: K is a count of SUB-WINDOWS, so it is bounded by kCoRecurSubWindows in practice;
+    // the parser accepts any positive integer and the verb reports zero pairs above the ceiling rather than
+    // refusing — an empty result under a disclosed min_recur= is a truthful answer, not an error.
+    { "--cochange-recur=",   &Config::cochangeRecur, false, kIntFlagMax,       "a positive integer",         "--cochange-recur=2" },
 
     // the grep context windows (ripgrep -B/-A/-C)
     { "--grep-before=",      &Config::grepBefore,    true,  kIntFlagMax,       "a non-negative integer",     "--grep-before=3" },
@@ -1682,7 +1698,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 150;   // +1: --handoff (kBoolFlags row)
+inline constexpr std::size_t kTotalFlagArms       = 152;   // +1: --handoff (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2309,6 +2325,26 @@ inline void validateModifierGuards( Config& c ) noexcept
     {
         std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn — pass one "
                               "(e.g. ripwire <dir> --hotspots --since=\"1 week ago\")\n" );
+        c.ok = false;
+    }
+
+    // --cochange-recur=K / --cochange-groups are read ONLY inside the --cochange branch of
+    // runMaintenanceViews (main.cpp). Alone they silently no-op; refuse loudly, exactly like --since above.
+    if( ( c.cochangeRecur > 0 || c.cochangeGroups ) && !c.cochange )
+    {
+        std::fprintf( stderr, "ripwire: --cochange-recur=K and --cochange-groups modify --cochange — pass it "
+                              "(e.g. ripwire <dir> --cochange --cochange-recur=2)\n" );
+        c.ok = false;
+    }
+
+    // --cochange-groups covers the repo-wide VIOLATING-PAIR set; with --cochange=FILE there is one core file
+    // by construction and the group form has nothing to group. Refusing beats emitting a one-file "group"
+    // that looks like a finding — the honest reading is that the question is not defined for this form.
+    if( c.cochangeGroups && !c.cochangeFile.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --cochange-groups groups the repo-wide violating pairs — it has nothing to "
+                              "group under --cochange=FILE, whose core file is already the one you named "
+                              "(e.g. ripwire <dir> --cochange --cochange-groups)\n" );
         c.ok = false;
     }
 
