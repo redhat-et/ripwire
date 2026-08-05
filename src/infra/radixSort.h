@@ -17,8 +17,12 @@
 //      pass over the keys, so the data is read once before any scatter.
 //    * No-op pass skip — a digit whose whole column lands in one bin is skipped,
 //      which collapses small/bucketed key ranges to 1-2 passes.
-//    * NEON byte histograms — contiguous uint32/uint64/float keys histogram via
-//      a single vector load + byte spill; the IEEE float order-flip is in SIMD.
+//    * SIMD byte histograms (NEON on arm64, SSE2 on x86_64) — contiguous
+//      uint32/uint64/float keys histogram via a single vector load + byte
+//      spill; the IEEE float order-flip is in SIMD. Parity vs the scalar path
+//      is gated by test/radixsimdcheck.sh. Measured on x86 (Rosetta proxy,
+//      -O2 -DNDEBUG): float 1.44-1.52x over scalar, uint32/uint64 a wash
+//      (kept for backend uniformity at no measured cost).
 //    * uint32 histogram counters (count is capped at UINT32_MAX) so the 256-bin
 //      tables stay L1-resident across clear/accumulate/offset scans.
 //    * Packed <word,index> pairs (sortKeyLargePairs) turn the index scatter into
@@ -32,6 +36,10 @@
 //    * Software gather prefetch on the keys[idx] index path — tried and dropped:
 //      at game sizes (hundreds of keys) the gathered set is L1-resident, so the
 //      prefetch instructions only added overhead. Revisit if N grows large.
+//    * AVX2 byte histograms (32-byte load, same spill) — tried and dropped:
+//      measured 0.86-0.94x of the SSE2 kernels under the only x86 available
+//      here (Rosetta 2 translation — a proxy, not real silicon). Do not re-add
+//      without a measured win on physical x86.
 //
 
 #pragma once
@@ -42,11 +50,23 @@
 #include <type_traits>
 #include <utility>
 
-// The byte-histogram fast paths in radixSort.inl are written in NEON intrinsics under
-// this same guard, so this header owns the intrinsics include rather than inheriting it
-// from whatever happened to be included first.
-#if defined( __ARM_NEON ) || defined( __ARM_NEON__ )
-#include <arm_neon.h>
+// The byte-histogram fast paths in radixSort.inl are written in vector intrinsics under
+// these backend macros, so this header owns the backend choice (and the intrinsics
+// include) rather than inheriting it from whatever happened to be included first. The
+// byte-spill trick indexes lanes by memory order, so a big-endian target (NEON can be
+// either) takes the scalar path; x86 is always little-endian.
+#if ( defined( __ARM_NEON ) || defined( __ARM_NEON__ ) ) && \
+    ( !defined( __BYTE_ORDER__ ) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ )
+    #include <arm_neon.h>
+    #define RADIXSORT_NEON 1
+    #define RADIXSORT_SSE2 0
+#elif defined( __SSE2__ ) || defined( _M_X64 )
+    #include <emmintrin.h>
+    #define RADIXSORT_NEON 0
+    #define RADIXSORT_SSE2 1
+#else
+    #define RADIXSORT_NEON 0
+    #define RADIXSORT_SSE2 0
 #endif
 
 namespace radix
