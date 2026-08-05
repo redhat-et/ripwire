@@ -144,7 +144,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 ## What it answers
 
-Around the core sit 124 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 125 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
 [`docs/COMMANDS.md`](docs/COMMANDS.md) documents 101 of the flags with a real invocation and its

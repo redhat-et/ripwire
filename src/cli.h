@@ -133,6 +133,9 @@ struct Config
     bool             deps              = false;            // --deps: file→file dependency view (#include/import counts)
     bool             hotspots          = false;            // --hotspots: complexity × recent git churn (maintenance-pain map)
     bool             clones            = false;            // --clones: token-normalized duplicate function bodies
+    bool             readability       = false;            // --readability: the Posnett/Hindle/Devanbu (MSR 2011) lens — per function, Halstead
+                                                            // volume + token entropy + line span → P, emitted LEAST readable first. Pages through
+                                                            // limit/offset like the other report verbs; a ranking lens, never a grade (readability.h)
     bool             cochange          = false;            // --cochange[=FILE]: files that change together in git (hidden coupling)
     std::string_view cochangeFile;                         // --cochange=FILE: lockstep partners of one file
     std::string_view archRules;                            // --arch=FILE: enforce layering rules (exit 2 on violation)
@@ -784,6 +787,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               BARE name, top_ccx= its cognitive complexity, top_l= its source line (build an --expand\n"
         "                               selector from p=/top_l=/top=, not from top= alone — it no longer carries a :line suffix)\n"
         "    --clones                   token-normalized duplicate bodies\n"
+        "    --readability              per-function readability lens, LEAST readable first: vol= Halstead volume V (N*log2(eta)),\n"
+        "                               ent= Shannon token entropy E, lines= L, posnett= sigmoid(8.87 - 0.033V + 0.40L - 1.5E)\n"
+        "                               (Posnett/Hindle/Devanbu, MSR 2011). APPROXIMATION, disclosed: ONE token-class table serves\n"
+        "                               every language (keywords + punctuation = operators, identifiers + literals = operands),\n"
+        "                               with no per-grammar refinement, so V is cross-language and not a per-grammar Halstead count.\n"
+        "                               The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a\n"
+        "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
+        "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
         "    --cochange[=FILE]          files that change together in git (hidden coupling; the rows' own legend defines surprising=)\n"
         "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn to commits after this point:\n"
         "                               a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate\n"
@@ -1205,10 +1216,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree\n"
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
-        "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate.\n"
+        "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
+        "                               --readability.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
-        "                               impact rows, 20 seam pairs, 200 graph-query rows / --top-k).\n"
+        "                               impact rows, 20 seam pairs, 40 readability rows, 200 graph-query rows / --top-k).\n"
         "                               With --offset alone (no --limit) the verb's own default page size applies and\n"
         "                               the root discloses limit=\"0\" — on OUTPUT that 0 means 'no explicit --limit',\n"
         "                               never a zero-row page (the flag itself refuses --limit=0).\n"
@@ -1383,6 +1395,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--deps",               &Config::deps               },
     { "--hotspots",           &Config::hotspots           },
     { "--clones",             &Config::clones             },
+    { "--readability",        &Config::readability        },
     { "--cochange",           &Config::cochange           },
     { "--communities",        &Config::communities        },
     { "--community",          &Config::communityFlag      },   // bare flag → empty ID → handler refuses loudly. Matched by
@@ -1682,7 +1695,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 150;   // +1: --handoff (kBoolFlags row)
+inline constexpr std::size_t kTotalFlagArms       = 151;   // +1: --handoff, +1: --readability (kBoolFlags rows)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -1869,7 +1882,8 @@ inline void validatePlanLanes( Config& c ) noexcept
 constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
-    "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate";
+    "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
+    "--readability";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -1878,7 +1892,8 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.whereisFlag || !c.grep.empty() || !c.match.empty() || !c.impactSym.empty() || !c.usesSym.empty()
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
-        || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate;
+        || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
+        || c.readability;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
