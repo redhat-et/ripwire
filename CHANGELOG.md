@@ -3,16 +3,24 @@
 All notable changes to ripwire are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**No release has been cut yet.** Everything below is unreleased and pre-1.0: the flag surface may
-still change. When a flag is superseded it is deprecated with a stderr pointer at its replacement
-and kept working; removals wait for a major version.
+Everything here is pre-1.0: the flag surface may still change. When a flag is superseded it is
+deprecated with a stderr pointer at its replacement and kept working; removals wait for a major
+version. A `v0.1.0` tag exists (2026-08-02) but its GitHub Release carries no binaries; **v0.2.0 is
+the first release with published, SHA-256-checked archives**, and it contains everything below.
 
 Every measured number in this file names its corpus and method. Numbers without a stated method are
 not published here — see `docs/EVALS.md` for the instruments behind the headline figures.
 
 ---
 
-## [Unreleased]
+## [0.2.0] — 2026-08-04
+
+The first binary release: portable archives for macOS arm64/x64 and Linux arm64/x64, each with a
+SHA-256 file, built by `.github/workflows/release.yml` on the tag push. Includes everything from the
+asset-less `v0.1.0` tag plus the language definition-shape rounds (TypeScript, JavaScript, Python,
+Swift, CUDA memory-space capture), the 2026-08-04 audit hardening (cache isolation, honest
+lint/doc-drift behavior, transitive test reachability, skill routing, Codex plugin/CLI setup), and
+the Codex CLI benchmark harness under `bench/agentloop/`.
 
 ### Added — retrieval and ranking
 
