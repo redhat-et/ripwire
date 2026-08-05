@@ -20,6 +20,7 @@
 #include "recall.h"
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
+#include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
@@ -4253,6 +4254,15 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+
+    // --readability: the Posnett/Hindle/Devanbu (MSR 2011) closed-form lens, per function, LEAST readable
+    // first (readability.h owns the measurement AND its emission, the way --handoff owns its packet). It
+    // reads only the symbol table and the files on disk, so it needs neither the graph nor git — and it is
+    // a LENS: exit 0 always, no verdict, no threshold.
+    if( cfg.readability )
+    {
+        return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset );
+    }
 
     // --dead-code[=DIR]: HIGH-CONFIDENCE candidates only. Zero callers is incomplete whole-program evidence,
     // so the default reports source-defined free functions with explicit internal (`static`) linkage. External
