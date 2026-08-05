@@ -132,6 +132,7 @@ after="$( nsnap )"
 
 # ── (d) degrade on corrupt cache → cold parse, output unchanged ───────────────────────────────────────────
 # ground truth from a pristine cache dir, then corrupt every snapshot blob in our dir and re-run.
+mkdir -p "$TMP/coldxdg2"
 env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg2" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/d_truth" 2>/dev/null
 for f in $( snapfiles ); do printf 'GARBAGE-not-a-valid-cache-blob-\x00\x01\x02' > "$f"; done
 run --no-cache >"$TMP/d1" 2>/dev/null; rcd=$?

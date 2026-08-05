@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hookcheck.sh — gate for skills/hooks/ripwire-nudge.sh (Phase B5.2, the
+# hookcheck.sh — gate for hooks/ripwire-nudge.sh (Phase B5.2, the
 # opt-in PreToolUse "nudge raw grep toward ripwire" hook, extended by Phase B9 to `git diff`/`git log`/
 # `git show --stat`) and its installer, skills/install.sh --hook.
 #
@@ -16,7 +16,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-HOOK="$ROOT/skills/hooks/ripwire-nudge.sh"
+HOOK="$ROOT/hooks/ripwire-nudge.sh"
 INSTALL="$ROOT/skills/install.sh"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -224,7 +224,7 @@ echo "-- install.sh --hook output --"; echo "$INSTOUT1"
 [ -f "$SETTINGS" ] && ok "install.sh --hook: wrote $SETTINGS" || no "install.sh --hook: $SETTINGS not created"
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     jq -e --arg cmd "$HOOK" 'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
-        && ok "settings.json references skills/hooks/ripwire-nudge.sh" \
+        && ok "settings.json references hooks/ripwire-nudge.sh" \
         || no "settings.json does not reference the hook script"
     jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "Grep|Bash"' \
         "$SETTINGS" >/dev/null 2>&1 \

@@ -99,8 +99,8 @@ else: print(r["result"]["content"][0]["text"])
 '
 }
 wait_for_id() { local i; for i in $( seq 1 200 ); do grep -q "\"id\":$2" "$1" 2>/dev/null && return 0; sleep 0.05; done; return 1; }
-# Y4: shard-aware lookup — a blob may be flat under a cache dir or under <dir>/<xx>/ (2-hex shard).
-blob_paths() { find "$1" -maxdepth 2 -type f -name "$2" 2>/dev/null; }
+# The private cache root adds ripwire/ below TMPDIR, then the blob family adds its 2-hex shard.
+blob_paths() { find "$1" -maxdepth 3 -type f -name "$2" 2>/dev/null; }
 blob_first() { blob_paths "$1" "$2" | head -1; }
 qsnap_count() { blob_paths "$1" 'ripwire-qsnap-*.bin' | grep -c . ; }
 # L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
@@ -139,7 +139,7 @@ FINAL="$( blob_first "$A_C" 'ripwire-qsnap-*.bin' )"
 [ -n "$FINAL" ] && [ "$( validate_qsnap "$FINAL" )" = "VALID" ] && ok "(a) final qsnap blob is checksum-valid" \
                                                                || no "(a) final qsnap blob missing/invalid"
 # Y4: shard-aware lookup — the atomic-rename tmp file can land in either layout too.
-[ -n "$( find "$A_C" -maxdepth 2 -type f -name '*.tmp.*' 2>/dev/null )" ] \
+[ -n "$( find "$A_C" -maxdepth 3 -type f -name '*.tmp.*' 2>/dev/null )" ] \
     && no "(a) stale *.tmp.* residue left behind (rename did not consume it)" \
     || ok "(a) no *.tmp.* residue after writes (rename consumed the tmp)"
 assert_no_tsan "$A_W/err.txt" "a"

@@ -7,15 +7,30 @@
 
 # ripwire
 
-**The ripgrep of AI context.** Point it at a repository; your coding agent gets a ranked,
-deterministic call graph instead of grepping around and reading whole files — orientation, blast
-radius, and which tests to run, answered in tens of milliseconds from a warm index.
+## Give your coding agent a map before it reads the repo.
 
-On real mid-task coding questions it answers at **7.3%** of the tokens a grep-and-read pass costs,
-with warm queries at ~0.1 s. On the latest 60-instance head-to-head it puts **all** gold files in
-the top 10 on **58.3%** of instances, against **33.3%** for the best competitor tested — and it has
-won every benchmark round run so far. Zero runtime dependencies, C++23, builds with the network
-off. [The full tables, and the caveats that belong with them →](#measured)
+**ripwire is the ripgrep of AI context:** one zero-runtime-dependency binary that ranks the code,
+traces the call graph, measures change impact, and identifies the tests your coding agent should run.
+
+Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
+
+```bash
+ripwire . --for="incremental cache invalidation"
+```
+
+Instead of a grep-and-read expedition, the agent gets the relevant symbols, callers, change risks,
+and tests in one deterministic, token-budgeted answer.
+
+| Measured result | ripwire |
+| --- | ---: |
+| Tokens vs a naive grep/read pass | **7.3%** |
+| Warm task query | **~0.1 s** |
+| All gold files in the top 10 | **58.3%** |
+| Best competitor in that paired round | **33.3%** |
+| Runtime dependencies | **0** |
+
+Those numbers have different instruments and important caveats; the losses ship beside the wins in
+[Measured](#measured) and [`docs/EVALS.md`](docs/EVALS.md). C++23, builds with the network off.
 
 [Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
 [Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
@@ -39,6 +54,16 @@ cmake -S . -B build && cmake --build build -j
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
+
+Using OpenAI Codex? Put the binary on `PATH`, then install the bundled task-shaped skills so Codex
+knows which CLI query to use and when to stop reading:
+
+```bash
+skills/install.sh --codex       # canonical shared skills: ${AGENTS_HOME:-~/.agents}/skills
+```
+
+The CLI is the recommended baseline because it works in every shell-capable agent. An optional MCP
+server is also available for agents whose workflow benefits from persistent tool registration.
 
 Four commands worth learning first:
 
@@ -108,12 +133,12 @@ spot:
 ```
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
-<s t="fn" n="runEval" p="./src/eval.h:133"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:1303"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:1552"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:7246"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:7276"/>
-<s t="fn" n="getIndex" p="./src/mcpindex.h:734"/>
+<s t="fn" n="runEval" p="./src/eval.h:168"/>
+<s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
+<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:8807"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:8843"/>
+<s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
 
@@ -393,7 +418,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **312 gate scripts** and is the authoritative list;
+`test/regression.sh` names **334 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -418,7 +443,7 @@ config — you read the line, then run it.
 ```bash
 ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
 ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
-ripwire wrap codex       # MCP:      the [mcp_servers.ripwire] stanza for ~/.codex/config.toml
+ripwire wrap codex       # MCP:      codex mcp add ripwire -- ripwire --mcp (+ TOML fallback)
 ripwire wrap windsurf    # MCP:      that client's stanza
 ripwire wrap gemini      # MCP:      that client's stanza
 ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
@@ -460,12 +485,13 @@ immediately:
 
 ```bash
 skills/install.sh                 # → ~/.claude/skills
+skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canonical Codex/agent path)
+skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather
 ```
 
-The script's own header documents its other modes, including Codex and an opt-in advisory PreToolUse
-hook.
+The script's own header documents its other modes, including the opt-in advisory PreToolUse hook.
 
 ---
 

@@ -56,18 +56,25 @@ def atomic_write(path, data):                          # a concurrent atomic com
     os.fdopen(fd, "w").write(data)
     os.rename(tmp, path)
 
-def edit_lock_path(target):                            # A3-F8: mirror C++ mcpedit::editLockPath (cache-dir keyed lock,
-    h = 1469598103934665603                             #   NOT a repo-tree "<path>.ripwire-lock" sidecar). FNV-1a-64 of
-    for c in target.encode("utf-8", "surrogateescape"):#   the (absolute) ingested target path → a stable per-file name,
+def fnv1a64(data, offset=1469598103934665603):
+    h = offset
+    for c in data:
         h = ((h ^ c) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+def edit_lock_path(target):                            # A3-F8: mirror C++ mcpedit::editLockPath (cache-dir keyed lock,
+    h = fnv1a64(target.encode("utf-8", "surrogateescape")) # NOT a repo-tree "<path>.ripwire-lock" sidecar). FNV-1a-64 of
     name = "ripwire-edit-%016x.lock" % h
-    tmpdir = os.environ.get("TMPDIR")                  # same cacheDirLadder(): $TMPDIR → $XDG_CACHE_HOME/ripwire → /tmp
+    tmpdir = os.environ.get("TMPDIR")                  # same cacheDirLadder(): $TMPDIR/ripwire → XDG/ripwire → /tmp/ripwire-uid
     if tmpdir:
-        return os.path.join(tmpdir, name)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        d = os.path.join(xdg, "ripwire"); os.makedirs(d, exist_ok=True); return os.path.join(d, name)
-    return os.path.join("/tmp", name)
+        base = os.path.join(tmpdir, "ripwire")
+    else:
+        xdg = os.environ.get("XDG_CACHE_HOME")
+        base = os.path.join(xdg, "ripwire") if xdg else os.path.join("/tmp", "ripwire-%d" % os.getuid())
+    lockdir = os.path.join(base, "locks")
+    shard = "%02x" % (fnv1a64(name.encode(), 14695981039346656037) & 0xff)
+    d = os.path.join(lockdir, shard); os.makedirs(d, mode=0o700, exist_ok=True)
+    return os.path.join(d, name)
 
 PAD = ("// pad " + "x"*60 + "\n") * 14000               # ~980 KB comment pad → widens the [read..rename] window
 def src(canary):

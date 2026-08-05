@@ -153,6 +153,7 @@ after="$( nqsnap )"
 
 # ── (e) degrade on corrupt qsnap blob → alert on stderr + correct output ───────────────────────────────────
 # ground truth from a pristine private cache dir, then corrupt every qsnap blob in our dir and re-run.
+mkdir -p "$TMP/coldxdg"
 env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/e_truth" 2>/dev/null
 for f in $( qsnapfiles ); do printf 'QSNP\xff\xff\xff\xffGARBAGE-not-a-valid-snapshot-blob\x00\x01\x02' > "$f"; done
 run --no-cache >"$TMP/e1" 2>"$TMP/e_err"; rce=$?

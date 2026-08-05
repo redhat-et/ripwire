@@ -102,6 +102,7 @@
 #include "svector.h"      // rw::svector — small basename→path lists
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 #include "gitstamp.h"     // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
+#include "layout.h"       // layout::isCFamilyPath — shared C/C++/ObjC/CUDA extension classifier
 
 #include <algorithm>
 #include <atomic>
@@ -1569,6 +1570,18 @@ inline void harvestCodeLine( std::string_view line, const std::string& rel, std:
     }
 }
 
+// C-family comment text is not corpus evidence. Reuse layout's string-aware scrubber and leave every
+// other language byte-identical; in Python, for example, `//` is an operator rather than a comment.
+inline std::string_view codeFactText( std::string_view path, std::string_view bytes, std::string& scratch )
+{
+    if( !layout::isCFamilyPath( path ) )
+    {
+        return bytes;
+    }
+    scratch = layout::withoutComments( bytes );
+    return scratch;
+}
+
 // ── the on-disk path set (so "missing-file" means MISSING, not merely unindexed) ─────────────────────────
 // Two of this verb's early false positives were files that plainly exist — `CMakeLists.txt` (CMake is not an
 // indexed grammar) and `third_party/unordered_dense.h` (an excluded directory). Calling those "missing" is
@@ -2053,8 +2066,10 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
             lineCounts[k] = forEachLine( bytes, []( std::string_view, std::uint32_t ) {} );
             return;
         }
-        const std::string   rel( relForHash( identPath, root ) );
-        const std::uint32_t lineCount = forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t lineIndex )
+        const std::string rel( relForHash( identPath, root ) );
+        std::string       uncommented;
+        const std::string_view corpusBytes = codeFactText( identPath, bytes, uncommented );
+        const std::uint32_t lineCount = forEachLine( corpusBytes, [ & ]( std::string_view line, std::uint32_t lineIndex )
                                                      { harvestCodeLine( line, rel, lineIndex, wantsFirstByte, facts, into ); } );
         if( isIndexed )
         {

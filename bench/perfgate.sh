@@ -19,6 +19,7 @@
 #   RIPWIRE_BIN=build_prof/ripwire bench/perfgate.sh
 #   RIPWIRE_PERF_CORPUS=../your-large-cpp-corpus RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh
 #   RIPWIRE_PERF_NAV_ARG=--deps RIPWIRE_PERF_NAV_KEY=deps_cpp RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh
+#   bench/perfgate.sh --preflight-only          # semantic harness checks only; no timing/budget comparison
 #   bench/perfgate.sh --write-budgets           # (re)generate perf_budgets.txt from THIS machine's
 #                                                # measured medians x 1.5 — use when you've made a
 #                                                # deliberate, verified perf change and want a new floor.
@@ -63,7 +64,13 @@ esac
 BUDGETS="$ROOT/bench/perf_budgets.txt"
 RUNS=5
 WRITE_BUDGETS=0
-[ "${1:-}" = "--write-budgets" ] && WRITE_BUDGETS=1
+PREFLIGHT_ONLY=0
+case "${1:-}" in
+    "") ;;
+    --write-budgets)  WRITE_BUDGETS=1 ;;
+    --preflight-only) PREFLIGHT_ONLY=1 ;;
+    *) echo "usage: bench/perfgate.sh [--write-budgets|--preflight-only]"; exit 2 ;;
+esac
 
 [ -x "$BIN" ] || { echo "perfgate: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
@@ -111,9 +118,12 @@ echo ""
 echo "-- cold (--no-cache) --"
 "$BIN" "$CORPUS" --no-cache > "$TMP/cold.preflight" 2>"$TMP/cold.preflight.err" \
     || { echo "perfgate: cold semantic preflight failed"; cat "$TMP/cold.preflight.err"; exit 1; }
-grep -q '<r>' "$TMP/cold.preflight" || { echo "perfgate: cold preflight did not emit the core map"; exit 1; }
-cold_ms="$( median_ms "$BIN" "$CORPUS" --no-cache )" || exit 1
-printf '  %-24s %8.1f ms\n' "cold" "$cold_ms"
+grep -Eq '<r([ >])' "$TMP/cold.preflight" || { echo "perfgate: cold preflight did not emit the core map"; exit 1; }
+cold_ms=""
+if [ "$PREFLIGHT_ONLY" -eq 0 ]; then
+    cold_ms="$( median_ms "$BIN" "$CORPUS" --no-cache )" || exit 1
+    printf '  %-24s %8.1f ms\n' "cold" "$cold_ms"
+fi
 
 echo "-- warm (--cache=<sidecar>, primed) --"
 CACHE_FILE="$TMP/perfgate_cache.bin"
@@ -121,18 +131,28 @@ CACHE_FILE="$TMP/perfgate_cache.bin"
     || { echo "perfgate: warm-cache prime failed"; cat "$TMP/prime.err"; exit 1; }
 [ -s "$CACHE_FILE" ] && diff -q "$TMP/cold.preflight" "$TMP/prime.out" >/dev/null \
     || { echo "perfgate: warm-cache prime failed semantic/cache-transparency preflight"; exit 1; }
-warm_ms="$( median_ms "$BIN" "$CORPUS" --cache="$CACHE_FILE" )" || exit 1
-printf '  %-24s %8.1f ms\n' "warm" "$warm_ms"
+warm_ms=""
+if [ "$PREFLIGHT_ONLY" -eq 0 ]; then
+    warm_ms="$( median_ms "$BIN" "$CORPUS" --cache="$CACHE_FILE" )" || exit 1
+    printf '  %-24s %8.1f ms\n' "warm" "$warm_ms"
+fi
 nav_ms=""
 if [ -n "$NAV_ARG" ]; then
     echo "-- navigation ($NAV_ARG, warm cache) --"
     "$BIN" "$CORPUS" "$NAV_ARG" --cache="$CACHE_FILE" >"$TMP/nav.preflight" 2>"$TMP/nav.preflight.err" \
         || { echo "perfgate: navigation semantic preflight failed"; cat "$TMP/nav.preflight.err"; exit 1; }
     [ -s "$TMP/nav.preflight" ] || { echo "perfgate: navigation preflight emitted no result"; exit 1; }
-    nav_ms="$( median_ms "$BIN" "$CORPUS" "$NAV_ARG" --cache="$CACHE_FILE" )" || exit 1
-    printf '  %-24s %8.1f ms\n' "$NAV_KEY" "$nav_ms"
+    if [ "$PREFLIGHT_ONLY" -eq 0 ]; then
+        nav_ms="$( median_ms "$BIN" "$CORPUS" "$NAV_ARG" --cache="$CACHE_FILE" )" || exit 1
+        printf '  %-24s %8.1f ms\n' "$NAV_KEY" "$nav_ms"
+    fi
 fi
 echo ""
+
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+    echo "perfgate: all semantic preflights passed."
+    exit 0
+fi
 
 # key_to_ms KEY — looks up the measured median for a budget key by name (bash-3.2-safe: no assoc arrays)
 key_to_ms()

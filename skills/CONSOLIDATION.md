@@ -106,7 +106,7 @@ Net: 16 skills (compress folded into efficient as a companion file, no moment lo
 The untested-code-coverage moment ("this is untested, add coverage") had no home — it's distinct from
 judging your own diff (`ripwire-change-check`) or your own code's quality (`ripwire-quality-bar`). New
 standalone skill `ripwire-write-tests`: ranks candidates by `--seams` (untested cross-module edges) and the
-`tested=0` lens, pulls the symbol's outside contract via `--callers`, verifies the new test registers with
+`tested=1` coverage lens, pulls the symbol's outside contract via `--callers`, verifies the new test registers with
 `--affected`. No skill was merged or deleted for this one — it's a genuinely new moment.
 
 Net: 17 skills (write-tests added, no other change).

@@ -766,6 +766,8 @@ struct McpVerbFields
 {
     const char* verb;
     const char* fields;   // space-separated, in inputSchema order
+    enum class Effect : std::uint8_t { ReadOnly, Writes, Destructive };
+    Effect      effect = Effect::ReadOnly;
 };
 
 inline constexpr McpVerbFields kMcpVerbFields[] = {
@@ -786,7 +788,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // ── flagship-reflex verbs ──
     { "exemplar",                 "path paths kind task" },
     { "quality_delta",            "path" },
-    { "quality_baseline",         "path" },
+    { "quality_baseline",         "path", McpVerbFields::Effect::Writes },
     { "impact",                   "path paths symbol limit offset" },
     { "uses",                     "path paths symbol" },
     { "path_between",             "path paths from to" },
@@ -799,9 +801,9 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "flags",                    "path kind symbol" },
     { "doc_drift",                "path kind" },
     // ── edit verbs ──
-    { "replace_symbol_body",      "path paths symbol file new_body" },
-    { "insert_before_symbol",     "path paths symbol file text" },
-    { "insert_after_symbol",      "path paths symbol file text" },
+    { "replace_symbol_body",      "path paths symbol file new_body", McpVerbFields::Effect::Destructive },
+    { "insert_before_symbol",     "path paths symbol file text", McpVerbFields::Effect::Writes },
+    { "insert_after_symbol",      "path paths symbol file text", McpVerbFields::Effect::Writes },
 };
 
 // Dispatch-only ALIASES of advertised tools: a name tools/call answers that gets no separate tools/list
@@ -1112,6 +1114,30 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
         out += "]";
     }
     return out + "}";
+}
+
+// The rest of a tools/list stanza after its human-facing description: the input schema and the MCP safety
+// annotations Codex uses when selecting and approving tools. The effect lives on kMcpVerbFields so a new
+// advertised verb cannot acquire a second, hand-maintained side-effect list. All ripwire tools are local to
+// the caller's workspace: none reaches an external/open-world service.
+inline std::string toolMetadataFor( std::string_view verb, bool pathIsRequired )
+{
+    McpVerbFields::Effect effect = McpVerbFields::Effect::ReadOnly;
+    for( const McpVerbFields& row : kMcpVerbFields )
+    {
+        if( verb == row.verb )
+        {
+            effect = row.effect;
+            break;
+        }
+    }
+
+    const bool readOnly    = effect == McpVerbFields::Effect::ReadOnly;
+    const bool destructive = effect == McpVerbFields::Effect::Destructive;
+    return "\"inputSchema\":" + inputSchemaFor( verb, pathIsRequired )
+         + ",\"annotations\":{\"readOnlyHint\":" + ( readOnly ? "true" : "false" )
+         + ",\"destructiveHint\":" + ( destructive ? "true" : "false" )
+         + ",\"openWorldHint\":false}";
 }
 
 // The two halves the old single message ran together. An EMPTY name is its own third case (the params

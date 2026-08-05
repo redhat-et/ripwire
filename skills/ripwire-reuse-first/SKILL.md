@@ -32,17 +32,18 @@ is the validated retrieval shape; "find me a similar-looking snippet" is the ant
 though it's the tempting first instinct.
 
 ## Before you write a function / class / util
-1. **Get the exemplar to imitate** — `ripwire <dir> --exemplar=fn|method|class|struct|iface|var` (a kind) or
-   `--exemplar="<task in words>"` (the top match's kind is inferred) → the repo's single best-in-class
-   instance of that shape: highest fan-in, lowest cognitive complexity, `tested=1` where possible — selected
-   by ROLE, **not** text similarity. It returns the full body under `<bodies>`. **Copy its shape (structure,
-   error handling, naming), not its text** — it's a model to imitate, not a template to clone verbatim.
-2. **Find the building block** — `ripwire <dir> --for="<what you're about to build>"` → ranked existing
+1. **Find the building block first** — `ripwire <dir> --for="<what you're about to build>"` → ranked existing
    signatures (plus, when the code has them, the `<lego>` / `<compose>` HAS-A blocks — what a class already
    owns). If you can name the helper you suspect exists, query it verbatim (`--for="parseByteSize"`) — `--for`
    auto-routes to name-exact retrieval and lands it at recall@1 ~99%. It also carries
    the quality lens (`cx`/`ccx`/`in`/`churn`/`amp`/`tested`) so you see which
    candidates are safe to extend. Often the thing exists — compose from it.
+2. **Optionally get a style/shape exemplar** — if the retrieval result leaves a local-idiom question,
+   `ripwire <dir> --exemplar=fn|method|class|struct|iface|var` (a kind) or
+   `--exemplar="<task in words>"` (the top match's kind is inferred) returns the repo's single best-in-class
+   instance of that shape: highest fan-in, lowest cognitive complexity, `tested=1` where possible — selected
+   by ROLE, **not** text similarity. It returns the full body under `<bodies>`. **Copy its shape (structure,
+   error handling, naming), not its text** — it is a model to imitate, not a relevant-code search.
 3. **Find candidates by behavior/shape** — `ripwire <dir> --grep="<a word from the behavior>"`, or a NARROWED
    graph query: `--graph-query='and(file(all,"<area>"),kind(all,fn))'`. (Bare `kind(all,fn)` is ranked by
    importance + capped at `--top-k`, so it's safe — but narrowing by `file()`/`name()`/`callers()` finds the

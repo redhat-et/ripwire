@@ -292,8 +292,8 @@ median_ms()
     local n_local=0
     local times=()
     for (( n_local = 0; n_local < PERFRUNS; ++n_local )); do
-  # Y4: shard-aware lookup — a qms blob may be flat under $clearDir or under $clearDir/<xx>/ (2-hex shard).
-        [ -n "$clearDir" ] && { f="$( find "$clearDir" -maxdepth 2 -type f -name 'ripwire-qms-*.bin' 2>/dev/null )"; [ -n "$f" ] && rm -f $f; }
+        # Private-root + shard-aware lookup: $clearDir/ripwire/<xx>/blob.
+        [ -n "$clearDir" ] && { f="$( find "$clearDir" -maxdepth 3 -type f -name 'ripwire-qms-*.bin' 2>/dev/null )"; [ -n "$f" ] && rm -f $f; }
         local elapsed
         elapsed="$( run_once_ms "$@" )" || return 1
         [ -z "$elapsed" ] && return 1

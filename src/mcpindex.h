@@ -527,9 +527,9 @@ struct McpIndex
     std::uint64_t                     workingSetHash = 0;   // FNV-1a of the changed-file id list used to build `rank`
 };
 
-// cache file path, deterministic per (user, root). A fixed world-writable /tmp path is a symlink/poisoning
-// target on multi-user machines, so prefer per-user locations: $TMPDIR (per-user on macOS), else
-// $XDG_CACHE_HOME/ripwire (created 0700), else fall back to the /tmp name.
+// Cache file path, deterministic per (user, root), under the shared private cache ladder and its existing
+// two-hex shard layout. MCP sessions used to leave one flat file per temporary checkout directly in TMPDIR;
+// tens of thousands of those files made every later cache-hygiene scan enumerate the shared directory.
 inline std::string mcpCachePath( const std::string& root )
 {
     std::uint64_t h = 1469598103934665603ULL;     // FNV-1a of the root → a stable per-root cache name
@@ -537,26 +537,7 @@ inline std::string mcpCachePath( const std::string& root )
     char name[ 64 ];
     std::snprintf( name, sizeof( name ), "ripwire-mcp-%016llx.cache", (unsigned long long)h );
 
-    const char* tmpDir = std::getenv( "TMPDIR" );
-    if( tmpDir && *tmpDir )
-    {
-        std::string d = tmpDir;
-        if( d.back() != '/' )
-        {
-            d += '/';
-        }
-        return d + name;
-    }
-
-    const char* xdgCache = std::getenv( "XDG_CACHE_HOME" );
-    if( xdgCache && *xdgCache )
-    {
-        std::string d = std::string( xdgCache ) + "/ripwire";
-        ::mkdir( d.c_str(), 0700 );               // EEXIST is fine; other failures degrade at cache-write time
-        return d + "/" + name;
-    }
-
-    return std::string( "/tmp/" ) + name;
+    return quality::resolveCacheBlobPath( quality::cacheDirLadder(), name );
 }
 
 // working-set (Cody-style): FNV-1a-64 of the SORTED changed-file id list, so the hash is a pure
