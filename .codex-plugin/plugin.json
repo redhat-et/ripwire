@@ -1,0 +1,36 @@
+{
+  "name": "ripwire",
+  "version": "0.1.0",
+  "description": "Deterministic codebase maps, call-graph retrieval, and change-safety workflows for coding agents.",
+  "author": {
+    "name": "Red Hat Emerging Technologies",
+    "url": "https://github.com/redhat-et"
+  },
+  "homepage": "https://github.com/redhat-et/ripwire",
+  "repository": "https://github.com/redhat-et/ripwire",
+  "license": "Apache-2.0",
+  "keywords": [
+    "codex",
+    "openai-codex",
+    "mcp",
+    "code-navigation",
+    "context-engineering"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Ripwire",
+    "shortDescription": "Deterministic codebase context for coding agents",
+    "longDescription": "Map repositories, retrieve task-relevant symbols, trace impact, and run change-safety checks without embeddings or a runtime service.",
+    "developerName": "Red Hat Emerging Technologies",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/redhat-et/ripwire",
+    "defaultPrompt": [
+      "Map this repository before we start editing.",
+      "Find the code and tests relevant to this task.",
+      "Review my working changes and name the tests to run."
+    ],
+    "brandColor": "#EE0000"
+  }
+}

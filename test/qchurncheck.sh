@@ -34,12 +34,12 @@ no(){ echo "  FAIL  $1"; fail=1; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 
 REPO="$( mktemp -d )"; TMP="$( mktemp -d )"; trap 'rm -rf "$REPO" "$TMP"' EXIT
-QTMP="$TMP/qtmp"; mkdir -p "$QTMP"   # our private TMPDIR — cacheDirLadder() lands qchurn-*.bin here
+QTMP="$TMP/qtmp"; QCACHE="$QTMP/ripwire"; mkdir -p "$QTMP"   # cacheDirLadder() creates the private child
 
 echo "qchurncheck: BIN=$BIN"
 
-# Y4: shard-aware lookup — a blob may be flat under $QTMP or under $QTMP/<xx>/ (2-hex shard).
-qchurnfiles(){ find "$QTMP" -maxdepth 2 -type f -name 'ripwire-qchurn-*.bin' 2>/dev/null; }
+# Y4: shard-aware lookup inside the private Ripwire cache directory.
+qchurnfiles(){ find "$QCACHE" -maxdepth 2 -type f -name 'ripwire-qchurn-*.bin' 2>/dev/null; }
 nqchurn(){ qchurnfiles | wc -l | tr -d ' '; }
 # name_only_count TRACEFILE — how many git child processes in this run's trace invoked --name-only (the
 # expensive walk gitCoChangeAndChurnCached guards). Any OTHER git call this run makes (rev-parse, HEAD

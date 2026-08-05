@@ -2,7 +2,7 @@
 # analyze.py — paired per-task/seed analysis for Phase B4 agent-in-the-loop eval results.
 #
 # WHAT THIS DOES. Consumes the record schema written by run_agentloop.py (SCHEMA
-# "ripwire-agentloop-results-v1") and computes paired arm deltas (baseline vs ripwire_mcp) per
+# "ripwire-agentloop-results-v2") and computes paired arm deltas (baseline vs ripwire_cli) per
 # (instance_id, seed), then a REPOSITORY-CLUSTERED bootstrap 95% lower bound on the resolved-rate
 # delta — because multiple SWE-bench instances from one repo are not independent trials any more than
 # multiple LocBench issues from one repo are.
@@ -15,7 +15,7 @@
 # independent re-implementation of the same statistical method for the agentloop record schema.
 #
 # SELF-TEST (`--self-test`): builds a tiny synthetic in-memory fixture (a handful of fake repos/
-# instances/seeds with a manufactured resolved-rate lift for ripwire_mcp) and asserts the pipeline
+# instances/seeds with a manufactured resolved-rate lift for ripwire_cli) and asserts the pipeline
 # produces the expected sign and a positive bootstrap lower bound — proves the math runs correctly
 # without needing any real (paid) run data.
 #
@@ -24,8 +24,8 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
-SCHEMA = "ripwire-agentloop-results-v1"
-ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_mcp"
+SCHEMA = "ripwire-agentloop-results-v2"
+ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
 
 def mean( xs ): return sum( xs ) / len( xs ) if xs else 0.0
 
@@ -98,7 +98,7 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
     repos = sorted( { repo for _, repo, *_ in paired } )
     out = dict( n_pairs=len( paired ), n_repos=len( repos ), n_incomplete=len( incomplete ) )
     if not paired:
-        out["note"] = "zero complete paired (baseline,ripwire_mcp) runs — nothing to analyze yet"
+        out["note"] = "zero complete paired (baseline,ripwire_cli) runs — nothing to analyze yet"
         return out
     rdeltas = [ resolved_delta( b, c ) for *_ , b, c in paired ]
     ldeltas = [ loc_hit_delta( b, c ) for *_ , b, c in paired ]
@@ -132,10 +132,10 @@ def print_report( out ):
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
 def synthetic_fixture():
-    # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ripwire_mcp resolves ~2/3 of the time,
+    # 3 fake repos x 3 instances/repo x seeds 1..3 = 27 pairs. ripwire_cli resolves ~2/3 of the time,
     # baseline ~1/3 — a manufactured, unambiguous positive lift, so the bootstrap lower bound MUST be
     # positive (that's the assertion --self-test checks) and tokens/wall/cost are set to a mild,
-    # deterministic ripwire_mcp overhead (+8%) so the ratio math has something non-trivial to compute.
+    # deterministic ripwire_cli overhead (+8%) so the ratio math has something non-trivial to compute.
     rng = random.Random( "agentloop-selftest-fixture-v1" )
     repos = [ "fake/repoA", "fake/repoB", "fake/repoC" ]
     records = []
@@ -157,6 +157,10 @@ def synthetic_fixture():
                         arm=arm, seed=seed, harness="fixture", model="fixture",
                         status="ok", resolved=resolved, localization_hit=resolved,
                         tokens_in=1000, tokens_out=tokens, wall_seconds=wall, cost_usd=cost,
+                        command_calls=1,
+                        ripwire_calls=0 if arm == ARM_BASELINE else 1,
+                        ripwire_commands=[] if arm == ARM_BASELINE else [ "ripwire . --for=fixture" ],
+                        events_path=None,
                         error=None, started_unix=0, finished_unix=0 ) )
     # one deliberately incomplete pair (baseline never finished) — must land in n_incomplete, not paired.
     records.append( dict( instance_id="repoA-orphan", repo="fake/repoA", base_commit="deadbeef",

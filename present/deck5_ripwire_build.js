@@ -101,7 +101,7 @@ function stat(s, big, label, x, y, w, color, opts={}){
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
     ["11 languages", "C/C++, ObjC, Python, TS/JS, Java, Go, Rust, Ruby, Swift, C#, Bash — plus JSON and Metal (a C++ dialect)"],
-    ["agent-native", "an MCP server and 123 long flags behind one `--help` that is always the authority"],
+    ["agent-native", "an MCP server and 124 long flags behind one `--help` that is always the authority"],
   ];
   let y = 4.15;
   for (const [h2, b] of props){
@@ -134,7 +134,7 @@ function stat(s, big, label, x, y, w, color, opts={}){
     s.addText(flags, { x: MX+6.6,  y: y+0.04, w: 5.35, h: 0.58, fontFace: MONO, fontSize: 9.5, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "ripwire --help is generated from the binary's own flag table — 123 long flags; docs/COMMANDS.md documents 101 of them with real recorded output");
+  foot(s, "ripwire --help is generated from the binary's own flag table — 124 long flags; docs/COMMANDS.md documents 101 of them with real recorded output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -431,7 +431,7 @@ function stat(s, big, label, x, y, w, color, opts={}){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["315 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
+    ["334 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -474,13 +474,13 @@ function stat(s, big, label, x, y, w, color, opts={}){
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// built for the agent's seat", CYAN);
-  title(s, "Wire it into your agent in one command");
-  chip(s, "$ ripwire wrap claude", MX, 2.0, 4.6, GREEN, { size: 15, h: 0.55 });
-  s.addText("(also: cursor, codex, windsurf, gemini, aider)", { x: 5.4, y: 2.0, w: 6.5, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
+  title(s, "Wire it into Codex in one command", { size: 30 });
+  chip(s, "$ codex mcp add ripwire -- ripwire --mcp", MX, 2.0, 6.8, GREEN, { size: 13.5, h: 0.55 });
+  s.addText("plugin bundle also ships all 17 skills", { x: 7.7, y: 2.0, w: 4.9, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
   const cards = [
     ["30 MCP verbs", "15 read verbs mirroring the CLI, 12 flagship reflexes (impact, uses, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
     ["lazy-body handles", "read verbs return signatures and a stable handle; the agent fetches a body only when it decides it needs one — names by default, bytes on request"],
-    ["17 agent skills", "moment-matched skill files (orient, navigate, change-check, quality-bar …) installed by skills/install.sh"],
+    ["17 agent skills", "moment-matched workflows (orient, navigate, change-check, quality-bar …), bundled in the Codex plugin or installed by skills/install.sh"],
     ["prompts/ — self-improvement", "ten copy-paste orchestrator loops: run the same audit, eval and head-to-head machinery that built the tool, on your own repo"],
   ];
   const cw = 5.95, ch = 1.72; let i = 0;

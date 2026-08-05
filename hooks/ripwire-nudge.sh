@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# skills/hooks/ripwire-nudge.sh — OPT-IN, ADVISORY-ONLY Claude Code PreToolUse hook.
+# hooks/ripwire-nudge.sh — OPT-IN, ADVISORY-ONLY Claude Code PreToolUse hook.
 #
 # Nudges an agent from raw grep/rg, and from raw `git diff`/`git log`/`git show --stat`, toward the
 # matching ripwire verb. Ships INACTIVE — only registered via `skills/install.sh --hook`, never
@@ -30,7 +30,7 @@
 #    "additionalContext":"..."}}
 #
 # Usage (wired by the installer, not meant to be run by hand):
-#   printf '%s' "$PRETOOLUSE_JSON" | skills/hooks/ripwire-nudge.sh
+#   printf '%s' "$PRETOOLUSE_JSON" | hooks/ripwire-nudge.sh
 set -u
 
 input="$( cat )"

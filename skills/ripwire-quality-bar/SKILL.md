@@ -23,6 +23,11 @@ allowed-tools: Bash, Read
 Don't eyeball quality — **measure the delta your change introduced**, with a deterministic oracle, in a
 bounded loop. A file that was already complex is not your regression.
 
+Apply the "non-trivial work" trigger literally. A single-line leaf fix that preserves the signature and
+adds no branch, symbol, dependency, or abstraction does not need a standalone quality-delta pass unless
+the repository requires it; run the focused behavioral test and diff checks instead. This skill earns its
+cost when the edit can change measured structure, not merely whenever the working tree is dirty.
+
 ## The loop
 1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta` before you call it
    done — in a git repo it auto-compares the working tree vs `git HEAD` (`<quality-delta

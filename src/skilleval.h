@@ -547,6 +547,43 @@ inline void reportSplit( const std::vector<PromptRow>& rows, const std::vector<R
     }
 }
 
+// One arm's actionable misses. Keep this outside runEvalSkills so diagnostics for every selector do not
+// multiply the already-large orchestration function's nesting and cognitive complexity.
+inline void reportMisses( const std::vector<PromptRow>& rows, const std::vector<RowOutcome>& outcomes,
+                          const std::vector<SkillDoc>& candidates, std::size_t arm )
+{
+    std::printf( "  misses (%s):\n", kArmName[arm] );
+    std::size_t missCount = 0;
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( rows[i].permitted.empty() || outcomes[i].hit1 )
+        {
+            continue;
+        }
+        ++missCount;
+        std::string want;
+        for( const std::uint32_t c : rows[i].permitted )
+        {
+            if( !want.empty() )
+            {
+                want += ',';
+            }
+            want += candidates[c].dirName;
+        }
+        std::string clipped = rows[i].prompt.substr( 0, 56 );                     // corpus is ASCII by contract
+        if( rows[i].prompt.size() > 56 )
+        {
+            clipped += "...";
+        }
+        std::printf( "    line %-3d want=%s got=%s \"%s\"\n", rows[i].lineNumber, want.c_str(),
+                     candidates[ outcomes[i].top1Index ].dirName.c_str(), clipped.c_str() );
+    }
+    if( missCount == 0 )
+    {
+        std::printf( "    (none)\n" );
+    }
+}
+
 // best single fire/abstain threshold ON THESE labels (an ORACLE upper bound, printed as such):
 // fire iff top-1 score > th; a fired positive is correct only if hit@1, an abstained negative is correct.
 struct OraclePoint { double acc = 0.0; double th = 0.0; };
@@ -877,38 +914,10 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         }
     }
 
-    // the misses, one line each (diagnostics arm) — the rows a description change should be measured on.
+    // Every arm's misses. Reporting only bm25-desc left a lower-scoring for-routed arm impossible to debug.
+    for( std::size_t a = 0; a < kArmCount; ++a )
     {
-        std::printf( "  misses (%s):\n", kArmName[kDiagArm] );
-        std::size_t missCount = 0;
-        for( std::size_t i = 0; i < rows.size(); ++i )
-        {
-            if( rows[i].permitted.empty() || outcomes[kDiagArm][i].hit1 )
-            {
-                continue;
-            }
-            ++missCount;
-            std::string want;
-            for( const std::uint32_t c : rows[i].permitted )
-            {
-                if( !want.empty() )
-                {
-                    want += ',';
-                }
-                want += set.candidates[c].dirName;
-            }
-            std::string clipped = rows[i].prompt.substr( 0, 56 );                     // corpus is ASCII by contract
-            if( rows[i].prompt.size() > 56 )
-            {
-                clipped += "...";
-            }
-            std::printf( "    line %-3d want=%s got=%s \"%s\"\n", rows[i].lineNumber, want.c_str(),
-                         set.candidates[ outcomes[kDiagArm][i].top1Index ].dirName.c_str(), clipped.c_str() );
-        }
-        if( missCount == 0 )
-        {
-            std::printf( "    (none)\n" );
-        }
+        reportMisses( rows, outcomes[a], set.candidates, a );
     }
 
     // split report (r26 P4): test/dev reported SEPARATELY so the two can never be silently conflated —

@@ -45,16 +45,23 @@ claudeFound=$( find -L "$CLAUDE_HOME/.claude/skills" -mindepth 2 -maxdepth 2 -na
     && ok "default install exposes all $shipped skills to Claude discovery" \
     || no "default install exposed $claudeFound of $shipped skills to Claude discovery"
 
+AGENTS_ROOT="$TMP/agents-root"
 CODEX_ROOT="$TMP/codex-root"
 CODEX_FALLBACK_HOME="$TMP/codex-fallback-home"
-HOME="$CODEX_FALLBACK_HOME" CODEX_HOME="$CODEX_ROOT" bash "$SK/install.sh" --codex >/dev/null 2>&1
-codexFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
+HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" bash "$SK/install.sh" --codex >/dev/null 2>&1
+codexFound=$( find -L "$AGENTS_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
 [ "$codexFound" -eq "$shipped" ] \
-    && ok "--codex exposes all $shipped skills under CODEX_HOME/skills" \
-    || no "--codex exposed $codexFound of $shipped skills under CODEX_HOME/skills"
+    && ok "--codex exposes all $shipped skills under AGENTS_HOME/skills" \
+    || no "--codex exposed $codexFound of $shipped skills under AGENTS_HOME/skills"
 [ ! -e "$CODEX_FALLBACK_HOME/.claude/skills" ] \
     && ok "--codex does not silently install into the Claude skill home" \
     || no "--codex also created a Claude skill home"
+
+HOME="$CODEX_FALLBACK_HOME" CODEX_HOME="$CODEX_ROOT" bash "$SK/install.sh" --codex-legacy >/dev/null 2>&1
+legacyFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
+[ "$legacyFound" -eq "$shipped" ] \
+    && ok "--codex-legacy retains the CODEX_HOME/skills compatibility path" \
+    || no "--codex-legacy exposed $legacyFound of $shipped skills under CODEX_HOME/skills"
 
 # ---- 3) ROUTE INTEGRITY: every ripwire-<name> a skill references must be a shipped skill ----
 # Catches a routing header / body that points at a deleted or misspelled skill (the phantom-route bug).

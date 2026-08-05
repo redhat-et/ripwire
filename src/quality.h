@@ -433,31 +433,44 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
 // `quality_baseline` verbs call the SAME code (no duplication of the git-archive / stale-vs-HEAD logic). main.cpp
 // re-exports them with `using` aliases so its existing call sites are byte-unchanged.
 
-// S4: shared per-user cache-directory ladder (mirrors mcpCachePath): $TMPDIR (per-user on macOS) → $XDG_CACHE_HOME/
-// ripwire (0700) → bare /tmp. A fixed world-writable /tmp path is a symlink/poisoning target on multi-user
-// machines. Returns the dir with NO trailing slash. Deterministic per (user, env).
+// S4: shared per-user cache-directory ladder: $TMPDIR/ripwire → $XDG_CACHE_HOME/ripwire →
+// /tmp/ripwire-<uid>, always mode 0700. Keeping our artifacts one level below TMPDIR is a performance
+// boundary as well as a security one: cache hygiene must never enumerate an unbounded shared TMPDIR full of
+// unrelated agent-session files. Returns the dir with NO trailing slash. Deterministic per (user, env).
 inline std::string cacheDirLadder()
 {
+    std::string d;
     const char* tmpDir = std::getenv( "TMPDIR" );
     if( tmpDir && *tmpDir )
     {
-        std::string d = tmpDir;
+        d = tmpDir;
         while( d.size() > 1 && d.back() == '/' )
         {
             d.pop_back();
         }
-        return d;
+        d += "/ripwire";
     }
-
-    const char* xdgCache = std::getenv( "XDG_CACHE_HOME" );
-    if( xdgCache && *xdgCache )
+    else if( const char* xdgCache = std::getenv( "XDG_CACHE_HOME" ); xdgCache && *xdgCache )
     {
-        std::string d = std::string( xdgCache ) + "/ripwire";
-        ::mkdir( d.c_str(), 0700 );   // EEXIST is fine; other failures degrade at cache-write time
-        return d;
+        d = std::string( xdgCache ) + "/ripwire";
+    }
+    else
+    {
+        d = "/tmp/ripwire-" + std::to_string( static_cast<unsigned long long>( ::getuid() ) );
     }
 
-    return "/tmp";
+    const int mkdirRc = ::mkdir( d.c_str(), 0700 );
+    struct stat st {};
+    if( mkdirRc == 0 || ( ::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == ::getuid() ) )
+    {
+        if( ::chmod( d.c_str(), 0700 ) == 0
+            && ::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == ::getuid()
+            && ( st.st_mode & 0777 ) == 0700 )
+        {
+            return d;
+        }
+    }
+    return "/dev/null/ripwire-cache-unavailable";   // unsafe/unusable candidate: make cache I/O fail closed
 }
 
 // popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of
@@ -839,7 +852,7 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
 // one another (the lean/rich lesson). `keepPath` (the file we are about to use) is always retained regardless of
 // mtime granularity. Degrade-only: any filesystem error is swallowed via the error_code overloads — eviction is
 // best-effort hygiene, never a correctness or crash risk.
-// The prefix-generic body: keep the `keep` newest ".bin" files whose name begins with `prefix`, delete older
+// The prefix-generic body: keep the `keep` newest ".bin"/".cache" files whose name begins with `prefix`, delete older
 // ones, always retain `keepPath`. Both the qheadsnap (ingest) and qsnap (Snapshot) cache families share this
 // (rule-of-three: two families that evict identically → one evictor, not two copies that must stay in sync).
 //
@@ -865,8 +878,17 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
 
     struct Blob { fs::file_time_type mtime; std::uintmax_t byteSize; std::string path; };
     std::vector<Blob> mine;
+    const auto matches = [ & ]( const std::string& name )
+    {
+        if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 )
+        {
+            return false;
+        }
+        return ( name.size() >= 4 && name.compare( name.size() - 4, 4, ".bin" ) == 0 )
+            || ( name.size() >= 6 && name.compare( name.size() - 6, 6, ".cache" ) == 0 );
+    };
 
-    // best-effort scan of ONE directory for "<prefix>...bin" blobs, appending matches to `mine`. Never aborts
+    // best-effort scan of ONE directory for matching cache artifacts, appending them to `mine`. Never aborts
     // the whole sweep on a per-shard error — a single unreadable shard just contributes nothing this round.
     const auto scanOneDir = [ & ]( const fs::path& d )
     {
@@ -883,11 +905,7 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
                 return;
             }
             const std::string name = sit->path().filename().string();
-            if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 )
-            {
-                continue;
-            }
-            if( name.size() < 4 || name.compare( name.size() - 4, 4, ".bin" ) != 0 )
+            if( !matches( name ) )
             {
                 continue;
             }
@@ -928,11 +946,7 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
             }
             continue;
         }
-        if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 )
-        {
-            continue;
-        }
-        if( name.size() < 4 || name.compare( name.size() - 4, 4, ".bin" ) != 0 )
+        if( !matches( name ) )
         {
             continue;
         }
@@ -1039,6 +1053,7 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
 // blobs that outlive their own keep-2 cap between runs — one dir-wide safety net under the per-family caps.
 constexpr double         kMaxCacheBlobAgeDays = 30.0;
 constexpr std::uintmax_t kMaxCacheDirBytes    = 2ull * 1024 * 1024 * 1024;   // 2 GB
+constexpr std::size_t    kMaxCacheBlobCount   = 4096;                         // bound every future hygiene scan
 
 inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string& keepPath )
 {
@@ -1049,7 +1064,7 @@ inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string&
         return; // only the first saveCache in this process sweeps
     }
 
-    evictOldCacheFamily( dir, "ripwire-", keepPath, std::numeric_limits<std::size_t>::max(), kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
+    evictOldCacheFamily( dir, "ripwire-", keepPath, kMaxCacheBlobCount, kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
 }
 
 // The HEAD-snapshot INGEST cache family (ripwire-qheadsnap-<repoHex>-<exclHex>-<sha>.bin), capped per (repo,excl).
@@ -1817,6 +1832,11 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     unsigned churnMonths = 0, std::vector<std::uint32_t>* outChurn = nullptr,
     std::uint32_t onlyRoot = UINT32_MAX )
 {
+    if( !hasEnclosingGitRepo( root ) )
+    {
+        return resolveCommitStream( RawCommitStream{}, ing, maxFiles, churnMonths, outChurn, onlyRoot );
+    }
+
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
     {
