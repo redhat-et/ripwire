@@ -1805,7 +1805,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                     const std::vector<std::uint64_t>& row = defs[i].lex.tokenHashes;
                     for( const std::uint64_t hash : row )
                     {
-                        mergeA.emplace_back( hash, slotCount++ );
+                        mergeA.push_back( LexPair{ hash, slotCount++ } );   // braced, not emplace_back( a, b ): aggregate emplace needs P0960, absent in Clang < 20 (CI's Xcode 15.4)
                     }
                     if( !row.empty() )
                     {
