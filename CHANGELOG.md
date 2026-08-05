@@ -377,6 +377,17 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   scalar path everywhere else. `test/dynmapsimdcheck.sh` proves SIMD-vs-scalar parity under the full
   sanitizer set and **fails a scalar-only build on a SIMD architecture**, so the gate cannot pass by
   measuring nothing.
+- **sparseCsr math kernels join the x86 port.** The CSR `blockReduceDot` / `scaleVec` / `spmvRow`
+  float kernels — NEON-only until now, silently falling back to scalar on x86_64 — compile to SSE2
+  (mul+add: SSE2 has no FMA, so x86 rounding differs from arm64 while each platform stays
+  bit-stable run-to-run, which is what the determinism contract requires). `test/dynmapsimdcheck.sh`
+  grew a third parity arm — an exact-integer regime whose sums are exact in every association
+  order, so lane and tail bugs surface as bit-exact mismatches with no tolerance band to hide
+  behind, plus a tolerance-band random regime and a known-eigenpair check — and its non-vacuity
+  banner now covers these kernels, so a scalar-only x86 build fails instead of passing vacuously.
+  Found by sweeping `__ARM_NEON` sites rather than porting from the feature list; the radix-sort
+  byte-histogram fast paths are the one remaining NEON-only site (identical behavior either way —
+  a perf follow-up, bench-gated).
 - **BREAKING (output): canonical symbol IDs corrected.** A parse-recovery artifact published a
   function's *return type* as its class scope. *(Measured on one repository: 80 wrong canonical IDs in
   ordinary C++ corrected, plus 5 newly-correct IDs where the real enclosing namespace took over.)*
