@@ -115,17 +115,38 @@ created by today's own gate-suite runs — the leak is ONGOING (~31k files/day o
 
 ## Release v0.2.0
 
-- Version bumped in source (`9ce286a`), CHANGELOG cut, full gates + ASan green at the tag (see
-  above). Tag `v0.2.0` pushed from this branch's HEAD (a clean fast-forward of `origin/main`,
-  5 commits ahead, 0 behind at tag time).
+- Version bumped in source (`9ce286a`), CHANGELOG cut, full gates + ASan green at the tag.
 - GitHub CLI is authenticated again (`joyful-ii-V-I`, repo+workflow scopes) — the prior pass's
   auth blocker is gone. Topics `codex`/`openai-codex` were already applied.
 - `v0.1.0` (2026-08-02, commit `c7364de`) remains as-is: tag untouched, its Release has **zero
-  assets** — v0.2.0 is the first run of `.github/workflows/release.yml`'s four archive legs.
-- Release verification results (workflow legs, SHA-256 checks, native-archive smoke test) are
-  appended below once the tag build completes — see "Release verification".
-- `scripts/install.sh` still requires explicit `RIPWIRE_REPO=redhat-et/ripwire`; its TODO(P6)
-  default stays unset pending the fresh-history export decision.
+  assets** — its workflow run's macos-x64 leg sat queued 24 h and auto-cancelled, skipping publish.
+- **The first real workflow exercise found three defects, each fixed gate/evidence-first:**
+  1. `d2217a4` — the `macos-13` Intel runner pool is retired (v0.1.0's leg queued 24 h → cancel;
+     v0.2.0's first run identical). macos-x64 now cross-compiles on `macos-14` with
+     `CMAKE_OSX_ARCHITECTURES=x86_64`; the produced Mach-O is genuinely x86_64 and runs under
+     Rosetta (verified locally).
+  2. `1c1d513` — both macOS legs failed compiling `ingest.cpp`: `61efd4e` turned `LexPair` from
+     `std::pair` into a bare aggregate but kept `emplace_back( hash, slot )`, which needs P0960 —
+     implemented only in Clang ≥ 20 (local AppleClang 21 and CI GCC accepted; CI Xcode 15.4
+     rejected). Fixed with braced `push_back( LexPair{...} )`; full gates re-run green.
+  3. `dda667f` — the published `.sha256` files embedded a `dist/` path prefix, so `shasum -c`
+     beside the downloaded pair failed — which is exactly how `scripts/install.sh` verifies,
+     breaking install-from-release. Checksums are now written with basenames from inside `dist/`.
+  The tag was moved to each fix (four pushes total) — legitimate only because no release object /
+  consumer existed until the final asset set; do NOT move it again now that it is published.
+
+### Release verification (2026-08-05, run 30973658699 — all 5 jobs success)
+
+- Release: <https://github.com/redhat-et/ripwire/releases/tag/v0.2.0> at commit `dda667f`.
+- 8 assets: `ripwire-0.2.0-{macos,linux}-{arm64,x64}.tar.gz` + `.sha256` each (~4.4–5.1 MB).
+- All four archives pass strict side-by-side `shasum -a 256 -c`.
+- Native smoke test: the downloaded macos-arm64 binary reports
+  `ripwire 0.2.0 (Release, AppleClang 15.0.0.15000309)` and maps `test/fixture` to well-formed XML
+  (`xmllint --noout` clean). The macos-x64 binary is `Mach-O 64-bit executable x86_64` and runs
+  under Rosetta.
+- `scripts/install.sh` end-to-end: `RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.2.0` →
+  download, checksum "OK", install, `--version` correct. Its TODO(P6) default repo stays unset
+  pending the fresh-history export decision.
 
 ## Remaining launch work
 
