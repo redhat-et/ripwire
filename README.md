@@ -60,6 +60,14 @@ visible *before* the agent touches them, in a few thousand tokens instead of fiv
 
 </details>
 
+**Name a symbol and it's the first hit.** A confidence-gated router detects when the query *names*
+something and switches rankers: recall@1 on name-shaped queries jumps **76.7% → 98.7%** in `src/`
+(MRR 0.859 → 0.993) and **63.3% → 87.3%** at the repository root. The gate is the load-bearing
+part — ungated, doc-phrase queries collapse from 0.993 to 0.427: an ungated router routes the
+wrong queries, so both numbers are published together. Reproduce with `ripwire <dir>
+--eval-retrieval`; full tables in [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and
+[Measured](#measured).
+
 [Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
 [Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
 [Docs](#documentation) · [Slides](present/ripwire-showcase.pdf)

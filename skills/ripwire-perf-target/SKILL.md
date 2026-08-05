@@ -4,7 +4,9 @@ description: >
   Investigate a measured performance problem. Start from a representative benchmark, a flame graph, or a
   profiler sample, then use ripwire to locate the measured symbols, map callers/callees, and inspect
   structural hypotheses such as complexity, churn, coupling, and nesting. Static graph metrics are
-  maintenance/change-risk signals, not runtime heat or call frequency. Backed by ripwire (deterministic, on PATH).
+  maintenance/change-risk signals, not runtime heat or call frequency. Inspect only the symbols the
+  profile names — no repo-wide hotspot sweeps for a localized measurement. Backed by ripwire
+  (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

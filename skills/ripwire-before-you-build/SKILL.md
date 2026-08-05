@@ -8,7 +8,8 @@ description: >
   (scope/effort)? Each takes ~30s and often surfaces an existing implementation to reuse. For a SINGLE
   function/class/helper you're about to write → ripwire-reuse-first. NOT for reviewing an already-written
   diff — that's ripwire-change-check. NOT for restructuring EXISTING code — that's ripwire-fresh-eyes; this
-  skill is for NEW work. Backed by ripwire (deterministic, on PATH).
+  skill is for NEW work. Run only the homework the task actually lacks — a small feature with an obvious
+  home needs none of this: skip the skill and build. Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 
