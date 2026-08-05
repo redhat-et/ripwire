@@ -11,8 +11,16 @@ tsan*/
 *.cache.tmp
 .ripwire-cache
 
-# generated sidecars (--arch --baseline / --quality-baseline / --note-add in the CWD)
-.ripwire_*
+# generated sidecars — EPHEMERAL ONLY. --quality-baseline is re-snapshotted before every change,
+# so committing it would just be noise. The DURABLE ledgers are deliberately NOT ignored:
+#   .ripwire_quality_acks   accepted-debt ratchet — a per-finding decision WITH a reason. Ignored,
+#                           it is a per-working-tree mute button, not a contract: it cannot reach CI,
+#                           a fresh clone re-gates on debt the team already accepted, and reviewers
+#                           never see the decision. It is written SORTED by (kind,key) precisely to
+#                           stay merge-friendly.
+#   .ripwire_arch_baseline  accepted layering debt — same argument.
+#   .ripwire_notes          docs/COMMANDS.md documents this as "the committed, sorted .ripwire_notes".
+.ripwire_quality_baseline
 *.pptx.inspect.ndjson
 
 # present/: the deck generator's npm tree (rebuild with `npm install` in present/)
