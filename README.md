@@ -15,7 +15,7 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files. One binary on your own machine: **no API key, no embeddings, no
 index server, no daemon, nothing left running.**
 
-### It finds the right files more often than the alternatives
+### Graph-Ranked Retrieval: it finds the right files more often than the alternatives
 
 60 paired LocBench instances, zero exclusions, same gold set and the same imported metric code for
 every arm. *Strict file@10 = **all** gold files inside the top 10* — whether your agent starts in the
@@ -41,7 +41,7 @@ something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7
 doc-phrase queries collapse from 0.993 MRR to 0.427 — so both numbers ship together. Reproduce
 either with `ripwire <dir> --eval-retrieval`.
 
-### It answers for a fraction of the context
+### Saves Tokens: it answers for a fraction of the context
 
 On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
 spends — **1.7%** on the questions both arms fully answered. `--pack-signatures` returns **67% fewer
@@ -51,15 +51,18 @@ context compressor over it saved **exactly 0 tokens**.
 It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
 warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
-### It automates the review judgments nobody has time to make
+### Better Code: it automates the review judgments nobody has time to make — every lens from published research
 
 `--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
 named badly, does it hide control flow inside an idiom, does its history say it keeps breaking, must
 you read five other files to follow it, does it mutate state three hops away — as **six independent
-evidence families**, and ranks by how many of them *agree*, never as one blended score. Pooled over
-five corpora (n = 27,999) the largest correlation between any two families is **+0.168**: they really
-are measuring different things, so two families firing on the same function is corroboration rather
-than one metric counted twice.
+evidence families**, and ranks by how many of them *agree*, never as one blended score. Each family
+implements published work — McCabe on shape, Butler on naming, Gopstein's atoms of confusion on
+idiom, Nagappan & Ball on churn, Beck & Diehl on colocation, Henry & Kafura on state — with the
+lesson taken from each paper, and the rules measured and *withdrawn*, in
+[`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,999) the largest correlation
+between any two families is **+0.168**: they really are measuring different things, so two families
+firing on the same function is corroboration rather than one metric counted twice.
 
 That matters most for code an agent wrote. Empty-catch error masking is **+47%** more common in
 AI-authored commits, a function rewritten again inside two weeks **+15%** more likely, and reuse is
