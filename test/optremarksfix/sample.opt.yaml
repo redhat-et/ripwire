@@ -1,0 +1,58 @@
+--- !Passed
+Pass:            inline
+Name:            Inlined
+DebugLoc:        { File: '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/limits',
+                   Line: 459, Column: 98 }
+Function:        _ZNSt3__114numeric_limitsIjE3maxB9nqe210106Ev
+Args:
+  - String:          ''''
+  - Callee:          _ZNSt3__123__libcpp_numeric_limitsIjLb1EE3maxB9nqe210106Ev
+  - String:          ''' inlined into '''
+  - Caller:          _ZNSt3__114numeric_limitsIjE3maxB9nqe210106Ev
+    DebugLoc:        { File: '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/limits',
+                       Line: 459, Column: 0 }
+  - String:          ''''
+...
+--- !Missed
+Pass:            inline
+Name:            NoDefinition
+DebugLoc:        { File: 'src/ingest.cpp', Line: 4984, Column: 36 }
+Function:        _ZN2rw12_GLOBAL__N_116captureTagsFactsEP13TSQueryCursor
+Args:
+  - Callee:          ts_node_start_byte
+  - String:          ' will not be inlined into '
+  - Caller:          _ZN2rw12_GLOBAL__N_116captureTagsFactsEP13TSQueryCursor
+    DebugLoc:        { File: 'src/ingest.cpp', Line: 4931, Column: 6 }
+  - String:          ' because its definition is unavailable'
+...
+--- !Missed
+Pass:            gvn
+Name:            LoadClobbered
+DebugLoc:        { File: 'third_party/deps/tree-sitter/lib/src/parser.c', Line: 1284, Column: 11 }
+Function:        ts_parser__advance
+Args:
+  - String:          'load of type i32 not eliminated because it is clobbered by call'
+...
+--- !Analysis
+Pass:            loop-vectorize
+Name:            VectorizationNotBeneficial
+DebugLoc:        { File: 'src/lexical.h', Line: 517, Column: 13 }
+Function:        _ZN2rw20lexicalScoresTieredE
+Args:
+  - String:          'the cost-model indicates that vectorization is not beneficial'
+...
+--- !Missed
+Pass:            licm
+Name:            LoadWithLoopInvariantAddressInvalidated
+Function:        _ZN2rw12noDebugLocAtAllEv
+Args:
+  - String:          'failed to move load with loop-invariant address because the loop may invalidate its value'
+...
+--- !Missed
+Pass:            slp-vectorizer
+Name:            NotBeneficial
+DebugLoc:        { File: '/Users/nobody/checkout/third_party/deps/doctest/doctest/doctest.h', Line: 77, Column: 1 }
+Function:        _ZN7doctest6detail9someThingEv
+Args:
+  - String:          'List vectorization was possible but not beneficial with cost 0 >= 0'
+...

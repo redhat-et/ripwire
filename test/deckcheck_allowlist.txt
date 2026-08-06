@@ -40,3 +40,15 @@
 --codex	skills/install.sh's canonical Codex destination mode, not a ripwire binary flag
 --codex-legacy	skills/install.sh's compatibility mode for older CODEX_HOME skill installs, not a ripwire binary flag
 --evaluator	bench/agentloop/run_agentloop.py harness flag ("--evaluator none|swebench") quoted in docs/EVALS.md §2 agent-loop pilot setup — not a ripwire binary flag
+--top	scripts/optremarks.py's own flag ("optremarks.py --top 40", how many rows the triage summary prints) quoted in docs/OPTREMARKS.md and skills/ripwire-opt-remarks, not a ripwire flag
+--sites	scripts/optremarks.py's own flag ("--sites N", list individual remark sites instead of the class summary) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--width	scripts/optremarks.py's own flag ("--width 200", how much of a remark message --sites prints) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--hot	scripts/optremarks.py's own flag ("--hot", restrict the triage to the HOT_FILES list) quoted in docs/OPTREMARKS.md and skills/ripwire-opt-remarks, not a ripwire flag
+--passes	scripts/optremarks.sh's own flag ("--passes 'inline|licm'", narrows both the -Rpass stream and the YAML opt-record) quoted in docs/OPTREMARKS.md and skills/ripwire-opt-remarks, not a ripwire flag
+--pass	scripts/optremarks.py's own flag ("--pass loop-vectorize", filter the triage by optimizer pass) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--clean	scripts/optremarks.sh's own flag ("optremarks.sh --clean", removes build_remarks/) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--file	scripts/optremarks.py's own flag ("--file src/ingest.cpp", filter the triage by source path) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--name	scripts/optremarks.py's own flag ("--name NoDefinition", filter the triage by remark Name) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--triage-only	scripts/optremarks.sh's own flag ("optremarks.sh --triage-only", re-triage an existing build_remarks/ tree without rebuilding) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--corpus	scripts/pgobuild.sh's own flag ("pgobuild.sh --corpus /path", which tree the PGO training workload runs over) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--reuse-profile	scripts/pgobuild.sh's own flag ("pgobuild.sh --reuse-profile", rebuild from an existing .profdata without re-instrumenting) quoted in docs/OPTREMARKS.md, not a ripwire flag

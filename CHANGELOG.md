@@ -13,6 +13,39 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Optimization-remarks build and triage** — `-DRIPWIRE_OPT_REMARKS=ON` (a separate tree; refused by
+  name inside `build/` and `asan/`) collects clang's `-Rpass*` remarks plus a YAML opt-record, and
+  `scripts/optremarks.sh` / `scripts/optremarks.py` turn it into a ranked report. `docs/OPTREMARKS.md`
+  carries the full triage of the first pass over `src/`, and `skills/ripwire-opt-remarks/` carries the
+  remark→fix patterns that survived it. New gate: `test/optremarkscheck.sh`.
+- **`-DRIPWIRE_LTO`, now ON by default** — link-time optimization. The first change the remarks pass
+  justified: 397 of 636 distinct `inline/NoDefinition` sites in `src/ingest.cpp` name a tree-sitter C
+  accessor, inside the two phases that are ~31% of a cold run, and no source edit can reach a
+  cross-TU definition. Measured on this repository as corpus (937 files, Apple Silicon) across four
+  independent interleaved A/Bs of 9/21/21/31 runs per arm: **cold 1–6% faster, warm 0–3%**, with
+  every cold statistic in every run favouring LTO and one run's warm min going the other way — the
+  per-run table is in `docs/OPTREMARKS.md` F1, and the range is the claim, not its best row. Output
+  is byte-identical and the determinism gate passes on the LTO tree. It costs link time — a rebuild
+  after touching `src/main.cpp` goes 34 s → 89 s — which is not a reason to decline a faster binary;
+  `-DRIPWIRE_LTO=OFF` restores the fast edit loop. **Note:** `option()` never overwrites an existing
+  cache entry, so a build tree configured before this change keeps `RIPWIRE_LTO:BOOL=OFF`; delete the
+  tree to pick the new default up.
+- **`-DRIPWIRE_PGO=generate|use` and `scripts/pgobuild.sh`** — profile-guided optimization, and the answer to the remark classes LTO cannot touch: `inline/TooCostly` and
+  `loop-vectorize/VectorizationNotBeneficial` are the cost model guessing at hotness, and a profile
+  replaces the guess with counts. **Cold 14–25% faster than a non-LTO build (6–16% over the shipped
+  LTO default), warm 5–10%**, measured on this
+  repository *and* on a ~2000-file C++ tree that appears in no training run — six interleaved A/Bs,
+  two corpora, two independently built PGO binaries, every statistic favouring PGO. Output is
+  byte-identical on both corpora; the determinism gate passes three times on the PGO tree. `pgobuild.sh` runs instrument → train → merge →
+  rebuild as one command. Honest G3 tension, stated in `docs/OPTREMARKS.md` F2: this is two configures
+  and a training run against a one-build-step guardrail. The `.profdata` is deliberately not committed
+  (a stale committed profile is a clang warning, not an error), and `RIPWIRE_PGO=use` **fails the
+  configure** when the profile is missing rather than silently producing an ordinary binary.
+
 ## [0.2.0] — 2026-08-04
 
 The first binary release: portable archives for macOS arm64/x64 and Linux arm64/x64, each with a

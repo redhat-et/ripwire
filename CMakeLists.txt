@@ -62,6 +62,118 @@ option(RIPWIRE_NATIVE "build with -march=native (DEV MACHINES ONLY — bakes in 
 include(cmake/PortableFlags.cmake)
 add_compile_options(${RIPWIRE_ARCH_FLAGS})
 
+# ---- link-time optimization: -DRIPWIRE_LTO=ON ----
+# The one change the optimization-remarks pass actually justified (docs/OPTREMARKS.md, finding F1).
+#
+# WHAT THE REMARKS SAID. In src/ingest.cpp — where the profiler puts ~26% of a cold run, in
+# `captureTagsFacts` — 397 of 636 distinct `inline/NoDefinition` remarks name a tree-sitter C entry
+# point (ts_node_start_byte, ts_node_end_byte, ts_node_type, ts_query_capture_name_for_id, …). Those
+# are three-line accessors, but they live in separately compiled C objects, so each one is an opaque
+# call that also acts as a memory barrier: 5448 `gvn/LoadClobbered … clobbered by call` remarks in
+# that same TU are the downstream damage. No source edit reaches this — the definitions are in another
+# translation unit, which is precisely what LTO fixes.
+#
+# WHAT IT MEASURED (this repo as corpus, 937 files, Apple Silicon; FOUR independent interleaved A/Bs,
+# 9/21/21/31 runs per arm). The direction is unanimous — every cold statistic in every run favours LTO
+# — but the magnitude is not crisp, and the honest claim is a RANGE, not the best run:
+#   cold  median  -0.8% .. -5.9%   (4/4 runs favour LTO)
+#   cold  min     -3.1% .. -5.8%   (4/4)
+#   warm  median   0.0% .. -3.0%   (3/4; the weakest run's warm min went the WRONG way by 4.8%)
+#   output byte-identical; binary 38.2 -> 37.1 MB; rebuild-after-touching-main.cpp 34 s -> 89 s (2.6x).
+# Full per-run table: docs/OPTREMARKS.md F1.
+#
+# WHY IT IS ON BY DEFAULT. It costs build time — a rebuild after touching src/main.cpp goes 34 s ->
+# 89 s — and that is not a reason to decline it. This project's target is how fast the best possible
+# coding tool can run; a slower LINK in exchange for a faster BINARY is a trade with no downside for
+# the person the tool is for. Turn it off with -DRIPWIRE_LTO=OFF when you want the fast edit loop.
+# Determinism is unaffected: pagerank.cpp's -fno-fast-math is a per-function IR attribute that
+# survives LTO, output is byte-identical to a non-LTO build, and the determinism gate passes on this
+# tree three times running.
+#
+# GOTCHA. option() never overwrites an existing cache entry, so an ALREADY-CONFIGURED tree that was
+# created before this default flipped keeps its old RIPWIRE_LTO:BOOL=OFF and silently builds slow.
+# `cmake -S . -B build` will not fix it; delete the tree (or -DRIPWIRE_LTO=ON explicitly) to pick it up.
+option(RIPWIRE_LTO "build with link-time optimization (inlines the tree-sitter C API into the hot capture loop)" ON)
+if(RIPWIRE_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT _ripwire_ipo_ok OUTPUT _ripwire_ipo_why LANGUAGES C CXX)
+  if(NOT _ripwire_ipo_ok)
+    # Fail loudly. A silently-ignored LTO request produces a normal binary that someone then benchmarks
+    # as "LTO made no difference" — the same green-while-inert failure §2 gates against elsewhere.
+    message(FATAL_ERROR "RIPWIRE_LTO=ON but this toolchain cannot do IPO: ${_ripwire_ipo_why}")
+  endif()
+  # The VARIABLE, set HERE — before the first add_executable/add_library and before FetchContent pulls
+  # the vendored tree-sitter subproject in. CMAKE_INTERPROCEDURAL_OPTIMIZATION seeds the property on
+  # targets created AFTER it, so this placement (and only this placement) reaches all three groups that
+  # matter: our C++, the sixteen C grammar objects, and the tree-sitter core in its own subdirectory.
+  # Cross-language is the point — the accessors we want inlined are C, the loop calling them is C++.
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+  message(STATUS "RIPWIRE_LTO: ON — link-time optimization across our code and the vendored C (slower link, see docs/OPTREMARKS.md F1)")
+endif()
+
+# ---- profile-guided optimization: -DRIPWIRE_PGO=generate|use ----
+# LTO's bigger sibling, and the direct answer to the remark classes LTO does NOT touch. `inline/TooCostly`
+# and `loop-vectorize/VectorizationNotBeneficial` are both the cost model guessing with no idea which
+# branch is taken or which call is hot; PGO replaces the guess with counted data. Measured effect on top
+# of LTO is several times LTO's own (docs/OPTREMARKS.md, finding F2).
+#
+# Two phases, and scripts/pgobuild.sh runs both plus the training workload as ONE command:
+#   cmake -S . -B build_pgogen -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=generate   # instrumented
+#   <run the instrumented binary over a representative workload>
+#   xcrun llvm-profdata merge -output=ripwire.profdata build_pgogen/prof/*.profraw
+#   cmake -S . -B build_pgo -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=use -DRIPWIRE_PGO_PROFILE=<abs path>
+#
+# G3 HONESTY. "One deterministic build step" is the guardrail, and PGO is genuinely in tension with it:
+# it needs two configures, a training run, and llvm-profdata. Three deliberate choices keep the tension
+# as small as it can be, rather than pretending it is absent:
+#   * The .profdata is NOT committed. A 3.3 MB binary blob that silently goes stale against source — and
+#     whose staleness clang reports as a warning, not an error — would trade a visible two-step build for
+#     an invisible wrong one. It is generated locally, by the script, from the source in front of you.
+#   * llvm-profdata is not a NEW host dependency: it ships inside the same Clang the build already
+#     requires (`xcrun llvm-profdata` on macOS, `llvm-profdata-NN` on Linux).
+#   * `use` FAILS if the profile is missing. A -fprofile-use pointed at nothing compiles fine and yields
+#     an ordinary binary, which someone then benchmarks as "PGO did nothing" — the green-while-inert
+#     shape CONTRIBUTING.md §2 gates against. The existence check below is that gate, at configure time.
+set(RIPWIRE_PGO "" CACHE STRING "profile-guided optimization phase: generate | use (empty = off)")
+set_property(CACHE RIPWIRE_PGO PROPERTY STRINGS "" generate use)
+set(RIPWIRE_PGO_PROFILE "" CACHE FILEPATH "RIPWIRE_PGO=use: absolute path to the merged .profdata")
+if(RIPWIRE_PGO)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # GCC spells the same idea with -fprofile-generate/-fprofile-use too, but its profile is per-object
+    # .gcda merged by a different tool; the paths below would half-work and mislead.
+    message(FATAL_ERROR "RIPWIRE_PGO requires Clang (the .profdata/llvm-profdata flavour). GCC's -fprofile-* uses .gcda and different tooling.")
+  endif()
+  get_filename_component(_ripwire_pgo_build_name "${CMAKE_BINARY_DIR}" NAME)
+  if(_ripwire_pgo_build_name STREQUAL "build" OR _ripwire_pgo_build_name STREQUAL "asan")
+    message(FATAL_ERROR
+      "RIPWIRE_PGO must not be enabled in ${_ripwire_pgo_build_name}/ — that is the tree the gates and "
+      "benches measure, and a silently PGO'd build/ripwire moves every recorded number. Use build_pgo/.")
+  endif()
+  if(RIPWIRE_PGO STREQUAL "generate")
+    # Counters land in <build>/prof as default_*.profraw, one per process image.
+    set(_ripwire_pgo_flag "-fprofile-generate=${CMAKE_BINARY_DIR}/prof")
+  elseif(RIPWIRE_PGO STREQUAL "use")
+    if(NOT RIPWIRE_PGO_PROFILE OR NOT EXISTS "${RIPWIRE_PGO_PROFILE}")
+      message(FATAL_ERROR
+        "RIPWIRE_PGO=use needs -DRIPWIRE_PGO_PROFILE=<absolute path to a merged .profdata> that exists "
+        "(got '${RIPWIRE_PGO_PROFILE}'). Run scripts/pgobuild.sh to produce one.")
+    endif()
+    # The two -Wno- are not a way to hide staleness: a profile is expected to cover only the code the
+    # training run reached, and every uncovered function legitimately reports "unprofiled". Without these
+    # the build drowns in thousands of such warnings and a real diagnostic cannot be seen in the noise.
+    set(_ripwire_pgo_flag "-fprofile-use=${RIPWIRE_PGO_PROFILE}" -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
+  else()
+    message(FATAL_ERROR "RIPWIRE_PGO must be 'generate' or 'use' (got '${RIPWIRE_PGO}')")
+  endif()
+  # Compile AND link, before the first target and before FetchContent: instrumentation has a runtime that
+  # must be linked in, and the vendored C is where the parse loop lives — profiling only our C++ would
+  # profile the caller of the hot code and not the hot code.
+  add_compile_options(${_ripwire_pgo_flag})
+  add_link_options(${_ripwire_pgo_flag})
+  message(STATUS "RIPWIRE_PGO: ${RIPWIRE_PGO} — see docs/OPTREMARKS.md F2 and scripts/pgobuild.sh")
+endif()
+
+
 # ---- FetchContent: VENDORED sources, PER-BUILD-TREE build output ----
 # Every dependency lives IN THIS REPO under third_party/deps/<name>: a cold clone builds with the
 # network unplugged — no git fetch, no ~/.cache priming, no CI cache step, no upstream that can
@@ -404,6 +516,69 @@ option(RIPWIRE_PROFILE "instrument the pipeline with PROFILE_SCOPE self-profilin
 foreach(_pt ripwire ripwire_probe)
   target_compile_definitions(${_pt} PRIVATE PROFILE_ENABLED=$<BOOL:${RIPWIRE_PROFILE}>)
 endforeach()
+
+# ---- optimization-remarks build (clang -Rpass / YAML opt-record): -DRIPWIRE_OPT_REMARKS=ON ----
+# Asks the optimizer what it DID and — the useful half — what it DECLINED to do: failed vectorization,
+# declined inlining, LICM/unswitch bail-outs, alias-blocked hoists. Every remark is an OBSERVATION, never
+# a defect: acting on one without a bench number is how readable G2-shaped code gets churned for nothing.
+# scripts/optremarks.sh drives the whole loop (configure → build → triage); see docs/OPTREMARKS.md.
+#
+# Three properties this option deliberately keeps:
+#   * SEPARATE BUILD TREE, no build type. Remarks only describe an OPTIMIZED build, but the repo forbids
+#     -DCMAKE_BUILD_TYPE=Release in a dev tree (NDEBUG compiles DEGRADED_PATH_ALERT out and blinds the
+#     degrade-path gates — CONTRIBUTING.md §5). No build type is needed here: RIPWIRE_ARCH_FLAGS already
+#     puts the plain configuration at -O2, so build_remarks/ describes the SAME codegen build/ ships,
+#     with the degrade paths still compiled in. The option is nonetheless refused inside build/ below.
+#   * OUR TARGETS ONLY. Attached with target_compile_options to ripwire + ripwire_probe, never
+#     add_compile_options — the vendored tree-sitter core and the sixteen grammar objects are C code we
+#     do not own and their remarks are pure noise (G3: third_party is out of scope for triage).
+#   * -gline-tables-only, not -g. A remark without a DebugLoc cannot be triaged (you get a mangled
+#     function name and no site), and line tables are the whole of what the opt-record needs.
+option(RIPWIRE_OPT_REMARKS "build with clang optimization remarks + a YAML opt-record (SEPARATE build dir)" OFF)
+if(RIPWIRE_OPT_REMARKS)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # GCC's spelling is -fopt-info-*, with different pass names and no YAML opt-record; a silent no-op
+    # here would hand back an empty triage that reads as "nothing to fix".
+    message(FATAL_ERROR
+      "RIPWIRE_OPT_REMARKS requires Clang (-Rpass=/-fsave-optimization-record are Clang spellings; "
+      "GCC ${CMAKE_CXX_COMPILER_VERSION} uses -fopt-info-* instead). Configure with CMAKE_CXX_COMPILER=clang++.")
+  endif()
+  # Refuse to turn the ordinary dev tree into the remarks tree: build/ripwire is the binary every gate
+  # and every bench number in this repo is measured against, and an accidental reconfigure would leave
+  # it carrying opt-record files and 100+ MB of build-log noise with nothing on stderr to say why.
+  get_filename_component(_ripwire_remarks_build_name "${CMAKE_BINARY_DIR}" NAME)
+  if(_ripwire_remarks_build_name STREQUAL "build" OR _ripwire_remarks_build_name STREQUAL "asan")
+    message(FATAL_ERROR
+      "RIPWIRE_OPT_REMARKS must not be enabled in ${_ripwire_remarks_build_name}/ — that is the tree the "
+      "gates and benches measure. Use a separate dir: cmake -S . -B build_remarks -DRIPWIRE_OPT_REMARKS=ON")
+  endif()
+  # -Rpass* stream human-readable remarks to stderr; -fsave-optimization-record writes the same facts
+  # as one <object>.opt.yaml per TU, which is the form scripts/optremarks.py triages. Both are emitted:
+  # the YAML is machine-triagable, the stderr text is what you read when you want the surrounding
+  # compile context of a single site.
+  #
+  # RIPWIRE_OPT_REMARKS_FILTER is the same regex for all four flags. `.*` — the default — is the honest
+  # first pass: you cannot decide which remark classes matter until you have seen which ones fire. It is
+  # also genuinely expensive, and the cost is NOT spread evenly across the tree: src/main.cpp is one
+  # ~605 KB TU holding thousands of functions, and the per-function-per-pass bookkeeping classes
+  # (size-info, asm-printer, prologepilog, stack-frame-layout) grow with functions x passes. On this
+  # tree the unfiltered record for main.cpp passes 800 MB and its stderr passes 400 MB, and the compile
+  # slows to a crawl writing them. Do the wide pass once on the SMALL TUs, then narrow:
+  #   -DRIPWIRE_OPT_REMARKS_FILTER='inline|loop-vectorize|slp-vectorizer|licm|loop-unswitch|loop-idiom'
+  # which is exactly the set of passes CLAUDE.md's G2 cares about, and which cuts the record ~30x.
+  set(RIPWIRE_OPT_REMARKS_FILTER ".*" CACHE STRING "regex of optimizer passes to report remarks for")
+  set(RIPWIRE_OPT_REMARKS_FLAGS
+    -Rpass=${RIPWIRE_OPT_REMARKS_FILTER}
+    -Rpass-missed=${RIPWIRE_OPT_REMARKS_FILTER}
+    -Rpass-analysis=${RIPWIRE_OPT_REMARKS_FILTER}
+    -foptimization-record-passes=${RIPWIRE_OPT_REMARKS_FILTER}
+    -gline-tables-only
+    -fsave-optimization-record)
+  foreach(_rt ripwire ripwire_probe)
+    target_compile_options(${_rt} PRIVATE ${RIPWIRE_OPT_REMARKS_FLAGS})
+  endforeach()
+  message(STATUS "RIPWIRE_OPT_REMARKS: ON, filter='${RIPWIRE_OPT_REMARKS_FILTER}' — <object>.opt.yaml per TU under ${CMAKE_BINARY_DIR}; triage with scripts/optremarks.py")
+endif()
 
 # ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
