@@ -468,40 +468,68 @@ retrieval shape); SFML's are terse changelog summaries whose vocabulary barely o
 benchmark that produced *easier-looking* numbers from a *harder-to-publish* corpus is exactly the
 non-portable claim the caveats warn about. **The public number is the baseline going forward.**
 
-**`--cochange surprising="1"` was calibrated against the paper it reimplements, and a third of what
-it flags is intentional coupling.** The predicate is Clio's modularity violation (Wong/Cai/Kim/Dalton,
-ICSE 2011 — [`LINEAGE.md`](LINEAGE.md) §2), and Clio publishes **66% precision on Hadoop Common**
-(152/231 confirmed) and **40% on Eclipse JDT** (161/399). Those are the expected band, so the
-predicate was measured against it rather than assumed to clear it.
+**`--cochange surprising="1"` was calibrated against the paper it reimplements, and roughly a third of
+what it flags is intentional coupling.** The predicate is Clio's modularity violation
+(Wong/Cai/Kim/Dalton, ICSE 2011 — [`LINEAGE.md`](LINEAGE.md) §2), and Clio publishes **66% precision on
+Hadoop Common** (152/231 confirmed) and **40% on Eclipse JDT** (161/399). Those are the expected band,
+so the predicate was measured against it rather than assumed to clear it.
 
-Corpus: a private 1,648-commit, 2,718-file C++/Objective-C++ tree, default 18-month window,
-`together>=3`. Method: `--cochange --pack-top-n=200000 --no-cache`, categories assigned by path
-(a pair counts as test-coupling when exactly one side matches `test`/`spec`/`harness`/`bench`).
+Corpus: the same private 1,648-commit C++/Objective-C++ tree both times (commit count re-verified
+against the working copy's own git history, unchanged), default 18-month window, `together>=3`. Method:
+`--cochange --pack-top-n=200000 --no-cache`, categories assigned by path (a pair counts as test-coupling
+when exactly one side matches `test`/`spec`/`harness`/`bench`).
+
+**Correction (2026-08-05): the first measurement below was taken on an index with a capture gap.** The
+include extractor did not see an `#include`/`#import` nested inside `#if`/`#ifdef` — including every
+classic `#ifndef FOO_H` include-guarded header — so a guard-wrapped file read as having almost no
+dependencies and its true dependents falsely showed `surprising="1"`. Fixed in `ba82324`
+(`captureIncludes` now descends into preprocessor-conditional containers; `kParserVer` 39→40). The
+worked example the original writeup named, `levelEdit2/LevelEditor.cpp`/`.h` (76 directives, 75 of them
+inside `#if LEVELEDIT`, only 1 previously captured), no longer emits `surprising="1"` for that pair —
+confirmed by re-running both a pre-fix (`kParserVer` 39) binary (built from `ba82324~1` in a
+throwaway worktree) and the current (`kParserVer` 40) binary against the identical corpus state. The
+pre-fix row is kept below rather than silently overwritten, per this repo's own honesty rule.
 
 | | pairs above the floor | `surprising="1"` | dependency-capable | flagged share |
 | --- | ---: | ---: | ---: | ---: |
-| no recurrence filter | 935 | 253 | 423 | **59.8%** |
-| `--cochange-recur=2` | 315 | 140 | 221 | 63.3% |
-| `--cochange-recur=3` | 98 | 47 | 86 | 54.7% |
+| no recurrence filter — **pre-fix** (`kParserVer`≤39) | 935 | 253 | 423 | 59.8% |
+| no recurrence filter — **current** (`kParserVer`=40) | 935 | **221** | 423 | **52.2%** |
+| `--cochange-recur=2` — pre-fix | 315 | 140 | 221 | 63.3% |
+| `--cochange-recur=2` — current | 315 | **121** | 221 | **54.8%** |
+| `--cochange-recur=3` — pre-fix | 98 | 47 | 86 | 54.7% |
+| `--cochange-recur=3` — current | 98 | **40** | 86 | **46.5%** |
 
-**That 59.8% is a *yield*, not a precision, and the two must not be compared directly.** Precision
-needs confirmed-defect ground truth — Clio used issue trackers and developer confirmation — and no
-such oracle exists for this corpus. What the composition *does* support is an upper bound. Of the 253
-flagged pairs, **82 (32.4%) are test↔subject or test↔test pairs**: a test moving with the code it
-tests is intentional coupling, not a design defect, and Clio would not count it. Excluding that class
-alone caps precision at **≤67.6%** — bracketing Clio's Hadoop figure from above and sitting well
-above its JDT figure. At least one further false positive has an independent, confirmed cause: the
-include extractor does not see an `#include` nested inside a `#if`/`#ifdef`, so a file whose body is
-wrapped in a feature guard reads as having almost no dependencies (one file in this corpus contributes
-1 of its ~29 includes to the graph, and its own header pairs with it as `surprising="1"`). **So the
-honest verdict is "consistent with the published band, with an upper bound that only just clears the
-better of the two figures" — not "better than Clio".**
+`dependency-capable` and `pairs above the floor` are untouched by the fix — it only changes which
+already-dependency-capable pairs still look `surprising`. Retired: 32 of 253 (no recurrence), 19 of 140
+(recur=2), 7 of 47 (recur=3) — zero new rows appeared at any recurrence level.
 
-**Recurrence cuts volume, not composition — the two filters are orthogonal.** `--cochange-recur=2`
-removes 45% of the flagged pairs (253 → 140), but the test-coupling share is 32.4% before and 32.9%
-after. Recurrence is therefore not a substitute for excluding intentional relations, and the largest
-remaining precision gain available is classifying test↔subject pairs rather than filtering harder on
-time. That is recorded here as open headroom, not as a shipped filter.
+**That 52.2% is a *yield*, not a precision, and the two must not be compared directly.** Precision needs
+confirmed-defect ground truth — Clio used issue trackers and developer confirmation — and no such oracle
+exists for this corpus. What the composition *does* support is an upper bound. Of the 221 flagged pairs,
+**79 (35.7%) are test↔subject or test↔test pairs**: a test moving with the code it tests is intentional
+coupling, not a design defect, and Clio would not count it. Excluding that class alone caps precision at
+**≤64.3%** — now sitting *below* Clio's Hadoop figure and still well above its JDT figure, i.e. squarely
+inside the 40%–66% band rather than a hair above its upper edge. **So the honest verdict changed, not
+just the number: pre-fix the tool looked like it barely cleared Clio's better corpus; post-fix it reads
+as comfortably inside the band Clio itself reports** — a more defensible claim, and a more conservative
+one, not the "even better than we thought" reading the raw 13%-of-population-was-artifact framing might
+suggest. The reason the ceiling *fell* rather than rose: of the 32 retired false positives, only 3 were
+test-coupling pairs — 29 were subject↔subject pairs that the guard-wrapped-include bug had misclassified
+as design defects. Removing them shrank the "genuine-looking" numerator (171→142) faster than it shrank
+the test-coupling denominator-contributor (82→79), which is why the *share* of test-coupling within
+what's left rose slightly even as its raw count fell.
+
+**Recurrence cuts volume, not composition — the two filters are still orthogonal, re-confirmed.**
+`--cochange-recur=2` removes 45% of the flagged pairs both before and after the fix (253→140 pre-fix,
+221→121 post-fix — 45.2% either way), and the test-coupling share stays close before/after recurrence
+filtering too: 35.7% unfiltered vs 36.4% at recur=2 (was 32.4%/32.9% pre-fix). Recurrence is therefore
+still not a substitute for excluding intentional relations. **The largest remaining precision-gain lever
+is unchanged, and looks slightly bigger, not smaller, on the repaired index**: test↔subject/test↔test
+pairs are 35.7% of what's currently flagged (79/221) versus 32.4% (82/253) before the fix — a bigger
+*share*, even though the *count* dropped (82→79, only 3 of the 32 retired pairs were test-coupling; the
+other 29 were subject↔subject pairs the guard-wrapped-include bug had misclassified). Classifying those
+79 pairs correctly is still the single largest lever available — larger than anything recurrence
+filtering can do to composition — and is recorded here as open headroom, not as a shipped filter.
 
 **Two ranking experiments produced no confirmed lift and did not ship.** `--anchor` and
 `--cochange-boost` are dropped from `--help` and refuse to run without an explicit development

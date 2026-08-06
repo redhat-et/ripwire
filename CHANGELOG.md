@@ -46,7 +46,12 @@ Calibration is published with the feature rather than after it. Clio reports 66%
 Common and 40% on Eclipse JDT; ripwire's measurable analogue on the corpus above is a **yield** of
 59.8% (flagged pairs over dependency-capable candidate pairs), which is not the same quantity — see
 [`docs/EVALS.md`](docs/EVALS.md) §7 for what was measured, what was not, and the upper bound on
-precision it supports.
+precision it supports. **Correction, still pre-release:** that 59.8% was measured on an index with a
+capture gap (guard-wrapped `#include`/`#import` never seen), fixed in `ba82324` (`kParserVer` 40); the
+re-measured yield on the same corpus is 52.2%, with the composition-derived precision ceiling moving
+from ≤67.6% to ≤64.3% — now inside Clio's 40–66% band rather than a hair above its top. `docs/EVALS.md`
+§7 carries both figures and the full re-derivation; this entry is left as originally written except for
+this note, per the project's own rule against silently overwriting a published number.
 
 Gate: `test/cochangecliocheck.sh` (29 arms over a scripted 24-commit fixture repo whose oversized base
 commit also proves the 30-file bulk cap still fires).
