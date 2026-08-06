@@ -184,3 +184,87 @@ created by today's own gate-suite runs — the leak is ONGOING (~31k files/day o
   install-from-release is verified end-to-end.
 - Do not convert more shell gates to C++ without a measured payoff (sampled shell-launch share was
   ~0.09–3.1% of gate time).
+
+---
+
+## 2026-08-06 — readability/quality waves: state, and the handoff
+
+**HANDOFF NOTE.** Written mid-flight so another session can pick this up cold. Current integration
+branch is **`integration/all`** (worktree `.claude/worktrees/integration`). Nothing is pushed. The
+full research record — every citation existence-verified — is **NOT in this repo** (`ripwirepubliccheck`
+arm 6a blocks `DESIGN_*` filenames); it lives in the private ledger at
+`ctxpack research/2026-08/DESIGN_READABILITY_METRICS.md`, with an untracked working copy at the
+ripwire root. Read it before extending any of this; §-numbers below refer to it.
+
+### Landed on `integration/all` (suite green: 352 gates, 349 pass, 3 skip, 0 fail)
+
+Naming lens (8 rules) · atoms-of-confusion pack (7 C-family rules) · `--readability` (Posnett/
+Halstead/entropy) · `--ensemble` (the family join) · `--naming-calibration` · `--context-ratio` ·
+`--nonlocal-state` · `--field-affinity` · Clio/MVG co-change refinements + citations · LTO/PGO with
+the dev/release split · import-container capture (`kParserVer` 40) · the durable quality ledgers
+un-gitignored.
+
+### In flight when this was written
+
+- **Wave 3** (workflow `wf_0eab98ba-d7d`): name-informativeness, comment-coherence, DMM, then the
+  single quality-panel command, then a skills rewire, then a land phase. Branches exist at base.
+- **`fix/ensemble-availability`** (separate thread): the `confusion` family reports itself as
+  MEASURED on corpora where it cannot fire. Real honesty bug — atoms are C-family only by design, so
+  on a Rust/Python tree the family was never applicable and silence reads as a clean bill of health.
+
+### Next, in order (the reasoning matters more than the list)
+
+1. **Finish wave 3 + the availability fix, then the README.** The README plan is settled: give the
+   "writes better code" bullet a NUMBER (it is the only bullet without one — that is why it reads
+   weakest), lead "saves tokens" with the head-to-head win–loss records (17–2 vs repowise, 16–2 vs
+   Aider — already in the README below the fold, invisible up top), lead "goes faster" with the WARM
+   number and re-measure cold on the LTO/PGO build, and add a fourth bullet on agent code rot. Then
+   the line worth more than any of them: *every number above is re-derived by a gate; if the prose
+   and the measurement disagree, the build fails.*
+2. **"What we refused to ship, and why."** The anti-fad argument is not a citation list — it is a
+   graveyard, and ours is unusually good: the withdrawn naming rule (measured INVERTED — it flagged
+   the best names in the tree), Halstead difficulty/effort (refuted 1982, still shipping elsewhere),
+   the Maintainability Index (constants fit to one 1980s dataset), cross-language atom porting
+   (transfer empirically falsified), and 1.1M compiler remarks that justified ZERO source edits.
+   `docs/LINEAGE.md` already separates *folded* from *surveyed*; **"measured and rejected" is a
+   natural third class** and inherits the same honesty rule and gate.
+3. **The tool-vs-command roadmap.** A command answers a question you already know how to ask; a tool
+   helps you ask the right one. Four properties to deepen, cheapest first:
+   - **Be a filter, not a replacement.** Accept `rg --json` on stdin and annotate each hit with its
+     enclosing symbol, callers, tested state, hotspot standing. The `--from-trace=-` stdin pattern
+     already exists — generalize it. Cheapest change with the largest positioning effect: it answers
+     "why not just grep?" with *use both, here is the pipe*.
+   - **State.** Every call is independent even when warm; an agent re-establishes intent on every
+     verb. A TASK HANDLE held by the MCP server ("I am working on X" once, subsequent verbs rank
+     against it) compounds across a session and is something a plain CLI structurally cannot do.
+   - **Actionable limits.** `amb="3"` truthfully says the resolver guessed. It does not say WHICH
+     calls or what would resolve them. Turn disclosure into a next action.
+   - **Close the loop.** §9.2 Tier A: where the correct replacement is derivable FROM THE CORPUS
+     (abbreviation inconsistency, synonym unification, convention normalization) propose the fix.
+     That is the line between a gate and a collaborator, and the only band where auto-correction is
+     safe, because consistency has a computable target and quality does not.
+   - (Expensive, own wave) **Model depth** — the graph has no data flow, which is why
+     `--nonlocal-state` must report floors. Today's include fix bought +23–37% edges on real corpora;
+     model completeness pays disproportionately.
+4. **Deferred Tier B**, to be judged by the calibration harness rather than assumed: `$gram`
+   surprisal, DepDegree, change entropy.
+
+### Traps a fresh session will hit
+
+- **Merge conflicts are always additive bookkeeping, never real disagreement.** `test/regression.sh`'s
+  single absorb-loop line (rebuild the union from BOTH sides — a naive insert mangles the `; do`
+  token), the gate count in `docs/EVALS.md` (3 places, DERIVED by manifestcheck), `kTotalFlagArms`
+  (the `static_assert` beats your arithmetic — it caught three wrong counts in one session), the
+  README flag count and `present/deck5`. In `src/cli.h`/`main.cpp` KEEP BOTH sides: taking one whole
+  hunk silently dropped a `Config` member and shipped a flag that parsed but never worked.
+- **Three gates flake on machine load, none is a real failure**: `editcheckcheck` (100 ms warm
+  budget), `gitstampcheck` (compares a SHARED cache-dir byte total between two runs — that is shared
+  mutable state in a gate, not a timing budget), `mergescoutcheck`'s perf arm. Re-run STANDALONE and
+  report both results. **A fix for these was attempted in wave 2 and never landed** — the agent
+  stalled waiting on a background suite run. Still open.
+- **Never copy a number from prose you did not re-measure.** A wrong denominator (159 of 171 → really
+  159 of 217) survived review here and was caught only because an agent re-measured instead of
+  trusting the doc. The Clio precision bound moved DOWN after the include fix, not up, for the same
+  reason — measure, then write what you measured.
+- `claude/unruffled-yalow-24aaa8` is **superseded** — HEAD fixed that litter by sharding and
+  deliberately never evicts live locks. Do not merge it.
