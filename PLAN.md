@@ -392,9 +392,9 @@ Produced by a 11-agent Workflow (survey per language family → design → 3-way
 merge), NOT implemented — a plan only, per the local-variable gap flagged in the section above.
 
 **Process note, worth recording so it doesn't repeat.** The workflow's agents defaulted to the
-session's PRIMARY working directory (`/Users/qgames/AppDevelopLocal/project2/ripwire`, branch
-`docs/readme-frontpage`) rather than this integration worktree, because the launch prompt used
-relative paths (`src/naminglens.h`) with no explicit root. The primary root has NONE of this
+session's PRIMARY working directory (a separate checkout on branch `docs/readme-frontpage`) rather
+than this integration worktree, because the launch prompt used relative paths (`src/naminglens.h`)
+with no explicit root. The primary root has NONE of this
 session's work — no `naminglens.h`, no `namingconsistency.h`, no `fieldaffinity.h`. **Always pass the
 absolute worktree path explicitly in a Workflow agent's prompt** — relative paths silently resolve
 against the wrong checkout, and a background agent has no way to notice unless it independently
@@ -501,7 +501,8 @@ one's design agent caught the same checkout-mismatch risk the local-variable wor
 avoided it: it explicitly read `src/fieldaffinity.h`/`docs/FIELDAFFINITY.md` from THIS integration
 worktree rather than the primary session directory, and separately caught that the task prompt's
 pointer to `docs/LINEAGE.md` for the "Gated-claim wording" pattern was wrong — that section actually
-lives in `DESIGN_READABILITY_METRICS.md` — and used the real location instead of trusting the prompt.
+lives in the private research record, not in this repo — and used the real location instead of
+trusting the prompt.
 Good precedent: state the absolute worktree path explicitly next time regardless, since this
 self-correction was diligence, not a guarantee.
 
