@@ -136,6 +136,10 @@ struct Config
     bool             readability       = false;            // --readability: the Posnett/Hindle/Devanbu (MSR 2011) lens — per function, Halstead
                                                             // volume + token entropy + line span → P, emitted LEAST readable first. Pages through
                                                             // limit/offset like the other report verbs; a ranking lens, never a grade (readability.h)
+    bool             ensemble          = false;            // --ensemble: the FAMILY JOIN — per function, which of the four orthogonal evidence
+                                                            // families (structural / lexical / confusion / historical) fire, ranked by the COUNT
+                                                            // of distinct families and never by a weighted composite. A family that could not be
+                                                            // measured is reported UNAVAILABLE, never silent (ensemble.h)
     bool             cochange          = false;            // --cochange[=FILE]: files that change together in git (hidden coupling)
     std::string_view cochangeFile;                         // --cochange=FILE: lockstep partners of one file
     std::string_view archRules;                            // --arch=FILE: enforce layering rules (exit 2 on violation)
@@ -795,6 +799,15 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a\n"
         "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
         "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
+        "    --ensemble                 the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
+        "                               — never a weighted composite score. fam= is ordinal, every row carries the evidence behind it, ties break on NodeId, and\n"
+        "                               a per-file rollup follows the rows. THRESHOLDS, all also restated on the root element:\n"
+        "                                 structural  ccx>=15 | loc>=60 | nest>=4 | params>=5 (the quality-delta bars verbatim, not new numbers), plus rrank=, the\n"
+        "                                             symbol's rank in the readability lens.   lexical  the naming rules.   confusion  the atom rules.\n"
+        "                                 historical  hrank=, the file's rank by git CHURN ALONE (not the hotspots churn x complexity score, half of which is already\n"
+        "                                             structural) over a fixed 12mo window; --since is REFUSED on this verb, because a fixed window keeps hrank= comparable.\n"
+        "                               rrank=/hrank= are RELATIVE cuts — the worst decile of THIS corpus, 1 to 40 rows — never absolute verdicts. Without git,\n"
+        "                               historical is UNAVAILABLE on the root and on every row with of=3, never 'did not fire'. Pages with limit=N.\n"
         "    --cochange[=FILE]          files that change together in git (hidden coupling; the rows' own legend defines surprising=)\n"
         "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn to commits after this point:\n"
         "                               a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate\n"
@@ -1217,10 +1230,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability.\n"
+        "                               --readability --ensemble.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
-        "                               impact rows, 20 seam pairs, 40 readability rows, 200 graph-query rows / --top-k).\n"
+        "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 200 graph-query rows / --top-k).\n"
         "                               With --offset alone (no --limit) the verb's own default page size applies and\n"
         "                               the root discloses limit=\"0\" — on OUTPUT that 0 means 'no explicit --limit',\n"
         "                               never a zero-row page (the flag itself refuses --limit=0).\n"
@@ -1396,6 +1409,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--hotspots",           &Config::hotspots           },
     { "--clones",             &Config::clones             },
     { "--readability",        &Config::readability        },
+    { "--ensemble",           &Config::ensemble           },
     { "--cochange",           &Config::cochange           },
     { "--communities",        &Config::communities        },
     { "--community",          &Config::communityFlag      },   // bare flag → empty ID → handler refuses loudly. Matched by
@@ -1695,7 +1709,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 151;   // +1: --handoff, +1: --readability (kBoolFlags rows)
+inline constexpr std::size_t kTotalFlagArms       = 152;   // +1: --handoff, +1: --readability, +1: --ensemble (kBoolFlags rows)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -1883,7 +1897,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability";
+    "--readability --ensemble";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -1893,7 +1907,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability;
+        || c.readability || c.ensemble;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in

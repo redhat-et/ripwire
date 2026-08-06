@@ -341,20 +341,13 @@ struct SymbolLineIndex
 
 inline SymbolLineIndex buildSymbolLineIndex( const IngestResult& ing )
 {
+    // model.h::symbolsByFile is the shared bucket-and-sort (see its note); this index keeps EVERY symbol and
+    // orders by source line, tie-broken on the id, exactly as it always did.
     SymbolLineIndex ix;
-    ix.byFile.resize( ing.files.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( s.fileId < ix.byFile.size() )
-        {
-            ix.byFile[s.fileId].push_back( s.id );
-        }
-    }
-    for( std::vector<NodeId>& v : ix.byFile )
-    {
-        std::sort( v.begin(), v.end(), [ & ]( NodeId a, NodeId b )
-                   { return ing.symbols[a].line != ing.symbols[b].line ? ing.symbols[a].line < ing.symbols[b].line : a < b; } );
-    }
+    ix.byFile = symbolsByFile( ing,
+                               []( const Symbol& ) { return true; },
+                               [ & ]( NodeId a, NodeId b )
+                               { return ing.symbols[a].line != ing.symbols[b].line ? ing.symbols[a].line < ing.symbols[b].line : a < b; } );
     return ix;
 }
 
