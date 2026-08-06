@@ -28,7 +28,10 @@ blast radius, and which tests to run.
   to **402** worth a second look (2-of-6 evidence families agreeing, `--quality-panel`) — an **8.3%**
   shortlist, not a guess; `--quality-delta` then measures what a change made *worse* across 10
   agent-code failure modes, `--exemplar` surfaces the repo's best-in-class pattern to imitate, and
-  `--test-gate` names the tests that must run before "done."
+  `--test-gate` names the tests that must run before "done." `--field-affinity` estimates
+  cache-friendliness **statically, before you ever run a profiler** — a code-review judgment call
+  every engineer makes and, per a two-round adversarial search, no other shipping tool automates
+  without running the program first (details below).
 - **Targets the failure modes AI-generated code specifically has** — empty-catch/swallowed-exception
   error-masking is **+47%** more common in AI-authored commits than human ones, and code reuse is
   *declining* even as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026); a
@@ -284,8 +287,8 @@ the six actually looks at, on this repository's own source, not a synthetic exam
 
 | Family | Question | Backing verb | On this repo |
 | --- | --- | --- | --- |
-| **structural** | shape: complexity, size, nesting, params — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9` |
-| **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency` | see below — the one family with a fix, not just evidence |
+| **structural** | shape: complexity, size, nesting, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
+| **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
 | **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
 | **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
 | **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
@@ -302,7 +305,24 @@ rather than blurring it:
   cost of **92.88** — fields read together in the same call routinely cross cache-line boundaries.
   Chilimbi, Davidson & Larus's cache-conscious structure definition (PLDI 1999), validated on real
   hardware counters; the advice-not-transform posture (report a split, never auto-reorder a struct)
-  follows Hundt, Mannarswamy & Chakrabarti (CGO 2006).
+  follows Hundt, Mannarswamy & Chakrabarti (CGO 2006). **This is a genuinely rare kind of tool**: code
+  review catches cache-unfriendly patterns constantly, but every adjacent tool that reasons about
+  memory-access shape (Intel Advisor's pattern classifier, DMon, PerfLint) does it by *running the
+  program first* — a two-round adversarial literature and patent search found no shipping tool and no
+  published work that does this **statically, before a line executes** (tier: RARE BUT REAL, the full
+  citation trail and hedged claim wording in [`docs/LINEAGE.md`](docs/LINEAGE.md)). The same verb now
+  also classifies each loop's access shape — `index`/handle-based (predictable, the hardware
+  prefetcher can hide the latency) vs. pointer-chase (data-dependent, no struct layout fixes an
+  unhideable per-hop stall) — and, for genuine chases, checks whether the pointer you dereference to
+  *reach* the next node sits next to the payload you're about to read, since that cache-line fetch is
+  unavoidable and colocating there is a strictly higher-value fix than generic field reordering. On
+  this repository: **1,374** loops classified, **5** genuine pointer-chases found in a codebase
+  deliberately built handle-based rather than pointer-linked (guardrail G2) — the lens staying quiet
+  on code written to avoid the problem is itself a check that it isn't firing at random. **Ships
+  entirely report-only**: an A/B benchmark against a real 64 MB shuffled linked list measured a
+  mostly-null result, so the ranking-affecting half of this feature is a provable no-op until a
+  blind real-corpus validation session clears it — reported here at the same honesty level as
+  everything else in this table, not oversold ahead of the evidence.
 - **`--readability`** is a sibling lens, not a panel family either — the one classic model in the tree
   with a published closed form: Halstead volume (Halstead, *Elements of Software Science*, 1977) and
   the Posnett/Hindle/Devanbu sigmoid fit (MSR 2011, [doi:10.1145/1985441.1985454](https://doi.org/10.1145/1985441.1985454)),
@@ -319,6 +339,15 @@ rather than blurring it:
   dominant convention at **1,677/1,803 (93.0%)** agreement, and the verb flags **136** off-convention
   names with a mechanically recombined `propose=` value for each (no dictionary, no synonym judgment —
   see [What it answers](#what-it-answers)).
+- **`--lint --naming-locals`** points those same naming rules at local variable names — the thing a
+  human reviewer flags immediately in a sprawling function and no static tool measured until this
+  session. Opt-in, off by default: on this repository, a plain `--lint` finds **2,225** findings;
+  adding `--naming-locals` finds **3,198** — **973 findings that were structurally invisible**
+  a moment ago, scoped tightly (only inside functions already flagged large/complex, only locals
+  nested two blocks deep for the short-name rule) so it doesn't just relabel every loop counter in
+  the tree. Ships disabled by default on purpose: this repository's own history includes a naming
+  rule that shipped on plausibility and was later measured to flag its *best*-named functions — see
+  the withdrawn-rule note below — so a rule this new stays opt-in until a real-corpus audit clears it.
 
 Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
 flagged this repository's best-named functions, kept as the standing argument for measuring before
