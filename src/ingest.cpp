@@ -37,6 +37,7 @@
 #include <mutex>
 #include <numeric>
 #include <string>
+#include <span>
 #include <string_view>
 #include <atomic>
 #include <regex>
@@ -994,13 +995,23 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 39;           // bump on any grammar/.scm/extraction change
-                                                      // 39: JavaScript gains four definition shapes measured missing
+constexpr std::uint32_t kParserVer    = 40;           // bump on any grammar/.scm/extraction change
+                                                      // 40: captureIncludes descends into import CONTAINERS instead of
+                                                      //    scanning the file root's direct children. Two families, one
+                                                      //    walk: (a) preprocessor conditionals —
+                                                      //    `#if`/`#ifdef`/`#ifndef`/`#else`/`#elif`/`#elifdef` — in the
+                                                      //    C family and C#; (b) ordinary language constructs — Python's
+                                                      //    `if TYPE_CHECKING:` / `try…except ImportError` / any function,
+                                                      //    method or class body, Rust's `mod x { … }` / fn / impl / trait
+                                                      //    / block bodies, and C#'s block-scoped `namespace Foo { … }`.
+                                                      //    None of those were ever visited before, so a v39 blob on any
+                                                      //    tree using them carries a SHORT include list → reject.
+                                                      // (39: JavaScript gains four definition shapes measured missing
                                                       //    against real repos (webpack@957bf3a, node@427d2e1 lib/) —
                                                       //    field_definition bound to an arrow/function, #private
                                                       //    methods (+ their call references), gated CJS export
                                                       //    assignments, gated prototype assignments. A v38 blob on a
-                                                      //    JS-bearing tree is missing those rows → reject.
+                                                      //    JS-bearing tree is missing those rows → reject.)
                                                       // (38: TypeScript
                                                       //    gains three definition shapes measured missing against a real
                                                       //    repo (openclaw, 24 658 .ts files) — abstract_method_signature,
@@ -2909,138 +2920,306 @@ std::string includePathOf( std::string_view spelling, bool& isAngleOut )
     return std::string( spelling.substr( 1, end - 1 ) );
 }
 
-// Capture #include / import directives (physical dependencies) by scanning the file's top-level
-// nodes. Node types confirmed per grammar: C++ preproc_include (path field, "" local vs <> external);
-// C++ preproc_call with directive `#import` (the C/C++ grammar has no #import rule — the objc grammar
-// does, and yields preproc_include there); Python import_statement/import_from_statement; Go/Swift
-// import_declaration; Rust use_declaration +
-// mod_item. LEVER-B B0: non-C imports now capture the CLEAN written specifier via grammar child fields
-// (module path / quoted specifier / use argument), not a sliced clause — the sound resolver input.
+// tree-sitter does NOT flatten the preprocessor. `#if` / `#ifdef` / `#ifndef` / `#else` / `#elif` /
+// `#elifdef` each parse as a CONTAINER node that OWNS every directive written between it and its
+// `#endif` — so a directive under a feature guard is a GRANDchild of the file root, not a child, and the
+// top-level-only child scan captureIncludes used to do could not see it at all. It was not
+// mis-resolved; it was never visited. The public node-type strings below are the same in every C-family
+// grammar we vendor (tree-sitter-c / -cpp / -objc / -cuda) AND in tree-sitter-c-sharp, whose
+// `preproc_if_in_top_level` / `_in_field_declaration_list` / `_in_enumerator_list` internal variants all
+// report these same names to `ts_node_type` — one table therefore covers every grammar with a
+// preprocessor, and no per-language branch is needed. `#region` is deliberately ABSENT: C#'s
+// preproc_region is a flat directive, not a container, so a `using` under it was always a root child.
+//
+// EVERY ARM IS CAPTURED, on purpose. We do not read the build system's `-D` flags (G3: no host-installed
+// dependencies, no compile database required), so which arm of an `#if`/`#else` a particular build
+// selects is not knowable here. The dependency view is therefore the UNION over all arms — a superset of
+// any one configuration, never a guess at which one. That is the honest direction for this graph: an
+// include that some configuration really does pull in is a real dependency, and over-capture costs a
+// spurious edge while under-capture costs a false `surprising="1"` on --cochange (the defect this fixes).
+//
+// Tables, not switches, per the declarative-tables rule: these lists are the whole contract, readable in
+// one pass, and a grammar bump that renames a node kind is a one-line edit here.
+inline constexpr std::array<std::string_view, 5> kPreprocConditionalNodes = { "preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif", "preproc_elifdef" };
+
+// One membership test for every node-kind table below — a single shape rather than one hand-rolled scan
+// per table (the repo already spells this `std::find( … ) != end` elsewhere; see graph.h / flipimpact.h).
+inline bool namesNode( std::span<const std::string_view> table, const char* type ) noexcept
+{
+    return std::find( table.begin(), table.end(), std::string_view( type ) ) != table.end();
+}
+
+inline bool isPreprocConditional( const char* type ) noexcept
+{
+    return namesNode( kPreprocConditionalNodes, type );
+}
+
+// ─── Non-preprocessor import containers, keyed by language ───────────────────────────────────────────
+//
+// The preprocessor is not the only thing that wraps a directive. Ordinary language constructs do it too,
+// and the same top-level-only scan dropped every one of them:
+//
+//   Python  `if TYPE_CHECKING: import x` and `try: import ujson / except ImportError: import json` — the
+//           two canonical spellings of a conditional dependency, the direct analogue of `#ifdef` — plus
+//           every function-, method- and class-body import.
+//   Rust    `use` inside `mod x { … }` (including `#[cfg(unix)] mod plat`, the Rust platform guard),
+//           inside a fn / impl / trait body, and inside any block expression.
+//   C#      `using` inside a BLOCK-scoped `namespace Foo { … }`. The file-scoped form (`namespace Foo;`)
+//           does not nest — its usings stay compilation-unit children — so it needs no entry, and
+//           test/nestedimportfix/filescoped.cs is the control that keeps it that way.
+//
+// KEYED BY LANGUAGE ON PURPOSE. `block` and `declaration_list` are node-type names in half a dozen of
+// our grammars; a shared list would send the walk into every C++/TypeScript/Java function body hunting a
+// directive form those languages do not have there — cost with no recall. Each language therefore names
+// only the containers ITS directives really appear in. Languages absent from the switch below (C-family,
+// TS/JS, Go, Swift, Java, Ruby) get the preprocessor set and nothing else, which is the whole of what
+// their grammars nest: TS/JS ESM `import` is top-level-only (a dynamic `import( … )` is a call
+// expression, not an import_statement), and Go/Java imports are top-level by language rule.
+//
+// EVERY ENTRY HAS A FIXTURE ARM in test/nestedimportfix — an entry with no arm is an untested claim, and
+// every parent chain below was read off a real parse with `--match`, never predicted from the grammar.
+inline constexpr std::array<std::string_view, 16> kPythonImportContainers = {
+    "block",                                                                    // every non-top-level import's DIRECT parent
+    "if_statement", "elif_clause", "else_clause",                               // `if TYPE_CHECKING:` and its arms
+    "try_statement", "except_clause", "except_group_clause", "finally_clause",  // `except ImportError:` / `except*`
+    "with_statement", "for_statement", "while_statement",
+    "match_statement", "case_clause",
+    "class_definition", "function_definition", "decorated_definition"           // decorated_* wraps the def, so it needs its own entry
+};
+
+// `unsafe`/`async` blocks and `decorated_definition` above look redundant next to `block` /
+// `function_definition` — they are not. They are the node the walk meets FIRST on the way down, so
+// without them the descent stops one level short of the body that holds the directive.
+inline constexpr std::array<std::string_view, 19> kRustImportContainers = {
+    "block", "declaration_list",                                                 // the two body kinds
+    "mod_item", "foreign_mod_item", "impl_item", "trait_item", "function_item",   // item containers
+    "expression_statement", "let_declaration",                                    // Rust wraps a statement-position
+                                                                                  // expression in one of these two, so
+                                                                                  // every control-flow entry below is
+                                                                                  // reachable ONLY through them
+    "if_expression", "else_clause", "match_expression", "match_block", "match_arm",
+    "loop_expression", "while_expression", "for_expression",
+    "unsafe_block", "async_block"
+};
+
+inline constexpr std::array<std::string_view, 2> kCsharpImportContainers = { "namespace_declaration", "declaration_list" };
+
+inline bool isImportContainer( Lang lang, const char* type ) noexcept
+{
+    if( isPreprocConditional( type ) )   // every grammar with a preprocessor: C/C++/ObjC/CUDA/Metal + C#
+    {
+        return true;
+    }
+    switch( lang )
+    {
+        case Lang::Python: return namesNode( kPythonImportContainers, type );
+        case Lang::Rust:   return namesNode( kRustImportContainers, type );
+        case Lang::CSharp: return namesNode( kCsharpImportContainers, type );
+        default:           return false;
+    }
+}
+
+// Nesting bound for the container descent. Real preprocessor guards nest a handful deep (the deepest in
+// any corpus measured here is 4); Python spends TWO levels per indent (statement + block), so this bound
+// has to clear ~2x the deepest plausible indentation, not the guard depth. 256 is far past either and
+// exists only so a hostile or generated file cannot turn the walk into unbounded heap-stack growth.
+// Exceeding it DEGRADES — deeper imports are simply not captured, the file still indexes — never fails.
+constexpr std::uint16_t kMaxImportContainerDepth = 256;
+
+// ONE import/include directive node → the written specifier, or empty when this node is not a directive
+// at all. Split out of captureIncludes so the walk that FINDS directives and the per-grammar table that
+// READS them stay separately readable — the walk is one shape, this is one branch per grammar spelling.
+//
+// Node types confirmed per grammar: C++ preproc_include (path field, "" local vs <> external); C++
+// preproc_call with directive `#import` (the C/C++ grammar has no #import rule — the objc grammar does,
+// and yields preproc_include there); Python import_statement/import_from_statement; Go/Swift
+// import_declaration; Rust use_declaration + mod_item; C# using_directive. LEVER-B B0: non-C imports
+// capture the CLEAN written specifier via grammar child fields (module path / quoted specifier / use
+// argument), not a sliced clause — the sound resolver input.
+//
+// `isAngle` is C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote), returned alongside the target so
+// path-precise resolution can leave angle includes unresolved. Allocates a std::string → not noexcept.
+struct DirectiveTarget { std::string target; bool isAngle; };
+
+DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src )
+{
+    std::string target;
+    bool        isAngle = false;
+
+    if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
+    {
+        const TSNode pth = ts_node_child_by_field_name( n, "path", 4 );
+        if( !ts_node_is_null( pth ) )
+        {
+            const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
+            if( a < b && b <= src.size() )
+            {
+                target = includePathOf( src.substr( a, b - a ), isAngle );
+            }
+        }
+    }
+    else if( std::strcmp( t, "preproc_call" ) == 0 )                     // C++-grammar `#import "x.h"` (ObjC/Metal spelling)
+    {
+        // `#import` is `#include` + include-once, so it MUST yield the same Include edge — this is
+        // the edge that connects a `.metal` shader to the FX headers it pulls in (10 of the 45 shaders in
+        // the measured reference tree use the `#import` spelling). Under the objc grammar it already parses
+        // as preproc_include (handled above); under the C/C++ grammar there is no #import rule, so it
+        // lands here as the generic preproc_call: directive:(preproc_directive) `#import`,
+        // argument:(preproc_arg) `"x.h"` / `<x.h>`. EVERY other preproc_call (`#pragma`, `#error`,
+        // `#warning`, an unknown directive) is not a physical dependency — the directive check below
+        // is what keeps them out, so this branch never widens the include graph beyond #import.
+        const TSNode dir = ts_node_child_by_field_name( n, "directive", 9 );
+        const TSNode arg = ts_node_child_by_field_name( n, "argument",  8 );
+        if( !ts_node_is_null( dir ) && !ts_node_is_null( arg ) )
+        {
+            const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
+            const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
+            if( da < db && db <= src.size() && aa < ab && ab <= src.size() && src.substr( da, db - da ) == "#import" )
+            {
+                target = includePathOf( src.substr( aa, ab - aa ), isAngle );   // trailing comment ends at the closing delimiter
+            }
+        }
+    }
+    else if( std::strcmp( t, "import_statement" ) == 0 )                 // Python `import a` / TS `import … from 'x'`
+    {
+        // Prefer the grammar's specifier field over slicing the whole statement (LEVER-B B0: the resolver
+        // needs the REAL written specifier, not the clause). Empirically confirmed node shapes:
+        //   Python: import_statement name:(dotted_name|aliased_import)  → the dotted module `pkg.mod`.
+        //   TS/JS:  import_statement source:(string)                    → the quoted specifier `'./x'`.
+        // ts_node_child_by_field_name returns null for the language that lacks the field, so a single
+        // capture covers both grammars without a per-language branch.
+        if( const TSNode src_ = ts_node_child_by_field_name( n, "source", 6 );  !ts_node_is_null( src_ ) )
+        {
+            target = importSpecifierText( src_, src );                    // TS/JS: strip the surrounding quotes
+        }
+        else if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );  !ts_node_is_null( nm ) )
+        {
+            target = importSpecifierText( nm, src );                      // Python: the dotted module head
+        }
+    }
+    else if( std::strcmp( t, "import_from_statement" ) == 0 )            // Python `from pkg.mod import Z`
+    {
+        // module_name:(dotted_name)  → `pkg.mod`;  module_name:(relative_import)  → `.rel` / `..up` (leading
+        // dots preserved so the resolver can resolve relative-to-file). The imported-names clause is dropped.
+        if( const TSNode mn = ts_node_child_by_field_name( n, "module_name", 11 );  !ts_node_is_null( mn ) )
+        {
+            target = importSpecifierText( mn, src );
+        }
+    }
+    else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
+    {
+        // argument:(scoped_identifier|scoped_use_list|identifier|…)  → `crate::a::b`. A brace group
+        // `crate::{a, b}` is kept verbatim; the resolver degrades on it (no unique single-file hit).
+        if( const TSNode arg = ts_node_child_by_field_name( n, "argument", 8 );  !ts_node_is_null( arg ) )
+        {
+            target = importSpecifierText( arg, src );
+        }
+    }
+    else if( std::strcmp( t, "mod_item" ) == 0 )                        // Rust `mod x;` (module-file declaration)
+    {
+        // A body-LESS `mod x;` declares module `x` in a sibling file (`x.rs` or `x/mod.rs`); a `mod x { … }`
+        // with a body is INLINE (no file) → skip it. Prefix `mod:` so the Rust resolver applies the
+        // module-file rule, distinct from a bare `use x;`. name:(identifier) → `x`.
+        if( ts_node_is_null( ts_node_child_by_field_name( n, "body", 4 ) ) )
+        {
+            if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );  !ts_node_is_null( nm ) )
+            {
+                if( std::string bare = importSpecifierText( nm, src );  !bare.empty() )
+                {
+                    target = "mod:" + bare;
+                }
+            }
+        }
+    }
+    else if(    std::strcmp( t, "import_declaration" ) == 0 )            // Go / Swift — captured but NOT precise-resolved
+    {
+        // Go (needs go.mod module-root) and Swift (whole-module, no path) are DEFERRED — the precise
+        // resolver leaves them unresolved. Keep the best-effort target for --uses / --deps back-compat.
+        const uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+        if( a < b && b <= src.size() )
+        {
+            std::string_view s  = src.substr( a, b - a );
+            const std::size_t sp = s.find( ' ' );                        // drop the leading keyword
+            if( sp != std::string_view::npos )
+            {
+                s = s.substr( sp + 1 );
+            }
+            target.assign( s.data(), s.size() < 96 ? s.size() : 96 );
+            while( !target.empty() && ( target.back() == ';' || target.back() == ' ' || target.back() == '\n' || target.back() == '\r' ) )
+            {
+                target.pop_back();
+            }
+        }
+    }
+    else if( std::strcmp( t, "using_directive" ) == 0 )
+    { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
+        target = csharpUsingTarget( n, src );                            // see csharpUsingTarget for the shape rationale
+    }
+    return { std::move( target ), isAngle };
+}
+
+// Capture #include / import directives (physical dependencies) by walking the file's top-level nodes —
+// and the bodies of anything that WRAPS a directive, which tree-sitter does not flatten: preprocessor
+// conditionals in the C family and C#, and ordinary language constructs in Python / Rust / C# (see
+// isImportContainer). Each node is read by directiveTargetOf above.
 // ABS-3: each directive ALSO emits an import-role RawRef (name = the importable final segment) so the
 // use-site index reports import sites. The ref is file-scope (fromSymbol=kNoNode) — that is correct for
-// a top-level directive, and it NEVER enters the call graph (role != Call → skipped in buildGraph).
-void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs )
+// a directive at any container depth, and it NEVER enters the call graph (role != Call → skipped in
+// buildGraph). The ref's line comes from the DIRECTIVE node, never from its enclosing `#if` or body.
+void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs )
 {
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
     kids.reserve( 64 );
     collectChildren( root, cursor.cur, kids );   // root's width is file-controlled — never index it (O(C²))
-    for( const TSNode n : kids )
-    {
-        const char* t = ts_node_type( n );
-        std::string  target;
-        bool         isAngle = false;   // C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote) — captured
-                                        // here so path-precise resolution can leave angle includes unresolved.
 
-        if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
+    // Iterative pre-order walk. An EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks
+    // on macOS, so a deep AST overflows the call stack well inside any depth guard — cc_walk above makes
+    // the same choice for the same reason. Children are pushed in REVERSE so pops preserve left-to-right
+    // order, which keeps `incs`/`refs` in SOURCE order: the determinism contract is byte-identity, and an
+    // order that depended on the walk shape would break it. Only ALLOWLISTED containers are entered, so a
+    // language whose imports are top-level by rule (TS/JS, Go, Java) still costs exactly the old scan.
+    struct IncFrame { TSNode node; std::uint16_t depth; };
+    std::vector<IncFrame> stack;
+    stack.reserve( 64 );
+    for( std::size_t i = kids.size(); i > 0; --i )
+    {
+        stack.push_back( { kids[i - 1], 0 } );
+    }
+
+    while( !stack.empty() )
+    {
+        const IncFrame frame = stack.back();
+        stack.pop_back();
+        const TSNode n = frame.node;
+        const char*  t = ts_node_type( n );
+
+        // READ, then DESCEND — both, never either/or. Rust's `mod_item` is the reason: a body-LESS
+        // `mod x;` is itself a directive (emitted as `mod:x`, the module-FILE declaration) while a
+        // `mod x { … }` is a container whose body holds `use`s. A walk that treated container-ness as a
+        // reason to skip the read would silently drop every Rust module-file declaration in the corpus.
+        // For every other container the read simply returns empty, so one uniform order covers all of them.
+        auto [ target, isAngle ] = directiveTargetOf( n, t, src );
+
+        if( isImportContainer( lang, t ) )
         {
-            const TSNode pth = ts_node_child_by_field_name( n, "path", 4 );
-            if( !ts_node_is_null( pth ) )
+            // `#else`/`#elif`/`#elifdef` hang off their `#if` as the `alternative:` child, and Python's
+            // `elif_clause`/`else_clause` hang off their `if_statement` the same way, so one uniform
+            // descent reaches every arm of a chain — no separate alternative-following pass.
+            if( frame.depth >= kMaxImportContainerDepth )
             {
-                const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
-                if( a < b && b <= src.size() )
+                DEGRADED_PATH_ALERT( "ingest: import-container nesting past the depth bound — deeper imports not captured" );
+            }
+            else
+            {
+                collectChildren( n, cursor.cur, kids );   // safe: the seed iteration above is finished
+                for( std::size_t i = kids.size(); i > 0; --i )
                 {
-                    target = includePathOf( src.substr( a, b - a ), isAngle );
+                    stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
                 }
             }
         }
-        else if( std::strcmp( t, "preproc_call" ) == 0 )                     // C++-grammar `#import "x.h"` (ObjC/Metal spelling)
-        {
-            // `#import` is `#include` + include-once, so it MUST yield the same Include edge — this is
-            // the edge that connects a `.metal` shader to the FX headers it pulls in (10 of the 45 shaders in
-            // the measured reference tree use the `#import` spelling). Under the objc grammar it already parses
-            // as preproc_include (handled above); under the C/C++ grammar there is no #import rule, so it
-            // lands here as the generic preproc_call: directive:(preproc_directive) `#import`,
-            // argument:(preproc_arg) `"x.h"` / `<x.h>`. EVERY other preproc_call (`#pragma`, `#error`,
-            // `#warning`, an unknown directive) is not a physical dependency — the directive check below
-            // is what keeps them out, so this branch never widens the include graph beyond #import.
-            const TSNode dir = ts_node_child_by_field_name( n, "directive", 9 );
-            const TSNode arg = ts_node_child_by_field_name( n, "argument",  8 );
-            if( !ts_node_is_null( dir ) && !ts_node_is_null( arg ) )
-            {
-                const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
-                const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
-                if( da < db && db <= src.size() && aa < ab && ab <= src.size() && src.substr( da, db - da ) == "#import" )
-                {
-                    target = includePathOf( src.substr( aa, ab - aa ), isAngle );   // trailing comment ends at the closing delimiter
-                }
-            }
-        }
-        else if( std::strcmp( t, "import_statement" ) == 0 )                 // Python `import a` / TS `import … from 'x'`
-        {
-            // Prefer the grammar's specifier field over slicing the whole statement (LEVER-B B0: the resolver
-            // needs the REAL written specifier, not the clause). Empirically confirmed node shapes:
-            //   Python: import_statement name:(dotted_name|aliased_import)  → the dotted module `pkg.mod`.
-            //   TS/JS:  import_statement source:(string)                    → the quoted specifier `'./x'`.
-            // ts_node_child_by_field_name returns null for the language that lacks the field, so a single
-            // capture covers both grammars without a per-language branch.
-            if( const TSNode src_ = ts_node_child_by_field_name( n, "source", 6 );  !ts_node_is_null( src_ ) )
-            {
-                target = importSpecifierText( src_, src );                    // TS/JS: strip the surrounding quotes
-            }
-            else if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );  !ts_node_is_null( nm ) )
-            {
-                target = importSpecifierText( nm, src );                      // Python: the dotted module head
-            }
-        }
-        else if( std::strcmp( t, "import_from_statement" ) == 0 )            // Python `from pkg.mod import Z`
-        {
-            // module_name:(dotted_name)  → `pkg.mod`;  module_name:(relative_import)  → `.rel` / `..up` (leading
-            // dots preserved so the resolver can resolve relative-to-file). The imported-names clause is dropped.
-            if( const TSNode mn = ts_node_child_by_field_name( n, "module_name", 11 );  !ts_node_is_null( mn ) )
-            {
-                target = importSpecifierText( mn, src );
-            }
-        }
-        else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
-        {
-            // argument:(scoped_identifier|scoped_use_list|identifier|…)  → `crate::a::b`. A brace group
-            // `crate::{a, b}` is kept verbatim; the resolver degrades on it (no unique single-file hit).
-            if( const TSNode arg = ts_node_child_by_field_name( n, "argument", 8 );  !ts_node_is_null( arg ) )
-            {
-                target = importSpecifierText( arg, src );
-            }
-        }
-        else if( std::strcmp( t, "mod_item" ) == 0 )                        // Rust `mod x;` (module-file declaration)
-        {
-            // A body-LESS `mod x;` declares module `x` in a sibling file (`x.rs` or `x/mod.rs`); a `mod x { … }`
-            // with a body is INLINE (no file) → skip it. Prefix `mod:` so the Rust resolver applies the
-            // module-file rule, distinct from a bare `use x;`. name:(identifier) → `x`.
-            if( ts_node_is_null( ts_node_child_by_field_name( n, "body", 4 ) ) )
-            {
-                if( const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );  !ts_node_is_null( nm ) )
-                {
-                    if( std::string bare = importSpecifierText( nm, src );  !bare.empty() )
-                    {
-                        target = "mod:" + bare;
-                    }
-                }
-            }
-        }
-        else if(    std::strcmp( t, "import_declaration" ) == 0 )            // Go / Swift — captured but NOT precise-resolved
-        {
-            // Go (needs go.mod module-root) and Swift (whole-module, no path) are DEFERRED — the precise
-            // resolver leaves them unresolved. Keep the best-effort target for --uses / --deps back-compat.
-            const uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
-            if( a < b && b <= src.size() )
-            {
-                std::string_view s  = src.substr( a, b - a );
-                const std::size_t sp = s.find( ' ' );                        // drop the leading keyword
-                if( sp != std::string_view::npos )
-                {
-                    s = s.substr( sp + 1 );
-                }
-                target.assign( s.data(), s.size() < 96 ? s.size() : 96 );
-                while( !target.empty() && ( target.back() == ';' || target.back() == ' ' || target.back() == '\n' || target.back() == '\r' ) )
-                {
-                    target.pop_back();
-                }
-            }
-        }
-        else if( std::strcmp( t, "using_directive" ) == 0 )
-        { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
-            target = csharpUsingTarget( n, src );                            // see csharpUsingTarget for the shape rationale
-        }
+
         if( !target.empty() )
         {
             // import-role use-site ref: name = the importable final segment (skip when the target has no
@@ -3049,7 +3228,7 @@ void captureIncludes( TSNode root, std::uint32_t fileId, std::string_view src, s
             {
                 RawRef r;
                 r.fileId    = fileId;
-                r.startByte = ts_node_start_byte( n );   // top-level directive → file-scope attribution
+                r.startByte = ts_node_start_byte( n );   // the DIRECTIVE, not its enclosing #if → file-scope attribution
                 r.line      = ts_node_start_point( n ).row + 1;
                 r.role      = RefRole::Import;
                 r.name      = std::move( nm );
@@ -4881,7 +5060,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: side captures" );
 
-        captureIncludes( root, fileId, src, incs, refs );   // physical deps + ABS-3 import-role use-sites
+        captureIncludes( root, le.lang, fileId, src, incs, refs );   // physical deps + ABS-3 import-role use-sites
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a
         // binding-free file (pybind gated on a file signal; extern-C/ctypes only fire on their exact shapes).
