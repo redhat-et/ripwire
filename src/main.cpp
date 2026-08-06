@@ -21,6 +21,7 @@
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
 #include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
+#include "nonlocalstate.h" // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
 #include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
 #include "ensemble.h"   // --ensemble: the family join over structural / lexical / confusion / historical evidence
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
@@ -4521,6 +4522,15 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     if( cfg.readability )
     {
         return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset );
+    }
+
+    // --nonlocal-state: per function, the non-local MUTABLE state it or its transitive callees reach, reads
+    // and writes kept apart (nonlocalstate.h owns the discovery, the closure AND its emission, the way
+    // --readability does). It needs the symbol table, the value-use references and the call graph — but no
+    // git — and it is a LENS: exit 0 always, no verdict, no threshold, every count a disclosed floor.
+    if( cfg.nonlocalState )
+    {
+        return nonlocal::writeNonLocalStateReport( ing, g, cfg.pageLimit, cfg.pageOffset );
     }
 
     // --naming-calibration: §9.5 — the naming-* lint rules judged against the repo's OWN rename history
@@ -10788,8 +10798,11 @@ int main( int argc, char** argv )
     // repeated invocation (e.g. successive --grep / --around / --for on the same tree) re-parses only what
     // changed. Verified output-identical to a cold parse (regression: cache transparency).
     // A4-P4: the verb class (rich=captureValueUses vs lean) is needed BEFORE choosing the auto-cache path
-    // so each class keys its own warm cache file (no cross-class thrash). Rich = --for/--metrics/--uses/--exemplar.
-    const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty();
+    // so each class keys its own warm cache file (no cross-class thrash). Rich = --for/--metrics/--uses/--exemplar
+    // /--nonlocal-state — the last one is read/write USE SITES by definition, so a lean ingest would hand it an
+    // empty reference set and it would report a confident, wrong zero.
+    const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
+                             || cfg.nonlocalState;
     IngestResult ing;
     if( multiRoot )
     {

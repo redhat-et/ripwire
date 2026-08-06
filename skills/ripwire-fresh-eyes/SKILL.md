@@ -175,6 +175,22 @@ sections your question needs.
    fitted on snippets of 20 lines or fewer, so on a 1,000-line function `posnett=` saturates at `0.000` —
    **read the ORDER of the rows, never the number as a grade.**
 
+   **Reachable non-local mutable state** — `ripwire <dir> --nonlocal-state`
+   `<fn p="src/infra/profilePmc.h:288" n="ensure_global_init" writes="2" reads="3" direct_writes="1"
+   direct_reads="3" cells_total="3"><cell n="g_perf" p="…:284" dir="rw" at="…:339" at_dir="rw"/>…` — per
+   function, the globals / file-scope statics / function-local statics / Python module globals it **or its
+   transitive callees** touch, **most writes first**, with reads and writes kept apart. `writes=`/`reads=`
+   fold in the callee closure; `direct_*` is what this body does itself; each `<cell>` names the declaration
+   and either the use site here (`at=`, with `at_dir=` for what THIS body does) or the callee it came
+   through (`via=`). Answers a different "is it safe to touch this?" than `--impact`: `--impact` is who
+   calls you, this is what *state* you can perturb from here — the reason a change with a tiny caller set
+   still breaks something across the repo. **`const`/`constexpr` declarations are not cells**, so a big
+   `writes=` is genuinely shared mutable state, not a table of constants. Three things to carry: it is
+   **unsound by construction** — no indirect calls, no pointer aliasing, no macro-named cells — so every
+   count is a `counts_floor="1"` floor and a zero means *none found*; a local **shadowing** a cell's name
+   can be charged to the cell; and it covers **C++/ObjC/Python only**, with every other indexed language
+   named in `unanalyzed_langs=` on the root, which is *not measured*, not *measured zero*.
+
    **Corroborated rot — `ripwire <dir> --ensemble`. Run this INSTEAD of steps 1-5 when the question is
    "where is the rot", and use the single-lens steps to drill into what it names.** One lens firing is an
    opinion; the same function flagged by *several kinds of evidence at once* is a finding. `--ensemble` joins
