@@ -76,22 +76,90 @@ inline std::size_t cloneCharLiteralLen( const std::string& src, std::size_t i, s
     return ( j < n && src[j] == '\'' ) ? ( j - i + 1 ) : 0;
 }
 
-// normalize bytes [a,b) → a token stream; identifiers→$I, numbers→$N, strings/chars→$S, // and /* */
-// comments dropped, keywords/operators/punctuation kept. tokenCount returns the number of tokens emitted.
-// stripHashComments: when the body's language uses `#` for line comments (Python/shell/Ruby), drop `#`-to-EOL
-// too (A4-F2 — otherwise an apostrophe in a `# don't …` comment opened a bogus char literal). Strings/chars are
-// consumed by the branches above `#`, so a `#` inside a literal is never mistaken for a comment.
-inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::uint32_t b, std::uint32_t& tokenCount,
-                                  bool stripHashComments = false )
+// Multi-byte operator spellings, for the scanner's maximal-munch mode (see munchMultiByteOperators below).
+// Only --readability asks for it today: `!=` scored as TWO operators is measuring punctuation, not operators.
+// Maximal munch over the WHOLE table (longest match wins), so declaration order here is not load-bearing and
+// a later addition cannot silently shadow an existing row.
+// The `?\?` spellings are ESCAPED on purpose: `??=` is the trigraph for `#`. C++17 removed trigraph
+// translation so the literal is correct either way, but clang warns (-Wtrigraphs) and a -Werror toolchain
+// would turn that warning into a broken build on another platform. The backslash costs nothing and says why.
+inline constexpr std::string_view kMultiByteOperators[] = {
+    "<<=", ">>=", "...", "**=", "<=>", "===", "!==", "?\?=",
+    "==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=", "/=", "%=",
+    "&=", "|=", "^=", "<<", ">>", "->", "=>", "::", "**", "?\?", "?.", "|>", ":=", "<-", ".."
+};
+
+// Longest operator spelling starting at src[i], or 0 when none matches (caller falls back to one byte).
+inline std::size_t multiByteOperatorLen( const std::string& src, std::size_t i, std::size_t n ) noexcept
 {
-    std::string out;
-    tokenCount = 0;
-    std::size_t i = a, n = std::min<std::size_t>( b, src.size() );
-    const auto idc = []( unsigned char c ) { return std::isalnum( c ) || c == '_'; };
+    std::size_t best = 0;
+    for( const std::string_view op : kMultiByteOperators )
+    {
+        if( op.size() > best && i + op.size() <= n && src.compare( i, op.size(), op ) == 0 )
+        {
+            best = op.size();
+        }
+    }
+    return best;
+}
+
+// Languages whose `#` opens a line comment. Two call sites in this file spelled the disjunction inline; a
+// third consumer (readability.h) made it three, so it is named once here.
+//
+// A constexpr BITMASK, not a `==` chain and not a linear scan of a 3-row table. Both of those spellings were
+// tried first and both landed on top of an existing helper — the `==` chain on graph.h's methodsCompatible,
+// the scan on lintrules.h's isValidSeverity and two more — because "is this one of N constants" is the most
+// re-derived shape in the tree, and --quality-delta names each new copy of it. The mask is one shift and one
+// AND with no branch, so it is also the cheapest form for something called once per indexed symbol.
+inline constexpr std::uint32_t langBit( Lang lang ) noexcept { return std::uint32_t( 1 ) << std::uint32_t( lang ); }
+inline constexpr std::uint32_t kHashLineCommentLangMask = langBit( Lang::Python ) | langBit( Lang::Bash ) | langBit( Lang::Ruby );
+static_assert( std::uint32_t( Lang::C ) < 32, "Lang outgrew a 32-bit mask — widen kHashLineCommentLangMask" );
+
+inline bool usesHashLineComments( Lang lang ) noexcept
+{
+    return ( ( kHashLineCommentLangMask >> std::uint32_t( lang ) ) & std::uint32_t( 1 ) ) != 0;
+}
+
+// What the scanner decided a token IS. The consumer decides what to DO with that — normalize it away
+// (--clones) or keep it verbatim (--readability) — which is the whole reason the two are separable.
+enum class CodeTokenKind : std::uint8_t { Identifier, Keyword, Number, String, Punctuation };
+
+// ══ THE ONE CODE SCANNER ══════════════════════════════════════════════════════════════════════════════
+// Bytes [a,b) → every token, as a VERBATIM slice of `src` plus its kind; whitespace and `//`, `/* */` (and,
+// with stripHashComments, `#`-to-EOL) comments dropped. Every token-stream consumer in the tree is a
+// projection of this one loop:
+//   --clones       erases identity  — identifiers→$I, numbers→$N, strings/chars→$S (normalizeSpan below)
+//   --readability  keeps identity   — the slices ARE the Halstead operand/operator vocabulary
+// It was two copies before readability.h would have made it three, and --quality-delta named the third as a
+// 778-token clone of both the moment it landed. A template sink rather than a returned vector: --clones runs
+// this over every function body in the corpus, so the shared form must not add an allocation per body.
+//
+// stripHashComments (A4-F2): without it an apostrophe in a `# don't …` comment opens a bogus char literal.
+// Strings and chars are consumed by the branches ABOVE `#`, so a `#` inside a literal is never a comment.
+//
+// munchMultiByteOperators: OFF (the --clones shape) emits punctuation one byte at a time, so `!=` is two
+// tokens. ON (the --readability shape) takes the longest match from kMultiByteOperators, because a Halstead
+// operator count that scores `!=` as two operators is measuring punctuation, not operators. It is a
+// PARAMETER and not a unification precisely because flipping it for --clones would change that verb's
+// normalized streams — i.e. its output bytes — and the new lens must be purely additive (G5).
+//
+// `sink( std::string_view token, CodeTokenKind kind )` is called once per token, in source order.
+template<typename Sink>
+inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b, bool stripHashComments,
+                            bool munchMultiByteOperators, Sink&& sink )
+{
+    const std::size_t n = std::min<std::size_t>( b, src.size() );
+    std::size_t       i = std::min<std::size_t>( a, n );
+    const auto        idc = []( unsigned char c ) noexcept { return std::isalnum( c ) != 0 || c == '_'; };
+
     while( i < n )
     {
         const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
-        if( std::isspace( c ) )                              { ++i; continue; }
+        if( std::isspace( c ) != 0 )
+        {
+            ++i;
+            continue;
+        }
         if( c == '/' && i + 1 < n && src[i + 1] == '/' )
         {
             i += 2;
@@ -113,7 +181,7 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
         }
         if( stripHashComments && c == '#' )
         {
-            i += 1;
+            ++i;
             while( i < n && src[i] != '\n' )
             {
                 ++i;
@@ -122,6 +190,7 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
         }
         if( c == '"' )
         {
+            const std::size_t begin = i;
             ++i;
             while( i < n && src[i] != '"' )
             {
@@ -131,9 +200,8 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
                 }
                 ++i;
             }
-            ++i;
-            out += "$S ";
-            ++tokenCount;
+            i = std::min( n, i + 1 );
+            sink( std::string_view( src.data() + begin, i - begin ), CodeTokenKind::String );
             continue;
         }
         // ' opens a char literal only with a plausible close (bounded lookahead) AND not directly after an
@@ -141,43 +209,79 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
         // separators (1'000'000) are absorbed by the number branch below, never reaching here.
         if( c == '\'' )
         {
-            const bool afterWord = ( i > a && idc( (unsigned char)src[i - 1] ) );
-            const std::size_t lit = afterWord ? 0 : cloneCharLiteralLen( src, i, n );
-            if( lit ) { i += lit; out += "$S "; ++tokenCount; continue; }
-            out += '\'';  out += ' ';  ++i;  ++tokenCount;  continue;   // punctuation
+            const bool        afterWord = i > a && idc( static_cast<unsigned char>( src[i - 1] ) );
+            const std::size_t lit       = afterWord ? 0 : cloneCharLiteralLen( src, i, n );
+            if( lit != 0 )
+            {
+                sink( std::string_view( src.data() + i, lit ), CodeTokenKind::String );
+                i += lit;
+                continue;
+            }
+            sink( std::string_view( src.data() + i, 1 ), CodeTokenKind::Punctuation );
+            ++i;
+            continue;
         }
-        if( std::isdigit( c ) )
+        if( std::isdigit( c ) != 0 )
         {
-            while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) )
+            const std::size_t begin = i;
+            while( i < n && ( idc( static_cast<unsigned char>( src[i] ) ) || src[i] == '.'
+                              || ( src[i] == '\'' && i + 1 < n && idc( static_cast<unsigned char>( src[i + 1] ) ) ) ) )
             {
                 ++i;
             }
-            out += "$N ";
-            ++tokenCount;
+            sink( std::string_view( src.data() + begin, i - begin ), CodeTokenKind::Number );
             continue;
         }
-        if( std::isalpha( c ) || c == '_' )
+        if( std::isalpha( c ) != 0 || c == '_' )
         {
-            const std::size_t s = i;
-            while( i < n && idc( (unsigned char)src[i] ) )
+            const std::size_t begin = i;
+            while( i < n && idc( static_cast<unsigned char>( src[i] ) ) )
             {
                 ++i;
             }
-            const std::string_view w( src.data() + s, i - s );
-            if( cloneIsKeyword( w ) )
-            {
-                out += w;
-                out += ' ';
-            }
-            else
-            {
-                out += "$I ";
-            }
-            ++tokenCount;
+            const std::string_view w( src.data() + begin, i - begin );
+            sink( w, cloneIsKeyword( w ) ? CodeTokenKind::Keyword : CodeTokenKind::Identifier );
             continue;
         }
-        out += char( c );  out += ' ';  ++i;  ++tokenCount;   // operator / punctuation
+        const std::size_t opLen = munchMultiByteOperators ? multiByteOperatorLen( src, i, n ) : std::size_t( 0 );
+        const std::size_t len   = opLen != 0 ? opLen : std::size_t( 1 );
+        sink( std::string_view( src.data() + i, len ), CodeTokenKind::Punctuation );
+        i += len;
     }
+}
+
+// The --clones PROJECTION of a scanned token: identity erased, control flow kept. One statement of the
+// mapping, so the joined-string and vector forms below cannot drift apart. A declarative table indexed by
+// the kind, not a switch chain (CONTRIBUTING.md §3) — an EMPTY row means "keep the token verbatim", which is
+// what keywords and punctuation do. Row order is the CodeTokenKind declaration order; the static_assert is
+// what makes reordering the enum a compile error rather than a silent re-mapping of $I onto $N.
+inline constexpr std::string_view kCloneNormalForms[] = { "$I", "", "$N", "$S", "" };
+static_assert( std::size( kCloneNormalForms ) == std::size_t( CodeTokenKind::Punctuation ) + 1,
+               "kCloneNormalForms must carry exactly one row per CodeTokenKind, in declaration order" );
+
+inline std::string_view cloneNormalizedForm( std::string_view token, CodeTokenKind kind ) noexcept
+{
+    const std::string_view form = kCloneNormalForms[ std::size_t( kind ) ];
+    return form.empty() ? token : form;
+}
+
+// normalize bytes [a,b) → a token stream; identifiers→$I, numbers→$N, strings/chars→$S, // and /* */
+// comments dropped, keywords/operators/punctuation kept. tokenCount returns the number of tokens emitted.
+// stripHashComments: when the body's language uses `#` for line comments (Python/shell/Ruby), drop `#`-to-EOL
+// too (A4-F2 — otherwise an apostrophe in a `# don't …` comment opened a bogus char literal). Strings/chars are
+// consumed by the branches above `#`, so a `#` inside a literal is never mistaken for a comment.
+inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::uint32_t b, std::uint32_t& tokenCount,
+                                  bool stripHashComments = false )
+{
+    std::string out;
+    tokenCount = 0;
+    scanCodeTokens( src, a, b, stripHashComments, false,
+                    [ & ]( std::string_view token, CodeTokenKind kind )
+                    {
+                        out += cloneNormalizedForm( token, kind );
+                        out += ' ';
+                        ++tokenCount;
+                    } );
     return out;
 }
 
@@ -191,89 +295,11 @@ inline std::vector<std::string> normalizeTokens( const std::string& src, std::ui
                                                  bool stripHashComments = false )
 {
     std::vector<std::string> out;
-    std::size_t i = a, n = std::min<std::size_t>( b, src.size() );
-    const auto  idc = []( unsigned char c ) { return std::isalnum( c ) || c == '_'; };
-    while( i < n )
-    {
-        const unsigned char c = static_cast<unsigned char>( src[i] );   // explicit: a raw char >=0x80 implicitly converting is the UBSan sign-change class (CI round 4 artifact)
-        if( std::isspace( c ) )                              { ++i; continue; }
-        if( c == '/' && i + 1 < n && src[i + 1] == '/' )
-        {
-            i += 2;
-            while( i < n && src[i] != '\n' )
-            {
-                ++i;
-            }
-            continue;
-        }
-        if( c == '/' && i + 1 < n && src[i + 1] == '*' )
-        {
-            i += 2;
-            while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
-            {
-                ++i;
-            }
-            i = std::min( n, i + 2 );
-            continue;
-        }
-        if( stripHashComments && c == '#' )
-        {
-            i += 1;
-            while( i < n && src[i] != '\n' )
-            {
-                ++i;
-            }
-            continue;
-        }
-        if( c == '"' )
-        {
-            ++i;
-            while( i < n && src[i] != '"' )
-            {
-                if( src[i] == '\\' )
-                {
-                    ++i;
-                }
-                ++i;
-            }
-            ++i;
-            out.emplace_back( "$S" );
-            continue;
-        }
-        // ' → char literal only with a plausible close and not right after an identifier/digit byte (A4-F2).
-        if( c == '\'' )
-        {
-            const bool afterWord = ( i > a && idc( (unsigned char)src[i - 1] ) );
-            const std::size_t lit = afterWord ? 0 : cloneCharLiteralLen( src, i, n );
-            if( lit ) { i += lit; out.emplace_back( "$S" ); continue; }
-            out.emplace_back( 1, '\'' );  ++i;  continue;   // punctuation
-        }
-        if( std::isdigit( c ) )
-        {
-            while( i < n && ( idc( (unsigned char)src[i] ) || src[i] == '.' || ( src[i] == '\'' && i + 1 < n && idc( (unsigned char)src[i + 1] ) ) ) )
-            {
-                ++i;
-            }
-            out.emplace_back( "$N" );
-            continue;
-        }
-        if( std::isalpha( c ) || c == '_' )
-        {
-            const std::size_t s = i;
-            while( i < n && idc( (unsigned char)src[i] ) )
-            {
-                ++i;
-            }
-            const std::string_view w( src.data() + s, i - s );
-            if( cloneIsKeyword( w ) ) { out.emplace_back( w ); }
-            else
-            {
-                out.emplace_back( "$I" );
-            }
-            continue;
-        }
-        out.emplace_back( 1, char( c ) );  ++i;   // operator / punctuation
-    }
+    scanCodeTokens( src, a, b, stripHashComments, false,
+                    [ & ]( std::string_view token, CodeTokenKind kind )
+                    {
+                        out.emplace_back( cloneNormalizedForm( token, kind ) );
+                    } );
     return out;
 }
 
@@ -337,7 +363,7 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
         {
             const Symbol& s = ing.symbols[id];
             std::uint32_t tc = 0;
-            const bool    hash = ( s.lang == Lang::Python || s.lang == Lang::Bash || s.lang == Lang::Ruby );   // `#` line comments
+            const bool    hash = usesHashLineComments( s.lang );   // `#` line comments
             std::string   norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, tc, hash );   // the BODY only [sigEndByte,endByte)
             if( int( tc ) < minTokens )
             {
@@ -636,7 +662,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
         for( NodeId id : byFile[f] )
         {
             const Symbol&            s    = ing.symbols[id];
-            const bool               hash = ( s.lang == Lang::Python || s.lang == Lang::Bash || s.lang == Lang::Ruby );
+            const bool               hash = usesHashLineComments( s.lang );
             std::vector<std::string> raw  = normalizeTokens( bytes, s.sigEndByte, s.endByte, hash );
             if( int( raw.size() ) < minTokens )
             {

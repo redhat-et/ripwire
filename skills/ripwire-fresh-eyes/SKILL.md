@@ -164,6 +164,17 @@ sections your question needs.
    **Worst case:** a file that's BOTH a top hotspot (step 1) AND `bf="1"` — gnarly code only one person
    understands.
 
+   **Per-function readability** — `ripwire <dir> --readability`
+   `<readability functions="N" shown="40" capped="1"><fn p="…:512" n="buildGraph" lines="1244" toks="6753"
+   ops="4359" vocab="382" vol="57923.4" ent="6.26" posnett="0.000"/>` — the Posnett/Hindle/Devanbu (MSR 2011)
+   closed-form model, **least readable first**: `vol=` Halstead volume, `ent=` Shannon token entropy,
+   `lines=` the definition's line span, `posnett=` the fitted sigmoid. Complements step 1: `--hotspots` ranks
+   by complexity × *churn* (where pain has been paid), this ranks by how hard the text is to *read* right
+   now, with no git history needed. Two caveats it states in its own legend and you should carry: one
+   token-class table serves every language, so `vol=` is a cross-language approximation; and the formula was
+   fitted on snippets of 20 lines or fewer, so on a 1,000-line function `posnett=` saturates at `0.000` —
+   **read the ORDER of the rows, never the number as a grade.**
+
 ## Hidden-coupling pass — "a change here keeps breaking unrelated files"
 
 6. **Behavioural coupling** — `ripwire <dir> --cochange`

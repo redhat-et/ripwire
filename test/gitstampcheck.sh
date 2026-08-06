@@ -204,11 +204,21 @@ for flags in "--doctor" "--doc-drift" "--hotspots" "--quality-delta" "--pr-conte
         # cache dir. That dir is machine-global, so any concurrent ripwire activity (another agent
         # session, another worktree's test run) can grow those counters between these two back-to-back
         # runs even though the binary itself is perfectly deterministic. This arm asserts output-SHAPE
-        # determinism of the binary, not that the whole machine held still — so normalize just those two
-        # volatile attributes out of BOTH sides before comparing; everything else still has to match
-        # byte-for-byte.
-        cmp_a="$( printf '%s' "$a" | sed -E 's/blobs="[0-9]+" bytes="[0-9]+"/blobs="N" bytes="N"/' )"
-        cmp_b="$( printf '%s' "$b" | sed -E 's/blobs="[0-9]+" bytes="[0-9]+"/blobs="N" bytes="N"/' )"
+        # determinism of the binary, not that the whole machine held still — so normalize the volatile
+        # attributes out of BOTH sides before comparing; everything else still has to match byte-for-byte.
+        #
+        # many= and truncated= are normalized for exactly the same reason and were the hole this arm
+        # flaked through under `pargates.py -j 6`: they are not independent facts, they are DERIVED from
+        # the very same live scan as blobs=/bytes=, so scrubbing the counters while still comparing the
+        # flags computed from them left the arm as machine-sensitive as before. Measured on a loaded
+        # machine (load average ~38, suite running at -j 6): 1 pair in ~3 flipped truncated="0" ->
+        # truncated="1" between two back-to-back runs, and the arm reported it as a determinism failure
+        # of the BINARY. Anchored on the cache-dir row so a truncated= belonging to any other <c> row is
+        # still compared verbatim; if that row's shape ever changes the substitution simply no-ops and
+        # the arm goes back to being strict, which is the safe direction for it to fail in.
+        scrubCacheDir(){ sed -E 's/(n="cache-dir"[^>]*)blobs="[0-9]+" bytes="[0-9]+" many="[01]" truncated="[01]"/\1blobs="N" bytes="N" many="N" truncated="N"/'; }
+        cmp_a="$( printf '%s' "$a" | scrubCacheDir )"
+        cmp_b="$( printf '%s' "$b" | scrubCacheDir )"
     fi
     [ "$cmp_a" = "$cmp_b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
     printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"
