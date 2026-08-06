@@ -161,6 +161,21 @@ sections your question needs.
    per-rule floor) with a `pairs=` sample size and its own legend calling itself a **noisy proxy**, not a
    verdict on any function you're looking at. It always exits 0.
 
+   **The one naming lens that proposes a FIX, not just evidence — `ripwire <dir> --naming-consistency`.**
+   Every other pass on this page tells you WHAT is wrong; this one is the deliberate exception, and only for
+   one narrow reason: case-CONVENTION is Tier A (the research record's own tiering for "propose a fix only
+   where the correct replacement is derivable from the corpus" — see `ripwire-quality-bar`'s zoom-in table
+   for the other nine `--quality-delta` kinds, which stay evidence-only on purpose). It votes the corpus's
+   OWN dominant case style (camel/pascal/snake/screaming) per `(language, kind)` group — decided only past a
+   20-name sample floor AND 90% agreement, `UNAVAILABLE` with `why=` otherwise, never a guessed winner — and
+   every off-convention name in a decided group gets `propose=`: its own subtokens mechanically recombined
+   into that style. No dictionary, no synonym judgment — which is exactly why this is the one place a rename
+   suggestion is safe to make. **It is still only a suggestion**, not a safe-to-blind-apply rename: applying
+   one for real needs `--uses` to prove the complete reference set first. Exit 0 always, a lens like the rest
+   of this page — abbreviation inconsistency and synonym unification (the other two Tier-A categories) stay
+   unimplemented on purpose; both need a dictionary or a semantic judgment call this verb's design
+   deliberately avoids.
+
    **Your own rules** — `ripwire <dir> --lint-rules=DIR` loads YAML ast-grep-style rules from `DIR` and runs
    them alongside (or instead of) the built-ins; findings share the same `<f rule= sev= p= …>message</f>`
    shape. A malformed rule alerts to stderr and is skipped (sibling rules still load); zero loaded rules

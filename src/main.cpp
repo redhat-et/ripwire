@@ -26,6 +26,7 @@
 #include "contextratio.h" // --context-ratio: the LOCAL-REASONING lens (outside-the-file share of a unit's context)
 #include "nonlocalstate.h" // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
 #include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
+#include "namingconsistency.h"  // --naming-consistency: §9.2 TIER A convention normalization (corpus-derived case-style vote)
 #include "ensemble.h"   // --ensemble: the family join over structural / lexical / confusion / historical evidence
 #include "qualitypanel.h" // --quality-panel: THE SINGLE COMMAND — the ensemble's four families plus colocation and state, under a preset
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
@@ -4644,6 +4645,14 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         return renamemine::writeNamingCalibrationReport( ing, d.root );
     }
 
+    // --naming-consistency: §9.2 TIER A convention normalization — the corpus's own case-convention vote,
+    // read-only, graph-free (namingconsistency.h owns the scan, the decision and the emission). Exit 0
+    // always — a lens, not a gate.
+    if( cfg.namingConsistency )
+    {
+        return namingconsistency::writeNamingConsistencyReport( ing, cfg.pageLimit, cfg.pageOffset );
+    }
+
     // --dead-code[=DIR]: HIGH-CONFIDENCE candidates only. Zero callers is incomplete whole-program evidence,
     // so the default reports source-defined free functions with explicit internal (`static`) linkage. External
     // entry points, methods, header definitions and declarations are excluded. There is no broad product mode,
@@ -5579,7 +5588,7 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         for( std::size_t i = extPw.begin; i < extPw.end; ++i )
         {
             std::printf( "<x n=\"%s\" lang=\"%s\" refs=\"%u\" calls=\"%u\"/>",
-                         ex( names[i].name ).c_str(), langLabel( names[i].lang ), names[i].refs, names[i].calls );
+                         ex( names[i].name ).c_str(), langTag( names[i].lang ), names[i].refs, names[i].calls );
         }
         std::printf( "</external-surface>" );
         return 0;

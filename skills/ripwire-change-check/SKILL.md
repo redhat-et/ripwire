@@ -14,7 +14,9 @@ description: >
   --metrics coupling/cohesion/size on what you touched, and shows the diff's footprint via --map-diff. For
   code QUALITY (better or worse) → **ripwire-quality-bar** instead — this skill judges merge safety, not
   quality. Backed by ripwire (deterministic, on PATH). A one-line leaf fix is not a merge audit — run the
-  focused test and skip this skill (and this file). Sizing work not yet written → ripwire-before-you-build.
+  focused test, but still run `--edit-check=SYM` first (~ms warm, cheaper than deciding by eye whether the
+  edit touched a contract): a clean `unchanged` result is what actually earns the right to skip the rest of
+  this skill (and this file). Sizing work not yet written → ripwire-before-you-build.
   Risk in a subsystem you did NOT write → ripwire-fresh-eyes.
 allowed-tools: Bash, Read
 ---
@@ -50,8 +52,11 @@ Use this first for the evidence dump; steps 1–5 below are the same ground as a
 
 **Scope guard:** Do not turn a focused fix into a full merge audit merely because a diff now exists. Invoke
 this skill when the user is actually at the submit/review/merge-safety moment, or when the edit changes a
-contract or has unclear reach. For an obvious leaf-level implementation fix with no signature/API change,
-the focused test plus `git diff --check` is enough unless repository instructions require a broader gate.
+contract or has unclear reach. But "obvious leaf-level fix with no signature/API change" is a claim, not a
+given — run `--edit-check=SYM` (the fast per-symbol sibling of step 8, ~ms warm) to confirm it before trusting
+it; a `status="contract-change"` result means the fix was not as leaf-level as it looked, and the full audit
+below is now warranted. Only a genuinely `"unchanged"` result plus the focused test plus `git diff --check`
+is enough to stop there, unless repository instructions require a broader gate.
 Never run `--pr-context` and then repeat its component steps without a specific unanswered question.
 
 **The header is stamped `at="<sha>[+dirty]"`** — the commit the evidence was measured at (`--pr-context`,

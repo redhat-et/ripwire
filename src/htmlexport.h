@@ -54,29 +54,8 @@ inline std::string jsonEscape( std::string_view s )
     return jsonesc::escapeHtml( s );
 }
 
-// Short lang label for the graph JSON (matches the terse XML convention).
-inline const char* langLabel( Lang l ) noexcept
-{
-    switch( l )
-    {
-        case Lang::Cpp:        return "cpp";
-        case Lang::Python:     return "py";
-        case Lang::TypeScript: return "ts";
-        case Lang::Go:         return "go";
-        case Lang::Rust:       return "rs";
-        case Lang::Swift:      return "swift";
-        case Lang::ObjC:       return "objc";
-        case Lang::JavaScript: return "js";
-        case Lang::Bash:       return "sh";
-        case Lang::Java:       return "java";
-        case Lang::Ruby:       return "rb";
-        case Lang::Markdown:   return "md";
-        case Lang::Json:       return "json";
-        case Lang::CSharp:     return "cs";
-        case Lang::C:          return "c";
-        default:               return "?";
-    }
-}
+// Short lang label for the graph JSON (matches the terse XML convention) — model.h::langTag is the
+// canonical switch; this file used to keep a private copy.
 
 // The inline vanilla-JS: a hash-routed wiki over three VIEWS (overview cards / module subgraph /
 // node ego-graph), all driven by ONE force-directed sim on <canvas>. No external refs, no build step.
@@ -776,7 +755,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         const Symbol&  sym  = ing.symbols[ order[k] ];
         const float    r    = rank[ order[k] ];
         const char*    tag  = symTag( sym.kind );
-        const char*    lang = langLabel( sym.lang );
+        const char*    lang = langTag( sym.lang );
         const NodeId   slot = moduleOf[k];
         const long     comm = ( slot == kNoNode ) ? -1L : long( moduleRank[ slot ] );
 

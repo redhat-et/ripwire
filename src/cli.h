@@ -160,6 +160,11 @@ struct Config
                                                             // repo's OWN rename history (old -> new pairs mined from git log -p).
                                                             // A NOISY proxy, disclosed as one; the floor a rule must clear lives in
                                                             // test/namingcalibrationcheck.sh, not here (renamemine.h)
+    bool             namingConsistency = false;            // --naming-consistency: §9.2 TIER A — the corpus's own case-CONVENTION
+                                                            // vote per (language, kind) group; every off-convention name in a
+                                                            // DECIDED group gets propose=, its own subtokens mechanically
+                                                            // recombined into the dominant style. A lens, exit 0 always
+                                                            // (namingconsistency.h)
     bool             commentCoherence  = false;            // --comment-coherence: per function/method with a doc comment, TWO published
                                                             // content measures — Steidl/Hummel/Juergens c_coeff (ICPC 2013, HIGH is BAD:
                                                             // the comment mostly restates the name) and Scalabrino CIC (ICPC 2016/JSEP
@@ -894,6 +899,18 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               PROXY, stated as one -- rebrands, moves and API changes all look like renames -- so read\n"
         "                               pairs= (the sample size) first; the group rules report scope=group-rule, not a fake 0/0.\n"
         "                               Exit 0 always: the per-rule floor lives in test/namingcalibrationcheck.sh\n"
+        "    --naming-consistency       TIER A convention normalization (section 9.2): the corpus's OWN case-convention vote per\n"
+        "                               (language, kind) group among multi-token eligible names -- a single-token name, or one split\n"
+        "                               only on digit boundaries, carries no case signal and is silently excluded. A group DECIDES\n"
+        "                               only when its leading style (camel/pascal/snake/screaming) clears a 20-name sample floor AND\n"
+        "                               a 90%% agreement floor; short of either it reports style=UNAVAILABLE with why= naming which\n"
+        "                               bar it missed, never a guessed winner. Every off-convention name in a DECIDED group\n"
+        "                               (including mixed -- naming-case's own finding, a separator AND a transition in one name,\n"
+        "                               which never wins a vote) gets propose=: its OWN subtokens mechanically recombined into the\n"
+        "                               dominant style -- no dictionary, no synonym judgment, which is what keeps this derivable\n"
+        "                               from the corpus rather than invented. propose= is a SUGGESTION, never a safe-to-blind-apply\n"
+        "                               rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0\n"
+        "                               always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows\n"
         "    --comment-coherence        per function/method WITH A DOC COMMENT, two published content measures, MOST NAME-RESTATING\n"
         "                               FIRST: c_coeff (Steidl/Hummel/Juergens, ICPC 2013) is the fraction of the comment's words within\n"
         "                               Levenshtein distance <2 of a word in the symbol's own (split) name — HIGH c_coeff IS BAD, it\n"
@@ -1369,7 +1386,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
         "                               --readability --ensemble --quality-panel --context-ratio --nonlocal-state\n"
-        "                               --comment-coherence.\n"
+        "                               --comment-coherence --naming-consistency.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
@@ -1556,6 +1573,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--context-ratio",      &Config::contextRatio       },
     { "--quality-panel",      &Config::qualityPanel       },   // bare flag → the `default` preset (the value is an OPTIONAL selection)
     { "--naming-calibration", &Config::namingCalibration  },
+    { "--naming-consistency", &Config::namingConsistency  },
     { "--comment-coherence",  &Config::commentCoherence   },
     { "--cochange",           &Config::cochange           },
     { "--cochange-groups",    &Config::cochangeGroups     },   // matched by EQUALITY, scanned before the prefix table, so it can
@@ -1875,7 +1893,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 164;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags)
+inline constexpr std::size_t kTotalFlagArms       = 165;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2063,7 +2081,8 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence";
+    "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
+    "--naming-consistency";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -2073,7 +2092,8 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability || c.ensemble || c.qualityPanel || c.contextRatio || c.nonlocalState || c.commentCoherence;
+        || c.readability || c.ensemble || c.qualityPanel || c.contextRatio || c.nonlocalState || c.commentCoherence
+        || c.namingConsistency;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in

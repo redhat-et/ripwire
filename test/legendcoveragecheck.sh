@@ -112,6 +112,7 @@ ROSTER = [
     ("readability",        [SMALL, "--readability"]),
     ("ensemble",           [SMALL, "--ensemble"]),
     ("context-ratio",      [SMALL, "--context-ratio"]),
+    ("naming-consistency", [SMALL, "--naming-consistency"]),
     ("cochange",           [ROOT,  "--cochange"]),
     ("cochange-file",      [ROOT,  "--cochange=src/cli.h"]),
     ("owners",             [ROOT,  "--owners"]),
