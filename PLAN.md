@@ -268,3 +268,31 @@ un-gitignored.
   reason — measure, then write what you measured.
 - `claude/unruffled-yalow-24aaa8` is **superseded** — HEAD fixed that litter by sharding and
   deliberately never evicts live locks. Do not merge it.
+
+### UPDATE — `fix/ensemble-availability` landed (`ab3f26b`)
+
+Merged clean into `integration/all`; builds clean. The fix went wider than the reported defect:
+`confusion` was the symptom, but the same class of lie appeared three more times —
+(a) with an **empty eligible set** all four families sat silent while `unavailable=""` claimed all
+four were measured; (b) `unavailWhy` was a single `const char*`, so with two families unavailable at
+once (a non-git Rust tree is exactly that) one reason was **silently overwritten** — truthful about
+*what*, lying about *why*; (c) `lexical` has a real precondition too (the naming pack skips
+Json/Markdown/Unknown), implemented though near-unreachable on today's language table.
+`structural` was **verified** to have no precondition rather than assumed to have none.
+
+Availability is now decided per corpus from what was indexed, calling each pack's OWN predicate — no
+second copy of the language list anywhere. `cfiles=`/`cscope=`/`lscope=` on the root make the verdict
+auditable from the output instead of taken on trust.
+
+Gate design worth imitating: arm (C) requires the family to actually FIRE on C, so a "fix" that
+marked everything unavailable would fail; the mutation arm adds exactly ONE C file and requires the
+verdict and `of=` to move — it asserts a measurement, not a constant.
+
+**NEW TRAP, add to the list above:** `git stash` → rebuild → `git stash pop` does **not** trigger a
+cmake rebuild, leaving a stale `build/ripwire` that silently emits base-binary output. This produces
+a FALSE GREEN in any A/B comparison — it was caught only because a differential showed *zero*
+difference where there had to be some. Build A/B binaries in genuinely separate worktrees and `cmp`
+them before trusting any before/after measurement.
+
+Still open at 97% budget: wave 3 (`wf_0eab98ba-d7d`) was mid-Metrics phase — name-informativeness,
+comment-coherence, DMM, then the panel, skills and land. Nothing pushed.
