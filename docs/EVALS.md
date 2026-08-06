@@ -19,6 +19,7 @@ section, and it is not an afterthought.
 | **Head-to-head comparison** | `bench/headtohead/` | ripwire against three other context/retrieval tools on the same 60 instances, same gold, same metric code. |
 | **C++ localization benchmarks** | `bench/cppbench/`, `bench/multiswe/` | The same localization metric on C++ corpora, since the public localization datasets are Python-heavy. |
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
+| **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
 | **The gate suite** | `test/regression.sh`, `test/pargates.py` | 346 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
@@ -568,7 +569,378 @@ Listed because the reason is more useful than the silence.
 
 ---
 
-## 9. Reproducing
+## 9. Ensemble family calibration — the measurement a preset must be derived from
+
+`--ensemble` joins four evidence families and ranks by the **count of distinct families that fire**,
+never by a weighted composite. That design is only worth something if the families are genuinely
+orthogonal; if they correlate, the join is one signal wearing four hats. This section is the
+measurement that decides it, and the measurement any named preset has to be derived from rather than
+chosen. **It ships no new rule and no new metric** — every number below comes out of `--ensemble`,
+`--readability` and `--metrics` through their existing entry points, parsed from their own XML by
+`bench/ensemblecal/run_ensemblecal.py`. Measured 2026-08-06 with the binary built at
+`integration/all` `61c6b54`.
+
+**Verdict up front: the ensemble premise HOLDS.** The largest cross-family correlation anywhere in
+the data is **φ = +0.278**, and pooled over the independent corpora no pair exceeds **+0.168**. The
+families are not restatements of each other. Two other results are less comfortable and are stated
+with equal weight: the **historical** family is too unstable across commits to carry a gate, and the
+**confusion** family reports itself as measured on corpora where it cannot fire at all.
+
+### 9.1 Corpora — and the overfitting caveat, stated first
+
+A preset derived from one codebase overfits to that codebase's conventions. Nine trees were reached;
+only five are **independent evidence**, and every pooled number below pools exactly those five.
+
+| Corpus | Files | Symbols | Edges | Eligible fns | HEAD | Dominant languages (indexed files) |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| **ripwire** | 977 | 7 373 | 9 490 | **4 672** | `61c6b54` | Bash 354, C/C++ hdr 154, C++ 136, md 104, Python 68 |
+| **tree-sitter (vendored)** | 113 | 2 936 | 2 994 | **1 538** | `61c6b54` | C/C++ hdr 55, C 30 — third-party, largely generated |
+| **gameA** | 2 376 | 42 918 | 38 391 | **17 157** | `0534e79` | C/C++ hdr 692, md 671, C++ 620, ObjC++ 50, Metal 42 |
+| **rustCLI** | 250 | 6 004 | 6 020 | **4 068** | *(no git)* | Rust 115, md 75, Bash 11, TS 8 |
+| **appleXR** | 320 | 1 860 | 582 | **454** | *(no git)* | json 158, Swift 49, C/C++ hdr 45, ObjC 40, Metal 13 |
+| *ripwire-src* | 95 | 2 795 | 7 929 | *1 958* | `61c6b54` | a **subset of ripwire** — not independent |
+| *ctxpack* | 920 | 7 476 | 8 312 | *4 027* | `b5ac9f2` | ripwire's **pre-cutover ancestor** — shared lineage |
+| *gameA-later* | 4 075 | 59 350 | 39 152 | *17 552* | `86a6dbb7` | a later **snapshot of gameA** |
+| *gameA-earlier* | 734 | 15 006 | 17 235 | *8 935* | `dabfaf0` | an earlier **snapshot of gameA** |
+
+`third_party` is a default-skipped crawl directory (`src/ingest.h`), so the ripwire and tree-sitter
+corpora are disjoint by construction rather than by an `--exclude`.
+
+`gameA`, `rustCLI` and `appleXR` are **private local trees, named here by shape rather than by name**
+— a game engine in C++/ObjC++/Metal, a Rust CLI, and a Swift/ObjC/Metal app. They cannot be
+redistributed, so their rows are reproducible by this project and by nobody else; that is a real
+limit on this section and it is why the two corpora that *are* in this repository (ripwire and the
+vendored tree-sitter grammars) are reported beside every private one.
+
+**Pooled independent denominator: 27 889 eligible functions across 5 trees**, spanning C, C++,
+ObjC/ObjC++, Metal, Rust, Swift, Python, TypeScript and Bash. That is a real language spread, but it
+is **five projects from two authoring populations** (this project's own lineage, one game tree, one
+vendored parser set, two Apple-platform trees), all reachable on one machine. No public
+multi-org corpus was fetched. **A preset derived from this is calibrated, not universal**, and the
+numbers below should be re-derived on any tree where it is deployed as a gate — which is Arcan's own
+`Max(this-system, benchmark)` posture, not a substitute for it.
+
+### 9.2 Per-family distribution, and where the shipped thresholds actually sit
+
+**Fire rate over the eligible denominator** (functions/methods with a body):
+
+| Corpus | eligible | structural | lexical | confusion | historical |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ripwire | 4 672 | 558 · 11.94% | 900 · 19.26% | 107 · 2.29% | 1 044 · 22.35% |
+| tree-sitter | 1 538 | 190 · 12.35% | 426 · 27.70% | 57 · 3.71% | 55 · 3.58% |
+| gameA | 17 157 | 2 170 · 12.65% | 1 676 · 9.77% | 613 · 3.57% | 892 · 5.20% |
+| rustCLI | 4 068 | 292 · 7.18% | 1 303 · 32.03% | **0 · 0.00%** | **UNAVAILABLE** |
+| appleXR | 454 | 45 · 9.91% | 16 · 3.52% | 7 · 1.54% | **UNAVAILABLE** |
+| *ripwire-src* | *1 958* | *482 · 24.62%* | *55 · 2.81%* | *101 · 5.16%* | *558 · 28.50%* |
+| *ctxpack* | *4 027* | *503 · 12.49%* | *825 · 20.49%* | *94 · 2.33%* | *874 · 21.70%* |
+| *gameA-later* | *17 552* | *2 257 · 12.86%* | *1 690 · 9.63%* | *629 · 3.58%* | *781 · 4.45%* |
+| *gameA-earlier* | *8 935* | *1 111 · 12.43%* | *929 · 10.40%* | *291 · 3.26%* | *57 · 0.64%* |
+
+**Cross-corpus spread (max ÷ min over the independent five, non-zero corpora only):** structural
+**1.76×**, confusion **2.40×**, historical **6.25×**, lexical **9.09×**. Structural is the portable
+one; lexical is the least portable, and §9.6 explains why.
+
+**The four absolute structural bars are already percentile-calibrated — by accident, and tightly.**
+A symbol appears in a row's `why=` string exactly when its value crossed a bar, so the crossing
+count over `eligible=` is the bar's exact exceedance, i.e. the percentile at which the shipped
+constant sits in that corpus's own distribution:
+
+| Bar | ripwire | tree-sitter | gameA | rustCLI | appleXR | band |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ccx >= 15` | P91.59 | P92.52 | P95.35 | P95.55 | P98.24 | **P91.6 – P98.2** |
+| `loc >= 60` | P93.99 | P95.19 | P94.87 | P96.12 | P96.26 | **P94.0 – P96.3** |
+| `nest >= 4` | P95.55 | P93.76 | P96.32 | P95.65 | P99.12 | **P93.8 – P99.1** |
+| `params >= 5` | P95.89 | P95.58 | P93.44 | P99.09 | P99.12 | **P93.4 – P99.1** |
+
+`loc >= 60` is the striking one: **a constant invented years ago in someone else's style guide lands
+inside a 2.3-percentile-point band across C++, Rust, ObjC++, Swift and generated C.** A
+percentile-derived replacement would be a rename of the number it replaces. This is the empirical
+answer to "should the bars be percentile-derived instead of invented" — **on this evidence they
+should not be changed**, and a preset should spend its degrees of freedom on *selection* instead.
+
+For anyone who does want to re-derive them, the full CDFs are in the harness output; the headline
+values (from `--metrics`, whose fn/method universe is close to but not identical to the ensemble's
+eligible set — the per-corpus `n` is printed so the gap is visible):
+
+| Metric | corpus | n | P50 | P75 | P90 | P95 | P99 | max |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ccx | ripwire | 4 920 | 0 | 3 | 12 | 21 | 77 | 724 |
+| ccx | gameA | 21 092 | 0 | 1 | 5 | 11 | 38 | 592 |
+| ccx | rustCLI | 4 069 | 0 | 1 | 6 | 13 | 39 | 218 |
+| loc | ripwire | 4 920 | 4 | 15 | 38 | 66 | 185.7 | 1 629 |
+| loc | gameA | 21 092 | 4 | 11 | 30 | 50 | 137 | 2 722 |
+| loc | rustCLI | 4 069 | 9 | 18 | 35 | 54 | 110.3 | 1 115 |
+
+**The two ordinal signals are NOT deciles, on any corpus that matters.** The readability and churn
+halves fire for "the worst decile of their own ranking, bounded above by 40 rows". The bound wins
+almost everywhere:
+
+| Corpus | readability cut | realized | churn cut | realized |
+| --- | --- | ---: | --- | ---: |
+| ripwire | 40 / 4 672 | **0.86%** | 40 / 977 | 4.09% |
+| tree-sitter | 40 / 1 538 | 2.60% | 12 / 113 | 10.62% |
+| gameA | 40 / 17 157 | **0.23%** | 40 / 1 810 | 2.21% |
+| rustCLI | 40 / 4 068 | 0.98% | — | n/a |
+| appleXR | 40 / 454 | 8.81% | — | n/a |
+
+On gameA the "worst decile" is a **0.23% cut — 43× tighter than a decile**. The legend does
+publish `rcut=`/`rmeasured=`, so a reader *can* compute this; the word "decile" is nonetheless wrong
+above ~400 functions and is a documentation defect, not a measurement one.
+
+### 9.3 Cross-family correlation — the orthogonality test
+
+φ (Pearson on the two binary indicators = the phi coefficient) over the full eligible denominator,
+so non-firing symbols are counted, not dropped. Pooled over the five independent corpora:
+
+| | structural | lexical | confusion | historical |
+| --- | ---: | ---: | ---: | ---: |
+| **structural** | 1.000 | −0.060 | **+0.168** | +0.127 |
+| **lexical** | −0.060 | 1.000 | −0.039 | −0.044 |
+| **confusion** | +0.168 | −0.039 | 1.000 | +0.047 |
+| **historical** | +0.127 | −0.044 | +0.047 | 1.000 |
+
+with the 2×2 counts behind each cell (n11 / n10 / n01 / n00 over 27 889, except the historical row
+whose denominator is the 23 367 symbols in the three corpora where git could be mined):
+
+| pair | φ | n11 | n10 | n01 | n00 | Jaccard |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| structural × lexical | −0.060 | 310 | 2 945 | 4 011 | 20 623 | 0.043 |
+| structural × confusion | +0.168 | 340 | 2 915 | 444 | 24 190 | 0.092 |
+| structural × historical | +0.127 | 523 | 2 395 | 1 468 | 18 981 | 0.119 |
+| lexical × confusion | −0.039 | 57 | 4 264 | 727 | 22 841 | 0.011 |
+| lexical × historical | −0.044 | 160 | 2 842 | 1 831 | 18 534 | 0.033 |
+| confusion × historical | +0.047 | 121 | 656 | 1 870 | 20 720 | 0.046 |
+
+**Per-corpus maxima by |φ|:** ripwire +0.262 (structural × historical), tree-sitter +0.167
+(structural × confusion), rustCLI −0.166 (structural × lexical), gameA +0.161 (structural
+× confusion), appleXR ≤ 0.024; among the non-independent extras, ctxpack +0.278 — the largest value
+anywhere in the study. **Every pair on every corpus is |φ| < 0.28, most are < 0.17, and the largest
+Jaccard overlap between any two families is 0.119 pooled (0.221 on any single corpus).**
+
+**Conclusion, plainly: the four families are near-orthogonal and the ensemble premise is confirmed.**
+At n = 27 889 a φ of 0.168 is statistically far from zero — it is a real effect, not noise — but it
+is a *small* one: knowing that a symbol tripped the structural family raises the odds it also tripped
+confusion, and the two still disagree on 3 359 of the 3 699 symbols either one flags. The one
+directional reading worth recording is that **the two largest positive correlations both involve
+`structural`** (+0.168 confusion, +0.127 historical), and both have a mechanical explanation: a long
+function has more room to contain a confusing construct, and a heavily-churned file tends to hold the
+big functions. Pooled, `lexical` is negatively correlated with all three others — the strongest single
+piece of evidence that identifier text is a genuinely different axis from code shape. (It is not
+negative on every corpus: on the vendored tree-sitter grammars lexical × historical is +0.155 and
+lexical × structural +0.112, both still small.)
+
+Had this come out the other way — several pairs above ~0.6 — the honest response would have been to
+delete the join and keep one family. It did not, and the numbers are published so a future round can
+check whether that stays true as the rules change.
+
+### 9.4 Co-firing distribution
+
+Pooled over the five independent corpora (n = 27 889):
+
+| families firing | symbols | share |
+| ---: | ---: | ---: |
+| 0 | 18 904 | 67.78% |
+| 1 | 7 761 | 27.83% |
+| 2 | 1 085 | 3.89% |
+| 3 | 136 | 0.49% |
+| 4 | **3** | **0.011%** |
+
+and the combinations, which is where the useful shape is:
+
+| n | combination | symbols | share |
+| ---: | --- | ---: | ---: |
+| 1 | lexical | 3 852 | 13.81% |
+| 1 | structural | 2 224 | 7.97% |
+| 1 | historical | 1 305 | 4.68% |
+| 1 | confusion | 380 | 1.36% |
+| 2 | structural + historical | 408 | 1.46% |
+| 2 | structural + lexical | 255 | 0.91% |
+| 2 | structural + confusion | 229 | 0.82% |
+| 2 | lexical + historical | 129 | 0.46% |
+| 2 | confusion + historical | 34 | 0.12% |
+| 2 | lexical + confusion | 30 | 0.11% |
+| 3 | structural + confusion + historical | 84 | 0.30% |
+| 3 | structural + lexical + historical | 28 | 0.10% |
+| 3 | structural + lexical + confusion | 24 | 0.09% |
+| 4 | all four | 3 | 0.011% |
+
+Three consequences a preset has to respect:
+
+1. **`fam=4` is not a tier, it is a rounding error.** Three symbols in 27 889. Any preset cut at
+   K ≥ 4 is a preset that outputs nothing, on every corpus measured.
+2. **Every multi-family combination containing `structural` outranks every one that does not.** The
+   least common 2-combination *with* structural (structural + confusion, 229) still beats the most
+   common one *without* (lexical + historical, 129); `structural` is in 7 of the 10 observed
+   multi-family combinations and in all three of the top three. Corroboration in practice means
+   "shape plus something".
+3. **The ladder is steep and clean**: 27.83% → 3.89% → 0.49% → 0.011%, roughly 7×, 8× and 45× per
+   rung. That is what a preset ladder can be cut from without inventing a number.
+
+### 9.5 Stability across commits — one family cannot support a gate
+
+The instrument is fixed and the corpus varies: **one binary, run over the same repository at a ladder
+of past commits** in a throwaway clone. Comparisons are restricted to symbols present in *both*
+trees, so added and deleted code cannot masquerade as instability.
+
+| Ladder | commits | sampled | span (committer dates) |
+| --- | ---: | ---: | --- |
+| ripwire | 148 first-parent | every ~18 | 2026-07-31 → 2026-08-05 |
+| ctxpack | 792 first-parent | every ~99 | 2026-06-20 → 2026-08-05 |
+| gameA | 1 620 first-parent | every ~202 | 2026-06-03 → 2026-07-21 |
+
+Jaccard of each family's flagged symbol set, consecutive sampled commits (mean) and oldest-vs-newest
+(endpoint):
+
+| Family | ripwire | ctxpack | gameA | consecutive range | endpoint range |
+| --- | --- | --- | --- | --- | --- |
+| lexical | 1.000 / 0.999 | 1.000 / 1.000 | 1.000 / 0.999 | **1.000** | **0.999 – 1.000** |
+| structural | 0.995 / 0.965 | 0.965 / 0.859 | 0.990 / 0.939 | 0.965 – 0.995 | 0.859 – 0.965 |
+| confusion | 0.997 / 0.981 | 0.920 / 0.684 | 0.990 / 0.947 | 0.920 – 0.997 | 0.684 – 0.981 |
+| historical | 0.841 / 0.546 | 0.862 / 0.525 | 0.800 / 0.426 | **0.800 – 0.862** | **0.426 – 0.546** |
+
+**`historical` jitters an order of magnitude harder than the other three, on all three histories.**
+Per-symbol flag-flip rate per sampled step: structural 0.06–0.66%, lexical 0.00%, confusion
+0.01–0.45%, **historical 1.21–6.67% (peak 32.99% on one ctxpack step)**. Endpoint to endpoint the
+historical sets overlap by Jaccard 0.426–0.546; on gameA, **161 of the 401 still-present symbols it
+flagged in June (40%) were no longer flagged in July**, on code that did not change between the two
+commits. This is not a bug — churn
+is a moving 12-month window and the family fires on the worst-ranked *files*, so a single busy week
+reshuffles the cut — but it is disqualifying for a gate. `lexical` sits at the opposite pole: it is a
+pure function of the identifier text, so it is exactly stable, and it moves only when someone renames
+something.
+
+**Honest limits of this pass.** All three histories are dense but short in wall-clock (5–50 days), so
+every sampled commit's 12-month churn window contains the whole history; a longer-lived repository
+would show *less* churn-cut movement per commit. The ctxpack endpoint figures are the least reliable
+row in the table — that tree grew from 208 to 4 027 eligible functions across the window, leaving a
+177-symbol surviving universe at the endpoint. Stability was measured on three repositories, two of
+which share a lineage; it was **not** measured on rustCLI or appleXR, which have no git history
+at all.
+
+### 9.6 What the measurement found wrong
+
+Three defects, reported rather than fixed — this pass ships no behaviour change.
+
+1. **`confusion` reports itself measured on corpora where it cannot fire.** The atom rules are gated
+   to C/C++/ObjC (`src/atoms.h::isCFamilyPath`). On rustCLI — 115 Rust files, 4 068 eligible
+   functions — the family fires **0 times**, and it is nowhere in `unavailable=`: the root names only
+   `historical`, and every row counts confusion inside its `of="3"`. So the verb states, in its own
+   vocabulary, that three families were evaluated and two of them found nothing, when the truth is
+   that one of the three could not apply to a single file in the corpus. The verb's own header says
+   *"a family that could not be MEASURED is reported as unavailable… a missing measurement must never
+   read as a clean bill of health"* — this is exactly that case, and `historical`'s handling on the
+   same corpus is the correct behaviour standing right beside the incorrect one. It also makes φ
+   undefined for both confusion pairs there. **The fix is a language-coverage precondition on the
+   confusion family, the same shape `historical` already has for a missing git history**; it needs
+   its own gate arm and is deliberately out of scope for a measurement pass.
+2. **"Worst decile" is not a decile.** See §9.2 — the realized readability cut ranges 0.23%–8.81%.
+   The numbers needed to compute it are published; the word is wrong.
+3. **The briefed first data point does not reproduce.** The distribution circulating for ripwire's
+   own `src/` — `fam=1: 696, fam=2: 217, fam=3: 51, fam=4: 6` — was re-measured on a clean tree at
+   three candidate revisions and came out **`fam=1: 696, fam=2: 202, fam=3: 32, fam=4: 0`** at
+   `61c6b54` (`src/`), `687 / 200 / 31` at `c136726` (`src/`), and `1 797 / 287 / 55` at `c136726`
+   (repo root). `fam=1` matches exactly while every higher rung differs, which is the signature of a
+   different **churn** state: a different top-40 churn cut moves symbols that already had one family
+   from `fam=1` to `fam=2` while moving an equal number of unflagged symbols up into `fam=1`. The
+   figure used everywhere in this section is the re-measured one.
+
+A fourth observation is not a defect but changes how `lexical` should be read: **the family is
+dominated by a different single rule on every corpus.** ripwire `naming-short` 793 of 900 (88%);
+tree-sitter `naming-underscore` 240 and `naming-wordy` 159 of 426; gameA `naming-confusable`
+824 of 1 676 (49%); rustCLI `naming-wordy` 1 252 of 1 303 (96%) — Rust's descriptive snake_case
+idiom, flagged as verbosity. **`lexical` is measuring house naming convention at least as much as
+naming quality**, which is the mechanism behind its 9.09× cross-corpus spread and the reason it must
+never be the sole family behind a flag.
+
+### 9.7 Proposed presets — derived, with the arithmetic
+
+Presets select **which families count** and **how many must agree**. There is no weight anywhere: a
+weighted composite is the Maintainability-Index failure mode this design exists to avoid.
+
+**The selection criteria, fixed before the presets and taken from the measurements above:**
+
+- **C1 — stability.** A family may gate only if its flagged set survives development. Measured mean
+  consecutive Jaccard: lexical 1.000, structural 0.965–0.995, confusion 0.920–0.997, historical
+  0.800–0.862. The four values form three clustered and one outlier; the observed gap is
+  **(0.862, 0.920)**, and any cut inside it selects the same three families. **⇒ `historical` is
+  excluded from the gating preset.** It stays in the reporting presets, where a moving window is a
+  feature.
+- **C2 — non-degeneracy.** A preset must have a non-zero yield on every corpus measured, or it is
+  unavailable rather than clean. This kills every rule that *requires* `confusion`
+  (`structural+confusion K≥2` yields **0.00%** on rustCLI) and every rule at K ≥ 3 over the
+  stable three (**0.00%** on rustCLI and appleXR).
+- **C3 — the rungs come from the measured ladder**, not from a target yield picked in advance. §9.4's
+  histogram summed from the top gives the cumulative cuts directly: `fam ≥ 1` = 27.83 + 3.89 + 0.49 +
+  0.011 = **32.22%**, `fam ≥ 2` = 3.89 + 0.49 + 0.011 = **4.39%**, `fam ≥ 3` = 0.49 + 0.011 =
+  **0.50%**, `fam ≥ 4` = **0.011%**. Two of those four are usable: `fam ≥ 4` is three symbols, and
+  `fam ≥ 3` fails C2. The third preset therefore has to come from **selection**, not from K.
+
+**The three presets that survive:**
+
+| Preset | families enabled | cut | pooled yield | per-corpus range |
+| --- | --- | --- | ---: | --- |
+| **lenient** | structural, lexical, confusion, historical | **fam ≥ 1** | 8 985 / 27 889 = **32.22%** | 14.32% – 46.90% |
+| **default** | structural, lexical, confusion, historical | **fam ≥ 2** | 1 224 / 27 889 = **4.39%** | 0.29% – 8.91% |
+| **strict** | structural, lexical, confusion | **fam ≥ 2** | 653 / 27 889 = **2.34%** | 0.29% – 6.50% |
+
+Per corpus, in full:
+
+| Preset | ripwire | tree-sitter | gameA | rustCLI | appleXR |
+| --- | --- | --- | --- | --- | --- |
+| lenient | 2 191/4 672 = 46.90% | 578/1 538 = 37.58% | 4 568/17 157 = 26.62% | 1 583/4 068 = 38.91% | 65/454 = 14.32% |
+| default | 358/4 672 = 7.66% | 137/1 538 = 8.91% | 714/17 157 = 4.16% | 12/4 068 = 0.29% | 3/454 = 0.66% |
+| strict | 80/4 672 = 1.71% | 100/1 538 = 6.50% | 458/17 157 = 2.67% | 12/4 068 = 0.29% | 3/454 = 0.66% |
+
+**Why `strict` is a *selection* and not a higher K.** The obvious strict preset — all four families,
+K ≥ 3 — fails C2 outright (0.00% on two of five corpora) and fails the gate test it exists for: its
+output set's endpoint Jaccard is **0.438 – 0.719**. Dropping `historical` instead produces a set that
+is both smaller *and* measurably steadier. Output-set stability, on the same three ladders:
+
+| Preset | ripwire | ctxpack | gameA |
+| --- | --- | --- | --- |
+| lenient (all 4, K ≥ 1) | 0.943 / 0.812 | 0.947 / 0.804 | 0.970 / 0.910 |
+| default (all 4, K ≥ 2) | 0.878 / 0.622 | 0.851 / 0.548 | 0.907 / 0.633 |
+| **strict** (s+l+c, K ≥ 2) | **1.000 / 1.000** | 0.909 / 0.667 | 0.982 / 0.896 |
+| *(rejected)* all 4, K ≥ 3 | 0.914 / 0.719 | 0.837 / 0.438 | 0.814 / 0.487 |
+
+*(mean consecutive Jaccard / endpoint Jaccard of the set the preset emits.)*
+
+The three are **nested by construction** — removing a family from the count can only lower a
+symbol's count — so `strict ⊆ default ⊆ lenient` on every corpus, which is what makes them a ladder
+rather than three unrelated filters.
+
+**What each is for, in the terms the measurement supports.** `lenient` is a browse list: a third of
+every codebase has *some* evidence against it, which is a reading order, never a verdict. `default`
+is a review list at ~1 symbol in 23. `strict` is the only rung the stability data supports pointing
+a gate at, at ~1 symbol in 43 pooled and 80 symbols on ripwire's own tree — a sitting's worth of
+work, and **literally the same 80 symbols** at every commit on the five-day ripwire ladder
+(Jaccard 1.000 consecutive and endpoint).
+
+**Three things these presets are NOT.** They are not validated against any notion of *actual* defect
+or maintenance cost — nothing here measures whether a `fam ≥ 2` symbol is worse code, only that two
+independent kinds of evidence point at it. They are not tuned per corpus, which is why `strict`
+yields 6.50% on tree-sitter and 0.29% on rustCLI from the same rule. And they are not stable
+under the §9.6 defect: until the confusion family declares itself unavailable on non-C-family code,
+`strict` on a Rust tree is silently `structural + lexical, K ≥ 2` wearing a three-family label.
+
+### 9.8 Reproducing this section
+
+```bash
+# clone the corpora you intend to check out; NEVER run `stability` against a tree you work in
+git clone --local --shared <repo> /tmp/repo-clone
+
+python3 bench/ensemblecal/run_ensemblecal.py collect   --out cal.json  <dir>[:LABEL[:indep]] ...
+python3 bench/ensemblecal/run_ensemblecal.py stability --out stab.json /tmp/repo-clone:LABEL --samples 8
+python3 bench/ensemblecal/run_ensemblecal.py report    --in cal.json --stability stab.json
+```
+
+Six of the nine corpora are private or non-public local trees and cannot be redistributed. The three
+that can — `ripwire`, `ripwire-src` and the vendored `tree-sitter` grammars — are in this repository
+and reproduce exactly from the pinned revision.
+
+---
+
+## 10. Reproducing
 
 ```bash
 cmake -S . -B build && cmake --build build -j

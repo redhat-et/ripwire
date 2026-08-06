@@ -53,3 +53,9 @@
 --triage-only	scripts/optremarks.sh's own flag ("optremarks.sh --triage-only", re-triage an existing build_remarks/ tree without rebuilding) quoted in docs/OPTREMARKS.md, not a ripwire flag
 --corpus	scripts/pgobuild.sh's own flag ("pgobuild.sh --corpus /path", which tree the PGO training workload runs over) quoted in docs/OPTREMARKS.md, not a ripwire flag
 --reuse-profile	scripts/pgobuild.sh's own flag ("pgobuild.sh --reuse-profile", rebuild from an existing .profdata without re-instrumenting) quoted in docs/OPTREMARKS.md, not a ripwire flag
+--out	bench/ensemblecal/run_ensemblecal.py's own flag ("run_ensemblecal.py collect --out cal.json", where the scan JSON lands) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
+--in	bench/ensemblecal/run_ensemblecal.py's own flag ("run_ensemblecal.py report --in cal.json", which scan JSON to report on) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
+--samples	bench/ensemblecal/run_ensemblecal.py's own flag ("stability --samples 8", how many commits the stability ladder visits) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
+--stability	bench/ensemblecal/run_ensemblecal.py's own flag ("report --stability stab.json", the optional commit-ladder JSON) quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md, not a ripwire flag
+--local	git's own flag ("git clone --local --shared <repo> /tmp/x") quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md where the calibration harness needs a throwaway clone, not a ripwire flag
+--shared	git's own flag, same `git clone` invocation as --local above, not a ripwire flag
