@@ -476,6 +476,14 @@ inline std::vector<AstMatch> collapseNestedTernaries( const IngestResult& ing, s
 
 }   // namespace atomdetail
 
+// The pack's LANGUAGE precondition, re-exported at pack level so a caller can ask the COVERAGE question
+// — "could this pack evaluate anything in this corpus at all?" — by calling the SAME predicate the pack
+// gates on, never a second copy of the extension list. src/ensemble.h's availability precondition reads
+// it: a corpus with no path this returns true for is one the atom rules were never run on, and that
+// silence is not a fact about the code. Deliberately NOT layout::isCFamilyPath, which answers a
+// different question (byte layout) over a different extension set.
+using atomdetail::isCFamilyPath;
+
 // Run the pack. One astQuery pass over the already-crawled files; everything after it is span algebra
 // and text tests over the captures. Deterministic: astQuery returns (file path, startByte, endByte,
 // tag) order and every filter below is order-preserving, so no hash iteration, thread arrival order,
