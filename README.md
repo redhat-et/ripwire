@@ -10,42 +10,68 @@
 
 ## Give your coding agent a map before it reads the repo.
 
-**ripwire is the ripgrep of AI context.** Point it at a repository and your coding agent gets a
-ranked, deterministic call graph instead of grepping around and reading whole files — orientation,
-blast radius, and which tests to run.
+**ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
+deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
+around and reading whole files. One binary on your own machine: **no API key, no embeddings, no
+index server, no daemon, nothing left running.**
 
-- **Saves tokens, head-to-head against the field** — paired win–loss at strict file@10, gold
-  files actually retrieved: **17–2 against repowise**, **16–2 against Aider**, **10–4 against
-  codebase-memory-mcp**, **12–3 against graphify**. On a fresh thread in an unfamiliar codebase the
-  agent answers at **7.3%** of what a grep-and-read pass costs.
-- **Goes faster** — this repository (603 tracked source files) parses in **~0.15 s** cold, **~0.10 s**
-  warm, on this exact tree, reproducible with `time ./build/ripwire . --no-cache`. LTO is on by
-  default and measured **1–6% faster cold**; layering PGO on top (`scripts/pgobuild.sh`) measures a
-  further **14–25% faster cold** against a plain non-LTO baseline, holding on a ~2,000-file corpus
-  that never appeared in training (`docs/OPTREMARKS.md` §5/§5b — six interleaved A/Bs, byte-identical
-  output, determinism gate green on the optimized binary).
-- **Writes better code** — the quality panel narrows **4,956** eligible functions in this repository
-  to **401** worth a second look (2-of-6 evidence families agreeing, `--quality-panel`) — an **8.1%**
-  shortlist, not a guess; `--quality-delta` then measures what a change made *worse* across 10
-  agent-code failure modes, `--exemplar` surfaces the repo's best-in-class pattern to imitate, and
-  `--test-gate` names the tests that must run before "done." `--field-affinity` estimates
-  cache-friendliness **statically, before you ever run a profiler** — a code-review judgment call
-  every engineer makes and, per a two-round adversarial search, no other shipping tool automates
-  without running the program first (details below).
-- **Targets the failure modes AI-generated code specifically has** — empty-catch/swallowed-exception
-  error-masking is **+47%** more common in AI-authored commits than human ones, and code reuse is
-  *declining* even as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026); a
-  function rewritten again inside two weeks (churn `--quality-delta` flags as `short-horizon-churn`)
-  is **+15%** more likely when AI wrote it. These aren't generic lint rules — each of the 10
-  `--quality-delta` kinds targets one measured, published degradation mode.
+### It finds the right files more often than the alternatives
 
-The parse/quality numbers above are reproducible on this exact tree with the commands shown; the
-win–loss and GitClear figures are dated, sourced measurements from `docs/EVALS.md`, not something
-CI recomputes every run — read the instrument and the corpus before trusting either kind. The one
-number `test/regression.sh` *does* gate on every run is the flag count itself (`--help`'s own
-table). Zero runtime dependencies, C++23, builds with the network off. Those numbers have different
-instruments and important caveats — the losses ship beside the wins in [Measured](#measured) and
-[`docs/EVALS.md`](docs/EVALS.md).
+60 paired LocBench instances, zero exclusions, same gold set and the same imported metric code for
+every arm. *Strict file@10 = **all** gold files inside the top 10* — whether your agent starts in the
+right place at all.
+
+| | strict file@10 | any@10 | median warm query |
+| --- | --- | --- | --- |
+| **ripwire `--for`** | **58.3%** | **85.0%** | **0.114 s** |
+| repowise 0.37.0 | 33.3% | 53.3% | 1.14 s |
+| codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 0.042 s |
+
+Instance by instance, ripwire retrieved a full gold set repowise missed **17 times**; the reverse
+happened **twice**. Held out wider — **243 instances across 78 repositories** — it lands **60.9%**
+against **27.6%** for its own pre-routing baseline: **+33.3pp** paired, clustered-bootstrap 95% lower
+bound **+25.0pp**, bought for +3.4% warm latency and **−39.4%** tokens. An earlier round on the same
+slice against Aider's repo map, graphify and codebase-memory-mcp came out in the same order (separate
+binary, separate evaluator — each table is internally paired and the two are not comparable to each
+other; both, with every caveat, in [Measured](#measured)).
+
+**Name a symbol and it is the first hit.** A confidence-gated router detects when a query *names*
+something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7%** in `src/`,
+**63.3% → 87.3%** at the repository root. The gate is the load-bearing part — route everything and
+doc-phrase queries collapse from 0.993 MRR to 0.427 — so both numbers ship together. Reproduce
+either with `ripwire <dir> --eval-retrieval`.
+
+### It answers for a fraction of the context
+
+On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
+spends — **1.7%** on the questions both arms fully answered. `--pack-signatures` returns **67% fewer
+bytes** than full bodies at top-50. The output is already dense enough that running a dedicated
+context compressor over it saved **exactly 0 tokens**.
+
+It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
+warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
+
+### It automates the review judgments nobody has time to make
+
+`--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
+named badly, does it hide control flow inside an idiom, does its history say it keeps breaking, must
+you read five other files to follow it, does it mutate state three hops away — as **six independent
+evidence families**, and ranks by how many of them *agree*, never as one blended score. Pooled over
+five corpora (n = 27,999) the largest correlation between any two families is **+0.168**: they really
+are measuring different things, so two families firing on the same function is corroboration rather
+than one metric counted twice.
+
+That matters most for code an agent wrote. Empty-catch error masking is **+47%** more common in
+AI-authored commits, a function rewritten again inside two weeks **+15%** more likely, and reuse is
+*declining* as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026). Each of
+`--quality-delta`'s 10 kinds targets one measured mode like those, and it reports **only what your
+change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
+names the tests that must run before "done."
+
+Tree-local numbers above are reproducible with the commands shown; the rest are dated, sourced
+measurements in [`docs/EVALS.md`](docs/EVALS.md) — each with its instrument, its corpus, and its
+counterexamples, because the losses ship beside the wins. Zero runtime dependencies, C++23, builds
+with the network off.
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
 
@@ -103,13 +129,8 @@ breakdown, real numbers per family → [The quality panel](#the-quality-panel) b
 
 </details>
 
-**Name a symbol and it's the first hit.** A confidence-gated router detects when the query *names*
-something and switches rankers: recall@1 on name-shaped queries jumps **76.7% → 98.7%** in `src/`
-(MRR 0.859 → 0.993) and **63.3% → 87.3%** at the repository root. The gate is the load-bearing
-part — ungated, doc-phrase queries collapse from 0.993 to 0.427: an ungated router routes the
-wrong queries, so both numbers are published together. Reproduce with `ripwire <dir>
---eval-retrieval`; full tables in [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and
-[Measured](#measured).
+Full retrieval tables — including the MRR figures behind the router numbers above — in
+[`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and [Measured](#measured).
 
 [Quickstart](#quickstart) · [The quality panel](#the-quality-panel) · [Benchmarks](#measured) ·
 [What it answers](#what-it-answers) · [Honesty contract](#the-honesty-contract) ·
