@@ -95,8 +95,10 @@
 // loops up into a per-field tally. This file consumes that tally in exactly two ways, both DISCLOSED, not
 // silent: (1) `<f chase="1" loops="N" shape_conf="…">` reports which declared field a real traversal
 // advances through and how confidently its declared type self-references the enclosing aggregate — never
-// for a field name owned by 2+ modeled aggregates (refused, counted in `as_stem_ambiguous=`, the same
-// "refuse rather than guess" convention `amb_skipped=` already uses above). (2) `kChaseSepCostBoostApplied`
+// for a field name owned by 2+ modeled aggregates (`as_stem_ambiguous=`), by NO modeled aggregate
+// (`as_stem_unowned=`), or by a sole owner whose declared type carries no pointer/reference marker and so
+// provably cannot be a raw-pointer chase target (`as_stem_nonptr=`) — all three refused-with-a-count, the
+// same "refuse rather than guess" convention `amb_skipped=` already uses above. (2) `kChaseSepCostBoostApplied`
 // is wired inline at the EXACT sepCost accumulation point a chase-target pair would be boosted at, and is
 // pinned at 1.0 (a documented no-op) — PLAN.md's shipping floor for anything RANKING-affecting is >=85%
 // precision on the shape_conf="self-ref" set, measured against real corpora with BLIND human review, which
@@ -170,9 +172,11 @@ struct AffField
     std::uint32_t fns      = 0;       // distinct indexed functions that touch it
 
     // Phase A/B disclosure (report-only — see the file header addendum and src/accessshape.h). chaseLoops
-    // is a FLOOR: the number of DISTINCT for-loop sites accessshape.h observed advancing THROUGH this
-    // field (`p = p->thisField`), 0 when never observed as a chase-advance field or when the field name
-    // was refused as ambiguous (owned by 2+ modeled aggregates — see as_stem_ambiguous= in the header).
+    // is a FLOOR: the number of DISTINCT for-loop sites accessshape.h observed advancing through a field
+    // of THIS NAME (`p = p->thisField` — attribution is by name, accepted only when this aggregate is the
+    // sole modeled owner AND the field's declared type can point at all), 0 when never observed as a
+    // chase-advance field or when the name was refused (as_stem_ambiguous= / as_stem_unowned= /
+    // as_stem_nonptr= in the header).
     std::uint32_t                chaseLoops = 0;
     accessshape::ChaseConfidence chaseConf  = accessshape::ChaseConfidence::None;
 };
@@ -253,7 +257,15 @@ struct AffResult
     std::size_t               asLoopsCapped   = 0;    // dropped by accessshape::kMaxLoopsModeled — a disclosed FLOOR
     std::size_t               asIndexLoops    = 0, asChaseLoops = 0, asMixedLoops = 0, asUnknownLoops = 0;
     std::size_t               asStemAmbiguous = 0;    // chase field names refused: owned by 2+ modeled aggregates
-    std::vector<std::string>  asSaturatedTags;        // astQuery tags whose count= is itself a floor (rare)
+    std::size_t               asStemUnowned   = 0;    // chase field names refused: owned by ZERO modeled aggregates
+                                                       //   (forward-declared / vendored / over-cap traversal target)
+    std::size_t               asStemNonptr    = 0;    // chase field names refused: the SOLE modeled owner's declared
+                                                       //   type carries no pointer/reference marker, so it provably
+                                                       //   cannot be a raw-pointer chase target (chaseTypeCanPoint)
+    bool                      asQueryCapped   = false; // classifyAccessShapes hit its astQuery budget — every as_*
+                                                       //   count above is a floor at once (tag-blind truncation)
+    std::vector<std::string>  asUncompiledQueries;     // shape queries that compiled for NO grammar — signal ABSENT,
+                                                       //   not truncated (should never fire for the five patterns)
 };
 
 // ── Chilimbi's separation weight, PLDI 1999 §4 ───────────────────────────────────────────────────────
@@ -659,7 +671,14 @@ inline ChaseFieldInfo resolveChaseField( const ModeledAgg& agg, std::uint32_t ag
         if( oIt == owners.end() || oIt->second.size() != 1 || oIt->second.front() != aggIndex )
         {
             continue;   // ambiguous (2+ aggregates declare this name) or not THIS struct's own field —
-                        // refused, not guessed; the caller tallies this in asStemAmbiguous.
+                        // refused, not guessed; the caller tallies this in asStemAmbiguous / asStemUnowned.
+        }
+        if( !accessshape::chaseTypeCanPoint( agg.def.fields[ fi ].type ) )
+        {
+            continue;   // sole owner by NAME, but its declared type has no pointer/reference marker — a
+                        // raw-pointer chase advance cannot target it, so the loop evidently traverses a
+                        // DIFFERENT (unmodeled) type sharing the field name. Refused, not guessed; the
+                        // caller tallies this in asStemNonptr (see accessshape::chaseTypeCanPoint).
         }
         info.found   = true;
         info.declIdx = fi;
@@ -668,6 +687,43 @@ inline ChaseFieldInfo resolveChaseField( const ModeledAgg& agg, std::uint32_t ag
         break;      // a struct declares a given field name at most once
     }
     return info;
+}
+
+// The chase-refusal tally — one bucket per DISTINCT refusal reason, so no disclosed count ever mislabels
+// another's cause (an unowned name is not "ambiguous"; a non-pointer sole owner is neither — the exact
+// mislabeling this replaced: owners.end() used to fall into the 2+-owners tally). The accept/refuse
+// DECISION itself lives in resolveChaseField; this pass only explains, in the header's counters, why each
+// observed chase field name did not earn an <f> disclosure.
+inline void tallyChaseRefusals( const accessshape::ShapeResult& shapeRes, const FieldOwners& owners,
+                                const std::vector<ModeledAgg>& aggs, AffResult& res )
+{
+    for( const auto& [ name, loops ] : shapeRes.chaseFieldLoops )
+    {
+        const auto oIt = owners.find( name );
+        if( oIt == owners.end() )
+        {
+            ++res.asStemUnowned;     // refused: NO modeled aggregate declares this field name (the loop
+                                     // traverses a forward-declared / vendored / over-cap type)
+            continue;
+        }
+        if( oIt->second.size() != 1 )
+        {
+            ++res.asStemAmbiguous;   // refused: 2+ modeled aggregates declare this field name
+            continue;
+        }
+        for( const layout::FieldRow& f : aggs[ oIt->second.front() ].def.fields )
+        {
+            if( f.name == name )     // a struct declares a given field name at most once
+            {
+                if( !accessshape::chaseTypeCanPoint( f.type ) )
+                {
+                    ++res.asStemNonptr;   // refused: the sole owner's declared type has no pointer/reference
+                                          // marker — provably not a raw-pointer chase target (chaseTypeCanPoint)
+                }
+                break;
+            }
+        }
+    }
 }
 
 // One aggregate's affinity graph, geometry diff and findings, from its accumulated touches.
@@ -868,15 +924,9 @@ inline AffResult computeFieldAffinity( const IngestResult& ing, const std::vecto
     res.asChaseLoops    = shapeRes.chaseLoops;
     res.asMixedLoops    = shapeRes.mixedLoops;
     res.asUnknownLoops  = shapeRes.unknownLoops;
-    res.asSaturatedTags = shapeRes.saturatedTags;
-    for( const auto& [ name, loops ] : shapeRes.chaseFieldLoops )
-    {
-        const auto oIt = owners.find( name );
-        if( oIt == owners.end() || oIt->second.size() != 1 )
-        {
-            ++res.asStemAmbiguous;   // refused: 2+ modeled aggregates declare this field name
-        }
-    }
+    res.asQueryCapped       = shapeRes.queryBudgetSaturated;
+    res.asUncompiledQueries = shapeRes.uncompiledQueries;
+    tallyChaseRefusals( shapeRes, owners, aggs, res );   // per-cause refusal counters — see its own comment
 
     std::vector<AggAccum> accum( aggs.size() );
     for( std::size_t i = 0; i < aggs.size(); ++i )
@@ -968,7 +1018,11 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
         "purely static for-loop advance-shape classification (index/chase/mixed/unknown, via astQuery TSQuery "
         "patterns, never execution); a chase-shaped field is disclosed on its <f> row as chase=\"1\" loops=\"N\", "
         "with shape_conf=\"self-ref\"/\"tmpl-approx\" only when the field's OWN declared type textually "
-        "self-references its aggregate. NEVER ranking-affecting yet: the required real-corpus, blind-reviewed "
+        "self-references its aggregate. Refusals are per-cause: as_stem_ambiguous= chase field names declared by "
+        "2+ modeled aggregates, as_stem_unowned= by NONE (forward-declared/vendored traversal target), "
+        "as_stem_nonptr= a sole owner whose declared type has no pointer/reference marker (provably not a "
+        "raw-pointer chase target). as_query_capped=1 means the classification hit its query budget, making every "
+        "as_* count a floor. NEVER ranking-affecting yet: the required real-corpus, blind-reviewed "
         "precision floor has not run, so sepcost= is IDENTICAL with or without this disclosure. See "
         "src/accessshape.h and docs/FIELDAFFINITY.md sec 8. -->" );
 
@@ -996,9 +1050,21 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
     {
         std::fprintf( out, " as_stem_ambiguous=\"%zu\"", res.asStemAmbiguous );
     }
-    if( !res.asSaturatedTags.empty() )
+    if( res.asStemUnowned > 0 )
     {
-        std::fprintf( out, " as_saturated=\"%zu\"", res.asSaturatedTags.size() );
+        std::fprintf( out, " as_stem_unowned=\"%zu\"", res.asStemUnowned );
+    }
+    if( res.asStemNonptr > 0 )
+    {
+        std::fprintf( out, " as_stem_nonptr=\"%zu\"", res.asStemNonptr );
+    }
+    if( res.asQueryCapped )
+    {
+        std::fprintf( out, " as_query_capped=\"1\"" );
+    }
+    if( !res.asUncompiledQueries.empty() )
+    {
+        std::fprintf( out, " as_uncompiled=\"%zu\"", res.asUncompiledQueries.size() );
     }
     std::fprintf( out, ">" );
 

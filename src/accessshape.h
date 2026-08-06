@@ -108,7 +108,12 @@
 //               classification (report-only, see below) but never a shape_conf attribute.
 // A chase field name declared by 2+ modeled aggregates (fieldaffinity.h's own FieldOwners ambiguity) is
 // REFUSED by the caller (fieldaffinity.h checks ownership before calling chaseFieldConfidence at all) —
-// this file has no aggregate index of its own and never guesses one.
+// this file has no aggregate index of its own and never guesses one. Two more caller-side refusals close
+// the name-only attribution gap the same way: a chase field name declared by ZERO modeled aggregates
+// (the traversal runs through a forward-declared / vendored / over-cap type — nothing to attach to), and
+// a SOLE-owner candidate whose declared type carries no pointer/reference marker at all (a raw-pointer
+// chase advance `p = p->f` cannot target an `int f` — attaching it would be a provably wrong guess;
+// chaseTypeCanPoint below is the predicate). Both are tallied, disclosed floors, never silent drops.
 //
 // ── REPORT-ONLY, BY DESIGN, UNTIL A REAL VALIDATION SESSION RUNS ─────────────────────────────────────
 // The plan requires >=85% precision on the shape_conf="self-ref" flagged set, measured against THREE real
@@ -141,11 +146,12 @@ namespace accessshape
 
 // ── tuning ────────────────────────────────────────────────────────────────────────────────────────────
 
-// Per-tag astQuery budget. MEASURED against ripwire's own src/ (2026-08-06, warm, this session):
-// as-loop=1209 as-update=1128 as-ptrvar=2 as-crement=1710 as-chase=0 hits — the largest of the five is
-// under 2000 on a ~120-file, ~1500-symbol C++23 corpus. 50000 leaves >25x headroom over that measured
-// number before any tag's count= becomes a floor (loopsCapped/ tagsSaturated below disclose it if a
-// corpus ever does saturate one).
+// SHARED astQuery budget (astQuery truncates the deterministically-sorted match list to this TOTAL, across
+// all five tags together — not per tag). MEASURED against ripwire's own src/ (2026-08-06, warm, this
+// session): as-loop=1209 as-update=1128 as-ptrvar=2 as-crement=1710 as-chase=0 hits — ~4000 total on a
+// ~120-file, ~1500-symbol C++23 corpus. 50000 leaves >12x headroom over that measured total before the
+// budget truncates anything (queryBudgetSaturated below discloses it if a corpus ever does saturate,
+// making EVERY shape count a floor at once — astQuery's post-sort truncation is tag-blind).
 inline constexpr std::size_t kQueryBudget = 50000;
 
 // Cost ceiling on the CORRELATION pass (span-containment over the astQuery output), mirroring
@@ -208,7 +214,14 @@ struct ShapeResult
     std::size_t                     forLoops     = 0;     // as-loop rows, before kMaxLoopsModeled
     std::size_t                     loopsCapped  = 0;      // dropped by kMaxLoopsModeled — disclosed FLOOR
     std::size_t                     indexLoops   = 0, chaseLoops = 0, mixedLoops = 0, unknownLoops = 0;
-    std::vector<std::string>        saturatedTags;         // astQuery tags whose count= is itself a floor
+    bool                            queryBudgetSaturated = false;   // astQuery returned exactly its budget — its
+                                                                     // tag-blind post-sort truncation may have
+                                                                     // dropped matches, so EVERY count above is a
+                                                                     // floor at once (disclosed, never silent)
+    std::vector<std::string>        uncompiledQueries;     // spec queries that compiled for NO grammar — those
+                                                            // signals are entirely ABSENT (not truncated), so a
+                                                            // classification relying on them degrades to unknown;
+                                                            // should never fire for the five C/C++ patterns above
 
     // Chase-field rollup: declared field name -> distinct loops observed advancing via it (a FLOOR, same
     // convention as fieldaffinity.h's fns= — the number of DISTINCT loop sites, not a dynamic count).
@@ -300,7 +313,11 @@ inline ShapeResult classifyAccessShapes( const IngestResult& ing, std::size_t qu
 
     std::vector<std::string> uncompiled;
     const std::vector<AstMatch> ms = astQuery( ing, accessShapeSpecs(), queryBudget, &uncompiled );
-    res.saturatedTags = uncompiled;
+    res.uncompiledQueries = uncompiled;
+    // astQuery truncates its deterministically-sorted output to the budget AFTER collection, tag-blind —
+    // a full return is the only observable saturation signal it exposes, so exactly-at-budget is disclosed
+    // as "may have been truncated" (a floor marker), never read as a lucky exact fit.
+    res.queryBudgetSaturated = ( ms.size() >= queryBudget );
 
     // C-FAMILY ONLY, ENFORCED (see file header) — same isCFamilyPath predicate fieldaffinity.h's own
     // aggregate model already uses, so "which files count" agrees between Phase A and the struct model
@@ -472,6 +489,18 @@ inline const char* confidenceName( ChaseConfidence c ) noexcept
         case ChaseConfidence::TmplApprox: return "tmpl-approx";
         default:                          return "";
     }
+}
+
+// Can a declared field of this AS-WRITTEN type spelling be the target of a raw-pointer chase advance at
+// all? `p = p->f` requires `f` to be pointer-shaped; a spelling with no '*'/'&' marker anywhere (layout.h
+// appends the declarator's own marker to FieldRow::type, so a genuine pointer field always carries one)
+// provably cannot be, so a name-only sole-owner attribution to such a field is REFUSED, not guessed. The
+// deliberate cost, same NOT-HANDLED axis as the typedef gap above: a smart-pointer field
+// (`std::shared_ptr<Node> next`) has no marker either and is refused with it — a disclosed undercount
+// (floor), which this file's contract prefers over a wrong attribution.
+inline bool chaseTypeCanPoint( std::string_view fieldType ) noexcept
+{
+    return fieldType.find( '*' ) != std::string_view::npos || fieldType.find( '&' ) != std::string_view::npos;
 }
 
 // `fieldType` is layout.h's FieldRow::type — the AS-WRITTEN spelling (e.g. "Node**" for a `Node*` field,

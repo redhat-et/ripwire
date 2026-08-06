@@ -1,5 +1,6 @@
 // accessshapefix/walks.cpp — the four discriminating traps PLAN.md's Phase A design named as REQUIRED
-// (its "correctness review" minimal set), plus the ambiguous-chase-field demo. Every function ALSO
+// (its "correctness review" minimal set), plus the three refusal demos (ambiguous / zero-owner /
+// non-pointer-sole-owner chase fields — one per disclosed refusal cause). Every function ALSO
 // performs a normal field access so --field-affinity has a co-access observation to attribute (Phase A
 // rides that existing pass; a loop whose fields are never touched via `.`/`->` produces no <f> row for
 // this test to assert against, the same "touched fields only" filter fieldaffinity.h has always had).
@@ -56,4 +57,41 @@ void stepperWalk( StepperA* s )
     {
         s->val = 0;
     }
+}
+
+// Zero-owner demo — Opaque is only ever FORWARD-declared in this corpus (a vendored/external type), so
+// the chase field `hop` has NO modeled owner: refused as as_stem_unowned="1", never mislabeled as
+// "ambiguous" (the pre-fix bug: owners.end() fell into the 2+-owners tally with the wrong cause label).
+struct Opaque;
+void hopWalk( Opaque* h, Opaque* ( *step )( Opaque* ) )
+{
+    for( Opaque* p = h; p; p = p->hop )
+    {
+        (void)step;
+    }
+}
+
+// Non-pointer sole-owner demo — `link` is declared by exactly ONE modeled aggregate (Ledger, shapes.h)
+// but as a plain int, while the loop chases `link` on the forward-declared Opaque: attribution must be
+// REFUSED (as_stem_nonptr="1"), and Ledger::link must NEVER carry a chase attribute. The two touch
+// functions below give Ledger the min_fns co-access it needs to be SHOWN, so the no-chase-attribute
+// assertion has a real <f n="link"> row to check against.
+void ledgerWalk( Opaque* h )
+{
+    for( Opaque* p = h; p; p = p->link )
+    {
+        (void)p;
+    }
+}
+
+void touchLedger( Ledger* l )
+{
+    l->link  = 1;
+    l->total = 2;
+}
+
+void touchLedger2( Ledger* l )
+{
+    l->link  = 3;
+    l->total = 4;
 }

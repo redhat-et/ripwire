@@ -215,9 +215,17 @@ punctuation stripped, IS the enclosing aggregate) and one weaker, explicitly hed
 the aggregate's name appears in the spelling — template argument, `::`-qualified, etc. — but the type
 is not a clean base match). A typedef/using alias whose OWN spelling does not textually contain the
 aggregate's name, a smart pointer over such an alias, and a multi-hop chain through an intermediate,
-differently-named type are **NOT HANDLED** — refused (no `shape_conf` attribute), never guessed. A chase
-field name owned by 2+ modeled aggregates is refused the same way `amb_skipped=` already refuses an
-ambiguous member-access site, disclosed as `as_stem_ambiguous=` in the header.
+differently-named type are **NOT HANDLED** — refused (no `shape_conf` attribute), never guessed.
+
+Chase-field attribution itself is by NAME, and every refusal is disclosed under its own cause, the same
+way `amb_skipped=` already refuses an ambiguous member-access site: a chase field name owned by 2+
+modeled aggregates is `as_stem_ambiguous=`; owned by NO modeled aggregate (the traversal runs through a
+forward-declared / vendored / over-cap type) is `as_stem_unowned=`; and a SOLE owner whose declared type
+carries no pointer/reference marker — provably not a raw-pointer chase target, so the loop must traverse
+a different, unmodeled type sharing the name — is `as_stem_nonptr=` (the deliberate cost: a smart-pointer
+field has no marker either and is refused with it, a disclosed undercount preferred over a wrong
+attribution). If the classification ever hits its shared query budget, `as_query_capped="1"` marks every
+`as_*` count a floor at once.
 
 ### 8.3 The chase-pointer A/B — a REAL measurement, and an honest NULL-to-weak result
 

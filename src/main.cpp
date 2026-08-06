@@ -9538,6 +9538,19 @@ int runDefaultMap( const MainDispatch& d )
         return sz;
     };
     const std::size_t maxTokensCeilingBytes = std::size_t( double( cfg.maxTokens ) * kMinBytesPerToken * kBudgetHeadroom );
+    // §F5 (cont.) — THE <ctx> WRAPPER IS PART OF THE MAP PORTION THE CALLER RECEIVES. A payload verb
+    // (--pack-signatures / --pack-top-n / --expand / --outline) opens `<ctx>` BEFORE serialize()'s own bytes
+    // (the fprintf below, ahead of the §H7 pre-render), so everything through `</r>` is 5 bytes larger than
+    // what measureMapBytes measures — and neither the search nor the verdict charged them: MEASURED on src/
+    // at N=6000 --pack-signatures, serialize's own portion fit the 12 744 B cap by 4 bytes and the delivered
+    // map portion was 12 745 B — 1 byte over, unlabelled (estchargecheck #5b's exact red). Charged in BOTH
+    // the search and the verdict so the two keep describing the same delivered document. Computed from
+    // `hasExtension` itself (hoisted to here — pure cfg, nothing the search changes) so the charge and the
+    // wrapper fprintf below can never drift; every payload verb is refused under --json, so the JSON path's
+    // charge is provably 0. The closing `</ctx>` lands AFTER `</r>`, in payload territory, and stays
+    // charged to est_tokens like the rest of the payload, not to fit_bytes.
+    const bool        hasExtension    = cfg.packSignatures || cfg.packTopN > 0 || !cfg.expand.empty() || !cfg.outline.empty();
+    const std::size_t mapCtxOpenBytes = ( hasExtension && !cfg.json ) ? sizeof( "<ctx>" ) - 1 : 0;
     if( cfg.maxTokens > 0 )
     {
         maxTokensFit = { std::size_t( cfg.maxTokens ), maxTokensCeilingBytes, /*isOverCeiling=*/false };   // maxTokens is > 0 here (guarded above)
@@ -9552,7 +9565,7 @@ int runDefaultMap( const MainDispatch& d )
         while( lo <= hi )
         {
             const int mid = lo + ( hi - lo ) / 2;
-            if( measureMapBytes( mid, 0 ) <= maxTokensCeilingBytes ) { best = mid; lo = mid + 1; }
+            if( measureMapBytes( mid, 0 ) + mapCtxOpenBytes <= maxTokensCeilingBytes ) { best = mid; lo = mid + 1; }
             else
             {
                 hi = mid - 1;
@@ -9632,7 +9645,8 @@ int runDefaultMap( const MainDispatch& d )
     // the ENTIRE output (map + extension blocks) in a single <ctx> root whenever extension output
     // is present. The DEFAULT map (no extension verb) is emitted UNwrapped, exactly as before, so
     // the golden and all existing callers that parse the bare <r>…</r> are unaffected.
-    const bool hasExtension = cfg.packSignatures || cfg.packTopN > 0 || !cfg.expand.empty() || !cfg.outline.empty();
+    // (`hasExtension` itself is defined beside mapCtxOpenBytes above, so the wrapper's 5 delivered
+    // bytes and the --max-tokens search/verdict that charge them read the same predicate.)
 
     // --expand est_tokens bugfix: the <bodies> block that packBodies appends AFTER the map is
     // part of the payload the caller receives, so the header's est_tokens must include it (before this fix it
@@ -9814,7 +9828,11 @@ int runDefaultMap( const MainDispatch& d )
     //     dialect. That one word lives in serialize.h, which this lane does not own, so changing the search
     //     here would ship a document whose own disclosure contradicts it. ROUTED, with the measurement, to
     //     whoever owns both halves — the cap does not yet HOLD under --json, but from here it is LABELLED.
-    if( cfg.maxTokens > 0 && mapTopK > 0 && measureEmittedMapBytes( mapTopK, cfg.json ? 0 : payloadTokens ) > maxTokensCeilingBytes )
+    // §F5 (cont.): + mapCtxOpenBytes — the `<ctx>` opener a payload verb prints ahead of serialize()'s bytes
+    // is inside the delivered map portion (everything through `</r>`), so the verdict charges it exactly as
+    // the search above did; see mapCtxOpenBytes's own comment for the 1-byte-over measurement that found it.
+    if( cfg.maxTokens > 0 && mapTopK > 0
+        && measureEmittedMapBytes( mapTopK, cfg.json ? 0 : payloadTokens ) + mapCtxOpenBytes > maxTokensCeilingBytes )
     {
         maxTokensFit.isOverCeiling = true;
     }
