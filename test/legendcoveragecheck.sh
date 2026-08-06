@@ -109,6 +109,7 @@ ROSTER = [
     ("exemplar",           [SMALL, "--exemplar=rank symbols"]),
     ("hotspots",           [ROOT,  "--hotspots"]),
     ("clones",             [ROOT,  "--clones"]),
+    ("readability",        [SMALL, "--readability"]),
     ("cochange",           [ROOT,  "--cochange"]),
     ("cochange-file",      [ROOT,  "--cochange=src/cli.h"]),
     ("owners",             [ROOT,  "--owners"]),

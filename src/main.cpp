@@ -20,6 +20,7 @@
 #include "recall.h"
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
+#include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
@@ -59,6 +60,8 @@
 #include "skillscan.h"
 #include "htmlexport.h"
 #include "lintrules.h"
+#include "atoms.h"          // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
+#include "naminglens.h"     // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
 #include "prcontext.h"
 #include "ccjson.h"
 #include "cli.h"
@@ -1526,6 +1529,64 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
 // built-ins (facts, not severities); user findings carry their declared sev=. Lives at file scope
 // (not local to runLint) so dedupeLintFindings below can share it.
 struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, text; };
+
+// §P0.2: rules whose RAW capture stream spent its whole per-rule budget — their count= is a floor, not
+// a total, and must say so (the contract --match already honours with hits_capped="1"). Keyed by
+// (name, namespace): a user rule may share a built-in rule's name, and a cap must never leak across
+// that boundary — a bare-name lookup painted `capped="1"` onto rules that were never capped (including
+// symbol-level built-ins that have no query budget at all). File scope, like LintOut and for the same
+// reason: mergeAtomsPack below fills it too.
+struct RuleCap { std::string rule; bool isUserRule; };
+
+// Fold the atoms-of-confusion pack (src/atoms.h — Gopstein et al., ESEC/FSE 2017) into the built-in
+// lint set: its findings, its per-rule floor disclosures, and its rule names for the tally. Three of
+// its seven rules are decided by SUBTRACTION ("every update_expression EXCEPT the statement-level and
+// for-header ones"), which no tree-sitter query can express, so the pack spends its own astQuery pass
+// on a budget far above kLintMaxPerRule — an exclusion stream truncated at 5000 would manufacture
+// false positives on this repo alone. kAtomRuleNames is THE list, so the tally cannot drift from what
+// the pack can emit. Lifted out of runLint for the same reason lintSymbolLevelChecks was.
+void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
+                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames )
+{
+    const rw::atoms::AtomsRun pack = rw::atoms::atomsOfConfusion( ing, rw::kLintMaxPerRule );
+    for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
+    for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
+    for( const std::string_view rule : rw::atoms::kAtomRuleNames ) { allRuleNames.emplace_back( rule ); }
+}
+
+// Fold the identifier-naming lens (src/naminglens.h) into the built-in lint set: its findings go straight
+// into ms, and a rule that spent its per-rule budget comes back here to be disclosed as a floor. Its rule
+// names are NOT appended — unlike the atoms pack they are spelled in runLint's allRuleNames table, because
+// the naming rules are symbol-level built-ins that were declared there before the pack existed. Lifted out
+// of runLint for the same reason mergeAtomsPack and lintSymbolLevelChecks were.
+void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules )
+{
+    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms ) )
+    {
+        saturatedRules.push_back( { std::move( namingRule ), false } );
+    }
+}
+
+// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text). sev and text are part of
+// the KEY, not decoration. (file, startByte, rule) alone is NOT a total order — one rule can emit two
+// findings at the same byte (naming-confusable pairs `rbegin` with both `begin` and `cbegin`, both
+// anchored at the symbol's own offset) — and std::sort is unstable, so tied rows came out in whatever
+// order the producers happened to have appended them. That made a VISIBLE part of the output depend on
+// the order the checks run in rather than on the data: a determinism contract held by accident, and it
+// flipped the moment the two built-in packs were merged from one call site instead of two. Everything a
+// reader can SEE is now in the key, so rows that still tie are byte-identical and dedupeLintFindings
+// collapses them. Lifted out of runLint for the same reason dedupeLintFindings was.
+void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
+{
+    std::sort( outs.begin(), outs.end(), [ & ]( const LintOut& x, const LintOut& y )
+    {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId]; }
+        if( x.startByte != y.startByte )                 { return x.startByte < y.startByte; }
+        if( x.rule != y.rule )                           { return x.rule < y.rule; }
+        if( x.sev != y.sev )                             { return x.sev < y.sev; }
+        return x.text < y.text;
+    } );
+}
 
 // §P6.1: two DIFFERENT AST captures (different startByte — e.g. the same magic-number value
 // spelled twice on one line, `h >> 33` appearing twice in the same expression) can still render
@@ -4419,6 +4480,15 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+
+    // --readability: the Posnett/Hindle/Devanbu (MSR 2011) closed-form lens, per function, LEAST readable
+    // first (readability.h owns the measurement AND its emission, the way --handoff owns its packet). It
+    // reads only the symbol table and the files on disk, so it needs neither the graph nor git — and it is
+    // a LENS: exit 0 always, no verdict, no threshold.
+    if( cfg.readability )
+    {
+        return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset );
+    }
 
     // --dead-code[=DIR]: HIGH-CONFIDENCE candidates only. Zero callers is incomplete whole-program evidence,
     // so the default reports source-defined free functions with explicit internal (`static`) linkage. External
@@ -8392,13 +8462,19 @@ std::optional<int> runLint( const MainDispatch& d )
         //   implicit-bool-conv — `if(ptr)` is idiomatic C++; flagging it produces near-universal noise
         std::vector<AstMatch> ms;   // combined findings (built-in tags + user rule ids); shared by both sources
 
-        // §P0.2: rules whose RAW capture stream spent its whole per-rule budget — their count= is a floor,
-        // not a total, and must say so (the contract --match already honours with hits_capped="1").
-        // Keyed by (name, namespace): a user rule may share a built-in rule's name, and a cap must never
-        // leak across that boundary — a bare-name lookup painted `capped="1"` onto rules that were never
-        // capped (including symbol-level built-ins that have no query budget at all).
-        struct RuleCap { std::string rule; bool isUserRule; };
-        std::vector<RuleCap> saturatedRules;
+        std::vector<RuleCap> saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
+
+        // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
+        // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
+        // Declared BEFORE the --lint block so the atoms pack can append its own names from inside it (one
+        // guarded region instead of two, which is also what keeps runLint's branch count from growing per pack).
+        std::vector<std::string> allRuleNames = {
+            "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
+            "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
+            "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
+            "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
+            "naming-predicate", "naming-setter", "naming-confusable",
+        };
 
         if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
         {
@@ -8622,6 +8698,13 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
+        // The two packs that live outside this function: the atoms-of-confusion pack (src/atoms.h) and the
+        // identifier-naming lens (src/naminglens.h). Each merges its own findings, its own floor disclosures
+        // and — for atoms, whose rule list is owned by the pack — its own rule names. Both run here, inside
+        // the one --lint guard, so the sort below covers every built-in finding regardless of its source.
+        mergeAtomsPack( ing, ms, saturatedRules, allRuleNames );
+        mergeNamingLens( ing, ms, saturatedRules );
+
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
                    {
@@ -8631,14 +8714,6 @@ std::optional<int> runLint( const MainDispatch& d )
 }
             return x.tag < y.tag; } );
         }   // if( cfg.lint ) — built-in checks
-
-        // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
-        // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
-        const std::vector<std::string> allRuleNames = {
-            "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
-            "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
-            "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
-        };
 
         // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
         // at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
@@ -8672,14 +8747,9 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
-        // Final deterministic order over the COMBINED set: (file path, startByte, rule).
-        std::sort( outs.begin(), outs.end(), [ & ]( const LintOut& x, const LintOut& y )
-                   {
-            if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-            if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
-}
-            return x.rule < y.rule; } );
+        // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
+        // way out to the row's own text.
+        sortLintRows( ing, outs );
 
         // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
         // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
@@ -8709,6 +8779,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
         std::printf( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
                      "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
+                     "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
                      "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
                      "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
