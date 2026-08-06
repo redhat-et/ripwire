@@ -89,6 +89,31 @@ cost when the edit can change measured structure, not merely whenever the workin
    Whatever you leave unacked stays visible — that is the point; an exit 2 you have explained in a commit
    message is worth more than an exit 0 you bought with a blanket ack.
 
+5. **Want ONE number instead of a list — `ripwire <dir> --dmm`.** `--quality-delta` says *which* kinds got
+   worse; it has no scale, so "is this change better than my last one?" has no answer. `--dmm` is that scale:
+   the Delta Maintainability Model (di Biase, Rastogi, Bruntink & van Deursen, TechDebt 2019; thresholds and
+   arithmetic from PyDriller's reference implementation) scores the share of the volume your change moved
+   that landed in — or freed from — risky units.
+
+   ```
+   <dmm base="2edbb46c…" target="working-tree" available="1" combine="pooled" size_metric="physical-loc"
+        dmm="0.436" good="462" bad="597" base_units="4759" target_units="4780">
+     <p k="size" dmm="0.184" good="65" bad="288" d_low="65" d_high="288"/>…
+   ```
+
+   A unit (a function/method definition with a body) is **low risk** iff `loc<=15` (size), `cyclomatic<=5`
+   (complexity), `params<=2` (interfacing). `good` = low-risk volume **added** plus high-risk volume
+   **removed**; `bad` = the reverse; `dmm = good/(good+bad)`. **Deleting a god function scores 1.000;
+   growing one scores 0.000.** The three sub-scores are separately actionable — a low `size` with a healthy
+   `interfacing` says *split the function*, not *change the signature*.
+
+   Three things to carry. **It is a DELTA, never a level:** editing bad code without changing its size,
+   complexity or parameter count contributes *nothing* — you are not punished for touching a mess, which is
+   deliberate. **`dmm="UNAVAILABLE"` is not a score of 1.0 or 0.0** — it means `good+bad` was 0 (a rename, a
+   literal edit, a comment reflow), i.e. the change is outside what the model measures; the same token can
+   appear per property. And **it never gates** (always exit 0): use it to *trend* — `--dmm=REV` scores one
+   commit against its parent and `--dmm=A..B` scores a range, so a series of commits is a series of numbers.
+
 ## When the delta flags something, zoom in
 Thresholds/definitions are the catalog in [`quality-metrics.md`](quality-metrics.md) — this is just drill-down + fix:
 
