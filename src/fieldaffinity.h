@@ -88,12 +88,26 @@
 //
 // Determinism: aggregates are walked in symbol-id order, every emitted list is explicitly sorted by a
 // total order ending in a name or an index, name->id maps are gtl::btree_map, and no wall clock is read.
+//
+// ── PHASE A/B ADDENDUM — access-shape classification and chase-pointer colocation ───────────────────────
+// src/accessshape.h (read its own file header first) classifies each `for`-loop's advance as index/chase/
+// mixed/unknown via the codebase's existing astQuery/TSQuery re-query mechanism, then rolls CHASE-shaped
+// loops up into a per-field tally. This file consumes that tally in exactly two ways, both DISCLOSED, not
+// silent: (1) `<f chase="1" loops="N" shape_conf="…">` reports which declared field a real traversal
+// advances through and how confidently its declared type self-references the enclosing aggregate — never
+// for a field name owned by 2+ modeled aggregates (refused, counted in `as_stem_ambiguous=`, the same
+// "refuse rather than guess" convention `amb_skipped=` already uses above). (2) `kChaseSepCostBoostApplied`
+// is wired inline at the EXACT sepCost accumulation point a chase-target pair would be boosted at, and is
+// pinned at 1.0 (a documented no-op) — PLAN.md's shipping floor for anything RANKING-affecting is >=85%
+// precision on the shape_conf="self-ref" set, measured against real corpora with BLIND human review, which
+// has not run. See docs/FIELDAFFINITY.md §8 and src/accessshape.h's own header for the full accounting.
 
 #include "model.h"
 #include "graph.h"
 #include "layout.h"       // the offset model + ModelCtx/modelDef/findDefBody — reused verbatim, not re-derived
 #include "serialize.h"    // escapeXml
 #include "mention.h"      // isIdentChar
+#include "accessshape.h"  // Phase A — access-shape classification, consumed report-only (see addendum above)
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
@@ -126,6 +140,22 @@ constexpr std::size_t   kMaxFieldsShown   = 32;     // per struct (touched field
 constexpr std::size_t   kMaxAggsModeled   = 8000;   // refusal bound on the whole-repo modelling pass
 constexpr std::size_t   kMaxScopeChars    = 120;    // displayed prefix of a PROFILE_SCOPE description
 
+// Phase B — the chase-pointer sepCost boost. TWO constants, deliberately: kChaseSepCostBoostMeasured is
+// the REAL number bench/bench_chase_ab.cpp produced on this machine (see docs/FIELDAFFINITY.md §8 for the
+// exact run); kChaseSepCostBoostApplied is what buildStructRow ACTUALLY multiplies by, pinned at 1.0 (a
+// provable no-op) until the plan's required real-corpus, blind-reviewed precision floor
+// (shape_conf="self-ref" >= 85%) clears. Wiring the measured constant into the arithmetic before that
+// floor clears would be exactly the unearned promotion PLAN.md's Phase B section forbids ("no silent
+// promotion past a floor nobody checked"). Keep these separate; do not fold one into the other.
+// MEASURED (2026-08-06, this session, Apple M5 Pro, unprivileged — counters UNAVAILABLE, same disclosed
+// gap bench_field_ab.cpp's own §5.1 has without root): bench/bench_chase_ab.cpp, a shuffled 64 MB /
+// 256 Ki-node pointer chase, ratio=split/packed over 5 repeats: 1.00 1.04 1.04 1.01 1.02 — mostly NULL,
+// weakly and inconsistently positive, NOT a confident confirmation at this working-set/shuffle regime.
+// That is itself an honest result (see docs/FIELDAFFINITY.md §8), and a second, independent reason
+// (beyond the unmet validation floor) this constant is NOT wired into the arithmetic below.
+constexpr double         kChaseSepCostBoostMeasured = 1.02;   // median of the 5 repeats above — NOT applied
+constexpr double         kChaseSepCostBoostApplied  = 1.00;   // LOCKED at 1.0 — report-only, see file header
+
 // ── the result model ─────────────────────────────────────────────────────────────────────────────────
 
 // One declared field, carrying the layout model's geometry plus this lens's access tally.
@@ -138,6 +168,13 @@ struct AffField
     bool          sized    = false;
     std::uint32_t accesses = 0;       // FLOOR: member-access sites attributed to this field
     std::uint32_t fns      = 0;       // distinct indexed functions that touch it
+
+    // Phase A/B disclosure (report-only — see the file header addendum and src/accessshape.h). chaseLoops
+    // is a FLOOR: the number of DISTINCT for-loop sites accessshape.h observed advancing THROUGH this
+    // field (`p = p->thisField`), 0 when never observed as a chase-advance field or when the field name
+    // was refused as ambiguous (owned by 2+ modeled aggregates — see as_stem_ambiguous= in the header).
+    std::uint32_t                chaseLoops = 0;
+    accessshape::ChaseConfidence chaseConf  = accessshape::ChaseConfidence::None;
 };
 
 // An edge of the field affinity graph (Chilimbi PLDI 1999), scored with his separation weight.
@@ -208,6 +245,15 @@ struct AffResult
     std::size_t              ambSkipped   = 0;    // sites refused because >1 aggregate declares that field name
     std::size_t              structsTotal = 0;    // structs with >= 1 attributed access, before the display cap
     std::size_t              findings     = 0;
+
+    // Phase A repo-wide rollup (report-only — see the file header addendum). Independent of `filtered`:
+    // access-shape classification is corpus-wide for the same reason the aggregate ambiguity universe is
+    // (a filter narrows what's SHOWN, never what's true about the rest of the corpus).
+    std::size_t               asForLoops      = 0;   // as-loop rows classifyAccessShapes found, before its cap
+    std::size_t               asLoopsCapped   = 0;    // dropped by accessshape::kMaxLoopsModeled — a disclosed FLOOR
+    std::size_t               asIndexLoops    = 0, asChaseLoops = 0, asMixedLoops = 0, asUnknownLoops = 0;
+    std::size_t               asStemAmbiguous = 0;    // chase field names refused: owned by 2+ modeled aggregates
+    std::vector<std::string>  asSaturatedTags;        // astQuery tags whose count= is itself a floor (rare)
 };
 
 // ── Chilimbi's separation weight, PLDI 1999 §4 ───────────────────────────────────────────────────────
@@ -585,9 +631,48 @@ inline void applyDisplayOrder( AffStruct& row )
                } );
 }
 
+// ── Phase A/B bridge: which declared field (if any) is THIS aggregate's confirmed chase pointer ────────
+// See the file header addendum and src/accessshape.h. Resolved once per aggregate, BEFORE buildStructRow,
+// so both halves of Phase B (the disclosure attribute on the field AND the sepCost boost's accumulation
+// point) read the SAME resolution rather than two call sites drifting apart.
+struct ChaseFieldInfo
+{
+    bool                          found  = false;
+    std::size_t                   declIdx = 0;    // index into agg.def.fields
+    std::uint32_t                 loops   = 0;
+    accessshape::ChaseConfidence  conf    = accessshape::ChaseConfidence::None;
+};
+
+inline ChaseFieldInfo resolveChaseField( const ModeledAgg& agg, std::uint32_t aggIndex, const FieldOwners& owners,
+                                         const accessshape::ShapeResult& shapeRes )
+{
+    ChaseFieldInfo info;
+    for( std::size_t fi = 0; fi < agg.def.fields.size(); ++fi )
+    {
+        const std::string& name = agg.def.fields[ fi ].name;
+        const auto          cIt = shapeRes.chaseFieldLoops.find( name );
+        if( cIt == shapeRes.chaseFieldLoops.end() )
+        {
+            continue;
+        }
+        const auto oIt = owners.find( name );
+        if( oIt == owners.end() || oIt->second.size() != 1 || oIt->second.front() != aggIndex )
+        {
+            continue;   // ambiguous (2+ aggregates declare this name) or not THIS struct's own field —
+                        // refused, not guessed; the caller tallies this in asStemAmbiguous.
+        }
+        info.found   = true;
+        info.declIdx = fi;
+        info.loops   = cIt->second;
+        info.conf    = accessshape::chaseFieldConfidence( agg.def.fields[ fi ].type, agg.name );
+        break;      // a struct declares a given field name at most once
+    }
+    return info;
+}
+
 // One aggregate's affinity graph, geometry diff and findings, from its accumulated touches.
 inline AffStruct buildStructRow( layout::ModelCtx& ctx, const ModeledAgg& agg, const AggAccum& acc,
-                                 const std::vector<std::uint32_t>& fanIn )
+                                 const std::vector<std::uint32_t>& fanIn, const ChaseFieldInfo& chaseInfo )
 {
     const layout::LayoutDef& def = agg.def;
 
@@ -618,6 +703,11 @@ inline AffStruct buildStructRow( layout::ModelCtx& ctx, const ModeledAgg& agg, c
         f.sized    = def.fields[ fi ].sized;
         f.accesses = acc.accesses[ fi ];
         f.fns      = acc.fnCount[ fi ];
+        if( chaseInfo.found && chaseInfo.declIdx == fi )
+        {
+            f.chaseLoops = chaseInfo.loops;
+            f.chaseConf  = chaseInfo.conf;
+        }
         declToRow[ fi ] = std::uint32_t( row.fields.size() );
         row.fields.push_back( std::move( f ) );
     }
@@ -668,7 +758,12 @@ inline AffStruct buildStructRow( layout::ModelCtx& ctx, const ModeledAgg& agg, c
         p.measured = true;
         p.dist     = ( fa.offset > fb.offset ) ? ( fa.offset - fb.offset ) : ( fb.offset - fa.offset );
         p.wt       = separationWeight( p.dist );
-        row.sepCost += double( p.fns ) * ( 1.0 - p.wt );
+        // Phase B's boost, applied at the EXACT accumulation point, BEFORE the sepCost-desc sort below —
+        // stated explicitly so this can never silently break the file's determinism contract (PLAN.md).
+        // kChaseSepCostBoostApplied is LOCKED at 1.0 (a provable no-op): see the tuning-constants comment
+        // and the file header addendum for why the measured value is not wired in yet.
+        const double boost = ( fa.chaseLoops > 0 || fb.chaseLoops > 0 ) ? kChaseSepCostBoostApplied : 1.0;
+        row.sepCost += double( p.fns ) * ( 1.0 - p.wt ) * boost;
     }
 
     // findings — the two shapes whose direction is defensible. Nothing else fires, ever.
@@ -764,6 +859,25 @@ inline AffResult computeFieldAffinity( const IngestResult& ing, const std::vecto
     res.aggregates                     = aggs.size();
     const FieldOwners owners           = buildFieldOwners( aggs );
 
+    // Phase A — corpus-wide, same reason the ambiguity universe above is corpus-wide: which loops advance
+    // via a chase-shaped update is a fact about the WHOLE repo, not about whichever struct a filter named.
+    const accessshape::ShapeResult shapeRes = accessshape::classifyAccessShapes( ing );
+    res.asForLoops      = shapeRes.forLoops;
+    res.asLoopsCapped   = shapeRes.loopsCapped;
+    res.asIndexLoops    = shapeRes.indexLoops;
+    res.asChaseLoops    = shapeRes.chaseLoops;
+    res.asMixedLoops    = shapeRes.mixedLoops;
+    res.asUnknownLoops  = shapeRes.unknownLoops;
+    res.asSaturatedTags = shapeRes.saturatedTags;
+    for( const auto& [ name, loops ] : shapeRes.chaseFieldLoops )
+    {
+        const auto oIt = owners.find( name );
+        if( oIt == owners.end() || oIt->second.size() != 1 )
+        {
+            ++res.asStemAmbiguous;   // refused: 2+ modeled aggregates declare this field name
+        }
+    }
+
     std::vector<AggAccum> accum( aggs.size() );
     for( std::size_t i = 0; i < aggs.size(); ++i )
     {
@@ -795,7 +909,8 @@ inline AffResult computeFieldAffinity( const IngestResult& ing, const std::vecto
             continue;
         }
         ++res.structsTotal;
-        AffStruct row = buildStructRow( ctx, aggs[ ai ], accum[ ai ], fanIn );
+        const ChaseFieldInfo chaseInfo = resolveChaseField( aggs[ ai ], std::uint32_t( ai ), owners, shapeRes );
+        AffStruct row = buildStructRow( ctx, aggs[ ai ], accum[ ai ], fanIn, chaseInfo );
         res.findings += row.findings.size();
         res.rows.push_back( std::move( row ) );
     }
@@ -849,14 +964,22 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
         "co-accessed field crossing a line boundary). Pack-tighter and sort-by-size advice is deliberately ABSENT: "
         "tight packing can induce false sharing, which is why the Go team keeps fieldalignment out of vet and gopls. "
         "ADVICE ONLY, never a transformation. validate= names the instrumented PROFILE_SCOPE whose counters would "
-        "confirm the hypothesis; see docs/FIELDAFFINITY.md. -->" );
+        "confirm the hypothesis; see docs/FIELDAFFINITY.md. PHASE A/B (report-only): as_* counts a corpus-wide, "
+        "purely static for-loop advance-shape classification (index/chase/mixed/unknown, via astQuery TSQuery "
+        "patterns, never execution); a chase-shaped field is disclosed on its <f> row as chase=\"1\" loops=\"N\", "
+        "with shape_conf=\"self-ref\"/\"tmpl-approx\" only when the field's OWN declared type textually "
+        "self-references its aggregate. NEVER ranking-affecting yet: the required real-corpus, blind-reviewed "
+        "precision floor has not run, so sepcost= is IDENTICAL with or without this disclosure. See "
+        "src/accessshape.h and docs/FIELDAFFINITY.md sec 8. -->" );
 
     std::fprintf( out, "<fieldaffinity block=\"%u\" model=\"lp64-approx\" counts_floor=\"1\" weighting=\"fanin-floor\""
                        " aggregates=\"%zu\" files=\"%zu\" fns_scanned=\"%zu\" accesses=\"%zu\" amb_skipped=\"%zu\""
-                       " structs=\"%zu\" shown=\"%zu\" capped=\"%d\" findings=\"%zu\" min_fns=\"%u\"",
+                       " structs=\"%zu\" shown=\"%zu\" capped=\"%d\" findings=\"%zu\" min_fns=\"%u\""
+                       " as_loops=\"%zu\" as_index=\"%zu\" as_chase=\"%zu\" as_mixed=\"%zu\" as_unknown=\"%zu\"",
                   kCacheBlockBytes, res.aggregates, res.filesScanned, res.fnsScanned, res.accesses,
                   res.ambSkipped, res.structsTotal, res.rows.size(),
-                  ( res.structsTotal > res.rows.size() ) ? 1 : 0, res.findings, kMinCoAccessFns );
+                  ( res.structsTotal > res.rows.size() ) ? 1 : 0, res.findings, kMinCoAccessFns,
+                  res.asForLoops, res.asIndexLoops, res.asChaseLoops, res.asMixedLoops, res.asUnknownLoops );
     if( res.filtered )
     {
         std::fprintf( out, " sym=\"%s\"", ex( res.sym ).c_str() );
@@ -864,6 +987,18 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
     if( res.aggsCapped > 0 )
     {
         std::fprintf( out, " aggs_capped=\"%zu\"", res.aggsCapped );
+    }
+    if( res.asLoopsCapped > 0 )
+    {
+        std::fprintf( out, " as_loops_capped=\"%zu\"", res.asLoopsCapped );
+    }
+    if( res.asStemAmbiguous > 0 )
+    {
+        std::fprintf( out, " as_stem_ambiguous=\"%zu\"", res.asStemAmbiguous );
+    }
+    if( !res.asSaturatedTags.empty() )
+    {
+        std::fprintf( out, " as_saturated=\"%zu\"", res.asSaturatedTags.size() );
     }
     std::fprintf( out, ">" );
 
@@ -894,6 +1029,14 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
             else
             {
                 std::fprintf( out, " placed=\"0\"" );
+            }
+            if( f.chaseLoops > 0 )
+            {
+                std::fprintf( out, " chase=\"1\" loops=\"%u\"", f.chaseLoops );
+                if( f.chaseConf != accessshape::ChaseConfidence::None )
+                {
+                    std::fprintf( out, " shape_conf=\"%s\"", accessshape::confidenceName( f.chaseConf ) );
+                }
             }
             std::fprintf( out, "/>" );
         }
