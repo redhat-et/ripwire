@@ -80,6 +80,24 @@ the *pre-fix diagnosis*; the query-compile column is then cut by the optimizatio
    was **62% of warm**. **Fixed** (commit `b9b5763`): compile only the grammars present in the
    crawl. See below.
 
+## Build-profile options (2026-08-05) — measured, both off by default
+
+Everything else in this document profiles the **default build**. A clang optimization-remarks pass
+over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`) found the hot phases above are call-bound across a
+translation-unit boundary into tree-sitter's C API — 397 of 636 distinct `inline/NoDefinition`
+remarks in `src/ingest.cpp` name a `ts_*` accessor. Two build options answer that:
+
+| build | cold | warm | cost |
+|---|---|---|---|
+| `-DRIPWIRE_LTO=ON` | 1–6% faster | 0–3% | rebuild after touching main.cpp 34 s → 89 s |
+| `scripts/pgobuild.sh` (PGO on LTO) | **14–25% faster** (6–16% over the LTO default) | 5–10% | two configures + a training run |
+
+Interleaved A/B, median and min, 9–31 runs per arm, repeated; measured on this repo AND on a
+~2000-file C++ tree in no training run. Output byte-identical, determinism gate green on both trees.
+The cold/warm split matches the phase table above: cold is a branchy walk over tree-sitter's parse
+tree (lots for a profile to learn), warm already runs in the cache-tuned CSR/SoA/B+tree structures.
+Full triage, per-run tables and every dismissed remark: [`../docs/OPTREMARKS.md`](../docs/OPTREMARKS.md).
+
 ## Optimization landed — two passes
 **1. Compile only present grammars** (commit `b9b5763`). After the crawl the present extensions are
 known, so the prewarm compiles only those grammars (a `.h` may re-route to objc via `looksObjC`, so
