@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--ensemble`](#ensemble) · [`--naming-calibration`](#naming-calibration) · [`--readability`](#readability) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--ensemble`](#ensemble) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor)
 
@@ -1229,6 +1229,26 @@ APPROXIMATION, disclosed: ONE token-class table serves every language (keywords 
 - The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a grade: read the ORDER of the rows, not the number on any one of them.
 - Pages with limit=N (offset=M);
 
+### `--ensemble`
+
+**Answers:** the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families
+
+**Shaped by:** `--json`
+
+### `--context-ratio`
+
+**Answers:** the LOCAL-REASONING lens: to understand this symbol, how much must you know that is NOT in front of you? Per symbol (and rolled up per file) the distinct in-corpus definitions and files its reference sites resolve to, and the share of them defined OUTSIDE its own file — as an edge count (ent_ratio=) and, weighted by the tokens a reader must actually read, as read_ratio=.
+
+ATTRIBUTION: the fraction itself is published — it is Beck and Diehl's per-class congruence (FSE 2011) flipped, with Martin's instability Ce/(Ca+Ce) as its crude ancestor. What is refined here is the READER WEIGHTING and the use of EVERY reference role (call, read, write, import, base class, member type), not calls alone. Resolution is NAME-BASED and language-gated, the same heuristic level the uses verb works at; a name with several definitions contributes each of them up to defs_per_name_cap= and amb= counts it. Names with no in-corpus definition land in ext=, which locals and parameters DOMINATE, so ext= is not a dependency count and is excluded from both ratios. ents=/files= are FLOORS. Pages with limit=N (offset=M); default 40 symbol rows and 40 file rows. An ORDERING, never a grade and never a threshold.
+
+**Shaped by:** `--json`
+
+**Caveats (stated by the binary):**
+
+- Resolution is NAME-BASED and language-gated, the same heuristic level the uses verb works at;
+- Names with no in-corpus definition land in ext=, which locals and parameters DOMINATE, so ext= is not a dependency count and is excluded from both ratios.
+- Pages with limit=N (offset=M);
+
 ### `--naming-calibration`
 
 **Answers:** score the naming-* lint rules against this repo's OWN rename history: one git log pass mines old->new identifier substitutions, joins each to the symbol it became at HEAD, and scores BOTH spellings with the same predicates --lint runs.
@@ -1240,20 +1260,6 @@ old=fires on the abandoned spelling, new=fires on the chosen one, proxy=old/(old
 - A NOISY PROXY, stated as one -- rebrands, moves and API changes all look like renames -- so read pairs= (the sample size) first;
 - the group rules report scope=group-rule, not a fake 0/0.
 - Exit 0 always: the per-rule floor lives in test/namingcalibrationcheck.sh
-
-### `--ensemble`
-
-**Answers:** the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families — never a weighted composite score.
-
-fam= is ordinal, every row carries the evidence behind it, ties break on NodeId, and a per-file rollup follows the rows. THRESHOLDS, all also restated on the root element: structural  ccx>=15 | loc>=60 | nest>=4 | params>=5 (the quality-delta bars verbatim, not new numbers), plus rrank=, the symbol's rank in the readability lens.   lexical  the naming rules.   confusion  the atom rules. historical  hrank=, the file's rank by git CHURN ALONE (not the hotspots churn x complexity score, half of which is already structural) over a fixed 12mo window; --since is REFUSED on this verb, because a fixed window keeps hrank= comparable. rrank=/hrank= are RELATIVE cuts — the worst decile of THIS corpus, 1 to 40 rows — never absolute verdicts. Without git, historical is UNAVAILABLE on the root and on every row with of=3, never 'did not fire'. Pages with limit=N.
-
-**Shaped by:** `--json`
-
-**Caveats (stated by the binary):**
-
-- the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families — never a weighted composite score.
-- THRESHOLDS, all also restated on the root element: structural  ccx>=15 | loc>=60 | nest>=4 | params>=5 (the quality-delta bars verbatim, not new numbers), plus rrank=, the symbol's rank in the readability lens.
-- --since is REFUSED on this verb, because a fixed window keeps hrank= comparable.
 
 ### `--cochange[=FILE]`
 
@@ -1312,8 +1318,6 @@ $ ./build/ripwire . --hotspots --since="2 weeks ago"
 <f p="./src/graph.h" churn="7" ccx="1424" score="9968" top="buildGraph" top_ccx="712" top_l="379"/>
 ... [25 more line(s); run it to see the whole thing]
 ```
-
-**Shaped by:** `--ensemble`
 
 **Caveats (stated by the binary):**
 
@@ -2227,7 +2231,7 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 
 **Answers:** machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate (the CI/scripting verbs).
 
-Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML. Deterministic: same 2-run byte-diff + stable key order contract as the XML. --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 200 graph-query rows / --top-k). With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0" — EXCEPT the two verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
+Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML. Deterministic: same 2-run byte-diff + stable key order contract as the XML. --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --context-ratio. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 200 graph-query rows / --top-k). With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0" — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
 
 **Try it**
 

@@ -140,6 +140,11 @@ struct Config
                                                             // families (structural / lexical / confusion / historical) fire, ranked by the COUNT
                                                             // of distinct families and never by a weighted composite. A family that could not be
                                                             // measured is reported UNAVAILABLE, never silent (ensemble.h)
+    bool             contextRatio      = false;            // --context-ratio: the LOCAL-REASONING lens — per symbol (and rolled up per
+                                                            // file), the distinct entities and files a reader must resolve, and the share
+                                                            // of them living outside the unit's own file, weighted by the TOKENS a reader
+                                                            // must read as well as by edge count. A REFINEMENT of Beck & Diehl's per-class
+                                                            // congruence (FSE 2011) / Martin's instability, not a new measure (contextratio.h)
     bool             namingCalibration = false;            // --naming-calibration: §9.5 — score the naming-* lint rules against this
                                                             // repo's OWN rename history (old -> new pairs mined from git log -p).
                                                             // A NOISY proxy, disclosed as one; the floor a rule must clear lives in
@@ -806,6 +811,19 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
         "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
         "    --ensemble                 the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
+        "    --context-ratio            the LOCAL-REASONING lens: to understand this symbol, how much must you know that is NOT in front\n"
+        "                               of you? Per symbol (and rolled up per file) the distinct in-corpus definitions and files its\n"
+        "                               reference sites resolve to, and the share of them defined OUTSIDE its own file — as an edge\n"
+        "                               count (ent_ratio=) and, weighted by the tokens a reader must actually read, as read_ratio=.\n"
+        "                               ATTRIBUTION: the fraction itself is published — it is Beck and Diehl's per-class congruence\n"
+        "                               (FSE 2011) flipped, with Martin's instability Ce/(Ca+Ce) as its crude ancestor. What is\n"
+        "                               refined here is the READER WEIGHTING and the use of EVERY reference role (call, read, write,\n"
+        "                               import, base class, member type), not calls alone. Resolution is NAME-BASED and language-gated,\n"
+        "                               the same heuristic level the uses verb works at; a name with several definitions contributes\n"
+        "                               each of them up to defs_per_name_cap= and amb= counts it. Names with no in-corpus definition\n"
+        "                               land in ext=, which locals and parameters DOMINATE, so ext= is not a dependency count and is\n"
+        "                               excluded from both ratios. ents=/files= are FLOORS. Pages with limit=N (offset=M); default 40\n"
+        "                               symbol rows and 40 file rows. An ORDERING, never a grade and never a threshold.\n"
         "    --naming-calibration       score the naming-* lint rules against this repo's OWN rename history: one git log pass mines\n"
         "                               old->new identifier substitutions, joins each to the symbol it became at HEAD, and scores\n"
         "                               BOTH spellings with the same predicates --lint runs. old=fires on the abandoned spelling,\n"
@@ -1243,21 +1261,24 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability --ensemble.\n"
+        "                               --readability --ensemble --context-ratio.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
-        "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 200 graph-query rows / --top-k).\n"
+        "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
+        "                               symbol rows, 200 graph-query rows / --top-k).\n"
         "                               With --offset alone (no --limit) the verb's own default page size applies and\n"
         "                               the root discloses limit=\"0\" — on OUTPUT that 0 means 'no explicit --limit',\n"
         "                               never a zero-row page (the flag itself refuses --limit=0).\n"
         "                               Deterministic seams (rows are already sorted) so --offset=N is the exact\n"
         "                               continuation of the previous --limit=N page. The root element then carries\n"
         "                               shown= capped= total= has_more= next_offset= offset= limit= — loop until\n"
-        "                               has_more=\"0\" — EXCEPT the two verbs with TWO INDEPENDENT listings, which carry the\n"
+        "                               has_more=\"0\" — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the\n"
         "                               noun-prefixed form instead (one shown= could only describe one): --test-gate\n"
         "                               shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities\n"
-        "                               shown_modules=/modules_capped= + shown_bridges=/bridges_capped=; the window takes the\n"
-        "                               PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete).\n"
+        "                               shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and\n"
+        "                               --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window\n"
+        "                               takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every\n"
+        "                               page, complete).\n"
         "                               Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and\n"
         "                               ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/\n"
         "                               --expand/--outline/--pack-signatures/--format=candidates) are shaped by\n"
@@ -1423,6 +1444,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--clones",             &Config::clones             },
     { "--readability",        &Config::readability        },
     { "--ensemble",           &Config::ensemble           },
+    { "--context-ratio",      &Config::contextRatio       },
     { "--naming-calibration", &Config::namingCalibration  },
     { "--cochange",           &Config::cochange           },
     { "--cochange-groups",    &Config::cochangeGroups     },   // matched by EQUALITY, scanned before the prefix table, so it can
@@ -1729,7 +1751,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 155;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags)
+inline constexpr std::size_t kTotalFlagArms       = 156;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -1917,7 +1939,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability --ensemble";
+    "--readability --ensemble --context-ratio";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -1927,7 +1949,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability || c.ensemble;
+        || c.readability || c.ensemble || c.contextRatio;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in

@@ -144,7 +144,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 ## What it answers
 
-Around the core sit 129 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 130 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
 [`docs/COMMANDS.md`](docs/COMMANDS.md) documents 101 of the flags with a real invocation and its
@@ -187,10 +187,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9086"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9122"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:8920"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:8956"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9097"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9133"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
