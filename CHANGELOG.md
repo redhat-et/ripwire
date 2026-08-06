@@ -15,6 +15,55 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `--field-affinity[=STRUCT]`, the cache-locality lens (advice only, and validated)
+
+Which fields are **read together but declared far apart**. Every shipping struct-layout tool answers
+"where are the holes?" — pahole, clang-analyzer `optin.performance.Padding`, PVS-Studio V802, Go
+`fieldalignment`, `-Wpadded`. None answers this one. The verb builds a static field **co-access
+affinity graph** (one observation per indexed C-family function body) and diffs it against the declared
+field order and 64-byte cache-line geometry, reusing `--layout`'s LP64 offset model rather than
+re-deriving it. Bare form ranks every aggregate in the repository by separation cost; `=STRUCT` narrows
+the report.
+
+**Almost none of this is new, and the output says so in its own legend.** The affinity graph, the
+points-to-free static access enumeration (`<function, struct type>`, an approximation its authors
+conceded), the separation weight `wt(fi,fj) = (block − dist)/block` reproduced verbatim, and
+hardware-counter validation of layout work are all Chilimbi, Davidson & Larus, *Cache-Conscious
+Structure Definition*, **PLDI 1999**. The advice-instead-of-transform posture and per-field counter
+attribution are Hundt, Mannarswamy & Chakrabarti, **CGO 2006**. What is new is narrow and is
+engineering: a *source-level, no-debug-info, whole-repo-ranking* delivery — pahole needs DWARF, Hundt's
+was one proprietary compiler on a dead architecture, `lshaz` is Linux-x86-only and answers the inverse
+(false-sharing) question.
+
+**Exactly two findings fire**, both with a direction defensible in one sentence: `split-line` (two
+fields co-accessed by ≥2 distinct functions at `wt == 0.00`, so no field order can put them on one line)
+and `straddle` (one co-accessed field crossing a line boundary). **Pack-tighter and sort-by-size advice
+is deliberately absent** — the Go team excludes its own `fieldalignment` analyzer from `vet` and `gopls`
+because the diagnostics "very rarely indicate a significant problem" and tight packing can induce false
+sharing. There is no rewrite mode and the verb never exits non-zero: five compiler attempts at automatic
+field layout are dead (GCC `-fipa-struct-reorg`, LLVM heap SRA, esan, StructFieldCacheAnalysis,
+Qualcomm's AoS→SoA RFC), every one that died on soundness died because a *compiler* must prove a pointer
+points at a pool of that struct. Advice cannot miscompile.
+
+Limits, in every header rather than in a footnote: `counts_floor="1"` (`fns=` counts distinct indexed
+functions, never dynamic frequency; `w=` is a fan-in reachability *proxy*), `model="lp64-approx"` (a
+definition `--layout` marks `modeled="0"` contributes its affinity graph and no geometry finding), only
+dot/arrow member syntax is counted, and a field name declared by two aggregates is **refused** and
+tallied in `amb_skipped=` rather than guessed.
+
+**The validation half is real, and it refuted the hypothesis in one regime.**
+`bench/bench_field_ab.cpp` builds the two layouts the lens compares and measures them through
+`prof::pmc` — ripwire's existing counter backend. On an Apple M5 Pro, 64 MB per arm, five repeats per
+stride: the flagged layout is 4–41 % **slower** at strides 9/1025/4097, mixed at 129, and ~2× **faster**
+under a fully sequential sweep — where the packed arm moves *less* data and still costs more time,
+because a single 64 B touch per 256 B element is a sparser stream than two. Hardware counters were
+**UNAVAILABLE** in that run (kperf needs root on macOS) and the harness says so rather than implying
+confirmation, so the *mechanism* claim remains unconfirmed. `docs/FIELDAFFINITY.md` records all of it,
+including the honest reading of the lens's own #1 result on ripwire's source (`MainDispatch` — real
+static separation cost, almost certainly nil dynamic cost, which is limit (1) visible in the top row).
+Gate: `test/fieldaffinitycheck.sh` over `test/fieldaffinityfix/`, whose every offset is hand-computed in
+the fixture's own comments.
+
 ### Added — `--cochange` grows the three things the papers behind it already had
 
 `--cochange`'s `surprising="1"` predicate is an independent implementation of published work, now

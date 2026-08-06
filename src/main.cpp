@@ -44,6 +44,7 @@
 #include "darkflags.h"      // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"     // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
 #include "layout.h"         // --layout=STRUCT — computed field offsets + tripwires + mirror drift
+#include "fieldaffinity.h"  // --field-affinity — the cache-locality lens (co-access graph vs declared order)
 #include "abicheck.h"       // --stray-content --abi — the cross-branch ABI-BREAK gate (layout x stray-content)
 #include "docdrift.h"       // --doc-drift — the markdown doc-anchor verifier
 #include "gitoracle.h"      // --with-history: the shared "was this name ever here" git-history oracle
@@ -7168,6 +7169,47 @@ std::optional<int> runLayout( const MainDispatch& d )
     return layout::layoutContractBroken( result ) ? 2 : 0;   // exit 2 = mirror drift or a contradicted tripwire
 }
 
+// --field-affinity[=STRUCT]: the CACHE-LOCALITY lens. src/fieldaffinity.h owns the whole computation (the
+// aggregate modelling pass, the member-access enumeration, the affinity graph, Chilimbi's separation weight
+// and the two findings); this handler resolves the flag, refuses a filter that names nothing modelable, and
+// emits. Exit 0 ALWAYS on a successful run — this is a report and its findings are ADVICE, so wiring it to a
+// non-zero exit would make a non-monotonic axis (see the header's Go-fieldalignment caution) into a gate.
+// Single-root by construction: the offset model reads on-disk paths, which a merged workspace relabels.
+std::optional<int> runFieldAffinity( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config& cfg = d.cfg;
+
+    if( !cfg.fieldAffinity )
+    {
+        return std::nullopt;
+    }
+    if( d.multiRoot )
+    {
+        std::fprintf( stderr, "ripwire: --field-affinity is single-root only (the offset model reads on-disk paths, "
+                              "which a merged workspace relabels) — run it once per root\n" );
+        return 1;
+    }
+
+    const fieldaffinity::AffResult res =
+        fieldaffinity::computeFieldAffinity( d.ing, d.fanIn, cfg.fieldAffinityStruct );
+
+    // A filter that matched no modelable aggregate is a REFUSAL, not an empty report: an empty
+    // <fieldaffinity/> reads as "this struct has no co-access", which is a different and much stronger
+    // claim than "this name never resolved to a C-family aggregate body this verb can model".
+    if( !cfg.fieldAffinityStruct.empty() && res.rows.empty() && res.structsTotal == 0 )
+    {
+        std::fprintf( stderr, "ripwire: --field-affinity: no indexed C-family struct/class named '%.*s' with any attributed "
+                              "field access (this verb models C/C++/ObjC only; try --layout=%.*s for its declared layout)\n",
+                      int( cfg.fieldAffinityStruct.size() ), cfg.fieldAffinityStruct.data(),
+                      int( cfg.fieldAffinityStruct.size() ), cfg.fieldAffinityStruct.data() );
+        return 1;
+    }
+
+    fieldaffinity::writeFieldAffinity( stdout, res );
+    return 0;
+}
+
 // §A8.6: "how many communities count as a real module" — size>=2, i.e. NOT an isolated singleton. Shared by
 // emitCommunitiesReport (below) and emitCommunityDrill's `modules=`, so the two verbs' modules= counts use
 // the identical predicate and cannot drift into two different numbers under one attribute name.
@@ -11142,6 +11184,11 @@ int main( int argc, char** argv )
     }
 
     if( std::optional<int> handled = runLayout( dsp ) )
+    {
+        return *handled;
+    }
+
+    if( std::optional<int> handled = runFieldAffinity( dsp ) )
     {
         return *handled;
     }
