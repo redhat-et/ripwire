@@ -413,6 +413,17 @@ struct NamingLensResult
 inline constexpr std::size_t kConfusableGroupMax = 512;   // beyond this many co-visible names the O(n²) pair scan
 inline constexpr std::size_t kConfusableWindow   = 24;    //   degrades to a sorted-neighbor window — disclosed as a floor
 
+// The pack's LANGUAGE precondition, named so a caller can ask the COVERAGE question — "could this pack
+// evaluate anything in this corpus at all?" — without re-listing the excluded languages. A data or doc
+// language carries no identifier this pack has an opinion about, so its silence is out of scope rather
+// than a clean bill of health, and src/ensemble.h's availability precondition reads exactly this.
+// detail::eligibleSymbol is the only other caller, which is what keeps the list from becoming two
+// copies that can drift apart.
+inline bool namingEvaluableLang( Lang lang ) noexcept
+{
+    return lang != Lang::Json && lang != Lang::Markdown && lang != Lang::Unknown;
+}
+
 namespace detail
 {
 
@@ -465,7 +476,7 @@ inline bool eligibleSymbol( const Symbol& s )
     {
         return false;
     }
-    if( s.lang == Lang::Json || s.lang == Lang::Markdown || s.lang == Lang::Unknown )
+    if( !namingEvaluableLang( s.lang ) )
     {
         return false;
     }
