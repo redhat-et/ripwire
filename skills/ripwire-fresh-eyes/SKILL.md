@@ -191,8 +191,25 @@ sections your question needs.
    can be charged to the cell; and it covers **C++/ObjC/Python only**, with every other indexed language
    named in `unanalyzed_langs=` on the root, which is *not measured*, not *measured zero*.
 
-   **Corroborated rot — `ripwire <dir> --ensemble`. Run this INSTEAD of steps 1-5 when the question is
-   "where is the rot", and use the single-lens steps to drill into what it names.** One lens firing is an
+   **THE SINGLE COMMAND — `ripwire <dir> --quality-panel[=strict|default|lenient]`. When the question is
+   just "where is the rot", start HERE, not at step 1.** It is the whole panel in one ranked report: the four
+   families `--ensemble` joins, plus `colocation` (how much of what you must read to understand this function
+   lives outside its own file) and `state` (this function's OWN BODY touching non-local mutable state) — six
+   families, ranked by the count of distinct families and never by a composite.
+   `<s p="src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation"
+   uncounted="" unavail=""><e f="colocation" counted="1" why="crank=29"/>…`
+   Pick the preset by what you are doing, and note that a preset only **selects** families and **cuts** on the
+   count — it never weights: `lenient` (all six, 1 must agree) is a *reading order*, about a third of any tree;
+   `default` (all six, 2 must agree) is a review list; `strict` (the four families measured stable enough to
+   stand behind a gate, 2 must agree) is the only rung to point CI at. `historical` and `colocation` are
+   deliberately out of `strict` — each is a fixed-size worst-40 cut over a ranking whose population moves, so
+   both re-shuffle across commits on code that did not change. A row still SHOWS them, as `uncounted=` with
+   `counted="0"`, so you can see what the preset set aside. Everything the `--ensemble` paragraph below says
+   about ordinal cuts and UNAVAILABLE applies here unchanged.
+
+   **Corroborated rot, four families only — `ripwire <dir> --ensemble`.** The narrower join, and the one
+   whose numbers are published; reach for it when you want exactly the calibrated four plus the per-file
+   rollup. One lens firing is an
    opinion; the same function flagged by *several kinds of evidence at once* is a finding. `--ensemble` joins
    four **orthogonal** families — `structural` (the shape: `ccx`/`loc`/`nest`/`params` bars plus the
    readability rank), `lexical` (the `naming-*` rules on the identifier text), `confusion` (the `atom-*`

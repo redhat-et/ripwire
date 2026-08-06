@@ -19,10 +19,22 @@
 #   * The stability pass runs ONE binary over MANY commits. The instrument is fixed and the corpus
 #     varies — the reverse would measure the tool's own churn, not the code's.
 #
+# TWO VERBS, ONE HARNESS. `--verb ensemble` (the default) measures the FOUR calibrated families and
+# reproduces docs/EVALS.md §9 byte-for-byte. `--verb panel` measures `--quality-panel=lenient`, whose
+# SIX families are those four plus `colocation` and `state` — the measurement docs/EVALS.md §9.9 is
+# derived from, and the one a new family has to pass BEFORE it is enabled by default. The family list is
+# read from the verb's OWN root element (`families=` / `enabled=`), never hardcoded here, so a family
+# added to the verb cannot go unmeasured because this file was not updated.
+#
+# `--verb panel` uses the LENIENT preset on purpose: cut 1 emits a row for every symbol where any family
+# fired, which is the census the correlation needs. A higher cut would drop exactly the single-family rows
+# the phi coefficient is computed over.
+#
 # USAGE
 #   python3 bench/ensemblecal/run_ensemblecal.py collect   --out cal.json  DIR[:LABEL[:indep]] ...
 #   python3 bench/ensemblecal/run_ensemblecal.py stability --out stab.json REPO[:LABEL] ... [--samples 8]
 #   python3 bench/ensemblecal/run_ensemblecal.py report    --in  cal.json [--stability stab.json]
+#   … any of the three with --verb panel to measure the six-family panel instead of the four-family join.
 #
 # `stability` CHECKS OUT PAST COMMITS. Point it at a throwaway clone
 # (`git clone --local --shared <repo> /tmp/x`), never at a tree you are working in.
@@ -31,6 +43,17 @@ import argparse, collections, itertools, json, math, os, re, subprocess, sys
 
 FAM = ["structural", "lexical", "confusion", "historical"]
 RW = os.environ.get("RIPWIRE_BIN", "./build/ripwire")
+
+# The two verbs this harness can measure. `root` is the element name, `args` the invocation, `capped` the
+# attribute that says the listing was truncated (a capped listing is not a census, so either value of 1 is
+# a hard error). Nothing about the FAMILIES is in this table — they are read from the root element.
+VERBS = {
+    "ensemble": {"root": "ensemble",      "args": ["--ensemble"],                "capped": "syms_capped",
+                 "fams": lambda root: FAM},
+    "panel":    {"root": "quality_panel", "args": ["--quality-panel=lenient"],   "capped": "capped",
+                 "fams": lambda root: [f for f in root["enabled"].split(",") if f]},
+}
+VERB = VERBS["ensemble"]      # rebound by main() before anything runs
 
 
 def attrs(tok):
@@ -47,10 +70,10 @@ def strip_comments(xml):
 
 # ── collection ────────────────────────────────────────────────────────────────────────────────────
 def scan_ensemble(path, extra=()):
-    body = strip_comments(run(path, ["--ensemble", "--limit=200000"] + list(extra)))
-    m = re.search(r"<ensemble ([^>]*)>", body)
+    body = strip_comments(run(path, VERB["args"] + ["--limit=200000"] + list(extra)))
+    m = re.search(r"<" + VERB["root"] + r" ([^>]*)>", body)
     if not m:
-        raise RuntimeError("no <ensemble> root for " + path)
+        raise RuntimeError("no <" + VERB["root"] + "> root for " + path)
     root, syms, cur = attrs(m.group(1)), [], None
     for tok in body.split("<"):
         if tok.startswith("s "):
@@ -61,8 +84,8 @@ def scan_ensemble(path, extra=()):
         elif tok.startswith("e ") and cur is not None:
             a = attrs(tok)
             cur["why"][a["f"]] = a["why"]
-    if root.get("syms_capped") == "1":
-        raise RuntimeError("symbol rows were capped — raise --limit; a capped listing is not a census")
+    if root.get(VERB["capped"]) == "1":
+        raise RuntimeError("symbol rows were capped \u2014 raise --limit; a capped listing is not a census")
     return root, syms
 
 
@@ -90,6 +113,14 @@ def metric_cdf(path, extra=()):
     return n, {k: sorted(v) for k, v in cols.items()}
 
 
+def bind_families(root):
+    """The family list comes from the VERB'S OWN ROOT, never from this file. A family added to the verb is
+    therefore measured the moment it ships; a family this harness has never heard of cannot go missing."""
+    global FAM
+    FAM = VERB["fams"](root)
+    return FAM
+
+
 def collect(specs, out):
     res = {}
     for spec in specs:
@@ -98,11 +129,12 @@ def collect(specs, out):
         label = parts[1] if len(parts) > 1 and parts[1] else os.path.basename(path.rstrip("/"))
         indep = (len(parts) > 2 and parts[2] == "indep")
         root, syms = scan_ensemble(path)
+        bind_families(root)
         vecs = collections.Counter()
         for s in syms:
             vecs[tuple(1 if f in s["fired"] else 0 for f in FAM)] += 1
         elig = int(root["eligible"])
-        vecs[(0, 0, 0, 0)] += elig - sum(vecs.values())
+        vecs[tuple([0] * len(FAM))] += elig - sum(vecs.values())
         bars, barvals = collections.Counter(), collections.defaultdict(list)
         rules = {"lexical": collections.Counter(), "confusion": collections.Counter()}
         for s in syms:
@@ -120,6 +152,7 @@ def collect(specs, out):
                       "rules": {k: dict(v) for k, v in rules.items()},
                       "metrics_n": nmet, "cdf": cdf}
         print(f"collected {label:16s} eligible={elig}", flush=True)
+    res["__families__"] = list(FAM)
     json.dump(res, open(out, "w"))
 
 
@@ -139,6 +172,7 @@ def stability(specs, out, samples):
             date = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%cd", "--date=short"],
                                   capture_output=True, text=True).stdout.strip()
             root, syms = scan_ensemble(repo)
+            bind_families(root)
             fired = {f: set() for f in FAM}
             for s in syms:
                 key = "|".join((s["p"].rsplit(":", 1)[0], s["n"]))
@@ -152,6 +186,7 @@ def stability(specs, out, samples):
             print(f"  {label} {sha[:9]} {date} eligible={root['eligible']}", flush=True)
         subprocess.run(["git", "-C", repo, "checkout", "--quiet", "--force", revs[0]], check=True)
         res[label] = {"repo": repo, "commits_total": len(revs), "step": step, "snaps": snaps}
+    res["__families__"] = list(FAM)
     json.dump(res, open(out, "w"))
 
 
@@ -187,8 +222,19 @@ def sel(bits, enabled, K):
     return sum(bits[FAM.index(f)] for f in enabled) >= K
 
 
-PRESETS = [("lenient", FAM, 1), ("default", FAM, 2),
-           ("strict", ["structural", "lexical", "confusion"], 2)]
+# The families this harness's own stability pass has MEASURED below the criterion-C1 cut, i.e. the ones a
+# `strict` preset may not count. `historical` was §9.5's finding; `colocation` is §9.9's, found by running the
+# very same ladder on the two new families instead of assuming they inherited the four's stability. Both are
+# fixed-size cuts over a ranking whose population moves, which is the mechanism, and the cut interval that
+# separates them from the stable cluster is UNCHANGED from §9.7 — (0.862, 0.920) on mean consecutive Jaccard.
+# One rule, both verbs: on `--verb ensemble` FAM has no `colocation`, so this yields §9.7's strict set exactly.
+UNSTABLE_FOR_GATING = ("historical", "colocation")
+
+
+def presets():
+    """The named presets, over WHATEVER family list this run bound. `strict` is the measured-stable set."""
+    stable = [f for f in FAM if f not in UNSTABLE_FOR_GATING]
+    return [("lenient", list(FAM), 1), ("default", list(FAM), 2), ("strict", stable, 2)]
 
 
 def set_jaccard(A, B):
@@ -210,7 +256,7 @@ def ladder_jaccard(snaps, pick):
 
 def preset_set(snap, enabled, K):
     """The symbols one preset emits at one snapshot."""
-    per = collections.defaultdict(lambda: [0, 0, 0, 0])
+    per = collections.defaultdict(lambda: [0] * len(FAM))
     for i, f in enumerate(FAM):
         for key in snap["fired"][f]:
             per[key][i] = 1
@@ -255,8 +301,8 @@ def report_correlation(D, order, pool, poolh):
         v = pool if k == "POOLED-INDEPENDENT" else vecs_of(D[k])
         un = [] if k == "POOLED-INDEPENDENT" else D[k]["unavail"]
         print(f"  -- {k}")
-        for i in range(4):
-            for j in range(i + 1, 4):
+        for i in range(len(FAM)):
+            for j in range(i + 1, len(FAM)):
                 if FAM[i] in un or FAM[j] in un:
                     print(f"     {FAM[i]:11s} x {FAM[j]:11s} n/a (unavailable)")
                     continue
@@ -274,10 +320,10 @@ def report_cofiring(D, order, pool):
         h = collections.Counter()
         for b, c in v.items():
             h[sum(b)] += c
-        print(f"  -- {k} n={tot}  " + "  ".join(f"fam={i}:{h[i]}({100.0*h[i]/tot:.2f}%)" for i in range(5)))
+        print(f"  -- {k} n={tot}  " + "  ".join(f"fam={i}:{h[i]}({100.0*h[i]/tot:.2f}%)" for i in range(len(FAM) + 1)))
         for b, c in sorted(v.items(), key=lambda kv: (-sum(kv[0]), -kv[1])):
             if sum(b):
-                print(f"       {sum(b)} {'+'.join(FAM[i][:4] for i in range(4) if b[i]):26s}"
+                print(f"       {sum(b)} {'+'.join(FAM[i][:4] for i in range(len(FAM)) if b[i]):34s}"
                       f" {c:6d} {100.0*c/tot:5.2f}%")
 
 def report_thresholds(D, order):
@@ -326,7 +372,7 @@ def report_stability(S):
 
 def report_presets(D, indep, S):
     print("\n7. PRESET GRID — yield of every (enabled-set, K), and of the three named presets")
-    for E, K in [(list(e), k) for r in range(1, 5) for e in itertools.combinations(FAM, r)
+    for E, K in [(list(e), k) for r in range(1, len(FAM) + 1) for e in itertools.combinations(FAM, r)
                  for k in range(1, r + 1)]:
         cells, pn, pe = [], 0, 0
         for k in indep:
@@ -334,10 +380,10 @@ def report_presets(D, indep, S):
             n = sum(c for b, c in v.items() if sel(b, E, K))
             pn += n; pe += e
             cells.append(f"{k[:10]}={100.0*n/e:5.2f}%" + ("*" if set(E) & set(D[k]["unavail"]) else ""))
-        print(f"  {'+'.join(x[:4] for x in E):26s} K>={K}  pooled={100.0*pn/pe:5.2f}%  " + " ".join(cells))
+        print(f"  {'+'.join(x[:4] for x in E):40s} K>={K}  pooled={100.0*pn/pe:5.2f}%  " + " ".join(cells))
     print("  * = an enabled family was UNAVAILABLE on that corpus")
     print("  NAMED PRESETS")
-    for name, E, K in PRESETS:
+    for name, E, K in presets():
         pn = pe = 0
         per = []
         for k in indep:
@@ -350,7 +396,7 @@ def report_presets(D, indep, S):
     if not S:
         return
     print("  NAMED PRESET OUTPUT-SET STABILITY (the gate-jitter question)")
-    for name, E, K in PRESETS:
+    for name, E, K in presets():
         line = f"    {name:8s}"
         for lbl, blk in S.items():
             snaps = blk["snaps"]
@@ -360,10 +406,14 @@ def report_presets(D, indep, S):
 
 
 def report(cal, stab):
+    global FAM
     D = json.load(open(cal))
+    FAM = D.pop("__families__", FAM)
     order = list(D)
     indep = [k for k in order if D[k]["independent"]]
     S = json.load(open(stab)) if stab else None
+    if S:
+        S.pop("__families__", None)
     pool, poolh = pooled(D, indep)
     report_corpora(D, order)
     report_marginals(D, order)
@@ -384,7 +434,10 @@ def main():
     ap.add_argument("--in", dest="inp", default="ensemblecal.json")
     ap.add_argument("--stability", default=None)
     ap.add_argument("--samples", type=int, default=8)
+    ap.add_argument("--verb", choices=sorted(VERBS), default="ensemble")
     a = ap.parse_args()
+    global VERB
+    VERB = VERBS[a.verb]
     if a.mode == "collect":
         collect(a.targets, a.out)
     elif a.mode == "stability":
