@@ -616,3 +616,190 @@ unmeasured constant here too.
 
 Not started. Both this plan and the local-variable-indexing plan above are now written up and ready
 for a future session to pick up — neither has been implemented this session.
+
+## 2026-08-06 (night) — audit pass on the two landed features, plus two design proposals
+
+An audit-and-improve pass over the two features the evening sections above planned and a prior
+session landed (local-variable indexing Phases 1-2; access-shape/chase-pointer Phases A/B). What it
+found and FIXED, so the design proposals below start from a corrected baseline:
+
+* **Three honesty defects in the Phase A/B refusal accounting, all probe-confirmed before fixing.**
+  (1) A chase field name owned by ZERO modeled aggregates (a traversal through a forward-declared /
+  vendored type) was tallied under `as_stem_ambiguous=` — whose every comment and doc said "owned by
+  2+ modeled aggregates". Now its own disclosed counter, `as_stem_unowned=`. (2) A chase field whose
+  SOLE modeled owner declares it as a non-pointer (probe: `struct Counter { int next; }` plus a loop
+  chasing `->next` on an unrelated forward-declared type) was silently attributed `chase="1"` to the
+  int field — a provably wrong guess. Now refused via `accessshape::chaseTypeCanPoint` (no '*'/'&'
+  marker in the declared spelling ⇒ cannot be a raw-pointer chase target; the disclosed cost is that
+  smart-pointer fields are refused with it) and counted as `as_stem_nonptr=`. (3)
+  `ShapeResult::saturatedTags` was fed from astQuery's UNCOMPILED-queries out-param — opposite
+  failure mode (signal absent, not truncated) — and genuine budget saturation was undetected despite
+  the tuning comment claiming disclosure. Renamed `uncompiledQueries` (`as_uncompiled=`), plus a real
+  `queryBudgetSaturated` bit (`as_query_capped="1"`). All three pinned in
+  `test/accessshapecheck.sh` (fixture grew `hopWalk`/`ledgerWalk`/`Ledger`; loop counters 5→7).
+* **Open Question 8 above, measured.** The declDepth>=2 gate is NOT what protects `for( int i … )`:
+  a for-init declaration's parent is the `for_statement`, so `cc_isCountableLocalDecl` structurally
+  never counts it at ANY depth — the modern conventional-counter spelling can never fire
+  naming-short, whitelist-free (pinned: `naminglocalscheck.sh` arm 4b). The RESIDUAL false-positive
+  class is the C-style block-declared counter (`int j;` then `for( j = 0; … )`) — probe-confirmed to
+  fire; deliberately NOT patched (an i/j/k whitelist or a used-as-counter heuristic would be the
+  plausible-but-unaudited guard the WITHDRAWN note warns about); quantify it in the required
+  real-corpus audit before default-enable.
+* **The estchargecheck #5b known-red, root-caused and fixed.** A payload verb's map portion starts
+  with a 5-byte `<ctx>` opener (printed by main.cpp before serialize()'s bytes) that neither the
+  --max-tokens binary search nor the ceiling verdict charged — at N=6000 the map fit the 12 744 B
+  cap by 4 bytes unwrapped and delivered 12 745 B wrapped, unlabelled. Both now charge
+  `mapCtxOpenBytes`; suite is 361 gates / 358 pass / 2 skip / 0 real fails.
+* Also: `naminglocalscheck.sh`'s mutation arm now restores `src/naminglens.h`'s ORIGINAL mtime after
+  its restore-rebuild (backup `cp -p`, restore bare-cp + rebuild + `touch -r`) — a bare-cp restore
+  re-stamped the file "now" and turned `g1freshcheck` red for suite-mates under `pargates.py -j 6`.
+
+Everything below is a PLAN ONLY — nothing in the two proposals is implemented.
+
+### Proposal 1 — the loop×layout join: static cache-line utilization (`--field-affinity` Phase C)
+
+**The observation this answers, verbatim from the driving conversation:** "we code review for cache
+friendliness before measuring it, it seems like there should be some way to write a tool to at least
+get an estimate on how cache friendly so code can be quickly adjusted before measurement… I have
+never seen a tool do it, it is always measure first than change the code."
+
+**Why what exists is a partial instance.** The shipped pieces each answer ONE reviewer question:
+`--layout` answers "what does a line fetch bring in?" (geometry); `--field-affinity` answers "which
+fields want to be closer?" (pairwise co-access distance); Phase A/B answers "which traversals are
+latency-bound and where must the unavoidable fetch land?" (advance shape). None answers the FIRST
+question a reviewer actually asks of a hot loop: **"of each cache line this loop drags in, how much
+does it use?"** — the question behind the two most common cache review comments (AoS→SoA; hot/cold
+field split). That is a JOIN of two models this tree already builds, not a new analysis:
+
+* Per loop, Phase A already has the loop's span and shape (index/chase/mixed/unknown).
+* Per enclosing function, fieldaffinity Stage 2 already enumerates member-access sites with their
+  byte spans and resolves them (sole-owner-or-refuse) to a modeled aggregate's field. Narrowing
+  "per function" to "per loop" is the SAME byte-span-containment correlation accessshape.h already
+  does five times — no new mechanism.
+* Per aggregate, layout.h already knows each field's offset/size and the line count.
+
+**The emitted quantity.** For an `index`-shaped loop whose contained member accesses resolve to ONE
+aggregate T (anything else: refuse, disclosed): `touched` = union of accessed fields' [offset,
+offset+size) within T; `util` = bytes of `touched` ÷ min( sizeof(T), kCacheBlockBytes ) — the
+fraction of each fetched line the loop actually reads, under the two stated assumptions (unit
+element stride, which is what `index` shape means for a `++p` advance; allocation-contiguous
+elements). A `util` near sizeof(field)/sizeof(T) on a large T is the AoS-hot-loop signature; the
+advice row nominates the touched set as the SoA/hot-split candidate — nominates, never decides,
+same contract as every finding in the file. For a `chase` loop the number is NOT emitted (a chase
+loop's element stride is unknowable statically; its lens is the already-shipped colocation
+disclosure) — refusing that case is what keeps the number honest.
+
+**Why this is believable before measurement, and what would validate it.** bench_field_ab.cpp §5
+has ALREADY measured this phenomenon's two edges: 4 of 5 stride regimes confirmed the
+separation-cost hypothesis and the fully-sequential regime INVERTED (§5.3) — so the plan's required
+A/B (`bench/bench_util_ab.cpp`: same harness pattern, one hot 8-byte field in a 64/128/256-byte
+struct, packed-SoA vs full-AoS walk, unit stride) is expected to be the STRONGEST regime for the
+hypothesis (utilization is exactly what stride-1 hardware prefetching cannot fix — the prefetcher
+hides latency, not wasted bandwidth), but that expectation ships as a hypothesis, not a number,
+until the harness runs. Same report-only discipline as Phase B: `util=` is a disclosed attribute;
+nothing ranking-affecting consumes it until a real-corpus precision session (three corpora, blind,
+floor stated up front) clears.
+
+**Novelty, hedged.** The advice itself (SoA, hot/cold splitting) is COMMODITY — Chilimbi's own
+hot/cold splitting paper (PLDI 1999, the file's existing citation) plus 25 years of folklore. The
+measured quantity exists DYNAMICALLY in shipping tools: Intel Advisor's Memory Access Pattern
+analysis reports per-loop stride classes and cache-line utilization from an instrumented RUN — that
+is the "measure first" tool the observation names. A purely STATIC, pre-compile, per-loop
+utilization estimate surfaced as review advice was not found in either of the two adversarial
+searches already run for Phase A/B — but neither search was ASKING this question, so the claim tier
+is at most "PLAUSIBLY RARE, UNSEARCHED": a dedicated search (Advisor/VTune docs, Marmoset lineage,
+the AoS-SoA auto-transform literature — Curial et al. CGO 2018 "Automatic struct peeling" class)
+is a REQUIRED gate before any LINEAGE.md row, and finding a counter-example downgrades this to
+"reimplementation, cited" without killing its usefulness here.
+
+**Cost ceiling.** Reuses Phase A's astQuery output and Stage 2's access table — the join is
+O(loops × accesses-in-file) worst case, bounded by the same kMaxLoopsModeled refusal; measure the
+marginal wall against the 0.20 s Phase A number before landing, same discipline.
+
+### Proposal 2 — one theory under the three lenses: the reader's environment, and what it corrects
+
+**The direction, verbatim:** "basically we want to make a quantitative software metrics suite for
+everything would normally look for in a code review… but not literally true for everything a
+reviewer does, yes, but we want to push this as far as we can." Plus the worked example: a
+1000-line function with 50 poorly-named primitive locals.
+
+**The unified claim, stated so it can be wrong.** Reading a function is evaluating it over an
+environment. The comprehension cost the three lenses measure is the SIZE of that environment, split
+by binding lifetime: (a) bindings defined ELSEWHERE that must be loaded — `--context-ratio`'s
+ents=/read_ratio= (spatial non-locality); (b) bindings mutable from ELSEWHERE whose current value
+cannot be assumed across any call — `--nonlocal-state`'s reach-read/reach-write cells (temporal
+non-locality); (c) bindings defined HERE that must be held simultaneously — the new `locals=` count
+plus nesting (local environment width). All three are "how much is not hidden from me" — which is
+why Parnas 1972 is already `--context-ratio`'s citation; the other two are the same accounting at
+different lifetimes, not different theories.
+
+**What asking it as ONE theory corrects — the concrete deliverable.** Face (c) is currently counted
+WRONG for the theory: `locals=` counts declaration BIRTHS per function, but environment size is
+peak POPULATION — a 1000-line function with 50 locals in disjoint 20-line blocks is a sequence of
+small environments; the same 50 declared at function scope is one huge one, and the worked example
+is precisely the second shape. The theory therefore predicts a specific, cheap refinement:
+**`locals_live=` — the maximum number of countable locals whose enclosing scope chain is
+simultaneously open**, computable in the SAME fused cc_walk that counts births (a per-depth birth
+counter pushed/popped with compound_statement entry/exit — no second walk, same floor semantics).
+NOT novel as a metric: live-variables-per-statement and variable span are published comprehension
+measures from the structured-programming era (Dunsmore & Gannon's live-variable work is the named
+ancestor — cite on rediscovery, per the DESIGN_READABILITY_METRICS shortlist discipline), and
+scope-weighted rather than dataflow-live is a deliberate weakening (no dataflow here; a
+scope-alive-but-dead-after-last-use local still counts — a disclosed over-count, the safe
+direction for a nomination lens). The genuinely arguable-new part is only the COMPOSITION: all
+three faces on one row, in commensurable units where honest (entities + estimated read-tokens —
+context-ratio already prices face (a) in tokens; face (c)'s token price is the declarations'
+spans), presented as a `--quality-panel`-style JOIN.
+
+**Explicitly NOT proposed: a blended score.** The withdrawn naming rule is this tree's own proof
+that an unvalidated direction on a plausible axis ships wrong; a weighted sum of three axes is
+three unvalidated directions and a fake unit. The join VIEW (three columns, one row per symbol,
+sorted by any single column the caller picks) delivers the theory's value — the shapes become
+visible: high-(a)+low-(c) is the good-abstraction shape (context loaded, body simple);
+low-(a)+high-(c) is the worked example (self-contained but unnavigable); high-(b) anywhere is the
+testing hazard — without inventing weights nobody measured.
+
+**Is there a fourth axis?** The honest answer found by asking: not a missing MEASURE — a missing
+MEASURABILITY. The three faces cover what a static, name-resolved, polyglot index can see of
+information hiding. What a reviewer checks that none of them can: PROTOCOL state — ordering
+constraints ("must call open() before read()", init-before-use, lock-before-touch), the hidden
+automaton a module's interface implies. That is temporal coupling between CALLS, not reachability
+of CELLS; measuring it statically needs typestate/protocol inference, which is a different
+evidence class (and where it IS approximable — co-change's "these two functions always change
+together" — the tree already ships it as history evidence, not static structure). Recommendation:
+state the boundary in the join view's legend ("protocol/ordering constraints are not measured
+here"), do not manufacture an axis-four metric to fill it.
+
+**Validation before any of it defaults on.** (1) `locals_live=` gate: fixture functions with
+identical `locals=` and hand-derived different `locals_live=` (the two 50-local shapes above), plus
+the mutation arm proving a births-counter stub fails it. (2) The join view re-ranks ripwire's own
+src/ + one external corpus; a manual audit checks the top-20 against reviewer judgment the same way
+the naming-locals default-enable blocker requires — fixture-passing alone is
+demonstrated-insufficient on this tree (the WITHDRAWN precedent). (3) Any correlation claim
+("predicts comprehension effort") is out of scope until someone designs a study; the join makes no
+such claim in its legend.
+
+### Open questions (need a human call before either proposal is implemented)
+
+1. Proposal 1's aggregate-resolution rule inside a loop: sole-owner-or-refuse (recommended, matches
+   Phase B) — or should a loop whose accesses resolve to TWO aggregates emit two util rows? Refuse
+   first, measure the miss rate on the real-corpus session, then decide.
+2. Proposal 1's `util` denominator when sizeof(T) > one line: per-line union (exact, costlier) vs
+   min(sizeof(T), line) (floor, cheap — recommended for v1, disclosed as a floor).
+3. The dedicated novelty search for static per-loop utilization advice — who runs it and against
+   which source set; REQUIRED before any LINEAGE.md row (finding prior art demotes the claim, not
+   the feature).
+4. `locals_live=`'s interaction with the Phase 2 naming gate: should namingLocalsGate move from
+   `locals>=8` to `locals_live>=K` once measured? Theory says yes (population, not births);
+   measure the distribution on src/ first, same discipline as the locals>=8 floor.
+5. Whether the three-face join is a new verb (`--envelope`? name TBD) or a `--quality-panel`
+   preset — the panel already owns the "several lenses, one screen" contract; extending it avoids
+   a 168th flag arm. Recommended: panel preset.
+6. bench_util_ab.cpp's regimes: element sizes 64/128/256 B, hot-field 8 B, working sets LLC-resident
+   AND DRAM-resident (bench_chase_ab's null at 64 MB says the DRAM regime may wash here too — that
+   would be an honest partial-null to report, not to smooth over).
+
+Not started. Both proposals compose shipped machinery (layout model, Stage-2 access table, Phase A
+classification, cc_walk, context-ratio/nonlocal-state) — the only new code surfaces are the
+loop×layout join, the per-depth live counter, and a join view; every threshold above ships
+measured-or-refused, never invented.

@@ -650,6 +650,15 @@ inline void checkNameShape( const Symbol& s, const std::vector<std::string>& tok
 // idiomatic-short-name case Open Question 8 (PLAN.md) says this gate does not fully solve; declDepth>=2
 // narrows to the class most likely to be a REAL problem (a short name reused several control-structure
 // levels deep, far from its declaration) without pretending to solve the axis entirely.
+// The idiomatic-loop-counter axis, MEASURED (2026-08-06, probe fixture + naminglocalscheck.sh arm 4b):
+// the depth gate is NOT what protects `for( int i = 0; … )` — cc_isCountableLocalDecl's
+// compound-statement-parent rule structurally excludes every for-init declaration at ANY depth, so the
+// modern spelling of the conventional counter can never fire, whitelist-free. The RESIDUAL class that
+// still fires is the C-style block-declared counter (`int j;` on its own line, then `for( j = 0; … )`) at
+// declDepth>=2 — a real false-positive shape this gate does not close. Deliberately NOT patched with an
+// i/j/k name whitelist or a used-as-loop-counter heuristic: either would be exactly the
+// plausible-but-unaudited guard the WITHDRAWN note warns about; the plan's default-enable blocker (a
+// real-corpus manual audit) is where that class gets quantified before any further narrowing ships.
 // Findings ride the SAME tags as the Symbol-scoped rule (Open Question 3, PLAN.md: reuse over a new
 // `-local`-suffixed tag family, which would extend renamemine.h's position-pinned tallies[9]) — the
 // enclosing FUNCTION symbol supplies the finding's byte span (a local has none of its own), the LOCAL's

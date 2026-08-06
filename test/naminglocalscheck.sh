@@ -77,6 +77,10 @@ int bigFunction( int n )
                     {
                         int x = a + b;
                         int __reserved = 1;
+                        for( int q = 0; q < n; ++q )   // a CONVENTIONAL for-init counter, 6 blocks deep:
+                        {                              // its declaration's parent is for_statement, NOT
+                            a += q;                    // compound_statement, so it is structurally never
+                        }                              // countable and must never fire naming-short (arm 4b)
                         (void)x; (void)__reserved;
                     }
                 }
@@ -155,6 +159,22 @@ else
     no "decldepth: naming-short produced no anchored line to check"
 fi
 
+# ══ 4b. FOR-INIT COUNTER — the conventional-loop-counter class, MEASURED not assumed ══════════════════
+# The fixture's deepest block declares `for( int q = 0; … )` — the most conventional short name possible,
+# 6 blocks deep, well past the declDepth>=2 gate. It must NOT fire naming-short, and not because of any
+# name whitelist: a for-init declaration's parent is the for_statement, not the compound_statement, so
+# cc_isCountableLocalDecl (ingest.cpp) structurally never counts it — the exclusion Phase 1's own
+# localscountcheck.sh pins at the COUNT level, proven here to carry through to Phase 2's FLAGGING level.
+# (The residual class this does NOT close, recorded in naminglens.h's checkLocalNameShape comment: a
+# C-style block-declared counter — `int j;` then `for( j = 0; … )` — still fires; closing it needs the
+# real-corpus audit the plan's default-enable blocker already requires, not another plausible guard.)
+short_rows="$( on_rows naming-short | grep -c . || true )"
+if [ "$short_rows" = "1" ]; then
+    ok "for-init: naming-short fired exactly once (the block-declared x) — the depth-6 for-init counter q did NOT fire"
+else
+    no "for-init: naming-short fired $short_rows time(s), expected exactly 1 — a for-init counter may be leaking through"
+fi
+
 # ══ 5. TAG-REUSE ═════════════════════════════════════════════════════════════════════════════════════
 if printf '%s' "$ON" | grep -qi 'naming-short-local\|naming-.*-local"'; then
     no "tag-reuse: a NEW '-local'-suffixed tag appeared — Open Question 3 (PLAN.md) says reuse, not extend"
@@ -175,7 +195,14 @@ fi
 NAMINGLENS="$ROOT/src/naminglens.h"
 if [ -f "$NAMINGLENS" ] && grep -q 'inline bool namingLocalsGate' "$NAMINGLENS"; then
     BACKUP="$TMP/naminglens.h.bak"
-    cp "$NAMINGLENS" "$BACKUP"
+    cp -p "$NAMINGLENS" "$BACKUP"   # -p: carry the ORIGINAL mtime in the backup — after the restore build
+                                    # below succeeds, it is put back (touch -r), because a restore that
+                                    # leaves the source stamped "now" turns g1freshcheck red for every
+                                    # suite-mate scheduled after this gate (the asan binary reads as stale
+                                    # against a source file whose CONTENT never changed — observed live
+                                    # under pargates.py -j 6). The restore cp itself must NOT use -p: a
+                                    # backdated mtime before the rebuild makes the build system skip the
+                                    # recompile and leave the MUTATED binary in place.
     # neuter the gate to "always true" — a controlled, RESTORED-AFTERWARD source edit (same discipline as
     # localscountcheck.sh's own mutation arm), proving arm 3 is not vacuously green.
     python3 - "$NAMINGLENS" <<'PYEOF'
@@ -202,12 +229,16 @@ PYEOF
             no "mutation: neutering namingLocalsGate did NOT change smallFunction's hit count — arm 3 cannot actually fail, it is vacuous"
         fi
     fi
-    cp "$BACKUP" "$NAMINGLENS"
+    cp "$BACKUP" "$NAMINGLENS"      # deliberately NOT -p here: the fresh mtime is what makes the rebuild
+                                    # below actually recompile the restored content (see the backup's note)
     ( cd "$ROOT" && cmake --build build -j 6 >"$TMP/restorebuild.log" 2>&1 )
     if [ $? -ne 0 ]; then
         no "mutation: RESTORE build failed after reverting naminglens.h — repo may be left in a broken state, check $TMP/restorebuild.log"
     else
         ok "mutation: source restored to its original (non-mutated) state and rebuilt clean"
+        touch -r "$BACKUP" "$NAMINGLENS"   # rebuild done — put the ORIGINAL mtime back so suite-mates'
+                                           # freshness checks (g1freshcheck) don't read the untouched
+                                           # content as newer than the asan binary
     fi
 else
     no "mutation: could not locate namingLocalsGate in src/naminglens.h to mutate — gate signature drifted"

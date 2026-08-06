@@ -4,7 +4,8 @@
 # ships no CLI flag of its own — see fieldaffinity.h's file-header addendum for why).
 #
 # Fixture test/accessshapefix/ pins the FOUR discriminating traps the design's correctness review named
-# as required, plus the ambiguous-chase-field refusal:
+# as required, plus one demo per DISCLOSED refusal cause (ambiguous / zero-owner / non-pointer sole
+# owner — each with its own counter, so no refusal is ever tallied under another's cause label):
 #   indexWalk    for(LinkedNode* p=first; p!=first+n; ++p) p->payload=0;        -> index  (arrow in the
 #                BODY must NOT leak into the classification — the advance is pointer arithmetic on p)
 #   chaseWalk    for(LinkedNode* p=head; p; p=p->next) p->payload=0;            -> chase  (next IS the
@@ -17,6 +18,11 @@
 #                a real chase advance whose FIELD must still be REFUSED (as_stem_ambiguous, no <f n="step">
 #                chase attribute anywhere) — "refuse rather than guess", the same convention amb_skipped=
 #                already enforces for fieldaffinity.h's own member-access attribution.
+#   hopWalk      for(Opaque* p=h; p; p=p->hop) …  (Opaque only ever forward-declared)                    ->
+#                chase through a type with NO modeled owner: as_stem_unowned, never mislabeled ambiguous.
+#   ledgerWalk   for(Opaque* p=h; p; p=p->link) … (`link` solely owned by Ledger — as a plain int)       ->
+#                chase refused because the sole owner's type cannot point: as_stem_nonptr, and
+#                Ledger::link must never carry chase="1" (the pre-fix silent-misattribution bug).
 #
 # Also pins the REPORT-ONLY contract: sepcost= must be IDENTICAL whether or not Phase A/B code exists at
 # all (kChaseSepCostBoostApplied is a locked 1.0 no-op) — checked by hand-deriving LinkedNode's sepcost
@@ -52,15 +58,15 @@ sect(){ printf '%s' "$OUT" | tr '<' '\n' | awk -v want="$1" '
 has(){ printf '%s' "$1" | grep -q -- "$2"; }
 header(){ printf '%s' "$OUT" | grep -o '<fieldaffinity [^>]*>'; }
 
-# ── 1) the header's five loop-shape counters, hand-counted from walks.cpp's five functions ─────────────
+# ── 1) the header's loop-shape counters, hand-counted from walks.cpp's seven loop functions ────────────
 H="$( header )"
-if has "$H" 'as_loops="5"' && has "$H" 'as_index="1"' && has "$H" 'as_chase="2"' \
+if has "$H" 'as_loops="7"' && has "$H" 'as_index="1"' && has "$H" 'as_chase="4"' \
    && has "$H" 'as_mixed="1"' && has "$H" 'as_unknown="1"'
-then ok 'as_loops=5 splits 1 index / 2 chase / 1 mixed / 1 unknown, matching the five functions by hand'
+then ok 'as_loops=7 splits 1 index / 4 chase / 1 mixed / 1 unknown, matching the seven loop functions by hand'
 else no 'access-shape loop counters wrong'; printf '%s\n' "$H"
 fi
 
-# ── 2) the ambiguous chase field is REFUSED, not guessed ────────────────────────────────────────────────
+# ── 2) each refusal cause carries ITS OWN counter — no cause is ever tallied under another's label ──────
 if has "$H" 'as_stem_ambiguous="1"'
 then ok 'as_stem_ambiguous=1 — StepperA/StepperB both declaring `step` is caught'
 else no 'as_stem_ambiguous missing/wrong — the ambiguous chase field was not refused'; printf '%s\n' "$H"
@@ -68,6 +74,18 @@ fi
 if printf '%s' "$OUT" | grep -q 'n="step"[^/]*chase='
 then no 'a <f n="step"> row carries a chase attribute — an ambiguous field name must NEVER be flagged'
 else ok 'no <f n="step"> row carries chase="1" — the refusal held'
+fi
+if has "$H" 'as_stem_unowned="1"'
+then ok 'as_stem_unowned=1 — hopWalk chasing a forward-declared type is refused under its OWN cause, not "ambiguous"'
+else no 'as_stem_unowned missing/wrong — the zero-owner chase field was mislabeled or dropped'; printf '%s\n' "$H"
+fi
+if has "$H" 'as_stem_nonptr="1"'
+then ok 'as_stem_nonptr=1 — Ledger (sole owner of `link`, as an int) is refused: its type cannot point'
+else no 'as_stem_nonptr missing/wrong — the non-pointer sole owner was not refused'; printf '%s\n' "$H"
+fi
+if printf '%s' "$OUT" | grep -q 'n="link"[^/]*chase='
+then no 'Ledger::link (a plain int) carries a chase attribute — the silent-misattribution bug is back'
+else ok 'no <f n="link"> row carries chase="1" — a loop over an unmodeled type cannot decorate an int field'
 fi
 
 # ── 3) LinkedNode::next is the CONFIRMED self-ref chase target, loops=2 (chaseWalk + mixedWalk) ─────────
