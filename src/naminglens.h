@@ -15,8 +15,12 @@
 // successful abstraction, not of a bad name. The axis is non-monotonic with quality — near-0 holds
 // great abstractions AND genuine lies — so no threshold on it has a defensible direction and it cannot
 // be a lint rule at any cut. Do not re-add it. The substrate it needed (splitIdentifier, toLowerAscii,
-// tokensAgree) is kept below; a corpus-IDF informativeness lens is the successor candidate, and it must
-// clear a rename-history precision gate BEFORE it ships — this rule is the proof of why.
+// tokensAgree) is kept below and now also feeds naming-uninformative, its successor.
+//
+// naming-uninformative is the §9.0a candidate-1 successor: corpus IDF, not name↔body overlap, and a
+// ONE-SIDED direction — it fires ONLY on LOW informativeness, so unlike the withdrawn rule a high-idf
+// name (didYouMean's "you", say — rare as a C++ identifier subtoken even though common English) is
+// NEVER penalised. See the rule's own comment below for the exact formula and gate.
 //
 // The rules (each cites the empirical work it mechanizes; bracketed tags are the lineage):
 //   naming-short         — 1–2 letter Function/Method/Var name (Var = module/global role; a
@@ -29,6 +33,8 @@
 //   naming-setter        — set-prefixed name whose KNOWN return type is not void-like [LAPD A3]
 //   naming-confusable    — co-visible pair: edit distance ≤2 (both ≥5 chars), same tokens reordered,
 //                          or a bare/digit-suffixed twin [Namesake]
+//   naming-uninformative — every split subtoken is corpus-ubiquitous (BM25 idf, src/lexindex.h) AND the
+//                          body clears a size floor — fires ONLY at the low end [Sparck Jones 1972; §9.0a]
 //
 // Findings flow through the SAME lint tally/listing as every other built-in rule (AstMatch → runLint),
 // under the same per-rule budget semantics: a rule that hits its budget — or a confusable scan too big
@@ -40,6 +46,7 @@
 // which the casing rules here cannot afford).
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
@@ -49,6 +56,7 @@
 
 #include "model.h"
 #include "ingest.h"     // AstMatch — naming findings ride the shared lint finding shape
+#include "lexindex.h"   // lexSubtokenHash — the SAME normalized-token hash the BM25 postings path uses
 
 namespace rw
 {
@@ -424,6 +432,16 @@ inline bool namingEvaluableLang( Lang lang ) noexcept
     return lang != Lang::Json && lang != Lang::Markdown && lang != Lang::Unknown;
 }
 
+// naming-uninformative thresholds (§9.0a candidate 1). Both are principled, not fitted:
+//   kNameInfoLowIdfThreshold = ln(2) is the EXACT idf value at n = S/2 (ignoring the +0.5 smoothing) —
+//     "this subtoken sits in the majority of the corpus's eligible names", not merely "is frequent".
+//     idf is monotonically DEcreasing in document frequency, so "< threshold" means "common enough".
+//   kNameInfoMinBodyLines gates a name-only signal behind a body big enough for the name's information
+//     content to matter at all — a 3-line `fill` needs no name richer than its body (kept < this bar
+//     well below naming-body-mismatch's era and below the unrelated large-function bar of 80).
+inline const double        kNameInfoLowIdfThreshold = std::log( 2.0 );
+inline constexpr std::uint32_t kNameInfoMinBodyLines = 20;
+
 namespace detail
 {
 
@@ -439,8 +457,12 @@ struct RuleSink
     };
     std::vector<AstMatch> hits;
     std::size_t           maxHitsPerRule = 0;
-    Tally                 tallies[8]     = { { "naming-short" }, { "naming-wordy" }, { "naming-series" }, { "naming-underscore" }, { "naming-case" },
-                                             { "naming-predicate" }, { "naming-setter" }, { "naming-confusable" } };
+    // APPENDED ONLY: renamemine.h's §9.5 calibration (kRuleCount=8) indexes tallies[0..7] by POSITION —
+    // naming-uninformative rides at index 8 and is intentionally invisible to that harness (its scoring
+    // needs a whole-corpus subtoken population, which a two-symbol old/new rename pair cannot supply);
+    // it clears its own hand-controlled-corpus gate instead (test/nameinfocheck.sh). Never reorder 0..7.
+    Tally                 tallies[9]     = { { "naming-short" }, { "naming-wordy" }, { "naming-series" }, { "naming-underscore" }, { "naming-case" },
+                                             { "naming-predicate" }, { "naming-setter" }, { "naming-confusable" }, { "naming-uninformative" } };
 
     Tally& tallyFor( std::string_view tag )
     {
@@ -637,6 +659,128 @@ inline bool tokensAgree( std::string_view a, std::string_view b ) noexcept
     return a.size() < b.size() ? b.substr( 0, a.size() ) == a : a.substr( 0, b.size() ) == b;
 }
 
+// ── naming-uninformative substrate: corpus IDF over the IDENTIFIER-NAME vocabulary ─────────────────────
+//
+// The "corpus" here is deliberately narrower than lexical.h's BM25 doc/body corpus: one "document" is
+// one ELIGIBLE symbol's NAME (splitIdentifier, lowercased) — never its doc-comment or body — because the
+// question is "how common is this subtoken AS A NAMING CHOICE in this codebase", not "how common is this
+// word in prose/code text". reuses lexSubtokenHash (lexindex.h) so a name subtoken and a query subtoken
+// normalize identically, and the exact BM25 idf expression from lexical.h (S = document count, n = the
+// term's document frequency): idf = log( (S − n + 0.5) / (n + 0.5) + 1 ). Tokens under 2 bytes are
+// dropped, mirroring subtokens()/forEachLexSubtoken's own floor (a bare "x" carries no lexical signal
+// either way and naming-short already owns 1–2 letter FULL names).
+struct NameCorpusStats
+{
+    HashMap<std::uint64_t, std::uint32_t> subtokenDf;   // subtoken hash -> # distinct eligible NAMES containing it
+    std::size_t                            docCount = 0; // S — eligible names indexed
+};
+
+// ONE pass over every eligible symbol's name, building the whole-corpus subtoken document-frequency
+// table this lens needs. A subtoken repeated within one name (rare, but "dataData" is legal) counts
+// ONCE for that name — df is a document count, not a token count — via the per-name `seen` scratch.
+inline NameCorpusStats buildNameCorpusStats( const IngestResult& ing )
+{
+    NameCorpusStats            stats;
+    std::vector<std::string>   toks;
+    std::vector<std::uint64_t> seen;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( !eligibleSymbol( s ) )
+        {
+            continue;
+        }
+        splitIdentifier( s.name, toks );
+        seen.clear();
+        for( const std::string& tok : toks )
+        {
+            if( tok.size() < 2 )
+            {
+                continue;
+            }
+            const std::string   lowered = toLowerAscii( tok );
+            const std::uint64_t hash    = lexSubtokenHash( lowered.data(), lowered.size() );
+            if( std::find( seen.begin(), seen.end(), hash ) != seen.end() )
+            {
+                continue;   // already counted for THIS name
+            }
+            seen.push_back( hash );
+            ++stats.subtokenDf[hash];
+        }
+        ++stats.docCount;
+    }
+    return stats;
+}
+
+// the shared BM25 idf expression (lexical.h), over the name corpus above. An unseen hash (n=0) is the
+// most-informative case, not an error — every eligible name was scanned into subtokenDf, so a genuine
+// zero means the token literally never occurs elsewhere, which is correctly maximally informative.
+inline double subtokenIdf( const NameCorpusStats& stats, std::uint64_t hash )
+{
+    const auto           it = stats.subtokenDf.find( hash );
+    const std::uint32_t  n  = it == stats.subtokenDf.end() ? 0 : it->second;
+    const double          S = double( stats.docCount );
+    return std::log( ( S - double( n ) + 0.5 ) / ( double( n ) + 0.5 ) + 1.0 );
+}
+
+// N9: naming-uninformative. MAX (never mean/min) over the name's ≥2-byte subtokens: a name is only
+// uninformative when it is built ENTIRELY of corpus-common parts — one genuinely rare word is enough to
+// earn the name its silence (`processQuixotrope` is fine even though "process" alone would not be).
+// Function/Method only (a body-size condition needs a body); Var carries no such shape. Silent when the
+// name has no ≥2-byte token at all (naming-short's 1–2 letter core already owns that case).
+inline void checkNameInformativeness( const Symbol& s, const std::vector<std::string>& toks, const NameCorpusStats& corpus,
+                                      std::uint32_t bodyLines, RuleSink& sink )
+{
+    if( ( s.kind != SymKind::Function && s.kind != SymKind::Method ) || bodyLines < kNameInfoMinBodyLines )
+    {
+        return;
+    }
+    bool   any    = false;
+    double maxIdf = 0.0;
+    for( const std::string& tok : toks )
+    {
+        if( tok.size() < 2 )
+        {
+            continue;
+        }
+        const std::string   lowered = toLowerAscii( tok );
+        const std::uint64_t hash    = lexSubtokenHash( lowered.data(), lowered.size() );
+        const double         idf     = subtokenIdf( corpus, hash );
+        maxIdf = any ? std::max( maxIdf, idf ) : idf;
+        any    = true;
+    }
+    if( !any || maxIdf >= kNameInfoLowIdfThreshold )
+    {
+        return;
+    }
+    char idfBuf[32];
+    std::snprintf( idfBuf, sizeof( idfBuf ), "%.2f", maxIdf );
+    sink.add( "naming-uninformative", s, s.line,
+              s.name + " (" + std::to_string( bodyLines ) + "-line body; every name subtoken is corpus-ubiquitous, max idf=" + idfBuf + ")" );
+}
+
+// caller-side wrapper: derives bodyLines from the SAME [sigEndByte, endByte) span large-function counts
+// (main.cpp) and calls checkNameInformativeness above — pulled out of namingLensChecks' own loop body so
+// the byte-scan and the size guard do not add nesting/complexity to that already-large function.
+inline void checkNameInformativenessInBytes( const Symbol& s, const std::vector<std::string>& toks, const NameCorpusStats& corpus,
+                                             std::string_view bytes, RuleSink& sink )
+{
+    const std::uint32_t bodyA = std::min( s.sigEndByte, std::uint32_t( bytes.size() ) );
+    const std::uint32_t bodyB = std::min( s.endByte,    std::uint32_t( bytes.size() ) );
+    if( bodyB <= bodyA )
+    {
+        return;
+    }
+    std::uint32_t bodyLines = 0;
+    for( std::uint32_t i = bodyA; i < bodyB; ++i )
+    {
+        if( bytes[i] == '\n' )
+        {
+            ++bodyLines;
+        }
+    }
+    checkNameInformativeness( s, toks, corpus, bodyLines, sink );
+}
+
 // N3 + N7: the pair rules over names co-visible in one (file, scope) group.
 inline void checkScopeGroups( const IngestResult& ing, RuleSink& sink )
 {
@@ -803,6 +947,10 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
     detail::RuleSink sink;
     sink.maxHitsPerRule = maxHitsPerRule;
 
+    // ONE whole-corpus pass, up front: naming-uninformative needs the NAME subtoken document-frequency
+    // table before it can score any individual symbol (§9.0a candidate 1 — see the struct's own comment).
+    const detail::NameCorpusStats nameCorpus = detail::buildNameCorpusStats( ing );
+
     // memoized whole-file reads (same shape as lintSymbolLevelChecks) — an unreadable file yields an
     // empty view, and every rule needing bytes goes silent for it (degrade, not failure).
     std::vector<std::string> fileBytes( ing.files.size() );
@@ -845,6 +993,7 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
             const std::uint32_t sigA = std::min( s.sigStartByte, std::uint32_t( bytes.size() ) );
             const std::uint32_t sigB = std::min( s.sigEndByte,   std::uint32_t( bytes.size() ) );
             detail::checkRoleReturnTypes( s, std::string_view( bytes ).substr( sigA, sigB - sigA ), sink );
+            detail::checkNameInformativenessInBytes( s, toks, nameCorpus, bytes, sink );
         }
     }
     detail::checkScopeGroups( ing, sink );

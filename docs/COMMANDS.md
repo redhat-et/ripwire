@@ -1369,7 +1369,9 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 
 ### `--lint`
 
-**Answers:** built-in AST checks (c-cast, goto, unsafe-c-fn, ...)
+**Answers:** built-in AST checks (c-cast, goto, unsafe-c-fn, naming-*, ...).
+
+naming-uninformative is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule
 
 **Try it**
 
@@ -1395,6 +1397,10 @@ $ ./build/ripwire . --lint
 ```
 
 **Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--lint-rules`, `--json`
+
+**Caveats (stated by the binary):**
+
+- naming-uninformative is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule
 
 ### `--lint-rules=DIR`
 

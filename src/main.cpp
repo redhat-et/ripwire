@@ -8578,7 +8578,7 @@ std::optional<int> runLint( const MainDispatch& d )
             "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
             "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
             "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
-            "naming-predicate", "naming-setter", "naming-confusable",
+            "naming-predicate", "naming-setter", "naming-confusable", "naming-uninformative",
         };
 
         if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
