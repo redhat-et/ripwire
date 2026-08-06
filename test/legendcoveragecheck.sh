@@ -110,6 +110,7 @@ ROSTER = [
     ("hotspots",           [ROOT,  "--hotspots"]),
     ("clones",             [ROOT,  "--clones"]),
     ("readability",        [SMALL, "--readability"]),
+    ("ensemble",           [SMALL, "--ensemble"]),
     ("cochange",           [ROOT,  "--cochange"]),
     ("cochange-file",      [ROOT,  "--cochange=src/cli.h"]),
     ("owners",             [ROOT,  "--owners"]),

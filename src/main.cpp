@@ -21,6 +21,7 @@
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
 #include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
+#include "ensemble.h"   // --ensemble: the family join over structural / lexical / confusion / historical evidence
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
@@ -3312,6 +3313,41 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     return 0;
 }
 
+// THE per-file churn mining every churn-consuming verb shares: one window, one multi-root merge rule, one
+// definition of "git could not be mined at all" (false ⇒ every caller must report UNAVAILABLE rather than
+// treat an all-zero vector as "nothing changed"). Extracted from the --hotspots block when --ensemble became
+// its second caller — a second copy of a 20-line per-root merge loop is exactly the clone --quality-delta
+// flags, and it is also how the two verbs' windows would silently diverge one round from now.
+// `since`/`rootScope`: the single-root path uses the caller's ALREADY-RESOLVED scope (so --hotspots does not
+// resolve it twice); the multi-root path resolves per root, because a revision is only meaningful inside the
+// repository that contains it. An empty `since` means "the default window", exactly as before.
+bool mineChurnPerFile( const rw::IngestResult& ing, const std::string& root, bool multiRoot,
+                       const std::vector<rw::WorkspaceRoot>& ws, std::string_view since,
+                       const rw::SinceScope& rootScope, const char* defaultWindow, std::vector<std::uint32_t>& churn )
+{
+    if( !multiRoot )
+    {
+        return gitChurnCounts( root, ing, churn, defaultWindow, since.empty() ? nullptr : &rootScope );
+    }
+    // §5: churn mined per root against that root's files only; merged into one labeled list below.
+    bool churnOk = false;
+    for( std::uint32_t r = 0; r < ws.size(); ++r )
+    {
+        const rw::SinceScope       perRootScope = rw::resolveSinceScope( ws[r].arg, since );
+        std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
+        if( !gitChurnCounts( ws[r].arg, ing, rootChurn, defaultWindow, since.empty() ? nullptr : &perRootScope, r ) )
+        {
+            continue;
+        }
+        churnOk = true;
+        for( std::size_t f = 0; f < churn.size(); ++f )
+        {
+            churn[f] += rootChurn[f];
+        }
+    }
+    return churnOk;
+}
+
 // §P11.3: the worst-function lookup for one --hotspots row, isolated so the row-emission loop inside the
 // already-oversized runMaintenanceViews dispatcher gains a function CALL, not another decision point.
 struct HotspotWorstFn { const char* name; std::uint32_t line; };
@@ -3364,6 +3400,25 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
     const bool                        multiRoot    = d.multiRoot;
     const std::vector<WorkspaceRoot>& ws           = d.ws;
 
+    // --ensemble: the FAMILY JOIN (src/ensemble.h owns the join AND its emission, the way --readability owns
+    // its lens). It calls four existing measurements and reports which of the four EVIDENCE FAMILIES fire on
+    // each function, ranked by the count of distinct families — never by a weighted composite, which is the
+    // Maintainability-Index failure mode this verb exists to avoid.
+    //
+    // GIT IS OPTIONAL HERE, and that is the honesty contract: --hotspots exits 1 without git because its whole
+    // output IS the churn product, but three of the ensemble's four families need no history at all. So a
+    // failed mining pass hands the join a nullptr and the historical family is reported UNAVAILABLE on the
+    // root and on every row — never as "did not fire", which would let a missing measurement read as a clean
+    // bill of health. --since is deliberately not plumbed in: the window is part of the disclosed threshold
+    // set, and one fixed 12-month window (the same one --hotspots defaults to) keeps hrank= comparable.
+    if( cfg.ensemble )
+    {
+        std::vector<std::uint32_t> churn( ing.files.size(), 0 );
+        const rw::SinceScope       noScope;
+        const bool                 churnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), noScope, rw::ensemble::kEnsembleChurnSince, churn );
+        return rw::ensemble::writeEnsembleReport( ing, churnOk ? &churn : nullptr, root, cfg.pageLimit, cfg.pageOffset );
+    }
+
     // --hotspots: the maintenance-pain map = per-file (Σ cognitive complexity) × (recent git churn).
     // Complexity alone is a weak prioritizer (most complex code is never touched); churn is the
     // orthogonal axis that says "and it keeps changing" — together they locate where bugs/pain live.
@@ -3388,30 +3443,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         }
 
         std::vector<std::uint32_t> churn( ing.files.size(), 0 );
-        bool churnOk;
-        if( multiRoot )
-        {
-            // §5: churn mined per root against that root's files only; merged into one labeled list below.
-            churnOk = false;
-            for( std::uint32_t r = 0; r < ws.size(); ++r )
-            {
-                const rw::SinceScope rootScope = rw::resolveSinceScope( ws[r].arg, cfg.since );
-                std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
-                if( !gitChurnCounts( ws[r].arg, ing, rootChurn, "12 months ago", cfg.since.empty() ? nullptr : &rootScope, r ) )
-                {
-                    continue;
-                }
-                churnOk = true;
-                for( std::size_t f = 0; f < churn.size(); ++f )
-                {
-                    churn[f] += rootChurn[f];
-                }
-            }
-        }
-        else
-        {
-            churnOk = gitChurnCounts( root, ing, churn, "12 months ago", cfg.since.empty() ? nullptr : &sinceScope );
-        }
+        const bool churnOk = mineChurnPerFile( ing, root, multiRoot, ws, cfg.since, sinceScope, "12 months ago", churn );
         if( !churnOk )
         {
             // Empty churn has TWO causes: (1) genuine git-unavailable / not-a-repo / no-history-at-all →
