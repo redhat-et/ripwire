@@ -27,6 +27,7 @@
 #include "nonlocalstate.h" // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
 #include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
 #include "ensemble.h"   // --ensemble: the family join over structural / lexical / confusion / historical evidence
+#include "qualitypanel.h" // --quality-panel: THE SINGLE COMMAND — the ensemble's four families plus colocation and state, under a preset
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
@@ -4553,6 +4554,47 @@ inline bool deadCodeFilterMatchesPath( std::string_view path, std::string_view d
     return false;
 }
 
+// --quality-panel[=PRESET]: THE SINGLE COMMAND (qualitypanel.h owns the join, the preset selection AND its
+// emission, the way --ensemble owns its own). Its own function rather than a block inside runQualityViews:
+// that dispatcher is already the tree's third-most complex symbol, and this verb needs three statements the
+// other branches there do not (a preset parse, a refusal, a churn mining pass).
+//
+// It is dispatched from runQualityViews rather than from runMaintenanceViews beside --ensemble because two of
+// its six families need what that dispatcher has and this one does not: the call graph (the state family's
+// closure) and the value-use references (both new families) — see needsValueUses below.
+//
+// THE PRESET REFUSAL LIVES HERE, not in validateModifierGuards, and that is deliberate: the preset vocabulary
+// belongs to the verb (qualitypanel.h), and cli.h is a leaf that includes only ingest.h. Pulling the whole
+// lens stack into the argument parser to spell three names would be a worse trade than refusing one step
+// later. Refusing at all is the point — silently substituting `default` for a preset the caller did not name
+// answers a different question under the label they typed.
+//
+// GIT IS OPTIONAL, exactly as it is for --ensemble: five of the six families need no history, so a failed
+// mining pass hands the join a nullptr and the historical family is reported UNAVAILABLE rather than as
+// "did not fire". --since is deliberately not plumbed in — the churn window is part of the disclosed
+// threshold set and one fixed 12-month window keeps hrank= comparable between runs.
+int runQualityPanel( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+
+    qpanel::Preset preset = qpanel::Preset::Default;
+    if( !cfg.qualityPanelPreset.empty() && !qpanel::parsePreset( cfg.qualityPanelPreset, preset ) )
+    {
+        std::fprintf( stderr, "ripwire: --quality-panel: unknown preset '%.*s' (supported: strict|default|lenient; "
+                              "bare --quality-panel is default)\n",
+                      int( cfg.qualityPanelPreset.size() ), cfg.qualityPanelPreset.data() );
+        return 1;
+    }
+
+    std::vector<std::uint32_t> churn( ing.files.size(), 0 );
+    const rw::SinceScope       noScope;
+    const bool                 churnOk = mineChurnPerFile( ing, d.root, d.multiRoot, d.ws, std::string_view(), noScope,
+                                                           rw::ensemble::kEnsembleChurnSince, churn );
+    return qpanel::writePanelReport( ing, d.g, churnOk ? &churn : nullptr, d.root, preset, cfg.pageLimit, cfg.pageOffset );
+}
+
 // The residual of §6.3's extraction: --dead-code, the only branch left in runQualityViews. main() calls it
 // immediately after runQualityDelta, i.e. in the position the old two-branch chain evaluated it.
 std::optional<int> runQualityViews( const MainDispatch& d )
@@ -4586,6 +4628,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     if( cfg.nonlocalState )
     {
         return nonlocal::writeNonLocalStateReport( ing, g, cfg.pageLimit, cfg.pageOffset );
+    }
+
+    if( cfg.qualityPanel )
+    {
+        return runQualityPanel( d );
     }
 
     // --naming-calibration: §9.5 — the naming-* lint rules judged against the repo's OWN rename history
@@ -10900,10 +10947,11 @@ int main( int argc, char** argv )
     // changed. Verified output-identical to a cold parse (regression: cache transparency).
     // A4-P4: the verb class (rich=captureValueUses vs lean) is needed BEFORE choosing the auto-cache path
     // so each class keys its own warm cache file (no cross-class thrash). Rich = --for/--metrics/--uses/--exemplar
-    // /--context-ratio/--nonlocal-state — the local-reasoning lens counts read/write sites, and nonlocal-state's
-    // attribution is read/write USE SITES by definition, so a lean ingest would hand either a confident, wrong zero.
+    // /--context-ratio/--nonlocal-state/--quality-panel — the local-reasoning lens counts read/write sites, and
+    // nonlocal-state's attribution is read/write USE SITES by definition, so a lean ingest would hand either a
+    // confident, wrong zero; --quality-panel builds two of its six families out of exactly those two lenses.
     const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
-                                || cfg.contextRatio || cfg.nonlocalState;
+                                || cfg.contextRatio || cfg.nonlocalState || cfg.qualityPanel;
     IngestResult ing;
     if( multiRoot )
     {
