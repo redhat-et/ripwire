@@ -204,4 +204,19 @@ inline AstQueryShape astQueryShape( std::string_view query )
 // Each finding carries tag "unreachable-code"; results are sorted (fileId, startByte) → deterministic.
 std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t maxMatches = 5000 );
 
+// ---- local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ----
+// On-demand re-parse of ONE already-gated function's own byte span [sigStartByte, endByte) — reusing
+// Phase 1's cc_isCountableLocalDecl/cc_declHasStructuredBinding predicates so the SET of declarations this
+// walk visits is provably the same set Phase 1's `locals=` count already covers (no second, silently
+// divergent rule). C/C++ only (model.h::localsCountedLang; the caller must gate on it — this function
+// degrades to an empty result for any other lang rather than assert, since a caller mistake here is a
+// missing finding, not a memory-safety issue). NEVER cached, NEVER promoted into IngestResult/Symbol/the
+// call graph — call sites are expected to be RARE (only functions clearing naminglens.h's size+locals
+// gate), so a fresh re-parse per call is the right cost/simplicity tradeoff, not a hot-path concern.
+// `defBytes` = the exact substring `fileBytes.substr( sigStartByte, endByte - sigStartByte )` (a full
+// function/method definition, which parses standalone under the C/C++ grammar); `defStartLine` = the
+// 1-based file line `sigStartByte` falls on, so each fact's `line` is an ABSOLUTE file line, not a row
+// local to the re-parsed substring.
+std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, std::uint32_t defStartLine, Lang lang );
+
 }   // namespace rw
