@@ -43,9 +43,22 @@
 //
 // UNAVAILABLE IS NOT SILENT. A family that could not be MEASURED is reported as unavailable on the root and on
 // every row, and of= drops so the count has an honest denominator. A missing measurement must never read as a
-// clean bill of health; that distinction is the point of the verb. Note that an EMPTY RANKING counts as not
-// measured, not as measured-and-silent — see the two cases enumerated at the historical family below, the
-// second of which this verb got wrong on its first run and which is exactly the failure being guarded against.
+// clean bill of health; that distinction is the point of the verb. THREE ways a family fails to be measured,
+// and all three are unavailable rather than silent:
+//   (1) an EMPTY RANKING — the two cases enumerated at the historical family below, the second of which this
+//       verb got wrong on its first run;
+//   (2) an empty LANGUAGE COVERAGE — the two rule-pack families have a language gate of their own, so on a
+//       corpus with no eligible function they can read they were never applicable rather than quiet. This is
+//       the defect the wave-2 calibration found (docs/EVALS.md §9.6): the confusion family is the atom pack,
+//       C/C++/ObjC/CUDA by design, and it reported itself measured on a pure-Rust tree. See scopeByLanguage;
+//   (3) an empty ELIGIBLE SET — nothing with a body was indexed, so no family measured anything at all.
+// Every one of them is decided PER CORPUS from what was actually indexed. None is hardcoded, because the
+// question "could this family have fired here" is a fact about the corpus, never about the build.
+//
+// ONE REASON PER FAMILY. Two families can be unavailable at once — a Rust tree outside a repository is both —
+// so unavailable_why= carries a `family: reason` segment for each, in family order. A single reason slot keeps
+// whichever wrote last, which would be a fresh way to under-report a missing measurement inside the very
+// machinery that exists to report one.
 //
 // SCOPE: this verb JOINS. It computes no new metric and adds no new rule — every number in it is produced by
 // machinery that already shipped, called through its existing entry point.
@@ -147,7 +160,14 @@ struct EnsembleScan
     std::size_t   eligibleCount       = 0;    // functions/methods with a body — the denominator
     std::size_t   noFamilyCount       = 0;    // eligible symbols where NO family fired
     std::uint8_t  unavailMask         = 0;    // families that could not be evaluated at all
-    const char*   unavailWhy          = "";
+    // ONE reason PER FAMILY, not one reason per scan. Two families can be unavailable at the same time —
+    // a Rust tree outside a repository is both — and a single slot silently keeps whichever wrote last,
+    // which would be a NEW way for this verb to under-report a missing measurement in the exact place the
+    // verb exists to report one. Indexed by kFam*; empty means "this family WAS measured".
+    std::string   unavailWhy[kFamilyCount];
+    std::size_t   confusionFiles      = 0;    // indexed files in a language the atom pack can read
+    std::size_t   confusionScope      = 0;    // eligible symbols inside those files — the pack's REACH
+    std::size_t   lexicalScope        = 0;    // eligible symbols in a language the naming pack can read
     std::size_t   readabilityMeasured = 0;
     std::size_t   readabilityCut      = 0;
     std::size_t   churnRanked         = 0;    // files with at least one in-window commit
@@ -158,6 +178,20 @@ struct EnsembleScan
 
 namespace detail
 {
+
+// Mark one family unavailable, KEEPING THE FIRST reason. First-writer-wins is the rule because the specific
+// reason is always written before the general one: rankChurn names which of its two git cases fired before
+// the eligible-set guard below would overwrite it with "nothing was eligible". A family already unavailable
+// stays unavailable — the mask is an OR, so the order of these calls cannot change the verdict, only which
+// sentence explains it.
+inline void markUnavailable( EnsembleScan& scan, std::uint8_t family, const char* why )
+{
+    scan.unavailMask |= std::uint8_t( 1u << family );
+    if( scan.unavailWhy[family].empty() )
+    {
+        scan.unavailWhy[family] = why;
+    }
+}
 
 // A single rule firing, already bound to the function that contains it. The lint packs emit byte spans; the
 // join needs symbols, and this is the only place the two are reconciled.
@@ -308,8 +342,7 @@ inline std::vector<std::uint32_t> rankChurn( const IngestResult& ing, const std:
     std::vector<std::uint32_t> rank( ing.files.size(), UINT32_MAX );
     if( churnPerFile == nullptr )
     {
-        scan.unavailMask |= std::uint8_t( 1u << kFamHistorical );
-        scan.unavailWhy   = "git could not be mined here (not a repository, no git on PATH, or no history) - the historical family was NOT measured, which is not the same as measured and silent";
+        markUnavailable( scan, kFamHistorical, "git could not be mined here (not a repository, no git on PATH, or no history) - the historical family was NOT measured, which is not the same as measured and silent" );
         return rank;
     }
 
@@ -331,14 +364,118 @@ inline std::vector<std::uint32_t> rankChurn( const IngestResult& ing, const std:
     scan.churnCut    = ordinalCut( scan.churnRanked, kOrdinalWindowCap );
     if( scan.churnRanked == 0 )
     {
-        scan.unavailMask |= std::uint8_t( 1u << kFamHistorical );
-        scan.unavailWhy   = "git was mined but not one indexed file bound to an in-window commit (a corpus scanned from outside the repository that tracks it, a path join that matched nothing, or a window with no commits) - the historical family ranked NOTHING, so its silence is not a fact about this code";
+        markUnavailable( scan, kFamHistorical, "git was mined but not one indexed file bound to an in-window commit (a corpus scanned from outside the repository that tracks it, a path join that matched nothing, or a window with no commits) - the historical family ranked NOTHING, so its silence is not a fact about this code" );
     }
     for( std::size_t rankIndex = 0; rankIndex < scan.churnCut && rankIndex < order.size(); ++rankIndex )
     {
         rank[ order[rankIndex] ] = std::uint32_t( rankIndex );
     }
     return rank;
+}
+
+// STAGE: the LANGUAGE-COVERAGE precondition — the same shape rankChurn already carries for git, applied to
+// the two families that are RULE PACKS with a language gate of their own.
+//
+//   confusion  the atom pack runs ONLY on C/C++/ObjC/CUDA paths (atoms::isCFamilyPath). That is a decision
+//              with evidence behind it, not an oversight: atom transfer to other languages is empirically
+//              falsified, so the rules are deliberately not run elsewhere. On a pure Rust / Python / Swift /
+//              TypeScript corpus the family therefore cannot fire AT ALL — not "found nothing", but "was
+//              never applicable" — and reporting that as a silent non-firing makes a clean bill of health
+//              out of a measurement that never happened. Found by the wave-2 calibration (docs/EVALS.md
+//              §9.6 defect 1) on a 115-file Rust tree, where the verb said three families were evaluated
+//              and two were quiet while one of the three had not been run on a single file.
+//   lexical    the naming pack skips data and doc languages (naminglens::namingEvaluableLang). Audited for
+//              the same defect and it is reachable in principle, so the precondition is computed the same
+//              way rather than assumed away — the only honest form of "we checked".
+//
+// BOTH predicates are CALLED, never restated here. A second copy of an extension list is how a report ends
+// up naming a gate the pack stopped using, which is the same class of defect one layer down.
+//
+// THE PRECONDITION IS OVER THE JOIN'S OWN DENOMINATOR (eligible functions), not over the crawl. A vendored
+// header holding nothing but macros puts a C-family file in the corpus while leaving every eligible symbol
+// out of the pack's reach; a family that could not have reached ONE ROW of this report did not measure this
+// report, whatever it was handed. Both numbers are disclosed (cfiles= and cscope=) so the verdict is
+// auditable from the output instead of on trust.
+//
+// The `structural` family is deliberately absent from this pass: its four absolute bars read ccx/loc/nest/
+// params, which ingest computes for every language, and its ordinal half is the Posnett lens, which is not
+// language-gated either. It has no coverage precondition to check — only the eligible-set one below, which
+// it shares with all four.
+// The three coverage counts, in one pass over the eligible set. Both predicates are the PACKS' OWN, called
+// rather than restated (see the stage comment below).
+inline void countCoverage( const IngestResult& ing, const std::vector<char>& eligible, EnsembleScan& scan )
+{
+    for( const std::string& path : ing.files )
+    {
+        if( atoms::isCFamilyPath( path ) )
+        {
+            ++scan.confusionFiles;
+        }
+    }
+    for( const Symbol& s : ing.symbols )
+    {
+        if( eligible[s.id] == 0 )
+        {
+            continue;
+        }
+        if( s.fileId < ing.files.size() && atoms::isCFamilyPath( ing.files[s.fileId] ) )
+        {
+            ++scan.confusionScope;
+        }
+        if( naminglens::namingEvaluableLang( s.lang ) )
+        {
+            ++scan.lexicalScope;
+        }
+    }
+}
+
+inline void scopeByLanguage( const IngestResult& ing, const std::vector<char>& eligible, EnsembleScan& scan )
+{
+    // Nothing eligible ⇒ NO family measured anything, and an empty unavailable= would claim all four did.
+    if( scan.eligibleCount == 0 )
+    {
+        for( std::uint8_t family = 0; family < kFamilyCount; ++family )
+        {
+            markUnavailable( scan, family, "not one function or method with a body was indexed here, so this family had no eligible symbol to measure - the report's silence is not a fact about any code" );
+        }
+        return;
+    }
+
+    countCoverage( ing, eligible, scan );
+
+    if( scan.confusionScope == 0 )
+    {
+        markUnavailable( scan, kFamConfusion, scan.confusionFiles == 0
+            ? "the confusion family is the atom pack, which by design runs only on C/C++/ObjC/CUDA paths (atom transfer to other languages is empirically falsified), and this corpus indexed NO such file - the family was NOT measured here, which is not the same as measured and silent"
+            : "the confusion family is the atom pack, which by design runs only on C/C++/ObjC/CUDA paths, and although this corpus indexed such files not one eligible function lives in them - the atom rules could not reach a single row of this report, so their silence is not a fact about this code" );
+    }
+    if( scan.lexicalScope == 0 )
+    {
+        markUnavailable( scan, kFamLexical, "the lexical family is the naming pack, which has no opinion about identifiers in a data or doc language, and not one eligible function here is in a language it reads - the family was NOT measured, which is not the same as measured and silent" );
+    }
+}
+
+// The per-family reasons as `family: reason` segments, in family order — a total order over a fixed table,
+// so the string is deterministic without a sort. Empty when every family was measured, which is exactly
+// what an empty unavailable= means.
+inline std::string unavailWhyList( const EnsembleScan& scan )
+{
+    std::string out;
+    for( std::uint8_t family = 0; family < kFamilyCount; ++family )
+    {
+        if( scan.unavailWhy[family].empty() )
+        {
+            continue;
+        }
+        if( !out.empty() )
+        {
+            out += " | ";
+        }
+        out += kFamilyNames[family];
+        out += ": ";
+        out += scan.unavailWhy[family];
+    }
+    return out;
 }
 
 // STAGE: the two lint packs, called through their existing entry points, bound to functions and sorted into
@@ -471,6 +608,11 @@ inline EnsembleScan computeEnsemble( const IngestResult& ing, const std::vector<
     const std::vector<std::uint32_t> posnettRank = rankReadability( ing, scan );      // structural's ordinal half
     const std::vector<std::uint32_t> churnRank   = rankChurn( ing, churnPerFile, scan );
 
+    // ── availability, decided PER CORPUS from what was indexed. After rankChurn, so the historical family's
+    //    own reason is already in place; the packs below still run unconditionally, because short-circuiting
+    //    an unavailable family would make the verdict and the evidence two different measurements. ─────────
+    scopeByLanguage( ing, eligible, scan );
+
     // ── the two categorical signals: the lint packs, bound to the functions that contain their findings ─────
     const std::vector<std::vector<NodeId>> byFile = eligibleByFile( ing, eligible );
     const std::vector<FamilyHit>           hits   = collectLintHits( ing, byFile, scan );
@@ -587,11 +729,20 @@ inline constexpr const char* kEnsembleLegend =
     "corpus, so rrank= and hrank= mean 'worst in THIS corpus', never 'bad in absolute terms'. "
     "The historical family ranks by churn ALONE, not by the hotspots score (churn x complexity), because half of "
     "that product is the structural family and two families that cannot disagree are one family counted twice. "
-    "unavailable=families that could not be evaluated at all, with unavailable_why= saying why. UNAVAILABLE is "
+    "unavailable=families that could not be evaluated at all, with unavailable_why= saying why, one reason per "
+    "unavailable family. UNAVAILABLE is "
     "never the same as silent: an empty unavailable= means every family was measured, and a family listed there "
     "was NOT measured, so its absence from fired= is not evidence of health. An EMPTY ranking counts as not "
     "measured, so hranked=0 makes the historical family unavailable: a corpus scanned from outside the "
     "repository that tracks it mines zero churn for every file, and that silence is not a fact about the code. "
+    "So does an empty LANGUAGE COVERAGE. The confusion family is the atom pack, which by design runs only on "
+    "C/C++/ObjC/CUDA paths, so on a corpus with no eligible function in one it was never applicable rather than "
+    "quiet: cfiles=indexed files it can read cscope=eligible symbols inside them, and cscope=0 makes it "
+    "unavailable. The lexical family is the naming pack, which has no opinion about a data or doc language: "
+    "lscope=eligible symbols in a language it reads, and lscope=0 makes it unavailable. The structural family "
+    "has no such precondition - its bars and its readability rank are computed for every language. "
+    "of= on each row is 4 minus the unavailable families, so a row NEVER counts a family that could not have "
+    "been evaluated for it, and fam= cannot reach 4 on a corpus where one family was never applicable. "
     "unreadable_files=indexed files the readability lens could not read, so rrank= is a floor over what it saw. "
     "findings_capped=1 when a lexical or confusion rule spent its per-rule budget, with floor_rules= naming "
     "them: those families are then FLOORS. A naming or atom finding that lies outside every function body is "
@@ -630,11 +781,14 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     std::printf( "<ensemble families=\"%u\" eligible=\"%zu\" ranked=\"%zu\" no_family=\"%zu\" unavailable=\"%s\" unavailable_why=\"%s\"",
                  unsigned( kFamilyCount ), scan.eligibleCount, total, scan.noFamilyCount,
                  familyList( scan.unavailMask ).c_str(),
-                 std::string( escapeXml( std::string_view( scan.unavailWhy ), escUnavail ) ).c_str() );
+                 std::string( escapeXml( detail::unavailWhyList( scan ), escUnavail ) ).c_str() );
     std::printf( " bar_ccx=\"%u\" bar_loc=\"%u\" bar_nest=\"%u\" bar_params=\"%u\"",
                  quality::kCcxBar, quality::kLocBar, quality::kNestBar, quality::kParamBar );
     std::printf( " rcut=\"%zu\" rmeasured=\"%zu\" hcut=\"%zu\" hranked=\"%zu\" window=\"%s\"",
                  scan.readabilityCut, scan.readabilityMeasured, scan.churnCut, scan.churnRanked, kEnsembleWindowLabel );
+    // The LANGUAGE-COVERAGE denominators — what the availability verdict was computed FROM, so a reader can
+    std::printf( " cfiles=\"%zu\" cscope=\"%zu\" lscope=\"%zu\"",     // check the verdict instead of taking it.
+                 scan.confusionFiles, scan.confusionScope, scan.lexicalScope );
     if( scan.unreadableFileCount != 0 )
     {
         std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
