@@ -20,6 +20,8 @@ allowed-tools: Bash, Read
 > • PR-submission readiness — tests to run, blast radius, "safe to merge?" → **ripwire-change-check** — run
 >   `--quality-delta` FIRST, then its `--test-gate`: clean code that runs the wrong tests still regresses.
 > • Reusing before you write the code in the first place → **ripwire-reuse-first**.
+> • Wide-angle "where does this still look rotten" read across a whole file/subsystem (not a before/after
+>   delta) → the panel below, or **ripwire-fresh-eyes** for the full six-family breakdown.
 > • Not sure which skill? → **ripwire-router**.
 
 Don't eyeball quality — **measure the delta your change introduced**, with a deterministic oracle, in a
@@ -29,6 +31,28 @@ Apply the "non-trivial work" trigger literally. A single-line leaf fix that pres
 adds no branch, symbol, dependency, or abstraction does not need a standalone quality-delta pass unless
 the repository requires it; run the focused behavioral test and diff checks instead. This skill earns its
 cost when the edit can change measured structure, not merely whenever the working tree is dirty.
+
+## Before you converge: the wide-angle read — `--quality-panel`
+
+`ripwire <dir> --quality-panel[=strict|default|lenient]` is THE SINGLE COMMAND for "does what I just
+touched still look rotten" — one ranked report over **six** evidence families (the four `--ensemble`
+joins — `structural`, `lexical`, `confusion`, `historical` — plus `colocation` and `state`; the full
+per-family breakdown lives in **ripwire-fresh-eyes**). Point it at the file or symbol you just edited for
+a multi-angle second opinion the single `--quality-delta` number can't give you on its own.
+
+**Read it correctly: it is a lens, never a gate.** `--help` says so in the flag's own text and the
+contract is enforced in code — `--quality-panel` exits 0 unconditionally, on every preset, on every repo.
+It does not compare against a baseline and it cannot fail a commit. The gate for "did MY change make this
+WORSE" is Step 3 below (`--quality-delta`) — that is the only pass in this skill (or in ripwire) with an
+exit code that means something. Run `--quality-panel` for the wide-angle read, converge with
+`--quality-delta`, never the other way round.
+
+Pick the preset by what "rotten" needs to mean right now: `lenient` (all six families, 1 must agree) is a
+reading order, roughly a third of any tree; `default` (all six, 2 must agree) is a review list; `strict`
+(only the four families measured stable enough to stand behind repeatedly — `historical` and `colocation`
+are fixed-size worst-40 cuts over a ranking whose population moves, so both re-shuffle release to release
+on code that never changed) is the rung closest to something CI-shaped, but it is still a lens — nothing
+here plugs into an exit code the way `--quality-delta` does.
 
 ## The loop
 1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta` before you call it

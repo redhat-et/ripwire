@@ -149,6 +149,18 @@ sections your question needs.
    enclosing symbol. No-build, AST-only — a fast complement to clang-tidy, not a replacement. Skim the
    per-rule counts for the dominant smell.
 
+   **Two rule prefixes are also family evidence.** `naming-*` (`naming-case`/`naming-confusable`/
+   `naming-predicate`/`naming-series`/`naming-setter`/`naming-short`/`naming-underscore`/`naming-wordy`) is
+   exactly `--ensemble`'s/`--quality-panel`'s `lexical` family; `atom-*` (`atom-assign-as-value`/
+   `atom-comma-operator`/`atom-embedded-crement`/`atom-implicit-predicate`/`atom-nested-ternary`/
+   `atom-octal-literal`/`atom-reversed-subscript`) is `confusion`. A `--lint` finding under either prefix
+   is the identical predicate the family join runs — reading it here just skips the join. **Not a moment to
+   reach for mid-task:** `--naming-calibration` scores both spellings of this repo's own historical renames
+   (old identifier vs. what it was renamed to) against the same `naming-*` predicates — it is how those
+   rules were validated, a maintainer calibration harness (`test/namingcalibrationcheck.sh` pins the
+   per-rule floor) with a `pairs=` sample size and its own legend calling itself a **noisy proxy**, not a
+   verdict on any function you're looking at. It always exits 0.
+
    **Your own rules** — `ripwire <dir> --lint-rules=DIR` loads YAML ast-grep-style rules from `DIR` and runs
    them alongside (or instead of) the built-ins; findings share the same `<f rule= sev= p= …>message</f>`
    shape. A malformed rule alerts to stderr and is skipped (sibling rules still load); zero loaded rules
