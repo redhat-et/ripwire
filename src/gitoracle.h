@@ -497,54 +497,45 @@ inline void foldPatchLine( std::string_view raw, RemovalSite& site, HistoryIndex
     forEachIdentifier( raw.substr( 1 ), [ & ]( std::string_view name ) { recordRemoval( idx, name, site ); } );
 }
 
-// Walk `git log` newest-first and fold every removed line into `idx`. ONE process, ONE pass, whatever the
-// number of names anyone will later ask about.
+// ── the shared patch-stream reader ───────────────────────────────────────────────────────────────────────
+// One hand-rolled line splitter over fixed-size reads: getline() would allocate per line, and this stream is
+// a quarter of a gigabyte of them on the deepest repo measured (gitmine::gitCommandLines, which buffers every
+// line into a vector, would hold all of that in RAM at once). `line` accumulates only the tail of a line that
+// straddled a chunk boundary, so the common case never copies at all.
 //
-// The flag set is load-bearing, not decoration:
-//   --no-merges   a merge's diff is not shown by default anyway; saying so keeps the walk honest and cheap
-//                 (the LIMIT: a deletion performed ONLY as a merge resolution is invisible — documented).
-//   -p -U0        the patch, with zero context lines: a CONTEXT line is unchanged content, and counting it
-//                 as removed would make almost every name look deleted.
-//   --no-renames  a rename becomes delete+add, which is what makes "newest removal" total (see the header).
-//   --no-color / --no-ext-diff / --no-textconv
-//                 the output must be plain unified diff whatever the user's git config says; an external
-//                 differ or a textconv filter would both change the format and run someone else's program.
-//   --format=%x01%H %cs
-//                 a \x01-led header line per commit. \x01 cannot appear in a unified-diff marker column, so
-//                 the framing is unambiguous without a second pass. %cs is git's COMMITTER date — the same
-//                 deterministic clock quality::gitCommitterDateIso uses; the wall clock is never consulted.
-inline HistoryIndex runProbe( const std::string& root )
+// TWO walkers share this reader now — the name-history oracle below, and renamemine.h's rename harvester —
+// so the loop lives here once rather than being cloned into the second one. What the two do NOT share is the
+// bound: each owns the counter it is folding into, so `keepWalking` is the caller's predicate. The BYTE bound
+// is walker-independent and is enforced here.
+struct PatchWalk
 {
-    HistoryIndex idx;
+    bool        started   = false;   // popen succeeded; false ⇒ NO ANSWER, which is not the same as "nothing found"
+    bool        truncated = false;   // a bound was hit ⇒ what was seen is true, what was not seen is UNKNOWN
+    int         status    = 0;       // pclose status; non-zero ⇒ the walk cannot be assumed complete
+    std::size_t bytesRead = 0;
+};
 
-    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
-                          + " log --no-merges --no-color --no-ext-diff --no-textconv --no-renames"
-                            " --format='%x01%H %cs' -p -U0 2>/dev/null";
+template<class OnLine, class KeepWalking>
+inline PatchWalk walkGitPatch( const std::string& cmd, OnLine onLine, KeepWalking keepWalking )
+{
+    PatchWalk  walk;
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        DEGRADED_PATH_ALERT( "gitoracle: git log failed to start — the history probe answers unknown for every name" );
-        return idx;
+        return walk;                                          // the CALLER names the degrade — it knows what it lost
     }
+    walk.started = true;
 
-    RemovalSite       site;
     std::string       line;
-    std::size_t       bytesRead = 0;
     std::vector<char> chunk( kProbeChunk );
-
-    // One hand-rolled line splitter over fixed-size reads: getline() would allocate per line, and this stream
-    // is a quarter of a gigabyte of them on the deepest repo measured. `line` accumulates only the tail of a
-    // line that straddled a chunk boundary, so the common case never copies at all.
-    const auto onLine = [ & ]( std::string_view raw ) { foldPatchLine( raw, site, idx ); };
-
-    while( idx.commitsWalked <= kMaxProbeCommits && bytesRead < kMaxProbeBytes )
+    while( keepWalking() && walk.bytesRead < kMaxProbeBytes )
     {
         const std::size_t got = std::fread( chunk.data(), 1, chunk.size(), pipe );
         if( got == 0 )
         {
             break;
         }
-        bytesRead += got;
+        walk.bytesRead += got;
 
         std::size_t at = 0;
         while( at < got )
@@ -572,14 +563,55 @@ inline HistoryIndex runProbe( const std::string& root )
 
     // A bound hit is not a failure — it is an answer of a different STRENGTH, and saying so is the whole
     // difference between this oracle and a guess. Drain rather than SIGPIPE git mid-write.
-    if( idx.commitsWalked > kMaxProbeCommits || bytesRead >= kMaxProbeBytes )
+    if( !keepWalking() || walk.bytesRead >= kMaxProbeBytes )
     {
-        idx.truncated = true;
+        walk.truncated = true;
         char sink[ 65536 ];
         while( std::fread( sink, 1, sizeof( sink ), pipe ) > 0 ) {}
+    }
+    walk.status = pclose( pipe );
+    return walk;
+}
+
+// Walk `git log` newest-first and fold every removed line into `idx`. ONE process, ONE pass, whatever the
+// number of names anyone will later ask about.
+//
+// The flag set is load-bearing, not decoration:
+//   --no-merges   a merge's diff is not shown by default anyway; saying so keeps the walk honest and cheap
+//                 (the LIMIT: a deletion performed ONLY as a merge resolution is invisible — documented).
+//   -p -U0        the patch, with zero context lines: a CONTEXT line is unchanged content, and counting it
+//                 as removed would make almost every name look deleted.
+//   --no-renames  a rename becomes delete+add, which is what makes "newest removal" total (see the header).
+//   --no-color / --no-ext-diff / --no-textconv
+//                 the output must be plain unified diff whatever the user's git config says; an external
+//                 differ or a textconv filter would both change the format and run someone else's program.
+//   --format=%x01%H %cs
+//                 a \x01-led header line per commit. \x01 cannot appear in a unified-diff marker column, so
+//                 the framing is unambiguous without a second pass. %cs is git's COMMITTER date — the same
+//                 deterministic clock quality::gitCommitterDateIso uses; the wall clock is never consulted.
+inline HistoryIndex runProbe( const std::string& root )
+{
+    HistoryIndex idx;
+
+    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
+                          + " log --no-merges --no-color --no-ext-diff --no-textconv --no-renames"
+                            " --format='%x01%H %cs' -p -U0 2>/dev/null";
+
+    RemovalSite     site;
+    const PatchWalk walk = walkGitPatch( cmd,
+                                         [ & ]( std::string_view raw ) { foldPatchLine( raw, site, idx ); },
+                                         [ & ] { return idx.commitsWalked <= kMaxProbeCommits; } );
+    if( !walk.started )
+    {
+        DEGRADED_PATH_ALERT( "gitoracle: git log failed to start — the history probe answers unknown for every name" );
+        return idx;
+    }
+    if( walk.truncated )
+    {
+        idx.truncated = true;
         DEGRADED_PATH_ALERT( "gitoracle: history walk hit its bound — names it did not see report unknown, never never" );
     }
-    const int status = pclose( pipe );
+    const int status = walk.status;
 
     // THE dangerous failure, and the reason it gets its own guard rather than riding on `ok = true`: the
     // caller has already established that HEAD resolves, so a walk that produced ZERO commit headers did not
