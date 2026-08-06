@@ -193,6 +193,21 @@ sections your question needs.
    named in `unavail=` with `of=` dropping to 3 — **UNAVAILABLE is not the same as clean**, so on a corpus
    with no git history do not read the missing `historical` as "nothing is churning".
 
+   **How much is NOT in front of you — `ripwire <dir> --context-ratio`.** The other lenses ask how hard a
+   function is to read *once you have it open*; this one asks how much you must open *besides* it.
+   `<s p="src/main.cpp:10177" n="main" sites="1050" ents="131" ents_out="85" ent_ratio="0.649" files="37"
+   files_out="36" rtok="165317" rtok_out="61968" read_ratio="0.375" ext="141" amb="19"/>` — `ents=` distinct
+   in-corpus definitions its reference sites resolve to, `ents_out=`/`ent_ratio=` how many live outside its
+   own file, and `rtok=`/`rtok_out=`/`read_ratio=` the same split weighted by the **tokens a reader must
+   actually read**. Read the two ratios *together*: `main` above needs 65% of its entities from elsewhere but
+   only 37% of its reading volume, because the biggest things it touches are next door. A per-file rollup
+   follows the symbol rows and is a **union over the whole file** (includes and imports included), not the sum
+   of those rows. Three things to carry: it credits its own prior art — the fraction is Beck & Diehl's
+   per-class congruence (FSE 2011) flipped, and the refinement is the reader weighting plus the use of every
+   reference role, not just calls; resolution is **name-based**, so `amb=` names resolved to several
+   definitions and `ents=` is a floor; and `ext=` is dominated by locals and parameters, so it is **not** an
+   external-dependency count and never enters either ratio.
+
 ## Hidden-coupling pass — "a change here keeps breaking unrelated files"
 
 6. **Behavioural coupling** — `ripwire <dir> --cochange`
