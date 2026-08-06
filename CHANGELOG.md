@@ -15,6 +15,57 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `--nonlocal-state`: the mutable state a function can reach, reads and writes kept apart
+
+A new lens: for every function and method, the non-local **mutable** state it — or anything in its
+transitive callee closure — reads and writes, as two separate sets, with the site or the callee that
+explains each one. A *cell* is a file- or namespace-scope variable, a function-local `static` (local
+in name only), or a Python module global; a `const`/`constexpr`/`consteval` declaration is not a cell,
+so a large `writes=` is genuinely shared mutable state and not a table of constants.
+
+```
+<fn p="src/infra/profilePmc.h:288" n="ensure_global_init" writes="2" reads="3"
+    direct_writes="1" direct_reads="3" cells_total="3">
+  <cell n="g_perf" p="src/infra/profilePmc.h:284" dir="rw" at="src/infra/profilePmc.h:339" at_dir="rw"/>
+```
+
+`writes=`/`reads=` fold in the callee closure, `direct_*` is what the body does itself, and each cell
+child carries `dir=r|w|rw` plus either `at=` (a use site here, with `at_dir=` for what *this* body does
+— it can be narrower than `dir=`) or `via=` (the nearest callee that touches it). Rows are ordered
+most writes first; pages with `--limit`/`--offset`.
+
+**Direction is the point, and it is not new.** Henry & Kafura's 1981 information-flow metric already
+separated what a procedure reads from what it writes; folding them into one number discards the half
+that is a hazard for everyone else. The lineage is recorded in full in
+[`docs/LINEAGE.md`](docs/LINEAGE.md) — Fowler's **Global Data** / **Mutable Data** smells (2018), which
+name this hazard and ship no metric; **Marinescu's ATFD** (ICSM 2004), the closest existing number and
+one-hop, per-class, Java and direction-blind; **QMOOD DAM** and **MOOD AHF/MHF** (Bansiya & Davis, TSE
+2002), which count *declared visibility* and therefore score a class with private fields and leaked
+mutable internals as perfectly encapsulated; **Potanin, Noble & Biddle 2004**, the only published
+*measurement* of externally reachable state, which is dynamic, Java-only and tooled with something
+unmaintained; and **Meyers & Binkley** (TOSEM 2007), whose slice-based coupling already puts globals in
+its output set, so the delta — per function rather than per variable, over the call graph rather than a
+dependence graph — is argued in the source header rather than asserted. **The folklore term "action at
+a distance" is deliberately not used**: it has zero academic presence and naming the feature after it
+would have been the one indefensible choice available.
+
+**It is unsound, and every count says so.** `counts_floor="1"` is on the root. The analysis cannot see
+an indirect call (function pointer, virtual, callback, macro-generated call site), a write through a
+pointer or reference that aliases a cell without naming it, a cell named only inside a macro, or
+reflection-like dispatch — each of those makes the count too low. In the other direction, a local that
+*shadows* a cell's name is charged to the cell unless ingest recorded a type binding for it. The
+report's own legend names all of these where the reader meets them.
+
+**Scope, stated rather than implied.** It covers **C++, ObjC and Python** — the languages for which the
+index carries read/write use sites at all (`captureUses`, `src/ingest.cpp`). Every other indexed
+language is named on the root as `unanalyzed_langs=` with a file count, because a Go or Rust corpus
+would otherwise report a confident, wrong zero. Widening the lens means widening `captureUses` first,
+with its own gate; adding a declaration rule alone would not do it, and the source header says so.
+
+Gate: `test/nonlocalstatecheck.sh` (12 arms) — a hand-derived golden over a two-language fixture, a
+mutation control that turns one cell `const` and must go red, plus determinism, direction, provenance,
+paging, additivity and XML well-formedness.
+
 ### Added — `--cochange` grows the three things the papers behind it already had
 
 `--cochange`'s `surprising="1"` predicate is an independent implementation of published work, now

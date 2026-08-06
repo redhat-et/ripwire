@@ -136,6 +136,10 @@ struct Config
     bool             readability       = false;            // --readability: the Posnett/Hindle/Devanbu (MSR 2011) lens — per function, Halstead
                                                             // volume + token entropy + line span → P, emitted LEAST readable first. Pages through
                                                             // limit/offset like the other report verbs; a ranking lens, never a grade (readability.h)
+    bool             nonlocalState     = false;            // --nonlocal-state: per function, the non-local MUTABLE state it or its transitive
+                                                            // callees reach — globals/statics/file-scope data — with READS and WRITES kept apart
+                                                            // and the site or callee that explains each one. Unsound by construction (indirect
+                                                            // calls, aliasing, shadowing), so every count is a floor (nonlocalstate.h)
     bool             ensemble          = false;            // --ensemble: the FAMILY JOIN — per function, which of the four orthogonal evidence
                                                             // families (structural / lexical / confusion / historical) fire, ranked by the COUNT
                                                             // of distinct families and never by a weighted composite. A family that could not be
@@ -805,6 +809,23 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a\n"
         "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
         "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
+        "    --nonlocal-state           per function, the NON-LOCAL MUTABLE STATE it can reach, MOST WRITES FIRST: writes= reads= are the\n"
+        "                               distinct cells this function OR its transitive callees write / read; direct_writes= direct_reads=\n"
+        "                               are the subsets in its own body. A cell is a file/namespace-scope variable, a function-local static,\n"
+        "                               or a Python module global; a const/constexpr/consteval declaration is not a cell. Each cell child\n"
+        "                               names its declaration, its direction (dir=r|w|rw) and either the use site in this body (at=) or the\n"
+        "                               callee it came through (via=).\n"
+        "                               Lineage: Fowler's Global Data / Mutable Data smells (2018) name the hazard and ship no metric;\n"
+        "                               Marinescu's ATFD (ICSM 2004) is the closest number but is one-hop, per-class, Java, and direction-blind;\n"
+        "                               QMOOD DAM and MOOD AHF/MHF count DECLARED VISIBILITY and so score a class with private fields and\n"
+        "                               leaked mutable internals as perfectly encapsulated; the only published measurement of externally\n"
+        "                               reachable state (Potanin/Noble/Biddle 2004) is DYNAMIC, Java-only, and its tool is unmaintained.\n"
+        "                               UNSOUND BY CONSTRUCTION -- it cannot see indirect calls, pointer aliasing, macro-named cells or\n"
+        "                               reflection-like dispatch, and a local SHADOWING a cell name can be charged to the cell -- so every\n"
+        "                               count is a FLOOR (counts_floor=\"1\") and the blind spots are listed in the report's own legend.\n"
+        "                               COVERS C++, ObjC and Python -- the languages whose read/write USE SITES the index carries. Every\n"
+        "                               other indexed language is named on the root as unanalyzed_langs= and contributes no cells and no\n"
+        "                               rows: that absence is NOT a measured zero. Pages with limit=N (offset=M); default 40 rows.\n"
         "    --ensemble                 the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
         "    --naming-calibration       score the naming-* lint rules against this repo's OWN rename history: one git log pass mines\n"
         "                               old->new identifier substitutions, joins each to the symbol it became at HEAD, and scores\n"
@@ -1243,10 +1264,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability --ensemble.\n"
+        "                               --readability --nonlocal-state --ensemble.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
-        "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 200 graph-query rows / --top-k).\n"
+        "                               impact rows, 20 seam pairs, 40 readability rows, 40 nonlocal-state rows, 40 ensemble symbol rows,\n"
+        "                               200 graph-query rows / --top-k).\n"
         "                               With --offset alone (no --limit) the verb's own default page size applies and\n"
         "                               the root discloses limit=\"0\" — on OUTPUT that 0 means 'no explicit --limit',\n"
         "                               never a zero-row page (the flag itself refuses --limit=0).\n"
@@ -1422,6 +1444,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--hotspots",           &Config::hotspots           },
     { "--clones",             &Config::clones             },
     { "--readability",        &Config::readability        },
+    { "--nonlocal-state",     &Config::nonlocalState      },
     { "--ensemble",           &Config::ensemble           },
     { "--naming-calibration", &Config::namingCalibration  },
     { "--cochange",           &Config::cochange           },
@@ -1729,7 +1752,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 155;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags)
+inline constexpr std::size_t kTotalFlagArms       = 156;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --nonlocal-state (kBoolFlags row)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -1917,7 +1940,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability --ensemble";
+    "--readability --nonlocal-state --ensemble";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -1927,7 +1950,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability || c.ensemble;
+        || c.readability || c.nonlocalState || c.ensemble;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
