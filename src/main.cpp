@@ -20,6 +20,7 @@
 #include "recall.h"
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
+#include "dmm.h"         // --dmm: the Delta Maintainability Model scalar — the trendable complement to --quality-delta
 #include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
 #include "contextratio.h" // --context-ratio: the LOCAL-REASONING lens (outside-the-file share of a unit's context)
 #include "nonlocalstate.h" // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
@@ -4465,6 +4466,39 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         return gatingCount > 0 ? 2 : 0;   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
     }
     return std::nullopt;
+}
+
+// ── --dmm ────────────────────────────────────────────────────────────────────────────────────────────────
+// The Delta Maintainability Model scalar — the TRENDABLE complement to --quality-delta above, and it sits
+// here because the two answer the same question at different resolutions ("which kinds got worse" vs "how
+// did this change score, on one scale"). dmm.h owns the whole computation and the emission; this handler
+// resolves the flag, splits the ONE user-error case (a revision that does not resolve → a refusal that
+// names the offending token, exit 1) from every environment case (no git, a root commit, an archive that
+// failed → an UNAVAILABLE report, exit 0), and never gates: a maintainability score with a threshold on it
+// is a score people write code to.
+std::optional<int> runDmm( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config& cfg = d.cfg;
+
+    if( !cfg.dmm )
+    {
+        return std::nullopt;
+    }
+
+    const dmm::Result r = dmm::computeDmm( d.root, cfg.dmmRange, d.ing, cfg.excludes, cfg.maxFileBytes );
+    if( r.status == dmm::Status::BadRev )
+    {
+        std::fprintf( stderr, "ripwire: --dmm: '%s' does not resolve to a commit in %s\n", r.badToken.c_str(), d.root.c_str() );
+        return 1;
+    }
+    if( r.status == dmm::Status::BadRange )
+    {
+        std::fprintf( stderr, "ripwire: --dmm: '%s' uses the three-dot form; --dmm compares two TREES, so spell it A..B "
+                              "(or --dmm=$(git merge-base A B)..B if the merge base is what you meant)\n", r.badToken.c_str() );
+        return 1;
+    }
+    return dmm::writeDmmReport( r );
 }
 
 // §A10.6: strips a REPEATED leading "./" so `./src`, `././src`, and `src` all compare on the same text —
@@ -9857,7 +9891,8 @@ void warnReportVerbPrecedence( const rw::Config& c )
         { "--arch",             !c.archRules.empty()      }, { "--hotspots",      c.hotspots              },
         { "--clones",            c.clones                 }, { "--cochange",      c.cochange              },
         { "--owners",            c.owners                 }, { "--quality-baseline", c.qualityBaseline    },
-        { "--quality-delta",     c.qualityDelta           }, { "--dead-code",     c.deadCode              },
+        { "--quality-delta",     c.qualityDelta           }, { "--dmm",           c.dmm                   },
+        { "--dead-code",         c.deadCode               },   // the row order IS the dispatch order (test/dispatchordercheck.sh pins every pair) — never re-pair for layout
         { "--edit-check",       !c.editCheckSym.empty()   }, { "--eval",          c.eval                  },
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
@@ -10359,6 +10394,10 @@ int main( int argc, char** argv )
         if( cfg.qualityDelta || cfg.qualityBaseline )
         {
             return refuse( "--quality-delta/--quality-baseline", "its baseline is keyed to ONE repo's HEAD; run it per root" );
+        }
+        if( cfg.dmm )
+        {
+            return refuse( "--dmm", "it diffs ONE repo's committed trees, and pooling two histories into one ratio would be meaningless; run it per root" );
         }
         if( !cfg.editCheckSym.empty() )
         {
@@ -11113,6 +11152,13 @@ int main( int argc, char** argv )
     // §6.3: --quality-baseline/--quality-delta, then --dead-code — the two branches of the old
     // runQualityViews, in the order that chain evaluated them.
     if( std::optional<int> handled = runQualityDelta( dsp ) )
+    {
+        return *handled;
+    }
+
+    // --dmm sits immediately after --quality-delta, which is also its precedence: a run that passes both
+    // gets the per-kind report, because that one can gate and this one deliberately cannot.
+    if( std::optional<int> handled = runDmm( dsp ) )
     {
         return *handled;
     }

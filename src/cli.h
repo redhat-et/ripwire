@@ -212,6 +212,14 @@ struct Config
     bool             qualityAck      = false;              // --quality-ack[=REASON]: accept the current findings into .ripwire_quality_acks (per-finding ratchet); shares qualityDelta's baseline resolution
     std::string_view qualityAckReason;                     // the reason recorded next to each acked finding
     std::string_view qualityAckOnly;                       // --ack-only=SUBSTR[,SUBSTR]: ack only findings whose kind or canonical id contains one of these (default: all)
+    bool             dmm             = false;              // --dmm[=REV|A..B]: the Delta Maintainability Model scalar (di Biase/Rastogi/
+                                                            // Bruntink/van Deursen, TechDebt 2019) — ONE trendable number in [0,1] for a
+                                                            // change: the share of moved volume that made the code healthier. The
+                                                            // per-kind complement to --quality-delta, which says WHICH debt grew but has
+                                                            // no scale. A DELTA, never a level: editing bad code without growing it
+                                                            // scores nothing at all (dmm.h)
+    std::string_view dmmRange;                             // --dmm=REV (that commit vs its first parent) or --dmm=A..B (B vs A). Bare
+                                                            // --dmm compares the WORKING TREE against HEAD, the way --quality-delta does
     std::string_view editCheckSym;                         // --edit-check=SYM (B11/L5): fast per-symbol post-edit contract check — SYM's
                                                             // param count + publicness now vs git HEAD (unchanged/new-symbol/contract-change),
                                                             // plus its 1-hop callers with any call-site provably incompatible with the NEW
@@ -934,6 +942,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               deletes. Which floor was actually used is on every report as baseline=: sidecar | git-HEAD | git-HEAD (stale sidecar removed) | git-HEAD (stale\n"
         "                               sidecar ignored) — the last two say a stale sidecar existed, and 'removed' means the file is gone. A non-git root has no HEAD to fall back to, so\n"
         "                               its sidecar is always honored; without one there, the verb exits 1.\n"
+        "    --dmm[=REV|A..B]           the DELTA MAINTAINABILITY MODEL scalar: ONE comparable number in [0,1] for a change, so quality becomes TRENDABLE across commits instead of a per-kind list (di Biase, Rastogi, Bruntink and van Deursen, TechDebt 2019; thresholds and arithmetic from PyDriller's deltamaintainability reference implementation). Bare = the WORKING TREE vs git HEAD (what --quality-delta compares); =REV = that commit vs its FIRST PARENT (the per-commit scalar); =A..B = tree B vs tree A.\n"
+        "                               A UNIT is a function/method definition with a body; its VOLUME is its line span. Per property a unit is LOW risk iff size: loc<=15, complexity: cyclomatic<=5, interfacing: params<=2. good = low-risk volume ADDED plus high-risk volume REMOVED; bad = low-risk REMOVED plus high-risk ADDED; dmm = good/(good+bad). So DELETING a god function scores 1.000 and GROWING one scores 0.000.\n"
+        "                               The three sub-scores (size/complexity/interfacing) are emitted alongside the combined one because they are separately actionable; the combined one POOLS them (summed good over summed good+bad) and is labelled combine=\"pooled\", since the paper publishes the three separately and no aggregate.\n"
+        "                               IT IS A DELTA, NEVER A LEVEL: a unit you edit without changing its size, complexity or parameter count sits in the same bin with the same volume on both sides and contributes NOTHING. Touching bad code is not punished, deliberately, because a gate that punishes it is a gate people route around.\n"
+        "                               dmm=\"UNAVAILABLE\" means good+bad was 0 (a rename, a literal edit, a comment reflow): the change is outside what the model measures. That is NEVER to be read as 1.000 or 0.000, and reason= says which case it was. Same token per property.\n"
+        "                               VOLUME IS PHYSICAL LINE SPAN (size_metric=\"physical-loc\"), where the reference implementation uses non-comment non-blank lines, so a heavily commented unit crosses the size threshold here earlier. NO THRESHOLD, NO VERDICT, ALWAYS EXIT 0.\n"
         "    --quality-ack[=REASON]     accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size\n"
         "      --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
         "                               FACET contains one of these; the pseudo-token 'gating' selects exactly what would\n"
@@ -1559,6 +1573,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--dead-code",          &Config::deadCode           },
     { "--quality-baseline",   &Config::qualityBaseline    },
     { "--quality-delta",      &Config::qualityDelta       },
+    { "--dmm",                &Config::dmm                },   // bare flag → the working tree vs HEAD (the value is an OPTIONAL rev/range)
 
     // review + the cross-branch verbs
     { "--pr-context",         &Config::prContext          },
@@ -1670,6 +1685,10 @@ inline constexpr ViewFlag kViewFlags[] =
     // `--field-affinity=` is exactly `--field-affinity`: the value is an OPTIONAL narrowing to one struct,
     // and the bare form (the whole-repo ranking) is the primary way to ask.
     { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Meaningful, nullptr, nullptr, &Config::fieldAffinity },
+    // --dmm= is Refuse, not Meaningful, even though the BARE --dmm is a real form: `--dmm=` is a half-typed
+    // range, and silently running the working-tree comparison for it would answer a question nobody asked.
+    { "--dmm=",            &Config::dmmRange, EmptyValue::Refuse, "a commit, or a RANGE A..B (bare --dmm compares the working tree against HEAD)",
+      "--dmm=HEAD~1..HEAD", &Config::dmm },
     // --html=FILE-or-stdout and --quality-ack=REASON are the same shape for a different reason: the value is
     // OPTIONAL, so `--html=` is `--html` (write to stdout) and `--quality-ack=` is `--quality-ack` (no
     // reason). The audit's own enumeration classified both as "already refusing"; neither is. They are
@@ -1811,7 +1830,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 159;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags)
+inline constexpr std::size_t kTotalFlagArms       = 161;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 

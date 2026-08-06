@@ -15,6 +15,60 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `--dmm`: the Delta Maintainability Model, one comparable number per change
+
+`--quality-delta` reports *which kinds* of debt a change added. It has no scale, so it cannot answer
+"was this change better than the last one?" — `--dmm` is that scale: one scalar in `[0,1]` per commit
+or per working diff, trendable across commits and comparable across authors.
+
+```
+<dmm base="2edbb46cfd9d…" target="working-tree" available="1" combine="pooled"
+     size_metric="physical-loc" dmm="0.436" good="462" bad="597"
+     base_units="4759" base_volume="86331" target_units="4780" target_volume="86684">
+  <p k="size"        dmm="0.184" good="65"  bad="288" d_low="65"  d_high="288"/>
+  <p k="complexity"  dmm="0.499" good="176" bad="177" d_low="176" d_high="177"/>
+  <p k="interfacing" dmm="0.626" good="221" bad="132" d_low="221" d_high="132"/>
+```
+
+A *unit* is a function or method definition with a body; its *volume* is its line span. Per property a
+unit is **low risk** iff `loc <= 15` (size), cyclomatic `cx <= 5` (complexity), `params <= 2`
+(interfacing). `good` is low-risk volume **added** plus high-risk volume **removed**; `bad` is the
+reverse; `dmm = good/(good+bad)`. **Deleting a god function scores 1.000; growing one scores 0.000.**
+The three sub-scores ship alongside the combined one because they are separately actionable — a low
+`size` with a healthy `interfacing` says *split the function*, not *change the signature*.
+
+Three spellings: bare `--dmm` compares the **working tree** against `git HEAD` (what `--quality-delta`
+compares); `--dmm=REV` scores one commit against its **first parent**, the per-commit scalar; and
+`--dmm=A..B` scores tree B against tree A. Multi-root workspaces refuse — pooling two histories into
+one ratio would mean nothing.
+
+**It is a delta, never a level, and that is the whole design.** A unit you edit without changing its
+size, complexity or parameter count sits in the same bin with the same volume on both sides and
+contributes exactly zero to both `good` and `bad`. You are not punished for touching pre-existing bad
+code, because a gate that punishes touching a mess is a gate people route around. For the same reason
+the verb has no threshold, renders no verdict, and always exits 0.
+
+**`dmm="UNAVAILABLE"` is not a score.** When `good + bad` is 0 — a rename, a literal edit, a comment
+reflow — the change is outside what the model measures, and the report says so in `reason=` rather
+than picking the flattering default. It is never 1.000 and never 0.000. The same token appears per
+property: a commit that only adds parameters leaves `size` and `complexity` UNAVAILABLE while
+`interfacing` is measured.
+
+**Lineage, and the one deviation.** The model is di Biase, Rastogi, Bruntink & van Deursen, TechDebt
+2019 (SIG). The three risk thresholds and the exact good/bad asymmetry are PyDriller's
+`deltamaintainability` reference implementation, read out of `pydriller/domain/commit.py` rather than
+re-derived from the paper's prose — including the 0/0 case, whose `None` is where UNAVAILABLE comes
+from. The deviation is disclosed on every report as `size_metric="physical-loc"`: PyDriller's volume
+is lizard's non-comment `nloc`, ripwire's is the definition's physical line span, so a heavily
+commented unit crosses the size threshold here earlier. The combined score is labelled
+`combine="pooled"` because the paper publishes the three properties separately and no aggregate.
+
+Gate: `test/dmmcheck.sh` — a hand-built git repository whose every commit has a pencil-derivable
+answer (delete-only-high-risk → 1.000, grow-a-god-unit → 0.000, a 4-good-vs-4-bad mix → 0.500, a
+literal-only edit → UNAVAILABLE), both sides of all three thresholds pinned (15 vs 16 lines, cx 5 vs
+6, 2 vs 3 params), plus the root-commit, non-git, refusal, determinism, well-formedness, legend and
+additivity arms.
+
 ### Added — `--nonlocal-state`: the mutable state a function can reach, reads and writes kept apart
 
 A new lens: for every function and method, the non-local **mutable** state it — or anything in its
