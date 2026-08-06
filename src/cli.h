@@ -293,6 +293,17 @@ struct Config
                                                              // definition compared field-by-field (the mirror/stub drift check).
                                                              // file:name disambiguates like --around/--lego. Exit 2 on a mirror
                                                              // mismatch or a sizeof tripwire the computed size contradicts.
+    bool             fieldAffinity   = false;               // --field-affinity[=STRUCT]: the CACHE-LOCALITY lens. Which fields are
+                                                             // READ TOGETHER (a static field co-access affinity graph, Chilimbi
+                                                             // PLDI 1999) but declared far apart, diffed against 64-byte cache-line
+                                                             // geometry via the same LP64 offset model --layout uses. Bare = the
+                                                             // whole repo, ranked by separation cost. ADVICE ONLY — it never
+                                                             // proposes a reordering, because packing advice is non-monotonic
+                                                             // (tight packing can induce false sharing).
+    std::string_view fieldAffinityStruct;                    // --field-affinity=STRUCT: narrow the report to one aggregate. The
+                                                             // AMBIGUITY universe stays the whole corpus either way (a field name
+                                                             // declared by two aggregates is refused, never guessed) — see
+                                                             // src/fieldaffinity.h::buildFieldOwners.
     std::string_view fromTrace;                             // --from-trace=FILE ('-'=stdin) (B11/L2): map a stack trace /
                                                              // sanitizer report / compiler-error text onto the indexed symbols —
                                                              // table-driven frame extraction (python/asan/node/compiler/generic),
@@ -1096,6 +1107,29 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               C-FAMILY files only (a TypeScript/Swift class has no byte layout) — .metal IS one\n"
         "                               of them (indexed under the C++ grammar, see kLangTable), so a Metal struct's layout is\n"
         "                               modelled like any other C-family aggregate.\n"
+        "    --field-affinity[=STRUCT]  the CACHE-LOCALITY lens: which fields are READ TOGETHER but declared FAR APART. Builds a\n"
+        "                               static field CO-ACCESS affinity graph (one observation per indexed C-family function\n"
+        "                               body) and diffs it against the DECLARED field order and 64-byte cache-line geometry,\n"
+        "                               reusing --layout's LP64 offset model. Bare = every aggregate in the repo, ranked by\n"
+        "                               separation cost; =STRUCT narrows the report to one. Pairs carry Chilimbi's separation\n"
+        "                               weight wt = (64 - dist)/64 (Cache-Conscious Structure Definition, PLDI 1999) — CITED,\n"
+        "                               not invented here, along with the affinity graph and the points-to-free access\n"
+        "                               enumeration; the advice-not-transform posture is Hundt et al., CGO 2006. Exactly TWO\n"
+        "                               findings fire, both with a direction you can defend in one sentence: split-line (two\n"
+        "                               fields co-accessed by 2+ functions at wt 0.00, so NO field order puts them on one line)\n"
+        "                               and straddle (one co-accessed field crossing a line boundary). ADVICE ONLY: it never\n"
+        "                               proposes a reordering and it has no rewrite mode, because pack-tighter/sort-by-size advice is\n"
+        "                               NON-MONOTONIC (tight packing can induce false sharing — the reason the Go team keeps its\n"
+        "                               own fieldalignment analyzer out of vet and gopls). LIMITS, both in the header: static\n"
+        "                               access counts are NOT dynamic frequency, so fns= is a FLOOR of distinct indexed\n"
+        "                               functions and w= is a call-graph reachability PROXY (1 + fan-in), never a measured\n"
+        "                               count; only dot/arrow member syntax is counted (a bare field name inside its own method\n"
+        "                               is indistinguishable from a local); a field name declared by TWO aggregates is REFUSED\n"
+        "                               and tallied in amb_skipped= rather than guessed; and all geometry is the LP64 MODEL, so\n"
+        "                               a definition --layout marks modeled=\"0\" contributes its affinity graph and NO geometry\n"
+        "                               finding. validate= names the instrumented PROFILE_SCOPE whose hardware counters would\n"
+        "                               confirm the hypothesis (see docs/FIELDAFFINITY.md for the worked example). C/C++/ObjC\n"
+        "                               only. Exit 0 always: a report, not a gate.\n"
         "    --doc-drift[=SUBSTR]       which of this repo's DOC claims are now false. Verifies the CHECKABLE anchors in every\n"
         "                               markdown file (SUBSTR filters doc paths) against the live index and prints ONLY the ones\n"
         "                               that no longer hold, four kinds: file:line refs (why=\"missing-file\" the path is gone,\n"
@@ -1486,6 +1520,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--handoff",            &Config::handoff            },
     { "--test-gate",          &Config::testGate           },
     { "--exercises",          &Config::exercisesFlag      },   // bare flag → empty TESTFILE → handler refuses loudly
+    { "--field-affinity",     &Config::fieldAffinity      },   // bare flag → whole-repo ranking (the value is an OPTIONAL narrowing)
 
     // cache + diagnostics
     { "--no-cache",           &Config::noCache            },
@@ -1632,6 +1667,9 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--stray-content=",  &Config::strayFilter     , EmptyValue::Meaningful, nullptr, nullptr, &Config::strayContent },
     { "--flags=",          &Config::darkFlagsFilter , EmptyValue::Meaningful, nullptr, nullptr, &Config::darkFlags },
     { "--doc-drift=",      &Config::docDriftFilter  , EmptyValue::Meaningful, nullptr, nullptr, &Config::docDrift },
+    // `--field-affinity=` is exactly `--field-affinity`: the value is an OPTIONAL narrowing to one struct,
+    // and the bare form (the whole-repo ranking) is the primary way to ask.
+    { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Meaningful, nullptr, nullptr, &Config::fieldAffinity },
     // --html=FILE-or-stdout and --quality-ack=REASON are the same shape for a different reason: the value is
     // OPTIONAL, so `--html=` is `--html` (write to stdout) and `--quality-ack=` is `--quality-ack` (no
     // reason). The audit's own enumeration classified both as "already refusing"; neither is. They are
@@ -1773,7 +1811,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 157;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row)
+inline constexpr std::size_t kTotalFlagArms       = 159;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
