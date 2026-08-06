@@ -21,6 +21,7 @@
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
 #include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
+#include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
 #include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
@@ -4322,6 +4323,15 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     if( cfg.readability )
     {
         return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset );
+    }
+
+    // --naming-calibration: §9.5 — the naming-* lint rules judged against the repo's OWN rename history
+    // (renamemine.h owns the mining, the join, the scoring AND the emission, the way --readability does).
+    // It walks git and reads the symbol table; it needs no graph. Exit 0 always — a measurement, not a
+    // verdict: test/namingcalibrationcheck.sh is where the per-rule floor lives.
+    if( cfg.namingCalibration )
+    {
+        return renamemine::writeNamingCalibrationReport( ing, d.root );
     }
 
     // --dead-code[=DIR]: HIGH-CONFIDENCE candidates only. Zero callers is incomplete whole-program evidence,

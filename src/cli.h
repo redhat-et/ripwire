@@ -136,6 +136,10 @@ struct Config
     bool             readability       = false;            // --readability: the Posnett/Hindle/Devanbu (MSR 2011) lens — per function, Halstead
                                                             // volume + token entropy + line span → P, emitted LEAST readable first. Pages through
                                                             // limit/offset like the other report verbs; a ranking lens, never a grade (readability.h)
+    bool             namingCalibration = false;            // --naming-calibration: §9.5 — score the naming-* lint rules against this
+                                                            // repo's OWN rename history (old -> new pairs mined from git log -p).
+                                                            // A NOISY proxy, disclosed as one; the floor a rule must clear lives in
+                                                            // test/namingcalibrationcheck.sh, not here (renamemine.h)
     bool             cochange          = false;            // --cochange[=FILE]: files that change together in git (hidden coupling)
     std::string_view cochangeFile;                         // --cochange=FILE: lockstep partners of one file
     std::string_view archRules;                            // --arch=FILE: enforce layering rules (exit 2 on violation)
@@ -795,6 +799,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a\n"
         "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
         "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
+        "    --naming-calibration       score the naming-* lint rules against this repo's OWN rename history: one git log pass mines\n"
+        "                               old->new identifier substitutions, joins each to the symbol it became at HEAD, and scores\n"
+        "                               BOTH spellings with the same predicates --lint runs. old=fires on the abandoned spelling,\n"
+        "                               new=fires on the chosen one, proxy=old/(old+new), where 0.50 is exactly chance. A NOISY\n"
+        "                               PROXY, stated as one -- rebrands, moves and API changes all look like renames -- so read\n"
+        "                               pairs= (the sample size) first; the group rules report scope=group-rule, not a fake 0/0.\n"
+        "                               Exit 0 always: the per-rule floor lives in test/namingcalibrationcheck.sh\n"
         "    --cochange[=FILE]          files that change together in git (hidden coupling; the rows' own legend defines surprising=)\n"
         "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn to commits after this point:\n"
         "                               a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate\n"
@@ -1396,6 +1407,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--hotspots",           &Config::hotspots           },
     { "--clones",             &Config::clones             },
     { "--readability",        &Config::readability        },
+    { "--naming-calibration", &Config::namingCalibration  },
     { "--cochange",           &Config::cochange           },
     { "--communities",        &Config::communities        },
     { "--community",          &Config::communityFlag      },   // bare flag → empty ID → handler refuses loudly. Matched by
@@ -1695,7 +1707,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 151;   // +1: --handoff, +1: --readability (kBoolFlags rows)
+inline constexpr std::size_t kTotalFlagArms       = 152;   // +1: --handoff, +1: --readability, +1: --naming-calibration (kBoolFlags rows)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
