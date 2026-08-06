@@ -1568,9 +1568,9 @@ void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
 // names are NOT appended — unlike the atoms pack they are spelled in runLint's allRuleNames table, because
 // the naming rules are symbol-level built-ins that were declared there before the pack existed. Lifted out
 // of runLint for the same reason mergeAtomsPack and lintSymbolLevelChecks were.
-void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules )
+void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules, bool namingLocals )
 {
-    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms ) )
+    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms, namingLocals ) )
     {
         saturatedRules.push_back( { std::move( namingRule ), false } );
     }
@@ -8907,7 +8907,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // and — for atoms, whose rule list is owned by the pack — its own rule names. Both run here, inside
         // the one --lint guard, so the sort below covers every built-in finding regardless of its source.
         mergeAtomsPack( ing, ms, saturatedRules, allRuleNames );
-        mergeNamingLens( ing, ms, saturatedRules );
+        mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals );
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
