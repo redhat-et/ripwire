@@ -24,8 +24,8 @@ blast radius, and which tests to run.
   further **14–25% faster cold** against a plain non-LTO baseline, holding on a ~2,000-file corpus
   that never appeared in training (`docs/OPTREMARKS.md` §5/§5b — six interleaved A/Bs, byte-identical
   output, determinism gate green on the optimized binary).
-- **Writes better code** — the quality panel narrows **4,866** eligible functions in this repository
-  to **402** worth a second look (2-of-6 evidence families agreeing, `--quality-panel`) — an **8.3%**
+- **Writes better code** — the quality panel narrows **4,956** eligible functions in this repository
+  to **401** worth a second look (2-of-6 evidence families agreeing, `--quality-panel`) — an **8.1%**
   shortlist, not a guess; `--quality-delta` then measures what a change made *worse* across 10
   agent-code failure modes, `--exemplar` surfaces the repo's best-in-class pattern to imitate, and
   `--test-gate` names the tests that must run before "done." `--field-affinity` estimates
@@ -80,6 +80,29 @@ visible *before* the agent touches them, in a few thousand tokens instead of fiv
 
 </details>
 
+<details>
+<summary><b>What the quality panel shows</b> — real output from this repository, trimmed (legend comment elided)</summary>
+
+```xml
+$ ripwire . --quality-panel --limit=1
+<quality_panel preset="default" families="6" enabled_n="6" cut="2" eligible="4956" ranked="401" …>
+<s p="./src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation">
+<e f="structural" why="ccx=724 loc=1244 nest=9 rrank=1"/>
+<e f="confusion" why="atom-embedded-crement*3"/>
+<e f="historical" why="hrank=19 churn=9"/>
+<e f="colocation" why="crank=33"/>
+</s>
+…
+</quality_panel>
+```
+
+Four of six independent evidence families corroborate on `buildGraph`, each with its own reason
+shown inline — never a single blended score. `eligible="4956"` narrows to `ranked="401"` (2-of-6
+agreement): an **8.1%** shortlist of this repository's own functions, not a guess. Full six-family
+breakdown, real numbers per family → [The quality panel](#the-quality-panel) below.
+
+</details>
+
 **Name a symbol and it's the first hit.** A confidence-gated router detects when the query *names*
 something and switches rankers: recall@1 on name-shaped queries jumps **76.7% → 98.7%** in `src/`
 (MRR 0.859 → 0.993) and **63.3% → 87.3%** at the repository root. The gate is the load-bearing
@@ -88,9 +111,92 @@ wrong queries, so both numbers are published together. Reproduce with `ripwire <
 --eval-retrieval`; full tables in [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and
 [Measured](#measured).
 
-[Quickstart](#quickstart) · [Benchmarks](#measured) · [What it answers](#what-it-answers) ·
-[Honesty contract](#the-honesty-contract) · [Agent setup](#set-it-up-in-your-coding-agent) ·
-[Docs](#documentation) · [Slides](present/ripwire-showcase.pdf)
+[Quickstart](#quickstart) · [The quality panel](#the-quality-panel) · [Benchmarks](#measured) ·
+[What it answers](#what-it-answers) · [Honesty contract](#the-honesty-contract) ·
+[Agent setup](#set-it-up-in-your-coding-agent) · [Docs](#documentation) ·
+[Slides](present/ripwire-showcase.pdf)
+
+---
+
+## The quality panel
+
+`--quality-panel` joins **six independent evidence families** (structural shape, lexical naming,
+syntactic-confusion idioms, git churn history, cross-file colocation, and non-local mutable state)
+and ranks by the *count* of families agreeing, never a weighted composite — averaging correlated
+metrics and calling it several is the Maintainability Index's well-known failure mode. On this
+repository the panel measures **4,956** eligible functions and narrows them to **401** worth a
+second look at 2-of-6 agreement — an **8.1%** shortlist, not a guess — and the largest correlation
+between any two families, pooled across five independent corpora (n = 27,999), is **+0.168**: the
+families really are measuring different things. What each of the six actually looks at, on this
+repository's own source, not a synthetic example:
+
+| Family | Question | Backing verb | On this repo |
+| --- | --- | --- | --- |
+| **structural** | shape: complexity, size, nesting, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
+| **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
+| **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
+| **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
+| **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
+| **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
+
+**Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
+rather than blurring it:
+
+- **`--field-affinity`** (cache-friendly co-access) is explicitly **not** a panel family, by unit: it
+  measures which struct fields are read together but declared far apart, and its subject is a *type*,
+  not a function — attributing a struct's finding to the functions that touch it would be a claim the
+  lens itself never makes (`docs/EVALS.md` §9.9.2). `MainDispatch` (`src/main.cpp:1335`, the 144-byte
+  struct threaded through nearly every verb) still carries **12** real findings against a separation
+  cost of **92.88** — fields read together in the same call routinely cross cache-line boundaries.
+  Chilimbi, Davidson & Larus's cache-conscious structure definition (PLDI 1999), validated on real
+  hardware counters; the advice-not-transform posture (report a split, never auto-reorder a struct)
+  follows Hundt, Mannarswamy & Chakrabarti (CGO 2006). **This is a genuinely rare kind of tool**: code
+  review catches cache-unfriendly patterns constantly, but every adjacent tool that reasons about
+  memory-access shape (Intel Advisor's pattern classifier, DMon, PerfLint) does it by *running the
+  program first* — a two-round adversarial literature and patent search found no shipping tool and no
+  published work that does this **statically, before a line executes** (tier: RARE BUT REAL, the full
+  citation trail and hedged claim wording in [`docs/LINEAGE.md`](docs/LINEAGE.md)). The same verb now
+  also classifies each loop's access shape — `index`/handle-based (predictable, the hardware
+  prefetcher can hide the latency) vs. pointer-chase (data-dependent, no struct layout fixes an
+  unhideable per-hop stall) — and, for genuine chases, checks whether the pointer you dereference to
+  *reach* the next node sits next to the payload you're about to read, since that cache-line fetch is
+  unavoidable and colocating there is a strictly higher-value fix than generic field reordering. On
+  this repository: **1,374** loops classified, **5** genuine pointer-chases found in a codebase
+  deliberately built handle-based rather than pointer-linked (guardrail G2) — the lens staying quiet
+  on code written to avoid the problem is itself a check that it isn't firing at random. **Ships
+  entirely report-only**: an A/B benchmark against a real 64 MB shuffled linked list measured a
+  mostly-null result, so the ranking-affecting half of this feature is a provable no-op until a
+  blind real-corpus validation session clears it — reported here at the same honesty level as
+  everything else in this table, not oversold ahead of the evidence.
+- **`--readability`** is a sibling lens, not a panel family either — the one classic model in the tree
+  with a published closed form: Halstead volume (Halstead, *Elements of Software Science*, 1977) and
+  the Posnett/Hindle/Devanbu sigmoid fit (MSR 2011, [doi:10.1145/1985441.1985454](https://doi.org/10.1145/1985441.1985454)),
+  fitted on snippets of 20 lines or fewer — past that the fitted score saturates and only the
+  *ordering* stays meaningful, which is exactly how the verb is used: least-readable-first, never as a
+  grade. Halstead's volume specifically (not the later, less-trusted difficulty/effort derivatives) is
+  among the metrics shown to track measured cognitive load directly (Peitek, Apel, Parnin, Brechmann &
+  Siegmund, ICSE 2021, [doi:10.1109/ICSE43902.2021.00056](https://doi.org/10.1109/ICSE43902.2021.00056)) —
+  `--readability` emits volume and stops there; difficulty and effort are computed nowhere in this
+  tree.
+- **`--naming-consistency`** is the *lexical* family's one exception to "evidence, never advice": every
+  other lens in this panel tells you WHAT is wrong, never a computed fix. Case-style consistency is
+  the one property with a corpus-derivable answer — on this repository's `src/`, camelCase is the
+  dominant convention at **1,677/1,803 (93.0%)** agreement, and the verb flags **136** off-convention
+  names with a mechanically recombined `propose=` value for each (no dictionary, no synonym judgment —
+  see [What it answers](#what-it-answers)).
+- **`--lint --naming-locals`** points those same naming rules at local variable names — the thing a
+  human reviewer flags immediately in a sprawling function and no static tool measured until this
+  session. Opt-in, off by default: on this repository, a plain `--lint` finds **2,225** findings;
+  adding `--naming-locals` finds **3,198** — **973 findings that were structurally invisible**
+  a moment ago, scoped tightly (only inside functions already flagged large/complex, only locals
+  nested two blocks deep for the short-name rule) so it doesn't just relabel every loop counter in
+  the tree. Ships disabled by default on purpose: this repository's own history includes a naming
+  rule that shipped on plausibility and was later measured to flag its *best*-named functions — see
+  the withdrawn-rule note below — so a rule this new stays opt-in until a real-corpus audit clears it.
+
+Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
+flagged this repository's best-named functions, kept as the standing argument for measuring before
+shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 
@@ -274,84 +380,6 @@ returns the innermost in-corpus body with them:
 ./build/ripwire . --from-trace=asan_report.txt
 cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 ```
-
-**The code-quality panel** — `--quality-panel` joins **six independent evidence families**
-(structural shape, lexical naming, syntactic-confusion idioms, git churn history, cross-file
-colocation, and non-local mutable state) and ranks by the *count* of families agreeing, never a
-weighted composite — averaging correlated metrics and calling it several is the Maintainability
-Index's well-known failure mode. On this repository the panel measures **4,866** eligible functions
-and narrows them to **402** worth a second look at 2-of-6 agreement — an **8.3%** shortlist, not a
-guess — and the largest correlation between any two families, pooled across five independent
-corpora (n = 27,999), is **+0.168**: the families really are measuring different things. What each of
-the six actually looks at, on this repository's own source, not a synthetic example:
-
-| Family | Question | Backing verb | On this repo |
-| --- | --- | --- | --- |
-| **structural** | shape: complexity, size, nesting, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
-| **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
-| **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
-| **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
-| **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
-| **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
-
-**Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
-rather than blurring it:
-
-- **`--field-affinity`** (cache-friendly co-access) is explicitly **not** a panel family, by unit: it
-  measures which struct fields are read together but declared far apart, and its subject is a *type*,
-  not a function — attributing a struct's finding to the functions that touch it would be a claim the
-  lens itself never makes (`docs/EVALS.md` §9.9.2). `MainDispatch` (`src/main.cpp:1335`, the 144-byte
-  struct threaded through nearly every verb) still carries **12** real findings against a separation
-  cost of **92.88** — fields read together in the same call routinely cross cache-line boundaries.
-  Chilimbi, Davidson & Larus's cache-conscious structure definition (PLDI 1999), validated on real
-  hardware counters; the advice-not-transform posture (report a split, never auto-reorder a struct)
-  follows Hundt, Mannarswamy & Chakrabarti (CGO 2006). **This is a genuinely rare kind of tool**: code
-  review catches cache-unfriendly patterns constantly, but every adjacent tool that reasons about
-  memory-access shape (Intel Advisor's pattern classifier, DMon, PerfLint) does it by *running the
-  program first* — a two-round adversarial literature and patent search found no shipping tool and no
-  published work that does this **statically, before a line executes** (tier: RARE BUT REAL, the full
-  citation trail and hedged claim wording in [`docs/LINEAGE.md`](docs/LINEAGE.md)). The same verb now
-  also classifies each loop's access shape — `index`/handle-based (predictable, the hardware
-  prefetcher can hide the latency) vs. pointer-chase (data-dependent, no struct layout fixes an
-  unhideable per-hop stall) — and, for genuine chases, checks whether the pointer you dereference to
-  *reach* the next node sits next to the payload you're about to read, since that cache-line fetch is
-  unavoidable and colocating there is a strictly higher-value fix than generic field reordering. On
-  this repository: **1,374** loops classified, **5** genuine pointer-chases found in a codebase
-  deliberately built handle-based rather than pointer-linked (guardrail G2) — the lens staying quiet
-  on code written to avoid the problem is itself a check that it isn't firing at random. **Ships
-  entirely report-only**: an A/B benchmark against a real 64 MB shuffled linked list measured a
-  mostly-null result, so the ranking-affecting half of this feature is a provable no-op until a
-  blind real-corpus validation session clears it — reported here at the same honesty level as
-  everything else in this table, not oversold ahead of the evidence.
-- **`--readability`** is a sibling lens, not a panel family either — the one classic model in the tree
-  with a published closed form: Halstead volume (Halstead, *Elements of Software Science*, 1977) and
-  the Posnett/Hindle/Devanbu sigmoid fit (MSR 2011, [doi:10.1145/1985441.1985454](https://doi.org/10.1145/1985441.1985454)),
-  fitted on snippets of 20 lines or fewer — past that the fitted score saturates and only the
-  *ordering* stays meaningful, which is exactly how the verb is used: least-readable-first, never as a
-  grade. Halstead's volume specifically (not the later, less-trusted difficulty/effort derivatives) is
-  among the metrics shown to track measured cognitive load directly (Peitek, Apel, Parnin, Brechmann &
-  Siegmund, ICSE 2021, [doi:10.1109/ICSE43902.2021.00056](https://doi.org/10.1109/ICSE43902.2021.00056)) —
-  `--readability` emits volume and stops there; difficulty and effort are computed nowhere in this
-  tree.
-- **`--naming-consistency`** is the *lexical* family's one exception to "evidence, never advice": every
-  other lens in this panel tells you WHAT is wrong, never a computed fix. Case-style consistency is
-  the one property with a corpus-derivable answer — on this repository's `src/`, camelCase is the
-  dominant convention at **1,677/1,803 (93.0%)** agreement, and the verb flags **136** off-convention
-  names with a mechanically recombined `propose=` value for each (no dictionary, no synonym judgment —
-  see [What it answers](#what-it-answers)).
-- **`--lint --naming-locals`** points those same naming rules at local variable names — the thing a
-  human reviewer flags immediately in a sprawling function and no static tool measured until this
-  session. Opt-in, off by default: on this repository, a plain `--lint` finds **2,225** findings;
-  adding `--naming-locals` finds **3,198** — **973 findings that were structurally invisible**
-  a moment ago, scoped tightly (only inside functions already flagged large/complex, only locals
-  nested two blocks deep for the short-name rule) so it doesn't just relabel every loop counter in
-  the tree. Ships disabled by default on purpose: this repository's own history includes a naming
-  rule that shipped on plausibility and was later measured to flag its *best*-named functions — see
-  the withdrawn-rule note below — so a rule this new stays opt-in until a real-corpus audit clears it.
-
-Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
-flagged this repository's best-named functions, kept as the standing argument for measuring before
-shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 
