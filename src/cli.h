@@ -165,6 +165,19 @@ struct Config
                                                             // DECIDED group gets propose=, its own subtokens mechanically
                                                             // recombined into the dominant style. A lens, exit 0 always
                                                             // (namingconsistency.h)
+    bool             namingLocals      = false;            // --naming-locals: local-variable-indexing plan Phase 2 (PLAN.md
+                                                            // 2026-08-06 evening) — an OPT-IN --lint extension only, folded into
+                                                            // the naming lens's existing naming-short/-wordy/-underscore/-case
+                                                            // tags for LOCAL variable names inside large/deep/complex C/C++
+                                                            // functions (naminglens.h). DEFAULT-OFF, and NOT wired into a plain
+                                                            // --lint run without this flag: the plan's own "Hard blocker on
+                                                            // default-enable" is unmet (no calibration harness can score a
+                                                            // local-scoped rule yet, and the required real-corpus manual audit
+                                                            // for idiomatic-short-name skew — i/j/k/buf/tmp/err — has not run).
+                                                            // Deliberately breaks naminglens.h's own stated invariant ("an
+                                                            // un-indexed loop local can never be flagged") — see that file's
+                                                            // WITHDRAWN note for why shipping a plausible-but-unaudited rule
+                                                            // is exactly the failure mode this flag's default-off guards against.
     bool             commentCoherence  = false;            // --comment-coherence: per function/method with a doc comment, TWO published
                                                             // content measures — Steidl/Hummel/Juergens c_coeff (ICPC 2013, HIGH is BAD:
                                                             // the comment mostly restates the name) and Scalabrino CIC (ICPC 2016/JSEP
@@ -911,6 +924,20 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               from the corpus rather than invented. propose= is a SUGGESTION, never a safe-to-blind-apply\n"
         "                               rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0\n"
         "                               always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows\n"
+        "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; a no-op alone), OFF by default:\n"
+        "                               local-variable-indexing plan Phase 2 (PLAN.md 2026-08-06 evening). Runs the\n"
+        "                               naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule\n"
+        "                               bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only,\n"
+        "                               but ONLY inside a function that already clears an EXISTING\n"
+        "                               size/complexity gate (loc>80 OR nest>4 OR ccx>=15 -- the shipped large-function/deep-nesting\n"
+        "                               thresholds) AND has locals>=8 (measured floor: median locals=9 among this repo's own 377\n"
+        "                               gated functions) -- never a whole-corpus local-name sweep. naming-short additionally requires\n"
+        "                               the local's own declDepth>=2 (nested, not the function's own outermost block). Deliberately\n"
+        "                               breaks the lens's stated invariant that an un-indexed local can never be flagged -- read the\n"
+        "                               WITHDRAWN note atop src/naminglens.h before relying on this. NOT default-enabled inside a\n"
+        "                               plain --lint run and not a candidate for it yet: the plan's own hard blocker (a hand-curated\n"
+        "                               fixture corpus AND a manual real-corpus audit for idiomatic-short-name skew -- i/j/k/buf/tmp/\n"
+        "                               err) has not run. Exit 0 always; findings ride the same naming-* tallies/floors as --lint\n"
         "    --comment-coherence        per function/method WITH A DOC COMMENT, two published content measures, MOST NAME-RESTATING\n"
         "                               FIRST: c_coeff (Steidl/Hummel/Juergens, ICPC 2013) is the fraction of the comment's words within\n"
         "                               Levenshtein distance <2 of a word in the symbol's own (split) name — HIGH c_coeff IS BAD, it\n"
@@ -1574,6 +1601,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--quality-panel",      &Config::qualityPanel       },   // bare flag → the `default` preset (the value is an OPTIONAL selection)
     { "--naming-calibration", &Config::namingCalibration  },
     { "--naming-consistency", &Config::namingConsistency  },
+    { "--naming-locals",      &Config::namingLocals       },
     { "--comment-coherence",  &Config::commentCoherence   },
     { "--cochange",           &Config::cochange           },
     { "--cochange-groups",    &Config::cochangeGroups     },   // matched by EQUALITY, scanned before the prefix table, so it can
@@ -1893,7 +1921,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 165;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row)
+inline constexpr std::size_t kTotalFlagArms       = 166;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
