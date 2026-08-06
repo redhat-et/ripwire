@@ -132,8 +132,8 @@ fi
 
 
 # ── (E) the LINEAGE arm — the README's three advertised counts vs docs/LINEAGE.md's own tables ──────
-# The extractor is shared by both files on purpose: LINEAGE.md bolds the numbers (`**27 repositories**
-# and **27 papers**`) and README.md bolds the pair (`**27 repositories and 27 papers**`), so `*` is
+# The extractor is shared by both files on purpose: LINEAGE.md bolds the numbers (`**29 repositories**
+# and **37 papers**`) and README.md bolds the pair (`**29 repositories and 37 papers**`), so `*` is
 # stripped before matching and ONE regex covers both spellings. Anchoring on the WORDS rather than on
 # a line number or a bold-marker position means a rewrap or a re-bold cannot silently disarm the arm.
 # The whole file is flattened to ONE line before matching, because prose wraps: an editor that broke

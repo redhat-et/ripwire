@@ -500,7 +500,7 @@ function stat(s, big, label, x, y, w, color, opts={}){
   kicker(s, "// standing on giants", AMBER);
   title(s, "The research inside \u2014 classic and current");
   s.addText([
-    { text: "27 repositories + 27 papers folded", options: { color: TEXT, bold: true } },
+    { text: "29 repositories + 37 papers folded", options: { color: TEXT, bold: true } },
     { text: "  \u00b7  220 more surveyed and labeled \u2014 every row with the lesson taken and where it lives: docs/LINEAGE.md", options: { color: MUTED } },
   ], { x: MX, y: 1.58, w: 12.0, h: 0.34, fontFace: SANS, fontSize: 13, margin: 0 });
   const classics = [

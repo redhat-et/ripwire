@@ -189,6 +189,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
 <s t="fn" n="churnRankedGraph" p="./src/main.cpp:9086"/>
 <s t="fn" n="runDefaultMap" p="./src/main.cpp:9122"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:8920"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:8956"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -448,7 +450,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**28 repositories and 30 papers** into one deterministic executable, alongside a labelled
+**30 repositories and 40 papers** into one deterministic executable, alongside a labelled
 survey of 220 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
