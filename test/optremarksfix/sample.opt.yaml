@@ -51,7 +51,7 @@ Args:
 --- !Missed
 Pass:            slp-vectorizer
 Name:            NotBeneficial
-DebugLoc:        { File: '/Users/nobody/checkout/third_party/deps/doctest/doctest/doctest.h', Line: 77, Column: 1 }
+DebugLoc:        { File: '/build/checkout/third_party/deps/doctest/doctest/doctest.h', Line: 77, Column: 1 }
 Function:        _ZN7doctest6detail9someThingEv
 Args:
   - String:          'List vectorization was possible but not beneficial with cost 0 >= 0'
