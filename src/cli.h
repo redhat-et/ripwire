@@ -136,6 +136,10 @@ struct Config
     bool             readability       = false;            // --readability: the Posnett/Hindle/Devanbu (MSR 2011) lens — per function, Halstead
                                                             // volume + token entropy + line span → P, emitted LEAST readable first. Pages through
                                                             // limit/offset like the other report verbs; a ranking lens, never a grade (readability.h)
+    bool             ensemble          = false;            // --ensemble: the FAMILY JOIN — per function, which of the four orthogonal evidence
+                                                            // families (structural / lexical / confusion / historical) fire, ranked by the COUNT
+                                                            // of distinct families and never by a weighted composite. A family that could not be
+                                                            // measured is reported UNAVAILABLE, never silent (ensemble.h)
     bool             namingCalibration = false;            // --naming-calibration: §9.5 — score the naming-* lint rules against this
                                                             // repo's OWN rename history (old -> new pairs mined from git log -p).
                                                             // A NOISY proxy, disclosed as one; the floor a rule must clear lives in
@@ -801,6 +805,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a\n"
         "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
         "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
+        "    --ensemble                 the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
         "    --naming-calibration       score the naming-* lint rules against this repo's OWN rename history: one git log pass mines\n"
         "                               old->new identifier substitutions, joins each to the symbol it became at HEAD, and scores\n"
         "                               BOTH spellings with the same predicates --lint runs. old=fires on the abandoned spelling,\n"
@@ -1238,10 +1243,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability.\n"
+        "                               --readability --ensemble.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
-        "                               impact rows, 20 seam pairs, 40 readability rows, 200 graph-query rows / --top-k).\n"
+        "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 200 graph-query rows / --top-k).\n"
         "                               With --offset alone (no --limit) the verb's own default page size applies and\n"
         "                               the root discloses limit=\"0\" — on OUTPUT that 0 means 'no explicit --limit',\n"
         "                               never a zero-row page (the flag itself refuses --limit=0).\n"
@@ -1417,6 +1422,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--hotspots",           &Config::hotspots           },
     { "--clones",             &Config::clones             },
     { "--readability",        &Config::readability        },
+    { "--ensemble",           &Config::ensemble           },
     { "--naming-calibration", &Config::namingCalibration  },
     { "--cochange",           &Config::cochange           },
     { "--cochange-groups",    &Config::cochangeGroups     },   // matched by EQUALITY, scanned before the prefix table, so it can
@@ -1723,7 +1729,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 154;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags)
+inline constexpr std::size_t kTotalFlagArms       = 155;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -1911,7 +1917,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability";
+    "--readability --ensemble";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -1921,7 +1927,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability;
+        || c.readability || c.ensemble;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in

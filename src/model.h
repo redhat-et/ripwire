@@ -8,6 +8,7 @@
 //        → rank:  personalized PageRank over the CSR
 //        → serialize: top-K symbols (by rank) → minified XML, grouped by file.
 
+#include <algorithm>   // std::sort — symbolsByFile below
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -368,6 +369,33 @@ inline constexpr std::size_t kMaxWorkspaceRoots = 16;
 inline const std::string& diskPath( const IngestResult& ing, std::uint32_t fileId ) noexcept
 {
     return ing.realPaths.empty() ? ing.files[ fileId ] : ing.realPaths[ fileId ];
+}
+
+// THE per-file symbol index every span- or line-based lookup starts from: bucket the symbol ids by file, then
+// sort each bucket. `keep` selects which symbols enter it and `less` orders each bucket, because those two are
+// the ONLY things that differ between callers — flipimpact.h wants every symbol in line order (the host of a
+// `#if` region), ensemble.h wants only body-carrying functions in byte order (the owner of a lint finding's
+// span). Both were written independently and a --quality-delta pass found them as a 159-token clone pair,
+// correctly: same shape, different filter and key. Parameterizing exactly those two is what makes this ONE
+// function rather than a family of near-copies, and it lives here because `IngestResult` does.
+// Deterministic by construction: the caller's `less` must be a total order (both current ones tie-break on a
+// unique per-symbol field), and file buckets are indexed, never hashed.
+template<typename Keep, typename Less>
+inline std::vector<std::vector<NodeId>> symbolsByFile( const IngestResult& ing, Keep keep, Less less )
+{
+    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < byFile.size() && keep( s ) )
+        {
+            byFile[ s.fileId ].push_back( s.id );
+        }
+    }
+    for( std::vector<NodeId>& bucket : byFile )
+    {
+        std::sort( bucket.begin(), bucket.end(), less );
+    }
+    return byFile;
 }
 
 }   // namespace rw

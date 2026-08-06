@@ -93,15 +93,26 @@ PY
 #      boundaries moved, so the N=3 and N=4 cuts happened to share the same set. A gate that reds because a
 #      source file was added is a gate nobody keeps (legendcoveragecheck.sh's arm (B) makes the same
 #      argument), and the strict form was never what "two-or-more, not every" means.
-SH3="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p3" | attr shared_symbols )"
-SH4="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p4" | attr shared_symbols )"
-if [ "${SH3:-0}" -ge "${SH2:-0}" ] && [ "${SH4:-0}" -ge "${SH3:-0}" ] && [ "${SH4:-0}" -gt "${SH2:-0}" ]; then
-    ok "shared_symbols is non-decreasing in N and strictly larger at 4 than at 2 ($SH2 -> $SH3 -> $SH4) — two-or-more semantics, not a global intersection"
-else
-    no "shared_symbols is not non-decreasing-and-wider ($SH2 -> ${SH3:-<none>} -> ${SH4:-<none>}): an EVERY-partition intersection would shrink"
-fi
-
-# (1c) the divergence the legend promises from 3 partitions on.
+#      AND THE MONOTONE FORM WAS STILL A PROXY. The relaxed "non-decreasing in N and wider at 4 than at 2"
+#      lasted exactly one wave: adding src/ensemble.h moved the sequence from 10 -> 20 -> 22 to 10 -> 20 -> 15
+#      and the arm went red again, for the same non-reason as the time before — the N=4 cut simply landed
+#      somewhere else. A two-or-more count has NO monotonicity in N to assert: every N recomputes the
+#      partition boundaries from scratch, so the sets being compared at N=3 and N=4 are not nested and the
+#      count is free to move either way. Both previous forms were measuring this corpus, not the definition.
+#
+#      SO ASSERT THE DEFINITION INSTEAD — a one-line proof, corpus-independent, no monotonicity anywhere:
+#
+#        Let S_i be the id set of partition i. Under the EVERY reading, shared = |∩_i S_i|, which is a subset
+#        of S_a ∩ S_b for EVERY pair (a,b), while union = |∪_i S_i| is a superset of S_a ∪ S_b for every pair.
+#        Therefore shared/union <= |S_a ∩ S_b| / |S_a ∪ S_b| = J(a,b) for every pair, and hence
+#        shared/union <= mean_pairs J = overlap_mean.  ALWAYS. No corpus can escape it.
+#
+#      So a run where shared/union is STRICTLY GREATER than overlap_mean refutes the EVERY reading outright,
+#      which is exactly what this arm exists to do. It subsumes the old arm (1c) — "the two diverge at 3+" —
+#      by pinning the SIGN of the divergence, which is the half that carries the meaning: an every-partition
+#      intersection cannot land above the mean pairwise Jaccard, and a two-or-more union of pairwise
+#      intersections routinely does. Note the proof is one-directional by design: it can only ever REFUTE the
+#      wrong definition, never confirm the right one, and that is the honest shape for this evidence.
 for N in 3 4; do
     R="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p$N" )"
     S="$( printf '%s' "$R" | attr shared_symbols )"; U="$( printf '%s' "$R" | attr union_symbols )"
@@ -110,11 +121,11 @@ for N in 3 4; do
 import sys
 s,u,o=int(sys.argv[1]),int(sys.argv[2]),float(sys.argv[3])
 r=s/u if u else 0.0
-print("DIVERGES" if abs(r-o)>0.001 else f"SAME {r:.4f}=={o}")
+print("ABOVE" if r > o + 0.001 else f"NOT-ABOVE {r:.4f} vs {o}")
 PY
-    [ "$( cat "$TMP/div" )" = DIVERGES ] \
-        && ok "N=$N: shared/union ($S/$U) differs from overlap_mean ($O) — the divergence starts at 3+, as stated" \
-        || no "N=$N: shared/union did NOT diverge from overlap_mean ($( cat "$TMP/div" )) — the legend's 3+ claim is wrong"
+    [ "$( cat "$TMP/div" )" = ABOVE ] \
+        && ok "N=$N: shared/union ($S/$U) is strictly ABOVE overlap_mean ($O) — a global intersection provably cannot be, so this is two-or-more semantics" \
+        || no "N=$N: shared/union is not above overlap_mean ($( cat "$TMP/div" )) — an EVERY-partition intersection is bounded by the mean pairwise Jaccard, so this run cannot rule one out"
 done
 
 # (1d) core_budget_tokens + partition_budget_tokens == budget_per_agent_tokens (the legend says they sum).

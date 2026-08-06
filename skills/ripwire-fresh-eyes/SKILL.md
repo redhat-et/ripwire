@@ -175,6 +175,24 @@ sections your question needs.
    fitted on snippets of 20 lines or fewer, so on a 1,000-line function `posnett=` saturates at `0.000` —
    **read the ORDER of the rows, never the number as a grade.**
 
+   **Corroborated rot — `ripwire <dir> --ensemble`. Run this INSTEAD of steps 1-5 when the question is
+   "where is the rot", and use the single-lens steps to drill into what it names.** One lens firing is an
+   opinion; the same function flagged by *several kinds of evidence at once* is a finding. `--ensemble` joins
+   four **orthogonal** families — `structural` (the shape: `ccx`/`loc`/`nest`/`params` bars plus the
+   readability rank), `lexical` (the `naming-*` rules on the identifier text), `confusion` (the `atom-*`
+   rules on the syntactic construct), `historical` (git change frequency) — and ranks by the **count of
+   distinct families**:
+   `<s p="src/graph.h:462" n="buildGraph" fam="3" of="4" fired="structural,confusion,historical"
+   unavail=""><e f="structural" why="ccx=724 loc=1244 nest=9 rrank=1"/>…` — plus a per-file rollup whose
+   `top_fam=` is the strongest single-symbol corroboration in that file.
+   **There is deliberately no composite score**: averaging correlated metrics re-weights one signal and calls
+   it three (the Maintainability-Index failure), so `fam=` is ordinal and every row carries the evidence
+   behind it — you never need a second command to see WHY. Two things to carry: `rrank=`/`hrank=` are
+   **relative** cuts (the worst decile of *this* corpus, so something always fires), while the `ccx`/`loc`/
+   `nest`/`params` bars are absolute and printed on the root; and a family that could not be measured is
+   named in `unavail=` with `of=` dropping to 3 — **UNAVAILABLE is not the same as clean**, so on a corpus
+   with no git history do not read the missing `historical` as "nothing is churning".
+
 ## Hidden-coupling pass — "a change here keeps breaking unrelated files"
 
 6. **Behavioural coupling** — `ripwire <dir> --cochange`
