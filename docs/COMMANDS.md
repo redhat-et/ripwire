@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor)
 
@@ -1895,13 +1895,25 @@ $ ./build/ripwire . --layout=Lang
 (empty)
 ```
 
-**Shaped by:** `--abi`
+**Shaped by:** `--abi`, `--field-affinity`
 
 **Caveats (stated by the binary):**
 
 - file:name disambiguates a same-named struct (like --around/--lego).
 - LIMITS, read them: the offsets are a MODEL, not the ABI — a lexical walk under standard- layout assumptions on a 64-bit Apple/LP64 target (natural alignment, interior padding, trailing pad to the aggregate's own alignment).
 - It is NOT a compiler: #pragma pack, bitfields, virtuals, base classes, nested/anonymous aggregates, #if-conditional members, templates, pointer-to-member fields and any field type it cannot size all set modeled="0" with a named caveat instead of printing a number, and one unsized field un-places every field after it.
+
+### `--field-affinity[=STRUCT]`
+
+**Answers:** the CACHE-LOCALITY lens: which fields are READ TOGETHER but declared FAR APART.
+
+Builds a static field CO-ACCESS affinity graph (one observation per indexed C-family function body) and diffs it against the DECLARED field order and 64-byte cache-line geometry, reusing --layout's LP64 offset model. Bare = every aggregate in the repo, ranked by separation cost; =STRUCT narrows the report to one. Pairs carry Chilimbi's separation weight wt = (64 - dist)/64 (Cache-Conscious Structure Definition, PLDI 1999) — CITED, not invented here, along with the affinity graph and the points-to-free access enumeration; the advice-not-transform posture is Hundt et al., CGO 2006. Exactly TWO findings fire, both with a direction you can defend in one sentence: split-line (two fields co-accessed by 2+ functions at wt 0.00, so NO field order puts them on one line) and straddle (one co-accessed field crossing a line boundary). ADVICE ONLY: it never proposes a reordering and it has no rewrite mode, because pack-tighter/sort-by-size advice is NON-MONOTONIC (tight packing can induce false sharing — the reason the Go team keeps its own fieldalignment analyzer out of vet and gopls). LIMITS, both in the header: static access counts are NOT dynamic frequency, so fns= is a FLOOR of distinct indexed functions and w= is a call-graph reachability PROXY (1 + fan-in), never a measured count; only dot/arrow member syntax is counted (a bare field name inside its own method is indistinguishable from a local); a field name declared by TWO aggregates is REFUSED and tallied in amb_skipped= rather than guessed; and all geometry is the LP64 MODEL, so a definition --layout marks modeled="0" contributes its affinity graph and NO geometry finding. validate= names the instrumented PROFILE_SCOPE whose hardware counters would confirm the hypothesis (see docs/FIELDAFFINITY.md for the worked example). C/C++/ObjC only. Exit 0 always: a report, not a gate.
+
+**Caveats (stated by the binary):**
+
+- ADVICE ONLY: it never proposes a reordering and it has no rewrite mode, because pack-tighter/sort-by-size advice is NON-MONOTONIC (tight packing can induce false sharing — the reason the Go team keeps its own fieldalignment analyzer out of vet and gopls).
+- LIMITS, both in the header: static access counts are NOT dynamic frequency, so fns= is a FLOOR of distinct indexed functions and w= is a call-graph reachability PROXY (1 + fan-in), never a measured count;
+- a field name declared by TWO aggregates is REFUSED and tallied in amb_skipped= rather than guessed;
 
 ### `--doc-drift[=SUBSTR]`
 

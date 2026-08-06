@@ -48,6 +48,19 @@ source shape.
    constrain a rewrite, nesting may hide branchy or quadratic work, and large bodies may combine unrelated
    work. Confirm every suspected bottleneck with the benchmark/profile.
 
+4b. **If the profile points at MEMORY, not compute** — `ripwire <dir> --field-affinity[=STRUCT]`
+   Output: per struct, which fields the indexed C/C++/ObjC functions access TOGETHER, diffed against the
+   declared field order and 64-byte cache-line geometry (Chilimbi's separation weight, PLDI 1999 — cited,
+   not invented here). Two findings only: `split-line` (a co-accessed pair no field order can put on one
+   line) and `straddle` (one co-accessed field crossing a line boundary). It emits no packing or
+   reordering advice at all, because that axis is not monotonic.
+   **This is a HYPOTHESIS GENERATOR, not a measurement.** `fns=` counts distinct indexed functions, never
+   execution frequency, and `w=` is a fan-in proxy — a struct can top the ranking and cost nothing at
+   runtime because it is constructed once. `<validate>` names the `PROFILE_SCOPE` whose hardware counters
+   would settle it; `bench/bench_field_ab.cpp` is the A/B harness and `docs/FIELDAFFINITY.md` records a
+   worked example in which the static hypothesis was **refuted** under one access pattern. Confirm on
+   hardware before changing a layout, exactly as with every other item on this list.
+
 5. **Expand measured candidates** — `ripwire <dir> --expand=SYM` for the implicated symbols.
    Output: full body + callee signatures. Look for inner-loop allocations, redundant work,
    or O(N²) patterns that profiler data would confirm.
