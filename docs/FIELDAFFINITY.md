@@ -178,4 +178,71 @@ bash test/fieldaffinitycheck.sh                       # the gate: hand-computed 
 c++ -O2 -std=c++23 bench/bench_field_ab.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_field_ab
 for s in 1 9 129 1025 4097; do /tmp/ripwire_field_ab $s; done   # §5.2
 sudo /tmp/ripwire_field_ab 9                          # §5.1 — the counter columns this run could not get
+bash test/accessshapecheck.sh                         # §8 gate: the four discriminating traps + refusal
+c++ -O2 -std=c++23 bench/bench_chase_ab.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_chase_ab
+/tmp/ripwire_chase_ab                                 # §8.3
 ```
+
+## 8. Phase A/B — access-shape classification and chase-pointer colocation (report-only)
+
+`src/accessshape.h` (read its own file header first) is the sibling this document's title promises:
+Phase A classifies each `for`-loop's advance as `index` / `chase` / `mixed` / `unknown` — via the SAME
+`astQuery`/TSQuery re-query mechanism `--lint` and `--nonlocal-state` already run, not a hand-rolled
+scanner, and not a reuse of a retained parse tree (`ingest.cpp` calls `ts_tree_delete` at every parse
+site) — then rolls chase-shaped loops up into a per-field tally. Phase B (this file, `buildStructRow`)
+consumes that tally in exactly two DISCLOSED ways: `<f chase="1" loops="N" shape_conf="…">` on a qualifying
+field, and a named boost multiplier wired inline at the sepCost accumulation point, BEFORE the
+sepCost-desc sort — stated explicitly so it can never silently break the determinism contract §0 above
+names.
+
+### 8.1 Why this ships REPORT-ONLY, not ranking-affecting
+
+PLAN.md's Phase B section sets an explicit shipping floor: `>=85%` precision on the `shape_conf="self-ref"`
+flagged set, measured against **three** real corpora (a chase-heavy positive corpus, ripwire's own `src/`
+as a negative control, and a THIRD corpus specifically chosen to stress the false-positive boundary a
+SoA-heavy codebase like this one's own `src/` cannot), reviewed **BLIND** — the classifier's own label
+hidden until the reviewer records an independent judgment. That session has not run; it cannot be
+completed honestly inside one sitting. So `kChaseSepCostBoostApplied` in `src/fieldaffinity.h` is LOCKED
+at `1.00` — a provable no-op — and `sepcost=` in the XML output is **identical** whether or not Phase A/B
+code exists at all. `test/accessshapecheck.sh`'s check (4) hand-derives the fixture's `sepcost=` from
+Chilimbi's own formula and asserts it is the unboosted number, so this cannot regress silently.
+
+### 8.2 What Phase A's self-reference confidence covers, and what it honestly does not
+
+The plan's original ambition named seven self-reference shapes a chase-target field's declared type could
+take. What ships now, real and gated, covers ONE clean case (`self-ref`: the field's AS-WRITTEN type,
+punctuation stripped, IS the enclosing aggregate) and one weaker, explicitly hedged case (`tmpl-approx`:
+the aggregate's name appears in the spelling — template argument, `::`-qualified, etc. — but the type
+is not a clean base match). A typedef/using alias whose OWN spelling does not textually contain the
+aggregate's name, a smart pointer over such an alias, and a multi-hop chain through an intermediate,
+differently-named type are **NOT HANDLED** — refused (no `shape_conf` attribute), never guessed. A chase
+field name owned by 2+ modeled aggregates is refused the same way `amb_skipped=` already refuses an
+ambiguous member-access site, disclosed as `as_stem_ambiguous=` in the header.
+
+### 8.3 The chase-pointer A/B — a REAL measurement, and an honest NULL-to-weak result
+
+`bench/bench_chase_ab.cpp` is bench_field_ab.cpp's methodology (alternate, median-of-7, read
+`prof::pmc`) applied to the ONE shape Phase B singles out: does colocating a chase-advance field
+(`next`) with the hot payload field a traversal also reads help, when the traversal is a genuinely
+LATENCY-BOUND pointer chase (a Fisher-Yates-shuffled 256 Ki-node, 64 MB linked list — no hardware
+prefetcher can hide a dependent load whose target address does not exist until the previous fetch
+resolves) rather than bench_field_ab's array-stride walk, whose address stream a prefetcher CAN often
+see coming (§5.3's stride=1 REFUTED case is exactly that).
+
+Apple M5 Pro, unprivileged (counters UNAVAILABLE without root, same disclosed gap as §5.1), five repeats,
+`ratio` = split ÷ packed:
+
+| repeat | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- |
+| ratio | 1.00 | 1.04 | 1.04 | 1.01 | 1.02 |
+
+**Mostly NULL, weakly and inconsistently positive — NOT a confident confirmation at this working-set and
+shuffle regime.** Plausible reading: at 64 MB the traversal is DRAM-latency-bound (~100 ns/node), and once
+that full random-access round trip is paid to bring in the cache line holding `next`, an ADDITIONAL line
+within the same already-open DRAM row/page (very likely, since `--field-affinity`'s own struct-affinity
+math never spans more than one aggregate's contiguous allocation) costs little extra against a latency
+floor the split arm's second fetch barely moves. This is a genuinely measured result, not an assumption,
+and it is the SECOND independent reason (beyond the unmet validation floor in §8.1) `kChaseSepCostBoostApplied`
+stays at `1.00`: the mechanism itself has not shown a strong effect in the one regime measured here. A
+smaller (LLC-resident) working set, or an unshuffled (allocation-order) chain, are both open regimes this
+session did not measure — see PLAN.md's Open Questions.
