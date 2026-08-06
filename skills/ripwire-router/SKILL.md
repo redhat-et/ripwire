@@ -29,7 +29,7 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 | **Reviewing MY diff** — "am I ready to push / is this safe to merge" | **ripwire-change-check** | `--quality-delta` (that's the quality-bar reflex) → `--pr-context` |
 | **Which tests should I run for this change? Did I run the right ones?** | **ripwire-change-check** | `--affected=F1,F2` / `--situ` → `--test-gate` |
 | **Writing tests for existing (untested) code** | **ripwire-write-tests** | `--seams` + `tested=1` coverage lens + `--callers=SYM` |
-| **Reviewing code I did NOT write** — unfamiliar subsystem, "what's gnarly here" | **ripwire-fresh-eyes** | `--hotspots` + `--clones` + `--owners` (scope to the subsystem) |
+| **Reviewing code I did NOT write** — unfamiliar subsystem, "what's gnarly here" | **ripwire-fresh-eyes** | `--quality-panel` (THE SINGLE COMMAND — six evidence families in one ranked report; a lens, not a gate) — or `--hotspots` + `--clones` + `--owners` one lens at a time (scope to the subsystem) |
 | **Debugging** — a symptom, a suspect subsystem, or "I changed X and it broke" | **ripwire-find-bug** | `--for=symptom` / `--situ` |
 | **I HAVE a stack trace / sanitizer report / compiler error** — paste it, don't hand-translate it | **ripwire-find-bug** | `--from-trace=FILE` (or `-` from stdin) — frames → ranked in-corpus suspects, innermost first |
 | **Just edited a symbol** — "did I change a contract someone depends on?" (pre-commit, per-symbol) | **ripwire-change-check** | `--edit-check=SYM` — unchanged / new-symbol / contract-change + flagged incompatible callers, ~26 ms warm |
@@ -90,6 +90,9 @@ The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--ca
   In a git repo it **auto-compares vs `git HEAD`** (no start-of-task ritual — just run it before you push).
   For a mid-task convergence loop, run `ripwire <dir> --quality-baseline` at the start to pin an explicit
   floor (it takes precedence over HEAD), then re-run `--quality-delta` after each edit. (→ **ripwire-quality-bar**.)
+  Want the wider "does this still look rotten" picture alongside the delta, not just what you changed? —
+  `ripwire <dir> --quality-panel[=strict|default|lenient]`, the six-family panel (→ **ripwire-fresh-eyes**).
+  **It is a lens, not a gate** — always exits 0; `--quality-delta` above is the only pass here that gates.
 
 `ripwire --help` is the full flag catalog; every skill re-verifies its commands against the shipped binary.
 
