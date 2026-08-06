@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 350 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 351 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -367,7 +367,7 @@ and these numbers prove **cheaper and faster, not better outcomes**.
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **350 gate scripts**, all of which exist on disk.
+naming **351 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -554,7 +554,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 350. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 351. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -956,6 +956,217 @@ python3 bench/ensemblecal/run_ensemblecal.py report    --in cal.json --stability
 Six of the nine corpora are private or non-public local trees and cannot be redistributed. The three
 that can — `ripwire`, `ripwire-src` and the vendored `tree-sitter` grammars — are in this repository
 and reproduce exactly from the pinned revision.
+
+### 9.9 The six-family panel — what the two new families had to pass first
+
+`--quality-panel[=strict|default|lenient]` is the single command over the whole panel: the four families of
+§9 plus **`colocation`** (the local-reasoning lens, `--context-ratio`) and **`state`** (this function's OWN
+BODY touching non-local mutable state, `--nonlocal-state`). Neither was enabled on the strength of being a
+plausible new axis. Both were put through **the same harness, the same corpora and the same criteria** as the
+original four *before* they shipped enabled, and this section is that measurement. It ships no new rule and no
+new threshold: every number comes out of `--quality-panel=lenient` through its existing entry point, parsed by
+`bench/ensemblecal/run_ensemblecal.py --verb panel`. The family list is read from the verb's own root, so a
+family added to the verb cannot go unmeasured because the harness was not updated.
+
+**Verdict up front, in three parts.** (1) **Both new families pass the orthogonality test** — the largest
+pooled cross-family φ in the whole 6×6 matrix is **+0.168**, which is exactly the value §9.3 published for the
+four, so widening the panel did not raise it. (2) **`--field-affinity` was NOT made a family**, and that is an
+exclusion by unit rather than a failed measurement — stated below. (3) **The stability pass disqualified a
+second family from gating.** `colocation` came out *worse* than `historical` on one commit ladder, so `strict`
+counts **four** families, not five. That third result is the uncomfortable one and it is the reason the ladder
+was run rather than assumed.
+
+Measured 2026-08-06, binary built at `feat/quality-panel`. Corpora, denominators and the overfitting caveat
+are §9.1's, unchanged — five independent trees, **27 999 eligible functions**, `ctxpack` and `ripwire-src`
+reported separately and never pooled.
+
+#### 9.9.1 Per-family fire rate, with the two new columns
+
+| Corpus | eligible | structural | lexical | confusion | historical | colocation | state |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ripwire | 4 782 | 12.25% | 18.99% | 2.28% | 21.73% | 0.84% | 3.12% |
+| tree-sitter | 1 538 | 12.35% | 27.70% | 3.71% | 3.58% | 2.60% | 0.72% |
+| gameA | 17 157 | 12.65% | 9.77% | 3.57% | 5.20% | 0.23% | 16.37% |
+| rustCLI | 4 068 | 7.18% | 32.03% | **UNAVAILABLE** | **UNAVAILABLE** | 0.98% | 0.10% |
+| appleXR | 454 | 9.91% | 3.52% | 1.54% | **UNAVAILABLE** | 6.17% | 0.88% |
+| *ctxpack* | *4 027* | *12.49%* | *20.49%* | *2.33%* | *21.70%* | *0.99%* | *2.83%* |
+| *ripwire-src* | *2 013* | *24.89%* | *2.73%* | *5.07%* | *27.77%* | *1.99%* | *0.79%* |
+
+Two properties of the new columns matter more than their levels:
+
+- **`colocation` is bounded at 40 rows by construction**, like the readability and churn halves it sits beside:
+  it fires for the worst decile of `--context-ratio`'s own ranking, capped at that verb's own 40-row window.
+  So it is 0.23% of gameA and 6.17% of appleXR from the *same* rule — a fixed-size cut is a larger share of a
+  small corpus, and that is what an ordinal family is.
+- **`state` has the widest cross-corpus spread of the six** — 0.10% to 16.37%, a 164× range against
+  `lexical`'s 9.09×. On gameA it is a **floor**: that corpus saturates the lens's own 2 048-cell budget, which
+  the verb discloses as `state_floor="1"`. A game engine really does carry more mutable global state than a
+  Rust CLI, so part of that range is signal, but the family must be read with `sscope=` beside it: on rustCLI
+  only **33 of 4 068** eligible functions are in a language the lens analyses, and the verb prints that number.
+
+#### 9.9.2 The orthogonality test — the 6×6 matrix
+
+φ over the full eligible denominator, pooled over the five independent corpora (n = 27 999):
+
+| | structural | lexical | confusion | historical | colocation | state |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **structural** | 1.000 | −0.061 | **+0.168** | +0.127 | +0.092 | **+0.162** |
+| **lexical** | −0.061 | 1.000 | −0.039 | −0.043 | −0.018 | −0.054 |
+| **confusion** | +0.168 | −0.039 | 1.000 | +0.047 | +0.026 | +0.070 |
+| **historical** | +0.127 | −0.043 | +0.047 | 1.000 | +0.062 | +0.026 |
+| **colocation** | +0.092 | −0.018 | +0.026 | +0.062 | 1.000 | **+0.003** |
+| **state** | +0.162 | −0.054 | +0.070 | +0.026 | +0.003 | 1.000 |
+
+Largest |φ| on any single corpus: ripwire +0.252, tree-sitter +0.167, gameA +0.190, rustCLI +0.204, appleXR
++0.126; among the non-independent extras ctxpack **+0.278** and ripwire-src +0.218. **The largest value
+anywhere in the study is still ctxpack's +0.278 `structural × historical` — the same pair, the same number
+§9.3 reported — and it involves neither new family.** The largest involving a new family anywhere is
+**+0.204** (rustCLI `structural × colocation`); pooled, **+0.162** (`structural × state`).
+
+**Both candidates therefore pass**, and the two results worth stating explicitly are:
+
+- **`colocation × state` is +0.003 pooled** — as close to independent as anything in either study. The two new
+  families are not a single "context" axis wearing two hats.
+- **Both new families correlate most with `structural`, and both have a mechanical explanation.** A function
+  that must read a lot from outside its own file usually has a lot of call sites, and a function that touches
+  many globals is usually a big one. This is the same directional reading §9.3 recorded for confusion and
+  historical: `structural` is the hub of what small positive correlation exists. It is small — at +0.162,
+  `structural` and `state` still disagree on 2 663 of the 3 461 functions either one flags.
+
+**Why `state` is the OWN-BODY half of its lens, decided before the φ was looked at.** `--nonlocal-state`
+publishes two quantities per function: the callee-**closure** union (`writes=`/`reads=`) and what the
+function's own text does (`direct_writes=`/`direct_reads=`). The panel's unit is one function's own
+comprehensibility, so the family has to be a property of *that* function's body — the closure is a fact about
+its callees. The measurement then agreed with the principle: the closure form fires on **35.27%** of gameA and
+correlates with `structural` at **+0.201** pooled, the own-body form on 16.37% at **+0.162**. Had the numbers
+gone the other way the principle would still have decided it, and the family would have been dropped rather
+than swapped for the better-scoring definition.
+
+**Why `--field-affinity` is not a family.** It measures an **aggregate**: which of a struct's fields are read
+together but declared far apart, scored with Chilimbi's cache-line separation weight. Its unit is a type and
+its subject is memory layout. Making it a family here would require attributing a struct's finding to the
+functions that touch its fields — flagging a function for a property of a type it merely uses, an attribution
+the lens itself never makes. A panel row has to be a claim about the row's own symbol. This is an exclusion on
+**unit**, decided without running a φ, and it is recorded as such rather than dressed up as a measurement.
+
+#### 9.9.3 Co-firing over six families
+
+Pooled over the five independent corpora (n = 27 999):
+
+| families firing | symbols | share | cumulative (fam ≥ n) |
+| ---: | ---: | ---: | ---: |
+| 0 | 17 151 | 61.26% | — |
+| 1 | 8 666 | 30.95% | 38.74% |
+| 2 | 1 717 | 6.13% | 7.79% |
+| 3 | 415 | 1.48% | 1.66% |
+| 4 | 47 | 0.17% | 0.18% |
+| 5 | **3** | **0.011%** | 0.011% |
+| 6 | **0** | **0.000%** | 0.000% |
+
+§9.4's first consequence holds a fortiori: **`fam = 6` is not a tier, it is empty** — zero symbols in 27 999,
+and `fam ≥ 5` is three. Adding two families moved the top of the ladder from `fam=4: 3` to `fam=5: 3, fam=6: 0`
+and left the *shape* alone: 38.74% → 7.79% → 1.66% → 0.18%, roughly 5×, 4.7× and 9× per rung.
+
+#### 9.9.4 Stability — and the second family the ladder disqualified
+
+Same protocol as §9.5: **one binary, the corpus varied** over a ladder of past commits in a throwaway clone,
+restricted to symbols present in both trees. Ladders: ripwire (138 first-parent commits, every ~17,
+2026-07-31 → 2026-08-05) and ctxpack (792, every ~99, 2026-06-20 → 2026-08-05).
+
+| Family | ripwire (mean / endpoint) | ctxpack (mean / endpoint) | worst mean |
+| --- | --- | --- | ---: |
+| lexical | 1.000 / 0.999 | 1.000 / 1.000 | **1.000** |
+| state | 0.999 / 0.990 | 1.000 / 1.000 | **0.999** |
+| structural | 0.996 / 0.969 | 0.965 / 0.859 | 0.965 |
+| confusion | 0.997 / 0.981 | 0.920 / 0.684 | 0.920 |
+| historical | 0.852 / 0.494 | 0.862 / 0.525 | 0.852 |
+| **colocation** | **1.000 / 1.000** | **0.732 / 0.222** | **0.732** |
+
+**`colocation` is the least stable family in the panel, on the ladder where the corpus grew.** Its 0.222
+endpoint Jaccard is the worst number in either study — worse than `historical`'s 0.426–0.546 — while on the
+ripwire ladder it is a perfect 1.000/1.000. That contrast is the whole finding, and the mechanism is the one
+§9.5 already named for churn: **a fixed-size worst-40 cut over a ranking whose population moves.** ctxpack grew
+from 208 to 4 027 eligible functions across its window, so the top 40 by outside-reading volume turns over
+completely; ripwire's tree barely changed size in five days, so it does not move at all. A family that is
+steady only while the corpus is not growing cannot carry a gate.
+
+`state` sits at the opposite pole for a reason that is equally mechanical: it is a **predicate**, not a
+ranking — a function's own body either has a direct access site or it does not — so it moves only when
+somebody edits that body. That is `lexical`'s property, and it is why both are 0.999+.
+
+**The criterion and its cut are unchanged; what moved is which families fall on which side.** §9.7's C1 cut
+interval on mean consecutive Jaccard is **(0.862, 0.920)**. Against the worst-mean column above, any cut inside
+that interval selects `{lexical, state, structural, confusion}` and excludes `{historical, colocation}`. No
+number was re-tuned to reach that answer.
+
+#### 9.9.5 The three presets, derived
+
+Criteria are §9.7's, applied to six families:
+
+- **C1 — stability.** ⇒ **both `historical` and `colocation` are excluded from the gating preset.** They stay
+  in the reporting presets, where a moving window is a feature.
+- **C2 — non-degeneracy.** Every named preset must have non-zero yield on every corpus measured. All three do
+  (per-corpus rows below); the rule kills the alternatives, not these — `stru+lexi+conf+stat` at K ≥ 3 yields
+  **0.00%** on rustCLI and appleXR, and every K ≥ 5 combination yields 0.00% on four of five corpora.
+- **C3 — the rungs come from the measured ladder.** §9.9.3's cumulative column gives them directly: `fam ≥ 1`
+  = 38.74%, `fam ≥ 2` = 7.79%, `fam ≥ 3` = 1.66%, `fam ≥ 4` = 0.18%. Two are usable; `fam ≥ 3` fails C2 on the
+  stable set and `fam ≥ 4` is 50 symbols pooled. The third preset therefore comes from **selection**, exactly
+  as it did in §9.7.
+
+| Preset | families counted | cut | pooled yield | per-corpus range |
+| --- | --- | --- | ---: | --- |
+| **lenient** | all six | **fam ≥ 1** | 10 848 / 27 999 = **38.74%** | 19.82% – 48.75% |
+| **default** | all six | **fam ≥ 2** | 2 182 / 27 999 = **7.79%** | 0.91% – 9.36% |
+| **strict** | structural, lexical, confusion, state | **fam ≥ 2** | 1 548 / 27 999 = **5.53%** | 0.32% – 7.61% |
+
+Per corpus, in full:
+
+| Preset | ripwire | tree-sitter | gameA | rustCLI | appleXR |
+| --- | --- | --- | --- | --- | --- |
+| lenient | 2 331/4 782 = 48.75% | 613/1 538 = 39.86% | 6 214/17 157 = 36.22% | 1 600/4 068 = 39.33% | 90/454 = 19.82% |
+| default | 411/4 782 = 8.59% | 144/1 538 = 9.36% | 1 580/17 157 = 9.21% | 37/4 068 = 0.91% | 10/454 = 2.20% |
+| strict | 121/4 782 = 2.53% | 103/1 538 = 6.70% | 1 306/17 157 = 7.61% | 13/4 068 = 0.32% | 5/454 = 1.10% |
+
+**The exclusion is validated by the output the preset actually emits**, not only by the per-family numbers.
+Output-set Jaccard down the same two ladders:
+
+| Preset | ripwire | ctxpack |
+| --- | --- | --- |
+| lenient (all 6, K ≥ 1) | 0.949 / 0.805 | 0.962 / 0.848 |
+| default (all 6, K ≥ 2) | 0.901 / 0.599 | 0.878 / 0.688 |
+| **strict** (s+l+c+state, K ≥ 2) | **1.000 / 1.000** | **0.948 / 0.818** |
+| *(rejected)* strict WITH colocation | 0.998 / 0.984 | 0.893 / 0.711 |
+
+*(mean consecutive / endpoint Jaccard of the set the preset emits.)* Dropping `colocation` makes the gating
+set both smaller and measurably steadier on the ladder where it mattered — the same trade §9.7 recorded for
+`historical`, found the same way.
+
+The three are **nested by construction** — removing a family from the count can only lower a symbol's count —
+so `strict ⊆ default ⊆ lenient` on every corpus. `test/qualitypanelcheck.sh` asserts that, the exact family
+list of each preset, the ordering, the unavailable path and the ladder identity
+`ranked + below_cut + no_family = eligible`.
+
+**What these presets are NOT.** Everything §9.7 said still applies: they are not validated against any notion
+of actual defect or maintenance cost, they are not tuned per corpus, and `strict` on rustCLI is really
+`structural + lexical, K ≥ 2` because `confusion` cannot apply there — the verb says so (`unavailable=`,
+`of="2"`) rather than wearing a four-family label silently. One limit is new and belongs here: **the stability
+pass covers two ladders, not three.** §9.5 measured gameA as well; this pass did not, so `colocation`'s
+verdict rests on ctxpack alone for the corpus-growth case. Two ladders were enough to disqualify it — the
+finding is that it *can* move that far, which one counterexample establishes — but a third would say more
+about how often.
+
+#### 9.9.6 Reproducing this section
+
+```bash
+git clone --local --shared <repo> /tmp/repo-clone      # NEVER run `stability` against a tree you work in
+
+python3 bench/ensemblecal/run_ensemblecal.py collect   --verb panel --out cal.json  <dir>[:LABEL[:indep]] ...
+python3 bench/ensemblecal/run_ensemblecal.py stability --verb panel --out stab.json /tmp/repo-clone:LABEL
+python3 bench/ensemblecal/run_ensemblecal.py report    --verb panel --in cal.json --stability stab.json
+```
+
+`--verb ensemble` (the default) still reproduces §9.1–§9.7 unchanged: `--ensemble` was not modified by this
+work, which is the reason the panel is a separate verb rather than a wider join.
 
 ---
 

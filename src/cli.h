@@ -144,6 +144,13 @@ struct Config
                                                             // families (structural / lexical / confusion / historical) fire, ranked by the COUNT
                                                             // of distinct families and never by a weighted composite. A family that could not be
                                                             // measured is reported UNAVAILABLE, never silent (ensemble.h)
+    bool             qualityPanel      = false;            // --quality-panel[=strict|default|lenient]: THE SINGLE COMMAND — the whole panel of
+                                                            // quality checks in ONE ranked report over SIX evidence families (the ensemble's four,
+                                                            // plus colocation and state), ranked by the COUNT of distinct families a preset counts
+                                                            // and never by a weighted composite. Presets SELECT and CUT, they never weight; a family
+                                                            // that could not be measured is UNAVAILABLE, never silent (qualitypanel.h)
+    std::string_view qualityPanelPreset;                    // --quality-panel=PRESET: which preset. An unknown value is REFUSED rather than
+                                                            // silently replaced — a substituted selection is a silently different report
     bool             contextRatio      = false;            // --context-ratio: the LOCAL-REASONING lens — per symbol (and rolled up per
                                                             // file), the distinct entities and files a reader must resolve, and the share
                                                             // of them living outside the unit's own file, weighted by the TOKENS a reader
@@ -857,6 +864,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               other indexed language is named on the root as unanalyzed_langs= and contributes no cells and no\n"
         "                               rows: that absence is NOT a measured zero. Pages with limit=N (offset=M); default 40 rows.\n"
         "    --ensemble                 the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
+        "    --quality-panel[=PRESET]   THE SINGLE COMMAND: the whole quality panel in ONE ranked report. Per function, which of SIX evidence\n"
+        "                               families fire -- structural (shape), lexical (identifier text), confusion (syntactic construct),\n"
+        "                               historical (git churn), colocation (what you must read from outside this file), state (this function's\n"
+        "                               OWN BODY touching non-local mutable state) -- ranked by the COUNT of distinct families, NEVER by a\n"
+        "                               weighted composite, each row carrying its own evidence. PRESET selects and cuts, never weights:\n"
+        "                               strict (the four families measured steady enough to gate on, 2 must agree) | default (all six, 2; the\n"
+        "                               bare form) | lenient (all six, 1 -- a reading order, not a verdict). historical and colocation are out\n"
+        "                               of strict: each is a fixed-size worst-40 cut over a ranking whose population moves, so both re-shuffle\n"
+        "                               on code that did not change (docs/EVALS.md section 9.9). A family that could not be measured here is\n"
+        "                               UNAVAILABLE, never 'did not fire', and of= drops with it. A lens: exit 0. Pages limit=N (offset=M).\n"
         "    --context-ratio            the LOCAL-REASONING lens: to understand this symbol, how much must you know that is NOT in front\n"
         "                               of you? Per symbol (and rolled up per file) the distinct in-corpus definitions and files its\n"
         "                               reference sites resolve to, and the share of them defined OUTSIDE its own file — as an edge\n"
@@ -1351,7 +1368,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability --ensemble --context-ratio --nonlocal-state --comment-coherence.\n"
+        "                               --readability --ensemble --quality-panel --context-ratio --nonlocal-state\n"
+        "                               --comment-coherence.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
@@ -1536,6 +1554,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--nonlocal-state",     &Config::nonlocalState      },
     { "--ensemble",           &Config::ensemble           },
     { "--context-ratio",      &Config::contextRatio       },
+    { "--quality-panel",      &Config::qualityPanel       },   // bare flag → the `default` preset (the value is an OPTIONAL selection)
     { "--naming-calibration", &Config::namingCalibration  },
     { "--comment-coherence",  &Config::commentCoherence   },
     { "--cochange",           &Config::cochange           },
@@ -1711,6 +1730,10 @@ inline constexpr ViewFlag kViewFlags[] =
     // range, and silently running the working-tree comparison for it would answer a question nobody asked.
     { "--dmm=",            &Config::dmmRange, EmptyValue::Refuse, "a commit, or a RANGE A..B (bare --dmm compares the working tree against HEAD)",
       "--dmm=HEAD~1..HEAD", &Config::dmm },
+    // `--quality-panel=` is exactly `--quality-panel`: the value is an OPTIONAL preset selection and the bare
+    // form is the `default` preset. An UNKNOWN value is refused in validateModifierGuards with the supported
+    // list — falling back to a preset the caller did not name would be a silently different report.
+    { "--quality-panel=",  &Config::qualityPanelPreset , EmptyValue::Meaningful, nullptr, nullptr, &Config::qualityPanel },
     // --html=FILE-or-stdout and --quality-ack=REASON are the same shape for a different reason: the value is
     // OPTIONAL, so `--html=` is `--html` (write to stdout) and `--quality-ack=` is `--quality-ack` (no
     // reason). The audit's own enumeration classified both as "already refusing"; neither is. They are
@@ -1852,7 +1875,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 162;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags)
+inline constexpr std::size_t kTotalFlagArms       = 164;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2040,7 +2063,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability --ensemble --context-ratio --nonlocal-state --comment-coherence";
+    "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -2050,7 +2073,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability || c.ensemble || c.contextRatio || c.nonlocalState || c.commentCoherence;
+        || c.readability || c.ensemble || c.qualityPanel || c.contextRatio || c.nonlocalState || c.commentCoherence;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
