@@ -66,6 +66,32 @@ inline const char* symTag( SymKind k ) noexcept
 // (like the existing Cpp<->ObjC bridge) so a .c definition still resolves against its .h declaration.
 enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C };
 
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c").
+// The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
+// caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
+inline const char* langTag( Lang l ) noexcept
+{
+    switch( l )
+    {
+        case Lang::Cpp:        return "cpp";
+        case Lang::Python:     return "py";
+        case Lang::TypeScript: return "ts";
+        case Lang::Go:         return "go";
+        case Lang::Rust:       return "rs";
+        case Lang::Swift:      return "swift";
+        case Lang::ObjC:       return "objc";
+        case Lang::JavaScript: return "js";
+        case Lang::Bash:       return "sh";
+        case Lang::Java:       return "java";
+        case Lang::Ruby:       return "rb";
+        case Lang::Markdown:   return "md";
+        case Lang::Json:       return "json";
+        case Lang::CSharp:     return "cs";
+        case Lang::C:          return "c";
+        default:               return "?";
+    }
+}
+
 // Call-site RECEIVER classification (P2-D one-hop type narrowing). Captured at ingest from the AST shape
 // of `recv.method()` / `recv->method()` so resolve.h can narrow BEFORE the ambiguous §2a name spray:
 //   None    — a bare call `f()` or a qualified `A::f()` (no receiver expr) → §2a ladder, unchanged.

@@ -14,16 +14,33 @@
 ranked, deterministic call graph instead of grepping around and reading whole files — orientation,
 blast radius, and which tests to run.
 
-- **Saves tokens** — on a fresh thread in an unfamiliar codebase, the agent answers at **7.3%** of
-  what a grep-and-read pass costs; head-to-head, all gold files landed in the top 10 on **58.3%**
-  of instances against **33.3%** for the best competitor tested.
-- **Goes faster** — a 1,560-file repository parses in **~1 s** cold; every warm query after that
-  answers in **~0.1 s**.
-- **Writes better code** — the quality verbs measure what a change made *worse*
-  (`--quality-delta`), surface the repo's best-in-class pattern to imitate (`--exemplar`), and
-  name the tests that must run before "done" (`--test-gate`).
+- **Saves tokens, head-to-head against the field** — paired win–loss at strict file@10, gold
+  files actually retrieved: **17–2 against repowise**, **16–2 against Aider**, **10–4 against
+  codebase-memory-mcp**, **12–3 against graphify**. On a fresh thread in an unfamiliar codebase the
+  agent answers at **7.3%** of what a grep-and-read pass costs.
+- **Goes faster** — this repository (603 tracked source files) parses in **~0.15 s** cold, **~0.10 s**
+  warm, on this exact tree, reproducible with `time ./build/ripwire . --no-cache`. LTO is on by
+  default and measured **1–6% faster cold**; layering PGO on top (`scripts/pgobuild.sh`) measures a
+  further **14–25% faster cold** against a plain non-LTO baseline, holding on a ~2,000-file corpus
+  that never appeared in training (`docs/OPTREMARKS.md` §5/§5b — six interleaved A/Bs, byte-identical
+  output, determinism gate green on the optimized binary).
+- **Writes better code** — the quality panel narrows **4,866** eligible functions in this repository
+  to **402** worth a second look (2-of-6 evidence families agreeing, `--quality-panel`) — an **8.3%**
+  shortlist, not a guess; `--quality-delta` then measures what a change made *worse* across 10
+  agent-code failure modes, `--exemplar` surfaces the repo's best-in-class pattern to imitate, and
+  `--test-gate` names the tests that must run before "done."
+- **Targets the failure modes AI-generated code specifically has** — empty-catch/swallowed-exception
+  error-masking is **+47%** more common in AI-authored commits than human ones, and code reuse is
+  *declining* even as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026); a
+  function rewritten again inside two weeks (churn `--quality-delta` flags as `short-horizon-churn`)
+  is **+15%** more likely when AI wrote it. These aren't generic lint rules — each of the 10
+  `--quality-delta` kinds targets one measured, published degradation mode.
 
-Zero runtime dependencies, C++23, builds with the network off. Those numbers have different
+The parse/quality numbers above are reproducible on this exact tree with the commands shown; the
+win–loss and GitClear figures are dated, sourced measurements from `docs/EVALS.md`, not something
+CI recomputes every run — read the instrument and the corpus before trusting either kind. The one
+number `test/regression.sh` *does* gate on every run is the flag count itself (`--help`'s own
+table). Zero runtime dependencies, C++23, builds with the network off. Those numbers have different
 instruments and important caveats — the losses ship beside the wins in [Measured](#measured) and
 [`docs/EVALS.md`](docs/EVALS.md).
 
@@ -144,7 +161,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 ## What it answers
 
-Around the core sit 135 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 136 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
 [`docs/COMMANDS.md`](docs/COMMANDS.md) documents 90 of the flags with a real invocation and its
@@ -187,8 +204,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9239"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9275"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9248"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9284"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -254,6 +271,58 @@ returns the innermost in-corpus body with them:
 ./build/ripwire . --from-trace=asan_report.txt
 cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 ```
+
+**The code-quality panel** — `--quality-panel` joins **six independent evidence families**
+(structural shape, lexical naming, syntactic-confusion idioms, git churn history, cross-file
+colocation, and non-local mutable state) and ranks by the *count* of families agreeing, never a
+weighted composite — averaging correlated metrics and calling it several is the Maintainability
+Index's well-known failure mode. On this repository the panel measures **4,866** eligible functions
+and narrows them to **402** worth a second look at 2-of-6 agreement — an **8.3%** shortlist, not a
+guess — and the largest correlation between any two families, pooled across five independent
+corpora (n = 27,999), is **+0.168**: the families really are measuring different things. What each of
+the six actually looks at, on this repository's own source, not a synthetic example:
+
+| Family | Question | Backing verb | On this repo |
+| --- | --- | --- | --- |
+| **structural** | shape: complexity, size, nesting, params — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9` |
+| **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency` | see below — the one family with a fix, not just evidence |
+| **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
+| **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
+| **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
+| **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
+
+**Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
+rather than blurring it:
+
+- **`--field-affinity`** (cache-friendly co-access) is explicitly **not** a panel family, by unit: it
+  measures which struct fields are read together but declared far apart, and its subject is a *type*,
+  not a function — attributing a struct's finding to the functions that touch it would be a claim the
+  lens itself never makes (`docs/EVALS.md` §9.9.2). `MainDispatch` (`src/main.cpp:1335`, the 144-byte
+  struct threaded through nearly every verb) still carries **12** real findings against a separation
+  cost of **92.88** — fields read together in the same call routinely cross cache-line boundaries.
+  Chilimbi, Davidson & Larus's cache-conscious structure definition (PLDI 1999), validated on real
+  hardware counters; the advice-not-transform posture (report a split, never auto-reorder a struct)
+  follows Hundt, Mannarswamy & Chakrabarti (CGO 2006).
+- **`--readability`** is a sibling lens, not a panel family either — the one classic model in the tree
+  with a published closed form: Halstead volume (Halstead, *Elements of Software Science*, 1977) and
+  the Posnett/Hindle/Devanbu sigmoid fit (MSR 2011, [doi:10.1145/1985441.1985454](https://doi.org/10.1145/1985441.1985454)),
+  fitted on snippets of 20 lines or fewer — past that the fitted score saturates and only the
+  *ordering* stays meaningful, which is exactly how the verb is used: least-readable-first, never as a
+  grade. Halstead's volume specifically (not the later, less-trusted difficulty/effort derivatives) is
+  among the metrics shown to track measured cognitive load directly (Peitek, Apel, Parnin, Brechmann &
+  Siegmund, ICSE 2021, [doi:10.1109/ICSE43902.2021.00056](https://doi.org/10.1109/ICSE43902.2021.00056)) —
+  `--readability` emits volume and stops there; difficulty and effort are computed nowhere in this
+  tree.
+- **`--naming-consistency`** is the *lexical* family's one exception to "evidence, never advice": every
+  other lens in this panel tells you WHAT is wrong, never a computed fix. Case-style consistency is
+  the one property with a corpus-derivable answer — on this repository's `src/`, camelCase is the
+  dominant convention at **1,677/1,803 (93.0%)** agreement, and the verb flags **136** off-convention
+  names with a mechanically recombined `propose=` value for each (no dictionary, no synonym judgment —
+  see [What it answers](#what-it-answers)).
+
+Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
+flagged this repository's best-named functions, kept as the standing argument for measuring before
+shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 

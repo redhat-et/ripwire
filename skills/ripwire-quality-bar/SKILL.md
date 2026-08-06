@@ -5,9 +5,14 @@ description: >
   open a PR / tell the user it's finished, run `ripwire <dir> --quality-delta` — reports ONLY what you made
   WORSE across 10 measured kinds (complexity, verbosity, nesting, params, duplication, dead-code,
   API-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper — the measured agent-code
-  failure modes), exiting non-zero on new debt. Fix the real regressions, re-run, converge. Reach for this at
-  every "I think this is done" moment on non-trivial work — but a single-line leaf fix with no new
-  branch/symbol/signature does NOT need this pass (or this file): run the focused test and move on. For
+  failure modes), exiting non-zero on new debt. Want the wider six-family "does this still look rotten" read
+  alongside the delta? `--quality-panel` is THE SINGLE COMMAND for that — the headline wide-angle pass below.
+  Fix the real regressions, re-run, converge. Reach for this at
+  every "I think this is done" moment on non-trivial work. The check itself is cheap (well under a second
+  warm) — run it even on a fix that looks trivial, because "trivial" is exactly the judgment this pass exists
+  to catch you being wrong about; what a single-line leaf fix with no new branch/symbol/signature can skip is
+  the CONVERGENCE LOOP around it (re-reading the drill-down table, acking, chasing `--dmm`) — read this file
+  only if the one-shot delta actually reports something. For
   merge-safety / blast-radius / tests-to-run →
   **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Backed by
   ripwire (deterministic, on PATH).
@@ -27,10 +32,13 @@ allowed-tools: Bash, Read
 Don't eyeball quality — **measure the delta your change introduced**, with a deterministic oracle, in a
 bounded loop. A file that was already complex is not your regression.
 
-Apply the "non-trivial work" trigger literally. A single-line leaf fix that preserves the signature and
-adds no branch, symbol, dependency, or abstraction does not need a standalone quality-delta pass unless
-the repository requires it; run the focused behavioral test and diff checks instead. This skill earns its
-cost when the edit can change measured structure, not merely whenever the working tree is dirty.
+Apply the "non-trivial work" trigger to the LOOP, not the check. `--quality-delta` warm-runs in well under a
+second — cheaper than deciding by eye whether a fix "counts" as trivial, and that eyeball judgment is
+precisely where a leaf-looking edit that quietly changed a signature or added a branch slips through
+unmeasured. Run it. What a single-line leaf fix that preserves the signature and adds no branch, symbol,
+dependency, or abstraction gets to skip is everything AFTER a clean run: the drill-down table, `--dmm`,
+acking, a second round. This skill (and this file) earns its cost when the one-shot delta actually reports
+something — a clean `gating="0"` run on a leaf fix is confirmation, not ceremony you were right to skip.
 
 ## Before you converge: the wide-angle read — `--quality-panel`
 
@@ -157,6 +165,15 @@ Thresholds/definitions are the catalog in [`quality-metrics.md`](quality-metrics
 These 10 kinds aren't a generic lint list — each targets a large-N-validated agent-code degradation mode
 (verbosity, structural erosion, smell rate, contract drift; passing tests ≠ clean design). Numbers + why the
 loop must be continuous, not a one-time prompt → [`quality-metrics.md`](quality-metrics.md).
+
+**Read the Fix column as DIRECTION, not a computed answer.** None of these 10 kinds has a corpus-derivable
+correct replacement — "split the fn" names a move, not a target function shape, and you still judge it. That
+is deliberate: complexity, coupling, and colocation don't have a computable right answer the way a naming
+CONVENTION does. The one exception in this whole tool is `--naming-consistency` (→ **ripwire-fresh-eyes**),
+which proposes an actual `propose=` value because case-style consistency is Tier A — the corpus's own
+majority IS the answer, mechanically recombined from the name's own subtokens, no judgment call involved.
+Don't expect that anywhere else, and don't invent a "the fix is X" claim here that this tool doesn't itself
+compute.
 
 ## The four guardrails (why this loop converges instead of degrading)
 1. **Deterministic oracle, not self-critique.** The delta is *computed* — it cannot hallucinate or reinforce
