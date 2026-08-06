@@ -55,3 +55,11 @@ Warm column reflects the query-compile optimization — commits `b9b5763` (skip 
   harness — the next benchmark to build; cf. RepoGraph's +32.8% SWE-bench from structural retrieval,
   [arXiv 2410.14684]). These numbers prove **cheaper + faster**, not **better outcomes** — say so.
 - Tokens via `tiktoken cl100k_base` (bytes ≈ 4/token). Numbers move with the corpus; re-run to reproduce.
+- **Every wall-clock row here is the DEFAULT build** (`cmake -S . -B build`), which is what a reader
+  who follows the quickstart gets. Two opt-in build options measured after this table make the same
+  binary faster without changing a byte of its output: LTO, now the default (cold 1–6%), and
+  `scripts/pgobuild.sh`, PGO on top of LTO (**cold 14–25% over a non-LTO build, 6–16% over the
+  default; warm 5–10%**). Method, per-run tables, and
+  the held-out-corpus check are in [`../docs/OPTREMARKS.md`](../docs/OPTREMARKS.md) — these rows are
+  deliberately NOT restated with those numbers, because the aider head-to-head would have to be
+  re-run against the same arms to say anything honest about the ratio.

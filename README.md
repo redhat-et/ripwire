@@ -390,6 +390,29 @@ frame); one machine, one corpus — re-run on yours. Backend contract is gated b
 [`test/pmccheck.sh`](test/pmccheck.sh); M5 Pro event names verified (the last-level alias resolves
 via `PL2_CACHE_MISS_LD`).
 
+**Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
+clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
+[`docs/OPTREMARKS.md`](docs/OPTREMARKS.md)) found that the phases above spend their time calling
+tree-sitter's C API across a translation-unit boundary — 397 of 636 distinct `inline/NoDefinition`
+remarks in the hot TU name a `ts_*` accessor. Two build options answer that, both **off by default**:
+
+| build | cold | warm | |
+| --- | --- | --- | --- |
+| `-DRIPWIRE_LTO=OFF` | baseline | baseline | the fast edit loop, not the fast binary |
+| **default** (`cmake -S . -B build`, LTO on) | 1–6% faster | 0–3% faster | |
+| `scripts/pgobuild.sh` (PGO on top of LTO) | **14–25% faster** (6–16% over the default) | 5–10% faster | the fastest binary this tree can produce |
+
+Measured by interleaved A/B (`A,B,A,B,…`, median **and** min, 9–31 runs per arm, repeated) on this
+repository *and* on a ~2000-file C++ tree that appears in no training run — the held-out corpus shows
+the same or larger gain, which is what rules out training on the benchmark. **Output is
+byte-identical** on all three builds and on both corpora, and the determinism gate passes on every
+tree; these options change how fast the answer arrives, never what it is. Cold gains 2–3× more than
+warm because cold is a branchy walk over tree-sitter's parse tree, while warm already runs in the
+cache-tuned CSR/SoA/B+tree structures G2 exists to produce. **LTO is on by default** — it costs link
+time and nothing else, and link time is not what this tool is optimized for. PGO needs a training
+run, so it stays a driven build (`scripts/pgobuild.sh`) rather than something a bare
+`cmake --build` does behind your back.
+
 **And on machines with no PMU at all — most cloud VMs and CI boxes — the counter columns no longer
 vanish.** A kernel that refuses every hardware event (`ENOENT`; no vPMU is the common cloud case)
 still offers software counters, so the Linux backend's per-event graceful skip now extends to the
@@ -600,6 +623,7 @@ behind `--mentions`; Office and PDF join them through an optional bridge.
 | The authoritative flag list, always current | `./build/ripwire --help` |
 | Pipeline, data model, determinism contract, output-honesty contract | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Every published number, its instrument, and what is *not* published | [`docs/EVALS.md`](docs/EVALS.md) |
+| Compiler optimization remarks: the triage, and the two opt-in faster builds | [`docs/OPTREMARKS.md`](docs/OPTREMARKS.md) |
 | The method, as something transferable | [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) |
 | Where every idea came from, and where each one lives in the code | [`docs/LINEAGE.md`](docs/LINEAGE.md) |
 | C++ house style, the G1–G5 guardrails, gate discipline, the submission checklist | [`CONTRIBUTING.md`](CONTRIBUTING.md) |

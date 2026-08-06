@@ -31,6 +31,6 @@ server = mcp.get("mcpServers", {}).get("ripwire")
 assert server == {"command": "ripwire", "args": ["--mcp"]}, server
 
 skills = sorted((root / "skills").glob("ripwire-*/SKILL.md"))
-assert len(skills) == 17, f"expected 17 bundled skills, got {len(skills)}"
+assert len(skills) == 18, f"expected 18 bundled skills, got {len(skills)}"
 print("codexplugincheck: ALL PASS")
 PY
