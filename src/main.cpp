@@ -21,6 +21,7 @@
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
 #include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
+#include "commentcoherence.h" // --comment-coherence: Steidl c_coeff + Scalabrino CIC, per documented function/method
 #include "contextratio.h" // --context-ratio: the LOCAL-REASONING lens (outside-the-file share of a unit's context)
 #include "nonlocalstate.h" // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
 #include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
@@ -4534,6 +4535,14 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     if( cfg.readability )
     {
         return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset );
+    }
+
+    // --comment-coherence: two published content measures per documented function/method (Steidl c_coeff
+    // + Scalabrino CIC) — commentcoherence.h owns the measurement AND its emission, the same shape as
+    // --readability. Symbol table + files on disk only; no graph, no git; a LENS: exit 0 always.
+    if( cfg.commentCoherence )
+    {
+        return writeCommentCoherenceReport( ing, cfg.pageLimit, cfg.pageOffset );
     }
 
     // --nonlocal-state: per function, the non-local MUTABLE state it or its transitive callees reach, reads

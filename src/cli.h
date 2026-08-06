@@ -153,6 +153,12 @@ struct Config
                                                             // repo's OWN rename history (old -> new pairs mined from git log -p).
                                                             // A NOISY proxy, disclosed as one; the floor a rule must clear lives in
                                                             // test/namingcalibrationcheck.sh, not here (renamemine.h)
+    bool             commentCoherence  = false;            // --comment-coherence: per function/method with a doc comment, TWO published
+                                                            // content measures — Steidl/Hummel/Juergens c_coeff (ICPC 2013, HIGH is BAD:
+                                                            // the comment mostly restates the name) and Scalabrino CIC (ICPC 2016/JSEP
+                                                            // 2018, Jaccard of comment terms vs the method's own identifier terms).
+                                                            // UNAVAILABLE (not scored) where no comment exists. Complements --doc-drift
+                                                            // (staleness) with content, over a disjoint input (commentcoherence.h)
     bool             cochange          = false;            // --cochange[=FILE]: files that change together in git (hidden coupling)
     std::string_view cochangeFile;                         // --cochange=FILE: lockstep partners of one file
     int              cochangeRecur     = 0;                // --cochange-recur=K (with --cochange): report only pairs whose co-change RECURS in >= K of the mined window's sub-windows (Clio, ICSE 2011 — a discrepancy is not a violation the first time it appears). 0 = unfiltered (every row still carries recur=). Disclosed as min_recur= in the header when set.
@@ -863,6 +869,18 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               PROXY, stated as one -- rebrands, moves and API changes all look like renames -- so read\n"
         "                               pairs= (the sample size) first; the group rules report scope=group-rule, not a fake 0/0.\n"
         "                               Exit 0 always: the per-rule floor lives in test/namingcalibrationcheck.sh\n"
+        "    --comment-coherence        per function/method WITH A DOC COMMENT, two published content measures, MOST NAME-RESTATING\n"
+        "                               FIRST: c_coeff (Steidl/Hummel/Juergens, ICPC 2013) is the fraction of the comment's words within\n"
+        "                               Levenshtein distance <2 of a word in the symbol's own (split) name — HIGH c_coeff IS BAD, it\n"
+        "                               means the comment mostly repeats the name and adds no information (the opposite of the naive\n"
+        "                               'high coherence sounds good' reading). cic (Scalabrino, ICPC 2016 / JSEP 2018) is the Jaccard\n"
+        "                               overlap of two preprocessed term sets: the comment's vocabulary vs every identifier the\n"
+        "                               definition's own span uses (operators/keywords stripped, camelCase/snake_case split, English\n"
+        "                               stopwords dropped, deduplicated). The two measure different things and are expected to\n"
+        "                               disagree — both are reported, never collapsed to one number. UNAVAILABLE (not scored, never a\n"
+        "                               zero) where no doc comment exists, counted in no_comment= on the root. Complements --doc-drift\n"
+        "                               (which checks whether a markdown CLAIM is stale) with comment CONTENT, over a disjoint input —\n"
+        "                               neither verb duplicates the other. Pages with limit=N (offset=M); default 40 rows.\n"
         "    --cochange[=FILE]          files that change together in git (hidden coupling; the rows' own legend defines surprising=)\n"
         "    --cochange-recur=K         (with --cochange) report only pairs whose co-change RECURS in K or more of the mined\n"
         "                               window's sub-windows, so a one-off refactor sprint stops reading like an eighteen-month\n"
@@ -1319,7 +1337,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
         "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability --ensemble --context-ratio --nonlocal-state.\n"
+        "                               --readability --ensemble --context-ratio --nonlocal-state --comment-coherence.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
@@ -1505,6 +1523,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--ensemble",           &Config::ensemble           },
     { "--context-ratio",      &Config::contextRatio       },
     { "--naming-calibration", &Config::namingCalibration  },
+    { "--comment-coherence",  &Config::commentCoherence   },
     { "--cochange",           &Config::cochange           },
     { "--cochange-groups",    &Config::cochangeGroups     },   // matched by EQUALITY, scanned before the prefix table, so it can
                                                                 // never shadow --cochange nor be shadowed by --cochange=FILE
@@ -1814,7 +1833,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 159;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags)
+inline constexpr std::size_t kTotalFlagArms       = 160;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2002,7 +2021,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
-    "--readability --ensemble --context-ratio --nonlocal-state";
+    "--readability --ensemble --context-ratio --nonlocal-state --comment-coherence";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -2012,7 +2031,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
-        || c.readability || c.ensemble || c.contextRatio || c.nonlocalState;
+        || c.readability || c.ensemble || c.contextRatio || c.nonlocalState || c.commentCoherence;
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
