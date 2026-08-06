@@ -733,7 +733,11 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 40;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 41;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 41 = Phase 1 local-variable-indexing (PLAN.md
+                                                          // 2026-08-06 evening): Symbol/RawDef gained a `locals`
+                                                          // FLOOR field (C/C++ only), a per-file RawDef cache blob
+                                                          // FORMAT change — old caches must be rejected.
                                                           // 40 = captureIncludes descends into import CONTAINERS: a
                                                           // `#if`-guarded #include/#import/`using`, a Python import under
                                                           // `if TYPE_CHECKING:` / `except ImportError:` / any body, a Rust

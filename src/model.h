@@ -146,6 +146,17 @@ struct Symbol
     // ALL descriptive facts on --metrics ONLY, never a gate. `params`/`maxNest` are meaningful for
     // functions/methods; 0 for other kinds. `loc` is the def's physical line span (body-inclusive).
     std::uint32_t loc          = 0;    // physical lines the def spans = 1-based end line − start line + 1; --metrics loc=
+    // local-variable-indexing plan, Phase 1 (2026-08-06 evening, PLAN.md): a FLOOR count of the def's own
+    // local-variable declarations, populated by the SAME fused-DFS complexity walk that computes cx/ccx/
+    // maxNest (ingest.cpp complexityOf/cc_walk) — zero new tree-sitter queries. MVP scope is C/C++ only
+    // (see localsCountedLang below); meaningful for fns/methods only (0 for other kinds, same convention
+    // as params/maxNest). Counts a `declaration` node whose PARENT is the enclosing `compound_statement`
+    // (a direct block-statement local) — this naturally excludes if-init/switch-condition/for-init/catch-
+    // clause declarators (their parent is the control-structure node, not compound_statement) without any
+    // per-shape special case; a structured-binding declarator (`auto [a,b] = …`) is explicitly excluded too
+    // (one declaration, ambiguous name count) — see cc_walk's locals-counting block. `--metrics` emits it as
+    // locals="N" locals_floor="1" (never a bare 0 for an uncovered language — see localsCountedLang).
+    std::uint32_t locals       = 0;
     std::uint16_t params        = 0;   // parameter count from the def's parameter-list child; --metrics params= (NUMBER only — no 7±2)
     std::uint8_t  maxNest       = 0;   // max control-structure nesting depth reached inside the def; --metrics nest=
     std::uint8_t  arityExact    = 0;   // B2.2: 1 ⇒ `params` is a FIXED, call-comparable arity (no variadic / default
@@ -160,8 +171,47 @@ struct Symbol
 // Two std::string members dominate; the scalars pack into what their alignment leaves. If this fires after a
 // field add, re-check you used the smallest type and grouped it — don't just bump N (a size regression is a
 // real signal here). libc++/libstdc++ std::string is 24 B (3 words); adjust N per-toolchain if it ever differs.
+// `locals` (Phase 1 local-variable-indexing, PLAN.md 2026-08-06 evening) added as a uint32_t grouped with
+// the other Q4 size-smell scalars, right before `loc`/`params`/`maxNest`/`arityExact` — measured (not
+// assumed): sizeof(Symbol) is UNCHANGED at 48 + 2*sizeof(std::string). The scalar run before the two
+// std::string members already carried 4 B of trailing alignment padding (std::string needs 8-B alignment
+// on a 64-bit ABI); the new uint32_t landed in that padding for FREE — the best possible SoA outcome, not
+// a coincidence worth losing: re-measure with a fresh `static_assert` fire (don't hand-arithmetic) if this
+// ever needs to change again.
 static_assert( sizeof( Symbol ) == 48 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
+
+// local-variable-indexing plan Phase 1 MVP scope (PLAN.md 2026-08-06 evening): C/C++ only — highest
+// locals/function ratio in the survey (5-15/fn vs 3:1 Python, 0.2-0.8 Go/Rust) and `locals` is threaded
+// through ingest.cpp's ALREADY C-family-only large-function/deep-nesting complexity walk, so this extends
+// shipped code rather than building a new cross-language subsystem. ObjC/ObjC++ is a named fast-follow
+// (ObjC's declaration-statement grammar differs enough to want its own fixture pass), not MVP. ANY caller
+// that needs to know whether `locals`/`locals_floor` can be trusted for a given Symbol — serialize.h's
+// --metrics emitter, naminglens.h's Phase-2 local-name walk gate — MUST route through this ONE predicate,
+// so the covered-language set can never drift between the two call sites.
+inline bool localsCountedLang( Lang lang ) noexcept
+{
+    return lang == Lang::Cpp || lang == Lang::C;
+}
+
+// local-variable-indexing plan Phase 2 (PLAN.md 2026-08-06 evening): one CAPTURED local-variable NAME,
+// from the on-demand re-parse ingest.cpp's collectGatedLocalNames runs ONLY for a function that already
+// cleared BOTH the existing size/complexity gate AND locals>=kNamingLocalsGateFloor (naminglens.h) — never
+// promoted to a Symbol/NodeId, never entering the call graph, never cached (recomputed fresh every time a
+// caller asks, since asking is rare by construction). `name` is OWNED (not the plan's literal
+// "non-owning string_view"): the file bytes the re-parse reads live only as long as naminglens.h's local
+// getBytes() cache for ONE lint pass, so a view into them would dangle the moment that pass's caller
+// tries to hold a LocalNameFact any longer — a real lifetime constraint the plan's wording didn't have in
+// view (its own self-correcting "Grounding note" already flagged that its citations needed a refresh
+// pass; this is the same class of correction). `declDepth`: 1 = a direct statement in the function's OWN
+// outermost block; 2+ = at least one control-structure block deeper — see checkLocalNameShape's own
+// declDepth>=2 gate on naming-short.
+struct LocalNameFact
+{
+    std::string   name;
+    std::uint32_t line      = 0;   // 1-based, absolute file line (not the re-parsed substring's own row)
+    std::uint8_t  declDepth = 0;
+};
 
 // An unresolved reference (call/usage). Resolved into an edge in the graph stage.
 struct Reference

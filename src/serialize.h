@@ -1092,13 +1092,14 @@ inline constexpr const char* kChurnRankLegend =
     "the same corpus ranked by pagerank orders differently -->";
 
 // §B7.3 (CA4) — the --metrics row vocabulary, emitted ONLY on a map that carries it, for the same reason
-// kChurnRankLegend is. The flag decorates every <s> row with up to twelve attributes and shipped with NO
+// kChurnRankLegend is. The flag decorates every <s> row with up to thirteen attributes and shipped with NO
 // legend at all: the v1 legend defines t/p/n/id/k/c/amb/overloads and stops, so a reader met in= out= cx=
-// ccx= role= loc= params= nest= cbo= lcom4= amp= tested= with nothing to read them against. role= is the
-// one that can actively mislead — here it is a fan-in THRESHOLD with a single value, while the same
+// ccx= role= loc= params= nest= locals= cbo= lcom4= amp= tested= with nothing to read them against. role= is
+// the one that can actively mislead — here it is a fan-in THRESHOLD with a single value, while the same
 // attribute name on the use-site verb carries call|read|write|import|extends, and that verb discloses its
-// own vocabulary in-legend. Absence is meaningful for four of these and is stated rather than left to be
-// inferred from a missing attribute.
+// own vocabulary in-legend. Absence is meaningful for five of these (locals= joined the group at Phase 1,
+// local-variable-indexing, PLAN.md 2026-08-06 evening: absent for every non-C/C++ def, model.h
+// localsCountedLang) and is stated rather than left to be inferred from a missing attribute.
 // G4: no "--" anywhere inside an XML comment ⇒ flag names written bare.
 // Kept TERSE for kMaxTokensFitLegend's reason — it rides on every --metrics map and is charged. A 715 B
 // first draft made estchargecheck #9 red: that arm allows the two dialects' est_tokens to differ by the
@@ -1107,7 +1108,8 @@ inline constexpr const char* kChurnRankLegend =
 // charged against anyone's budget; what a reader needs IN BAND is the key-to-meaning map itself.
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=depth "
-    "cbo=coupling lcom4=cohesion amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
+    "locals=local-var-decl-count(floor,C/C++-only,see locals_floor) cbo=coupling lcom4=cohesion "
+    "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
     "call|read|write|import|extends). Absent=N/A, never 0. -->";
 
 // §B13.4 — the --max-tokens fit's own legend clause, emitted ONLY on a map --max-tokens shaped, for the same
@@ -1522,11 +1524,19 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 std::snprintf( kbuf, sizeof( kbuf ), " k=\"%.4f\"", double( rank[id] ) );
             }
 
-            // Q-compute descriptive attrs (loc/params/nest/cbo/lcom4/tested), built into a side buffer that is
-            // appended before the closing '>' of the metrics attr. ALL --metrics-only; absent by default so the
-            // golden map is byte-identical. params/nest emitted only for fns/methods (kind guard) so a class/sec
-            // never carries a 0 it can't have; lcom4 only for class-kinds with methods (kLcom4NA sentinel omits).
-            char qbuf[ 96 ];  qbuf[ 0 ] = '\0';
+            // Q-compute descriptive attrs (loc/params/nest/locals/cbo/lcom4/tested), built into a side buffer
+            // that is appended before the closing '>' of the metrics attr. ALL --metrics-only; absent by
+            // default so the golden map is byte-identical. params/nest/locals emitted only for fns/methods
+            // (kind guard) so a class/sec never carries a 0 it can't have; lcom4 only for class-kinds with
+            // methods (kLcom4NA sentinel omits) — mutually exclusive with the fn/method group, which is why
+            // the buffer sizing below only has to cover ONE of the two groups' worst case, not both summed.
+            // 96 -> 160 (Phase 1, local-variable-indexing, PLAN.md 2026-08-06 evening): the fn/method worst
+            // case grew by locals="4294967295" locals_floor="1" (38 B) on top of the pre-existing
+            // loc+params+nest+cbo+amp+tested run (~88 B) — 96 would silently TRUNCATE (appendf's qe-clamp
+            // makes truncation safe from a buffer-overrun standpoint, but a truncated attr run is malformed
+            // XML, not a degrade worth shipping quietly). 160 leaves real headroom above the ~126 B measured
+            // worst case.
+            char qbuf[ 160 ];  qbuf[ 0 ] = '\0';
             if( metrics )
             {
                 char* qp = qbuf; char* const qe = qbuf + sizeof( qbuf );
@@ -1556,6 +1566,15 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 {
                     appendf( " params=\"%u\"", unsigned( s.params ) );
                     appendf( " nest=\"%u\"", unsigned( s.maxNest ) );
+                    // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): locals= is ABSENT — never
+                    // a bare "0" — for every def outside model.h's localsCountedLang (MVP: C/C++ only), so a
+                    // reader never mistakes "not counted for this language" for "counted, and there are none".
+                    // locals_floor="1" always rides alongside a present locals=: `int a,b;` counts as ONE
+                    // declaration-statement, not two names (see cc_isCountableLocalDecl's own comment).
+                    if( localsCountedLang( s.lang ) )
+                    {
+                        appendf( " locals=\"%u\" locals_floor=\"1\"", unsigned( s.locals ) );
+                    }
                 }
                 if( cbo && id < cbo->size() )
                 {
@@ -4528,6 +4547,15 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
     {
         std::snprintf( num, sizeof( num ), ",\"params\":%u,\"nest\":%u", unsigned( s.params ), unsigned( s.maxNest ) );
         w.write( num );
+        // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): the JSON sibling of the XML
+        // locals=/locals_floor= pair — omitted key (never a fabricated 0) outside model.h's
+        // localsCountedLang (MVP: C/C++ only). "locals_floor" mirrors the XML boolean-flag convention
+        // as JSON `true`, matching how `tested` is spelled two lines below.
+        if( localsCountedLang( s.lang ) )
+        {
+            std::snprintf( num, sizeof( num ), ",\"locals\":%u,\"locals_floor\":true", s.locals );
+            w.write( num );
+        }
     }
     if( q.cbo && q.id < q.cbo->size() ) { std::snprintf( num, sizeof( num ), ",\"cbo\":%u", (*q.cbo)[q.id] );  w.write( num ); }
     if( q.lcom4 && q.id < q.lcom4->size() && (*q.lcom4)[q.id] != 0xFFFFFFFFu )   // 0xFFFFFFFF = kLcom4NA (graph.h) ⇒ omit

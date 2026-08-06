@@ -522,12 +522,31 @@ inline bool isPythonDunder( std::string_view name ) noexcept
     return name.size() > 4 && name.substr( 0, 2 ) == "__" && name.substr( name.size() - 2 ) == "__";
 }
 
-// N1 + N2 + N4: facts derivable from the name alone (plus kind/lang for role and idiom gating).
-inline void checkNameShape( const Symbol& s, const std::vector<std::string>& toks, RuleSink& sink )
+// local-variable-indexing plan, Phase 2 (2026-08-06 evening, PLAN.md): the four NAME-SHAPE facts
+// checkNameShape computes, as booleans — pure function of (name, lang, toks), no Symbol/RuleSink
+// dependency, so it is equally usable for an indexed Symbol OR an un-indexed local variable name. This is
+// the checkNameShapeCore extraction the plan specifies; `reservedForm` disambiguates naming-underscore's
+// TWO message variants (both existing Symbol callers and the new local-scoped caller need it).
+struct NameShapeFacts
 {
-    // naming-short — strip decorating underscores; a 1–2 letter alphabetic core in a non-local role.
+    bool shortName      = false;   // naming-short candidate (1-2 letter alphabetic core)
+    bool wordy           = false;   // naming-wordy candidate (>5 split tokens)
+    bool underscoreIssue = false;   // naming-underscore candidate (either sub-case below)
+    bool reservedForm    = false;   // TRUE ⇒ underscoreIssue is the C-family reserved-identifier form,
+                                    // FALSE ⇒ it is the internal-consecutive-underscores form (message text differs)
+    bool caseIssue       = false;   // naming-case candidate (snake_case + camelCase mixed)
+};
+
+// N1 + N2 + N4: facts derivable from the name alone (plus lang for the C-family reserved-form gate).
+// role (Var vs Function/Method vs local) is NOT a parameter here — it only ever changes MESSAGE TEXT,
+// never which facts fire, so it stays out of the core and lives in each caller's own sink.add wording.
+inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, const std::vector<std::string>& toks ) noexcept
+{
+    NameShapeFacts facts;
+
+    // naming-short — strip decorating underscores; a 1–2 letter alphabetic core.
     {
-        std::string_view core = s.name;
+        std::string_view core = name;
         while( !core.empty() && core.front() == '_' )
         {
             core.remove_prefix( 1 );
@@ -541,24 +560,15 @@ inline void checkNameShape( const Symbol& s, const std::vector<std::string>& tok
         {
             allAlpha = allAlpha && ncAlpha( c );
         }
-        if( allAlpha && core.size() <= 2 )
-        {
-            sink.add( "naming-short", s, s.line,
-                      s.kind == SymKind::Var ? s.name + " (1-2 letter name for a module/global variable)"
-                                             : s.name + " (1-2 letter function name; visible far beyond a 20-line scope)" );
-        }
+        facts.shortName = allAlpha && core.size() <= 2;
     }
 
     // naming-wordy — more than 5 split tokens.
-    if( toks.size() > 5 )
-    {
-        sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( toks.size() ) + " words in one name)" );
-    }
+    facts.wordy = toks.size() > 5;
 
     // naming-underscore — internal consecutive underscores anywhere; C-family reserved forms
     // (leading __ or _Capital). Python dunders and single leading/trailing underscores are idiomatic.
     {
-        const std::string_view name = s.name;
         bool internalDouble = false;
         bool sawAlnumBefore = false;
         for( std::size_t i = 0; i + 1 < name.size(); ++i )
@@ -575,19 +585,14 @@ inline void checkNameShape( const Symbol& s, const std::vector<std::string>& tok
             }
         }
         // the reserved-identifier forms are a C-family rule only (C/C++/ObjC reserve leading _Capital and __).
-        const bool cFamily  = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::ObjC;
+        const bool cFamily  = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
         const bool reserved = cFamily && name.size() >= 2 && name[0] == '_' && ( name[1] == '_' || ncUpper( name[1] ) );
-        if( ( internalDouble && !isPythonDunder( name ) ) || reserved )
-        {
-            sink.add( "naming-underscore", s, s.line,
-                      reserved ? s.name + " (reserved identifier form: leading underscore + capital or double underscore)"
-                               : s.name + " (consecutive underscores inside a name)" );
-        }
+        facts.underscoreIssue = ( internalDouble && !isPythonDunder( name ) ) || reserved;
+        facts.reservedForm    = reserved;
     }
 
     // naming-case — one name mixing a snake separator AND an in-word camel transition.
     {
-        const std::string_view name = s.name;
         bool sawSeparator  = false;
         bool sawTransition = false;
         for( std::size_t i = 0; i + 1 < name.size(); ++i )
@@ -601,11 +606,111 @@ inline void checkNameShape( const Symbol& s, const std::vector<std::string>& tok
                 sawTransition = true;
             }
         }
-        if( sawSeparator && sawTransition )
-        {
-            sink.add( "naming-case", s, s.line, s.name + " (snake_case and camelCase mixed in one name)" );
-        }
+        facts.caseIssue = sawSeparator && sawTransition;
     }
+
+    return facts;
+}
+
+// existing Symbol-based caller — UNCHANGED behavior/output (byte-identical), now a thin wrapper over
+// checkNameShapeCore that supplies the Symbol-specific message wording and Var-vs-fn/method role text.
+inline void checkNameShape( const Symbol& s, const std::vector<std::string>& toks, RuleSink& sink )
+{
+    const NameShapeFacts facts = checkNameShapeCore( s.name, s.lang, toks );
+
+    if( facts.shortName )
+    {
+        sink.add( "naming-short", s, s.line,
+                  s.kind == SymKind::Var ? s.name + " (1-2 letter name for a module/global variable)"
+                                         : s.name + " (1-2 letter function name; visible far beyond a 20-line scope)" );
+    }
+    if( facts.wordy )
+    {
+        sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( toks.size() ) + " words in one name)" );
+    }
+    if( facts.underscoreIssue )
+    {
+        sink.add( "naming-underscore", s, s.line,
+                  facts.reservedForm ? s.name + " (reserved identifier form: leading underscore + capital or double underscore)"
+                                     : s.name + " (consecutive underscores inside a name)" );
+    }
+    if( facts.caseIssue )
+    {
+        sink.add( "naming-case", s, s.line, s.name + " (snake_case and camelCase mixed in one name)" );
+    }
+}
+
+// local-variable-indexing plan, Phase 2 (2026-08-06 evening, PLAN.md): checkNameShapeCore applied to an
+// UN-INDEXED local variable name. Deliberately breaks this file's own stated invariant ("an un-indexed
+// loop local can never be flagged") — see the WITHDRAWN note atop this file for the precedent this design
+// exists to avoid repeating (a plausible-but-unaudited rule that shipped and was wrong on real code).
+// naming-short gets an EXTRA per-local gate (declDepth>=2, i.e. nested — not the function's own outermost
+// block): gating only at the function level reproduces the withdrawn naming-body-mismatch rule's failure
+// shape (plausible, wrong axis) — a top-level loop-adjacent local like a single accumulator is exactly the
+// idiomatic-short-name case Open Question 8 (PLAN.md) says this gate does not fully solve; declDepth>=2
+// narrows to the class most likely to be a REAL problem (a short name reused several control-structure
+// levels deep, far from its declaration) without pretending to solve the axis entirely.
+// Findings ride the SAME tags as the Symbol-scoped rule (Open Question 3, PLAN.md: reuse over a new
+// `-local`-suffixed tag family, which would extend renamemine.h's position-pinned tallies[9]) — the
+// enclosing FUNCTION symbol supplies the finding's byte span (a local has none of its own), the LOCAL's
+// own declaration line is the anchor, and the message text names the enclosing function so a reader is
+// never left wondering which "x" is meant.
+inline void checkLocalNameShape( const Symbol& enclosingFn, const LocalNameFact& local, std::vector<std::string>& toks, RuleSink& sink )
+{
+    splitIdentifier( local.name, toks );
+    const NameShapeFacts facts = checkNameShapeCore( local.name, enclosingFn.lang, toks );
+
+    if( facts.shortName && local.declDepth >= 2 )
+    {
+        sink.add( "naming-short", enclosingFn, local.line,
+                  local.name + " (1-2 letter local variable name, nested " + std::to_string( local.declDepth )
+                      + " blocks deep in " + enclosingFn.name + ")" );
+    }
+    if( facts.wordy )
+    {
+        sink.add( "naming-wordy", enclosingFn, local.line,
+                  local.name + " (" + std::to_string( toks.size() ) + " words in one local variable name, in " + enclosingFn.name + ")" );
+    }
+    if( facts.underscoreIssue )
+    {
+        sink.add( "naming-underscore", enclosingFn, local.line,
+                  facts.reservedForm ? local.name + " (reserved identifier form on a local variable, in " + enclosingFn.name + ")"
+                                     : local.name + " (consecutive underscores in a local variable name, in " + enclosingFn.name + ")" );
+    }
+    if( facts.caseIssue )
+    {
+        sink.add( "naming-case", enclosingFn, local.line,
+                  local.name + " (snake_case and camelCase mixed in a local variable name, in " + enclosingFn.name + ")" );
+    }
+}
+
+// local-variable-indexing plan, Phase 2 gate thresholds. The size/complexity trio mirrors the SHIPPED
+// large-function (loc>80) / deep-nesting (nest>4) lint rules' own thresholds exactly (main.cpp) plus
+// quality.h's kCcxBar=15 (SonarSource's own cognitive-complexity bar, already used by --quality-delta) —
+// "reused unchanged", per the plan, computed here from Symbol's own already-indexed s.loc/s.maxNest/s.ccx
+// rather than re-deriving via main.cpp's newline-count/brace-depth proxy scan (duplicated logic for a
+// value the codebase already computes precisely via cc_walk). Local constants, not an #include of
+// quality.h (a heavyweight, unrelated-dependency header) just for one shared number — a drift here would
+// only ever change WHICH already-rare gated functions Phase 2 additionally scans, never anything
+// safety-critical, and the whole feature ships opt-in/disabled-by-default regardless (see --naming-locals).
+inline constexpr std::uint32_t kNamingLocalsSizeLocBar  = 80;   // matches main.cpp's large-function bar
+inline constexpr std::uint8_t  kNamingLocalsSizeNestBar = 4;    // matches main.cpp's deep-nesting bar
+inline constexpr std::uint32_t kNamingLocalsSizeCcxBar  = 15;   // matches quality.h's kCcxBar (SonarSource)
+// locals>=8 (Open Question 1, PLAN.md) — MEASURED, not invented: on ripwire's own src/ at the commit this
+// landed, 377 functions clear the trio above; among THOSE, locals= has median=9, p25=6, p75=18 (histogram
+// in this session's own report). 8 sits just below the median of the population it gates within — high
+// enough to skip the smallest-locals gated functions (where a handful of names would dominate the noise),
+// covering roughly the upper half of the already-gated set. Re-measure before ever changing this: run
+// `ripwire src --metrics --no-cache --top-k=10000` and bucket locals= among rows clearing the trio above.
+inline constexpr std::uint32_t kNamingLocalsGateFloor = 8;
+
+// local-variable-indexing plan, Phase 2: does this FUNCTION/METHOD Symbol clear the gate that makes it
+// worth an extra, un-indexed local-variable-name re-parse? Split out so the gate a caller CHECKS and the
+// gate this file's own tests ASSERT can never quietly diverge from each other or from --help's prose.
+inline bool namingLocalsGate( const Symbol& s ) noexcept
+{
+    const bool sizeOrComplexity = s.loc > kNamingLocalsSizeLocBar || s.maxNest > kNamingLocalsSizeNestBar || s.ccx >= kNamingLocalsSizeCcxBar;
+    return sizeOrComplexity && s.locals >= kNamingLocalsGateFloor;
 }
 
 // N5 + N6: role-vs-known-return-type checks. `sig` = the raw signature bytes; an empty view or an
@@ -929,20 +1034,23 @@ inline void checkScopeGroups( const IngestResult& ing, RuleSink& sink )
 
 // The lens entry point runLint merges: every finding is an AstMatch with a naming-* tag, flowing
 // through the same sort/dedupe/tally/paging as the other built-ins. maxHitsPerRule is the caller's
-// per-rule lint budget (kLintMaxPerRule) — same floor semantics as the query-based rules.
-inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule );
+// per-rule lint budget (kLintMaxPerRule) — same floor semantics as the query-based rules. `namingLocals`
+// (default false ⇒ byte-identical to before Phase 2 existed) is --naming-locals, the local-variable-
+// indexing plan Phase 2 opt-in (PLAN.md 2026-08-06 evening) — see cli.h's own comment for why it defaults
+// off.
+inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals = false );
 
 // The shape runLint actually calls, matching the house pattern of the other symbol-level checks
 // (`for( AstMatch& h : lintSymbolLevelChecks( ing ) )`): findings are APPENDED to `out`, and the
 // return value is the rule names whose count= must be disclosed as a floor.
-inline std::vector<std::string> appendNamingFindings( const IngestResult& ing, std::size_t maxHitsPerRule, std::vector<AstMatch>& out )
+inline std::vector<std::string> appendNamingFindings( const IngestResult& ing, std::size_t maxHitsPerRule, std::vector<AstMatch>& out, bool namingLocals = false )
 {
-    NamingLensResult res = namingLensChecks( ing, maxHitsPerRule );
+    NamingLensResult res = namingLensChecks( ing, maxHitsPerRule, namingLocals );
     out.insert( out.end(), std::make_move_iterator( res.hits.begin() ), std::make_move_iterator( res.hits.end() ) );
     return std::move( res.saturatedRules );
 }
 
-inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule )
+inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals )
 {
     detail::RuleSink sink;
     sink.maxHitsPerRule = maxHitsPerRule;
@@ -979,6 +1087,7 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
     };
 
     std::vector<std::string> toks;
+    std::vector<std::string> localToks;   // separate scratch — checkLocalNameShape re-splits per local name
     for( const Symbol& s : ing.symbols )    // symbols are already in deterministic (file, line, name) order
     {
         if( !detail::eligibleSymbol( s ) )
@@ -994,6 +1103,32 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
             const std::uint32_t sigB = std::min( s.sigEndByte,   std::uint32_t( bytes.size() ) );
             detail::checkRoleReturnTypes( s, std::string_view( bytes ).substr( sigA, sigB - sigA ), sink );
             detail::checkNameInformativenessInBytes( s, toks, nameCorpus, bytes, sink );
+
+            // local-variable-indexing plan, Phase 2 (--naming-locals, opt-in, default off — see cli.h).
+            // ONLY for a function that already clears detail::namingLocalsGate (size/complexity trio AND
+            // locals>=kNamingLocalsGateFloor) — a RARE pass, never a whole-corpus local-name sweep.
+            if( namingLocals && detail::namingLocalsGate( s ) )
+            {
+                const std::uint32_t defA = std::min( s.sigStartByte, std::uint32_t( bytes.size() ) );
+                const std::uint32_t defB = std::min( s.endByte,      std::uint32_t( bytes.size() ) );
+                if( defB > defA )
+                {
+                    std::uint32_t defStartLine = 1;
+                    for( std::uint32_t i = 0; i < defA; ++i )
+                    {
+                        if( bytes[i] == '\n' )
+                        {
+                            ++defStartLine;
+                        }
+                    }
+                    const std::vector<LocalNameFact> locals = collectGatedLocalNames(
+                        std::string_view( bytes ).substr( defA, defB - defA ), defStartLine, s.lang );
+                    for( const LocalNameFact& local : locals )
+                    {
+                        detail::checkLocalNameShape( s, local, localToks, sink );
+                    }
+                }
+            }
         }
     }
     detail::checkScopeGroups( ing, sink );

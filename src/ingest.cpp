@@ -884,6 +884,8 @@ struct RawDef
     std::uint32_t cx        = 0;   // cyclomatic complexity (1 + decision points); functions/methods only
     std::uint32_t ccx       = 0;   // cognitive complexity (nesting-weighted); functions/methods only
     std::uint32_t loc       = 0;   // Q4: physical line span of the def (end line − start line + 1)
+    std::uint32_t locals    = 0;   // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): local-decl
+                                   // count from cc_walk; C/C++ only (see model.h localsCountedLang), 0 elsewhere
     std::uint16_t params    = 0;   // Q4: parameter count (from the def's parameter-list child); fns/methods
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
@@ -995,7 +997,15 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 40;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 41;           // bump on any grammar/.scm/extraction change
+                                                      // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
+                                                      //    evening): RawDef/Symbol gained a `locals` uint32_t
+                                                      //    FLOOR field, populated inside the existing fused cc_walk
+                                                      //    DFS (C/C++ only — model.h localsCountedLang). A FORMAT
+                                                      //    change to the per-file RawDef cache blob (new u32 between
+                                                      //    loc and params) → old caches must be rejected, not
+                                                      //    misread as an off-by-one on every later field. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit (P0.2).
                                                       // 40: captureIncludes descends into import CONTAINERS instead of
                                                       //    scanning the file root's direct children. Two families, one
                                                       //    walk: (a) preprocessor conditionals —
@@ -1216,7 +1226,7 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 }
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     if( withLex )
     {
         VERIFY( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -1304,12 +1314,14 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
-// they sit next to the writer functions whose field list they must match. A LEAN def record is 9 u32 +
-// 4 u8 + 2 empty str(len u32) fields = 9*4 + 4*1 + 2*4 = 48 bytes; the RICH (withLex) extra is dlWeighted
-// u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty str(len u32) fields =
-// 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these same numbers from the
-// REAL writer functions at runtime so the next field added to writeDef/writeRef can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 48;   // 9×u32 + 4×u8 + 2×str(len u32, empty)
+// they sit next to the writer functions whose field list they must match. A LEAN def record is 10 u32 +
+// 4 u8 + 2 empty str(len u32) fields = 10*4 + 4*1 + 2*4 = 52 bytes (Phase 1, local-variable-indexing,
+// PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10); the RICH (withLex) extra is
+// dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty
+// str(len u32) fields = 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these
+// same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
+// can't silently stale them.
+inline constexpr std::size_t kMinDefRecordBytesLean      = 52;   // 10×u32 + 4×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 39;   // 3×u32 + 7×u8 + 5×str(len u32, empty)
 
@@ -1339,7 +1351,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
@@ -2078,9 +2090,63 @@ inline void collectChildren( TSNode n, TSTreeCursor& cur, std::vector<TSNode>& o
     }
 }
 
+// bounded-depth search for a structured_binding_declarator anywhere under `n` — the vendored tree-sitter-cpp
+// grammar nests it TWO levels below the `declaration` node (declaration -> init_declarator ->
+// structured_binding_declarator for `auto [a,b] = …`; verified against the vendored grammar via a parse-tree
+// dump, not assumed), so a same-level-only child scan misses it. `declaration` subtrees are grammar-bounded
+// (a handful of children, not attacker-widenable like a comment run), so a small depth cap (not the
+// cursor/stack machinery cc_walk itself uses for the whole-function walk) is the right tool here.
+inline bool cc_declHasStructuredBinding( TSNode n, int depth ) noexcept
+{
+    if( depth <= 0 )
+    {
+        return false;   // pathological-AST guard — declaration subtrees never legitimately need this deep
+    }
+    const std::uint32_t childCount = ts_node_child_count( n );
+    for( std::uint32_t ci = 0; ci < childCount; ++ci )
+    {
+        const TSNode child = ts_node_child( n, ci );
+        if( std::strcmp( ts_node_type( child ), "structured_binding_declarator" ) == 0 )
+        {
+            return true;
+        }
+        if( cc_declHasStructuredBinding( child, depth - 1 ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): is `n` a LOCAL-VARIABLE declaration
+// statement that cc_walk's own fused DFS should count? `declaration` node whose PARENT is the enclosing
+// `compound_statement` (a direct block-statement local) — one rule that, WITHOUT any per-shape special
+// case, naturally excludes an if-init (`if(int x=f())`)/switch-condition/for-init declarator (parent is
+// the control-structure node, not compound_statement) and a catch-clause exception declarator (parent is
+// catch_clause; also a different node KIND — parameter_declaration, not declaration — in the vendored
+// grammar). A structured-binding declarator (`auto [a,b] = …`) is excluded explicitly: it IS a direct
+// compound_statement child but introduces an unknown-count of names from one node, so counting it as "1"
+// would silently mis-state what the count means — the floor semantics (locals_floor=, model.h) already
+// cover honest undercounting elsewhere; this is a DIFFERENT axis (miscounting), kept out on purpose.
+// C/C++ ONLY (model.h localsCountedLang) — the caller gates on lang before ever reaching here.
+inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
+{
+    if( std::strcmp( t, "declaration" ) != 0 )
+    {
+        return false;
+    }
+    const TSNode parent = ts_node_parent( n );
+    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "compound_statement" ) != 0 )
+    {
+        return false;
+    }
+    return !cc_declHasStructuredBinding( n, 4 );
+}
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
-inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, std::uint32_t& cog, std::uint32_t& cyclo, std::uint32_t& maxNest, int startDepth )
+inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, std::uint32_t& cog, std::uint32_t& cyclo, std::uint32_t& maxNest, int startDepth,
+                      bool countLocals, std::uint32_t& locals )   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
 {
     // iterative pre-order DFS — an EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks on
     // macOS, so a deep AST overflows the call stack well inside the depth guard. Children are pushed in
@@ -2117,6 +2183,13 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         if( isNamed && isDecisionType( t ) )
         {
             ++cyclo;
+        }
+        // Phase 1 (local-variable-indexing): same fused DFS, third accumulator — zero extra tree-sitter
+        // queries. countLocals is false for every non-C/C++ def (model.h localsCountedLang), so this whole
+        // check compiles to a single branch-not-taken for every other language's walk.
+        if( countLocals && isNamed && cc_isCountableLocalDecl( n, t ) )
+        {
+            ++locals;
         }
         else if( std::strcmp( t, "binary_expression" ) == 0 )
         {
@@ -2211,20 +2284,176 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; };
-inline Complexity complexityOf( TSNode root, std::string_view src )   // one fused DFS → cx, ccx, AND max nesting (Q4)
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; };
+// `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
+// (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
+// per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
+// never emits (absent, not a bare "0" — see localsCountedLang's own comment).
+inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, AND locals (Q4 + Phase 1)
 {                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
-    std::uint32_t cog = 0, cyclo = 0, maxNest = 0;
+    std::uint32_t cog = 0, cyclo = 0, maxNest = 0, locals = 0;
+    const bool countLocals = localsCountedLang( lang );
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
     kids.reserve( 64 );
     collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
     for( const TSNode c : kids )
     {
-        cc_walk( c, 0, src, cog, cyclo, maxNest, 0 );
+        cc_walk( c, 0, src, cog, cyclo, maxNest, 0, countLocals, locals );
     }
-    return { 1u + cyclo, cog, maxNest };   // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting
+    return { 1u + cyclo, cog, maxNest, locals };   // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting ; locals = Phase 1 floor count
 }
+
+// ── local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ─────────────────────────────────
+//
+// bounded-depth: the identifier(s) a DECLARATOR subtree ultimately names, following ONLY the grammar's
+// "declarator:" field at each wrapper level (never "value:"/"size:"/"type:" — those hold an initializer
+// expression / array-size expression / type qualifier, whose own identifiers are USE sites, not the local's
+// own name; `int arr[n]` would otherwise wrongly harvest the USE of `n` as if it were a declared name).
+// EXPLICIT allowlist of wrapper shapes, verified against the vendored grammar via a real parse-tree dump
+// (not assumed — the exact same discipline Phase 1's structured-binding fix needed): init_declarator,
+// pointer_declarator, array_declarator all expose a "declarator:" field; reference_declarator's inner
+// identifier is an ANONYMOUS single child (no field name at all in this grammar — verified the same way).
+// A node type NOT in this allowlist (e.g. a local function-pointer declarator, or anything the dump did not
+// cover) is left UN-descended — silently fewer names captured is the safe floor outcome; a wrong or
+// misattributed name is the failure mode this walk exists to avoid, per the WITHDRAWN naming-body-mismatch
+// lesson (src/naminglens.h's own note): reasoning-only "this shape probably parses like X" is exactly what
+// shipped wrong there.
+inline void ln_extractDeclaratorIdentifiers( TSNode node, std::vector<TSNode>& outIdents, int depth ) noexcept
+{
+    if( depth <= 0 )
+    {
+        return;   // pathological-AST guard — real declarator nesting never legitimately needs this deep
+    }
+    const char* t = ts_node_type( node );
+    if( std::strcmp( t, "identifier" ) == 0 || std::strcmp( t, "field_identifier" ) == 0 )
+    {
+        outIdents.push_back( node );
+        return;
+    }
+    if( std::strcmp( t, "reference_declarator" ) == 0 )
+    {
+        const std::uint32_t n = ts_node_child_count( node );
+        for( std::uint32_t i = 0; i < n; ++i )
+        {
+            ln_extractDeclaratorIdentifiers( ts_node_child( node, i ), outIdents, depth - 1 );
+        }
+        return;
+    }
+    if( std::strcmp( t, "init_declarator" ) == 0 || std::strcmp( t, "pointer_declarator" ) == 0 || std::strcmp( t, "array_declarator" ) == 0 )
+    {
+        const std::uint32_t n = ts_node_child_count( node );
+        for( std::uint32_t i = 0; i < n; ++i )
+        {
+            const char* fieldName = ts_node_field_name_for_child( node, i );
+            if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 )
+            {
+                ln_extractDeclaratorIdentifiers( ts_node_child( node, i ), outIdents, depth - 1 );
+            }
+        }
+        return;
+    }
+    // unrecognized wrapper (incl. structured_binding_declarator, which should never reach here — Phase 1's
+    // cc_isCountableLocalDecl already excludes any `declaration` containing one before this ever runs):
+    // do not descend.
+}
+
+// one `declaration` node (already proven countable by cc_isCountableLocalDecl) → every declarator name it
+// introduces (plural: `int a, b;` is ONE declaration with TWO "declarator:"-fielded children — Phase 1's
+// COUNT stays "1 declaration-statement" by design, but Phase 2 needs each NAME individually to judge, so
+// this deliberately extracts more granularly than Phase 1 counts — a disclosed, documented difference
+// between the two phases, not a drift).
+inline void ln_declaratorIdentifiers( TSNode declNode, std::vector<TSNode>& outIdents )
+{
+    const std::uint32_t n = ts_node_child_count( declNode );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        const char* fieldName = ts_node_field_name_for_child( declNode, i );
+        if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 )
+        {
+            ln_extractDeclaratorIdentifiers( ts_node_child( declNode, i ), outIdents, 6 );
+        }
+    }
+}
+
+// declDepth: count of `compound_statement` ancestors from `declNode` up to and including the function's
+// OWN outermost body block (stops at `funcRoot`, the re-parsed def's root node) — so a direct top-level
+// local gets declDepth=1, and a local one control-structure block deeper gets declDepth=2+, matching
+// checkLocalNameShape's own declDepth>=2 gate (naminglens.h) exactly.
+inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
+{
+    std::uint8_t depth = 0;
+    TSNode       cur   = ts_node_parent( declNode );
+    while( !ts_node_is_null( cur ) )
+    {
+        if( std::strcmp( ts_node_type( cur ), "compound_statement" ) == 0 )
+        {
+            ++depth;
+            if( depth == 255 )
+            {
+                break;   // pathological-AST guard — matches the declDepth field's own uint8_t width
+            }
+        }
+        if( ts_node_eq( cur, funcRoot ) )
+        {
+            break;
+        }
+        cur = ts_node_parent( cur );
+    }
+    return depth;
+}
+
+// bounded-width recursive descent over the WHOLE re-parsed def subtree, collecting every countable local
+// declaration's name(s) — reuses cc_isCountableLocalDecl/cc_declHasStructuredBinding UNCHANGED, so the SET
+// of declarations this walk visits is provably the same set Phase 1's `locals=` count already covers (no
+// second, silently divergent detection rule). NOT the cursor/stack machinery cc_walk uses for a whole-
+// function hot-path walk — this only ever runs on an ALREADY-GATED (rare) function, so a plain recursive
+// walk (bounded by the same depth guard) is the right tool, not premature machinery.
+inline void ln_collectLocalDecls( TSNode node, TSNode funcRoot, int depth, std::vector<LocalNameFact>& out,
+                                   std::uint32_t defStartLine, std::string_view defBytes )
+{
+    if( depth <= 0 )
+    {
+        return;   // pathological-AST guard (mirrors cc_walk's own 512-frame guard, scaled to plain recursion)
+    }
+    const char* t = ts_node_type( node );
+    if( ts_node_is_named( node ) && cc_isCountableLocalDecl( node, t ) )
+    {
+        std::vector<TSNode> idents;
+        ln_declaratorIdentifiers( node, idents );
+        const std::uint8_t declDepth = ln_declDepth( node, funcRoot );
+        for( const TSNode& id : idents )
+        {
+            const std::uint32_t startByte = ts_node_start_byte( id );
+            const std::uint32_t endByte   = std::min( ts_node_end_byte( id ), std::uint32_t( defBytes.size() ) );
+            if( endByte <= startByte )
+            {
+                continue;
+            }
+            // row is relative to the RE-PARSED SUBSTRING (starts at row 0 = defStartLine); absolute file
+            // line = defStartLine + row, so a caller never has to know this function re-parses in isolation.
+            const std::uint32_t row = ts_node_start_point( id ).row;
+            LocalNameFact        fact;
+            fact.line      = defStartLine + row;
+            fact.declDepth = declDepth;
+            fact.name.assign( defBytes.substr( startByte, endByte - startByte ) );
+            out.push_back( std::move( fact ) );
+        }
+        return;   // do not descend INTO a countable declaration's own subtree again (nothing further to find)
+    }
+    const std::uint32_t n = ts_node_child_count( node );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        ln_collectLocalDecls( ts_node_child( node, i ), funcRoot, depth - 1, out, defStartLine, defBytes );
+    }
+}
+
+// collectGatedLocalNames itself (the ingest.h-declared, EXTERNAL-linkage entry point) is defined further
+// down, OUTSIDE this anonymous namespace — same split as ingest()/unreachableCheck() in this same file:
+// an anonymous-namespace definition would give it INTERNAL linkage, which cannot satisfy ingest.h's
+// declaration. The ln_* helpers above stay in here (internal-only, next to cc_walk/complexityOf which they
+// mirror) and remain visible to that later definition, exactly like ingest()/unreachableCheck() already
+// call plenty of anonymous-namespace-scoped helpers from outside the namespace block in this same TU.
 
 // Q4 PARAMETER COUNT: find the def's parameter-list node and count its formal parameters. Parameter-list
 // node types across our 7 grammars: C++/ObjC `parameter_list`, Python/TS `parameters`/`formal_parameters`,
@@ -5321,9 +5550,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
-            const auto [ cxVal, ccxVal, nestVal ] = fnOrMethod ? complexityOf( defNode, src ) : Complexity{ 0u, 0u, 0u };
+            const auto [ cxVal, ccxVal, nestVal, localsVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
+            d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
             // Q4 size smells (SIZE = master variable): physical LOC = span line count (end row − start row + 1);
             // param count + max nesting for functions/methods only (0 otherwise, absent in emit). All descriptive.
             {
@@ -6621,6 +6851,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             s.cx           = d.cx;
             s.ccx          = d.ccx;
             s.loc          = d.loc;      // Q4: physical line span
+            s.locals       = d.locals;   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang)
             s.params       = d.params;   // Q4: parameter count (fns/methods)
             s.arityExact   = d.arityExact;   // B2.2: params is a fixed call-comparable arity
             s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
@@ -7574,6 +7805,44 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
             stack.push_back( { kids[ i - 1 ], childDepth } );
         }
     }
+}
+
+// local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) — see ingest.h's own comment for the
+// full contract. Definition lives HERE (outside the anonymous namespace above) purely for LINKAGE — it
+// must be externally callable to satisfy ingest.h's declaration — while every helper it calls
+// (ln_extractDeclaratorIdentifiers / ln_declaratorIdentifiers / ln_declDepth / ln_collectLocalDecls) stays
+// anonymous-namespace-scoped next to cc_walk/complexityOf, which they mirror.
+std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, std::uint32_t defStartLine, Lang lang )
+{
+    std::vector<LocalNameFact> out;
+    if( !localsCountedLang( lang ) || defBytes.empty() )
+    {
+        return out;   // MVP scope (model.h::localsCountedLang) — degrade to empty, never assert on a caller mistake
+    }
+    const TSLanguage* grammar = ( lang == Lang::C ) ? tree_sitter_c() : tree_sitter_cpp();
+    TSParser* parser = ts_parser_new();
+    if( parser == nullptr )
+    {
+        return out;
+    }
+    ts_parser_set_language( parser, grammar );
+    TSTree* tree = ts_parser_parse_string( parser, nullptr, defBytes.data(), std::uint32_t( defBytes.size() ) );
+    if( tree == nullptr )
+    {
+        ts_parser_delete( parser );
+        return out;
+    }
+    const TSNode root = ts_tree_root_node( tree );
+    // the def parses as a single top-level function_definition inside a translation_unit — descend into
+    // the translation_unit's children (bounded: one file-worth of def text, already size-capped upstream).
+    const std::uint32_t n = ts_node_child_count( root );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        ln_collectLocalDecls( ts_node_child( root, i ), ts_node_child( root, i ), 512, out, defStartLine, defBytes );
+    }
+    ts_tree_delete( tree );
+    ts_parser_delete( parser );
+    return out;
 }
 
 std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t maxMatches )
