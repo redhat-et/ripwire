@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 346 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 347 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -367,7 +367,7 @@ and these numbers prove **cheaper and faster, not better outcomes**.
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **346 gate scripts**, all of which exist on disk.
+naming **347 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -554,7 +554,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 346. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 347. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -584,7 +584,9 @@ chosen. **It ships no new rule and no new metric** — every number below comes 
 the data is **φ = +0.278**, and pooled over the independent corpora no pair exceeds **+0.168**. The
 families are not restatements of each other. Two other results are less comfortable and are stated
 with equal weight: the **historical** family is too unstable across commits to carry a gate, and the
-**confusion** family reports itself as measured on corpora where it cannot fire at all.
+**confusion** family reported itself as measured on corpora where it cannot fire at all. The second of
+those has since been **fixed** — see §9.6 defect 1; the numbers in this section are the pre-fix
+measurement that found it, and are left as measured.
 
 ### 9.1 Corpora — and the overfitting caveat, stated first
 
@@ -629,7 +631,7 @@ numbers below should be re-derived on any tree where it is deployed as a gate �
 | ripwire | 4 672 | 558 · 11.94% | 900 · 19.26% | 107 · 2.29% | 1 044 · 22.35% |
 | tree-sitter | 1 538 | 190 · 12.35% | 426 · 27.70% | 57 · 3.71% | 55 · 3.58% |
 | gameA | 17 157 | 2 170 · 12.65% | 1 676 · 9.77% | 613 · 3.57% | 892 · 5.20% |
-| rustCLI | 4 068 | 292 · 7.18% | 1 303 · 32.03% | **0 · 0.00%** | **UNAVAILABLE** |
+| rustCLI | 4 068 | 292 · 7.18% | 1 303 · 32.03% | **0 · 0.00%** *(now UNAVAILABLE)* | **UNAVAILABLE** |
 | appleXR | 454 | 45 · 9.91% | 16 · 3.52% | 7 · 1.54% | **UNAVAILABLE** |
 | *ripwire-src* | *1 958* | *482 · 24.62%* | *55 · 2.81%* | *101 · 5.16%* | *558 · 28.50%* |
 | *ctxpack* | *4 027* | *503 · 12.49%* | *825 · 20.49%* | *94 · 2.33%* | *874 · 21.70%* |
@@ -819,7 +821,8 @@ at all.
 
 ### 9.6 What the measurement found wrong
 
-Three defects, reported rather than fixed — this pass ships no behaviour change.
+Three defects. The measurement pass itself shipped no behaviour change; defect 1 has since been fixed on
+its own branch and its entry below records that, so the table above stays the number that found it.
 
 1. **`confusion` reports itself measured on corpora where it cannot fire.** The atom rules are gated
    to C/C++/ObjC (`src/atoms.h::isCFamilyPath`). On rustCLI — 115 Rust files, 4 068 eligible
@@ -830,9 +833,23 @@ Three defects, reported rather than fixed — this pass ships no behaviour chang
    *"a family that could not be MEASURED is reported as unavailable… a missing measurement must never
    read as a clean bill of health"* — this is exactly that case, and `historical`'s handling on the
    same corpus is the correct behaviour standing right beside the incorrect one. It also makes φ
-   undefined for both confusion pairs there. **The fix is a language-coverage precondition on the
-   confusion family, the same shape `historical` already has for a missing git history**; it needs
-   its own gate arm and is deliberately out of scope for a measurement pass.
+   undefined for both confusion pairs there.
+
+   **FIXED.** `src/ensemble.h` now carries a language-coverage precondition on the confusion family —
+   the same shape `historical` already had for a missing git history — decided per corpus from what was
+   indexed, by calling the atom pack's own `atoms::isCFamilyPath` rather than a second copy of its
+   extension list. A corpus with no eligible function in a C-family file reports
+   `unavailable="confusion"` with a reason, and every row's `of=` drops accordingly, so `fam=4` is
+   unreachable there by construction instead of by coincidence. Two supporting changes fell out of it:
+   `unavailable_why=` now carries **one reason per unavailable family** (a single slot kept whichever
+   wrote last, so a Rust tree outside a repository — both families missing — would have shipped one of
+   the two silently), and the root discloses `cfiles=`/`cscope=`/`lscope=` so the verdict is auditable
+   from the output. The `lexical` family was audited for the same defect and given the same
+   per-corpus precondition; `structural` has none to give — its bars and its Posnett rank are computed
+   for every language. Gate: `test/ensembleavailcheck.sh`, which asserts the verdict on a git-backed
+   pure-Rust corpus, the inverse on a C corpus where the family must actually FIRE, both families
+   unavailable at once on a non-git Rust corpus, and — the mutation arm — that adding ONE C file to the
+   Rust corpus moves the verdict back.
 2. **"Worst decile" is not a decile.** See §9.2 — the realized readability cut ranges 0.23%–8.81%.
    The numbers needed to compute it are published; the word is wrong.
 3. **The briefed first data point does not reproduce.** The distribution circulating for ripwire's
@@ -919,9 +936,11 @@ work, and **literally the same 80 symbols** at every commit on the five-day ripw
 **Three things these presets are NOT.** They are not validated against any notion of *actual* defect
 or maintenance cost — nothing here measures whether a `fam ≥ 2` symbol is worse code, only that two
 independent kinds of evidence point at it. They are not tuned per corpus, which is why `strict`
-yields 6.50% on tree-sitter and 0.29% on rustCLI from the same rule. And they are not stable
-under the §9.6 defect: until the confusion family declares itself unavailable on non-C-family code,
-`strict` on a Rust tree is silently `structural + lexical, K ≥ 2` wearing a three-family label.
+yields 6.50% on tree-sitter and 0.29% on rustCLI from the same rule. And the `strict` row for rustCLI has to be read
+with §9.6 defect 1 in mind: on a Rust tree the confusion family cannot apply, so `strict` there is
+`structural + lexical, K ≥ 2`. Since that fix the verb SAYS so — `unavailable="confusion"`, `of="3"` —
+instead of wearing a three-family label silently, which is the difference between a preset with a known
+narrower scope on some corpora and a preset that misreports its own.
 
 ### 9.8 Reproducing this section
 
