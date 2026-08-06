@@ -15,6 +15,28 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Measured — `--ensemble`'s four families are near-orthogonal; one of them cannot carry a gate
+
+A calibration pass over **nine trees (five independent, 27 889 eligible functions)** spanning C, C++,
+ObjC/ObjC++, Metal, Rust, Swift, Python, TypeScript and Bash. No behaviour changed: the new
+`bench/ensemblecal/` harness reads `--ensemble`, `--readability` and `--metrics` and computes
+nothing of its own. Full numbers, per corpus and pooled, in [`docs/EVALS.md`](docs/EVALS.md) §9.
+
+- **The ensemble premise holds.** Largest cross-family correlation anywhere: **φ = +0.278**; pooled
+  over the independent corpora no pair exceeds **+0.168** and the largest overlap between any two
+  families is Jaccard 0.119. The four families are not one signal wearing four hats.
+- **`historical` is disqualified from gating, on measurement.** Across three commit ladders (148 /
+  792 / 1 620 first-parent commits) its flagged set has mean consecutive Jaccard **0.800–0.862** and
+  endpoint Jaccard **0.426–0.546**, against 0.920–1.000 for the other three.
+- **Three named presets, derived from that**: `lenient` = all four families, `fam ≥ 1` (32.22%
+  pooled); `default` = all four, `fam ≥ 2` (4.39%); `strict` = structural + lexical + confusion,
+  `fam ≥ 2` (2.34%) — strict is a *selection*, not a higher K, and its output set is both smaller and
+  measurably steadier than `fam ≥ 3` over all four.
+- **Two honesty defects found and recorded, not fixed here.** The `confusion` family is gated to
+  C/C++/ObjC but does not declare itself unavailable on a corpus with no C-family file (it fires 0 of
+  4 068 on a Rust tree while still counting inside `of=`); and the "worst decile" ordinal cut is
+  capped at 40 rows, so its realized width is **0.23%–8.81%**, not 10%.
+
 ### Added — `--cochange` grows the three things the papers behind it already had
 
 `--cochange`'s `surprising="1"` predicate is an independent implementation of published work, now
