@@ -111,7 +111,20 @@ argvFor()
         *)             return 1 ;;
     esac
 }
-printf '#0 parseArgs at src/cli.h:2100\n#1 serialize at src/serialize.h:900\n#2 main at src/main.cpp:7600\n' > "$TMP/trace.txt"
+# The innermost frame is DERIVED, never pinned. An absolute line number inside a probe is a CORPUS
+# COORDINATE, not a fact about the verb: this file used to write "src/cli.h:2100", and one wave's worth of
+# new --help text pushed that line off validateShapingFlagsHonored — a ~40-line body carrying a 3-call list,
+# and the ONLY part of this document a byte budget can cut — onto a three-line neighbour. The budget then had
+# nothing left to trim, the shaped run came back byte-identical, and the gate reported an entirely HONEST
+# --from-trace as broken. That is the THIRD instance of the inert-probe class this header already documents
+# twice above (--connect/--pr-context, then --pr-context's HEAD~1), and the (B-binds) precondition cannot see
+# it: (B-binds) weighs the WHOLE document against the allowance, and the ~2.9 KB legend keeps that true long
+# after the trimmable part has gone. So anchor on the NAME and let the probe follow the code, and let
+# (B-anchor) below assert that it landed rather than assume it.
+TRACE_FN=validateShapingFlagsHonored
+TRACE_LINE="$( grep -n "^inline void ${TRACE_FN}(" "$ROOT/src/cli.h" | head -1 | cut -d: -f1 )"
+[ -n "$TRACE_LINE" ] || { echo "shapingflagcheck: cannot locate ${TRACE_FN} in src/cli.h — the --from-trace probe has no anchor to derive"; exit 2; }
+printf '#0 parseArgs at src/cli.h:%s\n#1 serialize at src/serialize.h:900\n#2 main at src/main.cpp:7600\n' "$TRACE_LINE" > "$TMP/trace.txt"
 
 # the trim vocabulary the honouring arm accepts as evidence when a budgeted run does not get SMALLER. Kept
 # narrow on purpose: each of these is a statement the verb makes about a cut it performed, not a count that
@@ -177,6 +190,16 @@ while IFS="$( printf '\t' )" read -r verb honorsTop honorsMax; do
         fi
     done
 done < "$TMP/rows.tsv"
+# (B-anchor) the derived probe must actually LAND on the anchor. A rename or a refactor that moves the
+# frame onto some other symbol makes the honouring row above inert again — silently, and with a failure
+# message that blames the binary. This arm names the drift instead.
+"$BIN" . --from-trace="$TMP/trace.txt" >"$TMP/anchor.out" 2>/dev/null </dev/null
+innerFrame="$( grep -o '<frame [^>]*>' "$TMP/anchor.out" | grep 'innermost="1"' | head -1 )"
+case "$innerFrame" in
+    *"n=\"${TRACE_FN}\""*) ok "(B-anchor) the derived --from-trace frame resolved to ${TRACE_FN} (src/cli.h:${TRACE_LINE}) — the probe sits on a trimmable body, not on whatever now occupies a pinned line" ;;
+    *)                     no "(B-anchor) the derived --from-trace frame did NOT resolve to ${TRACE_FN} — it landed on: ${innerFrame:-<no innermost frame at all>}. The honouring row it feeds proves nothing until the anchor is fixed" ;;
+esac
+
 [ "$nNotice" -ge 20 ] && ok "(B) $nNotice ignore-disclosures fired across the table" || no "(B) only $nNotice ignore-disclosures fired (want >=20)"
 [ "$nHonor"  -ge 3  ] && ok "(B) $nHonor honouring rows proved to actually bind (not merely inert)" || no "(B) only $nHonor honouring rows bound"
 
