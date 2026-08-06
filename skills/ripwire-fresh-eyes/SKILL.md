@@ -224,6 +224,19 @@ sections your question needs.
    definitions and `ents=` is a floor; and `ext=` is dominated by locals and parameters, so it is **not** an
    external-dependency count and never enters either ratio.
 
+   **Comments that say nothing — `ripwire <dir> --comment-coherence`.** Per function/method **with a doc
+   comment**, two content measures, most name-restating first: `<fn p="…:41" n="computeTotal" c_coeff="1.000"
+   words="2" restate="2" cic="0.667" c_terms="2" i_terms="3" shared="2"/>`. `c_coeff` (Steidl/Hummel/Juergens,
+   ICPC 2013) is the fraction of the comment's words within Levenshtein distance 2 of a word in the name —
+   **HIGH is BAD**, it means the comment just restates the name (`// compute total` above `computeTotal`
+   scores `c_coeff="1.000"`), the opposite of the naive "high coherence sounds good" reading. `cic`
+   (Scalabrino, ICPC 2016/JSEP 2018) is the Jaccard overlap between the comment's vocabulary and the method's
+   own identifier vocabulary (params, locals, callees, fields) — a different axis, expected to disagree with
+   `c_coeff`, so read both rather than either alone. **UNAVAILABLE, never a zero**, where no doc comment
+   exists at all (counted in `no_comment=` on the root) — this pass never guesses at an absent comment's
+   quality. Different question from `--doc-drift` above: doc-drift asks whether a *markdown* claim is still
+   *true*; this asks whether a *source doc-comment* carries *information* — neither checks the other's axis.
+
 ## Hidden-coupling pass — "a change here keeps breaking unrelated files"
 
 6. **Behavioural coupling** — `ripwire <dir> --cochange`
