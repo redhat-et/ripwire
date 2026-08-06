@@ -176,6 +176,20 @@ sections your question needs.
    unimplemented on purpose; both need a dictionary or a semantic judgment call this verb's design
    deliberately avoids.
 
+   **Local-variable naming, opt-in and explicitly not the default — `ripwire <dir> --lint --naming-locals`.**
+   A `--lint` modifier, not a standalone verb (a no-op without `--lint`): runs `naming-short`/`naming-wordy`/
+   `naming-underscore`/`naming-case` — the same tags, same predicates as the Symbol-scoped checks above —
+   against LOCAL variable names too, C/C++ only, and only where the risk is real: inside a function that
+   already clears an existing size/complexity gate (`loc>80 OR nest>4 OR ccx>=15`) AND has `locals>=8`
+   (measured, not guessed: median 9 among this repo's own 377 gated functions). `naming-short` additionally
+   requires the local's own declaration depth `>=2` — a depth-1 `int n = argc;` never fires, a nested
+   `int x` two blocks deep can. This deliberately reverses `naminglens.h`'s own stated invariant ("an
+   un-indexed loop local can never be flagged") — read the WITHDRAWN note atop that file before trusting it.
+   **NOT enabled inside a plain `--lint` run and not a candidate for that yet**: the plan's own hard blocker
+   (a hand-curated fixture corpus AND a manual real-corpus audit for idiomatic-short-name skew — `i`/`j`/`k`/
+   `buf`/`tmp`/`err`) has not run. Treat a `--naming-locals` finding as a candidate to eyeball, not a verdict,
+   until that audit lands.
+
    **Your own rules** — `ripwire <dir> --lint-rules=DIR` loads YAML ast-grep-style rules from `DIR` and runs
    them alongside (or instead of) the built-ins; findings share the same `<f rule= sev= p= …>message</f>`
    shape. A malformed rule alerts to stderr and is skipped (sibling rules still load); zero loaded rules
