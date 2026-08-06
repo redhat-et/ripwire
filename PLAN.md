@@ -193,7 +193,7 @@ created by today's own gate-suite runs — the leak is ONGOING (~31k files/day o
 branch is **`integration/all`** (worktree `.claude/worktrees/integration`). Nothing is pushed. The
 full research record — every citation existence-verified — is **NOT in this repo** (`ripwirepubliccheck`
 arm 6a blocks `DESIGN_*` filenames); it lives in the private ledger at
-`ctxpack research/2026-08/DESIGN_READABILITY_METRICS.md`, with an untracked working copy at the
+the private ctxpack ledger under `research/2026-08/` (filename intentionally not spelled here — arm 8), with an untracked working copy at the
 ripwire root. Read it before extending any of this; §-numbers below refer to it.
 
 ### Landed on `integration/all` (suite green: 352 gates, 349 pass, 3 skip, 0 fail)
