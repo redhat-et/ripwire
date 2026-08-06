@@ -155,7 +155,7 @@ recorded output. Each family below links there.
 | [**understand a codebase cold**](docs/COMMANDS.md#understand-a-codebase-cold) | "What is this repo, and what matters in it?" | `--for` · `--tree` · `--lego` · `--exemplar` · `--recall` · `--top-k` · `--token-budget` · `--max-tokens` |
 | [**navigate / answer a question**](docs/COMMANDS.md#navigate--answer-a-question) | "Who calls this? Is it safe to change? Which tests?" | `--callers` · `--callees` · `--uses` · `--impact` · `--path` · `--connect` · `--affected` · `--situ` · `--test-gate` · `--grep` |
 | [**zoom the detail ladder**](docs/COMMANDS.md#zoom-the-detail-ladder) | "Show me more — but only where it pays." | `--detail` · `--pack-signatures` · `--outline` · `--expand` · `--compress` |
-| [**assess quality / structure**](docs/COMMANDS.md#assess-quality--structure) | "Where is the risk, and did I just add some?" | `--hotspots` · `--clones` · `--metrics` · `--deps` · `--lint` · `--quality-delta` · `--edit-check` · `--pr-context` · `--merge-scout` |
+| [**assess quality / structure**](docs/COMMANDS.md#assess-quality--structure) | "Where is the risk, and did I just add some?" | `--hotspots` · `--clones` · `--metrics` · `--deps` · `--lint` · `--quality-delta` · `--dmm` · `--edit-check` · `--pr-context` · `--merge-scout` |
 | [**self-diagnosis**](docs/COMMANDS.md#self-diagnosis) | "Is my setup actually working?" | `--doctor` |
 | [**security**](docs/COMMANDS.md#--scan-skillsdir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
 | [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--mcp` |
@@ -448,7 +448,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**30 repositories and 51 papers** into one deterministic executable, alongside a labelled
+**31 repositories and 52 papers** into one deterministic executable, alongside a labelled
 survey of 220 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
