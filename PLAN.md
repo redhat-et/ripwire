@@ -296,3 +296,322 @@ them before trusting any before/after measurement.
 
 Still open at 97% budget: wave 3 (`wf_0eab98ba-d7d`) was mid-Metrics phase — name-informativeness,
 comment-coherence, DMM, then the panel, skills and land. Nothing pushed.
+
+## 2026-08-06 (later) — four follow-up tasks: skills audit, stop-rule audit, Tier-A verb, README
+
+**All four DONE, gate suite green (358 gates, 355 pass, 3 skip, 0 fail), nothing pushed.** Worked
+straight in `.claude/worktrees/integration` (not a new branch) since the prior wave's work was
+already merged into `integration/all` before this session started.
+
+1. **Skills audit.** Found the prior wave's `feat/skills-quality-panel` merge had already done most
+   of the rewire — `--quality-panel` documented as THE SINGLE COMMAND in `ripwire-fresh-eyes`,
+   cross-referenced from `ripwire-quality-bar`/`ripwire-router`, all the new verbs (`--context-ratio`,
+   `--nonlocal-state`, `--comment-coherence`, `--naming-calibration`, `--dmm`, `--ensemble`,
+   `--field-affinity`) already routed. Real gap: `ripwire-quality-bar`'s own frontmatter description
+   never mentioned `--quality-panel` at all (the thing driving BM25-desc routing) — fixed. All skill
+   gates (`skilltruthcheck`/`skillinstallcheck`/`skillevalcheck`/`skillevalsplitcheck`) green before
+   and after.
+2. **Stop-rule audit.** Timed the "first call" of every skill with a stop rule on this repo, warm:
+   `--edit-check` ~73ms, `--pr-context` ~202ms, `--quality-delta` ~585ms, `--exemplar` ~94ms,
+   `--seams` ~28ms, bare report ~28ms — all sub-second. Loosened the two highest-traffic rules that
+   were gating a genuinely cheap call: `ripwire-quality-bar`'s "one-line fix skips the pass" now
+   means skip the LOOP (drill-down/ack/dmm), not the one-shot `--quality-delta` call itself;
+   `ripwire-change-check`'s "one-line fix skips this skill" now requires `--edit-check=SYM` (~ms)
+   first, only a genuine `unchanged` result earns the full skip. Kept `ripwire-orient`'s "stop at the
+   first rung" (already asymmetric-safe — it says stop AFTER a cheap call answers, not before one),
+   `ripwire-reuse-first`'s edit-vs-new-symbol distinction (the skill's premise genuinely doesn't apply
+   to a same-symbol edit), and the "one call, don't stack the whole battery" rules in
+   `ripwire-fresh-eyes`/`ripwire-write-tests`/`ripwire-navigate`/`ripwire-find-bug` (post-answer
+   ceilings, not pre-answer skips — the safe direction of the asymmetry).
+3. **Remediation gap — built `--naming-consistency`, a real new C++ verb** (not just a docs pass —
+   no Tier-A infra existed anywhere; `naminglens.h`'s `tokensAgree` was sitting there with "no caller
+   today" for exactly this). Scoped to the SAFEST Tier-A category only: convention normalization
+   (case style), deliberately not abbreviation/synonym unification — those need a dictionary or
+   semantic judgment, which is the exact trap that produced the withdrawn `naming-body-mismatch`
+   rule. Votes the corpus's own dominant case style (camel/pascal/snake/screaming) per
+   `(language, kind)` group, decided only past a 20-name sample floor AND 90% agreement;
+   off-convention names in a decided group get `propose=`, their own subtokens mechanically
+   recombined — no dictionary, no invention. Lens, exit 0 always; `propose=` is explicitly a
+   suggestion, not a safe-to-apply rename (that needs `--uses` + the §9.3 contract, not implemented
+   here). New file `src/namingconsistency.h`; gate `test/namingconsistencycheck.sh` (14 assertions
+   incl. a mutation arm that flips 10/27 names and proves the verdict moves — not hardcoded).
+   Dogfooded on ripwire's own `src/`: correctly calls camelCase dominant (1939/2111, 91.9%) and
+   flags real PascalCase outliers (`SpanIndex`, `DoNotOptimize`, `UnionFind`, …) — some of which are
+   deliberate (Google-benchmark-style helpers), which is exactly the kind of judgment `propose=`
+   leaves to the reader rather than auto-applying.
+   - **Refactor along the way**: `htmlexport.h` had a private `langLabel()` duplicating exactly what
+     the new verb needed — moved to `model.h` as `langTag()` next to `symTag()` (the existing
+     canonical-label pattern), both old call sites updated. Reuse-before-reinvent, not scope creep.
+   - **Wiring touched more than the verb**: `kTotalFlagArms` static_assert (164→165, per the standing
+     trap warning), TWO separate paging-honored-verb lists (`kPagingHonoringVerbs` runtime string AND
+     a hand-maintained `--help` HONORED-by prose list — `testgatepagecheck.sh` PC-2 catches them
+     drifting apart), `docs/EVALS.md`'s 3-place gate count (352, via `manifestcheck.sh`),
+     `docs/COMMANDS.md` regenerated, and the new file had to be `git add`ed before
+     `ripwirepubliccheck` arm 7 (include-closure) could see it — untracked files are invisible to
+     `git ls-files`, which is what arm 7 walks.
+   - **Line-number drift, exactly the trap the notes above warn about**: adding lines to `main.cpp`
+     shifted `readmeexamplecheck`'s pinned `--callers=rankGraphTeleport` example by +9 lines
+     (9239→9248, 9275→9284) — re-derived from a live run, not hand-arithmetic'd.
+4. **README, four numbers re-measured on this exact tree** (not copied from prose): panel shortlist
+   4,866 eligible → 402 at 2-of-6 agreement (8.3%, freshly run); cross-family correlation +0.168 max
+   pooled φ (already current in `docs/EVALS.md` §9.9.2, dated 2026-08-06 — verified consistent with a
+   spot-check on `src/` rather than re-running the full 5-corpus study); head-to-head win–loss records
+   (17–2 repowise, 16–2 Aider — already current, just led with instead of buried) and cold-parse
+   timing (self-measured on this repo: 603 files, ~0.15s cold/~0.10s warm, reproducible; the existing
+   1,560-file/~1s number is a private, non-reproducible corpus and stays labeled as such rather than
+   being re-measured under a different name — see `docs/OPTREMARKS.md` §5/§5b for the actual dated
+   LTO/PGO study, cited rather than re-run since re-running the full PGO 2-phase build was judged not
+   worth the wall-clock for a number already rigorously measured in-tree). Added a 4th opening bullet
+   (agent-code-rot motivation, GitClear 2026 citations already used elsewhere in the tree) and a new
+   "code-quality panel" subsection with real Halstead/Posnett/Peitek/Beck&Diehl/Chilimbi citations and
+   three dogfooded proof-points (`computeQualityDelta`'s 99.6% read_ratio, `ensure_global_init`'s
+   3-cell non-local reach, `MainDispatch`'s 12 field-affinity findings) — real numbers off this
+   repository's own source, not synthetic examples. **Caught myself overclaiming**: first draft said
+   "every number above is re-derived by a gate," which is false (only the flag count actually is) —
+   corrected before it shipped.
+
+**Traps hit this round, worth adding to the standing list**: (a) a brand-new `.h` file must be
+`git add`ed before `ripwirepubliccheck`'s include-closure arm can resolve `#include`s to it — an
+untracked file reads as a closure break, not as "new file, ignore." (b) There are TWO paging-honored
+verb lists in `src/cli.h` (the runtime refusal string and a separate `--help` prose list) —
+`testgatepagecheck.sh` is the only gate that catches them diverging; a change to one without the
+other passes every other gate. (c) `%` in a `--help` string is a live printf format spec — `90%
+agreement` in help text needs `90%%` or the build warns and the literal `%` is swallowed.
+
+Not attempted this round (out of scope for the four tasks given): PLAN item 2 ("what we refused to
+ship, and why" — the anti-fad graveyard section) and item 3's remaining tool-vs-command roadmap
+bullets (filter-not-replacement, task-handle state, actionable `amb=` limits). Also not attempted:
+indexing local variables (raised mid-session as a real gap — `naminglens.h`'s own eligibility rule
+explicitly excludes function-local names, "params and locals are not indexed," so a 1000-line
+function's 50 poorly-named locals are invisible to every naming rule today, and there is no
+local-variable-count metric at all — a legitimate future-wave candidate, not touched here).
+
+## 2026-08-06 (evening) — local-variable-indexing plan, orchestrated
+
+Produced by a 11-agent Workflow (survey per language family → design → 3-way adversarial review →
+merge), NOT implemented — a plan only, per the local-variable gap flagged in the section above.
+
+**Process note, worth recording so it doesn't repeat.** The workflow's agents defaulted to the
+session's PRIMARY working directory (`/Users/qgames/AppDevelopLocal/project2/ripwire`, branch
+`docs/readme-frontpage`) rather than this integration worktree, because the launch prompt used
+relative paths (`src/naminglens.h`) with no explicit root. The primary root has NONE of this
+session's work — no `naminglens.h`, no `namingconsistency.h`, no `fieldaffinity.h`. **Always pass the
+absolute worktree path explicitly in a Workflow agent's prompt** — relative paths silently resolve
+against the wrong checkout, and a background agent has no way to notice unless it independently
+verifies (which this one did — see below). The design agent's own "Grounding note" caught the
+mismatch, refused to invent file content, and re-fetched real `naminglens.h` text via `git show` on
+`feat/name-informativeness` instead — good self-correcting behavior, but it means every line-number
+citation below is grounded ~10 lines stale (the file grew between that branch and this worktree's
+current `naminglens.h`, 1022 lines) and it wrongly claimed **`src/namingconsistency.h` does not
+exist** — it does; it shipped earlier this same session (see above). Verified directly against this
+worktree before writing this section: `checkNameShape` is at `naminglens.h:526` (plan says 515-598,
+so the ~11-line drift is consistent and mechanical, not structural); `RuleSink::tallies[9]` and
+`renamemine.h`'s `kRuleCount=8` position-pinning (which Open Question 3 below depends on) are
+EXACTLY as the plan assumed — verified, not just trusted.
+
+**Verdict: the design is sound, only the line-number citations and the namingconsistency.h footnote
+need refreshing before implementation — not a re-plan.** `namingconsistency.h` should be read
+alongside `naminglens.h` as a second, more-recent house-style exemplar when this gets built (it's the
+newest lens in the tree, landed this same session, and already demonstrates the exact
+legend/gate/mutation-control pattern this plan calls for).
+
+### The plan (verbatim from the workflow's final merge, corrections above apply)
+
+**Phase 1 — `locals` count, threaded through the existing walk.** One `std::uint32_t locals` field on
+`Symbol`, populated by extending `ingest.cpp`'s existing fused-DFS complexity walk (the same one that
+already computes `cx`/`ccx`/`maxNest`) — zero new tree-sitter queries, zero new indexed symbols, zero
+new allocation-heavy passes. Requires a `kParserVer` cache-format bump (same commit) and a
+`RuleSink`-style floor marker (`locals_floor="1"`) rather than prose-only disclosure. Gate:
+`test/localscountcheck.sh` — three fixture functions with distinct hand-counted local counts (a
+single-constant-stub implementation cannot pass all three), a floor-boundary fixture asserting known
+declarator shapes (if-init, switch/case, catch-clause, structured bindings, lambda init-captures) are
+NOT counted, a language-omission fixture proving `locals=`/`locals_floor=` are ABSENT (never `"0"`)
+for a language Phase 1 doesn't cover, and a stale-cache fixture proving the version guard rejects a
+pre-bump cache blob rather than silently misreading it.
+
+**Phase 2 — gated naming predicates on local names.** Prerequisite: none further (naminglens.h is
+already landed in this worktree). Deliberately breaks naminglens.h's own stated invariant ("an
+un-indexed loop local can never be flagged") — stated explicitly as the point of this phase, not
+hidden. A second, name-capturing walk runs ONLY for functions clearing an existing size/complexity
+gate (`loc>80 OR maxNest>4 OR ccx>=15`, all three reused unchanged from `main.cpp`'s shipped
+`large-function`/`deep-nesting` rules) AND `locals>=8` (new, unmeasured — Open Question 1). Captured
+locals are lightweight non-owning `LocalNameFact{string_view name; line; declDepth}` records, never
+promoted to `Symbol`/`NodeId`/the graph. `checkNameShape` is split into a shared
+`checkNameShapeCore` (existing `Symbol`-based callers unchanged) plus a new `checkLocalNameShape`
+entry point; `naming-short` additionally requires the local's own `declDepth>=2` (nested, not the
+function's outermost block) — a per-local gate on top of the per-function one, added specifically
+because gating only at function level reproduces the withdrawn `naming-body-mismatch` rule's failure
+shape (plausible, wrong axis). Explicitly out of scope: `naming-predicate`/`naming-setter` (need a
+known return type, not transferable) and `naming-confusable`/`naming-uninformative` (corpus-scale,
+folding locals in risks the blow-up this design avoids).
+
+**Phase 3 — composite finding.** A `--lint` tag (`large-function-bad-locals`, NOT a `quality.h`
+`Regression` — a standing fact about the current tree has no `was`/`now` shape), firing once per
+gated function when the count of Phase-2-flagged locals clears a threshold `K` (Open Question 5,
+unmeasured). Both `N` (flagged count) and `M` (total locals) carry the same floor caveat — both come
+from the same undercounting walk, neither is "exactly known."
+
+**MVP scope: C/C++ (ObjC/ObjC++ fast-follow) only, not all 14 languages** — highest locals/function
+ratio in the survey (5-15/fn vs 3:1 Python, 0.2-0.8 Go/Rust), and `main.cpp`'s existing
+`large-function`/`deep-nesting` gate Phase 2 extends is *already* C-family-only, so this is extending
+shipped code rather than building a new cross-language subsystem. Go/Swift need a Swift-style
+post-capture filter for a DIFFERENT reason (query-layer scope conflation) that this walk-scoped
+design sidesteps — real second-wave candidates, not intrinsically harder here, just lacking an
+existing gate to piggyback on.
+
+**Hard blocker on default-enable, not a nice-to-have:** `renamemine.h`'s calibration join requires
+the new name to be `naminglens::eligibleSymbol` (indexed at HEAD) — locals are never indexed by
+Phase 1's own design, so `test/namingcalibrationcheck.sh` cannot calibrate a local-scoped rule as it
+stands. Required before default-enable: a hand-curated fixture corpus (Phase 2's fixtures A-E) AND a
+manual audit of flagged output on a real corpus (ripwire's own `src/`) checking for skew toward
+idiomatic-but-short names (`i`/`j`/`k`/`buf`/`tmp`/`err`) — cited against this exact lens's own
+history: `naming-body-mismatch` passed its fixture gate, shipped, and was only caught 4.5 hours later
+by a MANUAL audit of real output (159/217 findings dominated by the tree's best-named functions); the
+calibration harness built afterward produced zero usable signal (13 pairs, no scorable firings) on
+this same repo. Fixtures alone are demonstrated-insufficient on this exact lens, not hypothetically
+insufficient.
+
+### Open questions (unmeasured thresholds, need a human call before implementation)
+
+1. `locals>=8` — invented, not measured; ship Phase 1 alone first, look at the real distribution,
+   then set this floor.
+2. ~~Message-text fork~~ — resolved (the `checkNameShapeCore` extraction gives locals accurate text).
+3. Tag namespace — reuse existing tags with a `scope="local"` qualifier (recommended) vs new
+   `-local`-suffixed tags, which would extend the position-pinned `tallies[9]`.
+4. Validation path/timeline before default-enable — the fixture+audit combination is required, the
+   `renamemine.h` extension is a condition for staying enabled past a trial period; exact trial length
+   and audit sign-off owner is a real scope call, not a default to pick silently.
+5. Composite `K` — same measure-don't-guess problem as #1.
+6. Whether Phase 3 eventually feeds `--quality-delta` (regression view) vs staying `--lint`-only
+   (standing-facts view, recommended for MVP).
+7. Branch/merge sequencing note is now MOOT in this worktree (naminglens.h/renamemine.h are already
+   landed here) — re-check only if this plan is executed against a different checkout.
+8. How far the `declDepth>=2` gate goes toward closing the idiomatic-short-name false-positive class —
+   explicitly does not fully solve it (a deeply-nested loop counter still clears the gate); resolve
+   via the required real-corpus audit, not by inventing a further threshold here.
+
+Not started. Waiting on: the access-shape/chase-pointer cache-friendliness workflow (still running at
+time of writing) to land, so both plans get reviewed together rather than piecemeal.
+
+## 2026-08-06 (evening, cont.) — access-shape / chase-pointer colocation plan, orchestrated
+
+Produced by a 10-agent Workflow (4 independent web-backed prior-art searches → design → 4-way
+adversarial review incl. a dedicated novelty-refuter → merge). NOT implemented — a plan only. This
+one's design agent caught the same checkout-mismatch risk the local-variable workflow hit, but
+avoided it: it explicitly read `src/fieldaffinity.h`/`docs/FIELDAFFINITY.md` from THIS integration
+worktree rather than the primary session directory, and separately caught that the task prompt's
+pointer to `docs/LINEAGE.md` for the "Gated-claim wording" pattern was wrong — that section actually
+lives in `DESIGN_READABILITY_METRICS.md` — and used the real location instead of trusting the prompt.
+Good precedent: state the absolute worktree path explicitly next time regardless, since this
+self-correction was diligence, not a guarantee.
+
+### Novelty verdict: RARE BUT REAL — survived an adversarial check, not just a first pass
+
+The underlying engineering INSIGHT (colocate a linked structure's chase/next pointer near its hot
+payload fields, since the cache-line fetch to dereference it is unavoidable) is **COMMODITY** —
+settled practitioner folklore (Boost.Intrusive's own performance docs; Chandler Carruth's CppCon 2014
+talk; CMU's unpublished "Object Fusion" course project names the exact failure mode). Cited, not
+claimed, matching how `fieldaffinity.h`'s own header already handles Chilimbi/Hundt.
+
+The DETECTION-AND-PRIVILEGING MECHANISM — static, no-execution, source-level classification of a
+traversal's access shape (index vs. pointer-chase) that then privileges the specific chase-pointer
+field in an automated field-colocation check, surfaced as compile-time review advice — is **RARE BUT
+REAL**: not found after two independent multi-angle searches. The first (research phase, 14 academic
+queries + 8 industrial tool catalogs + a patent search) found the two closest structural cousins —
+**Marmoset** (ECOOP 2024, arXiv:2405.17590 — a static compiler that auto-synthesizes packed ADT
+layouts, but an automatic transform, not developer advice, and functional-ADT-scoped not general
+C/C++) and the unpublished **"Object Fusion"** CMU project (names the exact problem, but requires
+manual developer annotation of key/next accessors, not detection). The SECOND, independent search (a
+dedicated novelty-refuter agent, explicitly told to try to kill the claim rather than confirm it, run
+against a non-overlapping set of sources) additionally checked DMon (OSDI'21), DINAMITE,
+Intel Advisor, PerfLint, and Lattner's LLVM Data Structure Analysis / Automatic Pool Allocation —
+all fail on at least one of the two required prongs (require execution, or do generic/uniform field
+colocation with no chase-pointer-distinguished case, or classify for a different consumer like
+hardware prefetcher design). Neither search found a counter-example. Both are explicitly hedged as
+"a genuine search that failed to find a counter-example, not a formal patent clearance" — no full
+ACM DL/IEEE Xplore pass, no USPTO classification-code search.
+
+**SAFE claim** (for `docs/LINEAGE.md` if/when this ships): *"No shipping static-analysis tool, and no
+published academic work found in a multi-angle search (independently repeated by a second search
+covering a non-overlapping source set), combines (a) a purely static, no-execution, no-debug-info
+classification of a loop or traversal function's access shape as index/handle-based versus
+pointer-chase-based with (b) a chase-pointer-specific field-colocation check that treats the
+traversal pointer as a distinguished, higher-priority case of pairwise field affinity, surfaced as
+compile-time code-review advice."* Full UNSAFE-wording table (five specific overreach claims, each
+refuted by a named citation) and the complete prior-art citation set are in the workflow's saved
+output; ready to paste into `docs/LINEAGE.md` verbatim if the feature ships.
+
+### The plan (verbatim from the workflow's final merge)
+
+**Recommendation: extend `--field-affinity`, don't ship a new flag.** Stage 1 (aggregate modeling)
+and Stage 2 (member-access enumeration) already do the expensive part this needs; a second verb would
+either double the modeling cost or import `fieldaffinity.h` as a dependency of itself.
+
+**Phase A — access-shape classification (new).** New file `src/accessshape.h`. Classifies each
+loop/recursive traversal as `index` / `chase` / `mixed` / `unknown`, via declarative `TSQuery`
+patterns run through the codebase's EXISTING re-query mechanism (`astQuery()`, `ingest.cpp:7175` —
+already backs `--lint`, the atoms-of-confusion pack, and `--nonlocal-state`'s cell discovery), not a
+hand-rolled byte scanner and not a false reuse of parse-tree state (ingest calls `ts_tree_delete` at
+every parse site — no tree survives to reuse). Self-referential chase-field detection (does a field's
+declared type contain the enclosing struct's own name) handles 7 cases including typedef aliases,
+templates, smart-pointer unwrapping, and cross-aggregate multi-hop links; an ambiguous stem matching
+2+ modeled aggregates is REFUSED and disclosed (`stem_ambiguous=`), matching the file's existing
+`ambSkipped`/"refuse rather than guess" convention, never a first-seen-order guess. `unknown` fails
+closed by construction — a query that doesn't match emits no signal, never a wrong one.
+
+**Precision traps the design explicitly fixtures, not just describes**: a constant-stride pointer walk
+over a flat buffer with an arrow-deref BODY (`for(Node* p=first; p!=first+n; ++p) p->touch();`) must
+classify `index` — the advance is pointer arithmetic on `p`, not a field read — despite the `->` in
+the body; its near-twin differing only in the advance expression
+(`for(Node* p=head; p; p=p->next) p->touch();`) must classify `chase`. An STL iterator's `++it` must
+not collapse into the chase shape (`operator++`, not a field read). A single loop carrying BOTH an
+index signal and a chase signal at once (not two separate loops) must classify `mixed`. These are the
+minimal discriminating pairs the correctness review specified are necessary, not decorative.
+
+**A required, explicit cost ceiling** (new section added by the scale-perf review) — an
+`kMaxAggsModeled`-style skip threshold above a stated complexity band, disclosed via a floor counter,
+hooked into the existing `perfharnesscheck`/`spectimingcheck` gates; a reference-corpus wall-clock
+number is REQUIRED before Phase A leaves report-only status, not shipped unmeasured.
+
+**Phase B — chase-pointer colocation (refinement, conditional on Phase A).** Not a new finding kind —
+`--field-affinity`'s existing two-finding-kind contract (`split-line`/`straddle`) stays untouched. A
+chase-target field's `sepCost` contribution gets a named, disclosed boost multiplier
+(`kChaseSepCostBoost`) applied inline at the exact accumulation point, before the existing
+`sepCost desc → findings.size() desc → name asc → path asc` sort — stated explicitly so the boost
+can't silently break the file's determinism contract. The boost's actual numeric value is explicitly
+NOT claimed as measured until `bench/bench_chase_ab.cpp` (a new A/B harness, same pattern as
+`bench_field_ab.cpp`) produces a real number under a real `p=p->next` traversal — citing this file's
+own §5.3 precedent, where the split-arm hypothesis inverted at stride 1, as the reason to distrust an
+unmeasured constant here too.
+
+**Validation methodology — three required elements, not implicit:**
+1. Fixture gate (`test/accessshapecheck.sh`) — exact-match against every labelled trap case above,
+   `fieldaffinitycheck.sh`'s own assertion style.
+2. **A required, NOT optional, real-corpus precision/recall session** against THREE corpora — a
+   chase-heavy positive corpus (intrusive-list/tree-style C/C++), ripwire's own `src/` as a negative
+   control, AND a third corpus specifically added because ripwire's own SoA-heavy source is a WEAK
+   adversarial test for the false-positive risk that matters (G2 keeps `->` density low there, so a
+   near-zero chase rate doesn't stress the index/chase boundary) — an ordinary iterator/pointer-arithmetic-heavy
+   modern-C++ codebase is the actual precision stressor. Reviewed BLIND — the classifier's own label
+   is hidden until after the reviewer records an independent judgment — closing the exact
+   "did I validate this or just confirm my own heuristic" trap the withdrawn naming rule fell into.
+3. **A declared shipping floor**: >=85% precision on the `shape_conf="self-ref"` flagged set before
+   Phase B may consume it for anything ranking-affecting. Missing the floor keeps Phase A permanently
+   report-only — no all-or-nothing kill decision, no silent promotion past a floor nobody checked.
+
+### Open questions (need a human decision)
+
+1. The perf ceiling's exact threshold value — mechanism specified, number needs a real bench run.
+2. Should a bare iterator loop (`for(auto it=v.begin(); ...; ++it)`) ever classify `index` rather than
+   `unknown`? Proposed default: `unknown` (fails closed); revisit only if real-corpus recall numbers
+   show this is a material miss.
+3. Indirect range-for targets (`for(auto& x : *getItems())`) — safe default is `unknown`; deeper
+   resolution through call returns/view adaptors is explicitly out of scope for v1.
+4. `kChaseSepCostBoost`'s value — needs `bench/bench_chase_ab.cpp`, not a guess.
+5. Whether the disclosed template-self-ref false-positive gap (`Node<Key>* cachedLookup` unrelated to
+   traversal, still labelled self-ref under `tmpl_approx="1"`) should be narrowed in v1 or shipped
+   disclosed — explicitly flagged as worth a second opinion given its parallel to the withdrawn
+   naming rule's failure shape, not decided unilaterally in this plan.
+
+Not started. Both this plan and the local-variable-indexing plan above are now written up and ready
+for a future session to pick up — neither has been implemented this session.
