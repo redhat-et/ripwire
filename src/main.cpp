@@ -21,6 +21,7 @@
 #include "situ.h"
 #include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
 #include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
+#include "contextratio.h" // --context-ratio: the LOCAL-REASONING lens (outside-the-file share of a unit's context)
 #include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
 #include "ensemble.h"   // --ensemble: the family join over structural / lexical / confusion / historical evidence
 #include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
@@ -3544,6 +3545,16 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         const rw::SinceScope       noScope;
         const bool                 churnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), noScope, rw::ensemble::kEnsembleChurnSince, churn );
         return rw::ensemble::writeEnsembleReport( ing, churnOk ? &churn : nullptr, root, cfg.pageLimit, cfg.pageOffset );
+    }
+
+    // --context-ratio: the LOCAL-REASONING lens (src/contextratio.h owns the measurement AND its emission, the
+    // way --readability and --ensemble own theirs). It reads the symbol table and the REFERENCE table — the
+    // same substrate --uses reports — and needs neither the resolved call graph nor git, so it sits with the
+    // other pure lenses: exit 0 always, no verdict, no threshold. The reference table only carries value
+    // read/write sites when ingest ran RICH, which is why cfg.contextRatio joins needsValueUses below.
+    if( cfg.contextRatio )
+    {
+        return rw::contextratio::writeContextRatioReport( ing, cfg.pageLimit, cfg.pageOffset );
     }
 
     // --hotspots: the maintenance-pain map = per-file (Σ cognitive complexity) × (recent git churn).
@@ -10789,7 +10800,8 @@ int main( int argc, char** argv )
     // changed. Verified output-identical to a cold parse (regression: cache transparency).
     // A4-P4: the verb class (rich=captureValueUses vs lean) is needed BEFORE choosing the auto-cache path
     // so each class keys its own warm cache file (no cross-class thrash). Rich = --for/--metrics/--uses/--exemplar.
-    const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty();
+    const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
+                                || cfg.contextRatio;   // the local-reasoning lens counts read/write sites, which only the RICH parse carries
     IngestResult ing;
     if( multiRoot )
     {

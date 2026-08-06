@@ -111,6 +111,7 @@ ROSTER = [
     ("clones",             [ROOT,  "--clones"]),
     ("readability",        [SMALL, "--readability"]),
     ("ensemble",           [SMALL, "--ensemble"]),
+    ("context-ratio",      [SMALL, "--context-ratio"]),
     ("cochange",           [ROOT,  "--cochange"]),
     ("cochange-file",      [ROOT,  "--cochange=src/cli.h"]),
     ("owners",             [ROOT,  "--owners"]),
