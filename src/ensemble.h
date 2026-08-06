@@ -121,6 +121,75 @@ enum : std::uint8_t
 
 inline constexpr std::array<const char*, kFamilyCount> kFamilyNames = { { "structural", "lexical", "confusion", "historical" } };
 
+// ── THE FAMILY-VOCABULARY HELPERS, written ONCE over a (count, name lookup) pair ──────────────────────────
+// Three operations are pure functions of "a bitmask over a family table": name the set bits, mark one family
+// unavailable keeping the first reason, and render the per-family reasons. They live out here rather than
+// inside this verb because a SECOND verb (src/qualitypanel.h) has a LONGER family table and needs exactly
+// these three — and a second copy of them is how one report ends up naming a family the other stopped using.
+// The name lookup is a function pointer rather than a std::array so a caller whose table is assembled from two
+// pieces (the panel reads these four names from THIS table and appends its own) can still share the code.
+using FamilyNameFn = const char* ( * )( std::uint8_t );
+
+inline const char* ensembleFamilyName( std::uint8_t family ) noexcept
+{
+    return kFamilyNames[family];
+}
+
+// The comma-joined names of the families in `bits`, in family order — a total order over a fixed table, so
+// the string is deterministic without a sort.
+inline std::string familyListOf( std::uint8_t bits, std::uint8_t familyCount, FamilyNameFn nameOf )
+{
+    std::string out;
+    for( std::uint8_t family = 0; family < familyCount; ++family )
+    {
+        if( ( ( bits >> family ) & 1u ) != 0 )
+        {
+            if( !out.empty() )
+            {
+                out += ',';
+            }
+            out += nameOf( family );
+        }
+    }
+    return out;
+}
+
+// Mark one family unavailable, KEEPING THE FIRST reason. First-writer-wins is the rule because the specific
+// reason is always written before the general one: a family's own precondition names which case fired before
+// the eligible-set guard would overwrite it with "nothing was eligible". A family already unavailable stays
+// unavailable — the mask is an OR, so the order of these calls cannot change the verdict, only which sentence
+// explains it.
+inline void markUnavailableIn( std::uint8_t& mask, std::string* why, std::uint8_t family, const char* reason )
+{
+    mask |= std::uint8_t( 1u << family );
+    if( why[family].empty() )
+    {
+        why[family] = reason;
+    }
+}
+
+// The per-family reasons as `family: reason` segments, in family order. Empty when every family was measured,
+// which is exactly what an empty unavailable= means.
+inline std::string unavailWhyListOf( const std::string* why, std::uint8_t familyCount, FamilyNameFn nameOf )
+{
+    std::string out;
+    for( std::uint8_t family = 0; family < familyCount; ++family )
+    {
+        if( why[family].empty() )
+        {
+            continue;
+        }
+        if( !out.empty() )
+        {
+            out += " | ";
+        }
+        out += nameOf( family );
+        out += ": ";
+        out += why[family];
+    }
+    return out;
+}
+
 // The worst decile of a ranking, never wider than the ranking verb's own default window and never narrower
 // than one row. Zero rows in, zero out — a cut over nothing must not manufacture a row.
 inline std::size_t ordinalCut( std::size_t rankedCount, std::size_t windowCap ) noexcept
@@ -179,18 +248,12 @@ struct EnsembleScan
 namespace detail
 {
 
-// Mark one family unavailable, KEEPING THE FIRST reason. First-writer-wins is the rule because the specific
-// reason is always written before the general one: rankChurn names which of its two git cases fired before
-// the eligible-set guard below would overwrite it with "nothing was eligible". A family already unavailable
-// stays unavailable — the mask is an OR, so the order of these calls cannot change the verdict, only which
-// sentence explains it.
+// Mark one family unavailable — the shared first-writer-wins rule above, bound to this verb's scan. Here
+// the specific reason is always written before the general one: rankChurn names which of its two git cases
+// fired before the eligible-set guard below would overwrite it with "nothing was eligible".
 inline void markUnavailable( EnsembleScan& scan, std::uint8_t family, const char* why )
 {
-    scan.unavailMask |= std::uint8_t( 1u << family );
-    if( scan.unavailWhy[family].empty() )
-    {
-        scan.unavailWhy[family] = why;
-    }
+    markUnavailableIn( scan.unavailMask, scan.unavailWhy, family, why );
 }
 
 // A single rule firing, already bound to the function that contains it. The lint packs emit byte spans; the
@@ -455,27 +518,10 @@ inline void scopeByLanguage( const IngestResult& ing, const std::vector<char>& e
     }
 }
 
-// The per-family reasons as `family: reason` segments, in family order — a total order over a fixed table,
-// so the string is deterministic without a sort. Empty when every family was measured, which is exactly
-// what an empty unavailable= means.
+// The per-family reasons, over this verb's own four-family table.
 inline std::string unavailWhyList( const EnsembleScan& scan )
 {
-    std::string out;
-    for( std::uint8_t family = 0; family < kFamilyCount; ++family )
-    {
-        if( scan.unavailWhy[family].empty() )
-        {
-            continue;
-        }
-        if( !out.empty() )
-        {
-            out += " | ";
-        }
-        out += kFamilyNames[family];
-        out += ": ";
-        out += scan.unavailWhy[family];
-    }
-    return out;
+    return unavailWhyListOf( scan.unavailWhy, kFamilyCount, ensembleFamilyName );
 }
 
 // STAGE: the two lint packs, called through their existing entry points, bound to functions and sorted into
@@ -678,22 +724,10 @@ inline EnsembleScan computeEnsemble( const IngestResult& ing, const std::vector<
     return scan;
 }
 
-// The comma-joined names of the families in `bits`, in family order — the value of fired= / unavail= / union=.
+// The comma-joined names of the families in `bits` — the value of fired= / unavail= / union=.
 inline std::string familyList( std::uint8_t bits )
 {
-    std::string out;
-    for( std::uint8_t family = 0; family < kFamilyCount; ++family )
-    {
-        if( ( ( bits >> family ) & 1u ) != 0 )
-        {
-            if( !out.empty() )
-            {
-                out += ',';
-            }
-            out += kFamilyNames[family];
-        }
-    }
-    return out;
+    return familyListOf( bits, kFamilyCount, ensembleFamilyName );
 }
 
 // The legend the reader meets FIRST. Every attribute this verb emits is DEFINED here in the house `name=` form
