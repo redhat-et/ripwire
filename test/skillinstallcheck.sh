@@ -97,6 +97,7 @@ UNROUTED="
 --eval-retrieval # self-eval harness, not an agent moment
 --eval-stray     # self-eval harness, not an agent moment
 --eval-skills    # self-eval harness (skill-routing eval), not an agent moment
+--naming-calibration # self-eval harness (§9.5 lint-rule calibration, test/namingcalibrationcheck.sh), not an agent moment
 --ignore-tests   # exclude-knob, no dedicated moment (composes with --exclude)
 --max-file-size  # infra size-limit knob
 --no-cache       # infra cache-control knob

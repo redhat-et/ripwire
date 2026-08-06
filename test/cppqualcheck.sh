@@ -165,12 +165,13 @@ US="$( run . --uses=selectBaseline --no-cache )"
     && ok "repo: --uses=selectBaseline count=2 and names the mcpverbs.h qualified caller (was 1)" \
     || no "repo: --uses=selectBaseline expected 2 incl. mcpverbs.h, got '$( cnt "$US" )': $US"
 # 4 -> 5 when src/readability.h adopted docparse::detail::readWholeFile as the canonical whole-file read
-# (the feat/readability-lens round). The literal counts REAL call sites, so it moves when a real call site is
+# (the feat/readability-lens round); 5 -> 6 when src/renamemine.h adopted the same one (feat/naming-calibration).
+# The literal counts REAL call sites, so it moves when a real call site is
 # added; what it pins is that the qualified `docparse::detail::` spelling still RESOLVES, which is the defect
 # this arm was written for. Bumping it is correct; changing it to a >= would retire the arm.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 5 ] \
-    && ok "repo: --uses=readWholeFile count=5 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 5"
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 6 ] \
+    && ok "repo: --uses=readWholeFile count=6 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 6"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"
