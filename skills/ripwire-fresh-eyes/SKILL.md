@@ -7,7 +7,10 @@ description: >
   seams. One structured pass over maintenance hotspots, dead code, duplicate bodies, AST smells, ownership
   / bus-factor risk, and hidden (co-change) coupling — scope any pass to a subsystem with a DIR argument.
   Use when taking ownership of an existing module, planning a refactor, hunting consolidation, deciding who
-  should review, or producing a health snapshot. Everything emits FACTS, not verdicts — you judge. Backed
+  should review, or producing a health snapshot. Reads a function's nesting PROFILE (`humps=`/`deep=`/
+  `locals=`), not `nest=` alone, so a tangle and a long blocked-sequential body stop looking identical — then
+  routes to ripwire-quality-bar for which refactor that shape calls for.
+  Everything emits FACTS, not verdicts — you judge. Backed
   by ripwire (deterministic, on PATH). This is for an explicit risk/rot/refactor question after the target
   area is identified; cold structure mapping belongs to ripwire-orient. For any DIFF — yours or an incoming
   PR — use ripwire-change-check; this skill is whole subsystems, not diffs. A single-lens question is a
@@ -19,6 +22,8 @@ allowed-tools: Bash, Read
 
 > Routing:
 > • Any DIFF — your own, or an incoming PR you're reviewing — about to push or merge → **ripwire-change-check**.
+> • **You have the measurement and now need the FIX** — which refactor a measured shape calls for, its
+>   precondition, and the fix-then-prove loop → **ripwire-quality-bar**'s shape → refactor playbook.
 > • Architecture health (deps metrics, layering rules, modules) → **ripwire-layers**.
 > • Finding where a specific BUG lives → **ripwire-find-bug**.
 > • Not sure which skill? → **ripwire-router**.
@@ -237,8 +242,9 @@ sections your question needs.
    families `--ensemble` joins, plus `colocation` (how much of what you must read to understand this function
    lives outside its own file) and `state` (this function's OWN BODY touching non-local mutable state) — six
    families, ranked by the count of distinct families and never by a composite.
-   `<s p="src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation"
-   uncounted="" unavail=""><e f="colocation" counted="1" why="crank=29"/>…`
+   `<s p="./src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation"
+   uncounted="" unavail="" join="deep+untested"><e f="structural" counted="1" why="ccx=724 loc=1244 nest=9
+   humps=30 deep=308 rrank=1"/><e f="colocation" counted="1" why="crank=33"/>…`
    Pick the preset by what you are doing, and note that a preset only **selects** families and **cuts** on the
    count — it never weights: `lenient` (all six, 1 must agree) is a *reading order*, about a third of any tree;
    `default` (all six, 2 must agree) is a review list; `strict` (the four families measured stable enough to
@@ -248,6 +254,34 @@ sections your question needs.
    `counted="0"`, so you can see what the preset set aside. Everything the `--ensemble` paragraph below says
    about ordinal cuts and UNAVAILABLE applies here unchanged.
 
+   **Read the structural `why=` as a PROFILE — `nest=` alone is a max, and on a subsystem you did not write
+   that is exactly the wrong number to act on.** `nest=9` is one deepest line; it cannot tell a **tangled**
+   body from a long **blocked-sequential** one whose max is a single inner loop. The row carries the profile
+   beside it: **`humps=`** (how many maximal control-nesting regions reach the bar — CodeScene's "bumpy
+   road", EXACT) and **`deep=`** (how many **LINES** lie inside them — a FLOOR, `deep_floor="1"`), against
+   the `loc=` already on the row. Both are **absent exactly when `nest <` the bar** — not-deep, never a
+   hidden `0` — and **`deep` below `humps` is legal output, not a defect** (`deep` counts lines, `humps`
+   counts regions, and a one-line `if(c){x;}else{y;}` at the bar is two regions on one line). Two ratios do
+   the discriminating: **`deep/loc`** separates tangled (high — depth is sustained) from blocked-sequential
+   (low — a dispatch table or a setup block), and **`deep/humps`** separates one giant tangle (high — the
+   expensive fix) from many tiny touches (low — repeated missing abstractions, each its own cheap
+   extraction). `locals=` on the same row is the reader's working set — a FLOOR (`locals_floor="1"`),
+   **C/C++ only**, absent rather than `0` elsewhere. **Which fix each shape calls for, and its precondition
+   → ripwire-quality-bar's shape → refactor playbook.**
+
+   **`join="deep+untested"`** is an annotation, not a seventh family: this row carries `deep=` *and* no
+   indexed test reaches it. It changes nothing — not `fam=`, not `of=`, not the ordering, not which rows
+   appear — and it is exactly the pair where a refactor is most wanted and least safe (**test first**,
+   → **ripwire-write-tests**). It is **suppressed on every row when `tested_scope="0"`**, because on a corpus
+   whose tests were never crawled "untested" describes the crawl and not the code, so read `tested_scope=` on
+   the root before treating its absence as good news; `deep_untested=` counts them across the whole row set,
+   which the `limit=` window does not change.
+
+   **The `historical` family's unit is the FILE, not the symbol.** `churn=` and `hrank=` are file facts
+   inherited verbatim by every symbol in that file, so a symbol in a busy file collects this family without
+   any property of its own. On a subsystem read that is worth discounting explicitly: confirm at the symbol
+   (`git log -p <file>`, or `--hotspots --since=`) before calling one function the churny one.
+
    **Corroborated rot, four families only — `ripwire <dir> --ensemble`.** The narrower join, and the one
    whose numbers are published; reach for it when you want exactly the calibrated four plus the per-file
    rollup. One lens firing is an
@@ -256,9 +290,11 @@ sections your question needs.
    readability rank), `lexical` (the `naming-*` rules on the identifier text), `confusion` (the `atom-*`
    rules on the syntactic construct), `historical` (git change frequency) — and ranks by the **count of
    distinct families**:
-   `<s p="src/graph.h:462" n="buildGraph" fam="3" of="4" fired="structural,confusion,historical"
-   unavail=""><e f="structural" why="ccx=724 loc=1244 nest=9 rrank=1"/>…` — plus a per-file rollup whose
-   `top_fam=` is the strongest single-symbol corroboration in that file.
+   `<s p="./src/graph.h:462" n="buildGraph" fam="3" of="4" fired="structural,confusion,historical"
+   unavail=""><e f="structural" why="ccx=724 loc=1244 nest=9 humps=30 deep=308 rrank=1"/>…` — plus a
+   per-file rollup whose `top_fam=` is the strongest single-symbol corroboration in that file. (The
+   `humps=`/`deep=` profile and the per-FILE `historical` unit read exactly as in the panel above; this
+   verb has no `join=` annotation.)
    **There is deliberately no composite score**: averaging correlated metrics re-weights one signal and calls
    it three (the Maintainability-Index failure), so `fam=` is ordinal and every row carries the evidence
    behind it — you never need a second command to see WHY. Two things to carry: `rrank=`/`hrank=` are
@@ -343,8 +379,16 @@ passes into a refactor brief:
    historically move with it. A `surprising="1"` partner (no static dependency) is **hidden coupling the
    refactor must preserve or explicitly cut** — fold it into the plan before you start.
 
-→ **Refactor brief:** the cluster to split (with its `lcom4`/`ccx` evidence), the blast radius + test gate,
-and the co-change partners to keep in sync. For CI-enforcing the boundary you extract → **ripwire-layers**.
+4. **Pick the fix from the SHAPE, not the score** — `ripwire <dir> --quality-panel` (or `--metrics`) on the
+   cluster, then read `humps=`/`deep=`/`locals=` as above: many shallow humps → extract each one (cheap); one
+   deep tangle → guard-clause inversion then state extraction (expensive); small-and-dense → read it first,
+   density is often the algorithm; `join="deep+untested"` or high fan-in → **test before you touch it**. The
+   full shape → fix → precondition table, and the fix-then-prove loop that closes it
+   (`--quality-delta` → `--edit-check=SYM` → `--affected`), are in **ripwire-quality-bar**.
+
+→ **Refactor brief:** the cluster to split (with its `lcom4`/`ccx` evidence and its nesting profile), the
+blast radius + test gate, the co-change partners to keep in sync, and the named fix each shape calls for. For
+CI-enforcing the boundary you extract → **ripwire-layers**.
 
 ## Output
 

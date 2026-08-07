@@ -5,7 +5,9 @@ description: >
   use ripwire / where do I start with ripwire". A moment→skill map: it names the ONE skill for each moment an
   agent recognizes itself in — cold-start, understand-X, planning-a-feature, about-to-write-a-symbol,
   mid-implementation, reviewing-my-diff, debugging, refactoring, perf, security, handoff — plus the two
-  reflexes that leak most (before you write → --exemplar; before you call it done → --quality-delta). One
+  reflexes that leak most (before you write → --exemplar; before you call it done → --quality-delta) and the
+  moment after a measurement: which refactor a measured shape actually calls for, and the loop that proves
+  the fix landed. One
   hop from here to the right skill. Backed by ripwire (the deterministic "ripgrep of AI context", on PATH).
 allowed-tools: Bash, Read
 ---
@@ -38,8 +40,9 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 | **Worth remembering for the next session** — a gotcha tied to a symbol/file (trap, flake, invariant) | **ripwire-orient** | `--note-add="SYM: text"` — surfaces automatically whenever `--for`/`--expand` later emit that symbol |
 | **One-call orientation under a budget** — the whole --for → bodies → callers → tests dance at once | **ripwire-efficient** | `--pack-task="task"` (+ `--token-budget=N`) — ranking, top bodies, caller sigs, notes, tests_to_run in ONE bundle |
 | **About to FAN OUT** — spawning N subagents / worktrees / lanes, about to hand-write N per-agent briefs | **ripwire-efficient** | `--pack-task="task" --partition=N` (N=2..16) — ONE shared core plus N minimally-overlapping slices carved along the call graph's own communities, so N agents stop re-deriving the same orientation. `--token-budget` here means ONE agent's budget; each inner `<ctx>` is byte-identical to that agent's standalone call, so hand it over verbatim. Check `overlap_max` before trusting the split, and `split="K"` (>0 = a module was cut at its rank median because there were fewer modules than agents). Then `--plan-lanes=N --task="…"` (or `--plan-lanes --brief=FILE`) for the conflict-aware version: which lanes would COLLIDE, in what order they should land, and what each must test — JSON, pre-hoc, before a line is written. |
-| **Refactoring** — planning a restructure, or a suspected god object | **ripwire-fresh-eyes** | `--communities`/`--metrics` (lcom4) + `--impact` + `--cochange` |
-| **Perf** — a benchmark/profile (including a flame graph) identifies a slow operation or symbol | **ripwire-perf-target** | measure → navigate measured surface → re-measure |
+| **Refactoring** — planning a restructure, or a suspected god object | **ripwire-fresh-eyes** | `--communities`/`--metrics` (lcom4) + `--impact` + `--cochange`; read the nesting PROFILE (`humps=`/`deep=`), never `nest=` alone |
+| **I have the measurement — now WHICH refactor, and is it safe?** — a shape (many shallow humps / one deep tangle / small-and-dense / untested hub / a clone) needs a named fix and its precondition | **ripwire-quality-bar** | the shape → refactor playbook, then the closed fix loop: `--quality-delta` → `--edit-check=SYM` → `--affected` |
+| **Perf** — a benchmark/profile (including a flame graph) identifies a slow operation or symbol | **ripwire-perf-target** | measure → navigate measured surface → re-measure; if the counters say MEMORY not compute, `--field-affinity[=STRUCT]` (a hypothesis generator, never a measurement) |
 | **Security** — untrusted input, reviewing security-sensitive code, or auditing a skill/MCP config | **ripwire-security-scan** | `--lint` unsafe fns + `--scan-skills` |
 | **Handoff** — writing a summary of a repo/change for the next agent or teammate | **ripwire-handoff** | the handoff bundle |
 | **What's built but DARK here** — "why don't I see feature X" (code compiled/flagged OFF, not a bug) | **ripwire-fresh-eyes** | `--flags[=SUBSTR]` (dark-gate dashboard) + `--flip=NAME` (blast radius of turning one ON) — **ripwire-find-bug** points here too when a symptom turns out to be a dark flag |
@@ -88,6 +91,10 @@ The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--ca
   kinds (complexity, verbosity, nesting, params, duplication, dead-code, api-surface, error-masking,
   short-horizon-churn, new-clone-of-reused-helper); exit 2 = new debt.
   In a git repo it **auto-compares vs `git HEAD`** (no start-of-task ritual — just run it before you push).
+  **A finding is only half the job** — the fix is not done until it is proven: `--quality-delta` (targeted
+  kind gone, nothing else regressed) → `--edit-check=SYM` (contract intact) → `--affected` (the tests that
+  prove it). That chain, and the shape → refactor playbook that picks the fix in the first place, are in
+  **ripwire-quality-bar**.
   For a mid-task convergence loop, run `ripwire <dir> --quality-baseline` at the start to pin an explicit
   floor (it takes precedence over HEAD), then re-run `--quality-delta` after each edit. (→ **ripwire-quality-bar**.)
   Want the wider "does this still look rotten" picture alongside the delta, not just what you changed? —
