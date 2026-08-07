@@ -1,0 +1,84 @@
+[
+ {
+  "iid": "mesonbuild__meson-11366",
+  "repo": "mesonbuild/meson",
+  "gold": [
+   "docs/markdown/Installing.md",
+   "mesonbuild/minstall.py"
+  ]
+ },
+ {
+  "iid": "ctc-oss__fapolicy-analyzer-809",
+  "repo": "ctc-oss/fapolicy-analyzer",
+  "gold": [
+   "crates/daemon/src/error.rs",
+   "crates/daemon/src/fapolicyd.rs",
+   "crates/daemon/src/lib.rs",
+   "crates/daemon/src/profiler.rs",
+   "crates/daemon/src/svc.rs",
+   "crates/pyo3/src/daemon.rs",
+   "crates/pyo3/src/profiler.rs",
+   "crates/tools/src/fapolicy_profiler.rs",
+   "fapolicy_analyzer/ui/features/profiler_feature.py",
+   "fapolicy_analyzer/ui/profiler_page.py",
+   "fapolicy_analyzer/ui/reducers/profiler_reducer.py"
+  ]
+ },
+ {
+  "iid": "scikit-learn__scikit-learn-16948",
+  "repo": "scikit-learn/scikit-learn",
+  "gold": [
+   "examples/applications/plot_topics_extraction_with_nmf_lda.py",
+   "sklearn/decomposition/__init__.py",
+   "sklearn/decomposition/_nmf.py",
+   "sklearn/utils/estimator_checks.py"
+  ]
+ },
+ {
+  "iid": "sancus-tee__sancus-compiler-36",
+  "repo": "sancus-tee/sancus-compiler",
+  "gold": [
+   "src/drivers/linker.py",
+   "src/drivers/sancus/sancus_config.py",
+   "src/sancus_support/reactive.h",
+   "src/sancus_support/sm_support.h",
+   "src/stubs/reactive_stubs_support.h",
+   "src/stubs/sm_input.c",
+   "src/stubs/sm_output.c",
+   "src/stubs/sm_set_key.c"
+  ]
+ },
+ {
+  "iid": "Innopoints__backend-124",
+  "repo": "Innopoints/backend",
+  "gold": [
+   "innopoints/blueprints.py",
+   "innopoints/core/helpers.py",
+   "innopoints/schemas/account.py",
+   "innopoints/views/account.py",
+   "innopoints/views/authentication.py"
+  ]
+ },
+ {
+  "iid": "scikit-learn__scikit-learn-24076",
+  "repo": "scikit-learn/scikit-learn",
+  "gold": [
+   "setup.py",
+   "sklearn/metrics/_pairwise_distances_reduction/__init__.py",
+   "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+   "sklearn/neighbors/_base.py",
+   "sklearn/neighbors/_classification.py"
+  ]
+ },
+ {
+  "iid": "ivadomed__ivadomed-1081",
+  "repo": "ivadomed/ivadomed",
+  "gold": [
+   "ivadomed/config/config_default.json",
+   "ivadomed/config/config_microscopy.json",
+   "ivadomed/evaluation.py",
+   "ivadomed/main.py",
+   "ivadomed/metrics.py"
+  ]
+ }
+]
