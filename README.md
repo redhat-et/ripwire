@@ -832,7 +832,8 @@ pipeline phase with two hardware-counter reads — kperf on Apple Silicon, a pin
 group on Linux. Below: ripwire mapping **its own public tree** on an Apple M5 Pro, cold
 (`--no-cache`) except the last row. Counters are raw integers, never scaled; reproduce steps in
 [`bench/PROFILE.md`](bench/PROFILE.md) (arming needs root; unprivileged runs print the same table
-with timing columns only — the honest degrade).
+with timing columns only — the honest degrade). The report renders on **stderr**; stdout stays the
+deterministic XML map, so redirects and `| xmllint` pipes behave the same in the profile flavour.
 
 | scope | calls | instructions | IPC | L1D MPKI | wall |
 | --- | --- | --- | --- | --- | --- |

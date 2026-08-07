@@ -8,11 +8,14 @@
 //             at least 1M — a counter that "works" but reads garbage/zero deltas is a lie the timing
 //             columns would inherit.
 //   INACTIVE (unprivileged macOS, VMs without a vPMU, paranoid>=3, Rosetta): active()==false,
-//             event_count()==0, read() returns all-zero Snapshots, and NOTHING is printed to stderr —
-//             the quiet-degrade contract (an unprivileged run must not spam).
+//             event_count()==0, read() returns all-zero Snapshots, and NOTHING is printed to stderr
+//             besides the prof::report() output — the quiet-degrade contract (an unprivileged run must
+//             not spam arming noise).
 //
 // Either state passes; an inconsistent mixture (active with zero events, inactive with nonzero reads,
-// stderr noise) fails. The gate script captures stderr separately to enforce the quiet-degrade arm.
+// stderr noise) fails. The gate script captures stderr separately to enforce the quiet-degrade arm and
+// the stream contract: the report renders on stderr, never stdout (stdout is the data stream — the real
+// binary's XML map — and a report trailing it breaks >file / | xmllint workflows).
 // Compiled with -DPROFILE_ENABLED=1 -DPROFILE_AUTO_REPORT=0; prof::report() is invoked explicitly so the
 // report path (which drops counter columns when inactive) is exercised in both states.
 //
@@ -153,8 +156,8 @@ int main()
 #endif
     }
 
-    // the report must render in both states (counter columns present iff active); stderr silence is
-    // asserted by the gate script, which captures the streams separately.
+    // the report must render in both states (counter columns present iff active), on STDERR; the gate
+    // script captures the streams separately to assert that and the quiet-degrade arm.
     prof::report();
 
     return g_fail;
