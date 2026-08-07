@@ -1,0 +1,65 @@
+r6 structural expansion from a top-ranked file — pre-registered verdict (2026-08-06)
+
+REJECT AT CALIBRATION — no held-out run was spent. Binary @ 68a19a9, RIPWIRE_EXPAND="<S>,<N>",
+default stays OFF.
+
+TRAIN GRID (n=60; single n=17, multi n=43). Frozen rule: advance iff a cell nets >= 3 multi-file
+instance flips with ZERO single-file losses.
+
+  cell   multi gained   multi lost   single lost   gold ranks that MOVED
+  2,1         0             0             0                 8
+  2,2         0             0             0                10
+  2,3         0             0             0                10
+  3,1         0             0             0                11
+  3,2         0             0             1                11
+  3,3         0             0             1                12
+  5,1         0             1             1                13
+  5,2         0             1             1                14
+  5,3         0             1             1                14
+
+No cell gained a single instance. The wider cells did net HARM: at S=5 the lift costs one multi-file
+and one single-file instance, the "displaces legitimate rows" failure siblift showed at its wide
+settings, reproduced here on a different edge.
+
+THE MECHANISM FIRED. 8-14 gold ranks moved in every cell, so this is a negative RESULT and not an
+inert experiment — the distinction r4_siblift's out-of-domain probes were added to establish, checked
+here before the verdict was written. Ranks moved; none crossed the @10 frontier.
+
+FIFTH REJECTION, AND THE MATRIX IS NOW COMPLETE.
+
+  round               seed                  edge                 outcome
+  r1_anchorhop        mention anchors       call/import          +0.00pp
+  r1cpp_anchorhop     mention anchors       call/import          +0.00pp
+  r4_siblift          top-ranked files      same directory       rejected at calibration
+  r5_pooling          none (re-summarise)   none                 +0.00pp held-out
+  r6_expansion        top-ranked files      resolved import      rejected at calibration
+
+r6 was registered specifically because it was the untried diagonal — siblift had this seed with the
+wrong edge, anchorhop had this edge with the wrong seed — and because, unlike the other four, it
+introduces evidence the QUERY did not supply. It still did not move the frontier. Both remaining
+explanations for the stratum are therefore exhausted from the ranking side: it is not WHICH files are
+promoted, not HOW they are placed, and not WHETHER the evidence is lexical or structural.
+
+WHAT THE PROBE SAID, AND WHY IT WAS STILL RIGHT TO RUN. FEASIBILITY.md found the required edge present
+for 28 of 40 gold files (70%) under a permissive TEXT test, and recorded that as an upper bound, naming
+the exact gap: a text match is not a resolved graph edge, and reachability from ANY peer gold file is
+not reachability from the file actually found. This result suggests the gap was most of the 70%. The
+probe was still worth its one script — it converted "a fourth swing at the stratum" into a testable
+claim, and the claim failing is what makes this verdict conclusive rather than another maybe.
+
+RECOMMENDATION: THE MULTI-FILE STRATUM IS CLOSED TO RANKING-SIDE MECHANISMS. Five pre-registered
+rounds, five rejections, three distinct seeds and three distinct edges between them. Any sixth
+candidate of the same shape should be refused unless it can state what it does differently from all
+five, in the seed x edge x evidence-source terms this table uses.
+
+What is NOT closed, from round 4's held-out decomposition of 22 multi-file failures:
+  11  sibling never enters the candidate set at all  -> CANDIDATE GENERATION, not ranking
+   4  whole instance missed (primary at rank 39, 70) -> query understanding
+   3  gold files carrying no code symbols            -> candidate SOURCE (docs/config are indexable
+                                                        by other verbs; --for's stream is symbols only)
+Those are different subsystems. The 11 in particular were never reachable by anything tried in five
+rounds, because a reranker cannot rank a file it never saw.
+
+Scaffolding retained (src/expand.h, inert with RIPWIRE_EXPAND unset; golden, determinism and xmllint
+gates green), alongside src/filepool.h and src/siblift.h. Three inert mechanisms and five verdicts is
+a cheaper record than one undocumented "we tried some reranking once".
