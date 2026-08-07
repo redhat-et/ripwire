@@ -835,6 +835,109 @@ inline bool isRouteStopword( std::string_view w ) noexcept
     return false;
 }
 
+// ── ANCHOR DISCLOSURE (the `anchors:` clause of a name-exact reason) ──────────────────────────────────
+//
+// The confidence gate above is DOCUMENTED FRAGILE, three lines up: "a single generic word that happens to
+// equal a symbol name still routes to name-exact". That is a deliberate, measured trade — one-word lookups
+// are the shape name-exact wins on — but it means a route can be decided by a symbol the caller has never
+// heard of. It happened: a bash helper named json() in test/nestprofilecheck.sh turned "json escape" into a
+// 2-of-2 whole-name query, flipped the route, and collapsed a downstream partition to zero (mcpw3fixcheck
+// H4, fixed in e7ee64c by renaming the helper). Nothing misbehaved. The header said `name-exact — query
+// names a symbol (json)` and was, word for word, correct.
+//
+// The answer to a documented-fragile rule is to publish its evidence, not to re-tune it on one anecdote. So
+// a name-exact reason now names, per anchoring word, WHERE that word was matched — and the reader can
+// discount an anchor that turns out to be a one-use helper under test/ without opening anything. This is
+// DISCLOSURE ONLY: not one byte of the decision moved, and test/routecheck.sh (f3) pins that as a battery.
+struct NameAnchor
+{
+    std::uint32_t fileId    = 0;   // the FIRST definition of this name in NodeId order (deterministic)
+    std::uint32_t extraDefs = 0;   // how many further definitions share it — the anchor's ambiguity, disclosed
+};
+
+// One anchor's path, shortened for a header that rides on every routed run. The leading "./" goes, and a
+// path deeper than two segments keeps its TOP directory and its basename with "/.../" between them: those
+// are the two parts that answer "core source, or a one-use helper?". The elision is spelled out rather than
+// silently applied — a truncation a reader cannot see is the defect, not the truncation.
+inline std::string routeAnchorPath( std::string_view path )
+{
+    std::string_view p = path;
+    if( p.rfind( "./", 0 ) == 0 )
+    {
+        p.remove_prefix( 2 );
+    }
+    const std::size_t first = p.find( '/' );
+    const std::size_t last  = p.rfind( '/' );
+    if( first == std::string_view::npos || first == last )
+    {
+        return std::string( p );
+    }
+    return std::string( p.substr( 0, first ) ) + "/.../" + std::string( p.substr( last + 1 ) );
+}
+
+// The evidence behind ONE anchoring word: the defining file of the symbol it names, with "+N" when N further
+// definitions share that name (the anchor's own ambiguity, disclosed rather than hidden behind whichever
+// definition happened to be first), or the literal `syntax` when the word routed on camelCase / snake_case
+// SHAPE and names no symbol at all. That last case is the one worth spelling: a reader who sees a file name
+// in every anchor will read a shape-only route as a symbol hit.
+inline std::string routeAnchorEvidence( const IngestResult& ing, const HashMap<std::string, NameAnchor>& names,
+                                        const std::string& lowerWord )
+{
+    const auto at = names.find( lowerWord );
+    if( at == names.end() )
+    {
+        return "syntax";
+    }
+    std::string evidence = routeAnchorPath( ing.files[at->second.fileId] );
+    if( at->second.extraDefs != 0 )
+    {
+        evidence += "+" + std::to_string( at->second.extraDefs );
+    }
+    return evidence;
+}
+
+// The `anchors:` clause under construction. One `word(evidence)` per anchoring content word, appended in
+// QUERY WORD order — never hash order, which is why the index below is only ever probed by key. CAPPED:
+// this string rides on every routed run, and a pathological query whose every word names a symbol would
+// otherwise print a paragraph into a header that is charged against the caller's budget. Over the cap the
+// clause says how many it did not show, because a silently shortened list is the defect, not the shortening.
+struct AnchorList
+{
+    static constexpr std::size_t kMaxShown = 4;
+    std::string                  text;
+    std::size_t                  found = 0;
+
+    void add( std::string_view word, const std::string& evidence )
+    {
+        ++found;
+        if( found > kMaxShown )
+        {
+            return;
+        }
+        if( !text.empty() )
+        {
+            text += ' ';
+        }
+        text += std::string( word ) + "(" + evidence + ")";
+    }
+
+    // The clause as it appears in the reason, or EMPTY when nothing anchored the route — a subtoken+body
+    // route was not decided by any name match, so an anchors list on it would be evidence after the fact.
+    std::string clause() const
+    {
+        if( text.empty() )
+        {
+            return std::string();
+        }
+        std::string out = "; anchors: " + text;
+        if( found > kMaxShown )
+        {
+            out += " +" + std::to_string( found - kMaxShown ) + " more";
+        }
+        return out;
+    }
+};
+
 // lowercase a short token into a caller buffer (identifiers are short; no allocation churn in the hot loop)
 inline std::string routeLower( std::string_view w )
 {
@@ -847,6 +950,26 @@ inline std::string routeLower( std::string_view w )
         }
     }
     return out;
+}
+
+// ONE lowercase-name index over all symbols, built once per query (was: a routeLower(s.name) heap allocation
+// per size-matched symbol per word — O(contentWords × symbols) allocations, millions on a 100k-symbol tree).
+// A single probe per word replaces the O(symbols) linear scan; the routed-vs-plain decision is unchanged, it
+// was and remains a pure "does this word name a symbol" membership test.
+//
+// It was a SET until the anchor-disclosure round: same single pass, same one probe per word, but each entry
+// now also carries where the name was FIRST defined (in NodeId order, which is file/line/name order, so the
+// choice is deterministic) and how many further definitions share it.
+inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult& ing )
+{
+    HashMap<std::string, NameAnchor> names;
+    names.reserve( ing.symbols.size() );
+    for( const Symbol& s : ing.symbols )
+    {
+        const auto [ at, inserted ] = names.try_emplace( routeLower( s.name ), NameAnchor{ s.fileId, 0u } );
+        at->second.extraDefs += inserted ? 0u : 1u;
+    }
+    return names;
 }
 
 inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )
@@ -878,17 +1001,9 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     bool        hasCamelSnake   = false;                       // any content word is camelCase / snake_case shaped
     std::string identifierHit;                                 // the token that best evidences the name-exact route (for the reason)
 
-    // Build ONE lowercase-name SET over all symbols ONCE per query (was: a routeLower(s.name) heap
-    // allocation per size-matched symbol per word below — O(contentWords × symbols) allocations, millions
-    // on a 100k-symbol tree). A single membership probe per word replaces the O(symbols) linear scan; the
-    // routed-vs-plain decision is unchanged (it was, and remains, a pure "does this word name a symbol"
-    // membership test).
-    ankerl::unordered_dense::set<std::string> lowerSymbolNames;
-    lowerSymbolNames.reserve( ing.symbols.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        lowerSymbolNames.insert( routeLower( s.name ) );
-    }
+    // ONE lowercase-name index over all symbols, built once per query — see buildLowerNameIndex.
+    const HashMap<std::string, NameAnchor> lowerSymbolNames = buildLowerNameIndex( ing );
+    AnchorList                             anchors;
 
     for( std::string_view w : words )
     {
@@ -921,6 +1036,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
                 identifierHit = std::string( w );
             }
             ++wholeNameHits;                                   // explicit identifier syntax also counts toward "all words name symbols"
+            anchors.add( w, routeAnchorEvidence( ing, lowerSymbolNames, lw ) );
             continue;
         }
 
@@ -932,6 +1048,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
             {
                 identifierHit = std::string( w );
             }
+            anchors.add( w, routeAnchorEvidence( ing, lowerSymbolNames, lw ) );
         }
     }
 
@@ -951,6 +1068,10 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     {
         rc.which  = LexMode::NameExact;
         rc.reason = "name-exact BM25 — query names a symbol (" + identifierHit + ")";
+        // The evidence, appended and never substituted: downstream readers (test/taskechocheck.sh) parse the
+        // clause above out of this same string. A subtoken+body route names no anchors because nothing
+        // anchored it — an anchors list on a route the names did not decide would be evidence after the fact.
+        rc.reason += anchors.clause();
     }
     else if( nWords >= 3 )
     {
