@@ -36,34 +36,39 @@ the tests that reach them.
 
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
-**58.3% against 33.3%.** On 60 held-out LocBench instances, ripwire landed *every* gold file in the
-top 10 nearly twice as often as the best competitor tested — and answered in **0.114 s** against its
-1.14 s. Paired, zero exclusions, same gold set and the same imported metric code for every arm;
-*strict file@10 = **all** gold files inside the top 10*, which is whether your agent starts in the
-right place at all.
+**58.3% against 40.0% for the best tool tested — and it answers before they finish indexing.** Every
+arm below was re-run on 2026-08-06 against one ripwire binary, one evaluator, one 60-instance
+held-out LocBench slice: paired, zero exclusions, same gold set, and the metric code imported
+unmodified into every arm. *Strict file@10 = **all** gold files inside the top 10*, which is whether
+your agent starts in the right place at all.
 
-| Round 2 (2026-08-03) | strict file@10 | any@10 | median warm query |
-| --- | --- | --- | --- |
-| **ripwire `--for`** | **58.3%** | **85.0%** | **0.114 s** |
-| repowise 0.37.0 | 33.3% | 53.3% | 1.14 s |
-| codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 0.042 s |
+| Round 4 — LocBench, Python-dominant | strict file@10 | any@10 | index (median) | query (median) |
+| --- | --- | --- | --- | --- |
+| **ripwire `--for`** | **58.3%** | **85.0%** | **0.43 s** | 0.130 s |
+| codebase-memory-mcp 0.9.0 | 40.0% | 63.3% | 1.23 s | 0.079 s |
+| repowise 0.37.0 | 33.3% | 53.3% | 33.0 s | 1.324 s |
+| graphify 0.9.34 | 31.7% | 46.7% | 9.66 s | 0.732 s |
+| Aider repo-map 0.86.2 | 18.3% | 35.0% | *(inside query)* | 3.344 s |
+| codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 4.64 s | 0.042 s |
 
-| Round 1 — same slice, earlier binary and evaluator | strict file@10 | any@10 | median wall |
-| --- | --- | --- | --- |
-| **ripwire `--for`** | **36.7%** | **75.0%** | **0.074 s** |
-| codebase-memory-mcp | 26.7% | 66.7% | 1.14 s |
-| graphify | 21.7% | 41.7% | 5.8 s |
-| Aider repo-map | 13.3% | 33.3% | 2.5 s |
+Ripwire leads every arm on both accuracy metrics and in both strata. Paired, the losses are small and
+they are published: **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to graphify
+and aider. **Cold from nothing to an answer — parse, rank, reply, no cache — ripwire takes 0.299 s**,
+against a ~34 s index-then-query for repowise; its worst single index in this run was **424 s**.
 
-Two tables and not one merged ranking, because each round is paired within itself and they are **not**
-number-comparable to each other — different binary, different evaluator. Round 1's walls carry the
-other asymmetry: ripwire's is warm against a pre-built index, the competitors' cold per run.
+Three things this table costs us, said plainly. **codebase-memory-mcp is the real runner-up at 40.0%,
+not repowise** — an earlier round credited it with 26.7%, and re-running it fairly raised it. The
+margin over the best competitor is therefore **1.46×**, not the 1.75× two separately-dated tables used
+to imply. And **multi-file gold is hard for everyone**: ripwire leads the stratum at 21.4% strict, but
+its own any@10 there is 78.6% — it finds *a* gold file and misses the siblings, and no arm in this
+table solves that.
 
-Instance by instance in round 2, ripwire retrieved a full gold set repowise missed **17 times**; the
-reverse happened **twice**. Held out wider — **243 instances across 78 repositories** — it lands
-**60.9%** against **27.6%** for its own pre-routing baseline: **+33.3pp** paired, clustered-bootstrap
-95% lower bound **+25.0pp**, bought for +3.4% warm latency and **−39.4%** tokens. Every caveat, plus
-a third round against a compression-layer competitor, in [Measured](#measured).
+Held out wider — **243 instances across 78 repositories** — ripwire lands **60.9%** against **27.6%**
+for its own pre-routing baseline: **+33.3pp** paired, clustered-bootstrap 95% lower bound **+25.0pp**,
+bought for +3.4% warm latency and **−39.4%** tokens. Full provenance, the losing instances one by one,
+and a third round against a compression-layer competitor: [Measured](#measured) and
+[`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-2026-08-06/), whose harness is committed so
+anyone can re-run the whole comparison.
 
 <details>
 <summary><b>The same table, as narrated by Jane Austen</b> — every figure in it measured, the manners editorial</summary>
@@ -76,37 +81,39 @@ retrieval, and one lady of no pretension whatsoever.*
 It is a truth universally acknowledged, that an engineer in possession of a large repository must be
 in want of a map.
 
+**Mrs. Codebase-Memory** must be named first, for she has risen a great deal in the estimation of the
+neighbourhood — two-fifths of her answers entirely correct, which is more than any other caller can
+say, and she is ready in a second and a quarter. It must nevertheless be recorded that her card
+announces accomplishments in the semantic line; that upon enquiry the semantic line is not at home;
+and that the household denies all knowledge of it. One is left with the impression of a capable woman
+ill-served by whoever prints her cards.
+
 **Mr. Repowise** is by common consent the most substantial of the party, and no one who has waited
 upon him would dispute it. He is possessed of a handsome index and a manner of great thoroughness;
 but he must be *seen to*. One does not simply address Mr. Repowise. One sends word, and dresses, and
-waits — eleven seconds on an ordinary morning, and upon one memorable occasion in the country, four
-minutes and thirty-five seconds — during which interval a less consequential neighbour has already
+waits — three-and-thirty seconds on an ordinary morning, and upon one memorable occasion in the
+country, seven minutes and four seconds — during which interval a less consequential neighbour has
 answered the question, taken her leave, and thought no more about it. He answers creditably when at
 last he arrives, one time in three; whether that is worth the toilette, each family must determine
 for itself.
 
-**Mr. Codeseek** is a young gentleman of remarkably quick habits — nine tenths of a second to prepare
-himself. He suffers, however, from an affliction of address. Speak to him plainly, in the language of
-ordinary complaint, and he will regard you with perfect composure and say nothing whatever — nothing,
-upon sixty occasions out of sixty. Name a person precisely as that person is named, and he grows
-animated directly. It is not stupidity; it is a want of imagination in the matter of introductions.
-
-**Mrs. Codebase-Memory** is amiable and quick and deserves no unkindness. Her card announces
-accomplishments in the semantic line. Upon enquiry, the semantic line is not at home, and the
-household denies all knowledge of it. What she does possess she performs creditably, and one is left
-with the impression of a woman ill-served by whoever prints her cards.
-
 **Mr. Graphify** enjoys a great many admirers. He does not rank his acquaintances; he calls upon them
 in whatever order his walk happens to take him, and reports the order of the walk as though it were
-an opinion. He once arrived carrying five hundred and eighty-four megabytes of correspondence. On
-three occasions out of sixty, pressed for any answer at all, he replied that no matching nodes were
-found, and considered the matter closed.
+an opinion. He has been known to arrive carrying a hundred and thirty megabytes of correspondence.
+Pressed once for any answer at all, he replied that no matching nodes were found, and considered the
+matter closed.
 
 **Mr. Aider** is the most gentlemanly of the company and by far the most difficult to consult. He
 cannot be asked a question — the thing is simply not done. One may mention names in his hearing and
-hope he takes the hint; he does take it, a little, and is three points the better for it. But he
-forms his view of the neighbourhood before you speak and retains it after, and one cannot escape the
-feeling that the conversation was never truly with you.
+hope he takes the hint; he does take it, and is fully ten points the better for it, which says more
+about the hint than about Mr. Aider. But he forms his view of the neighbourhood before you speak and
+retains it after, and one cannot escape the feeling that the conversation was never truly with you.
+
+**Mr. Codeseek** is a young gentleman of quick habits who suffers from an affliction of address.
+Speak to him plainly, in the language of ordinary complaint, and he will regard you with perfect
+composure and say nothing whatever — nothing, upon sixty occasions out of sixty. Name a person
+precisely as that person is named, and he grows animated directly. It is not stupidity; it is a want
+of imagination in the matter of introductions.
 
 And there is **ripwire**, of whom nothing is said in the drawing rooms, because she has already gone
 home. She was asked; she answered, in thirteen hundredths of a second; every gold file within the
@@ -115,12 +122,13 @@ distant authority, and has never once been indexed at a party. Mr. Repowise find
 
 She is.
 
-<sub>Every figure above is one of the measured numbers in the tables on this page: the index walls
-(11.4 s median, 274.7 s worst; 0.9 s), the 33.3% strict file@10, the 0-results-on-60/60 fallback arm,
-the absent <code>semantic_query</code> tool, the 584 MB graph, the 3-of-60 empty rankings, aider's
-+3.3 pp personalization delta, and ripwire's 0.13 s / 58.3%. The arithmetic is in
-<a href="docs/EVALS.md">docs/EVALS.md</a>; only the manners are editorial. These are other people's
-real work, and the joke is aimed at the trade-offs, never at the authors.</sub>
+<sub>Every figure above is a measured number from the round-4 table on this page: the index medians
+(1.23 s, 33.0 s, 4.64 s) and repowise's 424 s worst case, the 40.0% and 33.3% strict file@10, the
+0-results-on-60/60 fallback arm, the absent <code>semantic_query</code> tool, graphify's 129 MB
+largest graph and its 1-of-60 empty ranking, aider's +10 pp personalization delta, and ripwire's
+0.130 s / 58.3%. Provenance in <a href="bench/headtohead/r4-2026-08-06/">bench/headtohead/r4-2026-08-06/</a>
+and <a href="docs/EVALS.md">docs/EVALS.md</a>; only the manners are editorial. These are other
+people's real work, and the joke is aimed at the trade-offs, never at the authors.</sub>
 
 </details>
 
