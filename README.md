@@ -14,6 +14,10 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
+**Languages:** C · C++ · Objective-C/C++ · Metal · CUDA · Python · TypeScript · JavaScript · Java ·
+Ruby · Bash · Go · Rust · Swift · C# · JSON — [sixteen vendored grammars](#languages), and adding
+another is a vendored tree-sitter grammar plus one row in a declarative table.
+
 ### No API key. No embeddings. No index server. No daemon.
 
 One self-contained binary on your own machine, offline. Install it and ask it something before you
@@ -928,6 +932,11 @@ so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--call
 its host-side launchers; dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
 JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON (config keys). Sixteen tree-sitter
 grammars, all vendored.
+
+Want another language? The pipeline is language-agnostic past the parse: a new language is a
+vendored tree-sitter grammar, its query file, and one row in the declarative
+`extension → { grammar, queries }` table (the "declarative constexpr tables" rule in
+[`CONTRIBUTING.md`](CONTRIBUTING.md)) — open an issue naming the grammar and the repo you'd run it on.
 
 Markdown, notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges
 behind `--mentions`; Office and PDF join them through an optional bridge.
