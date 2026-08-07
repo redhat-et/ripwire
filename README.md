@@ -923,7 +923,7 @@ The script's own header documents its other modes, including the opt-in advisory
 
 ## Improve it with your agent
 
-[`prompts/`](prompts/) holds ten **self-contained orchestrator prompts**: the loops this project is
+[`prompts/`](prompts/) holds eleven **self-contained orchestrator prompts**: the loops this project is
 built with, written so a coding agent can run them. They encode the workflow rather than describing
 it.
 
