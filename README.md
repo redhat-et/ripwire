@@ -271,7 +271,7 @@ visible *before* the agent touches them, in a few thousand tokens instead of fiv
 $ ripwire . --quality-panel --limit=1
 <quality_panel preset="default" families="6" enabled_n="6" cut="2" eligible="4956" ranked="401" …>
 <s p="./src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation">
-<e f="structural" why="ccx=724 loc=1244 nest=9 rrank=1"/>
+<e f="structural" why="ccx=724 loc=1244 nest=9 humps=30 deep=306 rrank=1"/>
 <e f="confusion" why="atom-embedded-crement*3"/>
 <e f="historical" why="hrank=19 churn=9"/>
 <e f="colocation" why="crank=33"/>
@@ -405,12 +405,43 @@ repository's own source, not a synthetic example:
 
 | Family | Question | Backing verb | On this repo |
 | --- | --- | --- | --- |
-| **structural** | shape: complexity, size, nesting, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
+| **structural** | shape: complexity, size, nesting *and how much of the body is deep*, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9 humps=30 deep=306 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
 | **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
 | **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
 | **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
 | **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
 | **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
+
+### `nest=` is a max, so it cannot tell a long function from a tangled one
+
+The structural family's `nest=` reports the single deepest line in a function. One line at depth 9 and
+a thousand lines at depth 9 produce the same number — which means a long **blocked-sequential** body (a
+run of shallow scoped steps, its max set by one inner loop nobody has to hold in their head) is
+indistinguishable from a **tangled** one that sustains depth for hundreds of lines. Every consumer of
+`nest=` inherited that blindness: the panel's structural family, `--readability`'s rank, the ensemble join.
+
+`--metrics` now emits the **profile** beside the max — `humps=` (how many maximal regions reach the
+nesting bar, CodeScene's "bumpy road": a rise above the threshold then a fall, so repeated missing
+abstractions read differently from one deep tangle) and `deep=` (how many lines lie inside them, against
+the `loc=` already on the row). Both come from the same fused walk that already computes `ccx`/`nest`, at
+zero extra parsing cost; `deep=` is a disclosed floor (`deep_floor="1"`). Both are **absent** exactly when
+`nest <` the bar — not-deep, never a hidden `0`. On this repository's own source:
+
+| function | `loc` | `nest` | `humps` | `deep` | deep/loc | reading |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ingest` (`src/ingest.cpp`) | 1632 | 8 | 25 | 467 | **29%** | genuinely tangled |
+| `buildGraph` (`src/graph.h`) | 1244 | 9 | 30 | 306 | **25%** | genuinely tangled |
+| `main` (`src/main.cpp`) | 1061 | 6 | 29 | 109 | **10%** | long, mostly shallow steps |
+| `dispatchMcpLine` (`src/mcp.h`) | 1099 | 7 | 22 | 98 | **9%** | a dispatch table, not a tangle |
+| `runDefaultMap` (`src/main.cpp`) | 650 | 4 | 7 | 14 | **2%** | blocked-sequential |
+| `ur_walkTree` (`src/ingest.cpp`) | 87 | 7 | 1 | 43 | **49%** | *small* and tangled |
+
+`loc` and `nest` alone rank `main` and `dispatchMcpLine` beside `ingest` and `buildGraph`; the profile
+separates them, and it promotes `ur_walkTree` — 87 lines, so no size bar fires, yet proportionally the
+densest thing in the table. **This changes no ranking**: `humps > 0` is exactly `nest >= bar`, which is
+precisely when the `nest` bar already fired, so the family count and the panel's shortlist are untouched.
+It is strictly more evidence on rows that already appear — a reader can tell the two shapes apart without
+opening the file.
 
 **Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
 rather than blurring it:

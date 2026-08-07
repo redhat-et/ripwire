@@ -369,6 +369,21 @@ inline std::string structuralBarEvidence( const Symbol& s )
             appendMeasurement( why, hit.name, hit.value );
         }
     }
+    // The nesting PROFILE, reported beside the max instead of gating on it (model.h Symbol::humps/deepLoc).
+    // nest= is the deepest line and says nothing about how much of the body is that deep, so a long
+    // BLOCKED-SEQUENTIAL function — a run of shallow scoped steps whose max is set by one inner loop — and a
+    // TANGLED one that holds depth for hundreds of lines produce the identical evidence string. humps= (how
+    // many regions reach the bar) and deep= (how many lines are inside them, against the loc= already above)
+    // are what tells them apart, and a reader gets it without opening the file.
+    //
+    // This adds NO firing case: humps>0 is exactly maxNest>=kNestBar, which is precisely when the `nest` bar
+    // in the table above already fired. The family count and the panel's ranking are therefore untouched, so
+    // no recalibration round is owed for it — this is strictly more evidence for rows that already appear.
+    if( s.humps > 0 )
+    {
+        appendMeasurement( why, "humps", std::uint32_t( s.humps ) );
+        appendMeasurement( why, "deep",  std::uint32_t( s.deepLoc ) );
+    }
     return why;
 }
 

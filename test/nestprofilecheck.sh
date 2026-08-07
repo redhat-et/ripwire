@@ -18,7 +18,7 @@
 # repo's EXISTING structural bar quality::kNestBar — no new magic number:
 #
 #   humps="N"   the count of MAXIMAL control-nesting regions that reach the bar. This is CodeScene's "bumpy
-#               road" (DESIGN_READABILITY_METRICS.md #8): a rise above the threshold then a fall. One deep
+#               road": a rise above the threshold then a fall. One deep
 #               tangle is 1; repeated missing abstractions are many. EXACT, not a floor — each deep region
 #               has exactly one first-crossing node in the walk, so there is nothing to double count.
 #   deep="N"    physical lines lying inside those regions. A FLOOR (deep_floor="1"), for the reason stated
