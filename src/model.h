@@ -504,20 +504,34 @@ struct RouteEdge
     std::string   toName;                          // the handler symbol's name
 };
 
+// One otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the skipped_oversize=
+// population, itemized (the count alone said the corpus was truncated without naming what was absent).
+// `path` is the CRAWL spelling, the same vocabulary result.files uses, so a row joins the map's p=
+// values; the multi-root merge relabels it to `<label>/./<rel>` exactly like files. `limitBytes` is the
+// ceiling that dropped the file (--max-file-size's value, or kMaxJsonConfigBytes for the .json lane),
+// so sizeBytes > limitBytes is self-evident in the row.
+struct SkippedOversize
+{
+    std::string   path;
+    std::uint64_t sizeBytes  = 0;
+    std::uint64_t limitBytes = 0;
+};
+
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned
 // in (file, line, name) order so the whole pipeline is reproducible run-to-run.
 struct IngestResult
 {
     std::vector<std::string> files;
 
-    // §P0.4/§P0.5d: how many otherwise-indexable files the crawl DROPPED for exceeding a per-file size
+    // §P0.4/§P0.5d: the otherwise-indexable files the crawl DROPPED for exceeding a per-file size
     // ceiling (--max-file-size / kDefaultMaxFileBytes, OR the .json lane's fixed kMaxJsonConfigBytes — §B13.1;
     // the two are mutually exclusive per file, so nothing is counted twice). `--max-file-size=8K` silently
-    // dropped ~296 of ~759 files and the header reported files=463 as if that were the corpus. Zero on every
-    // default run of a tree with nothing oversized, and surfaced only when non-zero — absent means nothing
-    // was skipped. The invariant a reader may rely on: files= + skipped_oversize= = the population the crawl
-    // considered, at EVERY --max-file-size setting.
-    std::uint32_t            skippedOversizeCount = 0;
+    // dropped ~296 of ~759 files and the header reported files=463 as if that were the corpus. Empty on every
+    // default run of a tree with nothing oversized; the header count is surfaced only when non-zero — absent
+    // means nothing was skipped. The invariant a reader may rely on: files= + skipped_oversize= = the
+    // population the crawl considered, at EVERY --max-file-size setting. The header emits size() as
+    // skipped_oversize=; --skipped itemizes the rows (one source, never two counters). Sorted by path.
+    std::vector<SkippedOversize> skippedOversize;
 
     std::vector<Symbol>      symbols;      // definitions
     std::vector<Reference>   references;   // unresolved calls

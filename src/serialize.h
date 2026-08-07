@@ -1388,9 +1388,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // if they WERE the corpus. Emitted ONLY when non-zero, per the house rule — absent means nothing was
     // skipped, so a default run over a tree with nothing oversized stays byte-identical.
     char skippedAttr[ 48 ];  skippedAttr[ 0 ] = '\0';
-    if( ing.skippedOversizeCount > 0 )
+    if( !ing.skippedOversize.empty() )
     {
-        std::snprintf( skippedAttr, sizeof( skippedAttr ), " skipped_oversize=%u", ing.skippedOversizeCount );
+        std::snprintf( skippedAttr, sizeof( skippedAttr ), " skipped_oversize=%zu", ing.skippedOversize.size() );
     }
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
@@ -4780,9 +4780,9 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     // §P0.5d, JSON lane: the size-ceiling disclosure must reach --json consumers too — the XML header
     // gained skipped_oversize= and a JSON reader (MCP clients most of all) must not be the one audience
     // still shown the survivors as if they were the corpus. Same absent-when-zero rule as the XML side.
-    if( h.ing.skippedOversizeCount > 0 )
+    if( !h.ing.skippedOversize.empty() )
     {
-        std::snprintf( hdr, sizeof( hdr ), "\"skipped_oversize\":%u,", h.ing.skippedOversizeCount );
+        std::snprintf( hdr, sizeof( hdr ), "\"skipped_oversize\":%zu,", h.ing.skippedOversize.size() );
         w.write( hdr );
     }
     // §A4d: `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.

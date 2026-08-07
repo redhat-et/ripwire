@@ -6672,6 +6672,54 @@ std::optional<int> runNotes( const MainDispatch& d )
     return std::nullopt;
 }
 
+// §P0.5d — --skipped: itemize the map header's skipped_oversize= count. The header discloses HOW MANY
+// otherwise-indexable files the crawl dropped for exceeding a size ceiling; this verb names WHICH — the
+// disclosure doctrine ("every truncation is disclosed") applied to the corpus itself, where the count kept
+// the accounting honest while the missing population stayed anonymous. One row per drop, path-sorted at
+// crawl time (ingest.cpp collectSources), each carrying the ceiling that dropped it, so bytes > limit is
+// self-evident per row. The binary-sniff and read-failure parse skips are deliberately NOT here: those
+// files keep their fileId and stay inside files= (present with zero symbols), so they are not absent from
+// the accounting this verb itemizes. Read-only; exit 0 always: a report, not a gate.
+std::optional<int> runSkipped( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+    if( !cfg.skippedList )
+    {
+        return std::nullopt;
+    }
+
+    {
+        XmlWriter         w( stdout );
+        std::vector<char> esc;
+        // NB: a literal `--flag` spelling is illegal inside an XML comment (no `--` in comments), so the
+        // legend names the flag as "the max-file-size flag" and leans on the attribute names.
+        w.write( "<ctx><!-- ripwire skipped-oversize report: one <f p= bytes= limit=/> row per otherwise-indexable file the crawl DROPPED for"
+                 " exceeding a size ceiling — these files are absent from files= and every other surface (files= + oversize= = the population"
+                 " the crawl considered). limit= is the ceiling that dropped the row: the max-file-size flag's value (max_file_size=) or the"
+                 " fixed .json config ceiling that flag does not raise (json_ceiling=); oversize=\"0\" means nothing was dropped at these"
+                 " ceilings. -->" );
+        char hdr[ 128 ];
+        // mirror ingest()'s own zero-ceiling clamp so the header states the EFFECTIVE bound, never a raw 0
+        const std::size_t effectiveMax = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
+        std::snprintf( hdr, sizeof( hdr ), "<skipped oversize=\"%zu\" max_file_size=\"%zu\" json_ceiling=\"%zu\">",
+                       ing.skippedOversize.size(), effectiveMax, kMaxJsonConfigBytes );
+        w.write( hdr );
+        for( const SkippedOversize& sk : ing.skippedOversize )
+        {
+            char row[ 96 ];
+            w.write( "<f p=\"" );  w.write( escapeXml( sk.path, esc ) );
+            std::snprintf( row, sizeof( row ), "\" bytes=\"%llu\" limit=\"%llu\"/>",
+                           ( unsigned long long ) sk.sizeBytes, ( unsigned long long ) sk.limitBytes );
+            w.write( row );
+        }
+        w.write( "</skipped></ctx>" );
+    }
+    std::fputc( '\n', stdout );
+    return 0;
+}
+
 // L4 — --pack-task="TASK": the budget-shared task bundle. ONE call assembling
 // the whole 3-5 call orientation dance under ONE deterministic byte budget (default 6K tokens; --token-budget
 // overrides), in a FIXED section order with a header that reports EVERY truncation (the overbudgetcheck "no
@@ -10019,7 +10067,8 @@ void warnReportVerbPrecedence( const rw::Config& c )
         { "--flags",             c.darkFlags              }, { "--whereis",       c.whereisFlag           },
         { "--layout",            c.layoutFlag             }, { "--doc-drift",     c.docDrift              },
         { "--from-trace",       !c.fromTrace.empty()      }, { "--note-add",      c.noteAddFlag           },
-        { "--notes",             c.notesList              }, { "--communities",   c.communities           },
+        { "--notes",             c.notesList              }, { "--skipped",       c.skippedList           },
+        { "--communities",       c.communities            },
         { "--community",         c.communityFlag          }, { "--zoom",          c.zoom                  },
         { "--seams",             c.seams                  }, { "--report",        c.report                },
         { "--tree",              c.tree                   }, { "--grep",         !c.grep.empty()          },
@@ -10252,6 +10301,10 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     if( c.notesList )
     {
         return "--notes";
+    }
+    if( c.skippedList )
+    {
+        return "--skipped";
     }
     if( c.exportCcJson )
     {
@@ -11386,6 +11439,11 @@ int main( int argc, char** argv )
     }
 
     if( std::optional<int> handled = runNotes( dsp ) )
+    {
+        return *handled;
+    }
+
+    if( std::optional<int> handled = runSkipped( dsp ) )
     {
         return *handled;
     }
