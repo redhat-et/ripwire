@@ -65,6 +65,65 @@ reverse happened **twice**. Held out wider — **243 instances across 78 reposit
 95% lower bound **+25.0pp**, bought for +3.4% warm latency and **−39.4%** tokens. Every caveat, plus
 a third round against a compression-layer competitor, in [Measured](#measured).
 
+<details>
+<summary><b>The same table, as narrated by Jane Austen</b> — every figure in it measured, the manners editorial</summary>
+
+<br>
+
+*A Survey of the Neighbourhood's Eligible Instruments — being an account of five gentlemen of
+retrieval, and one lady of no pretension whatsoever.*
+
+It is a truth universally acknowledged, that an engineer in possession of a large repository must be
+in want of a map.
+
+**Mr. Repowise** is by common consent the most substantial of the party, and no one who has waited
+upon him would dispute it. He is possessed of a handsome index and a manner of great thoroughness;
+but he must be *seen to*. One does not simply address Mr. Repowise. One sends word, and dresses, and
+waits — eleven seconds on an ordinary morning, and upon one memorable occasion in the country, four
+minutes and thirty-five seconds — during which interval a less consequential neighbour has already
+answered the question, taken her leave, and thought no more about it. He answers creditably when at
+last he arrives, one time in three; whether that is worth the toilette, each family must determine
+for itself.
+
+**Mr. Codeseek** is a young gentleman of remarkably quick habits — nine tenths of a second to prepare
+himself. He suffers, however, from an affliction of address. Speak to him plainly, in the language of
+ordinary complaint, and he will regard you with perfect composure and say nothing whatever — nothing,
+upon sixty occasions out of sixty. Name a person precisely as that person is named, and he grows
+animated directly. It is not stupidity; it is a want of imagination in the matter of introductions.
+
+**Mrs. Codebase-Memory** is amiable and quick and deserves no unkindness. Her card announces
+accomplishments in the semantic line. Upon enquiry, the semantic line is not at home, and the
+household denies all knowledge of it. What she does possess she performs creditably, and one is left
+with the impression of a woman ill-served by whoever prints her cards.
+
+**Mr. Graphify** enjoys a great many admirers. He does not rank his acquaintances; he calls upon them
+in whatever order his walk happens to take him, and reports the order of the walk as though it were
+an opinion. He once arrived carrying five hundred and eighty-four megabytes of correspondence. On
+three occasions out of sixty, pressed for any answer at all, he replied that no matching nodes were
+found, and considered the matter closed.
+
+**Mr. Aider** is the most gentlemanly of the company and by far the most difficult to consult. He
+cannot be asked a question — the thing is simply not done. One may mention names in his hearing and
+hope he takes the hint; he does take it, a little, and is three points the better for it. But he
+forms his view of the neighbourhood before you speak and retains it after, and one cannot escape the
+feeling that the conversation was never truly with you.
+
+And there is **ripwire**, of whom nothing is said in the drawing rooms, because she has already gone
+home. She was asked; she answered, in thirteen hundredths of a second; every gold file within the
+first ten, in eight-and-fifty cases of the hundred. She keeps no establishment, corresponds with no
+distant authority, and has never once been indexed at a party. Mr. Repowise finds her abrupt.
+
+She is.
+
+<sub>Every figure above is one of the measured numbers in the tables on this page: the index walls
+(11.4 s median, 274.7 s worst; 0.9 s), the 33.3% strict file@10, the 0-results-on-60/60 fallback arm,
+the absent <code>semantic_query</code> tool, the 584 MB graph, the 3-of-60 empty rankings, aider's
++3.3 pp personalization delta, and ripwire's 0.13 s / 58.3%. The arithmetic is in
+<a href="docs/EVALS.md">docs/EVALS.md</a>; only the manners are editorial. These are other people's
+real work, and the joke is aimed at the trade-offs, never at the authors.</sub>
+
+</details>
+
 **Name a symbol and it is the first hit.** A confidence-gated router detects when a query *names*
 something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7%** in `src/`,
 **63.3% → 87.3%** at the repository root. The gate is the load-bearing part — route everything and
