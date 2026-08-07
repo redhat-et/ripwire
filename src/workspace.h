@@ -180,6 +180,16 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
     return true;
 }
 
+// The §P8 labeled spelling `<label>/./<rel>` shared by every merged-workspace path surface (files below,
+// and the §P0.5d skipped-oversize rows) — the `./` re-insertion rationale lives at the files call site.
+inline std::string labeledWorkspacePath( const std::string& label, const std::string& rootArg, std::string_view crawlPath )
+{
+    std::string labeled = label;
+    const std::string_view rel = relForHash( crawlPath, rootArg );
+    if( !rel.empty() ) { labeled.append( "/./" );  labeled.append( rel ); }
+    return labeled;
+}
+
 // Merge per-root IngestResults (parallel to `roots`, canonical order) into ONE IngestResult:
 //   * ing.files[f]     = `<label>/<root-relative-path>` (the §2 labeled identity — what every surface emits)
 //   * ing.realPaths[f] = the per-root crawl spelling (what disk I/O must use; see rw::diskPath)
@@ -198,7 +208,6 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         totFiles += p.files.size();   totSyms  += p.symbols.size();   totRefs += p.references.size();
         totIncs  += p.includes.size(); totBinds += p.bindings.size(); totFfis += p.bindingAliases.size();
         totRouteDefs += p.routeDefs.size();   totRouteUses += p.routeUses.size();   // B6.3
-        m.skippedOversizeCount += p.skippedOversizeCount;   // §P0.5d: size-dropped files sum across roots
     }
     m.files.reserve( totFiles );          m.realPaths.reserve( totFiles );   m.fileRoot.reserve( totFiles );
     m.symbols.reserve( totSyms );         m.references.reserve( totRefs );
@@ -269,12 +278,18 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         // PRINTS is exactly what it now accepts.
         for( const std::string& f : p.files )
         {
-            std::string labeled = roots[r].label;
-            const std::string_view rel = relForHash( f, roots[r].arg );
-            if( !rel.empty() ) { labeled.append( "/./" );  labeled.append( rel ); }
-            m.files.push_back( std::move( labeled ) );
+            m.files.push_back( labeledWorkspacePath( roots[r].label, roots[r].arg, f ) );
             m.realPaths.push_back( f );
             m.fileRoot.push_back( std::uint32_t( r ) );
+        }
+
+        // §P0.5d: size-dropped files concatenate across roots, relabeled EXACTLY like files above so a
+        // --skipped row speaks the same `<label>/./<rel>` vocabulary as every other emitted path. Parts
+        // arrive in canonical label order and each part is path-sorted, so the concatenation stays sorted.
+        for( SkippedOversize& sk : p.skippedOversize )
+        {
+            sk.path = labeledWorkspacePath( roots[r].label, roots[r].arg, sk.path );
+            m.skippedOversize.push_back( std::move( sk ) );
         }
 
         for( Symbol& s : p.symbols )

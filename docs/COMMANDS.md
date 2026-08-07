@@ -46,7 +46,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
-**self-diagnosis** — [`--doctor`](#doctor)
+**self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
@@ -2227,6 +2227,18 @@ $ ./build/ripwire . --doctor
 - "Dependent source" is a NAMING heuristic (same dir, same filename stem, e.g.
 - A FAILING row (ok="0") also carries hint=, the derived verdict (which of self=/which= is stale and the fix, which grammar(s) failed to compile, why the cache dir isn't writable, ...) — a passing row never carries hint=.
 
+### `--skipped`
+
+**Answers:** itemize the map header's skipped_oversize= count: one <f p= bytes= limit=/> row per otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the files absent from files= and every other surface (files= + oversize= = the population the crawl considered).
+
+limit= is the ceiling that dropped the row: --max-file-size, or the fixed 256KB .json config ceiling --max-file-size does not raise; the root repeats both effective ceilings (max_file_size= json_ceiling=) so a zero-row report still states its bounds, and oversize="0" means nothing was dropped at them. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.
+
+**Caveats (stated by the binary):**
+
+- itemize the map header's skipped_oversize= count: one <f p= bytes= limit=/> row per otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the files absent from files= and every other surface (files= + oversize= = the population the crawl considered).
+- limit= is the ceiling that dropped the row: --max-file-size, or the fixed 256KB .json config ceiling --max-file-size does not raise;
+- exit 0 always: a report, not a gate.
+
 ---
 
 ## security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,
@@ -2374,7 +2386,7 @@ $ ./build/ripwire . --exclude=present --exclude=bench --top-k=5
 ... [5 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--index-out`
+**Shaped by:** `--skipped`, `--index-out`
 
 ### `--map-diff`
 
@@ -2506,6 +2518,8 @@ $ ./build/ripwire . --max-file-size=8K --top-k=3
 </s>
 ... [2 more line(s); run it to see the whole thing]
 ```
+
+**Shaped by:** `--skipped`
 
 **Caveats (stated by the binary):**
 
