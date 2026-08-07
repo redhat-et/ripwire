@@ -14,8 +14,8 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
-**Languages:** C · C++ · Objective-C/C++ · Metal · CUDA · Python · TypeScript · JavaScript · Java ·
-Ruby · Bash · Go · Rust · Swift · C# · JSON — [sixteen vendored grammars](#languages), and adding
+**Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
+JavaScript · Java · Ruby · Bash · C# · JSON — [sixteen vendored grammars](#languages), and adding
 another is a vendored tree-sitter grammar plus one row in a declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
@@ -994,10 +994,18 @@ estimate and a call graph all look plausible whether or not they are correct.
 
 ## Set it up in your coding agent
 
-Two steps, both under a minute: register the MCP server so the agent can call ripwire mid-task, then
-install the skills that tell it *when* to.
+**If your agent can run shell commands, it is already set up.** The CLI is the primary interface:
+`ripwire` on `PATH` costs the agent nothing until the moment it runs a command — no server to
+register, no tool schemas riding in every request's context. The one step that matters is installing
+the skills (step 2 below), which teach the agent *when* to reach for which verb.
 
-### 1. Register the server
+The MCP server is the **optional** second interface, for what a shell pipe can't give you: clients
+without shell access, lazy body *handles* (fetch a symbol's source only when actually needed), and
+the span-addressed edit verbs with their staleness/ambiguity refusal contract. That convenience has a
+cost the CLI doesn't carry — the verb schemas sit in the agent's context every session — so register
+it when you want those verbs, not as a default.
+
+### 1. (Optional) Register the MCP server
 
 `ripwire wrap <agent>` prints the recipe for the agent you name. It **prints**; it never edits your
 config — you read the line, then run it.
