@@ -1,0 +1,4629 @@
+{
+  "dataset": "locbench",
+  "split": "heldout",
+  "split_contract": "repo-disjoint sha256(ripwire-a7-v2\\0 + lowercase(repo)), byte0<128=train",
+  "history_depth": 1,
+  "ctx_extra_args": "",
+  "n_scored": 60,
+  "skipped": {
+    "nonpy": 0,
+    "checkout": 0,
+    "ctx": 0,
+    "unindexable": 0
+  },
+  "coverage": {
+    "covered": 197,
+    "gold": 197,
+    "added": 78
+  },
+  "arms": {
+    "for": {
+      "n": 60,
+      "f1": 16,
+      "f3": 25,
+      "f5": 29,
+      "f10": 35,
+      "allf10": 17,
+      "fn5": 6,
+      "fn10": 10,
+      "mrr": 15.223541095153891,
+      "anyf10": 51,
+      "anyfn10": 31,
+      "wall": 12.914447497110814,
+      "p95": 12.914447497110814,
+      "output_bytes": 332170,
+      "output_tokens_ceiling": 140779,
+      "candidate_bytes": 4572580,
+      "cold_wall": 0.0,
+      "index_wall": 0.0,
+      "primary_gold_files": 134,
+      "all_gold_files": 204
+    }
+  },
+  "instances": [
+    {
+      "instance_id": "ultralytics__ultralytics-17810",
+      "partition": "heldout",
+      "repo": "ultralytics/ultralytics",
+      "gold_files": [
+        "ultralytics/utils/ops.py"
+      ],
+      "primary_files": [
+        "ultralytics/utils/ops.py"
+      ],
+      "gold_funcs": [
+        [
+          "ultralytics/utils/ops.py",
+          "",
+          "segment2box"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "ultralytics/utils/ops.py",
+          "",
+          "segment2box"
+        ]
+      ],
+      "n_files": 545,
+      "n_syms": 6964,
+      "arms": {
+        "for": {
+          "file_first": 13,
+          "file_worst": 13,
+          "all_file_worst": 13,
+          "func_first": null,
+          "wall_median": 0.0655,
+          "wall_p95": 0.0655,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4980,
+          "output_tokens_ceiling": 2111,
+          "candidate_bytes": 77241
+        }
+      }
+    },
+    {
+      "instance_id": "Chainlit__chainlit-1575",
+      "partition": "heldout",
+      "repo": "Chainlit/chainlit",
+      "gold_files": [
+        "backend/chainlit/config.py",
+        "backend/chainlit/server.py",
+        "backend/chainlit/socket.py",
+        "frontend/src/App.tsx",
+        "libs/copilot/src/chat/index.tsx",
+        "libs/react-client/src/useChatSession.ts"
+      ],
+      "primary_files": [
+        "backend/chainlit/config.py",
+        "backend/chainlit/server.py",
+        "backend/chainlit/socket.py",
+        "frontend/src/App.tsx",
+        "libs/copilot/src/chat/index.tsx",
+        "libs/react-client/src/useChatSession.ts"
+      ],
+      "gold_funcs": [
+        [
+          "backend/chainlit/server.py",
+          "",
+          "get_html_template"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "build_anon_user_identifier"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "connect"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "connection_successful"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "window_message"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "backend/chainlit/server.py",
+          "",
+          "get_html_template"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "build_anon_user_identifier"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "connect"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "connection_successful"
+        ],
+        [
+          "backend/chainlit/socket.py",
+          "",
+          "window_message"
+        ]
+      ],
+      "n_files": 360,
+      "n_syms": 2277,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 64,
+          "all_file_worst": 64,
+          "func_first": 87,
+          "wall_median": 0.0548,
+          "wall_p95": 0.0548,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4034,
+          "output_tokens_ceiling": 1710,
+          "candidate_bytes": 67051
+        }
+      }
+    },
+    {
+      "instance_id": "huggingface__transformers-22496",
+      "partition": "heldout",
+      "repo": "huggingface/transformers",
+      "gold_files": [
+        "src/transformers/models/whisper/modeling_whisper.py",
+        "src/transformers/models/whisper/processing_whisper.py",
+        "src/transformers/models/whisper/tokenization_whisper.py",
+        "src/transformers/models/whisper/tokenization_whisper_fast.py"
+      ],
+      "primary_files": [
+        "src/transformers/models/whisper/modeling_whisper.py",
+        "src/transformers/models/whisper/processing_whisper.py",
+        "src/transformers/models/whisper/tokenization_whisper.py",
+        "src/transformers/models/whisper/tokenization_whisper_fast.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/transformers/models/whisper/modeling_whisper.py",
+          "WhisperForConditionalGeneration",
+          "generate"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper.py",
+          "WhisperTokenizer",
+          "_decode"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper_fast.py",
+          "WhisperTokenizerFast",
+          "_decode"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "src/transformers/models/whisper/processing_whisper.py",
+          "WhisperProcessor",
+          "get_prompt_ids"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper.py",
+          "WhisperTokenizer",
+          "get_prompt_ids"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper.py",
+          "WhisperTokenizer",
+          "_strip_prompt"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper_fast.py",
+          "WhisperTokenizerFast",
+          "get_prompt_ids"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper_fast.py",
+          "WhisperTokenizerFast",
+          "_strip_prompt"
+        ]
+      ],
+      "covered": [
+        [
+          "src/transformers/models/whisper/modeling_whisper.py",
+          "WhisperForConditionalGeneration",
+          "generate"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper.py",
+          "WhisperTokenizer",
+          "_decode"
+        ],
+        [
+          "src/transformers/models/whisper/tokenization_whisper_fast.py",
+          "WhisperTokenizerFast",
+          "_decode"
+        ]
+      ],
+      "n_files": 2381,
+      "n_syms": 59735,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 8,
+          "all_file_worst": 8,
+          "func_first": 6,
+          "wall_median": 0.81,
+          "wall_p95": 0.81,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5003,
+          "output_tokens_ceiling": 2120,
+          "candidate_bytes": 99978
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-24145",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        "doc/whats_new/v1.3.rst",
+        "sklearn/preprocessing/_polynomial.py"
+      ],
+      "primary_files": [
+        "sklearn/preprocessing/_polynomial.py"
+      ],
+      "gold_funcs": [
+        [
+          "sklearn/preprocessing/_polynomial.py",
+          "SplineTransformer",
+          "__init__"
+        ],
+        [
+          "sklearn/preprocessing/_polynomial.py",
+          "SplineTransformer",
+          "fit"
+        ],
+        [
+          "sklearn/preprocessing/_polynomial.py",
+          "SplineTransformer",
+          "transform"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "sklearn/preprocessing/_polynomial.py",
+          "SplineTransformer",
+          "__init__"
+        ],
+        [
+          "sklearn/preprocessing/_polynomial.py",
+          "SplineTransformer",
+          "fit"
+        ],
+        [
+          "sklearn/preprocessing/_polynomial.py",
+          "SplineTransformer",
+          "transform"
+        ]
+      ],
+      "n_files": 881,
+      "n_syms": 15846,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 3,
+          "wall_median": 0.1804,
+          "wall_p95": 0.1804,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3520,
+          "output_tokens_ceiling": 1492,
+          "candidate_bytes": 80245
+        }
+      }
+    },
+    {
+      "instance_id": "avantifellows__quiz-backend-84",
+      "partition": "heldout",
+      "repo": "avantifellows/quiz-backend",
+      "gold_files": [
+        "app/models.py",
+        "app/routers/session_answers.py",
+        "app/routers/sessions.py"
+      ],
+      "primary_files": [
+        "app/models.py",
+        "app/routers/session_answers.py",
+        "app/routers/sessions.py"
+      ],
+      "gold_funcs": [
+        [
+          "app/routers/session_answers.py",
+          "",
+          "update_session_answer"
+        ],
+        [
+          "app/routers/session_answers.py",
+          "",
+          "get_session_answer"
+        ],
+        [
+          "app/routers/sessions.py",
+          "",
+          "create_session"
+        ],
+        [
+          "app/routers/sessions.py",
+          "",
+          "update_session"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "app/routers/session_answers.py",
+          "",
+          "update_session_answer_in_a_session"
+        ],
+        [
+          "app/routers/session_answers.py",
+          "",
+          "get_session_answer_from_a_session"
+        ]
+      ],
+      "covered": [
+        [
+          "app/routers/session_answers.py",
+          "",
+          "update_session_answer"
+        ],
+        [
+          "app/routers/session_answers.py",
+          "",
+          "get_session_answer"
+        ],
+        [
+          "app/routers/sessions.py",
+          "",
+          "create_session"
+        ],
+        [
+          "app/routers/sessions.py",
+          "",
+          "update_session"
+        ]
+      ],
+      "n_files": 25,
+      "n_syms": 189,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 5,
+          "all_file_worst": 5,
+          "func_first": 0,
+          "wall_median": 0.0318,
+          "wall_p95": 0.0318,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 6343,
+          "output_tokens_ceiling": 2688,
+          "candidate_bytes": 61357
+        }
+      }
+    },
+    {
+      "instance_id": "sympy__sympy-27223",
+      "partition": "heldout",
+      "repo": "sympy/sympy",
+      "gold_files": [
+        "sympy/utilities/lambdify.py"
+      ],
+      "primary_files": [
+        "sympy/utilities/lambdify.py"
+      ],
+      "gold_funcs": [
+        [
+          "sympy/utilities/lambdify.py",
+          "",
+          "lambdify"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "sympy/utilities/lambdify.py",
+          "",
+          "lambdify"
+        ]
+      ],
+      "n_files": 1495,
+      "n_syms": 40728,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "all_file_worst": 1,
+          "func_first": 2,
+          "wall_median": 0.4513,
+          "wall_p95": 0.4513,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4183,
+          "output_tokens_ceiling": 1773,
+          "candidate_bytes": 63359
+        }
+      }
+    },
+    {
+      "instance_id": "Open-MSS__MSS-1967",
+      "partition": "heldout",
+      "repo": "Open-MSS/MSS",
+      "gold_files": [
+        ".github/workflows/python-flake8.yml",
+        "mslib/msui/mscolab.py",
+        "mslib/msui/socket_control.py",
+        "mslib/utils/airdata.py"
+      ],
+      "primary_files": [
+        "mslib/msui/mscolab.py",
+        "mslib/msui/socket_control.py",
+        "mslib/utils/airdata.py"
+      ],
+      "gold_funcs": [
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "add_operation"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "change_category_handler"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "change_description_handler"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "rename_operation_handler"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "logout"
+        ],
+        [
+          "mslib/msui/socket_control.py",
+          "ConnectionManager",
+          "disconnect"
+        ],
+        [
+          "mslib/utils/airdata.py",
+          "",
+          "get_airspaces"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "add_operation"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "change_category_handler"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "change_description_handler"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "rename_operation_handler"
+        ],
+        [
+          "mslib/msui/mscolab.py",
+          "MSUIMscolab",
+          "logout"
+        ],
+        [
+          "mslib/msui/socket_control.py",
+          "ConnectionManager",
+          "disconnect"
+        ],
+        [
+          "mslib/utils/airdata.py",
+          "",
+          "get_airspaces"
+        ]
+      ],
+      "n_files": 239,
+      "n_syms": 2876,
+      "arms": {
+        "for": {
+          "file_first": 39,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.0905,
+          "wall_p95": 0.0905,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3774,
+          "output_tokens_ceiling": 1600,
+          "candidate_bytes": 74831
+        }
+      }
+    },
+    {
+      "instance_id": "mesonbuild__meson-11366",
+      "partition": "heldout",
+      "repo": "mesonbuild/meson",
+      "gold_files": [
+        "docs/markdown/Installing.md",
+        "docs/markdown/snippets/meson_install_drop_privs.md",
+        "docs/markdown/snippets/meson_install_elevate.md",
+        "mesonbuild/minstall.py"
+      ],
+      "primary_files": [
+        "docs/markdown/Installing.md",
+        "mesonbuild/minstall.py"
+      ],
+      "gold_funcs": [
+        [
+          "mesonbuild/minstall.py",
+          "Installer",
+          "do_install"
+        ],
+        [
+          "mesonbuild/minstall.py",
+          "",
+          "rebuild_all"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "mesonbuild/minstall.py",
+          "Installer",
+          "do_install"
+        ],
+        [
+          "mesonbuild/minstall.py",
+          "",
+          "rebuild_all"
+        ]
+      ],
+      "n_files": 1961,
+      "n_syms": 11314,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": 0,
+          "wall_median": 0.1568,
+          "wall_p95": 0.1568,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 14795,
+          "output_tokens_ceiling": 6270,
+          "candidate_bytes": 82927
+        }
+      }
+    },
+    {
+      "instance_id": "dmlc__dgl-5240",
+      "partition": "heldout",
+      "repo": "dmlc/dgl",
+      "gold_files": [
+        "python/dgl/frame.py"
+      ],
+      "primary_files": [
+        "python/dgl/frame.py"
+      ],
+      "gold_funcs": [
+        [
+          "python/dgl/frame.py",
+          "Column",
+          "record_stream"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "python/dgl/frame.py",
+          "_LazyIndex",
+          "record_stream"
+        ]
+      ],
+      "covered": [
+        [
+          "python/dgl/frame.py",
+          "Column",
+          "record_stream"
+        ]
+      ],
+      "n_files": 1467,
+      "n_syms": 16608,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": 3,
+          "all_file_worst": 3,
+          "func_first": null,
+          "wall_median": 0.2052,
+          "wall_p95": 0.2052,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4762,
+          "output_tokens_ceiling": 2018,
+          "candidate_bytes": 71352
+        }
+      }
+    },
+    {
+      "instance_id": "ctc-oss__fapolicy-analyzer-809",
+      "partition": "heldout",
+      "repo": "ctc-oss/fapolicy-analyzer",
+      "gold_files": [
+        "Cargo.lock",
+        "crates/daemon/src/error.rs",
+        "crates/daemon/src/fapolicyd.rs",
+        "crates/daemon/src/lib.rs",
+        "crates/daemon/src/profiler.rs",
+        "crates/daemon/src/profiler.service",
+        "crates/daemon/src/svc.rs",
+        "crates/pyo3/Cargo.toml",
+        "crates/pyo3/src/daemon.rs",
+        "crates/pyo3/src/profiler.rs",
+        "crates/tools/src/fapolicy_profiler.rs",
+        "fapolicy_analyzer/ui/features/profiler_feature.py",
+        "fapolicy_analyzer/ui/profiler_page.py",
+        "fapolicy_analyzer/ui/reducers/profiler_reducer.py"
+      ],
+      "primary_files": [
+        "crates/daemon/src/error.rs",
+        "crates/daemon/src/fapolicyd.rs",
+        "crates/daemon/src/lib.rs",
+        "crates/daemon/src/profiler.rs",
+        "crates/daemon/src/svc.rs",
+        "crates/pyo3/src/daemon.rs",
+        "crates/pyo3/src/profiler.rs",
+        "crates/tools/src/fapolicy_profiler.rs",
+        "fapolicy_analyzer/ui/features/profiler_feature.py",
+        "fapolicy_analyzer/ui/profiler_page.py",
+        "fapolicy_analyzer/ui/reducers/profiler_reducer.py"
+      ],
+      "gold_funcs": [
+        [
+          "fapolicy_analyzer/ui/features/profiler_feature.py",
+          "",
+          "create_profiler_feature"
+        ],
+        [
+          "fapolicy_analyzer/ui/profiler_page.py",
+          "ProfilerPage",
+          "handle_done"
+        ],
+        [
+          "fapolicy_analyzer/ui/reducers/profiler_reducer.py",
+          "",
+          "handle_start_profiling_request"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "fapolicy_analyzer/ui/features/profiler_feature.py",
+          "",
+          "create_profiler_feature"
+        ],
+        [
+          "fapolicy_analyzer/ui/profiler_page.py",
+          "ProfilerPage",
+          "handle_done"
+        ],
+        [
+          "fapolicy_analyzer/ui/reducers/profiler_reducer.py",
+          "",
+          "handle_start_profiling_request"
+        ]
+      ],
+      "n_files": 292,
+      "n_syms": 2620,
+      "arms": {
+        "for": {
+          "file_first": 7,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": 29,
+          "wall_median": 0.05,
+          "wall_p95": 0.05,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4110,
+          "output_tokens_ceiling": 1742,
+          "candidate_bytes": 71159
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-16421",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/utils/text.py",
+        "docs/releases/5.1.txt"
+      ],
+      "primary_files": [
+        "django/utils/text.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "chars"
+        ],
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "_text_chars"
+        ],
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "words"
+        ],
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "_truncate_html"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "django/utils/text.py",
+          "",
+          "calculate_truncate_chars_length"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "__init__"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "void_elements"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "handle_startendtag"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "handle_starttag"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "handle_endtag"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "handle_data"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateHTMLParser",
+          "feed"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateCharsHTMLParser",
+          "__init__"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateCharsHTMLParser",
+          "process"
+        ],
+        [
+          "django/utils/text.py",
+          "TruncateWordsHTMLParser",
+          "process"
+        ]
+      ],
+      "covered": [
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "chars"
+        ],
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "_text_chars"
+        ],
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "words"
+        ],
+        [
+          "django/utils/text.py",
+          "Truncator",
+          "_truncate_html"
+        ]
+      ],
+      "n_files": 2517,
+      "n_syms": 42100,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 1,
+          "wall_median": 0.3473,
+          "wall_p95": 0.3473,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3808,
+          "output_tokens_ceiling": 1614,
+          "candidate_bytes": 71946
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-25186",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        "doc/whats_new/v1.3.rst",
+        "sklearn/ensemble/_iforest.py",
+        "sklearn/tree/_tree.pxd",
+        "sklearn/tree/_tree.pyx"
+      ],
+      "primary_files": [
+        "sklearn/ensemble/_iforest.py"
+      ],
+      "gold_funcs": [
+        [
+          "sklearn/ensemble/_iforest.py",
+          "IsolationForest",
+          "fit"
+        ],
+        [
+          "sklearn/ensemble/_iforest.py",
+          "IsolationForest",
+          "score_samples"
+        ],
+        [
+          "sklearn/ensemble/_iforest.py",
+          "IsolationForest",
+          "_compute_score_samples"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "sklearn/ensemble/_iforest.py",
+          "IsolationForest",
+          "fit"
+        ],
+        [
+          "sklearn/ensemble/_iforest.py",
+          "IsolationForest",
+          "score_samples"
+        ],
+        [
+          "sklearn/ensemble/_iforest.py",
+          "IsolationForest",
+          "_compute_score_samples"
+        ]
+      ],
+      "n_files": 876,
+      "n_syms": 15645,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "all_file_worst": null,
+          "func_first": 3,
+          "wall_median": 0.1925,
+          "wall_p95": 0.1925,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4379,
+          "output_tokens_ceiling": 1856,
+          "candidate_bytes": 76258
+        }
+      }
+    },
+    {
+      "instance_id": "streamlit__streamlit-6617",
+      "partition": "heldout",
+      "repo": "streamlit/streamlit",
+      "gold_files": [
+        "lib/streamlit/runtime/app_session.py",
+        "lib/streamlit/runtime/forward_msg_cache.py",
+        "lib/streamlit/runtime/runtime.py"
+      ],
+      "primary_files": [
+        "lib/streamlit/runtime/app_session.py",
+        "lib/streamlit/runtime/forward_msg_cache.py",
+        "lib/streamlit/runtime/runtime.py"
+      ],
+      "gold_funcs": [
+        [
+          "lib/streamlit/runtime/app_session.py",
+          "AppSession",
+          "shutdown"
+        ],
+        [
+          "lib/streamlit/runtime/forward_msg_cache.py",
+          "ForwardMsgCache",
+          "remove_expired_session_entries"
+        ],
+        [
+          "lib/streamlit/runtime/runtime.py",
+          "Runtime",
+          "_send_message"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "lib/streamlit/runtime/forward_msg_cache.py",
+          "ForwardMsgCache",
+          "remove_refs_for_session"
+        ],
+        [
+          "lib/streamlit/runtime/forward_msg_cache.py",
+          "ForwardMsgCache",
+          "remove_expired_entries_for_session"
+        ]
+      ],
+      "covered": [
+        [
+          "lib/streamlit/runtime/app_session.py",
+          "AppSession",
+          "shutdown"
+        ],
+        [
+          "lib/streamlit/runtime/forward_msg_cache.py",
+          "ForwardMsgCache",
+          "remove_expired_session_entries"
+        ],
+        [
+          "lib/streamlit/runtime/runtime.py",
+          "Runtime",
+          "_send_message"
+        ]
+      ],
+      "n_files": 1009,
+      "n_syms": 10641,
+      "arms": {
+        "for": {
+          "file_first": 70,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.1132,
+          "wall_p95": 0.1132,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4253,
+          "output_tokens_ceiling": 1803,
+          "candidate_bytes": 84697
+        }
+      }
+    },
+    {
+      "instance_id": "JoinMarket-Org__joinmarket-clientserver-1180",
+      "partition": "heldout",
+      "repo": "JoinMarket-Org/joinmarket-clientserver",
+      "gold_files": [
+        "jmclient/jmclient/blockchaininterface.py",
+        "jmclient/jmclient/wallet_service.py"
+      ],
+      "primary_files": [
+        "jmclient/jmclient/blockchaininterface.py",
+        "jmclient/jmclient/wallet_service.py"
+      ],
+      "gold_funcs": [
+        [
+          "jmclient/jmclient/blockchaininterface.py",
+          "BitcoinCoreInterface",
+          "_yield_transactions"
+        ],
+        [
+          "jmclient/jmclient/blockchaininterface.py",
+          "BitcoinCoreNoHistoryInterface",
+          "_yield_transactions"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "__init__"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "register_callbacks"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "transaction_monitor"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "check_callback_called"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "sync_wallet"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "get_all_transactions"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "sync_addresses"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "_yield_new_transactions"
+        ]
+      ],
+      "covered": [
+        [
+          "jmclient/jmclient/blockchaininterface.py",
+          "BitcoinCoreInterface",
+          "_yield_transactions"
+        ],
+        [
+          "jmclient/jmclient/blockchaininterface.py",
+          "BitcoinCoreNoHistoryInterface",
+          "_yield_transactions"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "__init__"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "register_callbacks"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "transaction_monitor"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "check_callback_called"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "sync_wallet"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "get_all_transactions"
+        ],
+        [
+          "jmclient/jmclient/wallet_service.py",
+          "WalletService",
+          "sync_addresses"
+        ]
+      ],
+      "n_files": 184,
+      "n_syms": 3068,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 10,
+          "all_file_worst": 10,
+          "func_first": 2,
+          "wall_median": 0.0702,
+          "wall_p95": 0.0702,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4668,
+          "output_tokens_ceiling": 1978,
+          "candidate_bytes": 83067
+        }
+      }
+    },
+    {
+      "instance_id": "TagStudioDev__TagStudio-735",
+      "partition": "heldout",
+      "repo": "TagStudioDev/TagStudio",
+      "gold_files": [
+        "tagstudio/src/qt/modals/tag_search.py",
+        "tagstudio/src/qt/widgets/tag.py"
+      ],
+      "primary_files": [
+        "tagstudio/src/qt/modals/tag_search.py",
+        "tagstudio/src/qt/widgets/tag.py"
+      ],
+      "gold_funcs": [
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "__init__"
+        ],
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "construct_tag_button"
+        ],
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "update_tags"
+        ],
+        [
+          "tagstudio/src/qt/widgets/tag.py",
+          "TagWidget",
+          "__init__"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "build_create_tag_button"
+        ]
+      ],
+      "covered": [
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "__init__"
+        ],
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "construct_tag_button"
+        ],
+        [
+          "tagstudio/src/qt/modals/tag_search.py",
+          "TagSearchPanel",
+          "update_tags"
+        ],
+        [
+          "tagstudio/src/qt/widgets/tag.py",
+          "TagWidget",
+          "__init__"
+        ]
+      ],
+      "n_files": 150,
+      "n_syms": 3347,
+      "arms": {
+        "for": {
+          "file_first": 17,
+          "file_worst": 30,
+          "all_file_worst": 30,
+          "func_first": 77,
+          "wall_median": 0.0493,
+          "wall_p95": 0.0493,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 6645,
+          "output_tokens_ceiling": 2816,
+          "candidate_bytes": 85375
+        }
+      }
+    },
+    {
+      "instance_id": "micropython__micropython-lib-947",
+      "partition": "heldout",
+      "repo": "micropython/micropython-lib",
+      "gold_files": [
+        "python-ecosys/requests/requests/__init__.py"
+      ],
+      "primary_files": [
+        "python-ecosys/requests/requests/__init__.py"
+      ],
+      "gold_funcs": [
+        [
+          "python-ecosys/requests/requests/__init__.py",
+          "",
+          "request"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "python-ecosys/requests/requests/__init__.py",
+          "",
+          "request"
+        ]
+      ],
+      "n_files": 337,
+      "n_syms": 5650,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "all_file_worst": 2,
+          "func_first": 4,
+          "wall_median": 0.0737,
+          "wall_p95": 0.0737,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5242,
+          "output_tokens_ceiling": 2222,
+          "candidate_bytes": 89860
+        }
+      }
+    },
+    {
+      "instance_id": "AzureAD__microsoft-authentication-library-for-python-454",
+      "partition": "heldout",
+      "repo": "AzureAD/microsoft-authentication-library-for-python",
+      "gold_files": [
+        "msal/application.py",
+        "msal/authority.py",
+        "msal/oauth2cli/assertion.py",
+        "msal/oauth2cli/oauth2.py"
+      ],
+      "primary_files": [
+        "msal/application.py",
+        "msal/authority.py",
+        "msal/oauth2cli/assertion.py",
+        "msal/oauth2cli/oauth2.py"
+      ],
+      "gold_funcs": [
+        [
+          "msal/authority.py",
+          "Authority",
+          "http_client"
+        ],
+        [
+          "msal/authority.py",
+          "Authority",
+          "__init__"
+        ],
+        [
+          "msal/authority.py",
+          "Authority",
+          "user_realm_discovery"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "msal/authority.py",
+          "Authority",
+          "http_client"
+        ],
+        [
+          "msal/authority.py",
+          "Authority",
+          "__init__"
+        ],
+        [
+          "msal/authority.py",
+          "Authority",
+          "user_realm_discovery"
+        ]
+      ],
+      "n_files": 44,
+      "n_syms": 599,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 6,
+          "all_file_worst": 6,
+          "func_first": 57,
+          "wall_median": 0.0417,
+          "wall_p95": 0.0417,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5816,
+          "output_tokens_ceiling": 2465,
+          "candidate_bytes": 98023
+        }
+      }
+    },
+    {
+      "instance_id": "Chainlit__chainlit-1441",
+      "partition": "heldout",
+      "repo": "Chainlit/chainlit",
+      "gold_files": [
+        "backend/chainlit/server.py"
+      ],
+      "primary_files": [
+        "backend/chainlit/server.py"
+      ],
+      "gold_funcs": [
+        [
+          "backend/chainlit/server.py",
+          "",
+          "upload_file"
+        ],
+        [
+          "backend/chainlit/server.py",
+          "",
+          "get_file"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "backend/chainlit/server.py",
+          "",
+          "upload_file"
+        ],
+        [
+          "backend/chainlit/server.py",
+          "",
+          "get_file"
+        ]
+      ],
+      "n_files": 355,
+      "n_syms": 2196,
+      "arms": {
+        "for": {
+          "file_first": 5,
+          "file_worst": 5,
+          "all_file_worst": 5,
+          "func_first": 42,
+          "wall_median": 0.0515,
+          "wall_p95": 0.0515,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4685,
+          "output_tokens_ceiling": 1986,
+          "candidate_bytes": 64962
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-29130",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        ".github/workflows/cuda-gpu-ci.yml",
+        ".github/workflows/update-lock-files.yml",
+        "build_tools/github/create_gpu_environment.sh",
+        "build_tools/update_environments_and_lock_files.py"
+      ],
+      "primary_files": [
+        "build_tools/update_environments_and_lock_files.py"
+      ],
+      "gold_funcs": [
+        [
+          "build_tools/update_environments_and_lock_files.py",
+          "",
+          "get_conda_environment_content"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "build_tools/update_environments_and_lock_files.py",
+          "",
+          "get_conda_environment_content"
+        ]
+      ],
+      "n_files": 910,
+      "n_syms": 16564,
+      "arms": {
+        "for": {
+          "file_first": 25,
+          "file_worst": 25,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.1879,
+          "wall_p95": 0.1879,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 2591,
+          "output_tokens_ceiling": 1098,
+          "candidate_bytes": 74123
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-18616",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/http/response.py",
+        "django/shortcuts.py",
+        "docs/ref/request-response.txt",
+        "docs/releases/5.2.txt",
+        "docs/topics/http/shortcuts.txt"
+      ],
+      "primary_files": [
+        "django/http/response.py",
+        "django/shortcuts.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/http/response.py",
+          "HttpResponseRedirectBase",
+          "__init__"
+        ],
+        [
+          "django/shortcuts.py",
+          "",
+          "redirect"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "django/http/response.py",
+          "HttpResponseRedirectBase",
+          "__init__"
+        ],
+        [
+          "django/shortcuts.py",
+          "",
+          "redirect"
+        ]
+      ],
+      "n_files": 2542,
+      "n_syms": 43322,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 3,
+          "all_file_worst": null,
+          "func_first": 5,
+          "wall_median": 0.3986,
+          "wall_p95": 0.3986,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7028,
+          "output_tokens_ceiling": 2978,
+          "candidate_bytes": 73612
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-18435",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/core/management/commands/runserver.py",
+        "docs/intro/tutorial01.txt",
+        "docs/ref/django-admin.txt",
+        "docs/releases/5.2.txt"
+      ],
+      "primary_files": [
+        "django/core/management/commands/runserver.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/core/management/commands/runserver.py",
+          "Command",
+          "on_bind"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "django/core/management/commands/runserver.py",
+          "Command",
+          "on_bind"
+        ]
+      ],
+      "n_files": 2540,
+      "n_syms": 42869,
+      "arms": {
+        "for": {
+          "file_first": 40,
+          "file_worst": 40,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.3858,
+          "wall_p95": 0.3858,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5665,
+          "output_tokens_ceiling": 2401,
+          "candidate_bytes": 75218
+        }
+      }
+    },
+    {
+      "instance_id": "aiortc__aiortc-795",
+      "partition": "heldout",
+      "repo": "aiortc/aiortc",
+      "gold_files": [
+        "src/aiortc/rtcsctptransport.py"
+      ],
+      "primary_files": [
+        "src/aiortc/rtcsctptransport.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/aiortc/rtcsctptransport.py",
+          "RTCSctpTransport",
+          "_send"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "src/aiortc/rtcsctptransport.py",
+          "RTCSctpTransport",
+          "_send"
+        ]
+      ],
+      "n_files": 74,
+      "n_syms": 1741,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "all_file_worst": 1,
+          "func_first": 7,
+          "wall_median": 0.0501,
+          "wall_p95": 0.0501,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7233,
+          "output_tokens_ceiling": 3065,
+          "candidate_bytes": 75154
+        }
+      }
+    },
+    {
+      "instance_id": "huggingface__transformers-22498",
+      "partition": "heldout",
+      "repo": "huggingface/transformers",
+      "gold_files": [
+        "src/transformers/modeling_utils.py",
+        "src/transformers/trainer.py",
+        "src/transformers/training_args.py"
+      ],
+      "primary_files": [
+        "src/transformers/modeling_utils.py",
+        "src/transformers/trainer.py",
+        "src/transformers/training_args.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/transformers/modeling_utils.py",
+          "",
+          "load_sharded_checkpoint"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_load_from_checkpoint"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_load_best_model"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_save"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_push_from_checkpoint"
+        ],
+        [
+          "src/transformers/training_args.py",
+          "TrainingArguments",
+          "__post_init__"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "src/transformers/modeling_utils.py",
+          "",
+          "load_sharded_checkpoint"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_load_from_checkpoint"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_load_best_model"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_save"
+        ],
+        [
+          "src/transformers/trainer.py",
+          "Trainer",
+          "_push_from_checkpoint"
+        ],
+        [
+          "src/transformers/training_args.py",
+          "TrainingArguments",
+          "__post_init__"
+        ]
+      ],
+      "n_files": 2293,
+      "n_syms": 57794,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 45,
+          "all_file_worst": 45,
+          "func_first": 0,
+          "wall_median": 0.7335,
+          "wall_p95": 0.7335,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4672,
+          "output_tokens_ceiling": 1980,
+          "candidate_bytes": 88919
+        }
+      }
+    },
+    {
+      "instance_id": "huggingface__transformers-35453",
+      "partition": "heldout",
+      "repo": "huggingface/transformers",
+      "gold_files": [
+        "src/transformers/optimization.py"
+      ],
+      "primary_files": [
+        "src/transformers/optimization.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/transformers/optimization.py",
+          "",
+          "_get_wsd_scheduler_lambda"
+        ],
+        [
+          "src/transformers/optimization.py",
+          "",
+          "get_wsd_schedule"
+        ],
+        [
+          "src/transformers/optimization.py",
+          "",
+          "get_scheduler"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "src/transformers/optimization.py",
+          "",
+          "_get_wsd_scheduler_lambda"
+        ],
+        [
+          "src/transformers/optimization.py",
+          "",
+          "get_wsd_schedule"
+        ],
+        [
+          "src/transformers/optimization.py",
+          "",
+          "get_scheduler"
+        ]
+      ],
+      "n_files": 4085,
+      "n_syms": 92419,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "all_file_worst": 4,
+          "func_first": null,
+          "wall_median": 1.4009,
+          "wall_p95": 1.4009,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 8673,
+          "output_tokens_ceiling": 3675,
+          "candidate_bytes": 100696
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-19043",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/forms/fields.py",
+        "django/forms/forms.py",
+        "django/forms/renderers.py",
+        "docs/ref/forms/api.txt",
+        "docs/ref/forms/fields.txt",
+        "docs/ref/forms/renderers.txt",
+        "docs/releases/5.2.txt"
+      ],
+      "primary_files": [
+        "django/forms/fields.py",
+        "django/forms/forms.py",
+        "django/forms/renderers.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/forms/fields.py",
+          "Field",
+          "__init__"
+        ],
+        [
+          "django/forms/fields.py",
+          "Field",
+          "get_bound_field"
+        ],
+        [
+          "django/forms/forms.py",
+          "BaseForm",
+          "__init__"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "django/forms/fields.py",
+          "Field",
+          "__init__"
+        ],
+        [
+          "django/forms/fields.py",
+          "Field",
+          "get_bound_field"
+        ],
+        [
+          "django/forms/forms.py",
+          "BaseForm",
+          "__init__"
+        ]
+      ],
+      "n_files": 2565,
+      "n_syms": 43897,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 13,
+          "all_file_worst": null,
+          "func_first": 87,
+          "wall_median": 0.406,
+          "wall_p95": 0.406,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 6017,
+          "output_tokens_ceiling": 2550,
+          "candidate_bytes": 72542
+        }
+      }
+    },
+    {
+      "instance_id": "python__cpython-7926",
+      "partition": "heldout",
+      "repo": "python/cpython",
+      "gold_files": [
+        "Lib/idlelib/macosx.py"
+      ],
+      "primary_files": [
+        "Lib/idlelib/macosx.py"
+      ],
+      "gold_funcs": [
+        [
+          "Lib/idlelib/macosx.py",
+          "",
+          "overrideRootMenu"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "Lib/idlelib/macosx.py",
+          "",
+          "overrideRootMenu"
+        ]
+      ],
+      "n_files": 2519,
+      "n_syms": 109060,
+      "arms": {
+        "for": {
+          "file_first": 6,
+          "file_worst": 6,
+          "all_file_worst": 6,
+          "func_first": 8,
+          "wall_median": 0.7525,
+          "wall_p95": 0.7525,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 9761,
+          "output_tokens_ceiling": 4137,
+          "candidate_bytes": 63800
+        }
+      }
+    },
+    {
+      "instance_id": "numpy__numpy-10615",
+      "partition": "heldout",
+      "repo": "numpy/numpy",
+      "gold_files": [
+        "doc/release/upcoming_changes/10615.deprecation.rst",
+        "numpy/core/function_base.py",
+        "numpy/core/src/multiarray/common.c",
+        "numpy/core/src/multiarray/common.h",
+        "numpy/core/src/multiarray/methods.c",
+        "numpy/core/src/multiarray/number.c"
+      ],
+      "primary_files": [
+        "numpy/core/function_base.py",
+        "numpy/core/src/multiarray/common.c",
+        "numpy/core/src/multiarray/common.h",
+        "numpy/core/src/multiarray/methods.c",
+        "numpy/core/src/multiarray/number.c"
+      ],
+      "gold_funcs": [
+        [
+          "numpy/core/function_base.py",
+          "",
+          "linspace"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "numpy/core/function_base.py",
+          "",
+          "linspace"
+        ]
+      ],
+      "n_files": 958,
+      "n_syms": 27485,
+      "arms": {
+        "for": {
+          "file_first": 23,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.2214,
+          "wall_p95": 0.2214,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4006,
+          "output_tokens_ceiling": 1698,
+          "candidate_bytes": 56705
+        }
+      }
+    },
+    {
+      "instance_id": "pandas-dev__pandas-29944",
+      "partition": "heldout",
+      "repo": "pandas-dev/pandas",
+      "gold_files": [
+        "doc/source/whatsnew/v1.5.0.rst",
+        "pandas/plotting/_core.py",
+        "pandas/plotting/_matplotlib/core.py"
+      ],
+      "primary_files": [
+        "pandas/plotting/_core.py",
+        "pandas/plotting/_matplotlib/core.py"
+      ],
+      "gold_funcs": [
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "__init__"
+        ],
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "_setup_subplots"
+        ],
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "_get_ax"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "_validate_subplots_kwarg"
+        ],
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "_col_idx_to_axis_idx"
+        ]
+      ],
+      "covered": [
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "__init__"
+        ],
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "_setup_subplots"
+        ],
+        [
+          "pandas/plotting/_matplotlib/core.py",
+          "MPLPlot",
+          "_get_ax"
+        ]
+      ],
+      "n_files": 1517,
+      "n_syms": 31130,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 21,
+          "all_file_worst": null,
+          "func_first": 53,
+          "wall_median": 0.3353,
+          "wall_p95": 0.3353,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 2614,
+          "output_tokens_ceiling": 1108,
+          "candidate_bytes": 82653
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-16948",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        "doc/computing/scaling_strategies.rst",
+        "doc/modules/classes.rst",
+        "doc/modules/decomposition.rst",
+        "doc/whats_new/v1.1.rst",
+        "examples/applications/plot_topics_extraction_with_nmf_lda.py",
+        "sklearn/decomposition/__init__.py",
+        "sklearn/decomposition/_nmf.py",
+        "sklearn/utils/estimator_checks.py"
+      ],
+      "primary_files": [
+        "examples/applications/plot_topics_extraction_with_nmf_lda.py",
+        "sklearn/decomposition/__init__.py",
+        "sklearn/decomposition/_nmf.py",
+        "sklearn/utils/estimator_checks.py"
+      ],
+      "gold_funcs": [
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "norm"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_beta_divergence"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_fit_coordinate_descent"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_multiplicative_update_w"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_multiplicative_update_h"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_fit_multiplicative_update"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "non_negative_factorization"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "NMF",
+          "_fit_transform"
+        ],
+        [
+          "sklearn/utils/estimator_checks.py",
+          "",
+          "_set_checking_parameters"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "__init__"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "_check_params"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "_solve_W"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "_minibatch_step"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "_minibatch_convergence"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "fit_transform"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "_fit_transform"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "transform"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "MiniBatchNMF",
+          "partial_fit"
+        ]
+      ],
+      "covered": [
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "norm"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_beta_divergence"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_fit_coordinate_descent"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_multiplicative_update_w"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_multiplicative_update_h"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "_fit_multiplicative_update"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "",
+          "non_negative_factorization"
+        ],
+        [
+          "sklearn/decomposition/_nmf.py",
+          "NMF",
+          "_fit_transform"
+        ],
+        [
+          "sklearn/utils/estimator_checks.py",
+          "",
+          "_set_checking_parameters"
+        ]
+      ],
+      "n_files": 873,
+      "n_syms": 14999,
+      "arms": {
+        "for": {
+          "file_first": 3,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.195,
+          "wall_p95": 0.195,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5231,
+          "output_tokens_ceiling": 2217,
+          "candidate_bytes": 76386
+        }
+      }
+    },
+    {
+      "instance_id": "sympy__sympy-27051",
+      "partition": "heldout",
+      "repo": "sympy/sympy",
+      "gold_files": [
+        ".mailmap",
+        "sympy/ntheory/generate.py"
+      ],
+      "primary_files": [
+        "sympy/ntheory/generate.py"
+      ],
+      "gold_funcs": [
+        [
+          "sympy/ntheory/generate.py",
+          "",
+          "prime"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "sympy/ntheory/generate.py",
+          "",
+          "prime"
+        ]
+      ],
+      "n_files": 1494,
+      "n_syms": 40691,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 131,
+          "wall_median": 0.4942,
+          "wall_p95": 0.4942,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3899,
+          "output_tokens_ceiling": 1653,
+          "candidate_bytes": 60996
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-19009",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/contrib/gis/db/backends/base/models.py"
+      ],
+      "primary_files": [
+        "django/contrib/gis/db/backends/base/models.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/contrib/gis/db/backends/base/models.py",
+          "SpatialRefSysMixin",
+          "srs"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "django/contrib/gis/db/backends/base/models.py",
+          "SpatialRefSysMixin",
+          "srs"
+        ]
+      ],
+      "n_files": 2570,
+      "n_syms": 43835,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": 0,
+          "func_first": 0,
+          "wall_median": 0.4016,
+          "wall_p95": 0.4016,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4000,
+          "output_tokens_ceiling": 1695,
+          "candidate_bytes": 74484
+        }
+      }
+    },
+    {
+      "instance_id": "pandas-dev__pandas-21401",
+      "partition": "heldout",
+      "repo": "pandas-dev/pandas",
+      "gold_files": [
+        "doc/source/io.rst",
+        "doc/source/whatsnew/v0.24.0.rst",
+        "pandas/core/generic.py",
+        "pandas/io/sql.py"
+      ],
+      "primary_files": [
+        "pandas/core/generic.py",
+        "pandas/io/sql.py"
+      ],
+      "gold_funcs": [
+        [
+          "pandas/core/generic.py",
+          "NDFrame",
+          "to_sql"
+        ],
+        [
+          "pandas/io/sql.py",
+          "",
+          "to_sql"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "insert_statement"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "_execute_insert"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "insert"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLDatabase",
+          "to_sql"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLiteDatabase",
+          "to_sql"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "_execute_insert_multi"
+        ]
+      ],
+      "covered": [
+        [
+          "pandas/core/generic.py",
+          "NDFrame",
+          "to_sql"
+        ],
+        [
+          "pandas/io/sql.py",
+          "",
+          "to_sql"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "insert_statement"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "_execute_insert"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLTable",
+          "insert"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLDatabase",
+          "to_sql"
+        ],
+        [
+          "pandas/io/sql.py",
+          "SQLiteDatabase",
+          "to_sql"
+        ]
+      ],
+      "n_files": 825,
+      "n_syms": 22865,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 1,
+          "all_file_worst": null,
+          "func_first": 0,
+          "wall_median": 0.2537,
+          "wall_p95": 0.2537,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4757,
+          "output_tokens_ceiling": 2016,
+          "candidate_bytes": 75317
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-13134",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/contrib/admin/sites.py",
+        "docs/ref/contrib/admin/index.txt",
+        "docs/releases/3.2.txt"
+      ],
+      "primary_files": [
+        "django/contrib/admin/sites.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/contrib/admin/sites.py",
+          "AdminSite",
+          "get_urls"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "django/contrib/admin/sites.py",
+          "AdminSite",
+          "catch_all_view"
+        ]
+      ],
+      "covered": [
+        [
+          "django/contrib/admin/sites.py",
+          "AdminSite",
+          "get_urls"
+        ]
+      ],
+      "n_files": 2411,
+      "n_syms": 37636,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 23,
+          "wall_median": 0.5939,
+          "wall_p95": 0.5939,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4250,
+          "output_tokens_ceiling": 1801,
+          "candidate_bytes": 74345
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-14012",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        "doc/whats_new/v0.22.rst",
+        "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py"
+      ],
+      "primary_files": [
+        "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py"
+      ],
+      "gold_funcs": [
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "__init__"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "fit"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "HistGradientBoostingRegressor",
+          "__init__"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "HistGradientBoostingClassifier",
+          "__init__"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "_is_fitted"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "_clear_state"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "_get_small_trainset"
+        ]
+      ],
+      "covered": [
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "__init__"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "BaseHistGradientBoosting",
+          "fit"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "HistGradientBoostingRegressor",
+          "__init__"
+        ],
+        [
+          "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+          "HistGradientBoostingClassifier",
+          "__init__"
+        ]
+      ],
+      "n_files": 718,
+      "n_syms": 11995,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 36,
+          "wall_median": 0.1526,
+          "wall_p95": 0.1526,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 8201,
+          "output_tokens_ceiling": 3475,
+          "candidate_bytes": 81995
+        }
+      }
+    },
+    {
+      "instance_id": "sancus-tee__sancus-compiler-36",
+      "partition": "heldout",
+      "repo": "sancus-tee/sancus-compiler",
+      "gold_files": [
+        "src/drivers/linker.py",
+        "src/drivers/sancus/sancus_config.py",
+        "src/drivers/sm-config-example.yaml",
+        "src/sancus_support/reactive.h",
+        "src/sancus_support/sm_support.h",
+        "src/stubs/CMakeLists.txt",
+        "src/stubs/reactive_stubs_support.h",
+        "src/stubs/sm_input.c",
+        "src/stubs/sm_output.c",
+        "src/stubs/sm_set_key.c"
+      ],
+      "primary_files": [
+        "src/drivers/linker.py",
+        "src/drivers/sancus/sancus_config.py",
+        "src/sancus_support/reactive.h",
+        "src/sancus_support/sm_support.h",
+        "src/stubs/reactive_stubs_support.h",
+        "src/stubs/sm_input.c",
+        "src/stubs/sm_output.c",
+        "src/stubs/sm_set_key.c"
+      ],
+      "gold_funcs": [
+        [
+          "src/drivers/linker.py",
+          "",
+          "add_sym"
+        ],
+        [
+          "src/drivers/linker.py",
+          "",
+          "get_io_sym_map"
+        ],
+        [
+          "src/drivers/linker.py",
+          "",
+          "get_io_sect_map"
+        ],
+        [
+          "src/drivers/linker.py",
+          "",
+          "sort_entries"
+        ],
+        [
+          "src/drivers/sancus/sancus_config.py",
+          "SmConfig",
+          "__init__"
+        ],
+        [
+          "src/drivers/sancus/sancus_config.py",
+          "SmConfig",
+          "__str__"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "src/drivers/sancus/sancus_config.py",
+          "SmConfig",
+          "num_connections"
+        ]
+      ],
+      "covered": [
+        [
+          "src/drivers/linker.py",
+          "",
+          "add_sym"
+        ],
+        [
+          "src/drivers/linker.py",
+          "",
+          "get_io_sym_map"
+        ],
+        [
+          "src/drivers/linker.py",
+          "",
+          "get_io_sect_map"
+        ],
+        [
+          "src/drivers/linker.py",
+          "",
+          "sort_entries"
+        ],
+        [
+          "src/drivers/sancus/sancus_config.py",
+          "SmConfig",
+          "__init__"
+        ],
+        [
+          "src/drivers/sancus/sancus_config.py",
+          "SmConfig",
+          "__str__"
+        ]
+      ],
+      "n_files": 23,
+      "n_syms": 303,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": 20,
+          "wall_median": 0.0319,
+          "wall_p95": 0.0319,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7193,
+          "output_tokens_ceiling": 3048,
+          "candidate_bytes": 63896
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-6116",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        "doc/whats_new.rst",
+        "sklearn/ensemble/_gradient_boosting.pyx",
+        "sklearn/ensemble/gradient_boosting.py",
+        "sklearn/tree/_tree.pyx",
+        "sklearn/tree/_utils.pxd"
+      ],
+      "primary_files": [
+        "sklearn/ensemble/gradient_boosting.py"
+      ],
+      "gold_funcs": [
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "BaseGradientBoosting",
+          "_staged_decision_function"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "decision_function"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "staged_decision_function"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "predict"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "staged_predict"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "predict_proba"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "predict_log_proba"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "staged_predict_proba"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingRegressor",
+          "predict"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingRegressor",
+          "staged_predict"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "BaseGradientBoosting",
+          "_staged_decision_function"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "decision_function"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "staged_decision_function"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "predict"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "staged_predict"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "predict_proba"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "predict_log_proba"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingClassifier",
+          "staged_predict_proba"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingRegressor",
+          "predict"
+        ],
+        [
+          "sklearn/ensemble/gradient_boosting.py",
+          "GradientBoostingRegressor",
+          "staged_predict"
+        ]
+      ],
+      "n_files": 712,
+      "n_syms": 12360,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "all_file_worst": null,
+          "func_first": 6,
+          "wall_median": 0.1407,
+          "wall_p95": 0.1407,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7003,
+          "output_tokens_ceiling": 2968,
+          "candidate_bytes": 79199
+        }
+      }
+    },
+    {
+      "instance_id": "duncanscanga__VDRS-Solutions-73",
+      "partition": "heldout",
+      "repo": "duncanscanga/VDRS-Solutions",
+      "gold_files": [
+        ".gitignore",
+        "app/models.py"
+      ],
+      "primary_files": [
+        "app/models.py"
+      ],
+      "gold_funcs": [
+        [
+          "app/models.py",
+          "",
+          "register"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "app/models.py",
+          "",
+          "register"
+        ]
+      ],
+      "n_files": 25,
+      "n_syms": 143,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 2,
+          "all_file_worst": null,
+          "func_first": 8,
+          "wall_median": 0.0336,
+          "wall_p95": 0.0336,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7506,
+          "output_tokens_ceiling": 3181,
+          "candidate_bytes": 43144
+        }
+      }
+    },
+    {
+      "instance_id": "openwisp__openwisp-users-286",
+      "partition": "heldout",
+      "repo": "openwisp/openwisp-users",
+      "gold_files": [
+        "openwisp_users/admin.py"
+      ],
+      "primary_files": [
+        "openwisp_users/admin.py"
+      ],
+      "gold_funcs": [
+        [
+          "openwisp_users/admin.py",
+          "UserAdmin",
+          "get_readonly_fields"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "openwisp_users/admin.py",
+          "UserAdmin",
+          "get_readonly_fields"
+        ]
+      ],
+      "n_files": 78,
+      "n_syms": 636,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": 0,
+          "func_first": 44,
+          "wall_median": 0.038,
+          "wall_p95": 0.038,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7470,
+          "output_tokens_ceiling": 3166,
+          "candidate_bytes": 84339
+        }
+      }
+    },
+    {
+      "instance_id": "AzureAD__microsoft-authentication-library-for-python-407",
+      "partition": "heldout",
+      "repo": "AzureAD/microsoft-authentication-library-for-python",
+      "gold_files": [
+        "msal/application.py"
+      ],
+      "primary_files": [
+        "msal/application.py"
+      ],
+      "gold_funcs": [
+        [
+          "msal/application.py",
+          "ClientApplication",
+          "__init__"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "msal/application.py",
+          "ClientApplication",
+          "__init__"
+        ]
+      ],
+      "n_files": 44,
+      "n_syms": 579,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "all_file_worst": 1,
+          "func_first": 1,
+          "wall_median": 0.0398,
+          "wall_p95": 0.0398,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5831,
+          "output_tokens_ceiling": 2471,
+          "candidate_bytes": 97736
+        }
+      }
+    },
+    {
+      "instance_id": "jazzband__django-two-factor-auth-390",
+      "partition": "heldout",
+      "repo": "jazzband/django-two-factor-auth",
+      "gold_files": [
+        "CHANGELOG.md",
+        "two_factor/views/profile.py"
+      ],
+      "primary_files": [
+        "CHANGELOG.md",
+        "two_factor/views/profile.py"
+      ],
+      "gold_funcs": [
+        [
+          "two_factor/views/profile.py",
+          "DisableView",
+          "get"
+        ],
+        [
+          "two_factor/views/profile.py",
+          "DisableView",
+          "form_valid"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "two_factor/views/profile.py",
+          "DisableView",
+          "dispatch"
+        ]
+      ],
+      "covered": [
+        [
+          "two_factor/views/profile.py",
+          "DisableView",
+          "get"
+        ],
+        [
+          "two_factor/views/profile.py",
+          "DisableView",
+          "form_valid"
+        ]
+      ],
+      "n_files": 80,
+      "n_syms": 508,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 12,
+          "all_file_worst": 12,
+          "func_first": 4,
+          "wall_median": 0.0382,
+          "wall_p95": 0.0382,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4322,
+          "output_tokens_ceiling": 1832,
+          "candidate_bytes": 78746
+        }
+      }
+    },
+    {
+      "instance_id": "netbox-community__netbox-7676",
+      "partition": "heldout",
+      "repo": "netbox-community/netbox",
+      "gold_files": [
+        "netbox/netbox/authentication.py"
+      ],
+      "primary_files": [
+        "netbox/netbox/authentication.py"
+      ],
+      "gold_funcs": [
+        [
+          "netbox/netbox/authentication.py",
+          "ObjectPermissionMixin",
+          "get_object_permissions"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "netbox/netbox/authentication.py",
+          "ObjectPermissionMixin",
+          "get_object_permissions"
+        ]
+      ],
+      "n_files": 774,
+      "n_syms": 7746,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": 0,
+          "func_first": 17,
+          "wall_median": 0.0858,
+          "wall_p95": 0.0858,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4936,
+          "output_tokens_ceiling": 2092,
+          "candidate_bytes": 82509
+        }
+      }
+    },
+    {
+      "instance_id": "Innopoints__backend-124",
+      "partition": "heldout",
+      "repo": "Innopoints/backend",
+      "gold_files": [
+        "innopoints/blueprints.py",
+        "innopoints/core/helpers.py",
+        "innopoints/schemas/account.py",
+        "innopoints/views/account.py",
+        "innopoints/views/authentication.py"
+      ],
+      "primary_files": [
+        "innopoints/blueprints.py",
+        "innopoints/core/helpers.py",
+        "innopoints/schemas/account.py",
+        "innopoints/views/account.py",
+        "innopoints/views/authentication.py"
+      ],
+      "gold_funcs": [
+        [
+          "innopoints/views/account.py",
+          "",
+          "get_info"
+        ],
+        [
+          "innopoints/views/authentication.py",
+          "",
+          "authorize"
+        ],
+        [
+          "innopoints/views/authentication.py",
+          "",
+          "login_cheat"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "innopoints/core/helpers.py",
+          "",
+          "csrf_protect"
+        ],
+        [
+          "innopoints/schemas/account.py",
+          "AccountSchema",
+          "get_csrf_token"
+        ]
+      ],
+      "covered": [
+        [
+          "innopoints/views/account.py",
+          "",
+          "get_info"
+        ],
+        [
+          "innopoints/views/authentication.py",
+          "",
+          "authorize"
+        ],
+        [
+          "innopoints/views/authentication.py",
+          "",
+          "login_cheat"
+        ]
+      ],
+      "n_files": 44,
+      "n_syms": 286,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": 168,
+          "wall_median": 0.032,
+          "wall_p95": 0.032,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 6037,
+          "output_tokens_ceiling": 2559,
+          "candidate_bytes": 64241
+        }
+      }
+    },
+    {
+      "instance_id": "zulip__zulip-14091",
+      "partition": "heldout",
+      "repo": "zulip/zulip",
+      "gold_files": [
+        "tools/coveragerc",
+        "zerver/lib/rate_limiter.py"
+      ],
+      "primary_files": [
+        "zerver/lib/rate_limiter.py"
+      ],
+      "gold_funcs": [
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "rate_limit"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "__init__"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "max_api_calls"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "max_api_window"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimiterBackend",
+          "block_access"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RedisRateLimiterBackend",
+          "is_ratelimited"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RedisRateLimiterBackend",
+          "incr_ratelimit"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RedisRateLimiterBackend",
+          "rate_limit_entity"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "get_rules"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "_garbage_collect_for_rule"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "need_to_limit"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "get_api_calls_left"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "block_access"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "unblock_access"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "clear_history"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "TornadoInMemoryRateLimiterBackend",
+          "rate_limit_entity"
+        ]
+      ],
+      "covered": [
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "rate_limit"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "__init__"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "max_api_calls"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimitedObject",
+          "max_api_window"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RateLimiterBackend",
+          "block_access"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RedisRateLimiterBackend",
+          "is_ratelimited"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RedisRateLimiterBackend",
+          "incr_ratelimit"
+        ],
+        [
+          "zerver/lib/rate_limiter.py",
+          "RedisRateLimiterBackend",
+          "rate_limit_entity"
+        ]
+      ],
+      "n_files": 2745,
+      "n_syms": 70965,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 9,
+          "wall_median": 0.2732,
+          "wall_p95": 0.2732,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 5046,
+          "output_tokens_ceiling": 2139,
+          "candidate_bytes": 70972
+        }
+      }
+    },
+    {
+      "instance_id": "pandas-dev__pandas-35029",
+      "partition": "heldout",
+      "repo": "pandas-dev/pandas",
+      "gold_files": [
+        "doc/source/whatsnew/v1.2.0.rst",
+        "pandas/io/excel/_base.py"
+      ],
+      "primary_files": [
+        "pandas/io/excel/_base.py"
+      ],
+      "gold_funcs": [
+        [
+          "pandas/io/excel/_base.py",
+          "ExcelFile",
+          "__init__"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "pandas/io/excel/_base.py",
+          "ExcelFile",
+          "__init__"
+        ]
+      ],
+      "n_files": 1311,
+      "n_syms": 26631,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.2714,
+          "wall_p95": 0.2714,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3089,
+          "output_tokens_ceiling": 1309,
+          "candidate_bytes": 77625
+        }
+      }
+    },
+    {
+      "instance_id": "pyca__pyopenssl-578",
+      "partition": "heldout",
+      "repo": "pyca/pyopenssl",
+      "gold_files": [
+        "CHANGELOG.rst",
+        "src/OpenSSL/SSL.py",
+        "src/OpenSSL/_util.py"
+      ],
+      "primary_files": [
+        "src/OpenSSL/SSL.py",
+        "src/OpenSSL/_util.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "recv"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "recv_into"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "bio_read"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "server_random"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "client_random"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "master_key"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "_get_finished_message"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "recv"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "recv_into"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "bio_read"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "server_random"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "client_random"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "master_key"
+        ],
+        [
+          "src/OpenSSL/SSL.py",
+          "Connection",
+          "_get_finished_message"
+        ]
+      ],
+      "n_files": 31,
+      "n_syms": 1225,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 5,
+          "all_file_worst": null,
+          "func_first": 0,
+          "wall_median": 0.0533,
+          "wall_p95": 0.0533,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7199,
+          "output_tokens_ceiling": 3051,
+          "candidate_bytes": 65900
+        }
+      }
+    },
+    {
+      "instance_id": "django__django-5605",
+      "partition": "heldout",
+      "repo": "django/django",
+      "gold_files": [
+        "django/middleware/csrf.py",
+        "docs/ref/csrf.txt",
+        "docs/ref/middleware.txt",
+        "docs/releases/1.10.txt",
+        "docs/topics/security.txt"
+      ],
+      "primary_files": [
+        "django/middleware/csrf.py"
+      ],
+      "gold_funcs": [
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_get_new_csrf_key"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "get_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "rotate_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_sanitize_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "CsrfViewMiddleware",
+          "process_view"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "CsrfViewMiddleware",
+          "process_response"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_get_new_csrf_string"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_salt_cipher_secret"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_unsalt_cipher_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_get_new_csrf_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_compare_salted_tokens"
+        ]
+      ],
+      "covered": [
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_get_new_csrf_key"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "get_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "rotate_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "",
+          "_sanitize_token"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "CsrfViewMiddleware",
+          "process_view"
+        ],
+        [
+          "django/middleware/csrf.py",
+          "CsrfViewMiddleware",
+          "process_response"
+        ]
+      ],
+      "n_files": 2020,
+      "n_syms": 30699,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 1,
+          "all_file_worst": null,
+          "func_first": 1,
+          "wall_median": 0.3072,
+          "wall_p95": 0.3072,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4445,
+          "output_tokens_ceiling": 1884,
+          "candidate_bytes": 71926
+        }
+      }
+    },
+    {
+      "instance_id": "justin13601__ACES-145",
+      "partition": "heldout",
+      "repo": "justin13601/ACES",
+      "gold_files": [
+        ".github/workflows/code-quality-main.yaml",
+        ".github/workflows/code-quality-pr.yaml",
+        ".pre-commit-config.yaml",
+        "README.md",
+        "docs/source/configuration.md",
+        "pyproject.toml",
+        "src/aces/config.py",
+        "src/aces/predicates.py",
+        "src/aces/query.py"
+      ],
+      "primary_files": [
+        "README.md",
+        "docs/source/configuration.md",
+        "src/aces/config.py",
+        "src/aces/predicates.py",
+        "src/aces/query.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/aces/config.py",
+          "TaskExtractorConfig",
+          "load"
+        ],
+        [
+          "src/aces/config.py",
+          "TaskExtractorConfig",
+          "_initialize_predicates"
+        ],
+        [
+          "src/aces/predicates.py",
+          "",
+          "get_predicates_df"
+        ],
+        [
+          "src/aces/query.py",
+          "",
+          "query"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "src/aces/config.py",
+          "TaskExtractorConfig",
+          "load"
+        ],
+        [
+          "src/aces/config.py",
+          "TaskExtractorConfig",
+          "_initialize_predicates"
+        ],
+        [
+          "src/aces/predicates.py",
+          "",
+          "get_predicates_df"
+        ],
+        [
+          "src/aces/query.py",
+          "",
+          "query"
+        ]
+      ],
+      "n_files": 43,
+      "n_syms": 427,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": 20,
+          "all_file_worst": null,
+          "func_first": 5,
+          "wall_median": 0.07,
+          "wall_p95": 0.07,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7394,
+          "output_tokens_ceiling": 3134,
+          "candidate_bytes": 60785
+        }
+      }
+    },
+    {
+      "instance_id": "aio-libs__aiohttp-7829",
+      "partition": "heldout",
+      "repo": "aio-libs/aiohttp",
+      "gold_files": [
+        "CHANGES/7829.misc",
+        "aiohttp/web_urldispatcher.py",
+        "docs/web_reference.rst"
+      ],
+      "primary_files": [
+        "aiohttp/web_urldispatcher.py"
+      ],
+      "gold_funcs": [
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "__init__"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "add_prefix"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "resolve"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "resolve"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "__init__"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "register_resource"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "_add_prefix_to_resources"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "_get_resource_index_key"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "index_resource"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "unindex_resource"
+        ]
+      ],
+      "covered": [
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "__init__"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "add_prefix"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "PrefixedSubAppResource",
+          "resolve"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "resolve"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "__init__"
+        ],
+        [
+          "aiohttp/web_urldispatcher.py",
+          "UrlDispatcher",
+          "register_resource"
+        ]
+      ],
+      "n_files": 138,
+      "n_syms": 5346,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 44,
+          "wall_median": 0.1193,
+          "wall_p95": 0.1193,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 8282,
+          "output_tokens_ceiling": 3510,
+          "candidate_bytes": 77962
+        }
+      }
+    },
+    {
+      "instance_id": "jupyterhub__oauthenticator-764",
+      "partition": "heldout",
+      "repo": "jupyterhub/oauthenticator",
+      "gold_files": [
+        "oauthenticator/google.py",
+        "setup.py"
+      ],
+      "primary_files": [
+        "oauthenticator/google.py",
+        "setup.py"
+      ],
+      "gold_funcs": [
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "update_auth_model"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_service_client"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_setup_service"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_fetch_member_groups"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_get_service_credentials"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_is_token_valid"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_setup_service_credentials"
+        ]
+      ],
+      "covered": [
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "update_auth_model"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_service_client"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_setup_service"
+        ],
+        [
+          "oauthenticator/google.py",
+          "GoogleOAuthenticator",
+          "_fetch_member_groups"
+        ]
+      ],
+      "n_files": 66,
+      "n_syms": 704,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 26,
+          "all_file_worst": 26,
+          "func_first": 1,
+          "wall_median": 0.0531,
+          "wall_p95": 0.0531,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3945,
+          "output_tokens_ceiling": 1672,
+          "candidate_bytes": 83597
+        }
+      }
+    },
+    {
+      "instance_id": "PlasmaPy__PlasmaPy-2542",
+      "partition": "heldout",
+      "repo": "PlasmaPy/PlasmaPy",
+      "gold_files": [
+        "changelog/2542.internal.rst",
+        "plasmapy/formulary/lengths.py"
+      ],
+      "primary_files": [
+        "plasmapy/formulary/lengths.py"
+      ],
+      "gold_funcs": [
+        [
+          "plasmapy/formulary/lengths.py",
+          "",
+          "gyroradius"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "plasmapy/formulary/lengths.py",
+          "",
+          "gyroradius"
+        ]
+      ],
+      "n_files": 248,
+      "n_syms": 4068,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 0,
+          "wall_median": 0.06,
+          "wall_p95": 0.06,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3732,
+          "output_tokens_ceiling": 1582,
+          "candidate_bytes": 79376
+        }
+      }
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-24076",
+      "partition": "heldout",
+      "repo": "scikit-learn/scikit-learn",
+      "gold_files": [
+        ".gitignore",
+        "doc/whats_new/v1.3.rst",
+        "setup.cfg",
+        "setup.py",
+        "sklearn/metrics/_pairwise_distances_reduction/__init__.py",
+        "sklearn/metrics/_pairwise_distances_reduction/_argkmin.pyx.tp",
+        "sklearn/metrics/_pairwise_distances_reduction/_argkmin_classmode.pyx.tp",
+        "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+        "sklearn/neighbors/_base.py",
+        "sklearn/neighbors/_classification.py"
+      ],
+      "primary_files": [
+        "setup.py",
+        "sklearn/metrics/_pairwise_distances_reduction/__init__.py",
+        "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+        "sklearn/neighbors/_base.py",
+        "sklearn/neighbors/_classification.py"
+      ],
+      "gold_funcs": [
+        [
+          "sklearn/neighbors/_base.py",
+          "NeighborsBase",
+          "_fit"
+        ],
+        [
+          "sklearn/neighbors/_classification.py",
+          "KNeighborsClassifier",
+          "predict"
+        ],
+        [
+          "sklearn/neighbors/_classification.py",
+          "KNeighborsClassifier",
+          "predict_proba"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+          "ArgKminClassMode",
+          "is_usable_for"
+        ],
+        [
+          "sklearn/metrics/_pairwise_distances_reduction/_dispatcher.py",
+          "ArgKminClassMode",
+          "compute"
+        ],
+        [
+          "sklearn/neighbors/_classification.py",
+          "",
+          "_adjusted_metric"
+        ]
+      ],
+      "covered": [
+        [
+          "sklearn/neighbors/_base.py",
+          "NeighborsBase",
+          "_fit"
+        ],
+        [
+          "sklearn/neighbors/_classification.py",
+          "KNeighborsClassifier",
+          "predict"
+        ],
+        [
+          "sklearn/neighbors/_classification.py",
+          "KNeighborsClassifier",
+          "predict_proba"
+        ]
+      ],
+      "n_files": 873,
+      "n_syms": 15672,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": 10,
+          "wall_median": 0.1944,
+          "wall_p95": 0.1944,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4942,
+          "output_tokens_ceiling": 2095,
+          "candidate_bytes": 82392
+        }
+      }
+    },
+    {
+      "instance_id": "UCL__TLOmodel-1524",
+      "partition": "heldout",
+      "repo": "UCL/TLOmodel",
+      "gold_files": [
+        "src/tlo/methods/contraception.py"
+      ],
+      "primary_files": [
+        "src/tlo/methods/contraception.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "EXPECTED_APPT_FOOTPRINT"
+        ],
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "__init__"
+        ],
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "apply"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "_get_appt_footprint"
+        ]
+      ],
+      "covered": [
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "EXPECTED_APPT_FOOTPRINT"
+        ],
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "__init__"
+        ],
+        [
+          "src/tlo/methods/contraception.py",
+          "HSI_Contraception_FamilyPlanningAppt",
+          "apply"
+        ]
+      ],
+      "n_files": 373,
+      "n_syms": 7283,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": 0,
+          "func_first": 2,
+          "wall_median": 0.145,
+          "wall_p95": 0.145,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 4581,
+          "output_tokens_ceiling": 1942,
+          "candidate_bytes": 87199
+        }
+      }
+    },
+    {
+      "instance_id": "Deltares__imod-python-1159",
+      "partition": "heldout",
+      "repo": "Deltares/imod-python",
+      "gold_files": [
+        ".gitignore",
+        "docs/api/changelog.rst",
+        "imod/mf6/simulation.py",
+        "imod/schemata.py",
+        "imod/typing/grid.py",
+        "pixi.toml",
+        "pyproject.toml"
+      ],
+      "primary_files": [
+        "imod/mf6/simulation.py",
+        "imod/schemata.py",
+        "imod/typing/grid.py"
+      ],
+      "gold_funcs": [
+        [
+          "imod/mf6/simulation.py",
+          "Modflow6Simulation",
+          "from_imod5_data"
+        ],
+        [
+          "imod/schemata.py",
+          "",
+          "scalar_None"
+        ],
+        [
+          "imod/typing/grid.py",
+          "",
+          "as_ugrid_dataarray"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "imod/typing/grid.py",
+          "GridCache",
+          "__init__"
+        ],
+        [
+          "imod/typing/grid.py",
+          "GridCache",
+          "get_grid"
+        ],
+        [
+          "imod/typing/grid.py",
+          "GridCache",
+          "remove_first"
+        ],
+        [
+          "imod/typing/grid.py",
+          "GridCache",
+          "clear"
+        ]
+      ],
+      "covered": [
+        [
+          "imod/mf6/simulation.py",
+          "Modflow6Simulation",
+          "from_imod5_data"
+        ],
+        [
+          "imod/schemata.py",
+          "",
+          "scalar_None"
+        ],
+        [
+          "imod/typing/grid.py",
+          "",
+          "as_ugrid_dataarray"
+        ]
+      ],
+      "n_files": 427,
+      "n_syms": 4201,
+      "arms": {
+        "for": {
+          "file_first": 2,
+          "file_worst": 30,
+          "all_file_worst": null,
+          "func_first": 99,
+          "wall_median": 0.0908,
+          "wall_p95": 0.0908,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 8264,
+          "output_tokens_ceiling": 3502,
+          "candidate_bytes": 75814
+        }
+      }
+    },
+    {
+      "instance_id": "Project-MONAI__MONAI-8123",
+      "partition": "heldout",
+      "repo": "Project-MONAI/MONAI",
+      "gold_files": [
+        "monai/networks/nets/segresnet_ds.py",
+        "monai/networks/nets/vista3d.py"
+      ],
+      "primary_files": [
+        "monai/networks/nets/segresnet_ds.py",
+        "monai/networks/nets/vista3d.py"
+      ],
+      "gold_funcs": [
+        [
+          "monai/networks/nets/segresnet_ds.py",
+          "SegResNetDS2",
+          "forward"
+        ],
+        [
+          "monai/networks/nets/vista3d.py",
+          "ClassMappingClassify",
+          "forward"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "monai/networks/nets/segresnet_ds.py",
+          "SegResNetDS2",
+          "forward"
+        ],
+        [
+          "monai/networks/nets/vista3d.py",
+          "ClassMappingClassify",
+          "forward"
+        ]
+      ],
+      "n_files": 1209,
+      "n_syms": 13799,
+      "arms": {
+        "for": {
+          "file_first": 23,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": null,
+          "wall_median": 0.1636,
+          "wall_p95": 0.1636,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3722,
+          "output_tokens_ceiling": 1578,
+          "candidate_bytes": 87181
+        }
+      }
+    },
+    {
+      "instance_id": "ivadomed__ivadomed-1081",
+      "partition": "heldout",
+      "repo": "ivadomed/ivadomed",
+      "gold_files": [
+        "docs/source/configuration_file.rst",
+        "docs/source/tutorials/two_class_microscopy_seg_2d_unet.rst",
+        "ivadomed/config/config_default.json",
+        "ivadomed/config/config_microscopy.json",
+        "ivadomed/evaluation.py",
+        "ivadomed/main.py",
+        "ivadomed/metrics.py"
+      ],
+      "primary_files": [
+        "ivadomed/config/config_default.json",
+        "ivadomed/config/config_microscopy.json",
+        "ivadomed/evaluation.py",
+        "ivadomed/main.py",
+        "ivadomed/metrics.py"
+      ],
+      "gold_funcs": [
+        [
+          "ivadomed/evaluation.py",
+          "",
+          "evaluate"
+        ],
+        [
+          "ivadomed/evaluation.py",
+          "Evaluation3DMetrics",
+          "__init__"
+        ],
+        [
+          "ivadomed/evaluation.py",
+          "Evaluation3DMetrics",
+          "get_ltpr"
+        ],
+        [
+          "ivadomed/evaluation.py",
+          "Evaluation3DMetrics",
+          "get_lfdr"
+        ],
+        [
+          "ivadomed/main.py",
+          "",
+          "run_command"
+        ],
+        [
+          "ivadomed/metrics.py",
+          "",
+          "get_metric_fns"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "ivadomed/evaluation.py",
+          "",
+          "evaluate"
+        ],
+        [
+          "ivadomed/evaluation.py",
+          "Evaluation3DMetrics",
+          "__init__"
+        ],
+        [
+          "ivadomed/evaluation.py",
+          "Evaluation3DMetrics",
+          "get_ltpr"
+        ],
+        [
+          "ivadomed/evaluation.py",
+          "Evaluation3DMetrics",
+          "get_lfdr"
+        ],
+        [
+          "ivadomed/main.py",
+          "",
+          "run_command"
+        ],
+        [
+          "ivadomed/metrics.py",
+          "",
+          "get_metric_fns"
+        ]
+      ],
+      "n_files": 123,
+      "n_syms": 1632,
+      "arms": {
+        "for": {
+          "file_first": 1,
+          "file_worst": null,
+          "all_file_worst": null,
+          "func_first": 2,
+          "wall_median": 0.047,
+          "wall_p95": 0.047,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7061,
+          "output_tokens_ceiling": 2992,
+          "candidate_bytes": 64645
+        }
+      }
+    },
+    {
+      "instance_id": "zulip__zulip-31168",
+      "partition": "heldout",
+      "repo": "zulip/zulip",
+      "gold_files": [
+        "zerver/lib/users.py",
+        "zerver/views/streams.py"
+      ],
+      "primary_files": [
+        "zerver/lib/users.py",
+        "zerver/views/streams.py"
+      ],
+      "gold_funcs": [
+        [
+          "zerver/views/streams.py",
+          "",
+          "principal_to_user_profile"
+        ],
+        [
+          "zerver/views/streams.py",
+          "",
+          "remove_subscriptions_backend"
+        ],
+        [
+          "zerver/views/streams.py",
+          "",
+          "add_subscriptions_backend"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "zerver/lib/users.py",
+          "",
+          "bulk_access_users_by_email"
+        ],
+        [
+          "zerver/lib/users.py",
+          "",
+          "bulk_access_users_by_id"
+        ],
+        [
+          "zerver/views/streams.py",
+          "",
+          "bulk_principals_to_user_profiles"
+        ]
+      ],
+      "covered": [
+        [
+          "zerver/views/streams.py",
+          "",
+          "principal_to_user_profile"
+        ],
+        [
+          "zerver/views/streams.py",
+          "",
+          "remove_subscriptions_backend"
+        ],
+        [
+          "zerver/views/streams.py",
+          "",
+          "add_subscriptions_backend"
+        ]
+      ],
+      "n_files": 5784,
+      "n_syms": 195660,
+      "arms": {
+        "for": {
+          "file_first": 11,
+          "file_worst": 50,
+          "all_file_worst": 50,
+          "func_first": 142,
+          "wall_median": 0.4302,
+          "wall_p95": 0.4302,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3022,
+          "output_tokens_ceiling": 1281,
+          "candidate_bytes": 70436
+        }
+      }
+    },
+    {
+      "instance_id": "xCDAT__xcdat-689",
+      "partition": "heldout",
+      "repo": "xCDAT/xcdat",
+      "gold_files": [
+        ".vscode/xcdat.code-workspace",
+        "xcdat/temporal.py"
+      ],
+      "primary_files": [
+        "xcdat/temporal.py"
+      ],
+      "gold_funcs": [
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "departures"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_group_average"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_get_weights"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_group_data"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_label_time_coords"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_keep_weights"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_calculate_departures"
+        ]
+      ],
+      "covered": [
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "departures"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_group_average"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_get_weights"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_group_data"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_label_time_coords"
+        ],
+        [
+          "xcdat/temporal.py",
+          "TemporalAccessor",
+          "_keep_weights"
+        ]
+      ],
+      "n_files": 38,
+      "n_syms": 668,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": null,
+          "func_first": 0,
+          "wall_median": 0.0401,
+          "wall_p95": 0.0401,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 6494,
+          "output_tokens_ceiling": 2752,
+          "candidate_bytes": 74025
+        }
+      }
+    },
+    {
+      "instance_id": "ansys__pymapdl-3705",
+      "partition": "heldout",
+      "repo": "ansys/pymapdl",
+      "gold_files": [
+        "doc/changelog.d/3705.added.md",
+        "src/ansys/mapdl/core/misc.py"
+      ],
+      "primary_files": [
+        "src/ansys/mapdl/core/misc.py"
+      ],
+      "gold_funcs": [
+        [
+          "src/ansys/mapdl/core/misc.py",
+          "",
+          "requires_package"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "src/ansys/mapdl/core/misc.py",
+          "",
+          "is_package_installed_cached"
+        ]
+      ],
+      "covered": [
+        [
+          "src/ansys/mapdl/core/misc.py",
+          "",
+          "requires_package"
+        ]
+      ],
+      "n_files": 283,
+      "n_syms": 5276,
+      "arms": {
+        "for": {
+          "file_first": 4,
+          "file_worst": 4,
+          "all_file_worst": null,
+          "func_first": 7,
+          "wall_median": 0.0791,
+          "wall_p95": 0.0791,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 3472,
+          "output_tokens_ceiling": 1472,
+          "candidate_bytes": 83723
+        }
+      }
+    },
+    {
+      "instance_id": "CrossGL__crosstl-229",
+      "partition": "heldout",
+      "repo": "CrossGL/crosstl",
+      "gold_files": [
+        "crosstl/translator/lexer.py"
+      ],
+      "primary_files": [
+        "crosstl/translator/lexer.py"
+      ],
+      "gold_funcs": [
+        [
+          "crosstl/translator/lexer.py",
+          "Lexer",
+          "tokenize"
+        ],
+        [
+          "crosstl/translator/lexer.py",
+          "Lexer",
+          "__init__"
+        ]
+      ],
+      "added_funcs": [
+        [
+          "crosstl/translator/lexer.py",
+          "Lexer",
+          "_compile_patterns"
+        ],
+        [
+          "crosstl/translator/lexer.py",
+          "Lexer",
+          "_get_cached_token"
+        ]
+      ],
+      "covered": [
+        [
+          "crosstl/translator/lexer.py",
+          "Lexer",
+          "tokenize"
+        ],
+        [
+          "crosstl/translator/lexer.py",
+          "Lexer",
+          "__init__"
+        ]
+      ],
+      "n_files": 63,
+      "n_syms": 1064,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": 0,
+          "func_first": 2,
+          "wall_median": 0.0389,
+          "wall_p95": 0.0389,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 7297,
+          "output_tokens_ceiling": 3092,
+          "candidate_bytes": 74589
+        }
+      }
+    },
+    {
+      "instance_id": "fulcrumgenomics__prymer-99",
+      "partition": "heldout",
+      "repo": "fulcrumgenomics/prymer",
+      "gold_files": [
+        "prymer/offtarget/offtarget_detector.py"
+      ],
+      "primary_files": [
+        "prymer/offtarget/offtarget_detector.py"
+      ],
+      "gold_funcs": [
+        [
+          "prymer/offtarget/offtarget_detector.py",
+          "OffTargetDetector",
+          "_build_off_target_result"
+        ],
+        [
+          "prymer/offtarget/offtarget_detector.py",
+          "OffTargetDetector",
+          "_to_amplicons"
+        ]
+      ],
+      "added_funcs": [],
+      "covered": [
+        [
+          "prymer/offtarget/offtarget_detector.py",
+          "OffTargetDetector",
+          "_build_off_target_result"
+        ],
+        [
+          "prymer/offtarget/offtarget_detector.py",
+          "OffTargetDetector",
+          "_to_amplicons"
+        ]
+      ],
+      "n_files": 54,
+      "n_syms": 476,
+      "arms": {
+        "for": {
+          "file_first": 0,
+          "file_worst": 0,
+          "all_file_worst": 0,
+          "func_first": 0,
+          "wall_median": 0.0391,
+          "wall_p95": 0.0391,
+          "cold_wall": 0.0,
+          "index_wall": 0.0,
+          "output_bytes": 6287,
+          "output_tokens_ceiling": 2664,
+          "candidate_bytes": 79990
+        }
+      }
+    }
+  ]
+}
