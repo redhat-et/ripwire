@@ -7,7 +7,10 @@ description: >
   API-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper — the measured agent-code
   failure modes), exiting non-zero on new debt. Want the wider six-family "does this still look rotten" read
   alongside the delta? `--quality-panel` is THE SINGLE COMMAND for that — the headline wide-angle pass below.
-  Fix the real regressions, re-run, converge. Reach for this at
+  Also carries the two things a measurement alone doesn't give you: the **shape → refactor playbook** (a
+  measured shape mapped to its named fix AND that fix's precondition, so you don't guard-clause a numeric
+  kernel or refactor an untested hub) and the **closed fix loop** that proves the fix landed
+  (`--quality-delta` → `--edit-check` → `--affected`). Fix the real regressions, re-run, converge. Reach for this at
   every "I think this is done" moment on non-trivial work. The check itself is cheap (well under a second
   warm) — run it even on a fix that looks trivial, because "trivial" is exactly the judgment this pass exists
   to catch you being wrong about; what a single-line leaf fix with no new branch/symbol/signature can skip is
@@ -27,6 +30,8 @@ allowed-tools: Bash, Read
 > • Reusing before you write the code in the first place → **ripwire-reuse-first**.
 > • Wide-angle "where does this still look rotten" read across a whole file/subsystem (not a before/after
 >   delta) → the panel below, or **ripwire-fresh-eyes** for the full six-family breakdown.
+> • **You have the measurement and need the FIX** — for your own diff or for a subsystem **ripwire-fresh-eyes**
+>   just measured → the shape → refactor playbook and the closed fix loop are both on this page, below.
 > • Not sure which skill? → **ripwire-router**.
 
 Don't eyeball quality — **measure the delta your change introduced**, with a deterministic oracle, in a
@@ -61,6 +66,59 @@ reading order, roughly a third of any tree; `default` (all six, 2 must agree) is
 are fixed-size worst-40 cuts over a ranking whose population moves, so both re-shuffle release to release
 on code that never changed) is the rung closest to something CI-shaped, but it is still a lens — nothing
 here plugs into an exit code the way `--quality-delta` does.
+
+### Read the structural row as a PROFILE — `nest=` alone is a max, and misleads solo
+
+`nest=` reports the single deepest line in a function. One line at depth 9 and a thousand lines at depth 9
+report the same number, so `nest=9` cannot tell a **tangled** body from a long **blocked-sequential** one
+whose max was set by one inner loop nobody has to hold in their head. Acting on `nest=` alone is how an
+agent guard-clauses a dispatch table. `--metrics` (and the structural family's `why=` string in
+`--quality-panel` / `--ensemble`) now carry the profile beside the max:
+
+```
+<e f="structural" counted="1" why="ccx=724 loc=1244 nest=9 humps=30 deep=308 rrank=1"/>
+```
+
+- **`humps=`** — how many *maximal control-nesting regions* reach the nesting bar (`bar_nest=` on the panel
+  root; CodeScene's "bumpy road": a rise above the threshold then a fall). One deep tangle is `1`; repeated
+  missing abstractions are many. EXACT, not a floor.
+- **`deep=`** — how many **LINES** lie inside those regions, read against the `loc=` already on the row. A
+  disclosed FLOOR (`deep_floor="1"`).
+- Both are **absent exactly when `nest <` the bar** — not-deep, never a hidden `0`.
+- **`deep` below `humps` is legal output, not a defect.** `deep` counts lines and `humps` counts regions, and
+  two regions can share a line: a one-line `if(c){x;}else{y;}` at the bar is 2 regions on 1 line. Three
+  reviewers have read that shape as a bug; it isn't.
+
+Two ratios do the actual discriminating, and you compute them yourself from the row:
+
+| Ratio | High says | Low says |
+|---|---|---|
+| **`deep/loc`** | **tangled** — the body *sustains* depth, so most of what you read is nested | **blocked-sequential** — a long run of shallow steps (a dispatch table, a switch, a setup block); the max is one inner loop |
+| **`deep/humps`** | **few giant tangles** — one region holds depth for a long stretch; the expensive fix | **many tiny touches** — repeated missing abstractions, each hump its own cheap extraction |
+
+On this repo's own source, `loc`/`nest` alone rank `main` (`loc=1061 nest=6 humps=29 deep=111`, **10%**)
+beside `buildGraph` (`loc=1244 nest=9 humps=30 deep=308`, **25%**) — the profile separates them, and it
+promotes `ur_walkTree` (`loc=87 nest=7 humps=1 deep=43`, **49%**), which no size bar fires on at all.
+
+**`locals=`** rides the same row: the count of local-variable declarations, a FLOOR (`locals_floor="1"`),
+**C/C++ only** and **absent — never a bare `0`** — for every other language. It measures the working set a
+reader must hold at once, which is the thing extraction is actually supposed to shrink; a "split" that leaves
+`locals` where it was mostly moved braces.
+
+**`join="deep+untested"`** on a `--quality-panel` row is a **conjunction of two facts the report already
+holds** — this row carries `deep=` *and* no indexed test reaches it — annotated, not a seventh family. It
+changes nothing: not `fam=`, not `of=`, not the ordering, not which rows appear. It is the pair where a
+refactor is most wanted and least safe, so it routes straight to **test first, refactor second** in the
+playbook below. It is **suppressed on every row when `tested_scope="0"`**, because on a corpus whose tests
+were never crawled "untested" would be a fact about the crawl, not about the code — read `tested_scope=` on
+the root before you read the absence of the annotation as good news. `deep_untested=` on the root counts them
+across the WHOLE row set, which the `limit=` window does not change.
+
+**The per-file churn caveat.** The `historical` family's `churn=` and `hrank=` are **FILE facts, inherited
+verbatim by every symbol in the file** — a symbol in a churny file collects that family without any property
+of its own. Discount it accordingly: on a row whose other evidence is thin, `historical` may be saying only
+"this file is busy", not "this function is." (`hrank=` is also a *relative* decile cut over this corpus, so
+something always fires.)
 
 ## The loop
 1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta` before you call it
@@ -101,7 +159,9 @@ here plugs into an exit code the way `--quality-delta` does.
    **LIMIT:** origin is canonId (`path::scope::name`) identity, so a **RENAMED or MOVED symbol reads as
    new** — a genuine regression carried in with a move classifies `new-symbol` and will not gate. If your
    diff moves code, the exit code is especially weak evidence; read the rows.
-4. **Fix the REAL ones, re-run, converge.** Repeat until clean or the remainder are conscious trade-offs.
+4. **Fix the REAL ones, re-run, converge.** Which fix a row calls for is the **shape → refactor playbook**
+   below; proving the fix landed is the **closed fix loop** below that. Repeat until clean or the remainder
+   are conscious trade-offs.
    **Record a trade-off instead of re-reading it forever:** `ripwire <dir> --quality-ack="why it's accepted"`
    writes the currently-visible findings into `.ripwire_quality_acks` (committable) — later runs suppress
    them honestly (`acked="N"`) and a finding REAPPEARS the moment it worsens past its acked size.
@@ -153,7 +213,7 @@ Thresholds/definitions are the catalog in [`quality-metrics.md`](quality-metrics
 |---|---|---|
 | `complexity` | `--expand=SYM` | split the fn · early-return · lift the nested branch out |
 | `verbosity` | `--expand=SYM` | the #1 agent failure mode (below) — cut boilerplate, don't just reformat |
-| `nesting` | `--expand=SYM` | guard clauses · invert the condition · extract the nested block |
+| `nesting` | `--expand=SYM` · `--metrics` for the `humps=`/`deep=` profile | guard clauses · invert the condition · extract the nested block — but read the profile first: which of those three it is depends on `deep/loc` and `deep/humps` (playbook below) |
 | `params` | `--expand=SYM` | bundle related params into a struct, or split the function |
 | `duplication` | `--clones` | reuse the existing body — Rule of Three; wrong abstraction beats two honest copies |
 | `dead-code` | — | delete what you orphaned, or wire the caller you forgot |
@@ -174,6 +234,58 @@ which proposes an actual `propose=` value because case-style consistency is Tier
 majority IS the answer, mechanically recombined from the name's own subtokens, no judgment call involved.
 Don't expect that anywhere else, and don't invent a "the fix is X" claim here that this tool doesn't itself
 compute.
+
+## The shape → refactor playbook
+
+The table above maps a *regression kind* to a direction. This maps a **measured shape** to the **named
+refactor** and — the part agents skip — that refactor's **precondition**. Same doctrine as everything else
+here: these are facts plus options, never verdicts. The tool measures the shape; which option is right is
+still your call, and "leave it alone" is always on the menu.
+
+| Measured shape | The named fix | Its precondition — check this FIRST |
+|---|---|---|
+| **Many shallow humps** — `humps` high, `deep/humps` small, `deep/loc` low | **Extract each hump.** The bumpy-road fix: every region that rises to the bar and falls back is one missing abstraction with its own name. Cheap, mechanical, one hump at a time. | Nothing structural blocks it — but each extraction is a new symbol, so re-run the loop below: extraction that lands as `origin="new-symbol"` `api-surface` debt should be file-local, not public. |
+| **One deep tangle** — `humps=1` (or few) with high `deep/loc` | **Guard-clause inversion**, then **state extraction**: invert the conditions that hold the depth, return early, and lift the sustained region's working set into a named struct or its own function. Expensive and genuinely risky — a rewrite, not a move. | `locals=` tells you what you're really moving; a big `locals` means the region's working set, not just its braces, has to travel. Check `--callers=SYM`/`--impact=SYM` before starting, and never do it in the same diff as a behavior change. |
+| **Small AND dense** — small `loc` with `deep/loc` ≥ ~50% (e.g. `ur_walkTree`: `loc=87 deep=43`) | **Read it before you prescribe anything.** Numeric kernels, tree walks, and state machines are *legitimately* dense: the depth is the algorithm. Often the right fix is a comment or a named constant, not a split. | This row is where a metric-driven agent does the most damage. `--expand=SYM` first. If the density is the algorithm, ack it (`--ack-only=`) and move on. |
+| **High fan-in AND untested** — big `in=`/`amp=`, `tested="0"`, or a `--quality-panel` row carrying `join="deep+untested"` | **Test first, refactor second.** The safety net is the fix's precondition, not its follow-up. → **ripwire-write-tests** (`--seams`, the `tested=` lens, `--callers=SYM` for the outside contract). | Confirm the annotation is real: `join=` is suppressed entirely at `tested_scope="0"`, so on an uncrawled-test corpus its *absence* proves nothing. |
+| **Duplication** — a `--quality-delta` `duplication` / `new-clone-of-reused-helper` row, or a `--clones` group | **Consolidate through the repo's own exemplar** — `ripwire <dir> --exemplar="<what this code does>"` names the best-in-class instance to converge on (chosen by ROLE, not text similarity), so the survivor matches house patterns instead of being whichever copy you happened to open. | **Rule of Three** — extract on the third occurrence, not the second; a wrong abstraction is worse than two honest copies. Check `type=` on the clone group: `type="3"` members are gapped near-misses and may differ on purpose. |
+| **Churn-flagged, structurally quiet** — `historical` fires with thin other evidence | **Probably nothing here.** `churn=`/`hrank=` are FILE facts inherited by every symbol in the file. | Confirm at the symbol before acting: `git log -p <file>` or `--hotspots --since=` to see whether *this* function is what keeps moving. |
+
+**None of these has a corpus-derivable "correct" answer** — see the paragraph above the table. The playbook
+names a move and the condition that makes the move safe; it does not compute a target shape, and any of these
+rows can honestly end in "measured, understood, left alone."
+
+## The closed fix loop — fix it, then PROVE the fix landed
+
+Fixing without verifying is how a refactor trades one regression for two. Four steps, in this order; each
+answers a question the previous one cannot:
+
+```bash
+# 1. make the fix (playbook above)
+ripwire <dir> --quality-delta        # 2. did the TARGETED kind improve, and did nothing else regress?
+ripwire <dir> --edit-check=SYM       # 3. is the CONTRACT intact?
+ripwire <dir> --affected=F1,F2       # 4. which tests PROVE it? (then run them)
+```
+
+2. **`--quality-delta`** — the only step with a meaningful exit code, and it is doing *two* jobs here, not
+   one: the row you were chasing should be gone, **and** nothing new should have appeared. A "split the
+   function" fix that drops `complexity` while adding `api-surface` + `duplication` is a lateral move.
+   Read `gating=`, but also read the `origin="new-symbol"` rows — extraction *always* creates new symbols and
+   those never gate, so exit 0 is not the same as "the fix was free."
+3. **`--edit-check=SYM`** — `unchanged` / `new-symbol` / `contract-change` for the symbol you just edited:
+   param count and publicness NOW vs `git HEAD`, plus its 1-hop callers with any call site provably
+   incompatible with the new arity flagged. A refactor is *supposed* to be `unchanged` here; a
+   `contract-change` you did not intend is the finding. Cheap enough (~ms warm) that skipping it is never the
+   economical choice. It refuses (exit 1) if `SYM` matches several definition sites — a contract is per
+   definition, so pass the `file:name` spelling it lists.
+4. **`--affected=F1,F2`** (or `--affected=SYM`) — the test files that transitively reach what you changed.
+   Metrics improving is not evidence the code still works; this names what to run, and then you run it.
+   Mid-task, `--situ` is the same answer over the whole `git diff` plus co-change partners; at PR time
+   `--test-gate` is the gating form (exit 4 when tests-to-run or the untested blast radius is non-empty).
+
+**Done means:** the targeted kind is gone from `--quality-delta`, nothing else regressed, `--edit-check`
+reports the contract you intended, and the `--affected` tests pass. Anything short of all four and the fix is
+still a hypothesis.
 
 ## The four guardrails (why this loop converges instead of degrading)
 1. **Deterministic oracle, not self-critique.** The delta is *computed* — it cannot hallucinate or reinforce
