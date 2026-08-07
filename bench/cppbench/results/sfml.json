@@ -1,5 +1,5 @@
 {
-  "source_repo": "/private/tmp/claude-501/-Users-qgames-AppDevelopLocal-project2-ripwire/a0d5c890-3802-455d-98aa-f77d108b2636/scratchpad/sfml-corpus",
+  "source_repo": "https://github.com/SFML/SFML",
   "dataset_lock_sha256": "81d7bb77eb5cbb9581d1f9c34b2d73588aa16181fc9594c99ae1e5b7a80ae376",
   "n_mined": 120,
   "n_scored": 115,
