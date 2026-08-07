@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # r6 expansion grid — frozen cells from bench/locbench/results/r6_expansion/PREREG.md, TRAIN split only.
+#
+# REPO/ASSETS: see the same header in ../r5_pooling/r5_grid.sh — absolute home-directory paths here are what
+# test/ripwirepubliccheck.sh arm 2 rejects, and did on all four CI legs.
 set -u
-REPO=/Users/qgames/AppDevelopLocal/project2/ripwire/.claude/worktrees/integration
-ASSETS=/Users/qgames/AppDevelopLocal/project2/bench-assets/r4
+REPO="${RIPWIRE_REPO:-$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../.." && pwd )}"
+ASSETS="${LOCBENCH_ASSETS:-}"
+[ -n "$ASSETS" ] || { echo "set LOCBENCH_ASSETS=<dir> — the scratch tree holding results/, work/ and logs/ (see bench/locbench/README.md)" >&2; exit 2; }
 cd "$REPO" || exit 2
+mkdir -p "$ASSETS/results" "$ASSETS/logs" || exit 2
 for cell in 2,1 2,2 2,3 3,1 3,2 3,3 5,1 5,2 5,3; do
     tag="${cell/,/x}"
     out="$ASSETS/results/r6_train_$tag.json"
