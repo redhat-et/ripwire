@@ -1,0 +1,64 @@
+r5 file-level evidence pooling — pre-registered verdict (2026-08-06)
+
+REJECT ON HELD-OUT. Binary 7a9a42ea @ 45eb7f6, RIPWIRE_POOL="<K>,<blend*100>", default stays OFF.
+
+IDENTITY CONTROL: cell (5,0) reproduced the train baseline EXACTLY, so the grid was readable. It
+earned its place before that: the first implementation ordered files by pooled score and
+slot-laddered the top ten, and blend=0 did NOT reproduce baseline, because the ladder was a change
+independent of the pooling. Per the PREREG that invalidates every cell, so the mechanism was
+corrected rather than the control waived — a file is now placed only if pooling PROMOTES it above its
+baseline rank.
+
+TRAIN GRID (n=60; single n=17, multi n=43). Baseline overall 40.00% / single 76.47% / multi 25.58%.
+
+  cell      multi dpp   single dpp   overall dpp
+  3,25        +0.00       +0.00        +0.00
+  3,50        +0.00       +0.00        +0.00
+  3,100       +0.00       +0.00        +0.00
+  5,25        +0.00       +0.00        +0.00
+  5,50        +0.00       +0.00        +0.00
+  5,100       +2.33       +0.00        +1.67    <- advanced under the frozen rule
+  10,25       +0.00       +0.00        +0.00
+  10,50       +2.33       +0.00        +1.67
+  10,100      +0.00       +0.00        +0.00
+
+HELD-OUT, cell (5,100), the single run the PREREG allows:
+
+  overall    58.3% -> 58.3%   (+0.00pp)
+  single     90.6% -> 90.6%   (+0.00pp)
+  multi      21.4% -> 21.4%   (+0.00pp)   <- registered primary
+  14 instances had a gold rank MOVE; ZERO crossed the @10 frontier.
+
+THE TRAIN SIGNAL WAS ONE INSTANCE. The entire +2.33pp was UXARRAY__uxarray-1117 (worst 16 -> 7), the
+same flip in both advancing cells; 12 instances moved and one crossed. It did not reproduce.
+
+METHODOLOGICAL DEFECT IN THIS ROUND'S OWN PREREG, recorded because it nearly laundered noise into an
+advance. The bar was ">= +2.00pp multi-file" on a 43-instance stratum, where ONE instance is 2.33pp.
+The bar was therefore below single-instance granularity and meant nothing stronger than "flip at
+least one". It was NOT moved after the grid ran — that would be the exact laundering the PREREG
+forbids — so the held-out run was spent as promised and reported as it fell. Future thresholds on
+this stratum must be stated in INSTANCES with a floor of >= 3, not in percentage points.
+
+FOURTH REJECTION, SAME SIGNATURE. r1_anchorhop, r1cpp_anchorhop, r4_siblift and now r5_pooling all
+reshuffle inside the top-k without moving the @10 frontier. r5 differed on the axis r4's post-mortem
+blamed — it chooses no neighbour — and still did not move it. That narrows the diagnosis: the problem
+is not WHICH files get promoted, and not HOW they are placed. Every one of these four mechanisms
+re-weights evidence the query already produced, and for the sibling files that define this stratum
+the query produced NO evidence to re-weight.
+
+WHAT THE ROUND 4 DECOMPOSITION SAYS ABOUT WHY (held-out, 22 multi-file failures):
+  9  sibling ranked but too low (median rank 26)  <- the only bucket a reranker can reach
+  7  sibling indexed but scoring ~zero on the query
+  4  whole instance missed (primary at rank 39, 70)
+  3  gold files carrying no code symbols at all
+Pooling could only ever have reached the 9, and on held-out it reached none of them: its inputs are
+the same query-derived symbol scores that already ranked those siblings at 26.
+
+WHAT SURVIVES. r6 structural expansion, seeded from a CONFIRMED top-ranked gold file rather than from
+a mention anchor, is the first candidate that would introduce evidence the query did not supply. Its
+feasibility probe (bench/locbench/results/r6_expansion/) found the required edge present for 28 of 40
+gold files (70%), with the caveats recorded there. That is a different failure mode from these four,
+and it is the only one of them with a verified substrate.
+
+Scaffolding retained (src/filepool.h, inert with RIPWIRE_POOL unset; golden, determinism and xmllint
+gates green), so a later round can re-use the ladder and the identity control without rebuilding them.
