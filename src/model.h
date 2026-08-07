@@ -9,6 +9,7 @@
 //        → serialize: top-K symbols (by rank) → minified XML, grouped by file.
 
 #include <algorithm>   // std::sort — symbolsByFile below
+#include <array>       // Symbol::evWhy — the fixed-size ev_why tag counters
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -129,6 +130,22 @@ inline const char* refRoleTag( RefRole r ) noexcept
     }
 }
 
+// Essential-complexity ev_why= reason vocabulary (the essential-complexity design note, §5.1). PUBLIC the
+// moment it ships (test/attrvocabcheck.sh's standing posture; test/essentialcxcheck.sh pins the spellings):
+// adding a tag later is a compatible extension, renaming one is not. Declaration order MUST track the
+// EvWhyTag indices ingest.cpp writes — the table is the single source both emitters read.
+inline constexpr std::size_t kEvWhyTagCount = 8;
+inline constexpr const char* kEvWhyTagTable[ kEvWhyTagCount ] = {
+    "guard-return",     // return/throw whose escape crosses at least one construct (incl. §1.3's guard clause)
+    "loop-escape",      // break/continue out of a loop from under an intervening construct
+    "switch-escape",    // break (or Java yield) out of a switch from under an intervening construct
+    "goto",             // goto across a construct boundary (incl. C# goto case/default)
+    "labelled-jump",    // labelled break/continue (Go/JS/TS/Java/Rust/Swift)
+    "back-edge",        // Ruby redo/retry — a hand-rolled back edge outside every prime
+    "fallthrough",      // Go fallthrough — an explicit intra-switch goto
+    "multi-entry",      // a case label displaced into a loop/branch (Duff's device; §2.6)
+};
+
 // A definition = one node in the graph. symbols[i].id == i (dense, deterministic order).
 struct Symbol
 {
@@ -204,6 +221,29 @@ struct Symbol
     // pins that equivalence in both directions).
     std::uint16_t humps        = 0;
     std::uint16_t deepLoc      = 0;
+    // ESSENTIAL COMPLEXITY ev(G) (McCabe 1976; NIST SP 500-235) — what remains after every structured
+    // region collapses. Computed SYNTACTICALLY inside the same fused cc_walk DFS (single-entry is
+    // guaranteed by the grammar; only single-EXIT can fail, via jump nodes), per
+    // the essential-complexity design note §2: a jump marks irreducible every construct strictly between it
+    // and its target, irreducibility propagates outward to the function root (stopping at closure/
+    // nested-fn boundaries), and a marked switch head contributes every arm. ev = 1 + Σ marked
+    // constructs' own cx decision weights, so ev <= cx is STRUCTURAL, not hoped for. 1 = fully
+    // structured (any contiguous region extracts mechanically); >= 2 = some region has a second exit
+    // and extract-method on it is a rewrite, not a refactor. A FLOOR (ev_floor=): noreturn CALLS,
+    // macro-hidden returns and unresolvable goto targets are invisible to a syntactic walk and can only
+    // RAISE the true value — an unrecognised jump marks NOTHING, never speculatively. Strict single-exit
+    // McCabe counts a guard clause (§10.1 Option A, the owner's call); evWhy is what keeps that honest —
+    // the guard-return share is visible and subtractable per row. Convention note, reconciled against an
+    // independent CFG reduction (test/essentialcxcheck.sh header): arm weights mirror cx exactly, so a
+    // marked switch whose arms include `default:` charges every arm where a residue's E-N+2 charges
+    // arms-1 — the same convention on both sides of ev <= cx, disclosed rather than special-cased.
+    // 0 for non-function kinds and for languages evCountedLang excludes (Bash); saturates at 65535 with
+    // humps' justification. Emitted iff ev >= 2 (absent on a cx row means EXACTLY 1 — never a bare "1").
+    std::uint16_t ev           = 0;
+    // evWhy[t] = how many jumps contributed under kEvWhyTagTable[t] (a jump contributes when its
+    // strictly-between chain is non-empty — a tail return or an arm-tail break contributes nothing).
+    // Saturates at 255 per tag: a def past that is beyond every triage threshold (humps' rule).
+    std::array<std::uint8_t, kEvWhyTagCount> evWhy{};
     std::uint16_t params        = 0;   // parameter count from the def's parameter-list child; --metrics params= (NUMBER only — no 7±2)
     std::uint8_t  maxNest       = 0;   // max control-structure nesting depth reached inside the def; --metrics nest=
     std::uint8_t  arityExact    = 0;   // B2.2: 1 ⇒ `params` is a FIXED, call-comparable arity (no variadic / default
@@ -237,7 +277,16 @@ struct Symbol
 // compromise but the whole point: it spends 4 B of that unavoidable 8 and leaves 4 B of live padding for
 // the NEXT field to land in free, exactly as `locals` did. A smaller type here would buy nothing and cost
 // range (both saturate at 65535 — see the fields' own comment); a uint32_t pair would have cost 16.
-static_assert( sizeof( Symbol ) == 56 + 2 * sizeof( std::string ),
+//
+// `ev`/`evWhy` (essential complexity) then cost the second step: 56 -> 64 + 2*string, MEASURED with the
+// standalone sizeof probe after this assert fired (the design predicted UNCHANGED because it budgeted the
+// uint16_t alone; the eight evWhy tag counters are what force the step). The uint16_t ev spends 2 of the
+// 4 B of live padding the humps/deepLoc step left; the 8×uint8_t evWhy run then crosses the 8-B boundary
+// once (+8), landing with 2 B of live padding for the NEXT field. The alternative — packing evWhy into
+// one uint32_t at 4 bits per tag — was rejected because a 4-bit counter saturates at 15, and printing
+// "guard-return:15" for a function with 20 guard returns is a wrong count, not a floor (honesty rule #3);
+// uint8_t saturating at 255 inherits humps' justification instead.
+static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
 // local-variable-indexing plan Phase 1 MVP scope (PLAN.md 2026-08-06 evening): C/C++ only — highest
@@ -251,6 +300,20 @@ static_assert( sizeof( Symbol ) == 56 + 2 * sizeof( std::string ),
 inline bool localsCountedLang( Lang lang ) noexcept
 {
     return lang == Lang::Cpp || lang == Lang::C;
+}
+
+// Essential-complexity coverage: 15 of 16 languages — every code language EXCEPT Bash
+// (the essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
+// `trap` are process-level, and function boundaries are weak — not worth a wrong number). Markdown/Json/
+// Unknown never carry a cx row, so listing them here would be vacuous either way. ANY consumer asking
+// whether Symbol::ev/evWhy can be trusted for a def — serialize.h's two emitters, ensemble.h's
+// annotation — MUST route through this ONE predicate, for localsCountedLang's reason: the covered set
+// must never drift between the emitter and any future consumer.
+inline bool evCountedLang( Lang lang ) noexcept
+{
+    return    lang == Lang::Cpp  || lang == Lang::C     || lang == Lang::ObjC || lang == Lang::Python
+           || lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Go || lang == Lang::Rust
+           || lang == Lang::Swift || lang == Lang::Java || lang == Lang::Ruby || lang == Lang::CSharp;
 }
 
 // local-variable-indexing plan Phase 2 (PLAN.md 2026-08-06 evening): one CAPTURED local-variable NAME,

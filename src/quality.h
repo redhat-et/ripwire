@@ -733,7 +733,17 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 45;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 46;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 46 = integration/quality-fleet merge of TWO independent
+                                                          // 45s (the integrated ppalt+nestcal 45 below, and ev(G)'s
+                                                          // 45 on feat/nest-profile) — fresh number, neither's blobs
+                                                          // may be served.
+                                                          // 45 (feat/nest-profile numbering) = essential complexity (44 was taken by the sibling
+                                                          // nesting-quirk round; see ingest.cpp): RawDef/Symbol gain
+                                                          // ev (u16 FLOOR) + evWhy (8×u8), a per-file def-record
+                                                          // FORMAT change, and Swift guard_statement joins
+                                                          // isDecisionType (a Swift cx VALUE change) — old caches
+                                                          // hold numbers this build would not produce.
                                                           // 45 = integration/quality-fleet merge of the ppalt
                                                           // line (43 there) and the nestcal r1 line (44 there):
                                                           // the merged extraction matches neither, fresh number.

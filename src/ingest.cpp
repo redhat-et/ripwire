@@ -889,6 +889,8 @@ struct RawDef
     std::uint16_t ppAlt     = 0;   // preproc alternative branches (#else/#elif) inside the def (see model.h Symbol::ppAlt)
     std::uint16_t humps     = 0;   // nesting profile: regions reaching quality::kNestBar (see model.h Symbol::humps)
     std::uint16_t deepLoc   = 0;   // nesting profile: lines inside them, a FLOOR (see model.h Symbol::deepLoc)
+    std::uint16_t ev        = 0;   // essential complexity, a FLOOR (see model.h Symbol::ev); 0 outside evCountedLang
+    std::array<std::uint8_t, kEvWhyTagCount> evWhy{};   // per-tag contributing-jump counts (model.h kEvWhyTagTable)
     std::uint16_t params    = 0;   // Q4: parameter count (from the def's parameter-list child); fns/methods
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
@@ -1000,7 +1002,39 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 45;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 46;           // bump on any grammar/.scm/extraction change
+                                                      // 46: integration/quality-fleet merge of TWO independent 45s
+                                                      //    — the integrated ppalt+nestcal 45 (below) and ev(G),
+                                                      //    which took 45 on feat/nest-profile (entry next; it had
+                                                      //    skipped 44 to dodge exactly this trap, but the
+                                                      //    integration line had already spent 45). The merged
+                                                      //    extraction (ppalt + nestcal clause semantics + ev/evWhy
+                                                      //    + Swift guard decision counting) matches neither
+                                                      //    lineage, so neither's blobs may be served. Mirror moved
+                                                      //    in the same commit; qschemetrip re-pinned.
+                                                      // 45 (feat/nest-profile numbering): essential complexity (the essential-complexity design note).
+                                                      //    45 and not 44: the nesting-quirk round on a sibling
+                                                      //    branch independently took 44 for the else-clause hump
+                                                      //    rewrite; two independent 44s would cross-hit caches at
+                                                      //    merge (that trap already fired once between two 43s).
+                                                      //    RawDef/Symbol gain `ev` (u16 FLOOR) + `evWhy` (8×u8 tag
+                                                      //    counters), computed inside the fused cc_walk DFS — a
+                                                      //    FORMAT change to the per-file def record (u32 + 8×u8
+                                                      //    after deepLoc) → old caches must be rejected. ALSO a
+                                                      //    VALUE change: Swift `guard_statement` joins
+                                                      //    isDecisionType (it is a decision point every cyclomatic
+                                                      //    tool counts; required so ev's counting of the
+                                                      //    guard-else exit keeps ev <= cx structural), so Swift
+                                                      //    cx moves on guard-bearing defs. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit (P0.2).
+                                                      // 43 (feat/nest-profile numbering): deepLoc line accounting fixed in cc_walk's else/elif
+                                                      //    clause — the hump PROFILE pass now runs forward
+                                                      //    (document order) instead of inside the backwards PUSH
+                                                      //    loop, so the `else` token's own line is no longer
+                                                      //    clamped away behind its block's high-water end. deep=
+                                                      //    VALUES move on else-at-the-bar shapes, so caches
+                                                      //    written by 42 hold numbers this build would not
+                                                      //    produce and must be rejected.
                                                       // 45: integration/quality-fleet merge of the ppalt line
                                                       //    (43 below) and the nestcal r1 line (44 below) — the
                                                       //    merged extraction (ppalt disclosure + r1 else/elif
@@ -1263,7 +1297,8 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 }
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
     if( withLex )
     {
         VERIFY( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -1351,16 +1386,17 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
-// they sit next to the writer functions whose field list they must match. A LEAN def record is 13 u32 +
-// 4 u8 + 2 empty str(len u32) fields = 13*4 + 4*1 + 2*4 = 64 bytes (Phase 1, local-variable-indexing,
+// they sit next to the writer functions whose field list they must match. A LEAN def record is 14 u32 +
+// 12 u8 + 2 empty str(len u32) fields = 14*4 + 12*1 + 2*4 = 76 bytes (Phase 1, local-variable-indexing,
 // PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10; the ppalt disclosure added `ppAlt`,
 // written as a u32 — 10 -> 11; the nesting profile then added `humps` and `deepLoc`, written as u32 each —
-// 11 -> 13, so 13*4 + 4 + 8 = 64); the RICH (withLex) extra is
+// 11 -> 13; essential complexity then added `ev` as a u32 in the run plus the 8×u8 evWhy tag counters
+// after the strings — 13 -> 14 u32 and 4 -> 12 u8, so 56 + 12 + 8 = 76); the RICH (withLex) extra is
 // dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty
 // str(len u32) fields = 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 64;   // 13×u32 + 4×u8 + 2×str(len u32, empty)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 76;   // 14×u32 + 12×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 39;   // 3×u32 + 7×u8 + 5×str(len u32, empty)
 
@@ -1390,7 +1426,8 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.ev = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    for( std::uint8_t& tagCount : d.evWhy ) { tagCount = r.u8(); }   // mirrors writeDef's fixed 8×u8 order
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
@@ -2040,7 +2077,12 @@ inline bool isDecisionType( const char* t ) noexcept
            // classic-switch `case`/`default` arm is a `switch_section`, each modern switch-expression
            // arm is a `switch_expression_arm` — both are the per-arm decision, matching Ruby's `when`.
            || std::strcmp( t, "foreach_statement" ) == 0   || std::strcmp( t, "switch_section" ) == 0
-           || std::strcmp( t, "switch_expression_arm" ) == 0;
+           || std::strcmp( t, "switch_expression_arm" ) == 0
+           // Swift `guard cond else { exit }` — a decision point every cyclomatic tool counts, previously
+           // missed (kParserVer 44). Also load-bearing for essential complexity: ev's per-construct weights
+           // mirror this predicate exactly (ev_ctrl machinery below), so counting the guard-else exit in ev
+           // without counting the guard here would break the structural ev <= cx containment.
+           || std::strcmp( t, "guard_statement" ) == 0;
 }
 
 // (cyclomatic is now counted inside the fused cc_walk / complexityOf below — one DFS computes cx AND ccx.)
@@ -2245,18 +2287,660 @@ inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNe
     }
 }
 
+// ═══ essential complexity ev(G) — the syntactic single-exit reduction (the essential-complexity design note) ═══
+//
+// THE RULE (§2.2, reference-verified — see test/essentialcxcheck.sh's reconciliation header): a jump marks
+// irreducible every control construct STRICTLY BETWEEN it and its target construct; irreducibility then
+// propagates OUTWARD to the function root (stopping at closure/nested-fn boundaries); a marked switch head
+// contributes every arm. ev = 1 + Σ (own cx decision weight of every marked construct). Weights are
+// EXACTLY `isNamed && isDecisionType(t)` — one weight-1 arena node per cyclo-counted decision node and
+// never more — which is what makes ev <= cx structural rather than hoped for (boolean operators add to
+// cyclo but never enter the arena, widening the gap only in the safe direction).
+//
+// THE FLOOR RULE (§6, load-bearing): an unrecognised jump node type, or an unresolvable target, marks
+// NOTHING. Never mark speculatively. Every failure mode — a noreturn call, a macro-hidden return, a label
+// this scan cannot find, a grammar shape not in the tables below — therefore lands in the UNDER-counting
+// direction, so emitted ev <= true ev(G) always, which is what lets serialize.h stamp ev_floor="1".
+//
+// DATA STRUCTURE (§2.3, G2): a parent-index arena, not a CFG — POD nodes, 32-bit handles, no edges, no
+// graph library. Pre-order guarantees parent index < child index, which the propagation pass exploits.
+enum class CtrlKind : std::uint8_t { Loop, Switch, Case, Branch, Try, Catch, Fn, Block, Labelled };
+struct CtrlNode
+{
+    std::uint32_t parent;   // arena index of the innermost enclosing construct; kNoCtrl at function root
+    std::uint16_t weight;   // this construct's OWN cx decision weight (isDecisionType), see above
+    std::uint8_t  kind;     // CtrlKind
+    std::uint8_t  marked;   // 0/1 — in the irreducible residue
+};
+static_assert( sizeof( CtrlNode ) == 8, "CtrlNode is the ev arena's hot element — keep it POD and tight" );
+inline constexpr std::uint32_t kNoCtrl = 0xFFFFFFFFu;
+
+// EvWhyTag indices MUST track model.h's kEvWhyTagTable declaration order — the table is the single
+// source of the public spellings; these are the write-side indices.
+enum class EvWhyTag : std::uint8_t { GuardReturn = 0, LoopEscape, SwitchEscape, Goto, LabelledJump, BackEdge, Fallthrough, MultiEntry };
+
+// Everything the walk accumulates for one def's ev. Vectors are constructed per complexityOf call and
+// reserve small — the same per-def allocation posture as cc_walk's own frame stack/kids (A4-F25: NOT
+// noexcept; bad_alloc propagates to the per-file degrade catch).
+struct EvCtx
+{
+    std::vector<CtrlNode> arena;
+    struct LabelDef     { std::uint32_t ctrl; std::string name; };            // label -> its construct's arena index
+    struct PendingJump  { std::uint32_t ctrl; std::uint8_t tag; std::string label; };   // gotos + labelled jumps, resolved post-walk
+    std::vector<LabelDef>    labels;
+    std::vector<PendingJump> pending;
+    std::uint32_t            why[ kEvWhyTagCount ] = {};
+};
+
+// jump-target kind masks for ev_findTarget
+enum : std::uint8_t { kEvTgtLoop = 1, kEvTgtSwitch = 2, kEvTgtBlock = 4, kEvTgtTry = 8, kEvTgtFn = 16 };
+
+// source text of the first child with one of the given node types ("" when absent). Jump statements are
+// grammar-bounded shapes (a keyword + at most a label/expression), so the indexed child form is right here
+// (see the O(children) note above collectChildren — this is a bounded-shape scan, not an unbounded walk).
+inline std::string_view ev_childText( TSNode n, std::string_view src, std::initializer_list<const char*> types ) noexcept
+{
+    const std::uint32_t childCount = ts_node_child_count( n );
+    for( std::uint32_t ci = 0; ci < childCount; ++ci )
+    {
+        const TSNode child = ts_node_child( n, ci );
+        const char*  ct    = ts_node_type( child );
+        for( const char* want : types )
+        {
+            if( std::strcmp( ct, want ) == 0 )
+            {
+                const std::uint32_t a = ts_node_start_byte( child ), b = ts_node_end_byte( child );
+                if( b <= src.size() && b > a )
+                {
+                    return src.substr( a, b - a );
+                }
+            }
+        }
+    }
+    return {};
+}
+
+// does the node carry an ANONYMOUS keyword child with this exact spelling? (C# `goto case 1;` /
+// `yield break;` — the discriminating token is unnamed, so type-based lookup cannot see it.)
+inline bool ev_hasAnonKeyword( TSNode n, std::string_view src, std::string_view keyword ) noexcept
+{
+    const std::uint32_t childCount = ts_node_child_count( n );
+    for( std::uint32_t ci = 0; ci < childCount; ++ci )
+    {
+        const TSNode child = ts_node_child( n, ci );
+        if( ts_node_is_named( child ) )
+        {
+            continue;
+        }
+        const std::uint32_t a = ts_node_start_byte( child ), b = ts_node_end_byte( child );
+        if( b <= src.size() && b - a == keyword.size() && src.substr( a, b - a ) == keyword )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// one label spelling across the grammars: Rust labels carry a leading tick (`'outer`), Swift statement
+// labels a trailing colon (`outer:`); the jump side and the definition side must agree byte-for-byte.
+inline std::string_view ev_normalizeLabel( std::string_view label ) noexcept
+{
+    if( !label.empty() && label.front() == '\'' ) { label.remove_prefix( 1 ); }
+    if( !label.empty() && label.back() == ':' )   { label.remove_suffix( 1 ); }
+    return label;
+}
+
+// nearest enclosing construct of an allowed kind, walking parent links. A Fn node is a hard boundary:
+// return-family jumps may TARGET it (kEvTgtFn), everything else fails there — a break can never leave a
+// closure, so resolving past one would mark constructs the jump provably does not cross (floor rule).
+// Returns kNoCtrl for "function root" when the mask includes kEvTgtFn, and for FAILURE otherwise — the
+// callers' masks make the two cases unambiguous per jump family.
+inline std::uint32_t ev_findTarget( const EvCtx& ctx, std::uint32_t from, std::uint8_t mask ) noexcept
+{
+    for( std::uint32_t i = from; i != kNoCtrl; i = ctx.arena[i].parent )
+    {
+        const CtrlKind k = CtrlKind( ctx.arena[i].kind );
+        if( k == CtrlKind::Fn )
+        {
+            return ( mask & kEvTgtFn ) ? i : kNoCtrl;
+        }
+        if( ( ( mask & kEvTgtLoop ) && k == CtrlKind::Loop ) || ( ( mask & kEvTgtSwitch ) && k == CtrlKind::Switch )
+            || ( ( mask & kEvTgtBlock ) && k == CtrlKind::Block ) || ( ( mask & kEvTgtTry ) && k == CtrlKind::Try ) )
+        {
+            return i;
+        }
+    }
+    return kNoCtrl;   // reached the function root
+}
+
+// a throw's target: the nearest enclosing try — but a try whose chain we enter THROUGH its own catch
+// clause is not a landing site (a rethrow propagates outward), so a Catch on the chain skips the next Try.
+inline std::uint32_t ev_findThrowTarget( const EvCtx& ctx, std::uint32_t from ) noexcept
+{
+    bool skipOwnTry = false;
+    for( std::uint32_t i = from; i != kNoCtrl; i = ctx.arena[i].parent )
+    {
+        const CtrlKind k = CtrlKind( ctx.arena[i].kind );
+        if( k == CtrlKind::Fn )
+        {
+            return i;
+        }
+        if( k == CtrlKind::Catch )
+        {
+            skipOwnTry = true;
+        }
+        else if( k == CtrlKind::Try )
+        {
+            if( skipOwnTry ) { skipOwnTry = false; }
+            else             { return i; }
+        }
+    }
+    return kNoCtrl;   // function root — an uncaught throw is a guard-shaped exit
+}
+
+// mark every construct STRICTLY BETWEEN `from` and `target` (exclusive). A Case arm that is the target's
+// own DIRECT arm is the jump's normal exit (design §2.2 row 1 — `case 1: … break;` is structured) and is
+// skipped when excludeDirectArm. Returns whether this jump CONTRIBUTES to ev_why: it must have crossed a
+// construct that actually raises ev — one carrying decision weight, or a switch head (whose arms then
+// complete). A weight-0 transparent wrapper alone (a goto label around the tail return, a bare Try) does
+// not make a jump a contributor — the tag counts must explain a RAISED ev, not narrate the walk.
+// Already-marked nodes still count — two breaks under one if are two contributing jumps, not one.
+inline bool ev_markBetween( EvCtx& ctx, std::uint32_t from, std::uint32_t target, bool excludeDirectArm ) noexcept
+{
+    bool contributed = false;
+    for( std::uint32_t i = from; i != target && i != kNoCtrl; i = ctx.arena[i].parent )
+    {
+        if( excludeDirectArm && CtrlKind( ctx.arena[i].kind ) == CtrlKind::Case && ctx.arena[i].parent == target )
+        {
+            continue;
+        }
+        ctx.arena[i].marked = 1;
+        if( ctx.arena[i].weight > 0 || CtrlKind( ctx.arena[i].kind ) == CtrlKind::Switch )
+        {
+            contributed = true;
+        }
+    }
+    return contributed;
+}
+
+inline void ev_countWhy( EvCtx& ctx, EvWhyTag tag ) noexcept
+{
+    ++ctx.why[ std::size_t( tag ) ];
+}
+
+// is `t` a control construct the arena tracks, and of what kind? Lang-gated where node-type spellings
+// collide across grammars (Swift's `do_statement` is a try, the C family's a loop; Ruby's bare-word kinds
+// double as anonymous keyword tokens elsewhere — the caller's isNamed gate recovers them, exactly as
+// cc_isNestingControl's note explains). Node-type spellings verified against the VENDORED grammars via
+// real parses (--match probes per language), not assumed — the ln_extractDeclaratorIdentifiers discipline.
+inline bool ev_ctrlKindFor( const char* t, Lang lang, CtrlKind& kindOut ) noexcept
+{
+    // branches
+    if(    std::strcmp( t, "if_statement" ) == 0        || std::strcmp( t, "if_expression" ) == 0
+        || std::strcmp( t, "conditional_expression" ) == 0 || std::strcmp( t, "ternary_expression" ) == 0
+        || std::strcmp( t, "guard_statement" ) == 0     || std::strcmp( t, "conditional" ) == 0
+        || std::strcmp( t, "elif_clause" ) == 0         || std::strcmp( t, "else_clause" ) == 0
+        || std::strcmp( t, "elsif" ) == 0               || std::strcmp( t, "if" ) == 0
+        || std::strcmp( t, "unless" ) == 0              || std::strcmp( t, "if_modifier" ) == 0
+        || std::strcmp( t, "unless_modifier" ) == 0 )
+    {
+        kindOut = CtrlKind::Branch;
+        return true;
+    }
+    // loops (Swift's do_statement is a TRY and is handled below)
+    if(    std::strcmp( t, "for_statement" ) == 0       || std::strcmp( t, "for_range_loop" ) == 0
+        || std::strcmp( t, "for_in_statement" ) == 0    || std::strcmp( t, "for_expression" ) == 0
+        || std::strcmp( t, "while_statement" ) == 0     || std::strcmp( t, "while_expression" ) == 0
+        || std::strcmp( t, "loop_expression" ) == 0     || std::strcmp( t, "foreach_statement" ) == 0
+        || std::strcmp( t, "repeat_while_statement" ) == 0
+        || ( std::strcmp( t, "do_statement" ) == 0 && lang != Lang::Swift )
+        || std::strcmp( t, "while" ) == 0               || std::strcmp( t, "until" ) == 0
+        || std::strcmp( t, "for" ) == 0                 || std::strcmp( t, "while_modifier" ) == 0
+        || std::strcmp( t, "until_modifier" ) == 0 )
+    {
+        kindOut = CtrlKind::Loop;
+        return true;
+    }
+    // switch/match heads (weight 0 — the arms carry the decisions, as in cx)
+    if(    std::strcmp( t, "switch_statement" ) == 0    || std::strcmp( t, "switch_expression" ) == 0
+        || std::strcmp( t, "match_expression" ) == 0    || std::strcmp( t, "match_statement" ) == 0
+        || std::strcmp( t, "expression_switch_statement" ) == 0 || std::strcmp( t, "type_switch_statement" ) == 0
+        || std::strcmp( t, "select_statement" ) == 0    || std::strcmp( t, "case" ) == 0
+        || std::strcmp( t, "case_match" ) == 0 )
+    {
+        kindOut = CtrlKind::Switch;
+        return true;
+    }
+    // arms
+    if(    std::strcmp( t, "case_statement" ) == 0      || std::strcmp( t, "switch_section" ) == 0
+        || std::strcmp( t, "switch_expression_arm" ) == 0 || std::strcmp( t, "match_arm" ) == 0
+        || std::strcmp( t, "expression_case" ) == 0     || std::strcmp( t, "communication_case" ) == 0
+        || std::strcmp( t, "default_case" ) == 0        || std::strcmp( t, "type_case" ) == 0
+        || std::strcmp( t, "case_clause" ) == 0         || std::strcmp( t, "switch_entry" ) == 0
+        || std::strcmp( t, "switch_rule" ) == 0         || std::strcmp( t, "switch_block_statement_group" ) == 0
+        || std::strcmp( t, "when" ) == 0                || std::strcmp( t, "in_clause" ) == 0 )
+    {
+        kindOut = CtrlKind::Case;
+        return true;
+    }
+    // try / catch (Swift spells try as do_statement + catch_block)
+    if(    std::strcmp( t, "try_statement" ) == 0       || std::strcmp( t, "try_with_resources_statement" ) == 0
+        || std::strcmp( t, "begin" ) == 0               || ( std::strcmp( t, "do_statement" ) == 0 && lang == Lang::Swift ) )
+    {
+        kindOut = CtrlKind::Try;
+        return true;
+    }
+    if(    std::strcmp( t, "catch_clause" ) == 0        || std::strcmp( t, "except_clause" ) == 0
+        || std::strcmp( t, "catch_block" ) == 0         || std::strcmp( t, "rescue" ) == 0 )
+    {
+        kindOut = CtrlKind::Catch;
+        return true;
+    }
+    // function boundaries — the jump barrier. A miss here is the ONE table error that would OVER-count
+    // (a return inside an unrecognised closure shape would mark the outer function's constructs), which
+    // is why this list errs wide and every entry was probe-verified.
+    if(    std::strcmp( t, "lambda_expression" ) == 0   || std::strcmp( t, "lambda" ) == 0
+        || std::strcmp( t, "closure_expression" ) == 0  || std::strcmp( t, "function_definition" ) == 0
+        || std::strcmp( t, "function_declaration" ) == 0 || std::strcmp( t, "function_expression" ) == 0
+        || std::strcmp( t, "arrow_function" ) == 0      || std::strcmp( t, "generator_function" ) == 0
+        || std::strcmp( t, "generator_function_declaration" ) == 0 || std::strcmp( t, "method_definition" ) == 0
+        || std::strcmp( t, "method_declaration" ) == 0  || std::strcmp( t, "func_literal" ) == 0
+        || std::strcmp( t, "function_item" ) == 0       || std::strcmp( t, "lambda_literal" ) == 0
+        || std::strcmp( t, "local_function_statement" ) == 0 || std::strcmp( t, "anonymous_method_expression" ) == 0
+        || std::strcmp( t, "method" ) == 0              || std::strcmp( t, "singleton_method" ) == 0 )
+    {
+        kindOut = CtrlKind::Fn;
+        return true;
+    }
+    // Ruby blocks — a jump scope of their own (`each do … next end`: next is the block's normal exit);
+    // lang-gated because Go/Java/C# spell their PLAIN braces "block", which must stay out of the arena.
+    if( lang == Lang::Ruby && ( std::strcmp( t, "block" ) == 0 || std::strcmp( t, "do_block" ) == 0 ) )
+    {
+        kindOut = CtrlKind::Block;
+        return true;
+    }
+    if( std::strcmp( t, "labeled_statement" ) == 0 )
+    {
+        kindOut = CtrlKind::Labelled;
+        return true;
+    }
+    return false;
+}
+
+// append one arena node; registers labels (labeled_statement wrappers; Rust/Swift loops carrying their
+// own label child) and fires the §2.6 multi-entry detection for displaced arms. Returns the new index.
+inline std::uint32_t ev_appendCtrl( EvCtx& ctx, TSNode n, CtrlKind kind, std::uint16_t weight, std::uint32_t parentIdx, Lang lang, std::string_view src )
+{
+    const std::uint32_t newIdx = std::uint32_t( ctx.arena.size() );
+    ctx.arena.push_back( CtrlNode{ parentIdx, weight, std::uint8_t( kind ), 0 } );
+    if( kind == CtrlKind::Labelled )
+    {
+        const std::string_view label = ev_normalizeLabel( ev_childText( n, src, { "statement_identifier", "label_name", "identifier" } ) );
+        if( !label.empty() )
+        {
+            ctx.labels.push_back( { newIdx, std::string( label ) } );
+        }
+    }
+    else if( ( kind == CtrlKind::Loop || kind == CtrlKind::Switch ) && ( lang == Lang::Rust || lang == Lang::Swift ) )
+    {
+        // Rust: `'outer: loop { … }` — the label is a child of the loop expression itself.
+        // Swift: `outer: for … { … }` — a statement_label child, colon included.
+        const std::string_view label = ev_normalizeLabel( ev_childText( n, src, { "label", "statement_label" } ) );
+        if( !label.empty() )
+        {
+            ctx.labels.push_back( { newIdx, std::string( label ) } );
+        }
+    }
+    if( kind == CtrlKind::Case && parentIdx != kNoCtrl )
+    {
+        const CtrlKind parentKind = CtrlKind( ctx.arena[ parentIdx ].kind );
+        if( parentKind != CtrlKind::Switch && parentKind != CtrlKind::Case )
+        {
+            // §2.6 — a case label displaced under a loop/branch between it and its switch (Duff's device):
+            // a REAL multi-entry region the single-entry theorem excludes everywhere else. Mark the arm;
+            // outward propagation then keeps the displacing construct, the switch, and every sibling arm.
+            ctx.arena[ newIdx ].marked = 1;
+            ev_countWhy( ctx, EvWhyTag::MultiEntry );
+        }
+    }
+    return newIdx;
+}
+
+// note one visited node for ev: either it opens a control construct (-> new arena node, returned as the
+// children's ctrl) or it is a jump (-> resolve or defer). Anything else returns parentIdx unchanged.
+// Caller guarantees isNamed (anonymous keyword tokens must never look like Ruby's bare-word nodes).
+inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint32_t parentIdx, Lang lang, std::string_view src )
+{
+    CtrlKind kind;
+    if( ev_ctrlKindFor( t, lang, kind ) )
+    {
+        return ev_appendCtrl( ctx, n, kind, std::uint16_t( isDecisionType( t ) ? 1 : 0 ), parentIdx, lang, src );
+    }
+
+    // ── jumps. Every rule below: resolve the target (ancestors only — the arena already holds them in a
+    //    pre-order walk), mark strictly between, count the tag iff the chain was non-empty. Unresolvable
+    //    (or unrecognised) ⇒ mark nothing — the floor rule.
+    const bool isRuby = ( lang == Lang::Ruby );
+
+    // return-family: target = nearest closure boundary, else the function root. Ruby `return` passes
+    // THROUGH blocks (a non-local method return), which kEvTgtFn-only masks give for free.
+    const auto noteReturn = [ & ]()
+    {
+        if( ev_markBetween( ctx, parentIdx, ev_findTarget( ctx, parentIdx, kEvTgtFn ), false ) )
+        {
+            ev_countWhy( ctx, EvWhyTag::GuardReturn );
+        }
+    };
+    const auto noteThrow = [ & ]()
+    {
+        if( ev_markBetween( ctx, parentIdx, ev_findThrowTarget( ctx, parentIdx ), false ) )
+        {
+            ev_countWhy( ctx, EvWhyTag::GuardReturn );
+        }
+    };
+    // break/continue-family: `armExit` = an arm-tail break is the target's normal exit (row 1).
+    const auto noteEscape = [ & ]( std::uint8_t mask, bool armExit )
+    {
+        const std::uint32_t target = ev_findTarget( ctx, parentIdx, mask );
+        if( target == kNoCtrl )
+        {
+            return;   // no such construct below the closure boundary — never mark speculatively
+        }
+        if( ev_markBetween( ctx, parentIdx, target, armExit ) )
+        {
+            ev_countWhy( ctx, CtrlKind( ctx.arena[ target ].kind ) == CtrlKind::Switch ? EvWhyTag::SwitchEscape : EvWhyTag::LoopEscape );
+        }
+    };
+
+    if( std::strcmp( t, "return_statement" ) == 0 || std::strcmp( t, "return_expression" ) == 0
+        || std::strcmp( t, "co_return_statement" ) == 0 || ( isRuby && std::strcmp( t, "return" ) == 0 ) )
+    {
+        noteReturn();
+    }
+    else if( std::strcmp( t, "throw_statement" ) == 0 || std::strcmp( t, "raise_statement" ) == 0 )
+    {
+        noteThrow();
+    }
+    else if( std::strcmp( t, "break_statement" ) == 0 || std::strcmp( t, "continue_statement" ) == 0 )
+    {
+        const bool             isBreak = ( t[0] == 'b' );
+        const std::string_view label   = ev_normalizeLabel( ev_childText( n, src, { "statement_identifier", "label_name", "identifier" } ) );
+        if( !label.empty() )
+        {
+            ctx.pending.push_back( { parentIdx, std::uint8_t( EvWhyTag::LabelledJump ), std::string( label ) } );
+        }
+        else
+        {
+            // Python's match does not capture break (§3.1's easily-missed case) — its head is in the arena
+            // as a Switch for structure, but a Python break resolves past it to the loop.
+            const std::uint8_t mask = isBreak ? std::uint8_t( lang == Lang::Python ? kEvTgtLoop : ( kEvTgtLoop | kEvTgtSwitch ) )
+                                              : std::uint8_t( kEvTgtLoop );
+            noteEscape( mask, isBreak );
+        }
+    }
+    else if( std::strcmp( t, "break_expression" ) == 0 || std::strcmp( t, "continue_expression" ) == 0 )
+    {
+        // Rust: `break 'label` / `continue 'label` carry a label child; a bare break targets the loop only.
+        const std::string_view label = ev_normalizeLabel( ev_childText( n, src, { "label", "loop_label" } ) );
+        if( !label.empty() )
+        {
+            ctx.pending.push_back( { parentIdx, std::uint8_t( EvWhyTag::LabelledJump ), std::string( label ) } );
+        }
+        else
+        {
+            noteEscape( kEvTgtLoop, t[0] == 'b' );
+        }
+    }
+    else if( isRuby && ( std::strcmp( t, "break" ) == 0 || std::strcmp( t, "next" ) == 0 ) )
+    {
+        noteEscape( kEvTgtLoop | kEvTgtBlock, false );
+    }
+    else if( isRuby && ( std::strcmp( t, "redo" ) == 0 || std::strcmp( t, "retry" ) == 0 ) )
+    {
+        // genuine back edges outside every prime (§3.1): mark the chain AND the target construct itself —
+        // even a redo sitting directly in the loop body makes that loop a hand-rolled goto shape.
+        const std::uint32_t target = ev_findTarget( ctx, parentIdx, std::uint8_t( t[2] == 'd' ? ( kEvTgtLoop | kEvTgtBlock ) : kEvTgtTry ) );
+        if( target != kNoCtrl )
+        {
+            ev_markBetween( ctx, parentIdx, target, false );
+            ctx.arena[ target ].marked = 1;
+            ev_countWhy( ctx, EvWhyTag::BackEdge );
+        }
+    }
+    else if( std::strcmp( t, "goto_statement" ) == 0 )
+    {
+        if( lang == Lang::CSharp && ( ev_hasAnonKeyword( n, src, "case" ) || ev_hasAnonKeyword( n, src, "default" ) ) )
+        {
+            // C# `goto case L;` / `goto default;` — an explicit intra-switch goto: target the enclosing
+            // switch WITHOUT the arm-exit grace (jumping INTO another arm is never a normal exit).
+            const std::uint32_t target = ev_findTarget( ctx, parentIdx, kEvTgtSwitch );
+            if( target != kNoCtrl && ev_markBetween( ctx, parentIdx, target, false ) )
+            {
+                ev_countWhy( ctx, EvWhyTag::Goto );
+            }
+        }
+        else
+        {
+            const std::string_view label = ev_normalizeLabel( ev_childText( n, src, { "statement_identifier", "label_name", "identifier" } ) );
+            if( !label.empty() )
+            {
+                ctx.pending.push_back( { parentIdx, std::uint8_t( EvWhyTag::Goto ), std::string( label ) } );
+            }
+        }
+    }
+    else if( std::strcmp( t, "fallthrough_statement" ) == 0 )
+    {
+        // Go — an explicit intra-switch goto; counts (§3.1). The arm itself is marked (no arm-exit grace),
+        // and propagation then keeps the switch and every sibling arm. (Swift's fallthrough is an
+        // undetectable hidden token in its grammar — probe-verified — so Swift under-counts here: floor.)
+        const std::uint32_t target = ev_findTarget( ctx, parentIdx, kEvTgtSwitch );
+        if( target != kNoCtrl && ev_markBetween( ctx, parentIdx, target, false ) )
+        {
+            ev_countWhy( ctx, EvWhyTag::Fallthrough );
+        }
+    }
+    else if( std::strcmp( t, "yield_statement" ) == 0 )
+    {
+        if( lang == Lang::Java )
+        {
+            // a switch-expression's value production — the arm's normal exit when at arm tail; an escape
+            // when it crosses an intervening construct (same geometry as break-to-switch).
+            const std::uint32_t target = ev_findTarget( ctx, parentIdx, kEvTgtSwitch );
+            if( target != kNoCtrl && ev_markBetween( ctx, parentIdx, target, true ) )
+            {
+                ev_countWhy( ctx, EvWhyTag::SwitchEscape );
+            }
+        }
+        else if( lang == Lang::CSharp && ev_hasAnonKeyword( n, src, "break" ) )
+        {
+            noteReturn();   // `yield break` ends the iterator — a return; `yield return` is a suspension, not a jump
+        }
+    }
+    else if( std::strcmp( t, "control_transfer_statement" ) == 0 )
+    {
+        // Swift wraps break/continue/return/throw in one node kind; the keyword is its first token.
+        const std::uint32_t a = ts_node_start_byte( n );
+        const std::string_view rest = ( a < src.size() ) ? src.substr( a ) : std::string_view{};
+        const std::string_view label = ev_normalizeLabel( ev_childText( n, src, { "simple_identifier" } ) );
+        if( rest.starts_with( "break" ) || rest.starts_with( "continue" ) )
+        {
+            if( !label.empty() )
+            {
+                ctx.pending.push_back( { parentIdx, std::uint8_t( EvWhyTag::LabelledJump ), std::string( label ) } );
+            }
+            else
+            {
+                noteEscape( rest.starts_with( "break" ) ? std::uint8_t( kEvTgtLoop | kEvTgtSwitch ) : std::uint8_t( kEvTgtLoop ), rest.starts_with( "break" ) );
+            }
+        }
+        else if( rest.starts_with( "return" ) )
+        {
+            noteReturn();
+        }
+        else if( rest.starts_with( "throw" ) )
+        {
+            noteThrow();
+        }
+    }
+    return parentIdx;
+}
+
+// post-walk finalization: resolve the label-addressed jumps (a label can sit AFTER its goto), run the
+// outward propagation, complete marked switches' arms, and sum. Returns ev (>= 1) and the tag counters.
+inline void ev_finalize( EvCtx& ctx, std::uint32_t& evOut, std::array<std::uint8_t, kEvWhyTagCount>& whyOut )
+{
+    // 1. label-addressed jumps — goto via lowest common ancestor (§2.5), labelled break/continue via the
+    //    ancestor check. A label that is missing, duplicated, or across a closure boundary marks NOTHING.
+    for( const EvCtx::PendingJump& jump : ctx.pending )
+    {
+        std::uint32_t labelCtrl = kNoCtrl;
+        bool          found = false, duplicated = false;
+        for( const EvCtx::LabelDef& def : ctx.labels )
+        {
+            if( def.name == jump.label )
+            {
+                duplicated = found;
+                labelCtrl  = def.ctrl;
+                found      = true;
+            }
+        }
+        if( !found || duplicated )
+        {
+            continue;
+        }
+        if( EvWhyTag( jump.tag ) == EvWhyTag::LabelledJump )
+        {
+            // the labelled construct must be an ANCESTOR reached without crossing a closure boundary
+            bool reachable = false;
+            for( std::uint32_t i = jump.ctrl; i != kNoCtrl; i = ctx.arena[i].parent )
+            {
+                if( CtrlKind( ctx.arena[i].kind ) == CtrlKind::Fn ) { break; }
+                if( i == labelCtrl ) { reachable = true; break; }
+            }
+            if( reachable && ev_markBetween( ctx, jump.ctrl, labelCtrl, false ) )
+            {
+                ev_countWhy( ctx, EvWhyTag::LabelledJump );
+            }
+        }
+        else   // goto
+        {
+            // both chains, each ending at the first closure boundary (inclusive, so two nodes under the
+            // SAME closure still meet); no common node + any boundary ⇒ different scopes ⇒ mark nothing.
+            const auto chainOf = [ & ]( std::uint32_t from, std::vector<std::uint32_t>& out, bool& hitFn )
+            {
+                out.clear();
+                hitFn = false;
+                for( std::uint32_t i = from; i != kNoCtrl; i = ctx.arena[i].parent )
+                {
+                    out.push_back( i );
+                    if( CtrlKind( ctx.arena[i].kind ) == CtrlKind::Fn ) { hitFn = true; break; }
+                }
+            };
+            std::vector<std::uint32_t> jumpChain, labelChain;
+            bool jumpHitFn = false, labelHitFn = false;
+            chainOf( jump.ctrl, jumpChain, jumpHitFn );
+            chainOf( labelCtrl, labelChain, labelHitFn );
+            std::uint32_t lca      = kNoCtrl;
+            std::size_t   lcaJump  = jumpChain.size(), lcaLabel = labelChain.size();
+            for( std::size_t j = 0; j < jumpChain.size() && lca == kNoCtrl; ++j )
+            {
+                for( std::size_t l = 0; l < labelChain.size(); ++l )
+                {
+                    if( labelChain[l] == jumpChain[j] )
+                    {
+                        lca = jumpChain[j]; lcaJump = j; lcaLabel = l;
+                        break;
+                    }
+                }
+            }
+            if( lca == kNoCtrl && ( jumpHitFn || labelHitFn ) )
+            {
+                continue;   // different closure scopes (a label name reused inside a lambda) — floor rule
+            }
+            bool contributed = false;
+            const auto markChainNode = [ & ]( std::uint32_t idx )
+            {
+                ctx.arena[ idx ].marked = 1;
+                if( ctx.arena[ idx ].weight > 0 || CtrlKind( ctx.arena[ idx ].kind ) == CtrlKind::Switch )
+                {
+                    contributed = true;   // same contributor rule as ev_markBetween: a crossed construct that raises ev
+                }
+            };
+            for( std::size_t j = 0; j < lcaJump; ++j )   { markChainNode( jumpChain[j] ); }
+            for( std::size_t l = 0; l < lcaLabel; ++l )  { markChainNode( labelChain[l] ); }
+            if( contributed )
+            {
+                ev_countWhy( ctx, EvWhyTag::Goto );
+            }
+        }
+    }
+
+    // 2. outward propagation (§2.2): an uncollapsed child keeps its ancestors in the residue. Ascending
+    //    index order + early stop is correct because parents precede children in a pre-order arena, and a
+    //    walk that marks a node always finishes that node's whole chain in the same sweep. Closure
+    //    boundaries (Fn) and Ruby blocks (Block) contain their tangles — the outer function's constructs
+    //    stay reducible around them.
+    for( std::uint32_t i = 0; i < std::uint32_t( ctx.arena.size() ); ++i )
+    {
+        if( !ctx.arena[i].marked )
+        {
+            continue;
+        }
+        for( std::uint32_t p = ctx.arena[i].parent; p != kNoCtrl; p = ctx.arena[p].parent )
+        {
+            const CtrlKind k = CtrlKind( ctx.arena[p].kind );
+            if( k == CtrlKind::Fn || k == CtrlKind::Block || ctx.arena[p].marked )
+            {
+                break;
+            }
+            ctx.arena[p].marked = 1;
+        }
+    }
+
+    // 3. a marked switch head contributes EVERY arm (§2.2 last row). Ascending order cascades through
+    //    nested consecutive labels (an arm whose parent is itself an arm).
+    for( std::uint32_t i = 0; i < std::uint32_t( ctx.arena.size() ); ++i )
+    {
+        if( CtrlKind( ctx.arena[i].kind ) != CtrlKind::Case || ctx.arena[i].parent == kNoCtrl )
+        {
+            continue;
+        }
+        const CtrlNode& parent = ctx.arena[ ctx.arena[i].parent ];
+        if( parent.marked && ( CtrlKind( parent.kind ) == CtrlKind::Switch || CtrlKind( parent.kind ) == CtrlKind::Case ) )
+        {
+            ctx.arena[i].marked = 1;
+        }
+    }
+
+    // 4. ev = 1 + Σ marked weights (saturating, humps' rule), and the tag counters (saturating at u8).
+    std::uint32_t sum = 1;
+    for( const CtrlNode& node : ctx.arena )
+    {
+        if( node.marked )
+        {
+            sum += node.weight;
+        }
+    }
+    evOut = ( sum > 65535u ) ? 65535u : sum;
+    for( std::size_t tagIndex = 0; tagIndex < kEvWhyTagCount; ++tagIndex )
+    {
+        whyOut[ tagIndex ] = std::uint8_t( ctx.why[ tagIndex ] > 255u ? 255u : ctx.why[ tagIndex ] );
+    }
+}
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
 inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, CcAccum& acc, int startDepth,
-                      bool countLocals )   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
+                      bool countLocals,   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
+                      Lang lang, EvCtx* evCtx )   // essential complexity: nullptr outside model.h evCountedLang — zero work then
 {
     // iterative pre-order DFS — an EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks on
     // macOS, so a deep AST overflows the call stack well inside the depth guard. Children are pushed in
     // reverse so pops preserve the original left-to-right visit order; the guard bounds the heap stack.
-    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint16_t depth; };
+    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; };   // ctrl: innermost enclosing ev arena index (kNoCtrl at root)
     std::vector<CcFrame> stack;
     stack.reserve( 64 );
-    stack.push_back( { start, startNesting, static_cast<std::uint16_t>( startDepth ) } );
+    stack.push_back( { start, startNesting, kNoCtrl, static_cast<std::uint16_t>( startDepth ) } );
     ChildCursor         cursor( start );
     std::vector<TSNode> kids;       kids.reserve( 64 );
     std::vector<TSNode> elifKids;   elifKids.reserve( 64 );   // the else-if grandchild descent below nests inside a kids iteration
@@ -2280,6 +2964,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         // ts_node_is_named here recovers the correct Ruby nodes while keeping C-family/JS byte-identical.
         // (The boolean-operator / binary_expression paths below are deliberately NOT gated — unchanged.)
         const bool isNamed = ts_node_is_named( n );
+
+        // essential complexity: one arena/jump note per named node, and the ctrl index the children
+        // inherit. All jump nodes are named in every supported grammar, and the isNamed gate is what
+        // keeps Ruby's bare-word kinds from colliding with anonymous keyword tokens (see the note above).
+        const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src ) : frame.ctrl;
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
         if( isNamed && isDecisionType( t ) )
@@ -2333,7 +3022,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
-                stack.push_back( { kids[i - 1], childNest, childDepth } );
+                stack.push_back( { kids[i - 1], childNest, ctrl, childDepth } );
             }
             continue;
         }
@@ -2350,11 +3039,14 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 {
                     // C-family `else if`: descend into the if's CHILDREN so cognitive doesn't re-score it as a
                     // fresh control — but cyclomatic still counts that `if` as a decision (parity with the old walk).
+                    // ev: that if never becomes a frame, so it gets its arena node HERE (Branch, weight 1 — 1:1
+                    // with the cyclo increment above, preserving the structural ev <= cx containment).
                     ++acc.cyclo;
+                    const std::uint32_t elifCtrl = ( evCtx != nullptr ) ? ev_appendCtrl( *evCtx, c, CtrlKind::Branch, 1, ctrl, lang, src ) : ctrl;
                     collectChildren( c, cursor.cur, elifKids );   // NOT kids — that iteration is still live
                     for( std::size_t j = elifKids.size(); j > 0; --j )
                     {
-                        stack.push_back( { elifKids[j - 1], nesting, childDepth } );
+                        stack.push_back( { elifKids[j - 1], nesting, elifCtrl, childDepth } );
                     }
                 }
                 else
@@ -2367,7 +3059,8 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                     // 20-line elif ladder reported humps=16. No maxNest bump and no cc_noteHump belong here:
                     // the parent construct recorded this depth when IT crossed, and a clause opens no new
                     // depth (matches Java/Go/C#, whose grammars have no clause node and were always flat).
-                    stack.push_back( { c, nesting, childDepth } );
+                    // (ev rides along untouched: `ctrl` is the clause's own arena index from ev_noteNode.)
+                    stack.push_back( { c, nesting, ctrl, childDepth } );
                 }
             }
             continue;
@@ -2382,7 +3075,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
-                stack.push_back( { kids[i - 1], nesting + 1, childDepth } );
+                stack.push_back( { kids[i - 1], nesting + 1, ctrl, childDepth } );
             }
             continue;
         }
@@ -2395,19 +3088,25 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         collectChildren( n, cursor.cur, kids );
         for( std::size_t i = kids.size(); i > 0; --i )
         {
-            stack.push_back( { kids[i - 1], nesting, childDepth } );
+            stack.push_back( { kids[i - 1], nesting, ctrl, childDepth } );
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; };
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; };
 // `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
 // (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
 // never emits (absent, not a bare "0" — see localsCountedLang's own comment).
-inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, AND the nesting profile
+inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, the nesting profile, AND ev
 {                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
     CcAccum acc;
     const bool countLocals = localsCountedLang( lang );
+    // essential complexity rides the SAME walk (zero new tree-sitter queries). ONE arena/label/pending set
+    // across all top-level children — a goto and its label can sit in sibling statements — finalized once
+    // the whole def has been walked. nullptr outside evCountedLang: every other language pays one
+    // branch-not-taken per node and gets ev=0, which serialize.h never emits (model.h evCountedLang).
+    EvCtx        evCtx;
+    EvCtx* const evPtr = evCountedLang( lang ) ? &evCtx : nullptr;
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
     kids.reserve( 64 );
@@ -2416,12 +3115,18 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )  
     // order, and humps in sibling statements are humps of the same function.
     for( const TSNode c : kids )
     {
-        cc_walk( c, 0, src, acc, 0, countLocals );
+        cc_walk( c, 0, src, acc, 0, countLocals, lang, evPtr );
     }
     // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting ;
     // locals = Phase 1 floor count ; ppAlt = preproc alternative branches (model.h Symbol::ppAlt) ;
-    // humps/deepLoc = the nesting profile (model.h Symbol).
-    return { 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc };
+    // humps/deepLoc = the nesting profile ; ev/evWhy = essential complexity (model.h Symbol) —
+    // 0 outside evCountedLang, >= 1 inside it.
+    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {} };
+    if( evPtr != nullptr )
+    {
+        ev_finalize( evCtx, out.ev, out.evWhy );
+    }
+    return out;
 }
 
 // ── local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ─────────────────────────────────
@@ -5691,7 +6396,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -5714,6 +6419,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // stays honest in the direction the attribute already claims.
             d.humps     = fnOrMethod ? std::uint16_t( humpsVal > 65535u ? 65535u : humpsVal ) : std::uint16_t( 0 );
             d.deepLoc   = fnOrMethod ? std::uint16_t( deepVal  > 65535u ? 65535u : deepVal  ) : std::uint16_t( 0 );
+            // essential complexity (model.h Symbol::ev): already saturated inside ev_finalize; 0 for
+            // non-function kinds and outside evCountedLang, matching the emitters' omission rule.
+            d.ev        = fnOrMethod ? std::uint16_t( evVal > 65535u ? 65535u : evVal ) : std::uint16_t( 0 );
+            d.evWhy     = fnOrMethod ? evWhyVal : std::array<std::uint8_t, kEvWhyTagCount>{};
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = finalSegment( nameTxt );
@@ -7008,6 +7717,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
             s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
             s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)
+            s.ev           = d.ev;      // essential complexity, a FLOOR (model.h; 0 outside evCountedLang)
+            s.evWhy        = d.evWhy;   // per-tag contributing-jump counts (model.h kEvWhyTagTable order)
             s.name   = d.name;
             s.scope  = d.scope;
             result.symbols.push_back( std::move( s ) );

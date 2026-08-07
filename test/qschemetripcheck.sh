@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-07, integration/quality-fleet, third renumbering: kParserVer 45/45 -> 46. The integration line
+#   had taken 45 (entry below); ev(G) independently took 45 on feat/nest-profile (its entry below — it
+#   skipped 44 to dodge this exact trap, but the integration line had already spent 45). The merged
+#   extraction (ppalt + nestcal clause semantics + ev/evWhy + Swift guard decision counting) matches
+#   neither, fresh number, mirror moved. kQSnapCacheScheme unmoved (extraction-side only).
 # 2026-08-07, integration/quality-fleet again: kParserVer 43/44 -> 45. The integration line had taken 43
 #   (ppalt renumbering, entry below); nestcal r1's own lineage had reached 44 (entry below). The merged
 #   extraction (ppalt + nestcal else-clause semantics) matches neither, so the merge takes a fresh number,
@@ -55,6 +60,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   two DIFFERENT 43-extractions existed, so neither's caches may be served and the merge takes a fresh
 #   number. Mirror moved both times. EXTRACTION changes only: what a cached Snapshot MEANS is untouched,
 #   so kQSnapCacheScheme deliberately did NOT move.
+# 2026-08-07, essential complexity: kParserVer 43 -> 45 (44 was taken by the sibling nesting-quirk round;
+#   see ingest.cpp's own note) and the quality.h mirror with it — RawDef/Symbol gained ev/evWhy (a def-record
+#   FORMAT change) and Swift guard_statement joined isDecisionType (a Swift cx VALUE change). An EXTRACTION
+#   change, not a Snapshot-SEMANTICS change, so kQSnapCacheScheme deliberately did NOT move.
 # 2026-07-31, H4 W2b FIXUP: kParserVer 33 -> 34 and the
 #   quality.h mirror with it, because a qualified call to a `>`-family OPERATOR now re-splits on the operator
 #   tail — the per-ref qualifier changes, so a v33 blob's edges are provably wrong and must not be re-served.
