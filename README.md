@@ -427,8 +427,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9248"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9284"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9262"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9298"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -506,46 +506,59 @@ check whether the tool is oversold.
 
 ### Against other tools
 
-**N = 60 paired instances, zero exclusions.** The first 60 scored held-out LocBench instances; same
-gold set and the same metric code, imported unmodified, for every arm. *Strict file@10 = **all** gold
-files inside the top 10.*
+**Round 4 (2026-08-06) — N = 60 paired instances, zero exclusions, one binary, one evaluator.** Every
+competitor was re-run on the same day against the same ripwire binary (`7a9a42ea`, rebuilt from HEAD)
+and the same evaluator, so the arms are directly comparable to each other. Earlier rounds could not
+say that: r1 (2026-07-13/14) and r2 (2026-08-03) each scored a different subset against a different
+binary, which is why this page used to print two tables and ask the reader not to compare them.
+*Strict file@10 = **all** gold files inside the top 10.* Harness, per-instance JSONL, and a
+reproduction recipe: [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-2026-08-06/).
 
-| Arm | strict file@10 | any@10 | median wall |
-| --- | --- | --- | --- |
-| **ripwire `--for`** | **36.7%** | 75.0% | **0.074 s** (warm, pre-built index) |
-| codebase-memory-mcp | 26.7% | 66.7% | 1.14 s |
-| graphify | 21.7% | 41.7% | 5.8 s |
-| Aider repo-map | 13.3% | 33.3% | 2.5 s |
+| Arm | strict file@10 | any@10 | index (median) | query (median) |
+| --- | --- | --- | --- | --- |
+| **ripwire `--for`** | **58.3%** | **85.0%** | **0.43 s** | 0.130 s |
+| codebase-memory-mcp 0.9.0 | 40.0% | 63.3% | 1.23 s | 0.079 s |
+| repowise 0.37.0 (MCP `search_codebase`, LLM-free wiki) | 33.3% | 53.3% | 33.0 s¹ | 1.324 s¹ |
+| graphify 0.9.34 (`--code-only --no-cluster`, keyless) | 31.7% | 46.7% | 9.66 s | 0.732 s |
+| Aider repo-map 0.86.2 (ident-personalized) | 18.3% | 35.0% | *(inside query)* | 3.344 s |
+| Aider repo-map 0.86.2 (no-personalization control) | 8.3% | 21.7% | *(inside query)* | 0.919 s |
+| codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 4.64 s | 0.042 s |
+| codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 4.64 s | 0.030 s |
 
-Paired win–loss at strict file@10: 16–2 against Aider, 10–4 against codebase-memory-mcp, 12–3 against
-graphify. **The speed caveat travels with the number:** 2.5 s ÷ 0.074 s is ≈34× the Aider median, but
-ripwire's figure is *warm with a pre-built index* while Aider's was *cold per run* — not an
-apples-to-apples cache state. Quote the two medians, or quote the multiple with that sentence
-attached.
+Paired, ripwire's losses are **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to
+graphify and aider; codeseek never beat it. **Cold from nothing to an answer** — parse, rank, reply,
+no cache — ripwire takes **0.299 s**, against a ~34 s index-then-query for repowise, whose worst
+single index in this run was **424 s**. That comparison is only possible because ripwire's own index
+was measured this round; r2 recorded competitor index walls and deliberately refused to tabulate
+them, since a one-sided cost table is not evidence.
 
-**Round two (2026-08-03): repowise and codeseek.** Same slice, same gold definition, same imported
-metric code — but a newer binary and evaluator, so the two rounds' tables are each internally
-paired and **not number-comparable to each other** (provenance for both:
-[`docs/EVALS.md` §2](docs/EVALS.md), full record with fairness notes in
-[`bench/headtohead/r2-2026-08-03/`](bench/headtohead/r2-2026-08-03/)).
+**What re-running cost us, stated because it is the reason to re-run at all.**
+**codebase-memory-mcp is the true runner-up at 40.0%** — r1 credited it with 26.7%, and scoring it
+fairly against today's binary raised it. graphify rose 21.7% → 31.7% and aider 13.3% → 18.3% the same
+way. The margin over the best competitor is therefore **1.46×**, not the 1.75× that two
+separately-dated tables implied; the old framing flattered us by comparing today's ripwire against
+year-old competitor runs.
 
-| Arm | strict file@10 | any@10 | median wall (query, warm) |
-| --- | --- | --- | --- |
-| **ripwire `--for`** | **58.3%** | **85.0%** | **0.114 s** |
-| repowise 0.37.0 (MCP `search_codebase`, LLM-free wiki) | 33.3% | 53.3% | 1.14 s¹ |
-| codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 0.042 s |
-| codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 0.025 s |
-
-Paired win–loss vs repowise at strict file@10: **17–2**; codeseek never beat ripwire on any instance.
-The caveats travel with the table: ¹ repowise's wall includes a fresh MCP-server spawn per query —
+Three limits travel with this table. ¹ repowise's walls include a fresh MCP-server spawn per query;
 resident-server usage is faster. ² codeseek's raw row returned **0 results on 60/60 queries** — its
-keyless fallback matches function names only, so this measures a query-protocol boundary, not its
-embedder-backed shipping mode (unbenchmarked here). On **untrimmed all-patch gold** — including files
-ripwire cannot index — the ordering holds and the margin narrows: **28.3%** vs repowise's 16.7%.
+keyless fallback matches function names only, so that row measures a query-protocol boundary, not its
+embedder-backed shipping mode (unbenchmarked here). And the slice is **Python-dominant** — 107 of 134
+gold files are `.py` — so this measures Python localization, not all twelve indexed languages.
 **Vexp and CodeIndexer were excluded, not beaten**: their free tiers (node/project/chunk caps) cannot
-run a fair 60-instance sweep; the report records the exact limits. An independent adversarial pass
-attacked the comparison's design and its findings — and their dispositions — ship with the report
-([`VERIFIER.md`](bench/headtohead/r2-2026-08-03/VERIFIER.md)).
+run a fair 60-instance sweep. An independent adversarial pass attacked the r2 comparison's design, and
+its findings and dispositions ship with that report
+([`VERIFIER.md`](bench/headtohead/r2-2026-08-03/VERIFIER.md)); r1's and r2's tables remain in their own
+directories as the historical record.
+
+**Multi-file gold is hard for every arm, including ours, and four attempts have failed to fix it.**
+ripwire leads the stratum at 21.4% strict — but its own any@10 there is 78.6%: it finds *a* gold file
+and misses the siblings. If each gold file were an independent draw at the single-file rate (90.6%),
+multi-file would score 71.2%; it scores 21.4%, so the failures are strongly correlated. The mechanism
+is that a sibling is a file which changed *because* the primary changed — the primary carries the
+issue's vocabulary, the siblings carry the consequences. Four pre-registered rounds
+(`r1_anchorhop`, `r1cpp_anchorhop`, `r4_siblift`, `r5_pooling`) have now been rejected at ±0.00pp
+against it, each archived with its grid and its verdict under
+[`bench/locbench/results/`](bench/locbench/results/).
 
 **Round three (2026-08-03): headroom — the compression-layer competitor.** headroom
 (`headroom-ai==0.33.0`, 64k★) compresses context an agent already fetched; it retrieves nothing —

@@ -60,3 +60,5 @@
 --local	git's own flag ("git clone --local --shared <repo> /tmp/x") quoted in docs/EVALS.md §9.8 and bench/ensemblecal/README.md where the calibration harness needs a throwaway clone, not a ripwire flag
 --shared	git's own flag, same `git clone` invocation as --local above, not a ripwire flag
 --verb	bench/ensemblecal/run_ensemblecal.py's own flag ("collect --verb panel", which ripwire verb the harness measures: the four-family ensemble or the six-family panel) quoted in docs/EVALS.md §9.9.6 and bench/ensemblecal/README.md, not a ripwire flag
+--code-only	graphify (competitor) flag, quoted in README's r4 head-to-head arm description — selects its keyless local AST path, not a ripwire flag (the --no-prose precedent)
+--no-cluster	graphify (competitor) flag, quoted in README's r4 head-to-head arm description — skips its clustering pass, not a ripwire flag (the --no-prose precedent)
