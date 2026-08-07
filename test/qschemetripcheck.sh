@@ -34,6 +34,17 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-07, integration/quality-fleet renumbering: kParserVer 42/42 -> 43 and the quality.h mirror with
+#   it. Two branches independently claimed 42 (nested-closure span attribution; ppalt disclosure); the
+#   integration resolves the collision to max+1 = 43 so blobs written by EITHER 42-binary are rejected —
+#   the two 42s describe different def-record formats, so re-serving either under one number would be
+#   wrong. EXTRACTION-side renumbering only; kQSnapCacheScheme deliberately did NOT move.
+# 2026-08-07, ppalt disclosure: kParserVer 41 -> 42 and the quality.h mirror with it, because RawDef/Symbol
+#   gained a `ppAlt` u16 (preproc alternative branches counted in the fused cc_walk DFS) and the def cache
+#   record a u32 between locals and params — a v41 blob's records misalign, so it must not be re-served.
+#   This is an EXTRACTION change, not a Snapshot-SEMANTICS change: what a cached Snapshot MEANS (dead set,
+#   clone-group identity, blob shape) is untouched, so kQSnapCacheScheme deliberately did NOT move — the
+#   same split as the 2026-07-31 entry below.
 # 2026-07-31, H4 W2b FIXUP: kParserVer 33 -> 34 and the
 #   quality.h mirror with it, because a qualified call to a `>`-family OPERATOR now re-splits on the operator
 #   tail — the per-ref qualifier changes, so a v33 blob's edges are provably wrong and must not be re-served.

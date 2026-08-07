@@ -733,7 +733,11 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 42;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 43;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 43 = ppalt disclosure: RawDef/Symbol gained a ppAlt
+                                                          // field (def-record FORMAT change) — was 42 on its own
+                                                          // branch, renumbered 43 at integration (collision with
+                                                          // the independent 42 below).
                                                           // 42 = nested-closure span attribution: the tags-pass
                                                           // body-climb no longer adopts an ancestor whose body
                                                           // CONTAINS the def — cached JS/TS spans/metrics for

@@ -1108,7 +1108,9 @@ inline constexpr const char* kChurnRankLegend =
 // charged against anyone's budget; what a reader needs IN BAND is the key-to-meaning map itself.
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=depth "
-    "locals=local-var-decl-count(floor,C/C++-only,see locals_floor) cbo=coupling lcom4=cohesion "
+    "locals=local-var-decl-count(floor,C/C++-only,see locals_floor) "
+    "ppalt=preproc-alternative-branches-in-body(#else/#elif; metrics sum ALL branches, no single build "
+    "compiles them all) cbo=coupling lcom4=cohesion "
     "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
     "call|read|write|import|extends). Absent=N/A, never 0. -->";
 
@@ -1534,9 +1536,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             // case grew by locals="4294967295" locals_floor="1" (38 B) on top of the pre-existing
             // loc+params+nest+cbo+amp+tested run (~88 B) — 96 would silently TRUNCATE (appendf's qe-clamp
             // makes truncation safe from a buffer-overrun standpoint, but a truncated attr run is malformed
-            // XML, not a degrade worth shipping quietly). 160 leaves real headroom above the ~126 B measured
-            // worst case.
-            char qbuf[ 160 ];  qbuf[ 0 ] = '\0';
+            // XML, not a degrade worth shipping quietly). 160 -> 192 (ppalt disclosure): ppalt="65535"
+            // (+14 B) put the summed fn/method worst case within a rounding error of 160; 192 restores the
+            // same real headroom over the recomputed worst case.
+            char qbuf[ 192 ];  qbuf[ 0 ] = '\0';
             if( metrics )
             {
                 char* qp = qbuf; char* const qe = qbuf + sizeof( qbuf );
@@ -1574,6 +1577,13 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                     if( localsCountedLang( s.lang ) )
                     {
                         appendf( " locals=\"%u\" locals_floor=\"1\"", unsigned( s.locals ) );
+                    }
+                    // ppalt disclosure: the body carries preproc branches that never coexist at compile
+                    // time, so this row's structural metrics are sums over ALL of them (model.h Symbol::
+                    // ppAlt). ABSENT when 0 — presence itself is the signal.
+                    if( s.ppAlt > 0 )
+                    {
+                        appendf( " ppalt=\"%u\"", unsigned( s.ppAlt ) );
                     }
                 }
                 if( cbo && id < cbo->size() )
@@ -4554,6 +4564,13 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
         if( localsCountedLang( s.lang ) )
         {
             std::snprintf( num, sizeof( num ), ",\"locals\":%u,\"locals_floor\":true", s.locals );
+            w.write( num );
+        }
+        // ppalt disclosure — the JSON sibling of the XML ppalt= attribute (model.h Symbol::ppAlt):
+        // omitted key when 0, mirroring locals/tested (absent-unless-measured).
+        if( s.ppAlt > 0 )
+        {
+            std::snprintf( num, sizeof( num ), ",\"ppalt\":%u", unsigned( s.ppAlt ) );
             w.write( num );
         }
     }
