@@ -23,7 +23,7 @@
 //   structural  the SHAPE of the code (ccx / loc / nest / params bars + the Posnett readability rank)
 //   lexical     the identifier TEXT (the naming-* rules)
 //   confusion   the syntactic CONSTRUCT (the atom-* rules)
-//   historical  git change frequency (the --hotspots churn axis)
+//   historical  git change frequency (the --hotspots churn axis) — PER FILE, so the row inherits it
 //   colocation  how much of what you must READ to understand this function lives outside its own file
 //               (--context-ratio, src/contextratio.h) — the LOCAL-REASONING axis
 //   state       the function's OWN BODY touching non-local MUTABLE state (--nonlocal-state,
@@ -476,7 +476,9 @@ inline constexpr const char* kPanelLegend =
     "THE SIX FAMILIES, partitioned by KIND OF EVIDENCE so that corroboration means the lenses failed "
     "DIFFERENTLY: structural (the shape of the code: complexity, size, nesting, parameters, readability rank) "
     "lexical (the identifier text: the naming rules) confusion (the syntactic construct: the atom rules) "
-    "historical (git change frequency) colocation (how much of what you must READ to understand this function "
+    "historical (git change frequency, measured PER FILE: every symbol in a file carries that file's churn= "
+    "and hrank= verbatim, so this family is file evidence inherited by the row, not the row's own history) "
+    "colocation (how much of what you must READ to understand this function "
     "lives outside its own file, from the local-reasoning lens) state (this function's OWN BODY touching "
     "non-local MUTABLE state). The first four are the ensemble join, called through its own entry point and "
     "unchanged; the last two passed the same orthogonality test on the same corpora before being enabled. "
