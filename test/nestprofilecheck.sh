@@ -244,7 +244,10 @@ def deep_py(n):
 EOF
 
 xml(){  "$BIN" "$1" --metrics --no-cache 2>/dev/null; }
-json(){ "$BIN" "$1" --metrics --json --no-cache 2>/dev/null; }
+# NB: not named `json` — a repo symbol spelled exactly `json` flips mcpw3fixcheck H4's probe task
+# "json escape" onto the name-exact BM25 route (every content word then names a symbol), which shrinks
+# the ranked surface to the two exact-name hits and collapses the explore partition fan-out to 0.
+json_map(){ "$BIN" "$1" --metrics --json --no-cache 2>/dev/null; }
 
 CPPXML="$( xml "$CPPDIR" )"
 PYXML="$(  xml "$PYDIR"  )"
@@ -402,7 +405,7 @@ printf '%s' "$CPPXML" | xmllint --noout - >/dev/null 2>&1 \
     || no "hygiene: --metrics output failed xmllint"
 
 # ══ 9. JSON PARITY ════════════════════════════════════════════════════════════════════════════════════
-CPPJSON="$( json "$CPPDIR" )"
+CPPJSON="$( json_map "$CPPDIR" )"
 printf '%s' "$CPPJSON" | python3 -c 'import json,sys; json.load(sys.stdin)' >/dev/null 2>&1 \
     && ok "json: --json --metrics output is valid JSON" \
     || no "json: --json --metrics output is not valid JSON"
