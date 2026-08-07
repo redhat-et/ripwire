@@ -12,9 +12,11 @@ cmake -S . -B build_prof -DRIPWIRE_NATIVE=ON -DRIPWIRE_PROFILE=ON && cmake --bui
 build_prof/ripwire <repo> --no-cache            # cold (full tree-sitter parse)
 build_prof/ripwire <repo>                        # warm (cache hit) — run twice, 2nd is warm
 # + Apple PMC cycles/instructions/cache-misses per phase (needs root to arm the counters):
-sudo build_prof/ripwire <repo> --no-cache > /tmp/p.txt 2>&1
+sudo build_prof/ripwire <repo> --no-cache > /tmp/map.xml 2> /tmp/p.txt
 ```
-The report auto-prints at exit (a `#PROF_TSV_BEGIN…END` block carries the raw integers for tooling).
+The report auto-prints at exit **on stderr** (a `#PROF_TSV_BEGIN…END` block carries the raw integers
+for tooling); stdout stays the well-formed XML map, so `>map.xml 2>report.txt` captures both and
+piping the map (`| xmllint --noout -`) keeps working in the profile flavour.
 
 **Counter backends.** Two real PMC backends sit behind one surface (`src/infra/profilePmc.h`):
 Apple Silicon (kperf/kpep — needs root or the kperf entitlement to ARM; event-name resolution
