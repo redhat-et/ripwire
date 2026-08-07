@@ -6,7 +6,7 @@
 [![Standard](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](CONTRIBUTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
 
-# ripwire
+# Ripwire: Rip'n Fast. Less Tokens. Better Code.
 
 ## Give your coding agent a map before it reads the repo.
 
@@ -15,25 +15,34 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files. One binary on your own machine: **no API key, no embeddings, no
 index server, no daemon, nothing left running.**
 
-### Graph-Ranked Retrieval: it finds the right files more often than the alternatives
+### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
 60 paired LocBench instances, zero exclusions, same gold set and the same imported metric code for
 every arm. *Strict file@10 = **all** gold files inside the top 10* — whether your agent starts in the
 right place at all.
 
-| | strict file@10 | any@10 | median warm query |
+| Round 2 (2026-08-03) | strict file@10 | any@10 | median warm query |
 | --- | --- | --- | --- |
 | **ripwire `--for`** | **58.3%** | **85.0%** | **0.114 s** |
 | repowise 0.37.0 | 33.3% | 53.3% | 1.14 s |
 | codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 0.042 s |
 
-Instance by instance, ripwire retrieved a full gold set repowise missed **17 times**; the reverse
-happened **twice**. Held out wider — **243 instances across 78 repositories** — it lands **60.9%**
-against **27.6%** for its own pre-routing baseline: **+33.3pp** paired, clustered-bootstrap 95% lower
-bound **+25.0pp**, bought for +3.4% warm latency and **−39.4%** tokens. An earlier round on the same
-slice against Aider's repo map, graphify and codebase-memory-mcp came out in the same order (separate
-binary, separate evaluator — each table is internally paired and the two are not comparable to each
-other; both, with every caveat, in [Measured](#measured)).
+| Round 1 — same slice, earlier binary and evaluator | strict file@10 | any@10 | median wall |
+| --- | --- | --- | --- |
+| **ripwire `--for`** | **36.7%** | **75.0%** | **0.074 s** |
+| codebase-memory-mcp | 26.7% | 66.7% | 1.14 s |
+| graphify | 21.7% | 41.7% | 5.8 s |
+| Aider repo-map | 13.3% | 33.3% | 2.5 s |
+
+Two tables and not one merged ranking, because each round is paired within itself and they are **not**
+number-comparable to each other — different binary, different evaluator. Round 1's walls carry the
+other asymmetry: ripwire's is warm against a pre-built index, the competitors' cold per run.
+
+Instance by instance in round 2, ripwire retrieved a full gold set repowise missed **17 times**; the
+reverse happened **twice**. Held out wider — **243 instances across 78 repositories** — it lands
+**60.9%** against **27.6%** for its own pre-routing baseline: **+33.3pp** paired, clustered-bootstrap
+95% lower bound **+25.0pp**, bought for +3.4% warm latency and **−39.4%** tokens. Every caveat, plus
+a third round against a compression-layer competitor, in [Measured](#measured).
 
 **Name a symbol and it is the first hit.** A confidence-gated router detects when a query *names*
 something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7%** in `src/`,
@@ -41,7 +50,7 @@ something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7
 doc-phrase queries collapse from 0.993 MRR to 0.427 — so both numbers ship together. Reproduce
 either with `ripwire <dir> --eval-retrieval`.
 
-### Saves Tokens: it answers for a fraction of the context
+### Saves Tokens: It answers for a fraction of the context
 
 On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
 spends — **1.7%** on the questions both arms fully answered. `--pack-signatures` returns **67% fewer
@@ -51,7 +60,7 @@ context compressor over it saved **exactly 0 tokens**.
 It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
 warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
-### Better Code: it automates the review judgments nobody has time to make — every lens from published research
+### Better Code: It automates the review judgments nobody has time to make — every lens from published research
 
 `--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
 named badly, does it hide control flow inside an idiom, does its history say it keeps breaking, must
