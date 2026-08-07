@@ -273,6 +273,51 @@ they measure a regression rather than the corpus.
 ranking lenses only; the recall lane looked clean on the private corpus because real documents
 outnumbered fixtures there. That gap is left visible on purpose.
 
+### The recall lane scores a frozen corpus (2026-08-07)
+
+**Source:** `bench/recalleval/make_snapshot.py` (freeze/verify), `bench/recalleval/snapshot.mdpack` +
+`snapshot.lock` (the corpus and its pin), `test/recallevalcheck.sh` (the gate; its header carries the
+full forensic record and the update policy).
+
+The recall lane's floor was ratcheted **85→83→78→69 in five days** with the ranker provably neutral at
+every step: the eval corpus was the live repository's own docs, so every documentation round moved BM25
+length normalization and rank boundaries. The terminal case (gate header, 2026-08-07 entry): a gold
+document *got longer* — 36 added lines containing none of the query's terms lowered its own score
+through length normalization alone, off a pre-change margin of 0.010. A 42-label lane at 2.38pt
+granularity over a live corpus measures corpus composition, not the ranker.
+
+The fix is a corpus split, not another floor edit:
+
+- **Frozen recall lane.** Every tracked `*.md` at the commit pinned in `snapshot.lock` (113 docs @
+  `7a7f798`), packed into the single crawler-inert file `snapshot.mdpack` and unpacked into a temp root
+  per run. On a frozen corpus with a deterministic binary, recall/MRR can move only when the ranker
+  moves — a red floor is a ranker regression *by construction*. Integrity is a content hash
+  (`corpus_sha256`, container-independent, no git history needed), enforced as the gate's check #0.
+- **Live pollution probe.** The same 42 queries re-run against the live root, reporting pollution@5
+  only (`recall_livepol`, ceiling 16% unchanged) — pollution@5 was stable through all five ratchet
+  entries and remains the honest live-composition signal.
+- **Ranking lane unchanged**, live: its labels are code symbols and its floors carry wide margins.
+
+Frozen-corpus bars (baselines measured twice, byte-identical; floors sit two queries under baseline —
+the gate's standing philosophy of floors loose enough to survive intentional improvement):
+
+| Metric | Frozen baseline | Floor |
+| --- | --- | --- |
+| lenient recall@5 | 76.2% (32/42) | **71%** |
+| lenient MRR | 0.619 | **0.57** |
+| pollution@5 (frozen) | 5.2% | reported, not gated |
+
+The frozen 76.2% is not comparable to the same-day live 78.6%: the frozen universe is markdown-only, so
+corpus statistics differ — scores are comparable only *within* a snapshot generation. The MRR floor was
+retained and recalibrated (its live margin, 0.613 vs 0.60, was the next casualty of the retired
+mechanism); 0.57 against a frozen corpus is a tighter real bar than 0.60 against a drifting one.
+
+**Update policy.** The snapshot is refreshed only in a deliberate recalibration commit that states why,
+re-freezes (`make_snapshot.py --freeze`), re-measures the frozen baselines, and resets the floors — all
+in one commit. Valid reasons: a label re-authoring that names a document the snapshot lacks (the
+zero-skip guard forces this), or an owner-ruled representativeness refresh after a docs restructure.
+**A red floor is never a reason to refresh.**
+
 ### Query-mention anchoring
 
 A file, dotted module, or `Type.method` named literally in the task text is lifted just below the top

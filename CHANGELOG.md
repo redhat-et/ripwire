@@ -15,6 +15,20 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — the held-out recall lane now scores a frozen doc corpus
+
+`bench/recalleval/`'s recall lane no longer measures the live repository's docs: it unpacks
+`snapshot.mdpack` — every tracked `*.md` at the commit pinned in `snapshot.lock` — into a temp root
+and scores that, so its recall/MRR floors trip only on a ranker regression. The change closes a
+standing defect: the lane's floor had been ratcheted 85→83→78→69 in five days purely by corpus
+composition (documents joining, or even just growing, moved BM25 length normalization), with ranker
+neutrality proven at every step — the forensic record is `test/recallevalcheck.sh`'s header. The
+live tree keeps its own signal: a `recall_livepol` probe re-runs the same queries against the live
+root and reports pollution@5 (ceiling 16% unchanged). Frozen bars: lenient recall@5 76.2% baseline /
+floor 71; lenient MRR 0.619 baseline / floor 0.57. Corpus integrity is a content hash verified as
+the gate's first check; refreshes happen only in deliberate recalibration commits
+(`bench/recalleval/make_snapshot.py --freeze`). Method and bars: `docs/EVALS.md`.
+
 ### Added — `--dmm`: the Delta Maintainability Model, one comparable number per change
 
 `--quality-delta` reports *which kinds* of debt a change added. It has no scale, so it cannot answer
