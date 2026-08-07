@@ -384,6 +384,9 @@ struct Config
     bool             doctor           = false;              // --doctor: self-diagnosis (binary/PATH staleness, grammar load, cache-dir
                                                              // health, git reachability, tree-sitter version) — a DIAGNOSTIC verb, not
                                                              // the deterministic map; environment-dependent lines are its whole point.
+    bool             skippedList      = false;              // --skipped (§P0.5d): itemize the map header's skipped_oversize= count —
+                                                             // one row per otherwise-indexable file the crawl dropped for exceeding a
+                                                             // size ceiling (p= bytes= limit=). Read-only; exit 0 always.
     std::string_view since;                                 // --since=REV|DATE: scope churn/co-change mining to commits after this point
                                                               // (--hotspots/--cochange/--rank-by=churn). REV (e.g. HEAD~20, a tag) is
                                                               // deterministic; a git approxidate ("2 weeks ago") is wall-clock-relative
@@ -1381,7 +1384,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               ok= until the vocabulary pass, which collided with the child bool). A FAILING\n"
         "                               row (ok=\"0\") also carries hint=, the derived verdict (which of self=/which=\n"
         "                               is stale and the fix, which grammar(s) failed to compile, why the cache dir\n"
-        "                               isn't writable, ...) — a passing row never carries hint=.\n\n"
+        "                               isn't writable, ...) — a passing row never carries hint=.\n"
+        "    --skipped                  itemize the map header's skipped_oversize= count: one <f p= bytes= limit=/> row per\n"
+        "                               otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the files\n"
+        "                               absent from files= and every other surface (files= + oversize= = the population the\n"
+        "                               crawl considered). limit= is the ceiling that dropped the row: --max-file-size, or\n"
+        "                               the fixed 256KB .json config ceiling --max-file-size does not raise; the root repeats\n"
+        "                               both effective ceilings (max_file_size= json_ceiling=) so a zero-row report still\n"
+        "                               states its bounds, and oversize=\"0\" means nothing was dropped at them. Rows sort by\n"
+        "                               path; composes with --max-file-size/--exclude and multi-root (rows carry the\n"
+        "                               <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.\n\n"
         "  security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,\n"
         "                               0 = clean; exit 3 = the path could not be read at all — refused,\n"
         "                               never reported as a clean scan); stdout carries one deterministic\n"
@@ -1635,6 +1647,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--no-cache",           &Config::noCache            },
     { "--refetch",            &Config::refetch            },
     { "--doctor",             &Config::doctor             },
+    { "--skipped",            &Config::skippedList        },
 
     // output shape
     { "--json",               &Config::json               },   // L2: JSON output for the core/CI verbs (see Config::json)
@@ -1929,7 +1942,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 166;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2)
+inline constexpr std::size_t kTotalFlagArms       = 167;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 

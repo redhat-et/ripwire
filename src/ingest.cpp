@@ -450,22 +450,24 @@ bool looksObjC( std::string_view bytes ) noexcept
 // ---- deterministic crawl: collect candidate source paths, then SORT ----
 // excludeLabel (multi-root A12): non-empty ⇒ --exclude substrings match `<label>/<root-relative>` instead
 // of the crawled spelling (one excludes namespace across roots). Empty ⇒ byte-identical to today.
-// §P0.5d: the crawl also reports how many otherwise-indexable files it dropped for exceeding A SIZE CEILING,
-// so the map header can say `skipped_oversize=` instead of presenting a truncated corpus as the whole tree.
+// §P0.5d: the crawl also reports WHICH otherwise-indexable files it dropped for exceeding A SIZE CEILING,
+// so the map header can say `skipped_oversize=` (the count) and --skipped can name the rows, instead of
+// presenting a truncated corpus as the whole tree.
 // §B13.1: "a size ceiling" is TWO ceilings — maxFileBytes (--max-file-size) and the fixed kMaxJsonConfigBytes
-// the .json lane applies on top of it — and the count covers both, because a file the reader cannot see is
-// equally invisible whichever ceiling dropped it. They are mutually exclusive per file (see the drop sites).
+// the .json lane applies on top of it — and the list covers both, because a file the reader cannot see is
+// equally invisible whichever ceiling dropped it. They are mutually exclusive per file (see the drop sites);
+// each row records the ceiling that dropped it as limitBytes.
 struct CrawlResult
 {
-    std::vector<std::string> paths;
-    std::uint32_t            oversizeSkippedCount = 0;
+    std::vector<std::string>     paths;
+    std::vector<SkippedOversize> skipped;
 };
 
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
                             std::size_t maxFileBytes, std::string_view excludeLabel = {} )
 {
-    std::vector<std::string> out;
-    std::uint32_t            oversizeSkippedCount = 0;
+    std::vector<std::string>     out;
+    std::vector<SkippedOversize> skipped;
 
     std::error_code ec;
     fs::path root = fs::path( rootDir );
@@ -475,7 +477,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     if( ec )
     {
         DEGRADED_PATH_ALERT( "ingest: cannot open root directory — empty result" );
-        return { std::move( out ), oversizeSkippedCount };
+        return { std::move( out ), std::move( skipped ) };
     }
 
     const fs::recursive_directory_iterator end;
@@ -575,7 +577,8 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         {
             if( !ec && sz > maxFileBytes )
             {
-                ++oversizeSkippedCount; // §P0.5d: a size drop is reportable, not invisible
+                // §P0.5d: a size drop is reportable, not invisible — path + size + the ceiling that dropped it
+                skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( maxFileBytes ) } );
             }
             ec.clear();
             continue;
@@ -588,7 +591,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         // §B13.1: COUNTED, exactly like the generic size drop 8 lines above. Both are "an otherwise-indexable
         // file the crawl dropped for exceeding a size ceiling", which is what skipped_oversize means, and the
         // two are mutually exclusive BY CONSTRUCTION — the generic ceiling is tested first, so a .json over
-        // both ceilings is counted once, there — which is why one counter serves both and no file is counted
+        // both ceilings is counted once, there — which is why one list serves both and no file is counted
         // twice. Uncounted, this drop broke the header's own accounting invariant
         // (files= + skipped_oversize= = the candidate population the crawl considered): on this repo the
         // DEFAULT map reported files=866 with the attribute absent (implying 866) while --max-file-size=256K
@@ -599,7 +602,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         // override it would trade a disclosure defect for a corpus one.
         if( sz > kMaxJsonConfigBytes && ext == ".json" )
         {
-            ++oversizeSkippedCount;
+            skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxJsonConfigBytes ) } );
             continue;
         }
 
@@ -612,7 +615,11 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 
     // LOAD-BEARING: lexicographic (byte-order) sort fixes node-id assignment run-to-run.
     std::sort( out.begin(), out.end() );
-    return { std::move( out ), oversizeSkippedCount };
+    // Same discipline for the drop list: collection order is the filesystem's, so sort before it can
+    // reach output (--skipped rows are emitted in this order).
+    std::sort( skipped.begin(), skipped.end(),
+               []( const SkippedOversize& a, const SkippedOversize& b ) noexcept { return a.path < b.path; } );
+    return { std::move( out ), std::move( skipped ) };
 }
 
 // ---- read a file's bytes (returns false on open failure) ----
@@ -6547,9 +6554,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space)
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: crawl (collectSources)" );
-        auto [ crawledPaths, oversizeSkippedCount ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel );
-        result.files                = std::move( crawledPaths );
-        result.skippedOversizeCount = oversizeSkippedCount;
+        auto [ crawledPaths, oversizeSkipped ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel );
+        result.files           = std::move( crawledPaths );
+        result.skippedOversize = std::move( oversizeSkipped );
     }
 
     // 2) parse every file IN PARALLEL — one TSParser per worker thread (parsers aren't

@@ -123,8 +123,12 @@ a CodeCharta `cc.json` for its 3D city view; the ladder's visualization end-poin
 
 **Read the specific files ripwire surfaces** (god-files + hotspots first) — don't grep blindly. A symbol's
 `amb="K"` means K of its calls are ambiguous (the resolver guessed) → read the source if which-target
-matters. Caveat: *broad, common-word* questions can still favor plain `rg` — ripwire shines on specific
-technical asks. CI-enforceable module boundaries graduate to `--arch=rules.txt` (see **ripwire-layers**).
+matters. A map header showing `skipped_oversize=N` means N otherwise-indexable files were dropped for
+exceeding a size ceiling — they are absent from `files=` and every ranking; `ripwire <dir> --skipped`
+names them (path + bytes + the ceiling that dropped each), so you know what the index cannot show you
+before you trust a "not found". Caveat: *broad, common-word* questions can still favor plain `rg` —
+ripwire shines on specific technical asks. CI-enforceable module boundaries graduate to
+`--arch=rules.txt` (see **ripwire-layers**).
 
 ## Leave a note for next time — the gotcha you just learned (field notes)
 
