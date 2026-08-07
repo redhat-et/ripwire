@@ -82,7 +82,19 @@ printf '%s' "$block" | grep -q 'CLEAN.md' && no "CLEAN.md listed — it has no d
 
 # ── determinism + xmllint ──────────────────────────────────────────────────────────────────────────────
 full2="$( "$BIN" "$CORPUS" --doc-drift --gateability --no-cache 2>/dev/null )"
-[ "$full" = "$full2" ] && ok "determinism (byte-identical)" || no "--doc-drift --gateability is non-deterministic"
+# Compare everything EXCEPT the root's at= git stamp, the same carve-out pagingsweepcheck's identity arm
+# makes for root disclosure attributes. at= is `<sha>` plus a `+dirty` marker derived from the WORKING TREE,
+# not from the corpus this verb measured — so a suite-mate that transiently creates or removes a file
+# anywhere under $ROOT flips it between these two runs and reddens an assertion about doc-drift's output.
+# That is exactly what happened on release (ubuntu-24.04, plain, gcc) of CI run 31185013910: this gate the
+# only failure on the leg, "non-deterministic" in 0.7 s, and 5/5 byte-identical when run alone. The tool is
+# deterministic given identical inputs; the input moved underneath it. Stripping the stamp keeps the arm
+# asserting what it is named for — that the MEASUREMENT is reproducible — instead of also asserting that no
+# other gate touched the checkout while it ran, which is not this gate's business and is not in its control.
+strip_at(){ printf '%s' "$1" | sed -E 's/ at="[^"]*"//g'; }
+[ "$( strip_at "$full" )" = "$( strip_at "$full2" )" ] \
+    && ok "determinism (byte-identical, modulo the at= working-tree stamp)" \
+    || no "--doc-drift --gateability is non-deterministic"
 printf '%s' "$full" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint clean" || no "xmllint FAILED"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi

@@ -34,6 +34,42 @@ which compiles `DEGRADED_PATH_ALERT` out; any gate that asserts a degrade path t
 CI builds *both* flavours on purpose — Release catches optimizer-only bugs, the plain build catches
 degrade paths. If you add a degrade path, the plain run is what proves it.
 
+**Never edit the tree while a build is running, and never background a build you then edit around.**
+This is not a style preference — it silently produces a binary that cannot exist from any single
+commit, and it costs hours to diagnose because every symptom points somewhere else.
+
+Make decides what to recompile by comparing mtimes. Header tracking is correct and complete (the
+compiler writes real depfiles: `build/CMakeFiles/ripwire.dir/src/ingest.cpp.o.d` lists `src/model.h`
+among ~1100 headers, and `pagerank.cpp.o.d` correctly lists none). But mtime ordering is only
+meaningful if the sources hold still. If you edit `src/model.h` — or `git checkout` a branch that
+does — while a build is in flight, that build writes `.o` files whose **mtime is newer than the
+header** but whose **content predates it**. Make then correctly concludes "up to date" and never
+recompiles them again. `cmake --build build -j` reports success, exit 0, no warnings, forever.
+
+Two ways this was hit in one session, both from backgrounding a build:
+
+- A `cmake --build asan` started on one branch and finished after a `git checkout` to another that
+  changed `Symbol`. Half the objects had `sizeof(Symbol)==96`, half `104`. ASan reported a
+  heap-buffer-overflow in `ingest` — a real report, of a fake bug. The tell: the overflowing buffer
+  was **1344 bytes = 14 × 96**, an exact multiple of the *previous* struct size. If a sanitizer
+  report's region size divides evenly by an old `sizeof`, stop debugging and rebuild.
+- `src/quality.h`'s `kIngestParserVerMirror` edited while a clean rebuild ran. The binary kept
+  emitting the old value through repeated successful rebuilds; `qextractionkeycheck` failed with
+  `parserVer=41, expected 12/42` and looked like a missed mirror update. `touch`ing the header fixed
+  it, which is the diagnosis: the object was newer than the source it disagreed with.
+
+If sources may have moved under a build — after any branch switch, or if you are unsure — do not
+trust an incremental rebuild:
+
+```bash
+cmake --build build --clean-first -j          # and the same for asan/ if that tree is in play
+```
+
+`test/g1freshcheck.sh` catches the ordinary stale binary (binary older than source) and is worth
+believing when it fires — it is not noise. It cannot catch this variant, because here the binary is
+*newer* than the source and only its contents are stale. Nothing in CMake can repair a source that
+changed mid-compile; the discipline is the fix.
+
 ## Verify
 
 ```bash

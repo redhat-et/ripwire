@@ -31,9 +31,12 @@
 #   5. TAG-REUSE    — findings ride the EXISTING naming-* tags (Open Question 3, PLAN.md) — no `-local`
 #                     suffixed tag family appears in the rule listing.
 #   6. HYGIENE      — determinism (two runs byte-identical) and well-formed XML.
-#   7. MUTATION     — the gate has real teeth: with the namingLocalsGate size/complexity check DISABLED in
-#                     source (a controlled, restored-afterward source edit — the same discipline Phase 1's
-#                     own gate used), arm 3's boundary assertion is PROVEN to go red.
+#   7. MUTATION     — the gate has real teeth: the SAME smallFunction body, padded past namingLocalsGate's
+#                     thresholds in a second fixture, DOES produce the local-scope finding arm 3 asserts is
+#                     absent — so arm 3's zero is the gate's doing and not a vacuous constant.
+#   8. NO SHARED-STATE WRITES — the gate leaves src/ and the binary byte-for-byte as it found them. Arm 7
+#                     used to prove its point by editing src/naminglens.h and rebuilding build/ in place,
+#                     which broke 126 suite-mates under pargates; arm 8 is the regression guard for that.
 #
 # Usage:
 #   bash test/naminglocalscheck.sh
@@ -50,6 +53,14 @@ no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required"; exit 2; }
 echo "naminglocalscheck: BIN=$BIN  TMP=$TMP"
+
+# arm 8's baseline — see its comment. Content hash of src/, plus the binary's identity, taken BEFORE any arm
+# runs so the comparison at the end measures this gate and nothing else.
+shared_state_fingerprint()
+{
+    ( cd "$ROOT" && find src -type f -exec cksum {} + | sort; cksum "$BIN" 2>/dev/null ) 2>/dev/null
+}
+SHARED_STATE_BEFORE="$( shared_state_fingerprint )"
 
 FIXDIR="$TMP/fix"; mkdir -p "$FIXDIR"
 cat >"$FIXDIR/big.cpp" <<'EOF'
@@ -192,56 +203,65 @@ else
 fi
 
 # ══ 7. MUTATION — the gate-boundary arm can actually fail ══════════════════════════════════════════════
-NAMINGLENS="$ROOT/src/naminglens.h"
-if [ -f "$NAMINGLENS" ] && grep -q 'inline bool namingLocalsGate' "$NAMINGLENS"; then
-    BACKUP="$TMP/naminglens.h.bak"
-    cp -p "$NAMINGLENS" "$BACKUP"   # -p: carry the ORIGINAL mtime in the backup — after the restore build
-                                    # below succeeds, it is put back (touch -r), because a restore that
-                                    # leaves the source stamped "now" turns g1freshcheck red for every
-                                    # suite-mate scheduled after this gate (the asan binary reads as stale
-                                    # against a source file whose CONTENT never changed — observed live
-                                    # under pargates.py -j 6). The restore cp itself must NOT use -p: a
-                                    # backdated mtime before the rebuild makes the build system skip the
-                                    # recompile and leave the MUTATED binary in place.
-    # neuter the gate to "always true" — a controlled, RESTORED-AFTERWARD source edit (same discipline as
-    # localscountcheck.sh's own mutation arm), proving arm 3 is not vacuously green.
-    python3 - "$NAMINGLENS" <<'PYEOF'
-import re, sys
-path = sys.argv[1]
-src = open(path, encoding='utf-8').read()
-marker = "inline bool namingLocalsGate( const Symbol& s ) noexcept\n{"
-idx = src.index(marker)
-insert_at = idx + len(marker)
-mutated = src[:insert_at] + "\n    return true;   // MUTATION TEST ONLY\n" + src[insert_at:]
-open(path, 'w', encoding='utf-8').write(mutated)
-PYEOF
-    BUILD_LOG="$TMP/mutbuild.log"
-    ( cd "$ROOT" && cmake --build build -j 6 >"$BUILD_LOG" 2>&1 )
-    MUT_RC=$?
-    if [ "$MUT_RC" -ne 0 ]; then
-        no "mutation: the neutered-gate build FAILED to compile — cannot prove the arm has teeth ($BUILD_LOG)"
-    else
-        MUT_OUT="$( xml_lint "$FIXDIR" )"
-        mut_small_hits="$( printf '%s' "$MUT_OUT" | tr '>' '\n' | grep 'in="smallFunction"' | grep -c 'naming-' || true )"
-        if [ "$mut_small_hits" != "0" ]; then
-            ok "mutation: neutering namingLocalsGate DOES make arm 3 (gate-boundary) go red ($mut_small_hits stray hit(s) on smallFunction) — the gate has real teeth"
-        else
-            no "mutation: neutering namingLocalsGate did NOT change smallFunction's hit count — arm 3 cannot actually fail, it is vacuous"
-        fi
-    fi
-    cp "$BACKUP" "$NAMINGLENS"      # deliberately NOT -p here: the fresh mtime is what makes the rebuild
-                                    # below actually recompile the restored content (see the backup's note)
-    ( cd "$ROOT" && cmake --build build -j 6 >"$TMP/restorebuild.log" 2>&1 )
-    if [ $? -ne 0 ]; then
-        no "mutation: RESTORE build failed after reverting naminglens.h — repo may be left in a broken state, check $TMP/restorebuild.log"
-    else
-        ok "mutation: source restored to its original (non-mutated) state and rebuilt clean"
-        touch -r "$BACKUP" "$NAMINGLENS"   # rebuild done — put the ORIGINAL mtime back so suite-mates'
-                                           # freshness checks (g1freshcheck) don't read the untouched
-                                           # content as newer than the asan binary
-    fi
+# The mutation is applied to the FIXTURE, never to src/naminglens.h.
+#
+# This arm used to neuter namingLocalsGate in the source, run `cmake --build build -j 6` against the SHARED
+# build tree, and rebuild again to restore. That is the only gate in test/ that ever wrote to $ROOT/src or to
+# $ROOT/build, and under test/pargates.py it corrupts the whole suite: while the two rebuilds relink
+# build/ripwire, every concurrently-scheduled gate sees the binary either absent (rc=2 "no ripwire binary")
+# or busy (ETXTBSY -> exit 126, reported as "Permission denied"). Measured on CI run 31145553507: 126 of 361
+# gates failed on release (ubuntu-24.04, Release) for that reason alone, and on two legs this gate blew
+# pargates' own 300 s timeout mid-rebuild — which kills the RESTORE leg and leaves the checkout mutated.
+# A gate must not be able to fail its suite-mates, so the shared-state edit is gone for good.
+#
+# The replacement is the positive control for the same claim, in-process and end-to-end: `smallFunction` is
+# re-emitted into its own corpus with its `if( n > 0 ) { int x = 1; … }` body BYTE-IDENTICAL and only the
+# gate inputs padded past namingLocalsGate's thresholds (naminglens.h: loc>80 || maxNest>4 || ccx>=15, AND
+# locals>=8). Same binary, same names, same nesting depth for `x` — the ONLY thing that changed is which
+# side of the gate the function sits on. If the padded twin flags and arm 3's original does not, arm 3's
+# zero is the gate's doing and not a vacuous constant. The padding locals are deliberately depth-1 and
+# unremarkable, so the hit that appears is `x`'s, the same local arm 3 asserts silence for.
+MUTDIR="$TMP/mut"; mkdir -p "$MUTDIR"
+{
+    printf '// arm 7 positive control: smallFunction, padded past namingLocalsGate (maxNest=5>4, locals=10>=8).\n'
+    printf '// The gated body below is byte-identical to big.cpp'"'"'s smallFunction — only the gate inputs differ.\n'
+    printf 'int smallFunction( int n )\n{\n'
+    for i in 1 2 3 4 5 6 7 8 9; do printf '    int padLocal%d = %d;\n' "$i" "$i"; done
+    printf '    if( n > 0 )\n    {\n'
+    printf '        if( n > 1 )\n        {\n'
+    printf '            if( n > 2 )\n            {\n'
+    printf '                if( n > 3 )\n                {\n'
+    printf '                    if( n > 0 )\n                    {\n'
+    printf '                        int x = 1;\n'
+    printf '                        return x;\n'
+    printf '                    }\n                }\n            }\n        }\n    }\n'
+    printf '    return padLocal1 + padLocal2 + padLocal3 + padLocal4 + padLocal5\n'
+    printf '         + padLocal6 + padLocal7 + padLocal8 + padLocal9;\n}\n'
+} >"$MUTDIR/small_padded.cpp"
+
+#
+# The assertion is anchored at `x`'s OWN line, not counted over `in="smallFunction"` the way arm 3 is.
+# Padding the function past the locals gate also pushes it past the FUNCTION-level size rules, and the twin
+# duly picks up a naming-uninformative row on the function name itself (measured: line 2, the declaration).
+# A bare `in="smallFunction"` count would therefore stay at 1 even if the local path emitted nothing at all —
+# a positive control that cannot fail. Matching the local's line keeps this arm about the one finding arm 3
+# claims the gate suppresses.
+MUT_OUT="$( xml_lint "$MUTDIR" )"
+XLINE="$( grep -n 'int x = 1;' "$MUTDIR/small_padded.cpp" | cut -d: -f1 )"
+mut_local_hits="$( printf '%s' "$MUT_OUT" | tr '>' '\n' | grep 'in="smallFunction"' | grep -c "small_padded\.cpp:$XLINE\"" || true )"
+if [ "$mut_local_hits" != "0" ]; then
+    ok "mutation: the SAME smallFunction body, padded past namingLocalsGate, DOES flag its local x at line $XLINE — arm 3's zero is the gate's doing, not a vacuous constant"
 else
-    no "mutation: could not locate namingLocalsGate in src/naminglens.h to mutate — gate signature drifted"
+    no "mutation: padding smallFunction past namingLocalsGate produced no finding at x's own line ($XLINE) — arm 3 cannot actually fail, it is vacuous"
+fi
+# ══ 8. NO SHARED-STATE WRITES ═════════════════════════════════════════════════════════════════════════
+# The regression guard for what arm 7 used to do. Compared against the fingerprint taken before any arm ran,
+# so a tree that was already dirty when the gate started stays green — what is asserted is that THIS gate
+# changed nothing, not that the checkout is pristine.
+if [ "$( shared_state_fingerprint )" = "$SHARED_STATE_BEFORE" ]; then
+    ok "shared state: src/ and the binary are exactly as this gate found them — no suite-mate can be broken by running it"
+else
+    no "shared state: src/ or $BIN CHANGED while this gate ran — under pargates that hands every concurrent gate a missing or busy binary (rc=2 / exit 126)"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -42,7 +42,16 @@ echo "includeprecisecheck: BIN=$BIN  BUILD_DIR=$BUILD_DIR  TMP=$TMP"
 # ── pull the exact compile flags CMake used for the ripwire C++ sources ───────────────────────────
 # flags.make escapes define quotes for MAKE (e.g. -DX=\"...\"); parse into bash arrays with eval so the
 # shell-level quoting is honoured exactly (a raw word-split would mangle the \"...\" define).
-CXX="$( command -v c++ || command -v clang++ )"
+# THE COMPILER MUST BE THE ONE CMAKE USED, not whatever `c++` happens to be. This harness reuses CMake's
+# EXACT compile flags from flags.make, and those flags are front-end specific: a Release tree configured
+# with clang carries `-flto=thin`, which gcc rejects outright ("unrecognized argument to '-flto=' option").
+# On a Linux box where CMake was given clang but `c++` resolves to g++, the guess and the flags disagree and
+# the driver cannot compile — CI run 31182301976, release (ubuntu-24.04, Release, clang), three gates red on
+# exactly this. link.txt's first token IS the compiler CMake drove, and this gate already parses it to strip
+# the leading path, so the right answer was on disk the whole time. Same lesson as scripts/cxxstd.sh: ask the
+# toolchain, never assume it.
+CXX="$( awk 'NR==1{ print $1; exit }' "$LINK_TXT" )"
+[ -n "$CXX" ] && command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
 eval "CXX_FLAGS=(    $( grep -m1 '^CXX_FLAGS ='    "$FLAGS_MK" | sed 's/^CXX_FLAGS =//' ) )"
 eval "CXX_DEFINES=(  $( grep -m1 '^CXX_DEFINES ='  "$FLAGS_MK" | sed 's/^CXX_DEFINES =//' ) )"
 eval "CXX_INCLUDES=( $( grep -m1 '^CXX_INCLUDES =' "$FLAGS_MK" | sed 's/^CXX_INCLUDES =//' ) )"

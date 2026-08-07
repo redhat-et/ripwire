@@ -2,9 +2,17 @@
 # r5 grid reader — applies the FROZEN decision rule from
 # bench/locbench/results/r5_pooling/PREREG.md. It does not choose a winner by any other criterion,
 # and it refuses to report anything at all if the identity control did not reproduce baseline.
-import json, pathlib, sys
+#
+# The grid's JSONs live outside the tree (bench/locbench/README.md), so the directory is supplied rather
+# than hardcoded — it used to be an absolute path into the author's home directory, which is exactly what
+# test/ripwirepubliccheck.sh arm 2 rejects. Same LOCBENCH_ASSETS the grid script writes to.
+import json, os, pathlib, sys
 
-R = pathlib.Path( "/Users/qgames/AppDevelopLocal/project2/bench-assets/r4/results" )
+_assets = os.environ.get( "LOCBENCH_ASSETS" )
+if not _assets:
+    sys.exit( "set LOCBENCH_ASSETS=<dir> — the scratch tree r5_grid.sh wrote results/ into "
+              "(see bench/locbench/README.md)" )
+R = pathlib.Path( _assets ) / "results"
 
 def read( p ):
     d = json.load( open( p ) )

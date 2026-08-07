@@ -182,7 +182,14 @@ BENCH="$ROOT/bench/bench_field_ab.cpp"
 if [ ! -f "$BENCH" ]; then
     no 'bench/bench_field_ab.cpp is missing — the PMC validation half has no harness'
 elif command -v c++ >/dev/null 2>&1; then
-    if c++ -fsyntax-only -std=c++23 "$BENCH" -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" 2>"$TMP/bench.err"
+    # §CI-P3: ask THIS front end how it spells C++23 rather than assuming the Clang-17 spelling — an
+    # AppleClang 15 (LLVM 16) macos-14 runner rejects `-std=c++23` outright and took this gate with it on
+    # BOTH macOS legs of CI run 31145553507, while every ubuntu leg passed. Seven other harness-compiling
+    # gates already learned this in PR #1 (run 30732976779); this one was written afterwards and re-hardcoded
+    # the flag. Rationale + the CMake mapping this mirrors: scripts/cxxstd.sh.
+    . "$ROOT/scripts/cxxstd.sh"
+    CXXSTD="$( ripwire_cxx_std_flag c++ )"
+    if c++ -fsyntax-only "$CXXSTD" "$BENCH" -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" 2>"$TMP/bench.err"
     then ok 'bench/bench_field_ab.cpp compiles against src/infra/profilePmc.h (the counter backend it validates with)'
     else no 'bench/bench_field_ab.cpp does not compile'; head -20 "$TMP/bench.err"
     fi

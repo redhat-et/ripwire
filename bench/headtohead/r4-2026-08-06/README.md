@@ -77,6 +77,18 @@ is not atomic, and a torn line is a silently lost instance.
   stay in output order and simply never match the universe. Filtering one tool's noise and not
   another's is how a comparison becomes an advertisement.
 
+## One recorded field was rewritten after the fact
+
+`results/r4_cbm.jsonl`'s `project` key. cbm mints its project id from the **absolute** path of the clone
+it indexes, so all 60 recorded values began with the run machine's home directory — which
+`test/ripwirepubliccheck.sh` arm 5 rejects, correctly, and which turned that gate red on all four CI legs.
+The host-specific prefix is now the literal `workdir-`; the `repos-` / `repos_c-` pool marker and the repo
+slug after it are untouched, because those are real provenance (which clone tree an instance ran in).
+
+Nothing derived from the numbers moved: `r4_score.py` never reads `project` — only `r4_worker.py` does,
+and only to hand cbm's own indexer's id back to its search call within a single run. A re-run regenerates
+the field from whatever path it runs at, so it was never reproducible across machines to begin with.
+
 ## Two harness bugs worth remembering
 
 Both were found because a run *failed loudly* rather than scoring a zero.
