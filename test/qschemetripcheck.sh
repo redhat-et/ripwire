@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-07, essential complexity: kParserVer 43 -> 45 (44 was taken by the sibling nesting-quirk round;
+#   see ingest.cpp's own note) and the quality.h mirror with it — RawDef/Symbol gained ev/evWhy (a def-record
+#   FORMAT change) and Swift guard_statement joined isDecisionType (a Swift cx VALUE change). An EXTRACTION
+#   change, not a Snapshot-SEMANTICS change, so kQSnapCacheScheme deliberately did NOT move.
 # 2026-07-31, H4 W2b FIXUP: kParserVer 33 -> 34 and the
 #   quality.h mirror with it, because a qualified call to a `>`-family OPERATOR now re-splits on the operator
 #   tail — the per-ref qualifier changes, so a v33 blob's edges are provably wrong and must not be re-served.

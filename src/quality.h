@@ -733,7 +733,13 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 43;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 45;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 45 = essential complexity (44 was taken by the sibling
+                                                          // nesting-quirk round; see ingest.cpp): RawDef/Symbol gain
+                                                          // ev (u16 FLOOR) + evWhy (8×u8), a per-file def-record
+                                                          // FORMAT change, and Swift guard_statement joins
+                                                          // isDecisionType (a Swift cx VALUE change) — old caches
+                                                          // hold numbers this build would not produce.
                                                           // 41 = Phase 1 local-variable-indexing (PLAN.md
                                                           // 2026-08-06 evening): Symbol/RawDef gained a `locals`
                                                           // FLOOR field (C/C++ only), a per-file RawDef cache blob
