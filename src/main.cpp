@@ -64,6 +64,7 @@
 #include "ownersview.h"      // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with mcpverbs.h's `owners` verb
 #include "mention.h"        // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
 #include "siblift.h"        // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
+#include "filepool.h"       // r5 EXPERIMENT: env-gated file-level evidence pooling (inert by default)
 #include "tracein.h"        // L2: --from-trace=FILE — table-driven stack-trace/sanitizer/compiler frame extraction
 #include "clones.h"
 #include "skillscan.h"
@@ -1762,6 +1763,19 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( const auto [ sibSeed, sibPer ] = sibliftParams(); sibSeed > 0 )
         {
             applySiblingLift( ing, lensRank, sibSeed, sibPer );
+        }
+    }
+
+    // r5 file-level evidence pooling (EXPERIMENTAL, pre-registered —
+    // bench/locbench/results/r5_pooling/PREREG.md): rank files by POOLED symbol evidence instead of
+    // their single best symbol, so a file with five moderate hits can outrank one with a single sharp
+    // one. Chooses no neighbour, which is the axis siblift failed on. INERT (byte-identical) unless
+    // RIPWIRE_POOL="<K>,<blend*100>" parses in range. Routed path only.
+    if( !cfg.noRoute )
+    {
+        if( const auto [ poolK, poolBlend ] = filePoolParams(); poolK > 0 )
+        {
+            applyFilePooling( ing, lensRank, poolK, poolBlend );
         }
     }
 
