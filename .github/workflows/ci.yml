@@ -2,8 +2,9 @@ name: CI
 
 # Guardrails as automated gates (CLAUDE.md "The guardrails as automated gates"):
 #   - release job:  configure (portable default, no RIPWIRE_NATIVE — CI hardware is not "this dev machine")
-#                    + build + the full gate suite (170+ gates incl. determinism/G4/quality) per
-#                    OS x build-flavour (Release / plain — see the job comment), run in parallel via
+#                    + build + the full gate suite (170+ gates incl. determinism/G4/quality) on SIX legs:
+#                    build-flavour (Release / plain) x front end (macOS AppleClang, Linux gcc, Linux
+#                    clang) — see the job comment for why each axis exists — run in parallel via
 #                    test/pargates.py -j 3 (same authoritative list as regression.sh).
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
 #                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
@@ -114,12 +115,29 @@ jobs:
     #             already-gated degrade path + --version's build-type token) and SKIP honestly on the
     #             Release leg, pointing at the plain leg as where the alert is proven; a missing alert
     #             on the plain flavour still FAILS. Neither flavour alone is enough.
-    name: release (${{ matrix.os }}, ${{ matrix.flavor }})
+    #
+    # And BOTH FRONT ENDS on Linux, not just the platform default. gcc is the one this job used to have,
+    # and it is a feature — a second front end over the same tree, which found three real portability bugs
+    # on its first run. But it is not the whole story either: RIPWIRE_OPT_REMARKS and RIPWIRE_PGO are
+    # Clang-only by construction (-Rpass=/-fsave-optimization-record, .profdata/llvm-profdata) and
+    # CMakeLists FATAL_ERRORs on anything else, so on a gcc-only Linux leg optremarkscheck's configure arms
+    # cannot be expressed and can only skip. macOS covers Clang but not Linux's libc, headers or linker.
+    # Six legs = {macos-14 AppleClang, ubuntu gcc, ubuntu clang} x {Release, plain}: every guardrail is
+    # observed by at least one leg on the OS it matters for, and no leg has to assert the impossible.
+    name: release (${{ matrix.os }}, ${{ matrix.flavor }}, ${{ matrix.cc }})
     strategy:
       fail-fast: false
+      # Explicit include list rather than three crossed axes: there is no gcc on the macOS runners (`g++`
+      # there is an AppleClang shim, so a `cc: gcc` macOS leg would silently be a second AppleClang leg
+      # claiming to be gcc), and a leg that lies about its toolchain is worse than a leg that is missing.
       matrix:
-        os: [macos-14, ubuntu-24.04]
-        flavor: [Release, plain]
+        include:
+          - { os: macos-14,     flavor: Release, cc: appleclang }
+          - { os: macos-14,     flavor: plain,   cc: appleclang }
+          - { os: ubuntu-24.04, flavor: Release, cc: gcc }
+          - { os: ubuntu-24.04, flavor: plain,   cc: gcc }
+          - { os: ubuntu-24.04, flavor: Release, cc: clang }
+          - { os: ubuntu-24.04, flavor: plain,   cc: clang }
     runs-on: ${{ matrix.os }}
     steps:
       # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
@@ -130,19 +148,34 @@ jobs:
         with:
           fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
 
+      # clang is installed on BOTH Linux legs, not only the clang one. optremarkscheck's Clang-only
+      # configure arms pin `clang++` when the default front end is not Clang, so the gcc leg keeps that
+      # coverage instead of skipping it — the same remedy the asan job applies for G1's Clang-only
+      # sanitizer members. It is a package install, not a change of the leg's own compiler: the gcc leg
+      # still BUILDS ripwire with gcc, which is the point of having it.
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 
       - name: Install tooling (macOS)
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
-
+      # CC/CXX are set for the clang leg ONLY. Leaving them unset elsewhere is deliberate: the gcc leg and
+      # the macOS leg must each get their platform's own default, which is what a stranger's clone gets.
       - name: Configure (portable — no RIPWIRE_NATIVE; empty build type = the plain flavour)
+        env:
+          CC:  ${{ matrix.cc == 'clang' && 'clang'   || '' }}
+          CXX: ${{ matrix.cc == 'clang' && 'clang++' || '' }}
         run: cmake -S . -B build ${{ matrix.flavor == 'Release' && '-DCMAKE_BUILD_TYPE=Release' || '' }}
+
+      # The front end is recorded per leg so a log reader never has to infer it from the job name alone —
+      # a `cc: clang` leg whose CMake cache says GNU is a broken matrix, not a passing run.
+      - name: Confirm the front end this leg actually configured with
+        run: |
+          grep -h 'CMAKE_CXX_COMPILER_ID\|CMAKE_CXX_COMPILER_VERSION' build/CMakeFiles/*/CMakeCXXCompiler.cmake
 
       - name: Build
         run: cmake --build build -j

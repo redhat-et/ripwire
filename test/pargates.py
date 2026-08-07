@@ -105,6 +105,25 @@ def run(g):
     return g, rc, round(time.time() - t0, 1), out[-2500:], skipped
 
 
+# --- shared-binary tripwire ---------------------------------------------------------------------
+# A gate that rebuilds the binary under test hands every CONCURRENT gate either a missing file
+# (rc=2, "no ripwire binary") or one the loader refuses while the linker still holds it
+# (ETXTBSY -> exit 126, printed as "Permission denied"). CI run 31145553507 lost 126 of 361 gates
+# that way to naminglocalscheck.sh's old source-mutation arm, and every one of the 126 reported a
+# plausible-looking failure of its OWN subject -- swiftcheck "non-deterministic", rubymetricscheck
+# "ccx should be > 0", type3check "XML not well-formed". Reading that log costs an hour before the
+# common cause is visible. Fingerprint the binary before and after: if it moved, say so first, and
+# say it loudly enough that nobody triages the 126 individually.
+def _bin_fingerprint():
+    try:
+        st = os.stat(binp)
+        return (st.st_size, st.st_mtime_ns, st.st_ino)
+    except OSError:
+        return None
+
+
+bin_before = _bin_fingerprint()
+
 t0 = time.time()
 results = []
 with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
@@ -118,6 +137,9 @@ for g in exclusive_gates:
     sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
     sys.stderr.flush()
 sys.stderr.write("\n")
+
+bin_after = _bin_fingerprint()
+bin_moved = bin_before != bin_after
 
 fails = [r for r in results if r[1] != 0]
 skips = [r for r in results if r[4]]
@@ -152,6 +174,12 @@ for g, rc, dt, _out, _sk in results:
 
 print(f"gates={len(results)} pass={len(results)-len(fails)-len(skips)} "
       f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}")
+if bin_moved:
+    print(f"\n*** THE BINARY UNDER TEST CHANGED WHILE THE SUITE RAN: {binp}")
+    print(f"***   before={bin_before}  after={bin_after}")
+    print("***   Some gate rebuilt it in place. Every gate that ran concurrently saw it missing")
+    print("***   (rc=2) or busy (exit 126 / 'Permission denied'), so THOSE FAILURES ARE NOT REAL.")
+    print("***   Find the gate that writes to the shared build tree and fix that first.")
 if skips:
     print("\nSKIPPED (ran, but proved nothing — not counted as passing):")
     for g, rc, dt, out, _ in skips:

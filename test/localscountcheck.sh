@@ -35,6 +35,8 @@
 #                        (a) emit a degrade note ("cache ... corrupt", never a silent misread) and
 #                        (b) produce byte-identical stdout to the from-scratch run — the version guard
 #                        rejects the stale blob and self-heals to a correct cold reparse.
+#                        (a) is a DEGRADED_PATH_ALERT, so it is observable only on a non-NDEBUG build; on a
+#                        Release binary the arm SKIPS with the flavour named, and CI's plain leg proves it.
 #   5. HYGIENE         — two cold runs are byte-identical (determinism) and the map is well-formed XML.
 #   6. JSON-PARITY      — --json carries the same locals=/locals_floor pair as XML, absent on the same
 #                        language-omission fixture.
@@ -203,10 +205,33 @@ PYEOF
         no "stale-cache: corrupted-version blob produced DIFFERENT output — the version guard silently misread it"
         diff "$TMP/warmA.xml" "$TMP/warmB.xml" | head -5
     fi
+    # The degrade note is a DEGRADED_PATH_ALERT (ingest.cpp:1521, "[math degraded] ingest: cache checksum
+    # mismatch"), and NDEBUG compiles those out — so on a Release binary this arm asserted something the
+    # build cannot express, and CI's two Release legs were unconditionally red on it. Decide what a missing
+    # note MEANS with the same two independent readings qualitystalecheck.sh arms 7/8c use, rather than
+    # trusting either alone:
+    #   unrelated alert fires, this one does not  → the seam really regressed          → FAIL
+    #   both silent on a dev/asan flavour         → binary contradicts its version str → FAIL
+    #   both silent on an NDEBUG flavour          → unobservable BY DESIGN             → SKIP, reason named
+    # The SKIP is only honest because CI runs the plain flavour as its own matrix leg, and THERE this arm
+    # still fails if the note goes missing. Deleting the assertion instead would have retired the coverage.
+    PROBE="$TMP/probe_repo"; mkdir -p "$PROBE"
+    ( cd "$PROBE" && git init -q . && git config user.email x@y && git config user.name x \
+      && printf 'int p( int x ){ return x + 1; }\n' > a.cpp && git add a.cpp && git commit -qm A ) >/dev/null 2>&1
+    "$BIN" "$PROBE" --rank-by=churn --since=notadate >/dev/null 2>"$TMP/probe.err"
+    alerts_observable=0
+    grep -q 'math degraded' "$TMP/probe.err" && alerts_observable=1
+    BUILD_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+    case "$BUILD_FLAVOUR" in
+        Release|RelWithDebInfo|MinSizeRel) ndebug_flavour=1 ;;
+        *)                                 ndebug_flavour=0 ;;
+    esac
     if grep -qi "cache" "$TMP/warmB.err" && grep -qi "corrupt\|reparse\|mismatch" "$TMP/warmB.err"; then
         ok "stale-cache: a degrade note was emitted for the corrupted blob (never a silent accept)"
+    elif [ "$alerts_observable" = "0" ] && [ "$ndebug_flavour" = "1" ]; then
+        printf '  SKIP  %s\n' "stale-cache: DEGRADED_PATH_ALERT is compiled out of this binary (--version says build type \"$BUILD_FLAVOUR\", which defines NDEBUG; the unrelated --since=notadate degrade path is silent here too, so alerts are unobservable globally rather than this seam having broken). The PLAIN-flavour leg of the same CI suite is where this arm is proven."
     else
-        no "stale-cache: no degrade note for the corrupted blob — got stderr: $( cat "$TMP/warmB.err" )"
+        no "stale-cache: no degrade note for the corrupted blob — build type \"$BUILD_FLAVOUR\" (unrelated alerts observable=$alerts_observable), got stderr: $( cat "$TMP/warmB.err" )"
     fi
 fi
 
