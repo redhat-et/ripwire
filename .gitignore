@@ -2,6 +2,7 @@
 build*/
 asan*/
 tsan*/
+profile*/      # -DRIPWIRE_PROFILE=ON tree, same class as the three above
 /fuzz/
 /fuzz_llvm/
 /relbuild/
