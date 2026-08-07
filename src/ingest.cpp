@@ -886,6 +886,8 @@ struct RawDef
     std::uint32_t loc       = 0;   // Q4: physical line span of the def (end line − start line + 1)
     std::uint32_t locals    = 0;   // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): local-decl
                                    // count from cc_walk; C/C++ only (see model.h localsCountedLang), 0 elsewhere
+    std::uint16_t humps     = 0;   // nesting profile: regions reaching quality::kNestBar (see model.h Symbol::humps)
+    std::uint16_t deepLoc   = 0;   // nesting profile: lines inside them, a FLOOR (see model.h Symbol::deepLoc)
     std::uint16_t params    = 0;   // Q4: parameter count (from the def's parameter-list child); fns/methods
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
@@ -997,7 +999,7 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 41;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 42;           // bump on any grammar/.scm/extraction change
                                                       // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
                                                       //    evening): RawDef/Symbol gained a `locals` uint32_t
                                                       //    FLOOR field, populated inside the existing fused cc_walk
@@ -1226,7 +1228,7 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 }
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     if( withLex )
     {
         VERIFY( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -1316,12 +1318,13 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
 // they sit next to the writer functions whose field list they must match. A LEAN def record is 10 u32 +
 // 4 u8 + 2 empty str(len u32) fields = 10*4 + 4*1 + 2*4 = 52 bytes (Phase 1, local-variable-indexing,
-// PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10); the RICH (withLex) extra is
+// PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10; the nesting profile then added
+// `humps` and `deepLoc`, written as u32 each — 10 -> 12, so 12*4 + 4 + 8 = 60); the RICH (withLex) extra is
 // dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty
 // str(len u32) fields = 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 52;   // 10×u32 + 4×u8 + 2×str(len u32, empty)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 60;   // 12×u32 + 4×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 39;   // 3×u32 + 7×u8 + 5×str(len u32, empty)
 
@@ -1351,7 +1354,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
@@ -2143,10 +2146,54 @@ inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
     return !cc_declHasStructuredBinding( n, 4 );
 }
 
+// Every accumulator the fused walk fills, in ONE bundle. It used to be six by-reference out-parameters
+// threaded through cc_walk's signature; the nesting-depth profile would have made that nine, which is the
+// parameter-count smell --metrics itself reports. One struct, passed by reference, is the same code with a
+// name — and the walk's own hot loop touches it exactly as before.
+struct CcAccum
+{
+    std::uint32_t cog     = 0;   // cognitive complexity (nesting-weighted)
+    std::uint32_t cyclo   = 0;   // cyclomatic decision count (cx = 1 + this)
+    std::uint32_t maxNest = 0;   // deepest control nesting reached  → Symbol::maxNest
+    std::uint32_t locals  = 0;   // Phase 1 local-declaration floor  → Symbol::locals
+    std::uint32_t humps   = 0;   // regions reaching quality::kNestBar → Symbol::humps   (see model.h)
+    std::uint32_t deepLoc = 0;   // lines inside those regions        → Symbol::deepLoc  (a FLOOR)
+    std::uint32_t deepEnd = 0;   // 1-based end row of the last counted hump — the anti-double-count clamp
+};
+
+// A hump is a control-nesting region whose depth FIRST reaches quality::kNestBar. Counting it at the
+// crossing is what makes the count exact: a deeper region inside an already-deep one has an ancestor chain
+// that is already at or over the bar, so it cannot cross again and cannot be counted twice.
+//
+// `deepLoc` bills the crossing node's whole line span, control header included — the `if(` line is part of
+// what a reader must hold in their head. Sibling humps are reached in document order (the DFS pushes
+// children in reverse, so pops run left to right), so a hump starting on the line the previous one ended is
+// clamped to start after it. The clamp can only ever SUBTRACT: if the order assumption is ever violated the
+// result is an under-count, never an over-count, which is exactly why deepLoc is published as a floor.
+inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNesting, CcAccum& acc ) noexcept
+{
+    if( fromNesting >= quality::kNestBar || toNesting < quality::kNestBar )
+    {
+        return;   // already deep (counted at an ancestor), or still shallow
+    }
+    ++acc.humps;
+    const std::uint32_t startRow = ts_node_start_point( n ).row + 1u;   // tree-sitter rows are 0-based
+    const std::uint32_t endRow   = ts_node_end_point( n ).row + 1u;
+    const std::uint32_t from     = ( startRow > acc.deepEnd ) ? startRow : acc.deepEnd + 1u;
+    if( endRow >= from )
+    {
+        acc.deepLoc += endRow - from + 1u;
+    }
+    if( endRow > acc.deepEnd )
+    {
+        acc.deepEnd = endRow;
+    }
+}
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
-inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, std::uint32_t& cog, std::uint32_t& cyclo, std::uint32_t& maxNest, int startDepth,
-                      bool countLocals, std::uint32_t& locals )   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
+inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, CcAccum& acc, int startDepth,
+                      bool countLocals )   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
 {
     // iterative pre-order DFS — an EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks on
     // macOS, so a deep AST overflows the call stack well inside the depth guard. Children are pushed in
@@ -2182,14 +2229,14 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
         if( isNamed && isDecisionType( t ) )
         {
-            ++cyclo;
+            ++acc.cyclo;
         }
         // Phase 1 (local-variable-indexing): same fused DFS, third accumulator — zero extra tree-sitter
         // queries. countLocals is false for every non-C/C++ def (model.h localsCountedLang), so this whole
         // check compiles to a single branch-not-taken for every other language's walk.
         if( countLocals && isNamed && cc_isCountableLocalDecl( n, t ) )
         {
-            ++locals;
+            ++acc.locals;
         }
         else if( std::strcmp( t, "binary_expression" ) == 0 )
         {
@@ -2202,7 +2249,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                     const std::string_view o = src.substr( a, 2 );
                     if( o == "&&" || o == "||" )
                     {
-                        ++cyclo;
+                        ++acc.cyclo;
                     }
                 }
             }
@@ -2215,11 +2262,12 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             const bool   elseIf = isIf && !ts_node_is_null( p )
                                   && ( std::strcmp( ts_node_type( p ), "if_statement" ) == 0 || std::strcmp( ts_node_type( p ), "if_expression" ) == 0 );
             const std::uint32_t childNest = elseIf ? nesting : nesting + 1;   // else-if doesn't deepen
-            cog += elseIf ? 1u : ( 1u + nesting );                           // flat +1 for else-if, else +1+nesting
-            if( childNest > maxNest )
+            acc.cog += elseIf ? 1u : ( 1u + nesting );                           // flat +1 for else-if, else +1+nesting
+            if( childNest > acc.maxNest )
             {
-                maxNest = childNest; // Q4: deepest control nesting reached
+                acc.maxNest = childNest; // Q4: deepest control nesting reached
             }
+            cc_noteHump( n, nesting, childNest, acc );   // profile: did THIS control cross the bar?
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
@@ -2230,7 +2278,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         if( isNamed && ( std::strcmp( t, "elif_clause" ) == 0 || std::strcmp( t, "else_clause" ) == 0
                          || std::strcmp( t, "elsif" ) == 0 ) )   // else / elif / else-if (+ Ruby `elsif`): flat +1 (cognitive)
         {
-            cog += 1u;
+            acc.cog += 1u;
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
@@ -2240,7 +2288,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 {
                     // C-family `else if`: descend into the if's CHILDREN so cognitive doesn't re-score it as a
                     // fresh control — but cyclomatic still counts that `if` as a decision (parity with the old walk).
-                    ++cyclo;
+                    ++acc.cyclo;
                     collectChildren( c, cursor.cur, elifKids );   // NOT kids — that iteration is still live
                     for( std::size_t j = elifKids.size(); j > 0; --j )
                     {
@@ -2249,10 +2297,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 }
                 else
                 {
-                    if( nesting + 1 > maxNest )
+                    if( nesting + 1 > acc.maxNest )
                     {
-                        maxNest = nesting + 1; // Q4: else/elif body deepens by one
+                        acc.maxNest = nesting + 1; // Q4: else/elif body deepens by one
                     }
+                    cc_noteHump( c, nesting, nesting + 1, acc );
                     stack.push_back( { c, nesting + 1, childDepth } );   // else/elif body deepens by one
                 }
             }
@@ -2260,10 +2309,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
         if( cc_isNestingOnly( t ) )
         {
-            if( nesting + 1 > maxNest )
+            if( nesting + 1 > acc.maxNest )
             {
-                maxNest = nesting + 1; // Q4: a lambda/closure body deepens nesting
+                acc.maxNest = nesting + 1; // Q4: a lambda/closure body deepens nesting
             }
+            cc_noteHump( n, nesting, nesting + 1, acc );
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
@@ -2274,7 +2324,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const std::string_view bop = cc_boolOp( n, src );
         if( !bop.empty() && cc_boolOp( ts_node_parent( n ), src ) != bop )
         {
-            ++cog; // new boolean run (cognitive)
+            ++acc.cog; // new boolean run (cognitive)
         }
 
         collectChildren( n, cursor.cur, kids );
@@ -2284,24 +2334,28 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; };
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t humps; std::uint32_t deepLoc; };
 // `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
 // (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
 // never emits (absent, not a bare "0" — see localsCountedLang's own comment).
-inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, AND locals (Q4 + Phase 1)
+inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, AND the nesting profile
 {                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
-    std::uint32_t cog = 0, cyclo = 0, maxNest = 0, locals = 0;
+    CcAccum acc;
     const bool countLocals = localsCountedLang( lang );
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
     kids.reserve( 64 );
     collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
+    // ONE accumulator across all top-level children: the deepEnd clamp has to see the whole def in document
+    // order, and humps in sibling statements are humps of the same function.
     for( const TSNode c : kids )
     {
-        cc_walk( c, 0, src, cog, cyclo, maxNest, 0, countLocals, locals );
+        cc_walk( c, 0, src, acc, 0, countLocals );
     }
-    return { 1u + cyclo, cog, maxNest, locals };   // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting ; locals = Phase 1 floor count
+    // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting ;
+    // locals = Phase 1 floor count ; humps/deepLoc = the nesting profile (model.h Symbol).
+    return { 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.humps, acc.deepLoc };
 }
 
 // ── local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ─────────────────────────────────
@@ -5550,7 +5604,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
-            const auto [ cxVal, ccxVal, nestVal, localsVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, humpsVal, deepVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -5564,6 +5618,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.params    = fnOrMethod ? countParams( defNode ) : std::uint16_t( 0 );
             d.arityExact = fnOrMethod ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
+            // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
+            // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
+            // stays honest in the direction the attribute already claims.
+            d.humps     = fnOrMethod ? std::uint16_t( humpsVal > 65535u ? 65535u : humpsVal ) : std::uint16_t( 0 );
+            d.deepLoc   = fnOrMethod ? std::uint16_t( deepVal  > 65535u ? 65535u : deepVal  ) : std::uint16_t( 0 );
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = finalSegment( nameTxt );
@@ -6855,6 +6914,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             s.params       = d.params;   // Q4: parameter count (fns/methods)
             s.arityExact   = d.arityExact;   // B2.2: params is a fixed call-comparable arity
             s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
+            s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
+            s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)
             s.name   = d.name;
             s.scope  = d.scope;
             result.symbols.push_back( std::move( s ) );

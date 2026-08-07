@@ -1107,7 +1107,11 @@ inline constexpr const char* kChurnRankLegend =
 // vs JSON 719 tokens, past the 25% bar). The long form of these definitions belongs in --help, which is not
 // charged against anyone's budget; what a reader needs IN BAND is the key-to-meaning map itself.
 inline constexpr const char* kMetricsLegend =
-    "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=depth "
+    "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "
+    "humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) "
+    "(humps/deep are the PROFILE nest= cannot give: nest= is a max, so one deep line and a body that is deep "
+    "throughout report the same number; deep/loc is the fraction. Both absent exactly when nest<bar — "
+    "not-deep, never a hidden 0) "
     "locals=local-var-decl-count(floor,C/C++-only,see locals_floor) cbo=coupling lcom4=cohesion "
     "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
     "call|read|write|import|extends). Absent=N/A, never 0. -->";
@@ -1566,6 +1570,16 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 {
                     appendf( " params=\"%u\"", unsigned( s.params ) );
                     appendf( " nest=\"%u\"", unsigned( s.maxNest ) );
+                    // The nesting PROFILE beside the max (model.h Symbol::humps/deepLoc). nest= alone cannot
+                    // distinguish a long run of shallow scoped steps from a body that sustains depth — both
+                    // report their deepest line and nothing about how much of the function is that deep.
+                    // Omitted, never a bare 0, when no region reached quality::kNestBar: that is exactly
+                    // nest < kNestBar, which the row already carries, so absence is lossless rather than a
+                    // truncation (test/nestprofilecheck.sh arm 5 pins the equivalence in both directions).
+                    if( s.humps > 0 )
+                    {
+                        appendf( " humps=\"%u\" deep=\"%u\" deep_floor=\"1\"", unsigned( s.humps ), unsigned( s.deepLoc ) );
+                    }
                     // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): locals= is ABSENT — never
                     // a bare "0" — for every def outside model.h's localsCountedLang (MVP: C/C++ only), so a
                     // reader never mistakes "not counted for this language" for "counted, and there are none".
@@ -4554,6 +4568,14 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
         if( localsCountedLang( s.lang ) )
         {
             std::snprintf( num, sizeof( num ), ",\"locals\":%u,\"locals_floor\":true", s.locals );
+            w.write( num );
+        }
+        // The JSON sibling of the XML humps=/deep=/deep_floor= triple — same omission rule (absent exactly
+        // when nest < quality::kNestBar), same floor flag spelled as JSON `true`. Unlike locals, this is
+        // NOT language-gated: cc_walk computes nesting for every grammar.
+        if( s.humps > 0 )
+        {
+            std::snprintf( num, sizeof( num ), ",\"humps\":%u,\"deep\":%u,\"deep_floor\":true", unsigned( s.humps ), unsigned( s.deepLoc ) );
             w.write( num );
         }
     }
