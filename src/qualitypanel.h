@@ -94,6 +94,18 @@
 // SCOPE: this verb JOINS and SELECTS. It computes no new metric, invents no threshold and adds no rule — every
 // number in it comes out of machinery that already shipped, called through its existing entry point.
 //
+// THE ONE ANNOTATION, and why it is not a hole in that scope rule. `join="deep+untested"` marks a row that
+// carries deep= (model.h Symbol::deepLoc, already inside the structural family's evidence string) and that
+// computeQMetrics' tested= flag says no indexed test reaches. It is a CONJUNCTION of two facts the report
+// already holds, not a metric: no new measurement, no new threshold, no entry point that did not exist. It is
+// deliberately NOT a seventh family, because deep IS the structural family — counting it would be that family
+// wearing a second hat, which is §9.1's disqualification and §3.10's failure mode in one. Structurally it
+// cannot become one by accident: the flag is set AFTER the count and the cut are decided, and neither
+// firedMask, countedMask, firedCount nor the sort comparator can see it. And it is suppressed when
+// tested_scope=0, because on a corpus whose tests were never crawled "untested" describes the crawl and not
+// the code — the same verdict the historical family's empty-ranking case already gets. Pinned by
+// test/qualitypanelcheck.sh arm (O), on twin functions with byte-identical bodies and different coverage.
+//
 // DETERMINISM. Every stage sorts before it is read: the four calibrated families arrive already ordered from
 // computeEnsemble, the colocation rank is a prefix of --context-ratio's own integer-keyed order, the state hits
 // are walked in NodeId order, and the rows sort by (counted family count desc, NodeId asc) — NodeId is assigned
@@ -201,6 +213,11 @@ struct PanelRow
     std::uint8_t countedMask = 0;     // firedMask & the preset's enabled set — what fam= counts
     std::uint8_t firedCount = 0;      // popcount( countedMask )
     std::string  why[kPanelFamilyCount];
+
+    // The ONE annotation: deep AND untested. NOT a family and not part of any count — see the block comment
+    // above kJoinDeepUntested. It is set after the count and the cut have already been decided, so nothing
+    // downstream of it can read it into fam=, and the sort comparator never sees it.
+    bool         deepUntested = false;
 };
 
 struct PanelScan
@@ -229,6 +246,9 @@ struct PanelScan
     std::size_t   stateScope   = 0;           // eligible functions inside them — the lens' REACH
     std::size_t   stateCells   = 0;           // non-local mutable cells the lens found
     bool          stateFloor   = false;       // the lens saturated a budget, so the family is a FLOOR
+
+    std::size_t   testedScope       = 0;      // symbols an indexed test reaches — the JOIN's honest denominator
+    std::size_t   deepUntestedCount = 0;      // rows carrying the annotation, over the WHOLE row set (not the page)
 };
 
 namespace detail
@@ -240,6 +260,43 @@ namespace detail
 inline void markUnavailable( PanelScan& scan, std::uint8_t family, const char* why )
 {
     ensemble::markUnavailableIn( scan.unavailMask, scan.unavailWhy, family, why );
+}
+
+// tested_scope= — how many symbols an indexed test transitively reaches. computeQMetrics' own flag, summed;
+// no second traversal, so the panel and --metrics/--seams/--exercises cannot disagree about what tested=
+// means. It is the JOIN's denominator, and it is published for the same reason cranked= and lscope= are: a
+// reader has to be able to tell "no deep function here is uncovered" from "no test was crawled here".
+inline std::size_t testedScopeOf( const QMetrics& qm ) noexcept
+{
+    std::size_t reached = 0;
+    for( const std::uint8_t flag : qm.tested )
+    {
+        reached += ( flag != 0 ) ? 1u : 0u;
+    }
+    return reached;
+}
+
+// THE ONE ANNOTATION: deep AND untested — the whole of it, in one predicate that nothing else in this file
+// may consult. Two facts the report ALREADY holds: `deep=` is inside the structural family's own evidence
+// string (lines inside the regions that reach bar_nest, model.h Symbol::deepLoc), and tested= is the
+// transitive test-seed reach above. Their INTERSECTION is the pair worth pointing at — a body that SUSTAINS
+// depth is where a reader most wants to refactor, and no test reaching it is what makes doing so dangerous.
+//
+// IT IS NOT A SEVENTH FAMILY, and the code is shaped so it cannot quietly become one. §9.1's rule is that
+// corroboration counts only when the lenses fail DIFFERENTLY, and `deep` IS the structural family; counting
+// this would be that family wearing a second hat, which is §3.10's Maintainability-Index failure with extra
+// steps. So it is a bool on the row, set AFTER the cut, read by the emitter and by nothing else: firedMask,
+// countedMask, firedCount and the sort comparator never see it.
+//
+// AND IT IS SUPPRESSED WHEN "UNTESTED" IS NOT A MEASUREMENT. On a corpus no indexed test reaches — a tree
+// scanned without its tests, a language whose test files were not crawled — every deep symbol is nominally
+// uncovered, and annotating all of them would report a fact about what was INDEXED as a property of each
+// function. That is the historical family's empty-ranking defect in a new place, so it gets the same answer
+// the legend already gives that one: at testedScope == 0 the annotation fires nowhere, and the zero is
+// published so the silence can be read correctly.
+inline bool deepAndUntested( const Symbol& s, const QMetrics& qm, std::size_t testedScope ) noexcept
+{
+    return testedScope != 0 && s.deepLoc > 0 && qm.tested[s.id] == 0;
 }
 
 // STAGE: the colocation RANK. --context-ratio already returns its rows MOST-OUTSIDE-READING-FIRST on integer
@@ -404,6 +461,10 @@ inline PanelScan computePanel( const IngestResult& ing, const Graph& g,
         markUnavailable( scan, kFamState,      "not one function or method with a body was indexed here, so this family had no eligible symbol to measure - the report's silence is not a fact about any code" );
     }
 
+    // THE ONE ANNOTATION's inputs — see detail::deepAndUntested for what it is, and what it is deliberately not.
+    const QMetrics qm = computeQMetrics( ing, g );
+    scan.testedScope  = testedScopeOf( qm );
+
     // ── the join. The four calibrated families' evidence is COPIED from their own rows (ensemble emits a row
     //    only where at least one of its four fired), then the two new families are OR-ed in. ──────────────
     std::vector<std::uint32_t> ensembleRowOf( symbolCount, UINT32_MAX );
@@ -451,6 +512,9 @@ inline PanelScan computePanel( const IngestResult& ing, const Graph& g,
             ++scan.belowCutCount;
             continue;
         }
+        // AFTER the cut, deliberately: an annotated row was selected by its families alone (see deepAndUntested).
+        row.deepUntested          = deepAndUntested( s, qm, scan.testedScope );
+        scan.deepUntestedCount   += row.deepUntested ? 1u : 0u;
         scan.rows.push_back( std::move( row ) );
     }
 
@@ -532,6 +596,15 @@ inline constexpr const char* kPanelLegend =
     "findings_capped=1 when a lexical or confusion rule spent its per-rule budget, with floor_rules= naming "
     "them: those families are then FLOORS. state_floor=1 when the non-local-state lens saturated its own cell or "
     "declaration budget, so the state family is a FLOOR too. "
+    "ONE JOIN, and it is NOT a seventh family: join=deep+untested marks a row whose structural evidence "
+    "carries deep= (a body that SUSTAINS depth at bar_nest, not one line that touches it) and that no indexed "
+    "test reaches. Both facts are already in this report; the annotation only puts them side by side, because "
+    "that pair is where a refactor is most wanted and least safe. deep IS the structural family, so counting "
+    "this would be one family wearing a second hat: it changes NOTHING - not fam=, not of=, not the order, "
+    "not which rows appear. tested_scope=symbols an indexed test reaches, the join's honest denominator; at "
+    "tested_scope=0 no indexed test reaches anything here, so untested would be a fact about what was crawled "
+    "rather than about the code, and the annotation is emitted on NO row. deep_untested=how many rows carry "
+    "it across the WHOLE row set, which the limit= window does not change. "
     "shown=symbol rows printed capped=1 when symbol rows were dropped; the listing is the one limit=N and "
     "offset=M window, which also prints total= has_more= next_offset= offset= limit= -->";
 
@@ -584,6 +657,9 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     std::printf( " cfiles=\"%zu\" cscope=\"%zu\" lscope=\"%zu\" sfiles=\"%zu\" sscope=\"%zu\" cells=\"%zu\"",
                  scan.confusionFiles, scan.confusionScope, scan.lexicalScope,   // check each verdict instead of
                  scan.stateFiles, scan.stateScope, scan.stateCells );           // taking it on trust.
+    // The join's own two numbers, on the root for the same reason every other denominator is: tested_scope=0
+    // is what a reader needs to know before reading a missing annotation as a clean bill of coverage.
+    std::printf( " tested_scope=\"%zu\" deep_untested=\"%zu\"", scan.testedScope, scan.deepUntestedCount );
     if( scan.unreadableFileCount != 0 )
     {
         std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
@@ -609,11 +685,14 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
         const Symbol&     s   = ing.symbols[row.id];
         const std::string path( escapeXml( ing.files[s.fileId], escPath ) );
         const std::string name( escapeXml( s.name, escName ) );
-        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\" uncounted=\"%s\" unavail=\"%s\">",
+        // The annotation rides LAST on the row and is omitted when it does not hold — "absent = did not
+        // hold", the same posture as every other optional attribute in this tool, never join="" or join="0".
+        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\" uncounted=\"%s\" unavail=\"%s\"%s>",
                      path.c_str(), s.line, name.c_str(), unsigned( row.firedCount ), evaluable,
                      familyList( row.countedMask ).c_str(),
                      familyList( std::uint8_t( row.firedMask & ~row.countedMask ) ).c_str(),
-                     unavailNames.c_str() );
+                     unavailNames.c_str(),
+                     row.deepUntested ? " join=\"deep+untested\"" : "" );
         for( std::uint8_t family = 0; family < kPanelFamilyCount; ++family )
         {
             if( ( ( row.firedMask >> family ) & 1u ) == 0 )

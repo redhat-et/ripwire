@@ -271,7 +271,7 @@ visible *before* the agent touches them, in a few thousand tokens instead of fiv
 $ ripwire . --quality-panel --limit=1
 <quality_panel preset="default" families="6" enabled_n="6" cut="2" eligible="4956" ranked="401" …>
 <s p="./src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation">
-<e f="structural" why="ccx=724 loc=1244 nest=9 humps=30 deep=306 rrank=1"/>
+<e f="structural" why="ccx=698 loc=1244 nest=8 humps=30 deep=283 rrank=1"/>
 <e f="confusion" why="atom-embedded-crement*3"/>
 <e f="historical" why="hrank=19 churn=9"/>
 <e f="colocation" why="crank=33"/>
@@ -405,7 +405,7 @@ repository's own source, not a synthetic example:
 
 | Family | Question | Backing verb | On this repo |
 | --- | --- | --- | --- |
-| **structural** | shape: complexity, size, nesting *and how much of the body is deep*, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=724 loc=1244 nest=9 humps=30 deep=306 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
+| **structural** | shape: complexity, size, nesting *and how much of the body is deep*, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=698 loc=1244 nest=8 humps=30 deep=283 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
 | **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
 | **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
 | **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
@@ -425,15 +425,17 @@ nesting bar, CodeScene's "bumpy road": a rise above the threshold then a fall, s
 abstractions read differently from one deep tangle) and `deep=` (how many lines lie inside them, against
 the `loc=` already on the row). Both come from the same fused walk that already computes `ccx`/`nest`, at
 zero extra parsing cost; `deep=` is a disclosed floor (`deep_floor="1"`). Both are **absent** exactly when
-`nest <` the bar — not-deep, never a hidden `0`. On this repository's own source:
+`nest <` the bar — not-deep, never a hidden `0`. `deep` counts **lines** and `humps` counts **regions**,
+and two regions can share a line — a one-line `if(c){x;}else{y;}` at the bar is two regions on one line —
+so `deep` below `humps` is legal output rather than a defect. On this repository's own source:
 
 | function | `loc` | `nest` | `humps` | `deep` | deep/loc | reading |
 | --- | --- | --- | --- | --- | --- | --- |
 | `ingest` (`src/ingest.cpp`) | 1632 | 8 | 25 | 467 | **29%** | genuinely tangled |
-| `buildGraph` (`src/graph.h`) | 1244 | 9 | 30 | 306 | **25%** | genuinely tangled |
-| `main` (`src/main.cpp`) | 1061 | 6 | 29 | 109 | **10%** | long, mostly shallow steps |
-| `dispatchMcpLine` (`src/mcp.h`) | 1099 | 7 | 22 | 98 | **9%** | a dispatch table, not a tangle |
-| `runDefaultMap` (`src/main.cpp`) | 650 | 4 | 7 | 14 | **2%** | blocked-sequential |
+| `buildGraph` (`src/graph.h`) | 1244 | 9 | 30 | 308 | **25%** | genuinely tangled |
+| `main` (`src/main.cpp`) | 1061 | 6 | 29 | 111 | **10%** | long, mostly shallow steps |
+| `dispatchMcpLine` (`src/mcp.h`) | 1099 | 7 | 22 | 102 | **9%** | a dispatch table, not a tangle |
+| `runDefaultMap` (`src/main.cpp`) | 650 | 4 | 7 | 15 | **2%** | blocked-sequential |
 | `ur_walkTree` (`src/ingest.cpp`) | 87 | 7 | 1 | 43 | **49%** | *small* and tangled |
 
 `loc` and `nest` alone rank `main` and `dispatchMcpLine` beside `ingest` and `buildGraph`; the profile
@@ -921,7 +923,7 @@ The script's own header documents its other modes, including the opt-in advisory
 
 ## Improve it with your agent
 
-[`prompts/`](prompts/) holds ten **self-contained orchestrator prompts**: the loops this project is
+[`prompts/`](prompts/) holds eleven **self-contained orchestrator prompts**: the loops this project is
 built with, written so a coding agent can run them. They encode the workflow rather than describing
 it.
 

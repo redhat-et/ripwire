@@ -43,6 +43,8 @@
 #                      carries humps=/deep= too, because cc_walk computes nesting for every language.
 #   8. HYGIENE       — determinism (two cold runs byte-identical), well-formed XML, valid JSON.
 #   9. JSON PARITY   — --json carries the same humps/deep/deep_floor triple, absent on the same rows.
+#  11. LINE ACCOUNT — regions on DISTINCT lines are each billed (the document-order clamp), and regions
+#                      that genuinely SHARE a line are billed once. Plus: switch-arm breadth is not depth.
 #  10. MUTATION      — the pinned numbers are load-bearing: asserting a wrong hump count on a fixture whose
 #                      real count is known must FAIL, or these arms are tautologies.
 #
@@ -224,6 +226,78 @@ int lambdaDepth( int n )
     }
     return n;
 }
+
+// ARM 11 — TWO SIBLING regions cross the bar on DIFFERENT lines, and each is billed its own span.
+// (This arm's fixtures were rewritten by nestcal r1: the original pair crossed the bar through an ELSE
+// clause, whose "regions" were the anonymous `else` token and its block — per-child minting the round
+// removed. An else body now sits at the construct's primary-body level and mints nothing; the LINE
+// ACCOUNTING contract the arm pins is unchanged and is exercised through sibling humps instead.)
+// Depths: if=1, for=2, while=3, and TWO SIBLING ifs inside the while body each cross 3→4. The first spans
+// four lines (the if line, the brace, the statement, the closing brace), the second is one line, and they
+// share NO line, so the union is 5 physical lines: humps=2, deep=5. Sibling humps arrive at the clamp in
+// document order (pops run left to right); fed out of order, the one-line second region would be swallowed
+// behind the first's high-water end and deep would read 4.
+int siblingHumpsDistinctLines( int n )
+{
+    if( n > 0 )
+    {
+        for( int i = 0; i < n; ++i )
+        {
+            while( n > i )
+            {
+                if( n % 2 == 0 )
+                {
+                    n -= 1;
+                }
+                if( n % 3 == 0 ) { n += 1; }
+            }
+        }
+    }
+    return n;
+}
+
+// ARM 11's NEGATIVE CONTROL — the SAME two sibling regions, written on ONE line. deep is a count of
+// physical LINES, so the union of two regions that share their only line is one line: deep=1 < humps=2 is
+// CORRECT output here, not the accounting bug above. Three separate validators have read this shape as a
+// defect; pinning it is how the gate answers them.
+int siblingHumpsOneLine( int n )
+{
+    if( n > 0 )
+    {
+        for( int i = 0; i < n; ++i )
+        {
+            while( n > i )
+            {
+                if( n % 2 == 0 ) { n -= 1; } if( n % 3 == 0 ) { n += 1; }
+            }
+        }
+    }
+    return n;
+}
+
+// ARM 11 — ARM BREADTH IS NOT BUMPINESS. Twelve multi-line switch arms, none of them deepening past the
+// switch itself: a `switch` adds ONE level and its cases add none, so nothing reaches the bar however many
+// arms there are. humps must stay ABSENT — a profile that counted arms would call every dispatch table a
+// bumpy road.
+int broadShallowSwitch( int n )
+{
+    switch( n )
+    {
+        case 0:  n += 1;  n += 2;  break;
+        case 1:  n += 3;  n += 4;  break;
+        case 2:  n += 5;  n += 6;  break;
+        case 3:  n += 7;  n += 8;  break;
+        case 4:  n += 9;  n += 10; break;
+        case 5:  n += 11; n += 12; break;
+        case 6:  n += 13; n += 14; break;
+        case 7:  n += 15; n += 16; break;
+        case 8:  n += 17; n += 18; break;
+        case 9:  n += 19; n += 20; break;
+        case 10: n += 21; n += 22; break;
+        default: n += 23;          break;
+    }
+    return n;
+}
 EOF
 
 cat >"$PYDIR/deep.py" <<'EOF'
@@ -258,7 +332,7 @@ row_of(){ printf '%s' "$1" | tr '>' '\n' | grep "n=\"$2\"" | head -1; }
 attr_of(){ printf '%s' "$1" | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -E "s/.*=\"([^\"]*)\"/\1/"; }
 
 # ══ 0. PRESENCE ══════════════════════════════════════════════════════════════════════════════════════
-for sym in shallow blockedSteps oneTangle threeHumps elseIfChain lambdaDepth; do
+for sym in shallow blockedSteps oneTangle threeHumps elseIfChain lambdaDepth siblingHumpsDistinctLines siblingHumpsOneLine broadShallowSwitch; do
     if [ -n "$( row_of "$CPPXML" "$sym" )" ]; then
         ok "presence: $sym is in the map"
     else
@@ -457,5 +531,45 @@ mut_got="$( attr_of "$( row_of "$CPPXML" threeHumps )" humps )"
 [ "$b_deep" != "$b_loc" ] \
     && ok "mutation self-test: deep= is not merely loc= under another name (blockedSteps deep=$b_deep loc=$b_loc)" \
     || no "mutation self-test: deep= equals loc= on blockedSteps — the profile may be aliasing the size"
+
+# ══ 11. LINE ACCOUNTING — distinct lines are billed; shared lines are not billed twice ═════════════════
+# WHY. cc_noteHump carries a single high-water mark (deepEnd) so that two regions overlapping on a line
+# cannot bill it twice. That clamp is only correct if regions arrive in DOCUMENT order — fed a later region
+# first, it swallows the earlier one entirely. The else-clause branch did exactly that historically (it
+# noted its kids inside the REVERSE push loop); nestcal r1 then removed clause noting altogether, so today
+# every cc_noteHump site notes one node before descending and document order holds by construction. This
+# arm keeps the clamp honest against ANY future call site that breaks that shape.
+#
+# WHAT THIS ARM DOES NOT ASSERT, deliberately: there is NO whole-output "deep >= humps" sweep here, and
+# adding one would be wrong. deep counts physical LINES and humps counts REGIONS, and two regions really
+# can share one line — a minified single-line function, or `if(c){x;}else{y;}` written on one line. On
+# those, deep < humps is the honest answer. So the invariant is pinned only on fixtures whose regions are
+# KNOWN to sit on separate lines, and the same-line case is pinned as CORRECT in the negative control.
+E_ROW="$( row_of "$CPPXML" siblingHumpsDistinctLines )"
+e_humps="$( attr_of "$E_ROW" humps )"; e_deep="$( attr_of "$E_ROW" deep )"
+if [ "$e_humps" = "2" ]; then
+    ok "line accounting: siblingHumpsDistinctLines crosses the bar in TWO sibling regions"
+else
+    no "line accounting: siblingHumpsDistinctLines should report humps=2; got '${e_humps:-<absent>}' — the fixture no longer produces the two-sibling-region shape, so the assertion below tests nothing"
+fi
+if [ "$e_deep" = "5" ]; then
+    ok 'line accounting: siblingHumpsDistinctLines deep=5 — a four-line region plus a one-line region, and they share no line'
+else
+    no "line accounting: siblingHumpsDistinctLines must report deep=5 (a 4-line region + a 1-line region, no line shared); got '${e_deep:-<absent>}'. A lower number means a region on its own distinct line was clamped away — the deepEnd high-water mark was fed a later region first, which can only happen if regions stopped arriving in document order"
+fi
+O_ROW="$( row_of "$CPPXML" siblingHumpsOneLine )"
+o_humps="$( attr_of "$O_ROW" humps )"; o_deep="$( attr_of "$O_ROW" deep )"
+if [ "$o_humps" = "2" ] && [ "$o_deep" = "1" ]; then
+    ok "line accounting: the SAME two regions written on ONE line report humps=2 deep=1 — deep is a line count, so deep < humps is correct output here, not a bug"
+else
+    no "line accounting: siblingHumpsOneLine must report humps=2 deep=1 (two regions sharing their only line); got humps='${o_humps:-<absent>}' deep='${o_deep:-<absent>}'. If deep rose to 2 the clamp stopped deduplicating a shared line, which over-counts"
+fi
+S_ROW="$( row_of "$CPPXML" broadShallowSwitch )"
+s_nest="$( attr_of "$S_ROW" nest )"; s_humps="$( attr_of "$S_ROW" humps )"
+if [ -n "$s_nest" ] && [ "$s_nest" -lt "$BAR" ] 2>/dev/null && [ -z "$s_humps" ]; then
+    ok "line accounting: twelve multi-line switch arms stay at nest=$s_nest with NO humps — arm BREADTH is not bumpiness"
+else
+    no "line accounting: broadShallowSwitch reports nest='$s_nest' humps='${s_humps:-<absent>}'; a dispatch table with many shallow arms must not read as a bumpy road (a switch adds ONE level, its cases add none)"
+fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
