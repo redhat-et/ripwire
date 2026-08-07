@@ -29,6 +29,25 @@ floor 71; lenient MRR 0.619 baseline / floor 0.57. Corpus integrity is a content
 the gate's first check; refreshes happen only in deliberate recalibration commits
 (`bench/recalleval/make_snapshot.py --freeze`). Method and bars: `docs/EVALS.md`.
 
+### Fixed — nested JS/TS closures no longer inherit the enclosing function's metrics
+
+Cross-codebase validation on webpack found a systematic extraction bug: a named const-closure
+nested inside another function's scope (`const f = (..) => {..}` inside a function body) reported
+the ENCLOSING function's loc/cx/ccx/nest/params instead of its own. In webpack's
+`lib/html/syntax.js`, all eight closures inside the ~3400-line `tokenize` arrow reported identical
+loc=3439 cx=487 params=3; the same happened under anonymous enclosers
+(`module.exports = (..) => {..}` in `lib/util/deterministicGrouping.js`). Root cause: the tags-pass
+body-climb (built for C++'s `function_declarator` → `function_definition` hop) adopted the first
+ancestor owning a `body` field — for a nested closure that ancestor is the *enclosing*
+`arrow_function`, whose whole span the closure then stole; `statement_block` was missing from the
+climb's scope-stop list, so only nested (not top-level) defs escaped upward. The climb now refuses
+any ancestor whose body *contains* the definition — a grammar-agnostic containment stop. Call-edge
+attribution rides the same spans, so calls in the encloser's body now attribute to the encloser
+instead of the last span-stealing closure. On webpack, unambiguously individually-scoped `nest>=4`
+rows went from ~18% to 98% (django's healthy Python baseline: 89%). `kParserVer` 41 → 42 (cached
+spans carry the bug). Gate: `test/jsnestedcheck.sh` on `test/jsnestedfix/` — hand-counted
+loc/cx/params/nest for both shapes, JS and a byte-identical TS twin.
+
 ### Added — `--dmm`: the Delta Maintainability Model, one comparable number per change
 
 `--quality-delta` reports *which kinds* of debt a change added. It has no scale, so it cannot answer

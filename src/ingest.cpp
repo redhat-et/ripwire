@@ -997,7 +997,13 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 41;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 42;           // bump on any grammar/.scm/extraction change
+                                                      // 42: nested-closure span attribution — the body-climb in
+                                                      //    the tags pass no longer adopts an ancestor whose body
+                                                      //    CONTAINS the def (JS/TS named const-closures nested in
+                                                      //    a function stole the encloser's whole span, so their
+                                                      //    cached startByte/endByte/loc/cx/params are wrong) →
+                                                      //    old blobs carry the bad spans and must be rejected.
                                                       // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
                                                       //    evening): RawDef/Symbol gained a `locals` uint32_t
                                                       //    FLOOR field, populated inside the existing fused cc_walk
@@ -5026,6 +5032,14 @@ inline bool sameSpan( TSNode a, TSNode b ) noexcept
     return ts_node_start_byte( a ) == ts_node_start_byte( b ) && ts_node_end_byte( a ) == ts_node_end_byte( b );
 }
 
+// does `outer`'s [start,end) byte range contain ALL of `inner`? Used by the tags-pass body-climb to tell a
+// def that IS an ancestor's signature (outside its body — adopt the ancestor's span) from a def spelled
+// INSIDE that body (a nested JS/TS closure — adopting would broadcast the encloser's span onto it).
+inline bool spanContains( TSNode outer, TSNode inner ) noexcept
+{
+    return ts_node_start_byte( inner ) >= ts_node_start_byte( outer ) && ts_node_end_byte( inner ) <= ts_node_end_byte( outer );
+}
+
 // is `id` the LHS write-target of its enclosing assignment/update? A4-F24: implements the documented contract
 // — `a[i] = …` / `p->f = …` make the BASE OBJECT (`a`, `p`) the target, while the index `i` / member `f` stay
 // reads. We climb through subscript/field chains while `id` is the base object (the leading sub-expression
@@ -5509,8 +5523,21 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         }
                         break;
                     }
+                    // Adopt an ancestor's span only if roleNode sits OUTSIDE its body — i.e. roleNode is the
+                    // ancestor's own signature/declarator (the C++ function_declarator → function_definition
+                    // hop this climb exists for). A def spelled INSIDE the body is a different, NESTED
+                    // definition — a JS/TS named const-closure (`const f = (..) => {..}` in a function body) —
+                    // and adopting here broadcast the encloser's whole span (loc/cx/params/nest) onto every
+                    // such closure (webpack lib/html/syntax.js: eight closures inside the 3439-line `tokenize`
+                    // all reported loc=3439 cx=487). The enclosing statement_block is not in the scope-stop
+                    // list above (only C-family compound_statement/block are), so nested defs escaped upward;
+                    // containment is the grammar-agnostic stop. Gate: test/jsnestedcheck.sh.
                     const TSNode pb = ts_node_child_by_field_name( p, "body", 4 );
-                    if( !ts_node_is_null( pb ) ) { defNode = p; body = pb; break; }
+                    if( !ts_node_is_null( pb ) )
+                    {
+                        if( !spanContains( pb, roleNode ) ) { defNode = p; body = pb; }
+                        break;
+                    }
                     child = p;
                     p     = ts_node_parent( p );
                 }
