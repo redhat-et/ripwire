@@ -65,6 +65,18 @@ echo "recallevalcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 OUT="$TMP/run1.txt"; OUT2="$TMP/run2.txt"
 
+# ── #0: the FROZEN CORPUS is intact — snapshot.lock's corpus_sha256 matches the bytes on disk. This is
+#    the integrity anchor of the whole lane (see the 2026-08-07 FROZEN SNAPSHOT entry below): a frozen
+#    doc edited in place, or a refresh that forgot to re-record the lock, must fail HERE, loudly,
+#    before any floor below is allowed to measure the wrong corpus. Hard exit: every recall number
+#    after this point is meaningless against a corrupt snapshot. ────────────────────────────────────────
+if python3 "$ROOT/bench/recalleval/make_snapshot.py" --verify >"$TMP/snap.txt" 2>&1; then
+    ok "frozen corpus intact ($( tail -1 "$TMP/snap.txt" ))"
+else
+    no "frozen corpus BROKEN: $( tail -2 "$TMP/snap.txt" | tr '\n' ' ' )"
+    echo 'FAILURES ABOVE'; exit 1
+fi
+
 # ── #1: the harness runs end-to-end, labels load clean ─────────────────────────────────────────────────
 RIPWIRE_BIN="$BIN" python3 "$ROOT/bench/recalleval/run_recalleval.py" >"$OUT" 2>"$TMP/err1.txt"
 rc=$?
@@ -81,8 +93,17 @@ rc=$?
 # the $'…' form and was unaffected — that is the idiom, everywhere in this file.
 REC="$( grep -E $'^AGG\trecall\t' "$OUT" )"
 RNK="$( grep -E $'^AGG\tranking\t' "$OUT" )"
+LIV="$( grep -E $'^AGG\trecall_livepol\t' "$OUT" )"
 field(){ printf '%s' "$1" | tr '\t' '\n' | sed -n "s/^$2=//p"; }
 { [ -n "$REC" ] && [ -n "$RNK" ]; } && ok "both AGG rows present" || no "missing an AGG row"
+# The recall AGG row must announce the corpus it was scored on, and it must be the pinned one — a
+# harness silently falling back to the live root would re-open the ratchet this file retired.
+LOCKC="$( sed -n 's/^source_commit=//p' "$ROOT/bench/recalleval/snapshot.lock" )"
+grep -q "^snapshot OK: commit=${LOCKC:-MISSING-LOCK}" "$OUT" \
+    && ok "recall lane scored the frozen corpus (commit ${LOCKC:0:12})" \
+    || no "recall lane did not announce the pinned snapshot commit — frozen lane not in effect"
+[ -n "$LIV" ] && ok "live pollution probe row present (recall_livepol)" \
+    || no "missing the recall_livepol row — live-corpus composition is unreported"
 RN="$( field "$REC" n )"; KN="$( field "$RNK" n )"
 { [ "${RN:-0}" -ge 30 ] && [ "${KN:-0}" -ge 25 ]; } \
     && ok "sample sizes recall=$RN (>=30), ranking=$KN (>=25)" \
@@ -206,9 +227,48 @@ KL5="$( field "$RNK" lenient_r5 )"; KMRR="$( field "$RNK" mrr_lenient )"; KPOL="
 #   pollution@5 (which already does that job and has been stable throughout). That is a design round
 #   with an owner ruling, not a floor edit — it is deliberately NOT done here, and it is the reason
 #   this entry is the last one that should read like the four above it.
-floor "$RL5" 69   && ok "recall lane lenient recall@5 ($RL5%) >= floor 69% (2026-08-07 baseline 76.2%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 69%"
-floor "$RMRR" 0.60 && ok "recall lane lenient MRR ($RMRR) >= floor 0.60 (exported-tree baseline 0.720)" || no "recall lane lenient MRR ($RMRR) under floor 0.60"
-ceil  "$RPOL" 16   && ok "recall lane pollution@5 ($RPOL%) <= ceiling 16% (exported-tree baseline 10.0%; see the composition note above)" || no "recall lane pollution@5 ($RPOL%) over ceiling 16% — generated/fixture docs are retaking --recall"
+#
+# 2026-08-07 FROZEN SNAPSHOT — the ruling arrived; the ratchet above is RETIRED and this is the last
+# floor entry of its kind. The recall lane no longer scores the live tree: it scores
+# bench/recalleval/snapshot.mdpack — every tracked *.md at the commit pinned in snapshot.lock,
+# packed into ONE file whose extension the crawler does not index (probed: the pack appears in
+# neither --recall nor the flagless map, so the snapshot cannot pollute the live corpus it froze;
+# one file, not 113 loose copies, because those 113 pushed warm --edit-check over its 100 ms budget)
+# and unpacked by the harness into a temp root per run. On a frozen corpus with a deterministic
+# binary, the ONLY input that can move recall/MRR is the ranker, so a red floor below is a ranker
+# regression BY CONSTRUCTION — never a document growing, joining, or leaving. Live-corpus
+# composition keeps its reporter: the harness re-runs the same queries against the LIVE root and
+# emits AGG recall_livepol, which carries the pollution ceiling (unchanged at 16%) — pollution@5 is
+# the metric that was stable through all five ratchet entries and is the honest signal for "the live
+# tree is filling with fixture decoys".
+#   FLOORS, calibrated on the frozen corpus @ 7a7f798 (113 docs; two runs byte-identical): baseline
+#   lenient_r5=76.2 (32/42), mrr_lenient=0.619, frozen pollution5=5.2. The frozen 76.2 differs from
+#   the same day's LIVE 78.6 because the frozen universe is markdown-only — BM25 corpus statistics
+#   shift, and the knife-edge queries this header chronicles sit on different sides; absolute scores
+#   are comparable only WITHIN a snapshot generation, which is the entire point. Margins are 2
+#   queries: r5 floor 71 (= 76.2 − 2 × 2.38, a third lost query trips at 69.0); MRR floor 0.57
+#   (= 0.619 − 2 × 1/42 worst-case reciprocal-rank mass, a third worst-case loss trips at 0.548).
+#   Loose enough to survive an intentional ranking improvement that trades away a query (§P7), tight
+#   enough that a 3-query regression trips — margins this tight were IMPOSSIBLE against the live
+#   corpus, where 2 queries was one documentation round's measured drift. The MRR floor is RETAINED
+#   and recalibrated — its live margin (0.613 vs floor 0.60) was the next casualty of the retired
+#   mechanism; against the frozen corpus it is a real ranker bar (0.57 < 0.60 is not a loosening:
+#   the old 0.60 priced a different, live corpus). The frozen lane's own pollution@5 is reported but
+#   NOT gated: fixture-share of a frozen corpus is a constant of the snapshot, and the ranking
+#   lane's ceilings already gate ranker-side pollution.
+#   UPDATE POLICY (read before touching snapshot/ or its lock): the snapshot is refreshed ONLY in a
+#   deliberate recalibration commit that (a) states why, (b) regenerates via
+#   `python3 bench/recalleval/make_snapshot.py --freeze [COMMIT]`, (c) re-measures the frozen
+#   baselines (two runs, byte-identical), and (d) resets the floors here — all FOUR in ONE commit.
+#   Valid reasons: a label re-authoring that names a document the snapshot lacks (check #2's
+#   zero-skip guard forces the refresh), or an owner-ruled representativeness refresh after a docs
+#   restructure. A red floor is NEVER a reason to refresh: on a frozen corpus a red floor is a
+#   ranker regression, full stop. Check #0's corpus_sha256 makes a quiet in-place edit or an
+#   unrecorded refresh fail loudly before any floor is consulted.
+floor "$RL5" 71   && ok "recall lane lenient recall@5 ($RL5%) >= floor 71% (frozen-corpus baseline 76.2%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 71% — ranker regression on the FROZEN corpus"
+floor "$RMRR" 0.57 && ok "recall lane lenient MRR ($RMRR) >= floor 0.57 (frozen-corpus baseline 0.619)" || no "recall lane lenient MRR ($RMRR) under floor 0.57 — ranker regression on the FROZEN corpus"
+LPOL="$( field "$LIV" pollution5 )"
+ceil  "${LPOL:-999}" 16 && ok "LIVE-corpus pollution@5 ($LPOL%) <= ceiling 16% (the corpus-composition reporter; exported-tree baseline 10.0%)" || no "LIVE-corpus pollution@5 (${LPOL:-missing}%) over ceiling 16% — generated/fixture docs are retaking --recall on the live tree"
 floor "$KL5" 70   && ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (post-§P4 84.4%)"  || no "ranking lane lenient recall@5 ($KL5%) under floor 70%"
 floor "$KMRR" 0.55 && ok "ranking lane lenient MRR ($KMRR) >= floor 0.55 (post-§P4 0.726)"    || no "ranking lane lenient MRR ($KMRR) under floor 0.55"
 ceil  "$KPOL" 5    && ok "ranking lane pollution@5 ($KPOL%) <= ceiling 5% (post-§P4 0.0%)"    || no "ranking lane pollution@5 ($KPOL%) over ceiling 5% — fixtures/present are retaking --for"
