@@ -132,6 +132,64 @@ people's real work, and the joke is aimed at the trade-offs, never at the author
 
 </details>
 
+<details>
+<summary><b>The same table, worked as a case file</b> — narrated by a private eye who trusts no index he didn't build himself</summary>
+
+<br>
+
+*The Long Index — in which a man asks six informants one simple question, and only one of them has
+the decency to answer it.*
+
+It was a million lines of somebody else's mistakes, and I needed one file out of it before the coffee
+went cold. So I did what you do. I went and talked to the people who say they know the neighborhood.
+
+**Codebase-Memory** had the best record in the room and she knew it — two answers right out of every
+five, handed over in a second and a quarter, which in this business is practically a kindness.
+Trouble was the card. Right under her name it said *semantic query*, real classy, real
+expensive-looking. I asked to see it. She said it wasn't in. I asked the house. The house had never
+heard of it. I've known a lot of good people ruined by whoever printed their cards.
+
+**Repowise** was the heavyweight — everybody told me so before I got through the door. Big index,
+good tailoring, thorough as a tax man. Only you don't just ask Repowise a question. You send word.
+You wait. Thirty-three seconds on a good day, and one bad morning out in the country, seven minutes
+and four seconds — long enough to get the same answer somewhere else, drive home, and forget his
+name. He came through one time in three. For some outfits that's worth the wait. I've got a
+metabolism.
+
+**Graphify** never met a fact he wouldn't hand you. Ask him one thing and he turns up with a hundred
+and twenty-nine megabytes of everything, unsorted, in whatever order he tripped over it — and he'll
+report that order like it's a considered opinion. It isn't. Leaned on him once for anything at all;
+he looked me dead in the eye, said no matching nodes, and figured we were square.
+
+**Aider** was a gentleman, which is another way of saying you couldn't file a straight question into
+him in triplicate. Wouldn't be asked. You mention things, loud, and hope — and sure enough, drop the
+right names and he's ten points sharper, which tells you everything about the names and nothing about
+Aider. He'd made up his mind about the place before I opened mine, and kept it after. You never did
+feel the conversation was with you.
+
+**Codeseek** was young and had a condition. Talk to him like a human being — plain, tired, the way a
+man actually asks for help — and he'll look clean through you and say nothing. Sixty times out of
+sixty, nothing. But name the thing exactly, badge number and all, and the kid lights right up. It
+isn't that he's slow. He just never learned how people knock on a door.
+
+And **ripwire**. Nobody at the table brought her up, on account of she'd already left. Took the
+question, answered it in thirteen hundredths of a second — every file I needed inside the first ten,
+fifty-eight times out of a hundred — keeps no office, wires no head branch, never once got herself
+indexed at a party. Repowise says she's abrupt.
+
+She is. That's why I hired her.
+
+<sub>Every figure above is a measured number from the round-4 table on this page: the index medians
+(1.23 s, 4.64 s, 33.0 s), repowise's 424 s / seven-minute worst case, the 40.0% and 33.3% strict
+file@10, codeseek's 0-of-60 plain-language arm, codebase-memory's advertised-but-absent semantic
+tool, graphify's 129 MB largest graph and its 1-in-60 empty return, aider's +10 pp name-drop delta,
+and ripwire's 0.130 s / 58.3%. Provenance in
+<a href="bench/headtohead/r4-2026-08-06/">bench/headtohead/r4-2026-08-06/</a> and
+<a href="docs/EVALS.md">docs/EVALS.md</a>; only the cynicism is editorial. These are other people's
+real work, and the joke is aimed at the trade-offs, never the authors.</sub>
+
+</details>
+
 **Name a symbol and it is the first hit.** A confidence-gated router detects when a query *names*
 something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7%** in `src/`,
 **63.3% → 87.3%** at the repository root. The gate is the load-bearing part — route everything and
@@ -427,8 +485,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9262"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9298"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9276"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9312"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
