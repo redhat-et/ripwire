@@ -164,7 +164,7 @@ struct Symbol
     // panel's structural family, --readability's rank, the ensemble join. Two facts fix it, both filled by
     // the SAME fused cc_walk DFS (no new tree-sitter queries) and both keyed to the EXISTING structural bar
     // quality::kNestBar — no new magic number. Language-agnostic, unlike `locals`: cc_walk computes nesting
-    // for every grammar. See test/nestprofilecheck.sh and DESIGN_READABILITY_METRICS.md #8 (bumpy road).
+    // for every grammar. See test/nestprofilecheck.sh; `humps` is CodeScene's "bumpy road" factor.
     //
     // humps  — count of MAXIMAL control-nesting regions that reach the bar (CodeScene's "bumpy road": a rise
     //          above the threshold then a fall). One deep tangle is 1; repeated missing abstractions are
