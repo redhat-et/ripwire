@@ -335,17 +335,16 @@ done
 # elseIfChain is the sharper half of direction A: a five-arm else-if chain must stay far below the bar no
 # matter how long it grows, because cc_walk's elseIf case does not deepen for `else if`.
 #
-# The pinned value is 2, not the 1 this fixture was first written for, and the extra 1 is a PRE-EXISTING
-# quirk this gate records rather than papers over: an `else_clause`'s children include the ANONYMOUS `else`
-# keyword token, which is not an if_statement, so cc_walk's else-body branch (ingest.cpp, the
-# `nesting + 1 > maxNest` line) raises maxNest for it. So every C-family else-if chain reads one deeper than
-# its real nesting. It does not affect this feature — 2 is still below the bar, so no hump is raised, which
-# is what the arm is really asserting — and changing it would move nest= for every else-if in every corpus,
-# i.e. a ranking change that belongs in its own calibrated round. Pinned here so it cannot drift unnoticed.
+# The pinned value is 1: however long the chain grows, its arms all sit at the chain's own depth. This
+# arm previously pinned 2 — the anonymous-`else`-token quirk, where cc_walk's clause branch re-deepened
+# every clause child including the bare `else` keyword — recorded deliberately as "a ranking change that
+# belongs in its own calibrated round". That round is bench/nestcal/r1-2026-08-07 (ACCEPT), which removed
+# the double-deepening; this pin is the round's re-pin and still exists so the value cannot drift again
+# in EITHER direction.
 ei_nest="$( attr_of "$( row_of "$CPPXML" elseIfChain )" nest )"
-[ "$ei_nest" = "2" ] \
-    && ok "omission: elseIfChain stays nest=2 regardless of chain length (1 real + the anonymous-else-token quirk), below the bar — no hump" \
-    || no "omission: elseIfChain reports nest='$ei_nest', want 2 — else-if nesting behaviour changed; re-read cc_walk's elseIf case"
+[ "$ei_nest" = "1" ] \
+    && ok "omission: elseIfChain stays nest=1 regardless of chain length (nestcal r1 re-pin), below the bar — no hump" \
+    || no "omission: elseIfChain reports nest='$ei_nest', want 1 — else-if nesting behaviour changed; re-read cc_walk's clause branch and bench/nestcal/r1-2026-08-07"
 # Direction B: EVERY row at or above the bar carries both attributes. Swept over the whole map, so a row
 # the fixture never named cannot quietly violate it. The reader is a FILE, not `python3 -c`: an inline
 # heredoc that mixes shell quoting with f-string quoting dies at import time and prints nothing, which this

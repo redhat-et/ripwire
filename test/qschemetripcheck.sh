@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-07, nestcal r1 (bench/nestcal/r1-2026-08-07): kParserVer 42 -> 43 and the quality.h mirror
+#   with it, because cc_walk's clause branch no longer double-deepens else/elif bodies — nest/humps/
+#   deep/ccx in a v42 blob are provably wrong and must not be re-served. EXTRACTION change only: what
+#   a cached Snapshot MEANS is untouched, so kQSnapCacheScheme deliberately did NOT move.
 # 2026-07-31, H4 W2b FIXUP: kParserVer 33 -> 34 and the
 #   quality.h mirror with it, because a qualified call to a `>`-family OPERATOR now re-splits on the operator
 #   tail — the per-ref qualifier changes, so a v33 blob's edges are provably wrong and must not be re-served.
