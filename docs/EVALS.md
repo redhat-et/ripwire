@@ -503,16 +503,17 @@ the lexical ranker made things worse. See §6.
 
 **Strict multi-file localization is hard and stays hard.** Held-out LocBench: single-file gold 73.4%,
 multi-file **18.2%**. Multi-SWE-bench C++: single-file 86.3%, multi-file **32.9%**. SFML C++:
-single-file 47.2%, multi-file **7.0%**. Every corpus shows the same cliff. Complete-blast-radius
+single-file 43.1%, multi-file **7.0%** (at `d411f3de4`, split by `primary_files` in
+`bench/cppbench/results/sfml.json`). Every corpus shows the same cliff. Complete-blast-radius
 retrieval on large patches is open headroom, not a solved problem.
 
-**The public C++ number is materially lower than an earlier private one.** SFML: strict file@10
-**31.3%**, any@10 **45.2%**, first-hit MRR **0.22** — against roughly 89% any@10 and 0.62 MRR on a
-private corpus that is no longer reproducible from this tree. The mechanism is visible in the query
-shape: the private corpus's commit messages were long, identifier-dense technical notes (an easy
-retrieval shape); SFML's are terse changelog summaries whose vocabulary barely overlaps the code. A
-benchmark that produced *easier-looking* numbers from a *harder-to-publish* corpus is exactly the
-non-portable claim the caveats warn about. **The public number is the baseline going forward.**
+**The public C++ number is materially lower than the retired private one was.** SFML: strict file@10
+**28.7%**, any@10 **41.7%**, first-hit MRR **0.21** — measured at commit `d411f3de4`
+(`bench/cppbench/results/sfml_scoreboard.md`, n_scored=115). Until 2026-08-07 this paragraph compared
+against a private corpus (~89% any@10, 0.62 MRR) that is no longer reproducible from this tree — its
+long, identifier-dense commit messages were an easier retrieval shape than SFML's terse changelog
+summaries, exactly the non-portable claim the caveats warn about, and that comparison is retired.
+**The public number is the baseline going forward.**
 
 **`--cochange surprising="1"` was calibrated against the paper it reimplements, and roughly a third of
 what it flags is intentional coupling.** The predicate is Clio's modularity violation
