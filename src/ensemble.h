@@ -13,7 +13,12 @@
 //                 (the four bars quality.h already uses) plus the --readability lens' Posnett rank.
 //   lexical     — the identifier TEXT: the naming-* rules (src/naminglens.h).
 //   confusion   — the syntactic CONSTRUCT: the atom-* rules (src/atoms.h, Gopstein et al. ESEC/FSE 2017).
-//   historical  — git: how often the file CHANGES (the --hotspots churn axis, same 12-month window).
+//   historical  — git: how often the FILE changes (the --hotspots churn axis, same 12-month window). Its unit
+//                 is the file and not the symbol, so every symbol in a file carries that file's churn/hrank
+//                 verbatim and a symbol in a churny file collects this family without any property of its
+//                 own. That is the family's real unit rather than a defect, but a reader has to be told: the
+//                 legend says PER FILE where it introduces the family, and test/qualitypanelcheck.sh (N)
+//                 pins the measurement first and the sentence second.
 //
 // WHY THE FIVE STRUCTURAL SIGNALS ARE ONE FAMILY AND NOT FIVE. ccx, loc, nest, params and the Posnett score all
 // track SIZE — Posnett's own fit is literally linear in L. Counting them as five agreeing witnesses is the
@@ -368,6 +373,21 @@ inline std::string structuralBarEvidence( const Symbol& s )
         {
             appendMeasurement( why, hit.name, hit.value );
         }
+    }
+    // The nesting PROFILE, reported beside the max instead of gating on it (model.h Symbol::humps/deepLoc).
+    // nest= is the deepest line and says nothing about how much of the body is that deep, so a long
+    // BLOCKED-SEQUENTIAL function — a run of shallow scoped steps whose max is set by one inner loop — and a
+    // TANGLED one that holds depth for hundreds of lines produce the identical evidence string. humps= (how
+    // many regions reach the bar) and deep= (how many lines are inside them, against the loc= already above)
+    // are what tells them apart, and a reader gets it without opening the file.
+    //
+    // This adds NO firing case: humps>0 is exactly maxNest>=kNestBar, which is precisely when the `nest` bar
+    // in the table above already fired. The family count and the panel's ranking are therefore untouched, so
+    // no recalibration round is owed for it — this is strictly more evidence for rows that already appear.
+    if( s.humps > 0 )
+    {
+        appendMeasurement( why, "humps", std::uint32_t( s.humps ) );
+        appendMeasurement( why, "deep",  std::uint32_t( s.deepLoc ) );
     }
     return why;
 }
@@ -739,7 +759,9 @@ inline constexpr const char* kEnsembleLegend =
     "correlated metrics re-weights one signal and calls it three, and a single quotable number is wrong the "
     "moment it is quoted. fam= is ordinal and every row carries its own evidence. "
     "The four families are structural (the shape of the code), lexical (the identifier text: the naming rules), "
-    "confusion (the syntactic construct: the atom rules) and historical (git change frequency). "
+    "confusion (the syntactic construct: the atom rules) and historical (git change frequency, measured PER "
+    "FILE: every symbol in a file carries that file's churn= and hrank= verbatim, so this family is file "
+    "evidence inherited by the row, not the row's own history). "
     "families=how many families exist eligible=functions and methods with a body, the denominator "
     "ranked=eligible symbols where at least one family fired no_family=eligible symbols where none did "
     "(ranked= + no_family= = eligible= exactly, on every run). "

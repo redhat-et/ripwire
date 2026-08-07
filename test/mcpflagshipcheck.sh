@@ -183,11 +183,14 @@ print("CLEAN_OK")
 diff -q "$TMP/qd_a" "$TMP/qd_b" >/dev/null && ok "quality_delta: deterministic (clean tree)" || no "quality_delta: non-deterministic"
 
 # now introduce a gnarly (high-complexity, deeply-nested) function in the WORKING TREE (uncommitted) → the
-# delta vs HEAD must become non-empty (the exit-2-equivalent).
+# delta vs HEAD must become non-empty (the exit-2-equivalent). The innermost `if( i%7 )` exists because
+# nestcal r1 (bench/nestcal/r1-2026-08-07) stopped double-charging else bodies: the original fixture's ccx
+# fell 17 -> 15, exactly AT kCcxBar=15, and the complexity kind only fires OVER the bar. One more genuinely
+# nested decision (+5 at depth 4) keeps the fixture doing its job under the corrected arithmetic.
 cat >>"$REPO/chain.cpp" <<'EOF'
 int gnarly( int a ) {
   int r = 0;
-  for( int i = 0; i < a; ++i ) { if( i%2 ) { if( i%3 ) { r += i; } else { r -= i; } } else { while( r > 100 ) { r -= 10; if( r < 0 ) break; } } }
+  for( int i = 0; i < a; ++i ) { if( i%2 ) { if( i%3 ) { if( i%7 ) { r += i; } } else { r -= i; } } else { while( r > 100 ) { r -= 10; if( r < 0 ) break; } } }
   return r;
 }
 EOF
