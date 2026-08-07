@@ -290,10 +290,35 @@ breakdown, real numbers per family → [The quality panel](#the-quality-panel) b
 Full retrieval tables — including the MRR figures behind the router numbers above — in
 [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and [Measured](#measured).
 
-[Quickstart](#quickstart) · [The quality panel](#the-quality-panel) · [Benchmarks](#measured) ·
-[What it answers](#what-it-answers) · [Honesty contract](#the-honesty-contract) ·
+[What it answers](#what-it-answers) · [The quality panel](#the-quality-panel) ·
+[Quickstart](#quickstart) · [Benchmarks](#measured) · [Honesty contract](#the-honesty-contract) ·
 [Agent setup](#set-it-up-in-your-coding-agent) · [Docs](#documentation) ·
 [Slides](present/ripwire-showcase.pdf)
+
+---
+
+## What it answers
+
+Around the core sit 137 long flags advertised in `--help`, across seven families — plus an MCP
+server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
+`./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents 90 of the flags with a real invocation and its
+recorded output. Each family below links there.
+
+| Family | The question | Representative flags |
+| --- | --- | --- |
+| [**understand a codebase cold**](docs/COMMANDS.md#understand-a-codebase-cold) | "What is this repo, and what matters in it?" | `--for` · `--tree` · `--lego` · `--exemplar` · `--recall` · `--top-k` · `--token-budget` · `--max-tokens` |
+| [**navigate / answer a question**](docs/COMMANDS.md#navigate--answer-a-question) | "Who calls this? Is it safe to change? Which tests?" | `--callers` · `--callees` · `--uses` · `--impact` · `--path` · `--connect` · `--affected` · `--situ` · `--test-gate` · `--grep` |
+| [**zoom the detail ladder**](docs/COMMANDS.md#zoom-the-detail-ladder) | "Show me more — but only where it pays." | `--detail` · `--pack-signatures` · `--outline` · `--expand` · `--compress` |
+| [**assess quality / structure**](docs/COMMANDS.md#assess-quality--structure) | "Where is the risk, and did I just add some?" | `--quality-panel` · `--hotspots` · `--clones` · `--metrics` · `--deps` · `--lint` · `--quality-delta` · `--dmm` · `--edit-check` · `--pr-context` · `--merge-scout` |
+| [**self-diagnosis**](docs/COMMANDS.md#self-diagnosis) | "Is my setup actually working?" | `--doctor` |
+| [**security**](docs/COMMANDS.md#--scan-skillsdir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
+| [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--mcp` |
+
+Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
+`--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
+incompatible), `--merge-scout=REF1,REF2` before landing parallel branches, and `--pack-task="…"` for
+ranking, bodies, callers and tests in one budgeted bundle.
 
 ---
 
@@ -444,31 +469,6 @@ contract, gated on every pull request and every push to main, not a tendency.
      binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
      graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
      stdout — and trip-wire for the honesty half. -->
-
----
-
-## What it answers
-
-Around the core sit 137 long flags advertised in `--help`, across seven families — plus an MCP
-server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
-`./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents 90 of the flags with a real invocation and its
-recorded output. Each family below links there.
-
-| Family | The question | Representative flags |
-| --- | --- | --- |
-| [**understand a codebase cold**](docs/COMMANDS.md#understand-a-codebase-cold) | "What is this repo, and what matters in it?" | `--for` · `--tree` · `--lego` · `--exemplar` · `--recall` · `--top-k` · `--token-budget` · `--max-tokens` |
-| [**navigate / answer a question**](docs/COMMANDS.md#navigate--answer-a-question) | "Who calls this? Is it safe to change? Which tests?" | `--callers` · `--callees` · `--uses` · `--impact` · `--path` · `--connect` · `--affected` · `--situ` · `--test-gate` · `--grep` |
-| [**zoom the detail ladder**](docs/COMMANDS.md#zoom-the-detail-ladder) | "Show me more — but only where it pays." | `--detail` · `--pack-signatures` · `--outline` · `--expand` · `--compress` |
-| [**assess quality / structure**](docs/COMMANDS.md#assess-quality--structure) | "Where is the risk, and did I just add some?" | `--quality-panel` · `--hotspots` · `--clones` · `--metrics` · `--deps` · `--lint` · `--quality-delta` · `--dmm` · `--edit-check` · `--pr-context` · `--merge-scout` |
-| [**self-diagnosis**](docs/COMMANDS.md#self-diagnosis) | "Is my setup actually working?" | `--doctor` |
-| [**security**](docs/COMMANDS.md#--scan-skillsdir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
-| [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--mcp` |
-
-Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
-`--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
-incompatible), `--merge-scout=REF1,REF2` before landing parallel branches, and `--pack-task="…"` for
-ranking, bodies, callers and tests in one budgeted bundle.
 
 ---
 
