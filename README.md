@@ -12,13 +12,34 @@
 
 **ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
-around and reading whole files. One binary on your own machine: **no API key, no embeddings, no
-index server, no daemon, nothing left running.**
+around and reading whole files.
+
+### No API key. No embeddings. No index server. No daemon.
+
+One self-contained binary on your own machine, offline. Install it and ask it something before you
+finish reading this page:
+
+```bash
+RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+ripwire . --for="incremental cache invalidation"
+```
+
+One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
+the tests that reach them.
+
+| The agent without a map | The agent with ripwire |
+| --- | --- |
+| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="2934"` on this repository |
+| reads whole files to find the four symbols that matter | those four symbols, with complexity, churn and test coverage inline |
+| finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
+| pays for every line it read, right or wrong | measured at **7.3%** of what that grep-and-read pass spends |
 
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
-60 paired LocBench instances, zero exclusions, same gold set and the same imported metric code for
-every arm. *Strict file@10 = **all** gold files inside the top 10* — whether your agent starts in the
+**58.3% against 33.3%.** On 60 held-out LocBench instances, ripwire landed *every* gold file in the
+top 10 nearly twice as often as the best competitor tested — and answered in **0.114 s** against its
+1.14 s. Paired, zero exclusions, same gold set and the same imported metric code for every arm;
+*strict file@10 = **all** gold files inside the top 10*, which is whether your agent starts in the
 right place at all.
 
 | Round 2 (2026-08-03) | strict file@10 | any@10 | median warm query |
@@ -86,13 +107,6 @@ counterexamples, because the losses ship beside the wins. Zero runtime dependenc
 with the network off.
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
-
-```bash
-ripwire . --for="incremental cache invalidation"
-```
-
-One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks,
-and the tests that reach them.
 
 <details>
 <summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed</summary>
