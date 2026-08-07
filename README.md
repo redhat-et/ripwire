@@ -70,8 +70,13 @@ and a third round against a compression-layer competitor: [Measured](#measured) 
 [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-2026-08-06/), whose harness is committed so
 anyone can re-run the whole comparison.
 
+---
+
+*The table above, read two other ways. Every figure in both is one of its measured numbers; only the
+manners and the cynicism are editorial.*
+
 <details>
-<summary><b>The same table, as narrated by Jane Austen</b> — every figure in it measured, the manners editorial</summary>
+<summary>📖 &nbsp;<b>The same table, as narrated by Jane Austen</b></summary>
 
 <br>
 
@@ -133,7 +138,7 @@ people's real work, and the joke is aimed at the trade-offs, never at the author
 </details>
 
 <details>
-<summary><b>The same table, worked as a case file</b> — narrated by a private eye who trusts no index he didn't build himself</summary>
+<summary>🕵️ &nbsp;<b>The same table, worked as a case file</b> — a private eye who trusts no index he didn't build himself</summary>
 
 <br>
 
@@ -189,6 +194,8 @@ and ripwire's 0.130 s / 58.3%. Provenance in
 real work, and the joke is aimed at the trade-offs, never the authors.</sub>
 
 </details>
+
+---
 
 **Name a symbol and it is the first hit.** A confidence-gated router detects when a query *names*
 something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7%** in `src/`,

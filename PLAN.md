@@ -803,3 +803,109 @@ Not started. Both proposals compose shipped machinery (layout model, Stage-2 acc
 classification, cc_walk, context-ratio/nonlocal-state) — the only new code surfaces are the
 loop×layout join, the per-depth live counter, and a join view; every threshold above ships
 measured-or-refused, never invented.
+
+## 2026-08-06 (late) — head-to-head round 4, five closed ranking rounds, and the handoff
+
+Cold-start pointer for the next session: everything below is on `integration/all` == `origin/main`.
+The benchmark ASSETS live OUTSIDE the repo at `~/AppDevelopLocal/project2/bench-assets/r4/` (kept
+deliberately — see "Assets" at the end). Read `bench/headtohead/r4-2026-08-06/README.md` first if the
+task is benchmarking, `bench/locbench/results/r6_expansion/gate_verdict.txt` first if the task is
+ranking quality.
+
+### What landed
+
+* **Round 4 — one unified head-to-head table.** Every competitor re-run 2026-08-06 against ONE binary
+  (`7a9a42ea`, rebuilt from HEAD) and ONE evaluator on the 60-instance held-out slice, paired, zero
+  exclusions: ripwire 58.3% / 85.0%, codebase-memory-mcp 40.0%, repowise 33.3%, graphify 31.7%, aider
+  18.3% (8.3% without ident personalization), codeseek 15.0% (0.0% on its raw arm). This RETIRES the
+  two-table split and the "not number-comparable" caveat the README used to carry. ripwire's own arm
+  reproduced r2 exactly, which is the evidence the harness is sound.
+* **The re-run COST us margin, and the README says so.** codebase-memory-mcp is the true runner-up —
+  r1 credited it 26.7%, fair re-scoring gives 40.0%. Margin over best competitor is **1.46x**, not the
+  1.75x two separately-dated tables implied. graphify 21.7 -> 31.7, aider 13.3 -> 18.3 likewise.
+* **An index-cost column, publishable for the first time.** r2 recorded competitor index walls and
+  refused to tabulate them because ripwire's own index was unmeasured. It is measured now
+  (`--measure-index --measure-cold`): ripwire cold-from-nothing-to-answer **0.299 s** against
+  repowise's ~34 s (median index 33.0 s, worst **424 s**).
+* **The harness is IN THE TREE** (`bench/headtohead/r4-2026-08-06/`), with all six arms' raw
+  per-instance JSONL. r1's runners were not, they lived in `/private/tmp`, and macOS emptied them — so
+  reproducing r1 meant rewriting three workers from prose. Round 5 is a re-run, not a rewrite.
+* **Five pre-registered ranking rounds against the multi-file stratum, five rejections.** The matrix
+  is complete: seed in {mention anchors, top-ranked files, none} x edge in {call/import, same
+  directory, resolved import, none}. r6 was the last untried diagonal AND the only mechanism adding
+  evidence the query did not supply; it moved 8-14 gold ranks per cell and crossed the @10 frontier
+  zero times. Verdict recommends REFUSING a sixth candidate of that shape unless it can state its
+  difference in seed x edge x evidence-source terms.
+
+### Next work, in the order I would do it
+
+1. **Candidate generation for the 11 (the only place multi-file instances still live).** Round 4's 22
+   held-out multi-file failures decompose: 9 sibling-ranked-but-too-low (median rank 26 — five rounds
+   have now failed to move these), **11 where the sibling NEVER ENTERS the candidate set**, 4
+   whole-instance misses, 3 gold files with no code symbols. A reranker cannot rank a file it never
+   saw, which is why every ranking round was structurally incapable of touching the 11. This is a
+   different subsystem (what enters the top-k=200 candidate stream at all) and a bigger change than
+   any of the five. Start by classifying the 11: is the sibling absent because of top-k truncation, or
+   because it scores exactly zero? Those need different fixes and the answer is one script.
+2. **C++/Rust head-to-head.** `bench/multiswe/` already mines Multi-SWE-bench's C/C++ splits and its
+   README claims to be the first public issue-shaped C++ localization eval; `LANGS = ("c","cpp")` and
+   the harness takes `--languages`, so Rust is a small change. The interesting question is NOT
+   ripwire's score — it is whether the competitors run on C++/Rust at all. If they are Python-centric,
+   that is a differentiator a Python-dominant benchmark structurally cannot show, and it is a stronger
+   honest claim than anything currently on the front page. NOTE the current table's own limit: 107 of
+   134 gold files are `.py`, and the README now discloses this.
+3. **Store per-gold-file ranks in `run_locbench.py`'s arm JSON.** It keeps only `file_first` and
+   `file_worst` today. That is why the r6 feasibility probe had to ask the weaker question
+   "reachable from ANY peer gold file" instead of "reachable from the file we actually found", and why
+   loss analysis keeps re-deriving things. Cheap, and it sharpens every future round.
+4. **Query-compile latency, measured and bounded.** Profiling the 5.7 s index outlier
+   (huggingface/transformers, 4,787 files) found ~73% is tree-sitter parse — irreducible — but that
+   tree-sitter QUERY COMPILATION is on the critical path when there is not enough parse work to hide
+   it: 36.8 ms of chainlit's 80 ms index, 3.5 ms of oauthenticator's 12 ms, versus 99.8 ms buried
+   inside transformers' 1,549 ms pool. It scales with the most expensive grammar present (C++/CUDA),
+   not file count. Compilation is ALREADY parallel across grammars, so the remaining lever is starting
+   it before the crawl finishes. Realistic gain ~15-35 ms on medium polyglot repos, ~0 on large ones.
+   Modest, on a thread-scheduling path with a documented lost-wakeup hazard — do it only when the
+   ranking work is genuinely exhausted.
+5. **StringZilla / length-carrying SIMD strings — probe `--grep`, not ingest.** The profile says our
+   own string work is a small slice of indexing (readFile 3.5%, build-model 1.5%); ~73% is inside
+   tree-sitter's parser where a different string type cannot reach. `--grep` is a parallel literal
+   scan over file bytes and is the plausible target. Measure before committing to a dependency (G3
+   would require vendoring it).
+
+### Rules this round earned, all of them paid for
+
+* **State an acceptance bar in INSTANCES, never in percentage points**, on any stratum small enough
+  that one instance is a visible fraction. r5's PREREG said ">= +2.00pp multi-file" on a 43-instance
+  stratum where one instance IS 2.33pp — the bar sat below single-instance granularity, one noisy flip
+  cleared it, and the held-out run it bought returned +0.00pp. r6's bar was ">= 3 instances".
+* **Run a feasibility probe before pre-registering a mechanism.** One script asking "does this
+  mechanism have anything to walk to?" cost far less than the grid it would have consumed. It said yes
+  (70% under a permissive text test) and r6 still failed — but the probe's own write-up had recorded
+  that 70% as an UPPER bound and named both gaps, so the failure was interpretable instead of
+  mysterious.
+* **An identity control is not ceremony.** r5's `blend=0` cell caught that the first implementation's
+  slot ladder changed output independently of the pooling. The PREREG said a failed identity control
+  invalidates every cell, so the MECHANISM was corrected rather than the control waived.
+* **Check the mechanism FIRED before writing a negative verdict.** r6 gained zero instances in nine
+  cells; 8-14 gold ranks moved per cell, which is what makes it a result rather than a dead harness.
+* **`git add -A` with no pathspec stages from the REPOSITORY ROOT regardless of cwd.** Run from
+  `bench/headtohead/r4-2026-08-06/`, it swept a 113 MB (16 MB packed) `-DRIPWIRE_PROFILE=ON` build tree
+  into a public commit. Use an explicit pathspec.
+* **`.gitignore` has no trailing-comment syntax.** `profile*/  # why` is one literal pattern matching
+  nothing. Comment on its own line above. `nulbytecheck` is what caught the tracked binaries, because
+  it walks `git ls-files` rather than the files a human meant to commit.
+* **A benchmark harness must not share an output channel with the tool under test**, and must not run
+  with the repo under test as `cwd`. Both bit the aider arm: it returned JSON on stdout where aider
+  prints progress (JSONDecodeError at char 0 on a good run), and `import numpy` from inside numpy's own
+  source tree refused outright. Only the zero-silent-skip rule kept these from scoring as "found
+  nothing".
+
+### Assets (kept on purpose — large disk)
+
+`~/AppDevelopLocal/project2/bench-assets/r4/`: `repos/`..`repos_e/` (five APFS clones, ~1.2 GB apparent
+and near-zero real, one per concurrent arm because every arm mutates its checkout), `work/` (dataset
+snapshot sha256 `5bbcea4b…`, plus ripwire's rich indexes), `tools/` (aider-chat 0.86.2, graphifyy
+0.9.34, codebase-memory-mcp 0.9.0, repowise 0.37.0 venvs; codeseek 0.1.31 lives at `~/.codeseek`).
+`results/` is already committed to the repo. Recreating all of it is roughly an hour; keeping it makes
+the next round a single `bash r6_grid.sh`.
