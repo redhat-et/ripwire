@@ -120,16 +120,74 @@ for flag in -gline-tables-only -fsave-optimization-record; do
     grep -q -- "$flag" "$ROOT/CMakeLists.txt" && ok "remarks build passes $flag" || no "remarks build lost $flag"
 done
 
-mkdir -p "$TMP/build"
-cmake -S "$ROOT" -B "$TMP/build" -DRIPWIRE_OPT_REMARKS=ON >"$TMP/refuse.log" 2>&1; refuseRc=$?
-[ "$refuseRc" -ne 0 ] && grep -q 'must not be enabled in build/' "$TMP/refuse.log" \
-    && ok "-DRIPWIRE_OPT_REMARKS=ON is refused in a tree named build/" \
-    || { no "a tree named build/ accepted the remarks flags (rc=$refuseRc)"; tail -5 "$TMP/refuse.log"; }
+# ── WHICH FRONT END? Both RIPWIRE_OPT_REMARKS and RIPWIRE_PGO are Clang-only by construction (-Rpass=/
+# -fsave-optimization-record; .profdata/llvm-profdata), and CMakeLists FATAL_ERRORs on anything else —
+# deliberately, since a silent no-op there hands back an empty triage or an un-optimized "PGO" binary.
+# Every arm below that expects a SUCCESSFUL configure therefore asserts a Clang-only outcome. CI's
+# release job runs ubuntu-24.04 on GCC on purpose ("a second front end over the same tree", ci.yml), so
+# on that leg those arms were asserting the impossible: run 31145553507 red on both ubuntu legs, green on
+# both macOS ones, for no defect at all.
+#
+# Read the front end off the configure already done above rather than guessing from $CXX — CMake's own
+# choice is the one CMakeLists sees. Then: if it is not Clang, PIN clang for the Clang-only arms when the
+# box has one (the same remedy ci.yml's asan job applies for G1's Clang-only sanitizers), and if it does
+# not, SKIP those arms with the reason named — but first assert the refusal itself, which is the honest
+# behaviour a GCC box is owed and which nothing tested until now.
+CXXID="$( sed -nE 's/^set\(CMAKE_CXX_COMPILER_ID "([^"]*)".*/\1/p' "$TMP"/build_devdefault/CMakeFiles/*/CMakeCXXCompiler.cmake 2>/dev/null | head -1 )"
+CLANGONLY_SKIP=""
+CLANGPIN=""
+if printf '%s' "$CXXID" | grep -q 'Clang'; then
+    ok "front end: the default configure is $CXXID — the Clang-only arms below run natively"
+else
+    # The refusal is the contract on this front end. Gate it, on a tree name that is NOT build/, so a
+    # pass cannot be the build/-name refusal firing first and masking a missing compiler guard.
+    cmake -S "$ROOT" -B "$TMP/build_gccrefuse" -DRIPWIRE_OPT_REMARKS=ON >"$TMP/gccrefuse.log" 2>&1; gccRefuseRc=$?
+    [ "$gccRefuseRc" -ne 0 ] && grep -q 'RIPWIRE_OPT_REMARKS requires Clang' "$TMP/gccrefuse.log" \
+        && ok "front end: $CXXID is REFUSED by name for remarks (never a silent empty triage)" \
+        || { no "front end: $CXXID configured remarks clean (rc=$gccRefuseRc) — an empty opt-record would read as 'nothing to fix'"; tail -5 "$TMP/gccrefuse.log"; }
+    cmake -S "$ROOT" -B "$TMP/build_gccpgorefuse" -DRIPWIRE_PGO=generate >"$TMP/gccpgorefuse.log" 2>&1; gccPgoRc=$?
+    [ "$gccPgoRc" -ne 0 ] && grep -q 'RIPWIRE_PGO requires Clang' "$TMP/gccpgorefuse.log" \
+        && ok "front end: $CXXID is REFUSED by name for PGO (GCC's .gcda flavour would half-work and mislead)" \
+        || { no "front end: $CXXID configured PGO clean (rc=$gccPgoRc) — the .profdata paths would half-work"; tail -5 "$TMP/gccpgorefuse.log"; }
+    if command -v clang++ >/dev/null 2>&1 && command -v clang >/dev/null 2>&1; then
+        CLANGPIN="1"
+        ok "front end: default is $CXXID, so the Clang-only arms below are pinned to the box's clang++ (coverage kept, not skipped)"
+    else
+        CLANGONLY_SKIP="the default front end is $CXXID and no clang++ is on PATH; -Rpass=/-fsave-optimization-record and .profdata are Clang-only spellings, so a successful configure is not expressible here. CI's macos-14 legs (AppleClang) run these arms."
+    fi
+fi
+# cmake_cc <args...> — configure with the Clang-only arms' toolchain, whatever that turned out to be.
+cmake_cc()
+{
+    if [ -n "$CLANGPIN" ]; then
+        CC=clang CXX=clang++ cmake "$@"
+    else
+        cmake "$@"
+    fi
+}
+skip(){ printf '  SKIP  %s\n' "$*"; }
 
-cmake -S "$ROOT" -B "$TMP/build_remarks" -DRIPWIRE_OPT_REMARKS=ON >"$TMP/accept.log" 2>&1; acceptRc=$?
-[ "$acceptRc" -eq 0 ] && grep -q 'RIPWIRE_OPT_REMARKS: ON' "$TMP/accept.log" \
-    && ok "-DRIPWIRE_OPT_REMARKS=ON configures in a separately named tree (refusal is by NAME, not blanket)" \
-    || { no "the remarks configure failed everywhere (rc=$acceptRc) — the refusal above proves nothing"; tail -5 "$TMP/accept.log"; }
+# The build/-name refusal is ALSO Clang-only to observe: CMakeLists checks the compiler first, so on a
+# GCC-only box this configure dies on "requires Clang" and never reaches the name check — a pass here
+# would be the wrong refusal firing.
+mkdir -p "$TMP/build"
+if [ -n "$CLANGONLY_SKIP" ]; then
+    skip "-DRIPWIRE_OPT_REMARKS=ON refused in a tree named build/ — $CLANGONLY_SKIP"
+else
+    cmake_cc -S "$ROOT" -B "$TMP/build" -DRIPWIRE_OPT_REMARKS=ON >"$TMP/refuse.log" 2>&1; refuseRc=$?
+    [ "$refuseRc" -ne 0 ] && grep -q 'must not be enabled in build/' "$TMP/refuse.log" \
+        && ok "-DRIPWIRE_OPT_REMARKS=ON is refused in a tree named build/" \
+        || { no "a tree named build/ accepted the remarks flags (rc=$refuseRc)"; tail -5 "$TMP/refuse.log"; }
+fi
+
+if [ -n "$CLANGONLY_SKIP" ]; then
+    skip "-DRIPWIRE_OPT_REMARKS=ON accepted in a separately named tree — $CLANGONLY_SKIP"
+else
+    cmake_cc -S "$ROOT" -B "$TMP/build_remarks" -DRIPWIRE_OPT_REMARKS=ON >"$TMP/accept.log" 2>&1; acceptRc=$?
+    [ "$acceptRc" -eq 0 ] && grep -q 'RIPWIRE_OPT_REMARKS: ON' "$TMP/accept.log" \
+        && ok "-DRIPWIRE_OPT_REMARKS=ON configures in a separately named tree (refusal is by NAME, not blanket)" \
+        || { no "the remarks configure failed everywhere (rc=$acceptRc) — the refusal above proves nothing"; tail -5 "$TMP/accept.log"; }
+fi
 
 grep -q 'CMAKE_BUILD_TYPE' "$ROOT/scripts/optremarks.sh" \
     && no "scripts/optremarks.sh mentions CMAKE_BUILD_TYPE — a Release remarks tree blinds the degrade-path gates" \
@@ -140,25 +198,31 @@ grep -q 'CMAKE_BUILD_TYPE' "$ROOT/scripts/optremarks.sh" \
 # compiles CLEAN and yields an ordinary binary, which the next person benchmarks as "PGO bought
 # nothing". The configure-time existence check is the only thing standing between that and a published
 # number, so it is gated here rather than trusted.
-cmake -S "$ROOT" -B "$TMP/build" -DRIPWIRE_PGO=generate >"$TMP/pgorefuse.log" 2>&1; pgoRefuseRc=$?
+# The build/-name refusal is checked FIRST in CMakeLists only after the compiler guard, so on a non-Clang
+# front end this arm would pass on the wrong message. cmake_cc keeps it reading the refusal it names.
+cmake_cc -S "$ROOT" -B "$TMP/build" -DRIPWIRE_PGO=generate >"$TMP/pgorefuse.log" 2>&1; pgoRefuseRc=$?
 [ "$pgoRefuseRc" -ne 0 ] && grep -q 'RIPWIRE_PGO must not be enabled in build/' "$TMP/pgorefuse.log" \
     && ok "-DRIPWIRE_PGO is refused in a tree named build/ (a PGO'd build/ripwire moves every recorded number)" \
     || { no "a tree named build/ accepted PGO (rc=$pgoRefuseRc)"; tail -5 "$TMP/pgorefuse.log"; }
 
-cmake -S "$ROOT" -B "$TMP/build_pgo" -DRIPWIRE_PGO=use -DRIPWIRE_PGO_PROFILE="$TMP/no-such.profdata" >"$TMP/pgomissing.log" 2>&1; pgoMissRc=$?
-[ "$pgoMissRc" -ne 0 ] && grep -q 'RIPWIRE_PGO=use needs' "$TMP/pgomissing.log" \
-    && ok "RIPWIRE_PGO=use with a missing .profdata FAILS the configure (never a silent no-op binary)" \
-    || { no "a missing profile configured clean — PGO would silently do nothing (rc=$pgoMissRc)"; tail -5 "$TMP/pgomissing.log"; }
+if [ -n "$CLANGONLY_SKIP" ]; then
+    skip "the three RIPWIRE_PGO phase arms (missing .profdata / bogus phase / generate+LTO) — $CLANGONLY_SKIP"
+else
+    cmake_cc -S "$ROOT" -B "$TMP/build_pgo" -DRIPWIRE_PGO=use -DRIPWIRE_PGO_PROFILE="$TMP/no-such.profdata" >"$TMP/pgomissing.log" 2>&1; pgoMissRc=$?
+    [ "$pgoMissRc" -ne 0 ] && grep -q 'RIPWIRE_PGO=use needs' "$TMP/pgomissing.log" \
+        && ok "RIPWIRE_PGO=use with a missing .profdata FAILS the configure (never a silent no-op binary)" \
+        || { no "a missing profile configured clean — PGO would silently do nothing (rc=$pgoMissRc)"; tail -5 "$TMP/pgomissing.log"; }
 
-cmake -S "$ROOT" -B "$TMP/build_pgo2" -DRIPWIRE_PGO=bogus >"$TMP/pgobogus.log" 2>&1; pgoBogusRc=$?
-[ "$pgoBogusRc" -ne 0 ] && grep -q "must be 'generate' or 'use'" "$TMP/pgobogus.log" \
-    && ok "an unrecognised RIPWIRE_PGO phase is refused, not ignored" \
-    || no "RIPWIRE_PGO accepted a phase name it does not implement (rc=$pgoBogusRc)"
+    cmake_cc -S "$ROOT" -B "$TMP/build_pgo2" -DRIPWIRE_PGO=bogus >"$TMP/pgobogus.log" 2>&1; pgoBogusRc=$?
+    [ "$pgoBogusRc" -ne 0 ] && grep -q "must be 'generate' or 'use'" "$TMP/pgobogus.log" \
+        && ok "an unrecognised RIPWIRE_PGO phase is refused, not ignored" \
+        || no "RIPWIRE_PGO accepted a phase name it does not implement (rc=$pgoBogusRc)"
 
-cmake -S "$ROOT" -B "$TMP/build_pgogen" -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=generate >"$TMP/pgogen.log" 2>&1; pgoGenRc=$?
-[ "$pgoGenRc" -eq 0 ] && grep -q 'RIPWIRE_PGO: generate' "$TMP/pgogen.log" && grep -q 'RIPWIRE_LTO: ON' "$TMP/pgogen.log" \
-    && ok "-DRIPWIRE_PGO=generate configures alongside LTO in a separately named tree (refusals are by NAME)" \
-    || { no "the instrumented configure failed everywhere (rc=$pgoGenRc) — the refusals above prove nothing"; tail -5 "$TMP/pgogen.log"; }
+    cmake_cc -S "$ROOT" -B "$TMP/build_pgogen" -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=generate >"$TMP/pgogen.log" 2>&1; pgoGenRc=$?
+    [ "$pgoGenRc" -eq 0 ] && grep -q 'RIPWIRE_PGO: generate' "$TMP/pgogen.log" && grep -q 'RIPWIRE_LTO: ON' "$TMP/pgogen.log" \
+        && ok "-DRIPWIRE_PGO=generate configures alongside LTO in a separately named tree (refusals are by NAME)" \
+        || { no "the instrumented configure failed everywhere (rc=$pgoGenRc) — the refusals above prove nothing"; tail -5 "$TMP/pgogen.log"; }
+fi
 
 grep -q 'raw.*-gt 0\|-gt 0 .*raw' "$ROOT/scripts/pgobuild.sh" \
     && ok "pgobuild.sh fails when training produced zero .profraw (an empty merge is a silent no-op)" \

@@ -48,9 +48,20 @@ ripwire_head_binary()
         return 1
     fi
 
-    # another process holds the lock — wait for its binary (build is ~50 s; allow 300 s).
+    # another process holds the lock — wait for its binary (build is ~50 s on the dev machine).
+    #
+    # THE WAIT BUDGET MUST STAY STRICTLY UNDER test/pargates.py's PER-GATE TIMEOUT, with room left over for
+    # the gate's own assertions after the wait returns. It used to be 300 s, which was EXACTLY pargates'
+    # timeout — so on a runner where the build is slow, a waiter could not possibly finish: it burned the
+    # whole gate budget waiting and was killed at the same instant its wait expired. That is what reddened
+    # crossdirincludecheck on all four Linux legs of CI run 31182301976 (rc=124 at 300.1 s) while macOS,
+    # where the build fits in ~60 s, stayed green. Two coupled budgets that must not be equal.
+    #
+    # 240 s here against pargates' 900 s for the six head-binary gates (its `slow` set) leaves 660 s of
+    # headroom. If either number moves, move it with the other one: pargates.py's `slow` comment names this
+    # file, and this comment names pargates.py, so neither can drift alone unnoticed.
     _t=0
-    while [ "$_t" -lt 300 ]; do
+    while [ "$_t" -lt 240 ]; do
         [ -x "$_bin" ] && { printf '%s\n' "$_bin"; return 0; }
         [ -d "$_lock" ] || break            # builder finished (or failed) — stop waiting either way
         sleep 2; _t=$(( _t + 2 ))

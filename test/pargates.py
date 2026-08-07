@@ -83,27 +83,59 @@ gates.sort(key=lambda g: -prior_timings.get(g, float("inf")))
 # the machine beside it. Keep the measured gate in this same authoritative run, but give its timing window
 # exclusive ownership after the parallel correctness wave.
 exclusive = {"editcheckcheck.sh"}
+
+# Six gates build a SECOND ripwire from git HEAD to diff today's resolver against it, sharing one sha-keyed
+# binary through test/lib/headbinlib.sh: one elected builder, the rest wait on its lock. A full build is ~50s
+# on the dev machine but several minutes on a 4-vCPU CI runner with -j 3 gates already competing for it, so
+# the flat 300 s ceiling below is not a budget for them -- it is shorter than the work. Measured: rc=124 at
+# 300.1 s on ALL FOUR Linux legs of CI run 31182301976, green on macOS where the same build fits in ~60 s.
+# Raising the ceiling for exactly these six keeps the flat 300 s tripwire meaningful for the other 355,
+# rather than blanket-raising it and losing the signal that a gate has silently become slow.
+# headbinlib.sh's own waiter budget must stay well under this number -- its comment explains the coupling.
+SLOW_TIMEOUT_SEC = 900
+slow = {"crossdirincludecheck.sh", "nestedimportcheck.sh", "preproccondcheck.sh",
+        "pyimportprecisecheck.sh", "rustimportprecisecheck.sh", "tsimportprecisecheck.sh"}
 parallel_gates = [g for g in gates if g not in exclusive]
 exclusive_gates = [g for g in gates if g in exclusive]
 
 
 def run(g):
     env = dict(os.environ, RIPWIRE_BIN=binp)
+    limit = SLOW_TIMEOUT_SEC if g in slow else 300
     t0 = time.time()
     try:
         p = subprocess.run(
             ["bash", os.path.join(testdir, g)],
-            cwd=root, env=env, capture_output=True, timeout=300,
+            cwd=root, env=env, capture_output=True, timeout=limit,
         )
         rc, out = p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
-        rc, out = 124, "TIMEOUT after 300s"
+        rc, out = 124, f"TIMEOUT after {limit}s"
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
     skipped = rc == 0 and "SKIP" in out[:400]
     return g, rc, round(time.time() - t0, 1), out[-2500:], skipped
 
+
+# --- shared-binary tripwire ---------------------------------------------------------------------
+# A gate that rebuilds the binary under test hands every CONCURRENT gate either a missing file
+# (rc=2, "no ripwire binary") or one the loader refuses while the linker still holds it
+# (ETXTBSY -> exit 126, printed as "Permission denied"). CI run 31145553507 lost 126 of 361 gates
+# that way to naminglocalscheck.sh's old source-mutation arm, and every one of the 126 reported a
+# plausible-looking failure of its OWN subject -- swiftcheck "non-deterministic", rubymetricscheck
+# "ccx should be > 0", type3check "XML not well-formed". Reading that log costs an hour before the
+# common cause is visible. Fingerprint the binary before and after: if it moved, say so first, and
+# say it loudly enough that nobody triages the 126 individually.
+def _bin_fingerprint():
+    try:
+        st = os.stat(binp)
+        return (st.st_size, st.st_mtime_ns, st.st_ino)
+    except OSError:
+        return None
+
+
+bin_before = _bin_fingerprint()
 
 t0 = time.time()
 results = []
@@ -118,6 +150,9 @@ for g in exclusive_gates:
     sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
     sys.stderr.flush()
 sys.stderr.write("\n")
+
+bin_after = _bin_fingerprint()
+bin_moved = bin_before != bin_after
 
 fails = [r for r in results if r[1] != 0]
 skips = [r for r in results if r[4]]
@@ -152,6 +187,12 @@ for g, rc, dt, _out, _sk in results:
 
 print(f"gates={len(results)} pass={len(results)-len(fails)-len(skips)} "
       f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}")
+if bin_moved:
+    print(f"\n*** THE BINARY UNDER TEST CHANGED WHILE THE SUITE RAN: {binp}")
+    print(f"***   before={bin_before}  after={bin_after}")
+    print("***   Some gate rebuilt it in place. Every gate that ran concurrently saw it missing")
+    print("***   (rc=2) or busy (exit 126 / 'Permission denied'), so THOSE FAILURES ARE NOT REAL.")
+    print("***   Find the gate that writes to the shared build tree and fix that first.")
 if skips:
     print("\nSKIPPED (ran, but proved nothing — not counted as passing):")
     for g, rc, dt, out, _ in skips:
