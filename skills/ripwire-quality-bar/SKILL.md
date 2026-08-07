@@ -79,6 +79,12 @@ agent guard-clauses a dispatch table. `--metrics` (and the structural family's `
 <e f="structural" counted="1" why="ccx=724 loc=1244 nest=9 humps=30 deep=308 rrank=1"/>
 ```
 
+**Every concrete number on this page is ILLUSTRATIVE OF A SHAPE, never a value to expect.** The counters
+themselves are under active calibration — an else-clause over-count fix in flight moves `humps=` down by a
+large fraction, and `ccx=`/`nest=` with it, on else-heavy functions. What is durable is what you *do* with
+the row: `humps=1` vs many, the two ratios below, and the semantics (regions vs lines, absence below the
+bar, `deep < humps` legal). Read the row in front of you; never carry a remembered number to it.
+
 - **`humps=`** — how many *maximal control-nesting regions* reach the nesting bar (`bar_nest=` on the panel
   root; CodeScene's "bumpy road": a rise above the threshold then a fall). One deep tangle is `1`; repeated
   missing abstractions are many. EXACT, not a floor.
@@ -96,9 +102,12 @@ Two ratios do the actual discriminating, and you compute them yourself from the 
 | **`deep/loc`** | **tangled** — the body *sustains* depth, so most of what you read is nested | **blocked-sequential** — a long run of shallow steps (a dispatch table, a switch, a setup block); the max is one inner loop |
 | **`deep/humps`** | **few giant tangles** — one region holds depth for a long stretch; the expensive fix | **many tiny touches** — repeated missing abstractions, each hump its own cheap extraction |
 
-On this repo's own source, `loc`/`nest` alone rank `main` (`loc=1061 nest=6 humps=29 deep=111`, **10%**)
-beside `buildGraph` (`loc=1244 nest=9 humps=30 deep=308`, **25%**) — the profile separates them, and it
-promotes `ur_walkTree` (`loc=87 nest=7 humps=1 deep=43`, **49%**), which no size bar fires on at all.
+Three shapes off this repo's own source — read the *pattern*, not the digits, which move with calibration:
+a ~1000-line function at a **low** `deep/loc` (`main`, roughly a tenth) sits beside one at **~2.5×** that
+fraction (`buildGraph`) once `loc`/`nest` have declared them equivalent; and a function far too small for
+any size bar to fire can carry the **highest** `deep/loc` in the table (`ur_walkTree`, `loc=87`, near half
+its body deep in a single hump). The first is blocked-sequential, the second tangled, the third dense —
+three different fixes, one indistinguishable `nest=`.
 
 **`locals=`** rides the same row: the count of local-variable declarations, a FLOOR (`locals_floor="1"`),
 **C/C++ only** and **absent — never a bare `0`** — for every other language. It measures the working set a
@@ -246,7 +255,7 @@ still your call, and "leave it alone" is always on the menu.
 |---|---|---|
 | **Many shallow humps** — `humps` high, `deep/humps` small, `deep/loc` low | **Extract each hump.** The bumpy-road fix: every region that rises to the bar and falls back is one missing abstraction with its own name. Cheap, mechanical, one hump at a time. | Nothing structural blocks it — but each extraction is a new symbol, so re-run the loop below: extraction that lands as `origin="new-symbol"` `api-surface` debt should be file-local, not public. |
 | **One deep tangle** — `humps=1` (or few) with high `deep/loc` | **Guard-clause inversion**, then **state extraction**: invert the conditions that hold the depth, return early, and lift the sustained region's working set into a named struct or its own function. Expensive and genuinely risky — a rewrite, not a move. | `locals=` tells you what you're really moving; a big `locals` means the region's working set, not just its braces, has to travel. Check `--callers=SYM`/`--impact=SYM` before starting, and never do it in the same diff as a behavior change. |
-| **Small AND dense** — small `loc` with `deep/loc` ≥ ~50% (e.g. `ur_walkTree`: `loc=87 deep=43`) | **Read it before you prescribe anything.** Numeric kernels, tree walks, and state machines are *legitimately* dense: the depth is the algorithm. Often the right fix is a comment or a named constant, not a split. | This row is where a metric-driven agent does the most damage. `--expand=SYM` first. If the density is the algorithm, ack it (`--ack-only=`) and move on. |
+| **Small AND dense** — small `loc`, but `deep` is a large fraction of it (roughly half or more), typically in one hump | **Read it before you prescribe anything.** Numeric kernels, tree walks, and state machines are *legitimately* dense: the depth is the algorithm. Often the right fix is a comment or a named constant, not a split. | This row is where a metric-driven agent does the most damage. `--expand=SYM` first. If the density is the algorithm, ack it (`--ack-only=`) and move on. |
 | **High fan-in AND untested** — big `in=`/`amp=`, `tested="0"`, or a `--quality-panel` row carrying `join="deep+untested"` | **Test first, refactor second.** The safety net is the fix's precondition, not its follow-up. → **ripwire-write-tests** (`--seams`, the `tested=` lens, `--callers=SYM` for the outside contract). | Confirm the annotation is real: `join=` is suppressed entirely at `tested_scope="0"`, so on an uncrawled-test corpus its *absence* proves nothing. |
 | **Duplication** — a `--quality-delta` `duplication` / `new-clone-of-reused-helper` row, or a `--clones` group | **Consolidate through the repo's own exemplar** — `ripwire <dir> --exemplar="<what this code does>"` names the best-in-class instance to converge on (chosen by ROLE, not text similarity), so the survivor matches house patterns instead of being whichever copy you happened to open. | **Rule of Three** — extract on the third occurrence, not the second; a wrong abstraction is worse than two honest copies. Check `type=` on the clone group: `type="3"` members are gapped near-misses and may differ on purpose. |
 | **Churn-flagged, structurally quiet** — `historical` fires with thin other evidence | **Probably nothing here.** `churn=`/`hrank=` are FILE facts inherited by every symbol in the file. | Confirm at the symbol before acting: `git log -p <file>` or `--hotspots --since=` to see whether *this* function is what keeps moving. |

@@ -268,6 +268,10 @@ sections your question needs.
    extraction). `locals=` on the same row is the reader's working set — a FLOOR (`locals_floor="1"`),
    **C/C++ only**, absent rather than `0` elsewhere. **Which fix each shape calls for, and its precondition
    → ripwire-quality-bar's shape → refactor playbook.**
+   **The numbers in the example rows on this page are ILLUSTRATIVE OF A SHAPE, not values to expect** — these
+   counters are under active calibration (an else-clause over-count fix in flight moves `humps=` down
+   substantially, and `ccx=`/`nest=` with it, on else-heavy functions). Durable is what you do with the row:
+   `humps=1` vs many, the two ratios, and the semantics above. Read the row in front of you.
 
    **`join="deep+untested"`** is an annotation, not a seventh family: this row carries `deep=` *and* no
    indexed test reaches it. It changes nothing — not `fam=`, not `of=`, not the ordering, not which rows
