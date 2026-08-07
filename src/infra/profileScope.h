@@ -9,7 +9,12 @@
 //  USAGE
 //    PROFILE_SCOPE();                          // measure the enclosing scope
 //    PROFILE_SCOPE_DESCRIBE( "phase B2-b" );   // ... with a label
-//    prof::report();  (or PROFILE_REPORT();)   // print; also auto-prints at exit
+//    prof::report();  (or PROFILE_REPORT();)   // print to stderr; also auto-prints at exit
+//
+//  The whole report renders on STDERR: stdout is the data stream (the binary's
+//  XML map), and a report trailing it would break every `>file` / `| xmllint`
+//  workflow and make the profile flavour's map ill-formed. Split the streams to
+//  capture both:  ripwire <dir> >map.xml 2>report.txt
 //
 //  WHY IT IS SHAPED THIS WAY
 //    * Clock: reads CNTVCT_EL0 directly (a constant 24 MHz system counter on
@@ -53,7 +58,7 @@
   #define PROFILE_BARRIER 0        // isb before the counter read (see note below)
 #endif
 #ifndef PROFILE_AUTO_REPORT
-  #define PROFILE_AUTO_REPORT 1    // print a report at static destruction
+  #define PROFILE_AUTO_REPORT 1    // print a report (to stderr) at static destruction
 #endif
 #ifndef PROFILE_PMC
   // Sample Apple Silicon hardware performance counters (cycles, instructions,
@@ -66,6 +71,7 @@
   #define PROFILE_PMC PROFILE_ENABLED
 #endif
 
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -768,6 +774,20 @@ struct ThreadSnap
     std::vector<Row> rows;
 };
 
+// every report byte goes through this: STDERR, never stdout. stdout is the data
+// stream (the binary's XML map) and the auto-report fires at static destruction,
+// AFTER the map — on stdout it would trail the document (ill-formed XML, dead
+// `| xmllint` pipes) and vanish under `>file`. stderr also unifies with the
+// leaked-thread warning in teardown() and prof::pmc's diagnostics.
+__attribute__(( format( printf, 1, 2 ) ))
+inline void report_printf( const char* fmt, ... ) noexcept
+{
+    va_list args;
+    va_start( args, fmt );
+    std::vfprintf( stderr, fmt, args );
+    va_end( args );
+}
+
 // number of PMC columns the table shows: 0 unless built with PROFILE_PMC AND the
 // counters actually armed at runtime. Header and rows share it so they stay aligned.
 inline unsigned events_shown() noexcept
@@ -808,14 +828,14 @@ inline void fmt_count( char* buf, std::size_t sz, uint64_t v ) noexcept
 // the COUNT block (calls, then one column per armed PMC event), then the scope.
 inline void print_header( bool tree )
 {
-    std::printf( "%12s %10s %10s %10s", "total ms", "avg us", "min us", "max us" );
-    std::printf( " %7s", tree ? "%thread" : "" );
-    std::printf( " %12s", "calls" );
+    report_printf( "%12s %10s %10s %10s", "total ms", "avg us", "min us", "max us" );
+    report_printf( " %7s", tree ? "%thread" : "" );
+    report_printf( " %12s", "calls" );
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
     {
-        std::printf( " %10s", prof::pmc::event_label( e ) );
+        report_printf( " %10s", prof::pmc::event_label( e ) );
     }
-    std::printf( "  %-40s %s\n", "scope", "(file:line)" );
+    report_printf( "  %-40s %s\n", "scope", "(file:line)" );
 }
 
 inline void print_row( const char* indentedName, const char* loc,
@@ -827,28 +847,28 @@ inline void print_row( const char* indentedName, const char* loc,
     const double maxUs    = double( r.maxT ) * nspt * 1e-3;
 
     // time block first
-    std::printf( "%12.3f %10.3f %10.3f %10.3f", totalMs, avgUs, minUs, maxUs );
+    report_printf( "%12.3f %10.3f %10.3f %10.3f", totalMs, avgUs, minUs, maxUs );
     if( pctParent >= 0.0 )
     {
-        std::printf( " %6.1f%%", pctParent );
+        report_printf( " %6.1f%%", pctParent );
     }
     else
     {
-        std::printf( " %7s", "" );
+        report_printf( " %7s", "" );
     }
 
     // then the count block: calls, then per-scope PMC totals (humanized)
-    std::printf( " %12llu", (unsigned long long) r.calls );
+    report_printf( " %12llu", (unsigned long long) r.calls );
 #if PROFILE_PMC
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
     {
         char b[ 16 ];
         fmt_count( b, sizeof( b ), r.events[ e ] );
-        std::printf( " %10s", b );
+        report_printf( " %10s", b );
     }
 #endif
 
-    std::printf( "  %-40s %s\n", indentedName, loc );
+    report_printf( "  %-40s %s\n", indentedName, loc );
 }
 
 inline void name_and_loc( const Row& r, char* nameBuf, std::size_t nameSz,
@@ -1003,50 +1023,50 @@ inline Derived resolve_derived()
 
 inline void print_agg_header( const Derived& d )
 {
-    std::printf( "%12s %6s %12s", "total ms", "%tot", "calls" );
+    report_printf( "%12s %6s %12s", "total ms", "%tot", "calls" );
     if( d.ipc() )
     {
-        std::printf( " %6s", "IPC" );
+        report_printf( " %6s", "IPC" );
     }
     if( d.l1dMpki() )
     {
-        std::printf( " %8s", "l1dMPKI" );
+        report_printf( " %8s", "l1dMPKI" );
     }
     if( d.brMpki() )
     {
-        std::printf( " %8s", "brMPKI" );
+        report_printf( " %8s", "brMPKI" );
     }
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
     {
-        std::printf( " %10s", prof::pmc::event_label( e ) );
+        report_printf( " %10s", prof::pmc::event_label( e ) );
     }
-    std::printf( "  %-40s %s\n", "scope", "(file:line)" );
+    report_printf( "  %-40s %s\n", "scope", "(file:line)" );
 }
 
 inline void print_agg_row( const Row& r, double nspt, double pctTotal, const Derived& d )
 {
-    std::printf( "%12.3f %5.1f%% %12llu",
+    report_printf( "%12.3f %5.1f%% %12llu",
                  double( r.total ) * nspt * 1e-6, pctTotal, (unsigned long long) r.calls );
 #if PROFILE_PMC
     const double inst = ( d.inst >= 0 ) ? double( r.events[ d.inst ] ) : 0.0;
     if( d.ipc() )     { const double c = double( r.events[ d.cyc ] );
-                        std::printf( " %6.2f", c > 0.0 ? inst / c : 0.0 ); }
+                        report_printf( " %6.2f", c > 0.0 ? inst / c : 0.0 ); }
     if( d.l1dMpki() )
     {
-        std::printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[d.l1d] ) / inst : 0.0 );
+        report_printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[d.l1d] ) / inst : 0.0 );
     }
     if( d.brMpki() )
     {
-        std::printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[d.br] ) / inst : 0.0 );
+        report_printf( " %8.2f", inst > 0.0 ? 1000.0 * double( r.events[d.br] ) / inst : 0.0 );
     }
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
-    { char b[ 16 ]; fmt_count( b, sizeof( b ), r.events[ e ] ); std::printf( " %10s", b ); }
+    { char b[ 16 ]; fmt_count( b, sizeof( b ), r.events[ e ] ); report_printf( " %10s", b ); }
 #else
     ( void ) d;
 #endif
     char nameBuf[ 160 ]; char loc[ 64 ];
     name_and_loc( r, nameBuf, sizeof( nameBuf ), loc, sizeof( loc ) );
-    std::printf( "  %-40s %s\n", nameBuf, loc );
+    report_printf( "  %-40s %s\n", nameBuf, loc );
 }
 
 // Fenced, tab-separated, one-row-per-site block with RAW integer counters +
@@ -1054,54 +1074,54 @@ inline void print_agg_row( const Row& r, double nspt, double pctTotal, const Der
 // humanized table needed. Sentinels let a tool grab exactly this region.
 inline void print_tsv( const std::vector<Row>& agg, double nspt, const Derived& d )
 {
-    std::printf( "\n#PROF_TSV_BEGIN\tone row per scope, aggregated across threads; counters are RAW integers\n" );
-    std::printf( "scope\tfile\tline\tcalls\ttotal_ms" );
+    report_printf( "\n#PROF_TSV_BEGIN\tone row per scope, aggregated across threads; counters are RAW integers\n" );
+    report_printf( "scope\tfile\tline\tcalls\ttotal_ms" );
     if( d.ipc() )
     {
-        std::printf( "\tipc" );
+        report_printf( "\tipc" );
     }
     if( d.l1dMpki() )
     {
-        std::printf( "\tl1d_mpki" );
+        report_printf( "\tl1d_mpki" );
     }
     if( d.brMpki() )
     {
-        std::printf( "\tbr_mpki" );
+        report_printf( "\tbr_mpki" );
     }
     for( unsigned e = 0, n = events_shown(); e < n; ++e )
     {
-        std::printf( "\t%s", prof::pmc::event_name( e ) );
+        report_printf( "\t%s", prof::pmc::event_name( e ) );
     }
-    std::printf( "\n" );
+    report_printf( "\n" );
 
     for( const Row& r : agg )
     {
         char fn[ 96 ]; trim_pretty( r.site->pretty, fn, sizeof( fn ) );
         const char* scope = r.site->description ? r.site->description : fn;
-        std::printf( "%s\t%s\t%d\t%llu\t%.3f", scope, r.site->file, r.site->line,
+        report_printf( "%s\t%s\t%d\t%llu\t%.3f", scope, r.site->file, r.site->line,
                      (unsigned long long) r.calls, double( r.total ) * nspt * 1e-6 );
 #if PROFILE_PMC
         const double inst = ( d.inst >= 0 ) ? double( r.events[ d.inst ] ) : 0.0;
         if( d.ipc() )     { const double c = double( r.events[ d.cyc ] );
-                            std::printf( "\t%.3f", c > 0.0 ? inst / c : 0.0 ); }
+                            report_printf( "\t%.3f", c > 0.0 ? inst / c : 0.0 ); }
         if( d.l1dMpki() )
         {
-            std::printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[d.l1d] ) / inst : 0.0 );
+            report_printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[d.l1d] ) / inst : 0.0 );
         }
         if( d.brMpki() )
         {
-            std::printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[d.br] ) / inst : 0.0 );
+            report_printf( "\t%.3f", inst > 0.0 ? 1000.0 * double( r.events[d.br] ) / inst : 0.0 );
         }
         for( unsigned e = 0, n = events_shown(); e < n; ++e )
         {
-            std::printf( "\t%llu", (unsigned long long) r.events[ e ] );
+            report_printf( "\t%llu", (unsigned long long) r.events[ e ] );
         }
 #else
         ( void ) d;
 #endif
-        std::printf( "\n" );
+        report_printf( "\n" );
     }
-    std::printf( "#PROF_TSV_END\n" );
+    report_printf( "#PROF_TSV_END\n" );
 }
 
 }   // namespace detail
@@ -1139,31 +1159,31 @@ inline void report()
     const double   nspt = ns_per_tick();
     const uint64_t oh   = overhead_ticks();
 
-    std::printf( "\n================================ PROFILE REPORT ================================\n" );
-    std::printf( "clock %.3f MHz (%.3f ns/tick = counter resolution)   threads %zu\n",
+    report_printf( "\n================================ PROFILE REPORT ================================\n" );
+    report_printf( "clock %.3f MHz (%.3f ns/tick = counter resolution)   threads %zu\n",
                  double( tick_hz() ) * 1e-6, nspt, snaps.size() );
     if( oh )
     {
-        std::printf( "measurement overhead ~%.1f ns/scope (subtract from short scopes)\n", double( oh ) * nspt );
+        report_printf( "measurement overhead ~%.1f ns/scope (subtract from short scopes)\n", double( oh ) * nspt );
     }
     else
     {
-        std::printf( "measurement overhead below counter resolution (<= %.1f ns/scope)\n", nspt );
+        report_printf( "measurement overhead below counter resolution (<= %.1f ns/scope)\n", nspt );
     }
 
 #if PROFILE_PMC
     if( prof::pmc::active() )
     {
-        std::printf( "PMC (per-scope counters, inclusive totals): " );
+        report_printf( "PMC (per-scope counters, inclusive totals): " );
         for( unsigned e = 0, n = prof::pmc::event_count(); e < n; ++e )
         {
-            std::printf( "%s%s", e ? ", " : "", prof::pmc::event_name( e ) );
+            report_printf( "%s%s", e ? ", " : "", prof::pmc::event_name( e ) );
         }
-        std::printf( "\n" );
+        report_printf( "\n" );
     }
     else
     {
-        std::printf( "PMC: unavailable (run privileged for HW counters; -DPROFILE_PMC=0 to compile out)\n" );
+        report_printf( "PMC: unavailable (run privileged for HW counters; -DPROFILE_PMC=0 to compile out)\n" );
     }
 #endif
 
@@ -1190,9 +1210,9 @@ inline void report()
 
     const std::vector<Row> agg = aggregate_by_site( snaps );
 
-    std::printf( "\n-- hottest scopes (aggregated across %zu threads, by total) --------------------\n",
+    report_printf( "\n-- hottest scopes (aggregated across %zu threads, by total) --------------------\n",
                  snaps.size() );
-    std::printf( "( %%tot = share of total top-level CPU; counters are per-scope inclusive sums;"
+    report_printf( "( %%tot = share of total top-level CPU; counters are per-scope inclusive sums;"
                  " IPC = inst/cyc, MPKI = misses per 1k-inst )\n" );
     print_agg_header( der );
     for( const Row& r : agg )
@@ -1204,11 +1224,11 @@ inline void report()
     print_tsv( agg, nspt, der );   // fenced #PROF_TSV block — raw ints, for tooling
 
     // ---- per-thread call trees, siblings by total ----
-    std::printf( "\n( %%thread = share of this thread's top-level time;"
+    report_printf( "\n( %%thread = share of this thread's top-level time;"
                  "  * = scope also entered from another caller, time is summed across all )\n" );
     for( const ThreadSnap& s : snaps )
     {
-        std::printf( "\n-- thread %llu (%s)%s%s  --  call tree ----------------------------------\n",
+        report_printf( "\n-- thread %llu (%s)%s%s  --  call tree ----------------------------------\n",
                      (unsigned long long) s.tid,
                      s.name[ 0 ] ? s.name : "unnamed",
                      s.isMain  ? " [main]"    : "",
@@ -1254,7 +1274,7 @@ inline void report()
         }
     }
 
-    std::printf( "================================================================================\n\n" );
+    report_printf( "================================================================================\n\n" );
 }
 
 }   // namespace prof
