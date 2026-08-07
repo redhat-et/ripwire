@@ -909,3 +909,51 @@ snapshot sha256 `5bbcea4b…`, plus ripwire's rich indexes), `tools/` (aider-cha
 0.9.34, codebase-memory-mcp 0.9.0, repowise 0.37.0 venvs; codeseek 0.1.31 lives at `~/.codeseek`).
 `results/` is already committed to the repo. Recreating all of it is roughly an hour; keeping it makes
 the next round a single `bash r6_grid.sh`.
+
+## 2026-08-07 — language expansion: the next grammars, in order
+
+Sixteen grammars are vendored. The next additions are chosen by (audience for an agent-context
+tool) × (tree-sitter grammar quality) × (marginal effort given the resolver tiers already built) —
+and each full language costs more than its table row: a vendored grammar + `tags.scm`, a call-form
+resolution decision, doc-comment binding, test-path conventions, a kParserVer bump with its
+tripwires, and a shape-recall validation round on two real public repos. The Swift round's recorded
+lesson governs all of it: **predicted holes were wrong — probe first.** No effort estimate below is
+believed until a probe (vendor the grammar, crawl two real repos, count what extracts) has run.
+
+### Round L1 — Kotlin, plus the YAML/TOML config tier
+
+* **Kotlin** is the largest audience hole: Android plus modern JVM backend, heavy agent traffic,
+  and a real discount because Java's resolver conventions and test-path patterns mostly transfer.
+  Community grammar is mature. Gate: a `kotlincheck.sh` in the per-language gate family
+  (`metalcheck`/`cudacheck` pattern) plus shape-recall floors recorded in `docs/EVALS.md`.
+* **YAML + TOML as config-key documents** — deliberately *not* full languages. The JSON config-key
+  tier is the precedent, so this is close to free and may be the highest utility-per-effort item
+  on the whole plan: CI workflows, `pyproject.toml`, `Cargo.toml`, and k8s manifests become
+  indexable keys, improving every repo regardless of its code language. Gate: config-key recall
+  arms over committed fixtures; the JSON tier's gate is the template.
+
+### Round L2 — PHP
+
+Low prestige, large payoff: the volume of legacy WordPress/Laravel code agents get pointed at is
+enormous, and "map this unfamiliar repo" wins hardest exactly there. First-party grammar. Same
+gate + shape-recall + EVALS obligations as L1.
+
+### Round L3 — probe-gated candidates
+
+In descending order, each entering only if its probe clears: **Zig** (small audience, perfectly
+aligned with the systems crowd, C-like grammar, cheap), **Lua** (embedded scripting plus the
+Neovim plugin ecosystem, first-party grammar), **Scala** (completes the JVM story; the grammar is
+genuinely hard — implicits, symbolic operators — budget a full round, not a row).
+
+### Explicit non-goals, with reasons
+
+* **SQL** — belongs in the *document* tier beside Markdown/notebooks if anywhere; dialect
+  fragmentation makes call-graph-grade symbol extraction a swamp. Revisit only as a document kind.
+* **Dart/Flutter** — real audience, historically lagging community grammar; a probe must
+  overperform before it earns a round.
+* **Elixir / OCaml / Haskell** — passionate niches; each costs a full round for a small slice.
+  Deferred, not rejected.
+
+Every round ends the way the TS→JS→Python→Swift series ended: floors in `docs/EVALS.md` naming the
+instrument and corpora, a per-language gate in `test/regression.sh` in the same commit, and the
+README language line updated only when the gate is green.
