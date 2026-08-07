@@ -439,7 +439,7 @@ repository's own source, not a synthetic example:
 | **structural** | shape: complexity, size, nesting *and how much of the body is deep*, params, local-variable count — absolute bars, not a ranking | `--metrics` | `buildGraph` (`src/graph.h:462`): `ccx=698 loc=1244 nest=8 humps=30 deep=283 locals=114` — **114 local variables invisible to every quality lens until this session**, because naming/size analysis has always stopped at a function's signature; `locals=` is a disclosed floor (`locals_floor="1"`), threaded through the same walk that already computes `ccx`/`nest`, at zero extra parsing cost |
 | **lexical** | identifier text: the 10 `naming-*` lint rules (short, wordy, case-mixed, uninformative, …) | `--lint`, `--naming-consistency`, `--lint --naming-locals` | see below — the one family with a fix, not just evidence |
 | **confusion** | syntactic idiom: the 7 `atom-*` rules (implicit predicates, nested ternaries, embedded `++`/`--`, …) | `--lint` | corpus-wide finding counts, not a per-function claim to spotlight here |
-| **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
+| **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest. One caveat the panel's own legend states and this table must too: churn is measured **per file**, so every symbol in a file carries that file's `churn=`/`hrank=` verbatim — this family is file evidence *inherited* by the row, never the row's own history |
 | **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
 | **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
 
@@ -475,6 +475,16 @@ densest thing in the table. **This changes no ranking**: `humps > 0` is exactly 
 precisely when the `nest` bar already fired, so the family count and the panel's shortlist are untouched.
 It is strictly more evidence on rows that already appear — a reader can tell the two shapes apart without
 opening the file.
+
+The panel also carries **one join, and it is deliberately not a seventh family**: a row whose structural
+evidence includes `deep=` (a body that *sustains* depth at the nesting bar) and that no indexed test
+reaches is annotated `join="deep+untested"` — the pair where a refactor is most wanted and least safe,
+put side by side because both facts are already on the row. It changes nothing: not `fam=`, not `of=`,
+not the order, not which rows appear (counting it would be the structural family wearing a second hat).
+The root reports `tested_scope=` (symbols any indexed test reaches — the join's honest denominator) and
+`deep_untested=` (rows carrying the annotation across the whole row set); at `tested_scope="0"` no
+indexed test reaches *anything* here, so "untested" would be a fact about what was crawled rather than
+about the code, and the annotation is emitted on **no** row.
 
 </details>
 

@@ -389,6 +389,19 @@ inline std::string structuralBarEvidence( const Symbol& s )
         appendMeasurement( why, "humps", std::uint32_t( s.humps ) );
         appendMeasurement( why, "deep",  std::uint32_t( s.deepLoc ) );
     }
+    // Essential complexity, ANNOTATION-ONLY (the essential-complexity design note, §8). The humps line above
+    // rides free because humps>0 IS the nest bar; ev does NOT have that property — a small function with
+    // one break-under-an-if has ev>=2 and clears no bar — so an ungated append here would be a NEW firing
+    // case, which changes the panel's row set and fam= counts and owes a pre-registered calibration round
+    // (qualitypanel.h: "A NEW FAMILY EARNS ITS PLACE BEFORE IT IS ENABLED, NEVER AFTER"). Gating on the
+    // family having ALREADY fired (why non-empty) makes this strictly-more-evidence on rows that already
+    // appear; test/essentialcxcheck.sh arm 10 pins both halves (row set unchanged + this being the only
+    // read of Symbol::ev outside the emitters). Promotion to a firing signal is a separate change with a frozen
+    // PREREG under bench/ (§8.3), not an edit to this line.
+    if( const std::uint32_t evValue = std::uint32_t( s.ev ); !why.empty() && evCountedLang( s.lang ) && evValue > 1u )
+    {
+        appendMeasurement( why, "ev", evValue );
+    }
     return why;
 }
 

@@ -1087,6 +1087,31 @@ inline constexpr const char* kAtStampLegend =
 
 // §A9.6 — the churn-ranked map's own legend clause, emitted ONLY on that path. The v1 legend is a fixed
 // string every other run shares byte-for-byte, and a churn-only fact does not belong inside it.
+// The ev_why= value ("guard-return:2,loop-escape:1"): tags in kEvWhyTagTable's fixed declaration order,
+// only non-zero counts, comma-separated — one formatter shared by BOTH dialects so the XML and JSON
+// spellings can never drift (jsonparitycheck's standing posture). The charset is closed (tag literals,
+// ':', ',', digits), so the value needs no XML or JSON escaping. Composed on std::string, never through
+// a fixed char buffer — test/fixedbufsweep.sh's own rule for variable-length markup-bound text.
+inline std::string evWhyString( const Symbol& s )
+{
+    std::string why;
+    for( std::size_t tagIndex = 0; tagIndex < kEvWhyTagCount; ++tagIndex )
+    {
+        if( s.evWhy[ tagIndex ] == 0 )
+        {
+            continue;
+        }
+        if( !why.empty() )
+        {
+            why += ',';
+        }
+        why += kEvWhyTagTable[ tagIndex ];
+        why += ':';
+        why += std::to_string( unsigned( s.evWhy[ tagIndex ] ) );
+    }
+    return why;
+}
+
 inline constexpr const char* kChurnRankLegend =
     "<!-- rank_by=churn: k= is a git CHANGE-FREQUENCY prior over window=, not call-graph importance; "
     "the same corpus ranked by pagerank orders differently -->";
@@ -1112,10 +1137,14 @@ inline constexpr const char* kMetricsLegend =
     "(humps/deep are the PROFILE nest= cannot give: nest= is a max, so one deep line and a body that is deep "
     "throughout report the same number; deep/loc is the fraction. Both absent exactly when nest<bar — "
     "not-deep, never a hidden 0. deep counts LINES and humps counts REGIONS, and two regions can share a "
-    "line, so deep BELOW humps is legal: two one-line sibling regions at the bar are 2 regions on 1 line) "
+    "line, so deep BELOW humps is legal: a one-line if/else at the bar is 2 regions on 1 line) "
     "locals=local-var-decl-count(floor,C/C++-only,see locals_floor) "
     "ppalt=preproc-alternative-branches-in-body(#else/#elif; metrics sum ALL branches, no single build "
-    "compiles them all) cbo=coupling lcom4=cohesion "
+    "compiles them all) "
+    "ev=essential-cx(McCabe: 1=fully structured, 2+=jumps block extract-method; absent on a cx row means "
+    "exactly 1; floor per ev_floor — noreturn calls/macro-hidden exits unseen; not counted: &&/||, Rust ? "
+    "and yield/await/defer, hence Bash carries no ev) ev_why=which-jumps-raised-it tag:count "
+    "cbo=coupling lcom4=cohesion "
     "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
     "call|read|write|import|extends). Absent=N/A, never 0. -->";
 
@@ -1621,17 +1650,33 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
 
             char attr[ 320 ];   // descriptive metric attrs (fan-in/out/cx/role/amb + Q-compute qbuf) — facts, never
                                 // gates. The name quote + id= are already written above; this opens with a space.
+                                // The closing '>' is written separately below so the ev run — composed on
+                                // std::string, never a fixed char buffer (fixedbufsweep's own rule: ev_why= is
+                                // variable-length text) — can sit inside the element.
             if( metrics && fanIn )
             {
                 const std::uint32_t in = ( id < fanIn->size() ) ? (*fanIn)[id] : 0u;
-                std::snprintf( attr, sizeof( attr ), " in=\"%u\" out=\"%u\" cx=\"%u\" ccx=\"%u\"%s%s%s%s>",
+                std::snprintf( attr, sizeof( attr ), " in=\"%u\" out=\"%u\" cx=\"%u\" ccx=\"%u\"%s%s%s%s",
                                in, out, s.cx, s.ccx, ( in >= 8 ? " role=\"hub\"" : "" ), qbuf, ambs, kbuf );
             }
             else
             {
-                std::snprintf( attr, sizeof( attr ), "%s%s>", ambs, kbuf );
+                std::snprintf( attr, sizeof( attr ), "%s%s", ambs, kbuf );
             }
             w.write( attr );
+            // Essential complexity (model.h Symbol::ev), --metrics only. Emitted iff ev >= 2: ev >= 1 for any
+            // walked fn/method body, so on a row carrying cx= ABSENT means exactly ev == 1 — lossless in the
+            // strictest sense, and never a bare ev="1" (G4 + the honesty contract point the same way). Routed
+            // through evCountedLang so an uncovered language (Bash) reads as "not counted", never "counted, 1".
+            // ev_floor="1" always rides along: noreturn calls, macro-hidden returns and unresolvable gotos are
+            // invisible to the syntactic walk and can only RAISE the true value. ev_why= is the reason
+            // breakdown that keeps §10.1-Option-A honest (a guard-heavy row is visibly not a knot).
+            if( metrics && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && evCountedLang( s.lang ) && s.ev >= 2u )
+            {
+                std::string evRun = " ev=\"" + std::to_string( s.ev ) + "\" ev_floor=\"1\" ev_why=\"" + evWhyString( s ) + "\"";
+                w.write( evRun );
+            }
+            w.write( ">" );
 
             for( std::uint32_t e = outOff[id]; e < outOff[id + 1]; ++e )
             {
@@ -4595,6 +4640,18 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
         {
             std::snprintf( num, sizeof( num ), ",\"humps\":%u,\"deep\":%u,\"deep_floor\":true", unsigned( s.humps ), unsigned( s.deepLoc ) );
             w.write( num );
+        }
+        // The JSON sibling of the XML ev=/ev_floor=/ev_why= triple — same omission rule (absent means
+        // exactly 1 on a cx row; evCountedLang keeps an uncovered language absent, never a fabricated
+        // number), floor spelled as JSON true like deep_floor/locals_floor. Composed on std::string via
+        // the shared evWhyString formatter — no fixed buffer and no new format call for fixedbufsweep to classify.
+        if( evCountedLang( s.lang ) && s.ev >= 2u )
+        {
+            w.write( ",\"ev\":" );
+            w.write( std::to_string( s.ev ) );
+            w.write( ",\"ev_floor\":true,\"ev_why\":\"" );
+            w.write( evWhyString( s ) );
+            w.write( "\"" );
         }
     }
     if( q.cbo && q.id < q.cbo->size() ) { std::snprintf( num, sizeof( num ), ",\"cbo\":%u", (*q.cbo)[q.id] );  w.write( num ); }
