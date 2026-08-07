@@ -999,9 +999,16 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 43;           // bump on any grammar/.scm/extraction change
-                                                      // 43: nestcal r1 — else/elif clause bodies no longer
-                                                      //    double-deepen; nest/humps/deep/ccx values shift
+constexpr std::uint32_t kParserVer    = 44;           // bump on any grammar/.scm/extraction change
+                                                      // 44: the merge of TWO independent 43s, so neither 43's
+                                                      //    caches may be served. One 43 was nestcal r1 (else/elif
+                                                      //    clause bodies no longer double-deepen — no per-child
+                                                      //    maxNest bump or hump minting; nest/humps/deep/ccx
+                                                      //    values shift). The other 43 fixed deepLoc's clamp
+                                                      //    order for else-clause regions (cc_noteElseRegions,
+                                                      //    forward pass); r1's removal of clause noting subsumes
+                                                      //    it — every surviving cc_noteHump site notes one node
+                                                      //    pre-descent, so document order holds by construction.
                                                       // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
                                                       //    evening): RawDef/Symbol gained a `locals` uint32_t
                                                       //    FLOOR field, populated inside the existing fused cc_walk

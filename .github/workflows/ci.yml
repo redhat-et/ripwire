@@ -9,6 +9,10 @@ name: CI
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
 #                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
 #                    uses on the (Apple Silicon) dev machines this repo is normally built on.
+#   - rhel job:      the platform this project ships a Linux prebuilt for, checked at PR time instead of only
+#                    at release. RHEL 9 userland (ubi9) via `container:` on a hosted Ubuntu runner, built with
+#                    Red Hat's own gcc-toolset (RHEL 9's default gcc 11 cannot do C++23). Build + fixture
+#                    self-run + the two headline guarantees, NOT the full suite — see the job comment for why.
 #   - asan job:      configure -DRIPWIRE_ASAN=ON (G1: address,undefined,integer,float-divide-by-zero,
 #                    float-cast-overflow, fail-fast) + build + the fixture self-run + the 5 heaviest verbs
 #                    (--pack-task/--from-trace/--quality-delta/--merge-scout/--edit-check)
@@ -188,6 +192,86 @@ jobs:
       # other's critical path.
       - name: "gate suite, parallel (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
         run: python3 test/pargates.py . build/ripwire -j 3
+
+      - name: det-gate — 2-run byte-identical diff
+        run: |
+          ./build/ripwire test/fixture --no-cache >/tmp/run_a.xml
+          ./build/ripwire test/fixture --no-cache >/tmp/run_b.xml
+          diff -q /tmp/run_a.xml /tmp/run_b.xml
+
+      - name: G4 — xmllint --noout
+        run: ./build/ripwire test/fixture --no-cache | xmllint --noout -
+
+  # ─── rhel: the platform this project actually ships a prebuilt for, checked at PR time ───────────────
+  #
+  # GitHub hosts no RHEL runner image, but a job can run inside RHEL userland ON a hosted Ubuntu runner via
+  # `container:`. UBI (Universal Base Image) pulls from registry.access.redhat.com with no subscription,
+  # which is what makes this work on public CI — release.yml's `smoke-rhel` job already relies on it.
+  #
+  # WHY IT IS WORTH A LEG. release.yml builds the Linux artifact in a manylinux_2_28 container and smoke-runs
+  # it on ubi9 precisely because a binary built on stock ubuntu-24.04 needs GLIBCXX_3.4.31 and DIES on RHEL 9
+  # (verified, and recorded in that workflow's own comment). But that check only runs when a release is cut:
+  # every ordinary PR was tested on glibc 2.39 Ubuntu and macOS only, so a RHEL-incompatible change stayed
+  # invisible until publish time. This leg moves that signal to the pull request.
+  #
+  # SCOPE, STATED HONESTLY. It builds and runs the two headline product guarantees (determinism, well-formed
+  # XML) plus the fixture self-run — NOT the 361-gate suite. That is deliberate, not laziness: the suite needs
+  # ripgrep, which is not in the RHEL repositories (it lives in EPEL), and the RHEL-specific signal here is
+  # "does this toolchain compile it and does this userland run it", which the ubuntu legs cannot give and
+  # which these steps do give. The full suite stays on the four ubuntu legs and the two macOS ones.
+  rhel:
+    name: rhel (ubi9, ${{ matrix.flavor }})
+    runs-on: ubuntu-24.04
+    container: registry.access.redhat.com/ubi9/ubi
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [Release, plain]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # RHEL 9's default gcc is 11, which does not implement C++23 — CMakeLists sets CXX_STANDARD 23 with
+      # STANDARD_REQUIRED ON, so the configure would fail outright. gcc-toolset-N is Red Hat's own supported
+      # answer (a parallel-installable newer GCC in /opt/rh). Probe newest-first rather than pinning one
+      # version: which toolsets a given UBI9 AppStream carries changes over the RHEL 9.x lifecycle, and a
+      # hard pin turns a routine repo refresh into a red leg. Whichever is found is ECHOED, so the log always
+      # records which compiler actually built this leg rather than leaving it to be inferred.
+      - name: Install the RHEL build toolchain
+        run: |
+          set -eu
+          dnf install -y cmake git libxml2 python3 make diffutils findutils
+          found=""
+          for v in 14 13 12; do
+            if dnf install -y "gcc-toolset-$v-gcc-c++"; then
+              found="$v"
+              break
+            fi
+          done
+          [ -n "$found" ] || { echo "no gcc-toolset-{14,13,12} in this UBI9 AppStream — C++23 is not buildable here"; exit 1; }
+          echo "TOOLSET=$found" >> "$GITHUB_ENV"
+
+      - name: Record the toolchain this leg is using
+        run: |
+          echo "gcc-toolset-$TOOLSET"
+          "/opt/rh/gcc-toolset-$TOOLSET/root/usr/bin/g++" --version
+          cmake --version | head -1
+          cat /etc/redhat-release
+
+      # CC/CXX point straight at the toolset's binaries rather than `source .../enable`, because every `run:`
+      # step is its own shell — a sourced environment would not survive to the next step.
+      - name: Configure (portable — no RIPWIRE_NATIVE; empty build type = the plain flavour)
+        env:
+          CC:  /opt/rh/gcc-toolset-${{ env.TOOLSET }}/root/usr/bin/gcc
+          CXX: /opt/rh/gcc-toolset-${{ env.TOOLSET }}/root/usr/bin/g++
+        run: cmake -S . -B build ${{ matrix.flavor == 'Release' && '-DCMAKE_BUILD_TYPE=Release' || '' }}
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Self-run on the fixture (it parses and ranks under RHEL userland)
+        run: ./build/ripwire test/fixture --no-cache | head -c 400; echo
 
       - name: det-gate — 2-run byte-identical diff
         run: |

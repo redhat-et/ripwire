@@ -91,3 +91,35 @@ average 72), and the arm fails for ANY binary under that. The controlled evidenc
 quiet-machine run — base 80/81 ms vs post 83/94 ms, both PASS — plus a final quiet-machine pass
 recorded below it. Determinism (`diff` two runs) and `xmllint --noout` green; ASan
 (`address,undefined,integer,float-*`, `-fno-sanitize-recover=all`) clean over fixtures and `src/`.
+
+## Addendum — the same-day cross-merge, and the third hypothesis
+
+After this round closed, `feat/nest-profile` advanced in a parallel session with a rewritten history
+carrying its own `kParserVer` 43: a `deep=` clamp-order fix (`cc_noteElseRegions`, a forward pass
+over else-clause children) plus gate arm 11, whose fixtures pinned an else branch at the bar as TWO
+regions (`elseBranchAtBar humps=2` — literally the anonymous `else` token and its block counted
+separately). That session also flagged a "third quirk": comments and `:` tokens inside a clause each
+minting a hump.
+
+Dispositions, applying this round's accepted semantics:
+
+- **The "third quirk" is subsumed, not new.** It is this round's defect (b) — per-child hump
+  minting — which the accepted fix removes wholesale. The prereg's diagnosis already named comment
+  extras explicitly.
+- **The clamp-order fix is subsumed too.** Its own comment notes the clause was "the only call site
+  out of order"; this round deleted clause noting entirely, so every surviving `cc_noteHump` site
+  notes one node before descending and document order holds by construction. `cc_noteElseRegions`
+  arrived dead at the merge and was removed.
+- **Arm 11's contract survives; its fixtures were quirk-bound.** Both else fixtures crossed the bar
+  only via the phantom clause `+1`, and their `humps=2` was the token+block minting. The arm's two
+  real assertions — distinct-line regions are each billed (clamp order), same-line regions bill once
+  (`deep < humps` is legal) — are re-instantiated with sibling-hump fixtures
+  (`siblingHumpsDistinctLines` humps=2 deep=5, `siblingHumpsOneLine` humps=2 deep=1, both verified
+  exact) plus the unchanged `broadShallowSwitch` negative control.
+- **`kParserVer` goes to 44 at the merge**: two *different* 43-extractions existed in the two
+  parents, so neither's caches may be served under the merged binary.
+- **All r1 measurements remain valid for the merged binary**: its extraction is identity-checked
+  against this round's post binary (`buildGraph nest=8 humps=30 deep=283 ccx=698`, matching
+  `post-ripwire-src.tsv` row for row), and `test/nestprofilecheck.sh` passes in full, arm 11
+  included. README's recorded panel block was regenerated (`ccx=724 nest=9 deep=306/308` →
+  `ccx=698 nest=8 deep=283`).

@@ -10,6 +10,7 @@ before you approve it. Read the plan, cut what you disagree with, then say go.
 | Prompt | Who it is for | What it produces |
 | --- | --- | --- |
 | [`improve-for-my-language.md`](improve-for-my-language.md) | Anyone using ripwire on a language it serves unevenly | Transcript-grounded gaps for one language — grammar coverage, symbol kinds, ranking, legends — as an ordered plan with measurable gates. |
+| [`improve-quality-panel.md`](improve-quality-panel.md) | Anyone whose panel shortlist they can judge — run it from your OWN codebase | Per-family agreement verdicts from blind reads of real functions, misses diagnosed by pipeline stage, and an ordered plan in which any ranking change owes a pre-registered calibration round. |
 | [`full-audit.md`](full-audit.md) | A maintainer, or anyone deciding whether to trust the tool | A severity-ranked audit across bugs, measured performance, verb-to-moment matching, token efficiency, and an ecosystem scan of papers and repos with real momentum. |
 | [`dogfood-gaps.md`](dogfood-gaps.md) | Anyone who wants findings instead of opinions | A real task done using only ripwire for navigation, with every fallback to grep or a whole-file read logged as a product gap at the moment it happened. |
 | [`capture-audit.md`](capture-audit.md) | Anyone checking whether the output is honest | A fresh showcase capture read by parallel adversarial lenses, and the findings turned into family-wide gates. |
