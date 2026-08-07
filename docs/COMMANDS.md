@@ -1104,13 +1104,13 @@ _Fan-in/out + complexity annotations on the map._
 ```
 $ ./build/ripwire . --metrics --top-k=10
 <!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->
-<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=depth cbo=coupling lcom4=cohesion amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role call|read|write|import|extends). Absent=N/A, never 0. -->
+<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) (humps/deep are the PROFILE nest= cannot give: nest= is a max, so one deep line and a body that is deep throughout report the same number; deep/loc is the fraction. Both absent exactly when nest<bar — not-deep, never a hidden 0. deep counts LINES and humps counts REGIONS, and two regions can share a line, so deep BELOW humps is legal: a one-line if/else at the bar is 2 regions on 1 line) locals=local-var-decl-count(floor,C/C++-only,see locals_floor) ev=essential-cx(McCabe: 1=fully structured, 2+=jumps block extract-method; absent on a cx row means exactly 1; floor per ev_floor — noreturn calls/macro-hidden exits unseen; not counted: &&/||, Rust ? and yield/await/defer, hence Bash carries no ev) ev_why=which-jumps-raised-it tag:count cbo=coupling lcom4=cohesion amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role call|read|write|import|extends). Absent=N/A, never 0. -->
 <!-- files=850 symbols=6432 edges=8737 shown=10 est_tokens=1020 ambiguous=2631 unresolved=662 precise=3 skipped_oversize=3 order=important-first -->
 <r est_tokens="1020">
 <f p="./src/svector.h">
 <s t="method" n="size" id="./src/svector.h::svector::size" in="796" out="0" cx="1" ccx="0" role="hub" loc="1" params="0" nest="0" cbo="0" amp="796" tested="1" k="0.0503">
 </s>
-<s t="method" n="push_back" id="./src/svector.h::svector::push_back" in="367" out="3" cx="2" ccx="1" role="hub" loc="1" params="1" nest="1" cbo="3" amp="367" tested="1" amb="2" k="0.0133">
+<s t="method" n="push_back" id="./src/svector.h::svector::push_back" in="367" out="3" cx="2" ccx="1" role="hub" loc="1" params="1" nest="1" locals="1" locals_floor="1" cbo="3" amp="367" tested="1" amb="2" k="0.0133" ev="2" ev_floor="1" ev_why="guard-return:1">
 <c n="buf"/>
 <c n="buf"/>
 <c n="grow"/>
@@ -1127,6 +1127,7 @@ $ ./build/ripwire . --metrics --top-k=10
 - also surfaces amp= (--metrics/--for/--exemplar): amp = |direct callers| (symbol-level, the in-edge CSR) + |co-change partners of the symbol's FILE| (file-level, mined from git history) — a deliberate GRANULARITY MIX, not a graph-only count;
 - degrades to callers-only (still valid) when git/history is unavailable.
 - amp= is DIRECT callers plus a historical co-edit signal the call graph cannot see at all — the two numbers on the same symbol routinely differ several-fold (one seen case: 4.6x apart) because they measure different things, not because one is wrong
+- ev= is essential complexity (McCabe): 1 (spelled as ABSENCE on any row that carries cx=) means every region is single-entry/single-exit so extract-method applies mechanically anywhere; 2+ means some jump gives a region a second exit and extracting it is a rewrite. A FLOOR (ev_floor="1"): noreturn calls, macro-hidden returns and unresolvable gotos are invisible to the syntactic walk and can only raise the true value. ev_why= breaks the number down by jump shape (guard-return, loop-escape, switch-escape, goto, labelled-jump, back-edge, fallthrough, multi-entry) so a guard-heavy row is visibly not a knot. Strict single-exit McCabe counts guard clauses — subtract the guard-return share if you disagree with 1976.
 
 ### `--deps`
 
