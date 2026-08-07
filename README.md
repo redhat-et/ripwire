@@ -6,7 +6,7 @@
 [![Standard](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](CONTRIBUTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
 
-# Ripwire: Rip'n Fast. Less Tokens. Better Code.
+# Rip'n Fast. Less Tokens. Better Code.
 
 ## Give your coding agent a map before it reads the repo.
 
