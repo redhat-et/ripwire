@@ -130,7 +130,7 @@ inline const char* refRoleTag( RefRole r ) noexcept
     }
 }
 
-// Essential-complexity ev_why= reason vocabulary (DESIGN_ESSENTIAL_COMPLEXITY.md §5.1). PUBLIC the
+// Essential-complexity ev_why= reason vocabulary (the essential-complexity design note, §5.1). PUBLIC the
 // moment it ships (test/attrvocabcheck.sh's standing posture; test/essentialcxcheck.sh pins the spellings):
 // adding a tag later is a compatible extension, renaming one is not. Declaration order MUST track the
 // EvWhyTag indices ingest.cpp writes — the table is the single source both emitters read.
@@ -205,7 +205,7 @@ struct Symbol
     // ESSENTIAL COMPLEXITY ev(G) (McCabe 1976; NIST SP 500-235) — what remains after every structured
     // region collapses. Computed SYNTACTICALLY inside the same fused cc_walk DFS (single-entry is
     // guaranteed by the grammar; only single-EXIT can fail, via jump nodes), per
-    // DESIGN_ESSENTIAL_COMPLEXITY.md §2: a jump marks irreducible every construct strictly between it
+    // the essential-complexity design note §2: a jump marks irreducible every construct strictly between it
     // and its target, irreducibility propagates outward to the function root (stopping at closure/
     // nested-fn boundaries), and a marked switch head contributes every arm. ev = 1 + Σ marked
     // constructs' own cx decision weights, so ev <= cx is STRUCTURAL, not hoped for. 1 = fully
@@ -281,7 +281,7 @@ inline bool localsCountedLang( Lang lang ) noexcept
 }
 
 // Essential-complexity coverage: 15 of 16 languages — every code language EXCEPT Bash
-// (DESIGN_ESSENTIAL_COMPLEXITY.md §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
+// (the essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
 // `trap` are process-level, and function boundaries are weak — not worth a wrong number). Markdown/Json/
 // Unknown never carry a cx row, so listing them here would be vacuous either way. ANY consumer asking
 // whether Symbol::ev/evWhy can be trusted for a def — serialize.h's two emitters, ensemble.h's

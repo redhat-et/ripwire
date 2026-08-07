@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # essentialcxcheck.sh — McCabe ESSENTIAL COMPLEXITY ev(G): what remains after every structured region
-# collapses. DESIGN_ESSENTIAL_COMPLEXITY.md is the contract; this gate was written FIRST and confirmed
+# collapses. The essential-complexity design note (untracked, like the readability-metrics note ensemble.h cites) is the contract; this gate was written FIRST and confirmed
 # RED against the pre-feature binary (non-negotiable #1).
 #
 # WHY THIS EXISTS. cx/ccx/loc/nest all measure HOW MUCH structure there is; ev= measures whether the

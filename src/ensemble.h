@@ -389,7 +389,7 @@ inline std::string structuralBarEvidence( const Symbol& s )
         appendMeasurement( why, "humps", std::uint32_t( s.humps ) );
         appendMeasurement( why, "deep",  std::uint32_t( s.deepLoc ) );
     }
-    // Essential complexity, ANNOTATION-ONLY (DESIGN_ESSENTIAL_COMPLEXITY.md §8). The humps line above
+    // Essential complexity, ANNOTATION-ONLY (the essential-complexity design note, §8). The humps line above
     // rides free because humps>0 IS the nest bar; ev does NOT have that property — a small function with
     // one break-under-an-if has ev>=2 and clears no bar — so an ungated append here would be a NEW firing
     // case, which changes the panel's row set and fam= counts and owes a pre-registered calibration round

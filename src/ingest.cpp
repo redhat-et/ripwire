@@ -1002,7 +1002,7 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 45;           // bump on any grammar/.scm/extraction change
-                                                      // 45: essential complexity (DESIGN_ESSENTIAL_COMPLEXITY.md).
+                                                      // 45: essential complexity (the essential-complexity design note).
                                                       //    45 and not 44: the nesting-quirk round on a sibling
                                                       //    branch independently took 44 for the else-clause hump
                                                       //    rewrite; two independent 44s would cross-hit caches at
@@ -2258,7 +2258,7 @@ inline void cc_noteElseRegions( const std::vector<TSNode>& kids, std::uint32_t n
     }
 }
 
-// ═══ essential complexity ev(G) — the syntactic single-exit reduction (DESIGN_ESSENTIAL_COMPLEXITY.md) ═══
+// ═══ essential complexity ev(G) — the syntactic single-exit reduction (the essential-complexity design note) ═══
 //
 // THE RULE (§2.2, reference-verified — see test/essentialcxcheck.sh's reconciliation header): a jump marks
 // irreducible every control construct STRICTLY BETWEEN it and its target construct; irreducibility then
