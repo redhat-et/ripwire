@@ -14,8 +14,8 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
-**Languages:** C · C++ · Objective-C/C++ · Metal · CUDA · Python · TypeScript · JavaScript · Java ·
-Ruby · Bash · Go · Rust · Swift · C# · JSON — [sixteen vendored grammars](#languages), and adding
+**Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
+JavaScript · Java · Ruby · Bash · C# · JSON — [sixteen vendored grammars](#languages), and adding
 another is a vendored tree-sitter grammar plus one row in a declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
