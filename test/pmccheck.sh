@@ -61,6 +61,41 @@ if grep -q 'PROFILE REPORT\|PROF_TSV' "$WORK/out.log"; then
 fi
 echo "  PASS  report stream (report on stderr, stdout clean of it)"
 
+# ── legend honesty: the aggregated-view legend describes only columns this tier actually printed ────────
+# The armed-event set is read back from the report's own PMC banner, so the expectation follows whatever
+# tier this machine hit: hardware (cycles+instructions armed) earns the IPC/MPKI derivations, the
+# software tier (task-clock/page-faults only) earns the counter-sums note but neither ratio, and a
+# timing-only degrade mentions no counters at all.
+LEGEND="$( grep -F '%tot = share of total top-level CPU' "$WORK/err.log" )"
+if [ -z "$LEGEND" ]; then
+    echo "  FAIL  legend honesty (aggregated-view legend line missing from the report)"
+    exit 2
+fi
+ARMED="$( sed -n 's/^PMC (per-scope counters, inclusive totals): //p' "$WORK/err.log" )"
+if [ "$STATE" = "ACTIVE" ] && [ -z "$ARMED" ]; then
+    echo "  FAIL  legend honesty (ACTIVE arm but the PMC banner names no events — nothing to check against)"
+    exit 2
+fi
+armedHas() { printf '%s\n' "$ARMED" | tr ',' '\n' | tr -d ' ' | grep -qx "$1"; }
+
+WANT_COUNTERS=no; WANT_IPC=no; WANT_MPKI=no
+if [ -n "$ARMED" ]; then WANT_COUNTERS=yes; fi
+if armedHas cycles && armedHas instructions; then WANT_IPC=yes; fi
+if armedHas instructions && { armedHas l1d-cache-misses || armedHas branch-misses; }; then WANT_MPKI=yes; fi
+
+HAS_COUNTERS=no; HAS_IPC=no; HAS_MPKI=no
+case "$LEGEND" in *'counters are per-scope inclusive sums'* ) HAS_COUNTERS=yes;; esac
+case "$LEGEND" in *'IPC ='*  ) HAS_IPC=yes;;  esac
+case "$LEGEND" in *'MPKI ='* ) HAS_MPKI=yes;; esac
+
+if [ "$WANT_COUNTERS" != "$HAS_COUNTERS" ] || [ "$WANT_IPC" != "$HAS_IPC" ] || [ "$WANT_MPKI" != "$HAS_MPKI" ]; then
+    echo "  FAIL  legend honesty (armed [${ARMED:-none}] wants counters=$WANT_COUNTERS IPC=$WANT_IPC MPKI=$WANT_MPKI;"
+    echo "        legend says counters=$HAS_COUNTERS IPC=$HAS_IPC MPKI=$HAS_MPKI):"
+    echo "    $LEGEND"
+    exit 2
+fi
+echo "  PASS  legend honesty (counters=$WANT_COUNTERS IPC=$WANT_IPC MPKI=$WANT_MPKI matches the armed tier: ${ARMED:-timing-only})"
+
 # ── quiet-degrade: an INACTIVE run writes NOTHING to stderr before the report (no arming spam) ──────────
 if [ "$STATE" = "INACTIVE" ]; then
     sed -n '/PROFILE REPORT/q;p' "$WORK/err.log" > "$WORK/prelude.log"
