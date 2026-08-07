@@ -290,8 +290,9 @@ breakdown, real numbers per family → [The quality panel](#the-quality-panel) b
 Full retrieval tables — including the MRR figures behind the router numbers above — in
 [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md) and [Measured](#measured).
 
-[What it answers](#what-it-answers) · [The quality panel](#the-quality-panel) ·
-[Quickstart](#quickstart) · [Benchmarks](#measured) · [Honesty contract](#the-honesty-contract) ·
+[What it answers](#what-it-answers) · [Quickstart](#quickstart) ·
+[The quality panel](#the-quality-panel) · [Benchmarks](#measured) ·
+[Honesty contract](#the-honesty-contract) ·
 [Agent setup](#set-it-up-in-your-coding-agent) · [Docs](#documentation) ·
 [Slides](present/ripwire-showcase.pdf)
 
@@ -319,6 +320,74 @@ Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error 
 `--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
 incompatible), `--merge-scout=REF1,REF2` before landing parallel branches, and `--pack-task="…"` for
 ranking, bodies, callers and tests in one budgeted bundle.
+
+---
+
+## Quickstart
+
+**Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
+every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
+[GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
+to `~/.local/bin`:
+
+```bash
+RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+```
+
+**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
+tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
+so there is no download step and no package manager to satisfy. Prove that with the network off:
+add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
+
+Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
+Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+
+```bash
+git clone https://github.com/redhat-et/ripwire.git
+cd ripwire
+cmake -S . -B build && cmake --build build -j
+./build/ripwire .          # the ranked map — start here on an unfamiliar repo
+```
+
+To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
+present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
+
+Wiring it into your agent takes one more minute — `wrap` **prints** the recipe for your client, it
+never edits your config:
+
+```bash
+ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
+ripwire wrap --all              # detect every installed agent, print each one's recipe
+skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
+```
+
+The CLI is the recommended baseline because it works in every shell-capable agent; the MCP server is
+optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
+all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
+
+Four commands worth learning first:
+
+```bash
+ripwire .                                          # the ranked map — start here
+ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
+ripwire . --callers=someFunction                   # who calls it
+ripwire . --test-gate                              # before you commit: which tests must run
+```
+
+> **Do not** configure a local tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`,
+> which compiles the degrade-path alerts out and blinds the gates that assert them. CI builds both
+> flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+**The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
+floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
+contract, gated on every pull request and every push to main, not a tendency.
+[The full discipline — and the losses published next to the wins →](#the-honesty-contract)
+
+<!-- The name is the design: rip-grep for the retrieval half — a zero-runtime-dependency C++23
+     binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
+     graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
+     stdout — and trip-wire for the honesty half. -->
 
 ---
 
@@ -401,74 +470,6 @@ rather than blurring it:
 Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
 flagged this repository's best-named functions, kept as the standing argument for measuring before
 shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
-
----
-
-## Quickstart
-
-**Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
-every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
-[GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
-to `~/.local/bin`:
-
-```bash
-RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
-```
-
-**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
-tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
-so there is no download step and no package manager to satisfy. Prove that with the network off:
-add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
-
-Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
-Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
-
-```bash
-git clone https://github.com/redhat-et/ripwire.git
-cd ripwire
-cmake -S . -B build && cmake --build build -j
-./build/ripwire .          # the ranked map — start here on an unfamiliar repo
-```
-
-To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
-present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
-
-Wiring it into your agent takes one more minute — `wrap` **prints** the recipe for your client, it
-never edits your config:
-
-```bash
-ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
-ripwire wrap --all              # detect every installed agent, print each one's recipe
-skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
-```
-
-The CLI is the recommended baseline because it works in every shell-capable agent; the MCP server is
-optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
-all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
-
-Four commands worth learning first:
-
-```bash
-ripwire .                                          # the ranked map — start here
-ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
-ripwire . --callers=someFunction                   # who calls it
-ripwire . --test-gate                              # before you commit: which tests must run
-```
-
-> **Do not** configure a local tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`,
-> which compiles the degrade-path alerts out and blinds the gates that assert them. CI builds both
-> flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-**The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
-floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
-exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
-contract, gated on every pull request and every push to main, not a tendency.
-[The full discipline — and the losses published next to the wins →](#the-honesty-contract)
-
-<!-- The name is the design: rip-grep for the retrieval half — a zero-runtime-dependency C++23
-     binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
-     graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
-     stdout — and trip-wire for the honesty half. -->
 
 ---
 
