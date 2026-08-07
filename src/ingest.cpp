@@ -999,7 +999,15 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 42;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 43;           // bump on any grammar/.scm/extraction change
+                                                      // 43: deepLoc line accounting fixed in cc_walk's else/elif
+                                                      //    clause — the hump PROFILE pass now runs forward
+                                                      //    (document order) instead of inside the backwards PUSH
+                                                      //    loop, so the `else` token's own line is no longer
+                                                      //    clamped away behind its block's high-water end. deep=
+                                                      //    VALUES move on else-at-the-bar shapes, so caches
+                                                      //    written by 42 hold numbers this build would not
+                                                      //    produce and must be rejected.
                                                       // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
                                                       //    evening): RawDef/Symbol gained a `locals` uint32_t
                                                       //    FLOOR field, populated inside the existing fused cc_walk
@@ -2190,6 +2198,40 @@ inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNe
     }
 }
 
+// The regions an else / elif / elsif clause contributes, noted in DOCUMENT order — and the order is the
+// whole reason this is its own function rather than three lines inside the clause's push loop.
+//
+// cc_noteHump carries ONE high-water end row so that two regions overlapping on a line cannot bill it
+// twice. That clamp is only correct when it is fed regions in document order: fed a later region first, it
+// swallows the earlier one whole. This clause used to note its kids INSIDE the push loop, which runs
+// BACKWARDS (children go onto a stack, so the last pushed pops first) — so the clause's BODY was billed
+// before the `else` token on the line above it, and the token's line, already behind the high-water end,
+// was clamped to nothing. Two regions, two DISTINCT lines, one line billed. Every other cc_noteHump call
+// site notes exactly one node before descending; this clause is the only one that walks its own children,
+// and so was the only one out of order.
+//
+// maxNest is a max and cyclo is a sum, so neither cares about order — only deepLoc does. Same regions and
+// the same hump COUNT as before; only the sequence they are reported in changed. (Two regions that share a
+// line still collapse to one line, correctly: deepLoc counts LINES, so a one-line `if(c){x;}else{y;}` at
+// the bar is two regions on one line and `deep < humps` there is the honest answer — model.h says so, and
+// test/nestprofilecheck.sh arm 11 pins both halves.)
+inline void cc_noteElseRegions( const std::vector<TSNode>& kids, std::uint32_t nesting, CcAccum& acc ) noexcept
+{
+    for( const TSNode c : kids )
+    {
+        const char* ct = ts_node_type( c );
+        if( std::strcmp( ct, "if_statement" ) == 0 || std::strcmp( ct, "if_expression" ) == 0 )
+        {
+            continue;   // C-family `else if`: not a region of its own — cc_walk descends into its children
+        }
+        if( nesting + 1 > acc.maxNest )
+        {
+            acc.maxNest = nesting + 1;   // Q4: else/elif body deepens by one
+        }
+        cc_noteHump( c, nesting, nesting + 1, acc );
+    }
+}
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
 inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, CcAccum& acc, int startDepth,
@@ -2280,6 +2322,8 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         {
             acc.cog += 1u;
             collectChildren( n, cursor.cur, kids );
+            cc_noteElseRegions( kids, nesting, acc );   // the PROFILE pass, FORWARD — read its note, the order is the point
+            // The PUSH pass, backwards, so pops preserve left-to-right visit order — unchanged.
             for( std::size_t i = kids.size(); i > 0; --i )
             {
                 const TSNode c  = kids[ i - 1 ];
@@ -2297,11 +2341,6 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 }
                 else
                 {
-                    if( nesting + 1 > acc.maxNest )
-                    {
-                        acc.maxNest = nesting + 1; // Q4: else/elif body deepens by one
-                    }
-                    cc_noteHump( c, nesting, nesting + 1, acc );
                     stack.push_back( { c, nesting + 1, childDepth } );   // else/elif body deepens by one
                 }
             }

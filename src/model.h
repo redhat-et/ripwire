@@ -174,6 +174,12 @@ struct Symbol
     // deepLoc — physical lines lying inside those regions; deepLoc/loc is the fraction the max throws away.
     //          A FLOOR (emitted as deep_floor="1"), because the clamp that stops two humps sharing a line
     //          from billing it twice can only ever subtract. Saturates at 65535 for the same reason.
+    //          deepLoc COUNTS LINES AND humps COUNTS REGIONS, so `deep < humps` is legal output and not a
+    //          defect: two regions genuinely share a line in a one-line `if(c){x;}else{y;}`, or anywhere in
+    //          minified source. Three separate validators have read that shape as a bug, so the metrics
+    //          legend says it out loud and test/nestprofilecheck.sh arm 11 pins it as correct — alongside
+    //          the case that WAS a defect, distinct-line regions collapsing because the clamp was fed them
+    //          out of document order (fixed at kParserVer 43, in cc_walk's else/elif clause).
     // Both are 0 exactly when maxNest < quality::kNestBar, so serialize.h omits them there rather than
     // writing a bare 0 — lossless, because `nest=` is already on the row (test/nestprofilecheck.sh arm 5
     // pins that equivalence in both directions).

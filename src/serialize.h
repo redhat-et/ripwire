@@ -1111,7 +1111,8 @@ inline constexpr const char* kMetricsLegend =
     "humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) "
     "(humps/deep are the PROFILE nest= cannot give: nest= is a max, so one deep line and a body that is deep "
     "throughout report the same number; deep/loc is the fraction. Both absent exactly when nest<bar — "
-    "not-deep, never a hidden 0) "
+    "not-deep, never a hidden 0. deep counts LINES and humps counts REGIONS, and two regions can share a "
+    "line, so deep BELOW humps is legal: a one-line if/else at the bar is 2 regions on 1 line) "
     "locals=local-var-decl-count(floor,C/C++-only,see locals_floor) cbo=coupling lcom4=cohesion "
     "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
     "call|read|write|import|extends). Absent=N/A, never 0. -->";
