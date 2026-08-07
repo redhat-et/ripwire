@@ -135,6 +135,11 @@ struct Symbol
     NodeId        id     = kNoNode;
     SymKind       kind   = SymKind::Other;
     Lang          lang   = Lang::Unknown;
+    std::uint16_t ppAlt  = 0;          // ppalt disclosure — full doc below, next to the other Q4 metric scalars.
+                                       // DECLARED here, not there: the two pad bytes between `lang` (u8 x2) and
+                                       // `fileId` (u32) are the struct's only remaining hole, so this u16 is free
+                                       // here and +8 bytes there (measured by the static_assert below firing
+                                       // 104 == 96 on the grouped placement — not hand-arithmetic).
     std::uint32_t fileId = 0;          // index into IngestResult::files
     std::uint32_t line   = 0;          // 1-based, for reference
     std::uint32_t sigStartByte = 0;    // signature span [sigStartByte, sigEndByte) in the file —
@@ -157,6 +162,19 @@ struct Symbol
     // (one declaration, ambiguous name count) — see cc_walk's locals-counting block. `--metrics` emits it as
     // locals="N" locals_floor="1" (never a bare 0 for an uncovered language — see localsCountedLang).
     std::uint32_t locals       = 0;
+    // PPALT DISCLOSURE — count of ALTERNATIVE-introducing preprocessor nodes (`#else`/`#elif`/`#elifdef`)
+    // inside the def, filled by the SAME fused cc_walk DFS that computes cx/ccx/maxNest/locals (zero new
+    // tree-sitter queries). When > 0 the body carries branches that never coexist at compile time, so every
+    // summed structural metric on this row (cx/ccx/nest/loc/locals) over-counts vs any single build —
+    // measured ~2x on bullet's btMatrix3x3.h::getRotation (`#if BT_USE_SSE … #else … #endif`
+    // implementations of the same function). ripwire does NOT guess which branch a build takes (which arm
+    // compiles depends on flags it never sees — doctrine: never quietly guess); it keeps the deterministic
+    // sum and DISCLOSES the alternative count so metric consumers can discount. A bare `#if…#endif` with no
+    // `#else` introduces no mutually-exclusive alternative and does not count. C-family + C# by grammar
+    // construction (only those grammars have preproc nodes) — no language predicate needed, unlike
+    // `locals`. Meaningful for fns/methods only (0 otherwise, same convention as params/maxNest); emitted
+    // as ppalt="N" on --metrics, ABSENT when 0. Saturates at 65535. See test/ppaltcheck.sh.
+    // (The `ppAlt` field itself is declared UP TOP, in the pad hole after `lang` — see its own comment.)
     std::uint16_t params        = 0;   // parameter count from the def's parameter-list child; --metrics params= (NUMBER only — no 7±2)
     std::uint8_t  maxNest       = 0;   // max control-structure nesting depth reached inside the def; --metrics nest=
     std::uint8_t  arityExact    = 0;   // B2.2: 1 ⇒ `params` is a FIXED, call-comparable arity (no variadic / default
@@ -177,7 +195,10 @@ struct Symbol
 // std::string members already carried 4 B of trailing alignment padding (std::string needs 8-B alignment
 // on a 64-bit ABI); the new uint32_t landed in that padding for FREE — the best possible SoA outcome, not
 // a coincidence worth losing: re-measure with a fresh `static_assert` fire (don't hand-arithmetic) if this
-// ever needs to change again.
+// ever needs to change again. `ppAlt` (uint16_t, ppalt disclosure) could NOT repeat the trick — `locals`
+// had consumed the tail padding entirely (this assert fired 104 == 96 on that placement) — so it sits in
+// the struct's one remaining hole instead, the 2 pad bytes between `lang` and `fileId` up top; sizeof
+// unchanged, measured by this assert, not hand-arithmetic.
 static_assert( sizeof( Symbol ) == 48 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
