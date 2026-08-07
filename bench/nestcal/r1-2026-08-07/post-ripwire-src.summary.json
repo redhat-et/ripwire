@@ -1,0 +1,19 @@
+{
+  "label": "post-ripwire-src",
+  "max_nest": 8,
+  "nest_hist": {
+    "0": 677,
+    "1": 581,
+    "2": 563,
+    "3": 269,
+    "4": 103,
+    "5": 29,
+    "6": 16,
+    "7": 4,
+    "8": 4
+  },
+  "rows_with_humps": 156,
+  "symbols_with_nest": 2246,
+  "total_deep": 3628,
+  "total_humps": 624
+}
