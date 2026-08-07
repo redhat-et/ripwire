@@ -65,6 +65,7 @@
 #include "mention.h"        // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
 #include "siblift.h"        // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
 #include "filepool.h"       // r5 EXPERIMENT: env-gated file-level evidence pooling (inert by default)
+#include "expand.h"         // r6 EXPERIMENT: env-gated structural expansion from top-ranked files (inert by default)
 #include "tracein.h"        // L2: --from-trace=FILE — table-driven stack-trace/sanitizer/compiler frame extraction
 #include "clones.h"
 #include "skillscan.h"
@@ -1776,6 +1777,19 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( const auto [ poolK, poolBlend ] = filePoolParams(); poolK > 0 )
         {
             applyFilePooling( ing, lensRank, poolK, poolBlend );
+        }
+    }
+
+    // r6 structural expansion (EXPERIMENTAL, pre-registered —
+    // bench/locbench/results/r6_expansion/PREREG.md): lift the RESOLVED import/reference neighbours of
+    // the top-ranked files. siblift had this seed with a same-directory edge; anchorhop had this edge
+    // seeded from mention anchors; both were rejected. This is the untried diagonal, and the first
+    // candidate that adds evidence the QUERY did not supply. INERT unless RIPWIRE_EXPAND="<S>,<N>".
+    if( !cfg.noRoute )
+    {
+        if( const auto [ expSeeds, expPer ] = expandParams(); expSeeds > 0 )
+        {
+            applyStructuralExpansion( ing, lensRank, expSeeds, expPer );
         }
     }
 
