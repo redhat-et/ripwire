@@ -1021,6 +1021,28 @@ inline Derived resolve_derived()
     return d;
 }
 
+// The legend names only the columns this tier's table actually carries — the same Derived set that
+// gates print_agg_header/print_agg_row. A hardware tier earns the IPC/MPKI derivations, a
+// software-counter tier (task-clock/page-faults) earns the counter-sums note but neither ratio, and a
+// timing-only degrade mentions no counters at all: the header describes exactly what is present.
+inline void print_agg_legend( const Derived& d )
+{
+    report_printf( "( %%tot = share of total top-level CPU" );
+    if( events_shown() > 0 )
+    {
+        report_printf( "; counters are per-scope inclusive sums" );
+    }
+    if( d.ipc() )
+    {
+        report_printf( "; IPC = inst/cyc" );
+    }
+    if( d.l1dMpki() || d.brMpki() )
+    {
+        report_printf( "; MPKI = misses per 1k-inst" );
+    }
+    report_printf( " )\n" );
+}
+
 inline void print_agg_header( const Derived& d )
 {
     report_printf( "%12s %6s %12s", "total ms", "%tot", "calls" );
@@ -1212,8 +1234,7 @@ inline void report()
 
     report_printf( "\n-- hottest scopes (aggregated across %zu threads, by total) --------------------\n",
                  snaps.size() );
-    report_printf( "( %%tot = share of total top-level CPU; counters are per-scope inclusive sums;"
-                 " IPC = inst/cyc, MPKI = misses per 1k-inst )\n" );
+    print_agg_legend( der );
     print_agg_header( der );
     for( const Row& r : agg )
     {
