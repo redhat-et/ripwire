@@ -15,6 +15,24 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `--skipped`: itemize the header's `skipped_oversize=` count
+
+The map header has long disclosed *how many* otherwise-indexable files the crawl dropped for
+exceeding a size ceiling (`skipped_oversize=N`, absent when zero) — but nothing anywhere named
+*which* files, so a reader could know the corpus was truncated without being able to say what was
+absent from it. `--skipped` names them: one `<f p= bytes= limit=/>` row per dropped file, path-sorted,
+where `limit=` is the ceiling that dropped the row — `--max-file-size`'s value, or the fixed 256 KB
+`.json` config ceiling that flag does not raise; the root element repeats both effective
+ceilings so a zero-row report still states its bounds. The accounting invariant is unchanged and now
+itemizable: `files=` + `oversize=` = the population the crawl considered, at every `--max-file-size`.
+Multi-root workspaces list rows under the same `<label>/./<rel>` spelling every other surface emits.
+
+Scope is deliberate: the parse-time binary-sniff and read-failure skips are *not* listed, because
+those files keep their `fileId` and stay inside `files=` (present with zero symbols) — they are not
+absent from the accounting this verb itemizes. The default map is byte-identical (G5: purely
+additive; the header count was already there). Read-only; exit 0 always. Gate:
+`test/skippedcheck.sh`.
+
 ### Added — `--dmm`: the Delta Maintainability Model, one comparable number per change
 
 `--quality-delta` reports *which kinds* of debt a change added. It has no scale, so it cannot answer
