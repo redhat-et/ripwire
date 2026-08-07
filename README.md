@@ -14,6 +14,10 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
+**Languages:** C · C++ · Objective-C/C++ · Metal · CUDA · Python · TypeScript · JavaScript · Java ·
+Ruby · Bash · Go · Rust · Swift · C# · JSON — [sixteen vendored grammars](#languages), and adding
+another is a vendored tree-sitter grammar plus one row in a declarative table.
+
 ### No API key. No embeddings. No index server. No daemon.
 
 One self-contained binary on your own machine, offline. Install it and ask it something before you
@@ -302,9 +306,20 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 Around the core sit 137 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
+
+<details>
+<summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
+
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
 [`docs/COMMANDS.md`](docs/COMMANDS.md) documents 90 of the flags with a real invocation and its
 recorded output. Each family below links there.
+
+Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
+`--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
+incompatible), `--merge-scout=REF1,REF2` before landing parallel branches, and `--pack-task="…"` for
+ranking, bodies, callers and tests in one budgeted bundle.
+
+</details>
 
 | Family | The question | Representative flags |
 | --- | --- | --- |
@@ -315,11 +330,6 @@ recorded output. Each family below links there.
 | [**self-diagnosis**](docs/COMMANDS.md#self-diagnosis) | "Is my setup actually working?" | `--doctor` |
 | [**security**](docs/COMMANDS.md#--scan-skillsdir) | "Is this agent skill file safe to install?" | `--scan-skill` · `--scan-skills` |
 | [**knobs / modes**](docs/COMMANDS.md#knobs--modes) | shape, format, cache, budget | `--json` · `--format` · `--mcp` |
-
-Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
-`--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
-incompatible), `--merge-scout=REF1,REF2` before landing parallel branches, and `--pack-task="…"` for
-ranking, bodies, callers and tests in one budgeted bundle.
 
 ---
 
@@ -334,13 +344,8 @@ to `~/.local/bin`:
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
 ```
 
-**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
-tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
-so there is no download step and no package manager to satisfy. Prove that with the network off:
-add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
-
-Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
-Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+**Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —
+every dependency is vendored in-tree, so the build completes with the network off.
 
 ```bash
 git clone https://github.com/redhat-et/ripwire.git
@@ -349,8 +354,21 @@ cmake -S . -B build && cmake --build build -j
 ./build/ripwire .          # the ranked map — start here on an unfamiliar repo
 ```
 
+<details>
+<summary>Why there is no download step — vendored grammars, the offline-build proof, the languages parsed, and putting it on <code>PATH</code></summary>
+
+**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
+tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
+so there is no download step and no package manager to satisfy. Prove that with the network off:
+add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
+
+Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
+Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
+
+</details>
 
 Wiring it into your agent takes one more minute — `wrap` **prints** the recipe for your client, it
 never edits your config:
@@ -361,10 +379,6 @@ ripwire wrap --all              # detect every installed agent, print each one's
 skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
 ```
 
-The CLI is the recommended baseline because it works in every shell-capable agent; the MCP server is
-optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
-all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
-
 Four commands worth learning first:
 
 ```bash
@@ -373,6 +387,13 @@ ripwire . --for="incremental cache invalidation"   # the task lens: what to touc
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
 ```
+
+<details>
+<summary>CLI or MCP, the <code>-DCMAKE_BUILD_TYPE=Release</code> trap, and the honesty contract in one line</summary>
+
+The CLI is the recommended baseline because it works in every shell-capable agent; the MCP server is
+optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
+all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
 
 > **Do not** configure a local tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`,
 > which compiles the degrade-path alerts out and blinds the gates that assert them. CI builds both
@@ -384,6 +405,8 @@ exists*. Two runs over the same tree are byte-identical, and a warm run equals a
 contract, gated on every pull request and every push to main, not a tendency.
 [The full discipline — and the losses published next to the wins →](#the-honesty-contract)
 
+</details>
+
 <!-- The name is the design: rip-grep for the retrieval half — a zero-runtime-dependency C++23
      binary that crawls a tree, extracts symbols with tree-sitter, resolves references into a call
      graph, ranks it with Personalized PageRank, and streams a deterministic minified XML map to
@@ -392,6 +415,14 @@ contract, gated on every pull request and every push to main, not a tendency.
 ---
 
 ## The quality panel
+
+**Six independent evidence families, ranked by how many of them agree — never one blended score.**
+Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
+second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,999) no two families correlate
+above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
+
+<details>
+<summary>How the six families are joined, and what each one actually finds in this repository's own source</summary>
 
 `--quality-panel` joins **six independent evidence families** (structural shape, lexical naming,
 syntactic-confusion idioms, git churn history, cross-file colocation, and non-local mutable state)
@@ -411,6 +442,11 @@ repository's own source, not a synthetic example:
 | **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest |
 | **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
 | **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
+
+</details>
+
+<details>
+<summary>Four verbs that sit <i>beside</i> the six-family join — <code>--field-affinity</code>, <code>--readability</code>, <code>--naming-consistency</code>, <code>--lint --naming-locals</code></summary>
 
 **Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
 rather than blurring it:
@@ -467,6 +503,8 @@ rather than blurring it:
   rule that shipped on plausibility and was later measured to flag its *best*-named functions — see
   the withdrawn-rule note below — so a rule this new stays opt-in until a real-corpus audit clears it.
 
+</details>
+
 Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
 flagged this repository's best-named functions, kept as the standing argument for measuring before
 shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
@@ -474,6 +512,14 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 ---
 
 ## Real runs
+
+**Four real invocations against this repository**, each printed as the binary actually prints it:
+`--callers` (and why its count is a floor), the default ranked map (and what `amb=` admits),
+`--test-gate` (exit 4 while obligations remain), and `--from-trace` (feed it the error itself, not a
+paraphrase of one).
+
+<details>
+<summary>How these excerpts were edited — minified output wrapped for reading, and exactly which numbers are elided</summary>
 
 Output is minified — one line, no whitespace between tags — so the excerpts below are wrapped for
 reading, and each one's leading legend comment is elided. Nothing else is edited, except that
@@ -483,6 +529,11 @@ PageRank `k=` values, and the test-gate example's
 grows: **the ranked map** elides those specifically, and says so again at the point of use, and **the
 test gate** additionally trims its `<u>` rows down to 2 of the 25 the real run prints, behind a
 trailing `…`.
+
+</details>
+
+<details>
+<summary><code>--callers</code> — a call graph built on the spot, and why <code>count="6"</code> ships labelled a floor</summary>
 
 **Ten seconds, no index server, no embeddings, no API key** — a parse and a call graph, built on the
 spot:
@@ -502,6 +553,11 @@ $ ripwire . --callers=rankGraphTeleport
 `counts_floor="1"` is the point. Call edges are extracted from source text by name, so dynamic
 dispatch, callbacks and macro-generated call sites contribute no edge: `count="6"` is a **floor**,
 and the element says so before you read a single row.
+
+</details>
+
+<details>
+<summary>The default ranked map — <code>--top-k=3</code>, and what <code>amb="2"</code> admits about a resolver guess</summary>
 
 **The ranked map** — the default run, capped to three symbols so it fits here:
 
@@ -526,6 +582,11 @@ so they move every time README.md itself gains or loses a line, which is not wha
 demonstrates. The rest of the header measures the whole corpus, not the excerpt — the `ambiguous=` tally is
 the call-graph completeness gauge, and `amb="2"` on a row says two of that symbol's calls hit a name
 with several definitions and the resolver guessed. Read the source when which-target matters.
+
+</details>
+
+<details>
+<summary><code>--test-gate</code> — exit 4 while obligations remain, and why <code>script_gates_unmodelled="332"</code> stays nonzero on a clean clone</summary>
 
 **The test gate** — `--test-gate` names the obligations and exits 4 while any remain. Captured with an
 uncommitted change in the tree: `changed="1"` and the rows below appear only because something was
@@ -552,6 +613,11 @@ a call edge, so those gates are invisible to this walk, and the number says so r
 `tests="2"` read as complete. The `<u>` rows are the untested blast radius: impacted symbols that no
 test in the corpus reaches.
 
+</details>
+
+<details>
+<summary><code>--from-trace</code> — hand it the stack trace, sanitizer report or compiler error itself, not a paraphrase</summary>
+
 **From an error, not a paraphrase of one** — `--from-trace` takes a stack trace, sanitizer report or
 compiler error on stdin or from a file, maps its frames onto indexed symbols innermost-first, and
 returns the innermost in-corpus body with them:
@@ -560,6 +626,8 @@ returns the innermost in-corpus body with them:
 ./build/ripwire . --from-trace=asan_report.txt
 cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 ```
+
+</details>
 
 ---
 
@@ -572,13 +640,9 @@ check whether the tool is oversold.
 
 ### Against other tools
 
-**Round 4 (2026-08-06) — N = 60 paired instances, zero exclusions, one binary, one evaluator.** Every
-competitor was re-run on the same day against the same ripwire binary (`7a9a42ea`, rebuilt from HEAD)
-and the same evaluator, so the arms are directly comparable to each other. Earlier rounds could not
-say that: r1 (2026-07-13/14) and r2 (2026-08-03) each scored a different subset against a different
-binary, which is why this page used to print two tables and ask the reader not to compare them.
-*Strict file@10 = **all** gold files inside the top 10.* Harness, per-instance JSONL, and a
-reproduction recipe: [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-2026-08-06/).
+**Round 4 (2026-08-06): 58.3% strict file@10 against 40.0% for the best competitor — a 1.46× margin,
+at a 0.43 s index.** N = 60 paired instances, zero exclusions, one binary, one evaluator, all re-run
+on the same day. *Strict file@10 = all gold files inside the top 10.*
 
 | Arm | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
@@ -590,6 +654,17 @@ reproduction recipe: [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-202
 | Aider repo-map 0.86.2 (no-personalization control) | 8.3% | 21.7% | *(inside query)* | 0.919 s |
 | codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 4.64 s | 0.042 s |
 | codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 4.64 s | 0.030 s |
+
+<details>
+<summary>Round-4 method and the paired losses — one binary, one evaluator, what re-running cost us, and the three limits that travel with this table</summary>
+
+**Round 4 (2026-08-06) — N = 60 paired instances, zero exclusions, one binary, one evaluator.** Every
+competitor was re-run on the same day against the same ripwire binary (`7a9a42ea`, rebuilt from HEAD)
+and the same evaluator, so the arms are directly comparable to each other. Earlier rounds could not
+say that: r1 (2026-07-13/14) and r2 (2026-08-03) each scored a different subset against a different
+binary, which is why this page used to print two tables and ask the reader not to compare them.
+*Strict file@10 = **all** gold files inside the top 10.* Harness, per-instance JSONL, and a
+reproduction recipe: [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-2026-08-06/).
 
 Paired, ripwire's losses are **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to
 graphify and aider; codeseek never beat it. **Cold from nothing to an answer** — parse, rank, reply,
@@ -616,6 +691,11 @@ its findings and dispositions ship with that report
 ([`VERIFIER.md`](bench/headtohead/r2-2026-08-03/VERIFIER.md)); r1's and r2's tables remain in their own
 directories as the historical record.
 
+</details>
+
+<details>
+<summary>The open problem — multi-file gold: 21.4% strict against 78.6% any@10, and four pre-registered fixes rejected at ±0.00pp</summary>
+
 **Multi-file gold is hard for every arm, including ours, and four attempts have failed to fix it.**
 ripwire leads the stratum at 21.4% strict — but its own any@10 there is 78.6%: it finds *a* gold file
 and misses the siblings. If each gold file were an independent draw at the single-file rate (90.6%),
@@ -625,6 +705,11 @@ issue's vocabulary, the siblings carry the consequences. Four pre-registered rou
 (`r1_anchorhop`, `r1cpp_anchorhop`, `r4_siblift`, `r5_pooling`) have now been rejected at ±0.00pp
 against it, each archived with its grid and its verdict under
 [`bench/locbench/results/`](bench/locbench/results/).
+
+</details>
+
+<details>
+<summary>Round 3 (2026-08-03) — headroom, the compression-layer competitor: 0 tokens saved on ripwire's output, and 5/12 losses published first</summary>
 
 **Round three (2026-08-03): headroom — the compression-layer competitor.** headroom
 (`headroom-ai==0.33.0`, 64k★) compresses context an agent already fetched; it retrieves nothing —
@@ -645,6 +730,8 @@ Provenance: [`docs/EVALS.md` §2](docs/EVALS.md), full record + adversarial veri
 materially corrected the draft's arithmetic in headroom's favor) in
 [`bench/headtohead/r3-headroom-2026-08-03/`](bench/headtohead/r3-headroom-2026-08-03/).
 
+</details>
+
 **LocBench held-out, N = 243 across 78 repositories.** Strict file@10 **60.9%**, against **27.6%** for
 the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
 **+25.00pp**, bought for +3.4% warm latency and **−39.4%** on the production token ceiling. More
@@ -660,6 +747,9 @@ pins it:
 | `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **67.0% fewer element bytes** at top-50 (46.7% at top-10, 66.2% at top-100) | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
 | Query-shape routing, on the production token ceiling | **−39.4%** p50, while strict file@10 rose +33.33pp | `bench/locbench/`, [EVALS §3](docs/EVALS.md) |
 | A whole-question bundle against a naive agent read | **96.0% fewer tokens (24.9×)** — 14,758 against 367,192, tiktoken `cl100k_base`, six realistic questions | `bench/BENCHMARK.md` — *historical, private corpus, not reproducible from this tree* |
+
+<details>
+<summary>Read this before quoting those numbers — root-neutralised bytes, the private-corpus caveat, and the two verbs where the saving inverts</summary>
 
 Read the first row's methodology before quoting it: element bytes are counted **root-neutralised**,
 with the corpus-root prefix subtracted from both sides, because the root repeats inside every element,
@@ -678,9 +768,21 @@ symbol: 303 bytes of signature-plus-doc-comment against a 158-byte body. The hea
 large result sets, and [the full counterexample list](#in-the-numbers) is part of the contract, not an
 appendix.
 
+</details>
+
 ---
 
 ### Where its own cycles go — hardware counters, per scope
+
+**Every pipeline phase is bracketed by two hardware-counter reads, and the numbers say what
+wall-clock cannot.** Parse and query retire **3.2–3.5 instructions per cycle**; the graph phases
+stream at 32–35 L1D MPKI and still hold IPC above 3.1 (guardrail G2 doing its visible job); and a
+warm run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load,
+**≈167× fewer**. Two opt-in builds go faster still — PGO by **14–25% cold** — with **byte-identical**
+output on every one.
+
+<details>
+<summary>How the self-profiler measures — kperf / <code>perf_event_open</code>, the per-scope counter table, and the three things it says that wall-clock cannot</summary>
 
 The self-profiler (`-DRIPWIRE_PROFILE=ON`; `src/infra/profileScope.h` + `profilePmc.h`) brackets every
 pipeline phase with two hardware-counter reads — kperf on Apple Silicon, a pinned `perf_event_open`
@@ -709,6 +811,11 @@ frame); one machine, one corpus — re-run on yours. Backend contract is gated b
 [`test/pmccheck.sh`](test/pmccheck.sh); M5 Pro event names verified (the last-level alias resolves
 via `PL2_CACHE_MISS_LD`).
 
+</details>
+
+<details>
+<summary>The two opt-in faster builds — LTO on by default, PGO at 14–25% cold, and why the output stays byte-identical</summary>
+
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
 [`docs/OPTREMARKS.md`](docs/OPTREMARKS.md)) found that the phases above spend their time calling
@@ -731,6 +838,11 @@ cache-tuned CSR/SoA/B+tree structures G2 exists to produce. **LTO is on by defau
 time and nothing else, and link time is not what this tool is optimized for. PGO needs a training
 run, so it stays a driven build (`scripts/pgobuild.sh`) rather than something a bare
 `cmake --build` does behind your back.
+
+</details>
+
+<details>
+<summary>On a vPMU-less cloud VM the columns don't vanish — software counters, a G2 witness at zero page faults, and the 2.17 s subprocess they exposed</summary>
 
 **And on machines with no PMU at all — most cloud VMs and CI boxes — the counter columns no longer
 vanish.** A kernel that refuses every hardware event (`ENOENT`; no vPMU is the common cloud case)
@@ -764,6 +876,8 @@ documented in-tree as a pure function of the file bytes — a cache candidate, n
 kernel that offers nothing at all — `perf_event_paranoid>=3`, seccomp — still degrades to
 timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 
+</details>
+
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
@@ -782,6 +896,13 @@ and this tool ships the check.**
 
 ### In the output
 
+**Three rules the output enforces on itself:** a zero reads as *none found*, never *none exists*;
+every truncation says what it withheld and how to page it; and every count names its unit, because
+the units differ by verb.
+
+<details>
+<summary>The three rules in full — <code>counts_floor="1"</code>, the <code>shown_*</code>/<code>*_capped=</code> paging vocabulary, and why two counts can disagree honestly</summary>
+
 - **A zero is a measurement, not an absence.** `counts_floor="1"` marks every count that name-based
   resolution cannot prove is a total. Read a zero as *none found*, never *none exists*.
 - **Truncation is disclosed where it happens.** `shown_*`, `*_capped=` and the paging attributes say
@@ -790,6 +911,8 @@ and this tool ships the check.**
 - **Units are named, because they differ by verb.** The callers count is distinct symbols, the impact
   count is a reach set, the uses count is call sites. The legend says which, so two numbers that look
   contradictory can be read as the different questions they answer.
+
+</details>
 
 ### In the numbers
 
@@ -843,6 +966,12 @@ ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 
+**One stdio server, 30 verbs** — 15 read, 12 flagship-reflex, 3 span-addressed edit — and a client
+that isn't one of the six above can be pointed at the same process by hand.
+
+<details>
+<summary>What the 30 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
+
 That registers one stdio server — `ripwire --mcp` — exposing **30 verbs**: 15 read verbs, 12
 flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CLI (`analyze`, `for`,
 `grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`,
@@ -867,6 +996,8 @@ that speaks MCP can be pointed at it by hand. The whole configuration is:
 
 Use an absolute path in `command` if `ripwire` is not on the agent's `PATH`. For a client that wants a
 socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
+
+</details>
 
 ### 2. Install the skills
 
@@ -894,6 +1025,9 @@ The script's own header documents its other modes, including the opt-in advisory
 built with, written so a coding agent can run them. They encode the workflow rather than describing
 it.
 
+<details>
+<summary>How to run one — build first, paste the file, and it writes a plan and stops for your go-ahead before anything runs</summary>
+
 How to run one:
 
 1. Build the tool first — most loops need a binary to measure against:
@@ -904,6 +1038,8 @@ How to run one:
    plan, cut what you disagree with, then say go.
 5. The loop runs its own gates in the foreground and reports what it left green.
 
+</details>
+
 Three worth starting with:
 
 | Prompt | What it produces |
@@ -912,10 +1048,15 @@ Three worth starting with:
 | [`dogfood-gaps.md`](prompts/dogfood-gaps.md) | A real task done using only ripwire for navigation, with every fallback to grep or a whole-file read logged as a product gap at the moment it happened. |
 | [`capture-audit.md`](prompts/capture-audit.md) | A fresh showcase capture read by parallel adversarial lenses, and the findings turned into family-wide gates. |
 
+<details>
+<summary>The other seven — head-to-head, ranking-eval from your own sessions, per-language, onboarding, sibling sweep, command tour, showcase build</summary>
+
 The other seven — a paired head-to-head against a competitor, a ranking-eval loop that mines real
 retrieval misses from your own sessions, a per-language improvement pass, a zero-context onboarding
 study, a sibling sweep, a live command tour, a showcase build — are listed with their audiences in
 [`prompts/README.md`](prompts/README.md). Each states its own scope and its honesty rules, and most name the gates they must leave green.
+
+</details>
 
 ---
 
@@ -928,6 +1069,11 @@ so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--call
 its host-side launchers; dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
 JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON (config keys). Sixteen tree-sitter
 grammars, all vendored.
+
+Want another language? The pipeline is language-agnostic past the parse: a new language is a
+vendored tree-sitter grammar, its query file, and one row in the declarative
+`extension → { grammar, queries }` table (the "declarative constexpr tables" rule in
+[`CONTRIBUTING.md`](CONTRIBUTING.md)) — open an issue naming the grammar and the repo you'd run it on.
 
 Markdown, notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges
 behind `--mentions`; Office and PDF join them through an optional bridge.
