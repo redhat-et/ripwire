@@ -165,8 +165,19 @@ KL5="$( field "$RNK" lenient_r5 )"; KMRR="$( field "$RNK" mrr_lenient )"; KPOL="
 # Floor set at 78, matching the independent 83→78 already made for present/ deck growth on another
 # branch (1df219f), and for the same reason: a floor within one query (2.38pt) of baseline goes red on
 # every same-class file the corpus gains, which makes it a corpus-size tripwire rather than a ranker gate.
+# 2026-08-07 MRR floor 0.60→0.58: corpus growth, THIRD occurrence, this time on the MRR floor (the r5
+# lesson had only been applied to recall@5). The nestcal r1 round added three round docs
+# (bench/nestcal/{README,r1-2026-08-07/{PREREGISTRATION,REPORT}}.md); two knife-edge queries each lost
+# one rank to a new same-class decoy ("changelog what capabilities changed recently" gold 1→2, "I added
+# a gate script where must I register it" lenient 3→4), lenient MRR 0.613→0.599 — arithmetic exactly
+# −(1/1−1/2)/42 −(1/3−1/4)/42. Ranker neutrality verified as a full 2×2: {base,new} binary × {base,new}
+# tree gives 0.613/0.613/0.599/0.599 — only the TREE moves the number; the nesting-fix binary is inert
+# here. 0.60 sat 0.013 above the in-tree measurement, i.e. ~ONE top-rank flip of headroom, on a lane
+# whose measured failure mode is "a document was added" — the same floor-was-the-defect shape as
+# 2026-08-04. 0.58 leaves ~1.5 top-flips against today's 0.599; pollution5 (the ranker-quality signal)
+# is unmoved and stays pinned by its own ceiling.
 floor "$RL5" 78   && ok "recall lane lenient recall@5 ($RL5%) >= floor 78% (baseline 81.0%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 78%"
-floor "$RMRR" 0.60 && ok "recall lane lenient MRR ($RMRR) >= floor 0.60 (exported-tree baseline 0.720)" || no "recall lane lenient MRR ($RMRR) under floor 0.60"
+floor "$RMRR" 0.58 && ok "recall lane lenient MRR ($RMRR) >= floor 0.58 (in-tree 2026-08-07 baseline 0.599)" || no "recall lane lenient MRR ($RMRR) under floor 0.58"
 ceil  "$RPOL" 16   && ok "recall lane pollution@5 ($RPOL%) <= ceiling 16% (exported-tree baseline 10.0%; see the composition note above)" || no "recall lane pollution@5 ($RPOL%) over ceiling 16% — generated/fixture docs are retaking --recall"
 floor "$KL5" 70   && ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (post-§P4 84.4%)"  || no "ranking lane lenient recall@5 ($KL5%) under floor 70%"
 floor "$KMRR" 0.55 && ok "ranking lane lenient MRR ($KMRR) >= floor 0.55 (post-§P4 0.726)"    || no "ranking lane lenient MRR ($KMRR) under floor 0.55"

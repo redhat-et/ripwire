@@ -999,7 +999,9 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 42;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 43;           // bump on any grammar/.scm/extraction change
+                                                      // 43: nestcal r1 — else/elif clause bodies no longer
+                                                      //    double-deepen; nest/humps/deep/ccx values shift
                                                       // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
                                                       //    evening): RawDef/Symbol gained a `locals` uint32_t
                                                       //    FLOOR field, populated inside the existing fused cc_walk
@@ -2297,12 +2299,15 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 }
                 else
                 {
-                    if( nesting + 1 > acc.maxNest )
-                    {
-                        acc.maxNest = nesting + 1; // Q4: else/elif body deepens by one
-                    }
-                    cc_noteHump( c, nesting, nesting + 1, acc );
-                    stack.push_back( { c, nesting + 1, childDepth } );   // else/elif body deepens by one
+                    // An else/elif body sits at the construct's PRIMARY-body level: `nesting` here is the
+                    // clause's inherited frame nesting, which already carries the parent construct's +1 (the
+                    // if pushed ALL its children at childNest). Deepening again — as this branch did before
+                    // the nestcal r1 round — double-counted every clause body AND raised maxNest/minted one
+                    // hump per clause CHILD (the anonymous keyword token, the condition, `:`), which is how a
+                    // 20-line elif ladder reported humps=16. No maxNest bump and no cc_noteHump belong here:
+                    // the parent construct recorded this depth when IT crossed, and a clause opens no new
+                    // depth (matches Java/Go/C#, whose grammars have no clause node and were always flat).
+                    stack.push_back( { c, nesting, childDepth } );
                 }
             }
             continue;
