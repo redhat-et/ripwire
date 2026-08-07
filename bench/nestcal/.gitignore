@@ -1,0 +1,3 @@
+# local-only: the private C-family validation tree's per-symbol artifacts are never committed
+*-cfam-private.tsv
+*-cfam-private.summary.json
