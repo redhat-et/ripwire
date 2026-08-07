@@ -33,17 +33,29 @@ Usage:
 
 Output: per-lane human table + machine-readable `AGG\t<lane>\t...` rows (greppable, diff-stable —
 the determinism gate runs the harness twice and diffs stdout byte-for-byte).
-NOT a golden: on a live repo the numbers move as docs/commits land — a benchmark you re-run.
+
+CORPUS SPLIT (2026-08-07, the frozen-snapshot ruling — see make_snapshot.py and the gate header):
+the RECALL lane scores the FROZEN corpus in bench/recalleval/snapshot.mdpack (unpacked into a temp
+root per run), so its recall/MRR move only when the RANKER moves; a separate `recall_livepol` probe
+re-runs the same queries against the LIVE root and reports pollution@5 only — the live-corpus
+composition signal. The RANKING lane still scores the live root: its labels are code symbols and
+its floors carry wide margins. Only the ranking lane and the live probe are "a benchmark you re-run
+on a moving repo"; the frozen recall lane is a fixed instrument until a recalibration commit
+re-freezes it.
 """
 
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+PACK_PATH = os.path.join(HERE, "snapshot.mdpack")
+LOCK_PATH = os.path.join(HERE, "snapshot.lock")
 
 FIXTURE_COMPONENTS = {"test", "tests", "fixture", "fixtures", "testdata", "present"}
 GENERATED_PREFIX = "docs/captures/"
@@ -188,6 +200,51 @@ def pct(num, den):
     return 100.0 * num / den if den else 0.0
 
 
+def materialize_snapshot(tmp_root):
+    """Unpack snapshot.mdpack into tmp_root as real *.md files; return (commit, doc count).
+
+    Cheap structural sanity only (lock present, doc count matches): the byte-level corpus_sha256
+    verification is single-sourced in make_snapshot.py --verify, which gate check #0 runs first.
+    """
+    if not os.path.isfile(LOCK_PATH) or not os.path.isfile(PACK_PATH):
+        raise RuntimeError("frozen corpus missing (%s / %s) — run make_snapshot.py --freeze in a recalibration commit" % (PACK_PATH, LOCK_PATH))
+    lock = {}
+    with open(LOCK_PATH, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                lock[key] = val
+    sys.path.insert(0, HERE)
+    from make_snapshot import read_pack
+    docs = read_pack()
+    for rel, content in docs:
+        dest = os.path.join(tmp_root, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(content)
+    if len(docs) != int(lock.get("files", "-1")):
+        raise RuntimeError("frozen corpus mismatch: %d docs in the pack vs files=%s in snapshot.lock" % (len(docs), lock.get("files")))
+    return lock["source_commit"], len(docs)
+
+
+def run_live_pollution(labels, bin_path, root):
+    """The live-corpus composition reporter: same queries, LIVE root, pollution@5 only.
+
+    No recall/MRR and no skip logic on purpose — labelled targets are irrelevant to a slot-share
+    metric, and printing live recall here would re-open the ratchet the frozen lane retired.
+    """
+    polluted_slots = 0
+    slot_total = 0
+    for lab in labels:
+        ranked = ranked_recall(bin_path, root, lab.query)
+        polluted_slots += sum(1 for path, _ in ranked[:5] if is_polluted(path))
+        slot_total += 5
+    print("lane=recall_livepol  n=%d queries (LIVE corpus; pollution@5 only — composition, not ranking)" % len(labels))
+    print("  pollution@5 = %.1f%% of top-5 slots are fixture/present/generated paths" % pct(polluted_slots, slot_total))
+    print("AGG\trecall_livepol\tn=%d\tpollution5=%.1f" % (len(labels), pct(polluted_slots, slot_total)))
+
+
 def run_lane(name, labels, bin_path, root, ranker, verbose):
     agg = Agg()
     skipped = 0
@@ -248,8 +305,15 @@ def main():
 
     try:
         if args.lane in ("recall", "both"):
-            run_lane("recall", recall_labels, bin_path, root,
-                     lambda q: ranked_recall(bin_path, root, q), args.verbose)
+            frozen_root = tempfile.mkdtemp(prefix="recalleval_frozen_")
+            try:
+                commit, count = materialize_snapshot(frozen_root)
+                print("snapshot OK: commit=%s files=%d (frozen corpus materialized)" % (commit, count))
+                run_lane("recall", recall_labels, bin_path, frozen_root,
+                         lambda q: ranked_recall(bin_path, frozen_root, q), args.verbose)
+            finally:
+                shutil.rmtree(frozen_root, ignore_errors=True)
+            run_live_pollution(recall_labels, bin_path, root)
         if args.lane in ("ranking", "both"):
             run_lane("ranking", ranking_labels, bin_path, root,
                      lambda q: ranked_for(bin_path, root, q, args.top_k), args.verbose)
