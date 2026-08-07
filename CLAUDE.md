@@ -46,7 +46,7 @@ does — while a build is in flight, that build writes `.o` files whose **mtime 
 header** but whose **content predates it**. Make then correctly concludes "up to date" and never
 recompiles them again. `cmake --build build -j` reports success, exit 0, no warnings, forever.
 
-Two ways this was hit in one session, both from backgrounding a build:
+Three ways this was hit, all from building across (or editing under) a branch switch:
 
 - A `cmake --build asan` started on one branch and finished after a `git checkout` to another that
   changed `Symbol`. Half the objects had `sizeof(Symbol)==96`, half `104`. ASan reported a
@@ -57,6 +57,14 @@ Two ways this was hit in one session, both from backgrounding a build:
   emitting the old value through repeated successful rebuilds; `qextractionkeycheck` failed with
   `parserVer=41, expected 12/42` and looked like a missed mirror update. `touch`ing the header fixed
   it, which is the diagnosis: the object was newer than the source it disagreed with.
+- The same `sizeof(Symbol)` mix can surface as an uncaught **`std::length_error`** — SIGABRT with
+  `vector<unsigned int>::__append` in the stack, thrown from a `resize( symbols.size() )` deep in
+  `ingest` (triaged 2026-08-07: `--quality-delta`'s `computeHeadSnapshot` re-ingest, ten identical
+  reports in one morning of worktree churn). A `.size()` of a `vector<Symbol>` whose element size
+  half the objects disagree on is garbage; the resize that consumes it is just the first bounds
+  check it fails. Zero repro in 38 runs on clean rebuilds of the same commit. If an "impossible"
+  length_error/bad_alloc comes from a resize fed by `.size()` of a struct that changed size across
+  a recent branch switch, rebuild `--clean-first` before debugging the exception.
 
 If sources may have moved under a build — after any branch switch, or if you are unsure — do not
 trust an incremental rebuild:
