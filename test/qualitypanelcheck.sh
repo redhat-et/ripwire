@@ -56,6 +56,20 @@
 #   (K) a bad preset name is REFUSED, not silently replaced
 #   (L) determinism + XML well-formedness on every fixture and preset
 #   (M) ADDITIVITY: the flagless map is byte-identical with the flag absent
+#   (N) the historical family's UNIT is the FILE, measured and then DISCLOSED in the legend
+#
+# WHY (N) EXISTS. The other five families are per-symbol claims: the bars, the naming rules, the atom rules,
+# the outside-reading rank and the state cells are all computed from ONE symbol. `historical` is not — churn
+# is mined per PATH, so every symbol in a file carries that file's churn=/hrank= verbatim, and a symbol in a
+# churny file collects the family for free without any property of its own. Measured on this repository at
+# the time this arm was written: 20 of the 40 default-preset rows were src/main.cpp symbols, every one of
+# them reporting the identical `hrank=0 churn=47`. That is not a bug — it is the family's real unit, and the
+# panel is explicitly ranked by families that must be able to DISAGREE. What was wrong was the legend, which
+# said only "git change frequency" and left a reader to assume the row's own history had been measured.
+# Non-negotiable #3 (honesty in output is a feature) makes that a defect in the report, not a caveat for the
+# docs. So this arm asserts BOTH halves and in that order: the measurement first (rows in one file really do
+# share one historical evidence string), the disclosure second (the legend says so where the reader meets
+# the family). A gate that pinned only the sentence would keep passing if the family's unit ever changed.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -451,6 +465,57 @@ if cmp -s "$TMP/map.a" "$TMP/map.b" && [ -s "$TMP/map.a" ]; then
 else
     no "(M) the flagless map moved — every flag in this tool is purely additive"
 fi
+
+# ── (N) the historical family is FILE-level evidence, measured then disclosed ─────────────────────────────
+# (N1) THE MEASUREMENT. hub.cpp holds two eligible functions and is the only churned file, so under `lenient`
+# both are rows and both fire historical. If the family were a per-symbol claim their evidence could differ;
+# it cannot, because there is one churn number per path. awk over the split document, never a grep for a
+# string the assertion itself supplies — the point is to read back what the binary actually emitted.
+tr '<' '\n' <"$TMP/panelc.lenient" >"$TMP/panelc.lenient.lines"
+awk '
+    /^s p="/           { inhub = ( $0 ~ /p="[^"]*hub\.cpp:/ ) }
+    inhub && /^e f="historical"/ {
+        if( match( $0, /why="[^"]*"/ ) ) { print substr( $0, RSTART + 5, RLENGTH - 6 ) }
+    }
+' "$TMP/panelc.lenient.lines" >"$TMP/hub.historical"
+hubRows="$( wc -l <"$TMP/hub.historical" | tr -d ' ' )"
+hubDistinct="$( sort -u "$TMP/hub.historical" | wc -l | tr -d ' ' )"
+if [ "$hubRows" -ge 2 ] && [ "$hubDistinct" = "1" ]; then
+    ok "(N1) all $hubRows hub.cpp rows carry the IDENTICAL historical evidence ($( head -1 "$TMP/hub.historical" )) — the family's unit is the file, and a symbol inherits it"
+else
+    no "(N1) expected >=2 hub.cpp rows sharing ONE historical evidence string; got $hubRows row(s), $hubDistinct distinct. Either the fixture stopped producing two churned rows (the arm then asserts nothing) or the family's unit changed, which the legend below still describes as file level"
+    sed 's/^/        /' "$TMP/hub.historical"
+fi
+# The control: the family is not file-level by accident of a one-file corpus. plain.cpp is committed once,
+# so its rows must NOT fire historical at all — otherwise (N1) would hold for a family that fired everywhere.
+if awk '
+    /^s p="/ { inplain = ( $0 ~ /p="[^"]*plain\.cpp:/ ) }
+    inplain && /^e f="historical"/ { found = 1 }
+    END { exit( found ? 1 : 0 ) }
+' "$TMP/panelc.lenient.lines"; then
+    ok "(N1) the once-committed file fires historical on NO row — (N1) pins a shared value, not a constant one"
+else
+    no "(N1) plain.cpp fired historical; the churn cut reached the unchurned file, so (N1)'s shared value proves nothing"
+fi
+# (N2) THE DISCLOSURE. The legend a reader meets FIRST must say the unit out loud, next to the family name.
+# Both legends carry the claim: the panel's own, and --ensemble's, which is where the four calibrated
+# families are described and where the same sentence used to stop at "git change frequency".
+legendOf(){ sed 's/-->/-->\n/g' "$1" | sed -n '1,/-->/p'; }   # the LEADING comment block only
+"$BIN" "$PANELC" --ensemble --no-cache >"$TMP/panelc.ensemble" 2>/dev/null
+for pair in "quality-panel:$TMP/panelc.default" "ensemble:$TMP/panelc.ensemble"; do
+    verb="${pair%%:*}"; doc="${pair#*:}"
+    legendOf "$doc" >"$TMP/legend.$verb"
+    if grep -q 'historical (git change frequency, measured PER FILE' "$TMP/legend.$verb"; then
+        ok "(N2) the $verb legend names the historical family's UNIT where the family is introduced"
+    else
+        no "(N2) the $verb legend describes historical without saying the measurement is PER FILE. Every symbol in a file shares one churn=/hrank=, so a row in a churny file collects this family with no property of its own; a legend that says only 'git change frequency' invites a reader to count it as per-symbol evidence in a report whose whole premise is families that can disagree"
+    fi
+    if grep -q 'inherited by the row' "$TMP/legend.$verb"; then
+        ok "(N2) and spells out the consequence — the row INHERITS the file's evidence"
+    else
+        no "(N2) the $verb legend states the unit but not what follows from it: a reader needs to know the row inherited this family rather than earned it"
+    fi
+done
 
 if [ "$fail" -eq 0 ]; then
     echo "qualitypanelcheck: PASS"
