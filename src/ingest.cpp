@@ -887,6 +887,8 @@ struct RawDef
     std::uint32_t locals    = 0;   // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): local-decl
                                    // count from cc_walk; C/C++ only (see model.h localsCountedLang), 0 elsewhere
     std::uint16_t ppAlt     = 0;   // preproc alternative branches (#else/#elif) inside the def (see model.h Symbol::ppAlt)
+    std::uint16_t humps     = 0;   // nesting profile: regions reaching quality::kNestBar (see model.h Symbol::humps)
+    std::uint16_t deepLoc   = 0;   // nesting profile: lines inside them, a FLOOR (see model.h Symbol::deepLoc)
     std::uint16_t params    = 0;   // Q4: parameter count (from the def's parameter-list child); fns/methods
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
@@ -998,7 +1000,22 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 43;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 45;           // bump on any grammar/.scm/extraction change
+                                                      // 45: integration/quality-fleet merge of the ppalt line
+                                                      //    (43 below) and the nestcal r1 line (44 below) — the
+                                                      //    merged extraction (ppalt disclosure + r1 else/elif
+                                                      //    clause semantics) matches neither lineage, so the
+                                                      //    merge takes a fresh number and both sides' blobs are
+                                                      //    rejected. Mirror moved in the same commit.
+                                                      // 44: the merge of TWO independent 43s, so neither 43's
+                                                      //    caches may be served. One 43 was nestcal r1 (else/elif
+                                                      //    clause bodies no longer double-deepen — no per-child
+                                                      //    maxNest bump or hump minting; nest/humps/deep/ccx
+                                                      //    values shift). The other 43 fixed deepLoc's clamp
+                                                      //    order for else-clause regions (cc_noteElseRegions,
+                                                      //    forward pass); r1's removal of clause noting subsumes
+                                                      //    it — every surviving cc_noteHump site notes one node
+                                                      //    pre-descent, so document order holds by construction.
                                                       // 43: ppalt disclosure — RawDef/Symbol gained a `ppAlt` u16
                                                       //    counting the ALTERNATIVE-introducing preprocessor nodes
                                                       //    (preproc_else/preproc_elif/preproc_elifdef) inside the
@@ -1246,7 +1263,7 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 }
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     if( withLex )
     {
         VERIFY( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -1334,15 +1351,16 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
-// they sit next to the writer functions whose field list they must match. A LEAN def record is 11 u32 +
-// 4 u8 + 2 empty str(len u32) fields = 11*4 + 4*1 + 2*4 = 56 bytes (Phase 1, local-variable-indexing,
-// PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10; the ppalt disclosure then added
-// `ppAlt`, written as a u32 — 10 -> 11); the RICH (withLex) extra is
+// they sit next to the writer functions whose field list they must match. A LEAN def record is 13 u32 +
+// 4 u8 + 2 empty str(len u32) fields = 13*4 + 4*1 + 2*4 = 64 bytes (Phase 1, local-variable-indexing,
+// PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10; the ppalt disclosure added `ppAlt`,
+// written as a u32 — 10 -> 11; the nesting profile then added `humps` and `deepLoc`, written as u32 each —
+// 11 -> 13, so 13*4 + 4 + 8 = 64); the RICH (withLex) extra is
 // dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty
 // str(len u32) fields = 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 56;   // 11×u32 + 4×u8 + 2×str(len u32, empty)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 64;   // 13×u32 + 4×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 39;   // 3×u32 + 7×u8 + 5×str(len u32, empty)
 
@@ -1372,7 +1390,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
@@ -2165,7 +2183,8 @@ inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
 }
 
 // Every accumulator the fused walk fills, in ONE bundle. It used to be six by-reference out-parameters
-// threaded through cc_walk's signature; the ppalt disclosure would have made that seven, which is the
+// threaded through cc_walk's signature; the ppalt disclosure and the nesting-depth profile together
+// would have made that ten, which is the
 // parameter-count smell --metrics itself reports. One struct, passed by reference, is the same code with a
 // name — and the walk's own hot loop touches it exactly as before.
 struct CcAccum
@@ -2175,7 +2194,11 @@ struct CcAccum
     std::uint32_t maxNest = 0;   // deepest control nesting reached  → Symbol::maxNest
     std::uint32_t locals  = 0;   // Phase 1 local-declaration floor  → Symbol::locals
     std::uint32_t ppAlt   = 0;   // preproc alternative branches      → Symbol::ppAlt   (see model.h)
+    std::uint32_t humps   = 0;   // regions reaching quality::kNestBar → Symbol::humps   (see model.h)
+    std::uint32_t deepLoc = 0;   // lines inside those regions        → Symbol::deepLoc  (a FLOOR)
+    std::uint32_t deepEnd = 0;   // 1-based end row of the last counted hump — the anti-double-count clamp
 };
+
 
 // An ALTERNATIVE-introducing preprocessor node: `#else` / `#elif` / `#elifdef` inside the def mean the
 // body carries code that never coexists at compile time, so every summed structural metric (cx/ccx/nest/
@@ -2190,6 +2213,36 @@ struct CcAccum
 inline bool cc_isPreprocAlternative( const char* t ) noexcept
 {
     return std::strncmp( t, "preproc_else", 12 ) == 0 || std::strncmp( t, "preproc_elif", 12 ) == 0;
+}
+
+
+// A hump is a control-nesting region whose depth FIRST reaches quality::kNestBar. Counting it at the
+// crossing is what makes the count exact: a deeper region inside an already-deep one has an ancestor chain
+// that is already at or over the bar, so it cannot cross again and cannot be counted twice.
+//
+// `deepLoc` bills the crossing node's whole line span, control header included — the `if(` line is part of
+// what a reader must hold in their head. Sibling humps are reached in document order (the DFS pushes
+// children in reverse, so pops run left to right), so a hump starting on the line the previous one ended is
+// clamped to start after it. The clamp can only ever SUBTRACT: if the order assumption is ever violated the
+// result is an under-count, never an over-count, which is exactly why deepLoc is published as a floor.
+inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNesting, CcAccum& acc ) noexcept
+{
+    if( fromNesting >= quality::kNestBar || toNesting < quality::kNestBar )
+    {
+        return;   // already deep (counted at an ancestor), or still shallow
+    }
+    ++acc.humps;
+    const std::uint32_t startRow = ts_node_start_point( n ).row + 1u;   // tree-sitter rows are 0-based
+    const std::uint32_t endRow   = ts_node_end_point( n ).row + 1u;
+    const std::uint32_t from     = ( startRow > acc.deepEnd ) ? startRow : acc.deepEnd + 1u;
+    if( endRow >= from )
+    {
+        acc.deepLoc += endRow - from + 1u;
+    }
+    if( endRow > acc.deepEnd )
+    {
+        acc.deepEnd = endRow;
+    }
 }
 
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
@@ -2276,6 +2329,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 acc.maxNest = childNest; // Q4: deepest control nesting reached
             }
+            cc_noteHump( n, nesting, childNest, acc );   // profile: did THIS control cross the bar?
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
@@ -2305,11 +2359,15 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 }
                 else
                 {
-                    if( nesting + 1 > acc.maxNest )
-                    {
-                        acc.maxNest = nesting + 1; // Q4: else/elif body deepens by one
-                    }
-                    stack.push_back( { c, nesting + 1, childDepth } );   // else/elif body deepens by one
+                    // An else/elif body sits at the construct's PRIMARY-body level: `nesting` here is the
+                    // clause's inherited frame nesting, which already carries the parent construct's +1 (the
+                    // if pushed ALL its children at childNest). Deepening again — as this branch did before
+                    // the nestcal r1 round — double-counted every clause body AND raised maxNest/minted one
+                    // hump per clause CHILD (the anonymous keyword token, the condition, `:`), which is how a
+                    // 20-line elif ladder reported humps=16. No maxNest bump and no cc_noteHump belong here:
+                    // the parent construct recorded this depth when IT crossed, and a clause opens no new
+                    // depth (matches Java/Go/C#, whose grammars have no clause node and were always flat).
+                    stack.push_back( { c, nesting, childDepth } );
                 }
             }
             continue;
@@ -2320,6 +2378,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 acc.maxNest = nesting + 1; // Q4: a lambda/closure body deepens nesting
             }
+            cc_noteHump( n, nesting, nesting + 1, acc );
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
@@ -2340,12 +2399,12 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; };
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; };
 // `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
 // (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
 // never emits (absent, not a bare "0" — see localsCountedLang's own comment).
-inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, AND ppAlt
+inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, AND the nesting profile
 {                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
     CcAccum acc;
     const bool countLocals = localsCountedLang( lang );
@@ -2353,13 +2412,16 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )  
     std::vector<TSNode> kids;
     kids.reserve( 64 );
     collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
+    // ONE accumulator across all top-level children: the deepEnd clamp has to see the whole def in document
+    // order, and humps in sibling statements are humps of the same function.
     for( const TSNode c : kids )
     {
         cc_walk( c, 0, src, acc, 0, countLocals );
     }
     // cx = 1 + decisions ; ccx = nesting-weighted cognitive ; maxNest = deepest control nesting ;
-    // locals = Phase 1 floor count ; ppAlt = preproc alternative branches (model.h Symbol::ppAlt).
-    return { 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt };
+    // locals = Phase 1 floor count ; ppAlt = preproc alternative branches (model.h Symbol::ppAlt) ;
+    // humps/deepLoc = the nesting profile (model.h Symbol).
+    return { 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc };
 }
 
 // ── local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ─────────────────────────────────
@@ -5629,7 +5691,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -5647,6 +5709,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.params    = fnOrMethod ? countParams( defNode ) : std::uint16_t( 0 );
             d.arityExact = fnOrMethod ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
+            // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
+            // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
+            // stays honest in the direction the attribute already claims.
+            d.humps     = fnOrMethod ? std::uint16_t( humpsVal > 65535u ? 65535u : humpsVal ) : std::uint16_t( 0 );
+            d.deepLoc   = fnOrMethod ? std::uint16_t( deepVal  > 65535u ? 65535u : deepVal  ) : std::uint16_t( 0 );
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = finalSegment( nameTxt );
@@ -6939,6 +7006,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             s.params       = d.params;   // Q4: parameter count (fns/methods)
             s.arityExact   = d.arityExact;   // B2.2: params is a fixed call-comparable arity
             s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
+            s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
+            s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)
             s.name   = d.name;
             s.scope  = d.scope;
             result.symbols.push_back( std::move( s ) );

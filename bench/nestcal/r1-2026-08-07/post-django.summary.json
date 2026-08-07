@@ -1,0 +1,19 @@
+{
+  "label": "post-django",
+  "max_nest": 9,
+  "nest_hist": {
+    "0": 4057,
+    "1": 2583,
+    "2": 1056,
+    "3": 395,
+    "4": 114,
+    "5": 44,
+    "6": 7,
+    "7": 3,
+    "9": 1
+  },
+  "rows_with_humps": 169,
+  "symbols_with_nest": 8260,
+  "total_deep": 1551,
+  "total_humps": 313
+}

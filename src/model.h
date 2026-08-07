@@ -175,6 +175,35 @@ struct Symbol
     // `locals`. Meaningful for fns/methods only (0 otherwise, same convention as params/maxNest); emitted
     // as ppalt="N" on --metrics, ABSENT when 0. Saturates at 65535. See test/ppaltcheck.sh.
     // (The `ppAlt` field itself is declared UP TOP, in the pad hole after `lang` — see its own comment.)
+    // NESTING-DEPTH PROFILE — what `maxNest` alone cannot say. maxNest is a MAX: one line at depth 9 and a
+    // thousand lines at depth 9 report the same number, so a long BLOCKED-SEQUENTIAL function (a run of
+    // shallow scoped steps, the max set by one inner loop) is indistinguishable from a TANGLED one that
+    // holds depth across hundreds of lines. Every consumer of nest= inherits that blindness: the quality
+    // panel's structural family, --readability's rank, the ensemble join. Two facts fix it, both filled by
+    // the SAME fused cc_walk DFS (no new tree-sitter queries) and both keyed to the EXISTING structural bar
+    // quality::kNestBar — no new magic number. Language-agnostic, unlike `locals`: cc_walk computes nesting
+    // for every grammar. See test/nestprofilecheck.sh; `humps` is CodeScene's "bumpy road" factor.
+    //
+    // humps  — count of MAXIMAL control-nesting regions that reach the bar (CodeScene's "bumpy road": a rise
+    //          above the threshold then a fall). One deep tangle is 1; repeated missing abstractions are
+    //          many. EXACT, not a floor: each region has exactly one first-crossing node in the walk, and a
+    //          region nested inside an already-deep one cannot cross again. Saturates at 65535 — a def with
+    //          more humps than that is past every triage threshold and the exact number buys nothing.
+    // deepLoc — physical lines lying inside those regions; deepLoc/loc is the fraction the max throws away.
+    //          A FLOOR (emitted as deep_floor="1"), because the clamp that stops two humps sharing a line
+    //          from billing it twice can only ever subtract. Saturates at 65535 for the same reason.
+    //          deepLoc COUNTS LINES AND humps COUNTS REGIONS, so `deep < humps` is legal output and not a
+    //          defect: two sibling regions genuinely share a line when both are written on it (see
+    //          test/nestprofilecheck.sh arm 11's negative control), or anywhere in minified source. Three
+    //          separate validators have read that shape as a bug, so the metrics legend says it out loud
+    //          and arm 11 pins it as correct — alongside the case that WAS a defect, distinct-line regions
+    //          collapsing because the deepEnd clamp was fed regions out of document order (nestcal r1,
+    //          kParserVer 44, removed the only out-of-order call site with the clause-noting quirk itself).
+    // Both are 0 exactly when maxNest < quality::kNestBar, so serialize.h omits them there rather than
+    // writing a bare 0 — lossless, because `nest=` is already on the row (test/nestprofilecheck.sh arm 5
+    // pins that equivalence in both directions).
+    std::uint16_t humps        = 0;
+    std::uint16_t deepLoc      = 0;
     std::uint16_t params        = 0;   // parameter count from the def's parameter-list child; --metrics params= (NUMBER only — no 7±2)
     std::uint8_t  maxNest       = 0;   // max control-structure nesting depth reached inside the def; --metrics nest=
     std::uint8_t  arityExact    = 0;   // B2.2: 1 ⇒ `params` is a FIXED, call-comparable arity (no variadic / default
@@ -199,7 +228,16 @@ struct Symbol
 // had consumed the tail padding entirely (this assert fired 104 == 96 on that placement) — so it sits in
 // the struct's one remaining hole instead, the 2 pad bytes between `lang` and `fileId` up top; sizeof
 // unchanged, measured by this assert, not hand-arithmetic.
-static_assert( sizeof( Symbol ) == 48 + 2 * sizeof( std::string ),
+//
+// `humps`/`deepLoc` (the nesting-depth profile) then cost the first real growth: 48 → 56 + 2*string,
+// MEASURED with a standalone sizeof probe after this assert fired, not derived on paper. The step is
+// unavoidable rather than sloppy — `locals` had spent the last of the trailing padding, so the scalar run
+// ended exactly on an 8-B boundary, and Symbol's alignment is 8 (the std::string members), so ANY further
+// field rounds the object up by a full 8 B no matter how small its type. Two uint16_t is therefore not a
+// compromise but the whole point: it spends 4 B of that unavoidable 8 and leaves 4 B of live padding for
+// the NEXT field to land in free, exactly as `locals` did. A smaller type here would buy nothing and cost
+// range (both saturate at 65535 — see the fields' own comment); a uint32_t pair would have cost 16.
+static_assert( sizeof( Symbol ) == 56 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
 // local-variable-indexing plan Phase 1 MVP scope (PLAN.md 2026-08-06 evening): C/C++ only — highest

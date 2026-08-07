@@ -56,6 +56,38 @@
 #   (K) a bad preset name is REFUSED, not silently replaced
 #   (L) determinism + XML well-formedness on every fixture and preset
 #   (M) ADDITIVITY: the flagless map is byte-identical with the flag absent
+#   (N) the historical family's UNIT is the FILE, measured and then DISCLOSED in the legend
+#
+# WHY (N) EXISTS. The other five families are per-symbol claims: the bars, the naming rules, the atom rules,
+# the outside-reading rank and the state cells are all computed from ONE symbol. `historical` is not — churn
+# is mined per PATH, so every symbol in a file carries that file's churn=/hrank= verbatim, and a symbol in a
+# churny file collects the family for free without any property of its own. Measured on this repository at
+# the time this arm was written: 20 of the 40 default-preset rows were src/main.cpp symbols, every one of
+# them reporting the identical `hrank=0 churn=47`. That is not a bug — it is the family's real unit, and the
+# panel is explicitly ranked by families that must be able to DISAGREE. What was wrong was the legend, which
+# said only "git change frequency" and left a reader to assume the row's own history had been measured.
+# Non-negotiable #3 (honesty in output is a feature) makes that a defect in the report, not a caveat for the
+# docs. So this arm asserts BOTH halves and in that order: the measurement first (rows in one file really do
+# share one historical evidence string), the disclosure second (the legend says so where the reader meets
+# the family). A gate that pinned only the sentence would keep passing if the family's unit ever changed.
+#
+#   (O) the deep x untested JOIN: an annotation, and never a seventh family
+#
+# WHY (O) EXISTS, and what the join is allowed to be. `deep=` (lines inside the regions that reach bar_nest)
+# and "no indexed test reaches this symbol" are two facts this report already holds. Their INTERSECTION is
+# where a refactor is both most needed and least safe, and a reader should not need a second verb to find it.
+# But it is emphatically NOT independent evidence: it restates two things already on the row, so counting it
+# as a family would be the Maintainability-Index failure this verb exists to refuse — one signal re-weighted
+# and called two. The join is therefore an ANNOTATION, and this arm pins it to that role in four parts:
+#   (O1) it FIRES on a deep function no test reaches
+#   (O2) it does NOT fire on a deep function a test does reach — the same body, only the coverage differs
+#   (O3) the two rows are otherwise IDENTICAL (same fam=, of=, fired=, and the same evidence strings) and
+#        they appear in NodeId (definition) order with the annotated one SECOND. That is the "no ranking
+#        change" claim in a form a gate can see: had the join been folded into the count or into a secondary
+#        ordering, the two rows would differ by more than the one attribute, or would have swapped.
+#   (O4) tested_scope=0 SUPPRESSES it. PANELC has no test path at all, so there "untested" is a fact about
+#        what was indexed and not about the code; the annotation must then be absent from every row rather
+#        than fire on all of them. Same doctrine as UNAVAILABLE above — an empty measurement is not a finding.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -183,6 +215,69 @@ RS
 NOFNS="$TMP/nofns"; mkdir -p "$NOFNS"
 printf '{ "alpha": 1, "beta": { "gamma": 2 } }\n' >"$NOFNS/one.json"
 printf '{ "delta": 3 }\n'                          >"$NOFNS/two.json"
+
+# ── DEEPJ — the join fixture for arm (O) ──────────────────────────────────────────────────────────────────
+# TWO functions with BYTE-IDENTICAL bodies, so every family sees exactly the same code twice: same ccx, same
+# loc, same nest, same humps/deep, same parameter count, same three-token name shape. One of them is called
+# from a test path and the other is called by nothing. The rows they produce must therefore be identical in
+# every respect EXCEPT the join annotation — which is the whole claim: the join reports a pair of facts the
+# report already contains and adds no evidence, no family and no ordering.
+DEEPJ="$TMP/deepj"; mkdir -p "$DEEPJ/src" "$DEEPJ/test"
+cat >"$DEEPJ/src/deep.cpp" <<'SRC'
+int deepTestedRoutine( int a, int b )
+{
+    int total = 0;
+    for( int i = 0; i < a; ++i )
+    {
+        if( b > i )
+        {
+            while( total < b )
+            {
+                if( ( total % 2 ) == 0 )
+                {
+                    total += 1;
+                }
+                else
+                {
+                    total += 2;
+                }
+            }
+        }
+    }
+    return total;
+}
+
+int deepUntestedRoutine( int a, int b )
+{
+    int total = 0;
+    for( int i = 0; i < a; ++i )
+    {
+        if( b > i )
+        {
+            while( total < b )
+            {
+                if( ( total % 2 ) == 0 )
+                {
+                    total += 1;
+                }
+                else
+                {
+                    total += 2;
+                }
+            }
+        }
+    }
+    return total;
+}
+SRC
+cat >"$DEEPJ/test/deep_test.cpp" <<'SRC'
+int deepTestedRoutine( int a, int b );
+
+int runDeepCase( void )
+{
+    return deepTestedRoutine( 3, 4 );
+}
+SRC
 
 panel(){ "$BIN" "$1" --quality-panel="$2" --limit=500 --no-cache 2>/dev/null; }
 rootElem(){ grep -o '<quality_panel [^>]*>' "$1" | head -1; }
@@ -451,6 +546,133 @@ if cmp -s "$TMP/map.a" "$TMP/map.b" && [ -s "$TMP/map.a" ]; then
 else
     no "(M) the flagless map moved — every flag in this tool is purely additive"
 fi
+
+# ── (N) the historical family is FILE-level evidence, measured then disclosed ─────────────────────────────
+# (N1) THE MEASUREMENT. hub.cpp holds two eligible functions and is the only churned file, so under `lenient`
+# both are rows and both fire historical. If the family were a per-symbol claim their evidence could differ;
+# it cannot, because there is one churn number per path. awk over the split document, never a grep for a
+# string the assertion itself supplies — the point is to read back what the binary actually emitted.
+tr '<' '\n' <"$TMP/panelc.lenient" >"$TMP/panelc.lenient.lines"
+awk '
+    /^s p="/           { inhub = ( $0 ~ /p="[^"]*hub\.cpp:/ ) }
+    inhub && /^e f="historical"/ {
+        if( match( $0, /why="[^"]*"/ ) ) { print substr( $0, RSTART + 5, RLENGTH - 6 ) }
+    }
+' "$TMP/panelc.lenient.lines" >"$TMP/hub.historical"
+hubRows="$( wc -l <"$TMP/hub.historical" | tr -d ' ' )"
+hubDistinct="$( sort -u "$TMP/hub.historical" | wc -l | tr -d ' ' )"
+if [ "$hubRows" -ge 2 ] && [ "$hubDistinct" = "1" ]; then
+    ok "(N1) all $hubRows hub.cpp rows carry the IDENTICAL historical evidence ($( head -1 "$TMP/hub.historical" )) — the family's unit is the file, and a symbol inherits it"
+else
+    no "(N1) expected >=2 hub.cpp rows sharing ONE historical evidence string; got $hubRows row(s), $hubDistinct distinct. Either the fixture stopped producing two churned rows (the arm then asserts nothing) or the family's unit changed, which the legend below still describes as file level"
+    sed 's/^/        /' "$TMP/hub.historical"
+fi
+# The control: the family is not file-level by accident of a one-file corpus. plain.cpp is committed once,
+# so its rows must NOT fire historical at all — otherwise (N1) would hold for a family that fired everywhere.
+if awk '
+    /^s p="/ { inplain = ( $0 ~ /p="[^"]*plain\.cpp:/ ) }
+    inplain && /^e f="historical"/ { found = 1 }
+    END { exit( found ? 1 : 0 ) }
+' "$TMP/panelc.lenient.lines"; then
+    ok "(N1) the once-committed file fires historical on NO row — (N1) pins a shared value, not a constant one"
+else
+    no "(N1) plain.cpp fired historical; the churn cut reached the unchurned file, so (N1)'s shared value proves nothing"
+fi
+# (N2) THE DISCLOSURE. The legend a reader meets FIRST must say the unit out loud, next to the family name.
+# Both legends carry the claim: the panel's own, and --ensemble's, which is where the four calibrated
+# families are described and where the same sentence used to stop at "git change frequency".
+legendOf(){ sed 's/-->/-->\n/g' "$1" | sed -n '1,/-->/p'; }   # the LEADING comment block only
+"$BIN" "$PANELC" --ensemble --no-cache >"$TMP/panelc.ensemble" 2>/dev/null
+for pair in "quality-panel:$TMP/panelc.default" "ensemble:$TMP/panelc.ensemble"; do
+    verb="${pair%%:*}"; doc="${pair#*:}"
+    legendOf "$doc" >"$TMP/legend.$verb"
+    if grep -q 'historical (git change frequency, measured PER FILE' "$TMP/legend.$verb"; then
+        ok "(N2) the $verb legend names the historical family's UNIT where the family is introduced"
+    else
+        no "(N2) the $verb legend describes historical without saying the measurement is PER FILE. Every symbol in a file shares one churn=/hrank=, so a row in a churny file collects this family with no property of its own; a legend that says only 'git change frequency' invites a reader to count it as per-symbol evidence in a report whose whole premise is families that can disagree"
+    fi
+    if grep -q 'inherited by the row' "$TMP/legend.$verb"; then
+        ok "(N2) and spells out the consequence — the row INHERITS the file's evidence"
+    else
+        no "(N2) the $verb legend states the unit but not what follows from it: a reader needs to know the row inherited this family rather than earned it"
+    fi
+done
+
+# ── (O) the deep x untested JOIN — an annotation, not a family ────────────────────────────────────────────
+panel "$DEEPJ" lenient >"$TMP/deepj.lenient"
+tr '<' '\n' <"$TMP/deepj.lenient" >"$TMP/deepj.lines"
+# One line per emitted row: "<name> <TAB> <the whole start tag>". awk, not a chain of greps, so the tag is
+# read back exactly as emitted rather than reconstructed from the assertion's own expectations.
+awk '
+    /^s p="/ {
+        tag = $0
+        sub( />$/, "", tag )
+        nm = tag
+        sub( /^.* n="/, "", nm ); sub( /".*$/, "", nm )
+        printf "%s\t%s\n", nm, tag
+    }
+' "$TMP/deepj.lines" >"$TMP/deepj.rows"
+rowTag(){ awk -F'\t' -v want="$1" '$1 == want { print $2; exit }' "$TMP/deepj.rows"; }
+testedTag="$( rowTag deepTestedRoutine )"
+untestedTag="$( rowTag deepUntestedRoutine )"
+if [ -n "$testedTag" ] && [ -n "$untestedTag" ]; then
+    ok "(O) both twin functions are rows — the join fixture asserts something"
+else
+    no "(O) the deep fixture did not emit both twins as rows (tested=[$testedTag] untested=[$untestedTag]); the rest of (O) would assert nothing"
+    sed 's/^/        /' "$TMP/deepj.rows"
+fi
+tScope="$( rootAttr "$TMP/deepj.lenient" tested_scope )"
+if [ -n "$tScope" ] && [ "$tScope" != "0" ]; then
+    ok "(O) tested_scope=\"$tScope\" — an indexed test reaches something here, so 'untested' is a claim about the code"
+else
+    no "(O) the deep fixture must report a non-zero tested_scope= (its test/ file calls one of the twins); got \"$tScope\". Without it the join is suppressed by design and (O1) below cannot fire"
+fi
+# (O1)/(O2) — the annotation fires on exactly one of two identical bodies, and it is the uncovered one.
+case "$untestedTag" in
+    *'join="deep+untested"'*) ok "(O1) the deep function no test reaches carries join=\"deep+untested\"" ;;
+    *)                        no "(O1) the deep, uncovered twin carries no join= annotation — the one pair the panel is supposed to point at: $untestedTag" ;;
+esac
+case "$testedTag" in
+    *join=*) no "(O2) the deep twin a test DOES reach carries a join= annotation; the join then says nothing about coverage and is just a second name for deep=: $testedTag" ;;
+    *)       ok "(O2) the covered twin carries no annotation — the annotation tracks coverage, not depth alone" ;;
+esac
+# (O3) — the rows are otherwise identical, and in definition order. Strip the two attributes that must differ
+# (p= and n=) and the annotation itself; what remains must match byte for byte.
+strip(){ printf '%s' "$1" | sed 's/ p="[^"]*"//; s/ n="[^"]*"//; s/ join="[^"]*"//'; }
+if [ "$( strip "$testedTag" )" = "$( strip "$untestedTag" )" ] && [ -n "$testedTag" ]; then
+    ok "(O3) the two rows are identical once p=, n= and the annotation are removed — the join adds no evidence and moves no count"
+else
+    no "(O3) the twin rows differ by more than the join annotation, so the join is not purely additive:"
+    printf '        tested  : %s\n' "$( strip "$testedTag" )"
+    printf '        untested: %s\n' "$( strip "$untestedTag" )"
+fi
+order="$( awk -F'\t' '$1 == "deepTestedRoutine" || $1 == "deepUntestedRoutine" { print $1 }' "$TMP/deepj.rows" | tr '\n' ' ' )"
+if [ "$order" = "deepTestedRoutine deepUntestedRoutine " ]; then
+    ok "(O3) and they come out in definition order, annotated one SECOND — the annotation is not a secondary sort key"
+else
+    no "(O3) the twins must appear in NodeId (definition) order 'deepTestedRoutine deepUntestedRoutine'; got '$order'. A join that reorders rows changes which rows survive the limit= window, which is a ranking change wearing an annotation's clothes"
+fi
+# (O4) — no indexed test anywhere: the annotation is suppressed, not fired on everything.
+panelScope="$( rootAttr "$TMP/panelc.lenient" tested_scope )"
+if [ "$panelScope" = "0" ]; then
+    ok "(O4) the test-less fixture reports tested_scope=\"0\" — the join's denominator is measured per corpus"
+else
+    no "(O4) PANELC has no test path, so tested_scope= must be \"0\"; got \"$panelScope\""
+fi
+if grep -q 'join="' "$TMP/panelc.lenient"; then
+    no "(O4) a corpus where no indexed test reaches anything still emitted join= annotations. Every deep row would carry one, which reports the absence of an indexed test suite as a property of each function"
+else
+    ok "(O4) and emits the annotation on no row at all"
+fi
+# The legend must define what the reader just met, and say what it is NOT.
+legendOf "$TMP/deepj.lenient" >"$TMP/legend.join"
+for token in 'join=' 'tested_scope=' 'deep_untested='; do
+    if grep -q "$token" "$TMP/legend.join"; then
+        ok "(O) the legend defines $token"
+    else
+        no "(O) the legend does not define $token — a marker a reader meets on the first screen with no definition where they meet it is the exact class test/legendcoveragecheck.sh exists for"
+    fi
+done
 
 if [ "$fail" -eq 0 ]; then
     echo "qualitypanelcheck: PASS"

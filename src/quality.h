@@ -733,7 +733,10 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 43;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 45;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 45 = integration/quality-fleet merge of the ppalt
+                                                          // line (43 there) and the nestcal r1 line (44 there):
+                                                          // the merged extraction matches neither, fresh number.
                                                           // 43 = ppalt disclosure: RawDef/Symbol gained a ppAlt
                                                           // field (def-record FORMAT change) — was 42 on its own
                                                           // branch, renumbered 43 at integration (collision with

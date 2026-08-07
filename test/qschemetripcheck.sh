@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-07, integration/quality-fleet again: kParserVer 43/44 -> 45. The integration line had taken 43
+#   (ppalt renumbering, entry below); nestcal r1's own lineage had reached 44 (entry below). The merged
+#   extraction (ppalt + nestcal else-clause semantics) matches neither, so the merge takes a fresh number,
+#   same convention as nestcal's own same-day merge. Mirror moved with it; kQSnapCacheScheme unmoved.
 # 2026-08-07, integration/quality-fleet renumbering: kParserVer 42/42 -> 43 and the quality.h mirror with
 #   it. Two branches independently claimed 42 (nested-closure span attribution; ppalt disclosure); the
 #   integration resolves the collision to max+1 = 43 so blobs written by EITHER 42-binary are rejected —
@@ -45,6 +49,12 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   This is an EXTRACTION change, not a Snapshot-SEMANTICS change: what a cached Snapshot MEANS (dead set,
 #   clone-group identity, blob shape) is untouched, so kQSnapCacheScheme deliberately did NOT move — the
 #   same split as the 2026-07-31 entry below.
+# 2026-08-07, nestcal r1 (bench/nestcal/r1-2026-08-07): kParserVer 42 -> 43 (cc_walk's clause branch no
+#   longer double-deepens else/elif bodies; nest/humps/deep/ccx in a v42 blob are provably wrong), then
+#   43 -> 44 at the same-day MERGE with the parallel deep=-clamp fix, which had independently taken 43 —
+#   two DIFFERENT 43-extractions existed, so neither's caches may be served and the merge takes a fresh
+#   number. Mirror moved both times. EXTRACTION changes only: what a cached Snapshot MEANS is untouched,
+#   so kQSnapCacheScheme deliberately did NOT move.
 # 2026-07-31, H4 W2b FIXUP: kParserVer 33 -> 34 and the
 #   quality.h mirror with it, because a qualified call to a `>`-family OPERATOR now re-splits on the operator
 #   tail — the per-ref qualifier changes, so a v33 blob's edges are provably wrong and must not be re-served.
