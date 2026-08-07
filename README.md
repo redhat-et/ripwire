@@ -967,9 +967,11 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 - **`--grep` costs more tokens than it saves**, and **`--pack-signatures` can make output bigger** —
   both quantified [next to the savings they qualify](#what-it-saves-you-in-tokens), because saying so
   is cheaper than being caught.
-- **The public C++ number is materially lower than the earlier private one.** SFML: strict file@10
-  31.3%, any@10 45.2%, first-hit MRR 0.22 — against roughly 89% any@10 on a private corpus that is no
-  longer reproducible from this tree. The public number is the baseline going forward.
+- **The public C++ number is materially lower than the retired private one was.** SFML: strict file@10
+  28.7%, any@10 41.7%, first-hit MRR 0.21 — measured at commit `d411f3de4`
+  (`bench/cppbench/results/sfml_scoreboard.md`). Until 2026-08-07 this bullet compared against a
+  roughly-89%-any@10 private corpus that is no longer reproducible from this tree; that comparison is
+  retired. The public number is the baseline going forward.
 - **PageRank is a bad co-change ranker** — 3.8% recall@5 against 40.3% for plain lexical, and fusing
   the two made it worse. Relatedness is lexical; importance is structural; the tool uses different
   machinery for each because the measurement said so.

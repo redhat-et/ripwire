@@ -149,7 +149,7 @@ python3 bench/cppbench/run_cppbench.py --source-repo /path/to/any/git/repo \
 against a bare URL) — pass it every time, including when reusing the shipped `dataset.lock` (whose own
 `source_repo` field is provenance, not a live path).
 
-## Results — SFML, n=120 mined / 115 scored, `--all`-branch mining (2026-07-22)
+## Results — SFML, n=120 mined / 115 scored, `--all`-branch mining (2026-08-07, commit `d411f3de4`)
 
 5 instances had **no indexable gold file** (their gold files are absent from ripwire's ranked universe
 at that parent — e.g. platform-specific sources outside the indexed set) and are excluded with a printed
@@ -158,18 +158,18 @@ verified byte-identical twice.
 
 | arm | file@1 | file@3 | file@5 | file@10 | any@10 | MRR | wall/inst (warm) |
 |---|---|---|---|---|---|---|---|
-| `for` (shipping default) | 7.0% | 14.8% | 20.0% | 31.3% | 45.2% | 0.219 | 0.78s |
-| `for --no-mention-boost` | 7.0% | 14.8% | 20.0% | 31.3% | 45.2% | 0.219 | 0.23s |
-| `query` (BM25 baseline) | 7.0% | 14.8% | 20.0% | 31.3% | 45.2% | 0.219 | 0.26s |
+| `for` (shipping default) | 5.2% | 11.3% | 18.3% | 28.7% | 41.7% | 0.205 | 0.88s |
+| `for --no-mention-boost` | 5.2% | 11.3% | 18.3% | 28.7% | 41.7% | 0.205 | 0.28s |
+| `query` (BM25 baseline) | 5.2% | 11.3% | 18.3% | 28.7% | 41.7% | 0.205 | 0.29s |
 
-Strict@10 by gold-set size (identical across all three arms): **single-file (n=72) 47.2%**, multi-file
-(n=43) 7.0%. Whole run: 718.9s wall over 120 instances (~6.0s/instance including one cold index build
-per unique parent tree; the per-arm warm localizer call is the 0.23–0.78s column).
+Strict@10 by gold-set size (identical across all three arms): **single-file (n=72) 43.1%**, multi-file
+(n=43) 7.0%. Whole run: 863.5s wall over 120 instances (~7.2s/instance including one cold index build
+per unique parent tree; the per-arm warm localizer call is the 0.28–0.88s column).
 
 **Honest reading (the losses with the wins):**
 
-- **The public C++ number: strict file@10 31.3%, any@10 45.2%, first-hit MRR 0.22.** Single-file
-  localization lands roughly half the time in the top ten; strict multi-file localization (ALL 2–5 gold
+- **The public C++ number: strict file@10 28.7%, any@10 41.7%, first-hit MRR 0.21.** Single-file
+  localization lands a bit under half the time in the top ten; strict multi-file localization (ALL 2–5 gold
   files in the top 10) is the hard case at 7.0% — the same single-vs-multi cliff the Python LocBench
   run shows, steeper here.
 - **All three arms are IDENTICAL at file granularity on this corpus.** SFML's commit messages are
@@ -180,8 +180,8 @@ per unique parent tree; the per-arm warm localizer call is the 0.23–0.78s colu
   *few*. Either way, post-hoc commit messages are not the query shape where the lens or the anchor
   earn their keep — that remains issue-style prose (Python LocBench: lens ≫ query, ~4.5× lenient;
   anchor +4.9pp held-out).
-- **These numbers are materially lower than the previous private-corpus run** (any@10 45.2% vs ~89%,
-  MRR 0.22 vs 0.62). The mechanism is visible in the queries: that corpus's messages were long,
+- **These numbers are materially lower than the previous private-corpus run** (any@10 41.7% vs ~89%,
+  MRR 0.21 vs 0.62). The mechanism is visible in the queries: that corpus's messages were long,
   identifier-dense, post-hoc technical notes (an easy retrieval shape); SFML's are terse
   changelog-style summaries whose vocabulary often barely overlaps the code. A benchmark that got
   *easier-looking* numbers from a *harder-to-publish* corpus was exactly the kind of non-portable
