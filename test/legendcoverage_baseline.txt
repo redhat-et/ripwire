@@ -69,6 +69,10 @@
 #     rel|type' is the <field name= type= owner= rel=/> row emitted at src/serialize.h:3071, and the four
 #     --pr-context lines live in src/prcontext.h. Both files were owned by other lanes when the cap came off,
 #     which is why they are recorded rather than closed.
+#   * 'for | field@name' surfaced when the L1 density fix (2026-08-08) dropped the route note's comment echo:
+#     the word "name" only ever appeared in that echo's routing prose ("names a symbol"), so the attribute
+#     was covered by ACCIDENT, never defined. Same <field> row as the owner|rel|type trio above; recorded
+#     with them rather than papered over by keeping duplicate bytes in every routed bundle.
 affected | affected@seeds
 clones | group@tokens
 cochange | cochange@capped
@@ -130,6 +134,7 @@ external-surface | external-surface@shown
 external-surface | x@lang
 for | ctx@route
 for | ctx@task
+for | field@name
 for | field@owner
 for | field@rel
 for | field@type

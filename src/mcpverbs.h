@@ -979,14 +979,16 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // W3FIX M3: the dash collapse was the ONLY scrub here, so an agent-supplied C0 byte, invalid UTF-8
     // sequence or newline still broke the document — xmlCommentText (serialize.h) is the ONE scrub for all
     // three, shared with the CLI --for twin so the two dialects cannot diverge on hostile input.
-    const std::string safeTask   = xmlCommentText( task );
-    const std::string safeReason = xmlCommentText( rc.reason );
+    const std::string safeTask = xmlCommentText( task );
+    // L1 (density audit 2026-08-08): rc.reason no longer needs a comment-scrubbed copy — it rides ONLY in
+    // the route= attribute (ctxRootOpen escapes it), same single-copy contract as the CLI --for twin
+    // (test/routeoncecheck.sh).
     // H1 (B0 r2): the MCP `for` bundle enforces the same GLOBAL default payload budget as the CLI --for
     // (serialize.h kForPayloadBudgetBytes). Lego + compose are rendered into memory FIRST so the <sigs>
     // budget is the exact remainder; emission ORDER is unchanged (header, sigs, lego, compose, </ctx>),
     // and when nothing trims the bytes are identical to the pre-H1 path.
     std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]" )   // §B1.7: same root attrs as the CLI twin
-                          + "<!-- ripwire lens for \"" + safeTask + "\" [routed: " + safeReason + "]" + mentionNote + boostNote + docMentionNote
+                          + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->";
     const auto renderToString = [ ]( auto&& emitFn ) -> std::string
     {
