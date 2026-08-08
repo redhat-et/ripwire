@@ -376,8 +376,8 @@ mandatory obligations) hold.
 ## 2026-08-08 — perfgate ledger: label=default
 
 Ledger-mode measurement (owner directive 2026-08-08: perf budgets are not the model — best
-tool first, then make it fast; no pass/fail — see bench/perfgate.sh header). BIN=/Users/qgames/AppDevelopLocal/project2/ripwire/.claude/worktrees/agent-a158118bf8ee5c734/build/ripwire
-corpus=/Users/qgames/AppDevelopLocal/project2/ripwire/.claude/worktrees/agent-a158118bf8ee5c734 runs=5 (median) machine=Darwin arm64 generated=2026-08-08 14:33 UTC
+tool first, then make it fast; no pass/fail — see bench/perfgate.sh header). BIN=build/ripwire (lane-F worktree)
+corpus=. (lane-F worktree) runs=5 (median) machine=Darwin arm64 generated=2026-08-08 14:33 UTC
 
 | key | median (ms) |
 |---|---:|
