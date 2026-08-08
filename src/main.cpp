@@ -10453,9 +10453,35 @@ int runDefaultMap( const MainDispatch& d )
 // the same collision, so an ignored query-family flag is skipped when the WINNER is also query-family —
 // that pair is X9(c)'s, and X9(c) words it better. Every other combination is this table's.
 //
-// Still excludes pure MODIFIERS (--metrics, --stable, --format=, --top-k…), which shape whatever verb runs
-// rather than selecting one, and --scan-skills/--scan-skill, which dispatch before the graph is built and
-// never reach this chain.
+// §F1 (audit 2026-08-08) — the adversarial verifier found the table was still INCOMPLETE, in the same way
+// and with the same symptom M1 had closed for the query family: eleven verb-shaped flags selected a handler
+// yet owned no row, so each collided with a real verb at stderr-EMPTY, exit 0. `--quality-panel --lint`
+// emitted panel bytes and said nothing; `--expand=SYM --lint` emitted LINT bytes and threw --expand away. A
+// sweep of --help against this table (rather than trusting the reported list) turned up all of them:
+//
+//   --index-out                                            pre-ingest, ahead of EVERY verb incl. the family
+//   --ensemble, --context-ratio                            runMaintenanceViews arms 1-2, ahead of --hotspots
+//   --readability, --comment-coherence, --nonlocal-state,   runQualityViews arms 1-6, ahead of --dead-code
+//   --quality-panel, --naming-calibration, --naming-consistency
+//   --handoff                                              runChangeViews arm 1, ahead of --situ
+//   --field-affinity                                       between --layout and --doc-drift
+//
+// All eleven are rows now, at their REAL dispatch positions. Like M1, this changed no behaviour: the same
+// verb still wins every pair; only the silence is gone. --quality-panel losing to --hotspots and beating
+// --lint is not the §A2 non-uniformity — §A2 was about ONE FAMILY answering one question three ways. A
+// single flag sitting at one position and being disclosed there is exactly what every other row does.
+//
+// --index-out is the one row that can beat a query-family flag, because it runs before ingest (it IS the
+// ingest-artifact generator). That is why X9(c) is now gated on the family actually winning: a run that
+// --index-out answered must not also print "--for takes precedence".
+//
+// Still excludes pure MODIFIERS (--metrics, --stable, --format=, --top-k, --rank-by…), which shape whatever
+// verb runs rather than selecting one, and --scan-skills/--scan-skill, which dispatch before the graph is
+// built and never reach this chain. §F1 verified the modifier side too: every refuse-alone flag
+// (--compress, --with-graph, --gateability, --plan, --adaptive…) already names its host verb, and --metrics/
+// --rank-by/--top-k tune the SAME <r> map document rather than replacing it.
+//
+// §F1 also introduces a THIRD class these two never covered — see kMapModifiers below.
 //
 // The order below is not asserted by reading: test/dispatchordercheck.sh runs every PAIR and checks that the
 // verb this table names as the winner is the verb whose bytes actually came out, so a table that rots reds
@@ -10464,18 +10490,36 @@ int runDefaultMap( const MainDispatch& d )
 // stay two-field and only the three query-family rows spell the third value.
 struct ReportVerbSlot { const char* flag; bool isActive; bool isQueryFamily = false; };
 
-void warnReportVerbPrecedence( const rw::Config& c )
+// The scan is separate from the printing because TWO callers need the winner: this table's own warning, and
+// X9(c), which may only speak when the query family is the thing that actually answered (§F1 — --index-out
+// is a row ahead of the family, so "the family always wins if present" stopped being true).
+struct VerbPrecedence
+{
+    const char* winner              = nullptr;
+    bool        winnerIsQueryFamily = false;
+    std::string ignored;
+};
+
+VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
 {
     const ReportVerbSlot slots[] = {
-        // §A2: the query family, contiguous and first — these three outrank every report verb below.
+        // §F1: --index-out dispatches BEFORE ingest, so it outranks even the query family. One row, at the top.
+        { "--index-out",        !c.indexOut.empty()       },
+        // §A2: the query family, contiguous and first among the report verbs — these three outrank every one below.
         { "--for",              !c.forTask.empty(), true  }, { "--pack-task",     c.packTaskFlag,    true },
         { "--query",            !c.query.empty(),   true  },
         { "--lego",             !c.legoType.empty()       }, { "--exemplar",     !c.exemplar.empty()      },
         { "--recall",           !c.recall.empty()         }, { "--deps",          c.deps                  },
-        { "--arch",             !c.archRules.empty()      }, { "--hotspots",      c.hotspots              },
+        { "--arch",             !c.archRules.empty()      },
+        { "--ensemble",          c.ensemble               }, { "--context-ratio", c.contextRatio          },   // §F1: runMaintenanceViews arms 1-2
+        { "--hotspots",          c.hotspots               },
         { "--clones",            c.clones                 }, { "--cochange",      c.cochange              },
         { "--owners",            c.owners                 }, { "--quality-baseline", c.qualityBaseline    },
         { "--quality-delta",     c.qualityDelta           }, { "--dmm",           c.dmm                   },
+        // §F1: runQualityViews' six lenses, in its own arm order, all ahead of --dead-code
+        { "--readability",       c.readability            }, { "--comment-coherence", c.commentCoherence  },
+        { "--nonlocal-state",    c.nonlocalState          }, { "--quality-panel", c.qualityPanel          },
+        { "--naming-calibration", c.namingCalibration     }, { "--naming-consistency", c.namingConsistency },
         { "--dead-code",         c.deadCode               },   // the row order IS the dispatch order (test/dispatchordercheck.sh pins every pair) — never re-pair for layout
         { "--edit-check",       !c.editCheckSym.empty()   }, { "--eval",          c.eval                  },
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
@@ -10484,13 +10528,17 @@ void warnReportVerbPrecedence( const rw::Config& c )
         { "--external-surface",  c.externalSurface        }, { "--path",         !c.pathSpec.empty()      },
         { "--connect",          !c.connectSpec.empty()    }, { "--impact",       !c.impactSym.empty()     },
         { "--mentions",         !c.mentionsSym.empty()    }, { "--affected",     !c.affectedFiles.empty() },
-        { "--exercises",         c.exercisesFlag          }, { "--situ",          c.situ                  },
+        { "--exercises",         c.exercisesFlag          },
+        { "--handoff",           c.handoff                },   // §F1: runChangeViews' first arm, ahead of --situ
+        { "--situ",              c.situ                   },
         { "--test-gate",         c.testGate               }, { "--pr-context",    c.prContext             },
         { "--export=cc.json",    c.exportCcJson           }, { "--merge-scout",   c.mergeScoutFlag        },
         { "--plan-lanes",        c.planLanesFlag          }, { "--stray-content", c.strayContent          },
         { "--abi",               c.abiFlag                }, { "--eval-stray",   !c.evalStray.empty()     },
         { "--flags",             c.darkFlags              }, { "--whereis",       c.whereisFlag           },
-        { "--layout",            c.layoutFlag             }, { "--doc-drift",     c.docDrift              },
+        { "--layout",            c.layoutFlag             },
+        { "--field-affinity",    c.fieldAffinity          },   // §F1: runFieldAffinity, between --layout and --doc-drift
+        { "--doc-drift",         c.docDrift               },
         { "--from-trace",       !c.fromTrace.empty()      }, { "--note-add",      c.noteAddFlag           },
         { "--notes",             c.notesList              }, { "--skipped",       c.skippedList           },
         { "--communities",       c.communities            },
@@ -10501,39 +10549,120 @@ void warnReportVerbPrecedence( const rw::Config& c )
         { "--around",           !c.around.empty()         },
     };
 
-    const char* winner              = nullptr;
-    bool        winnerIsQueryFamily = false;
-    std::string ignored;
+    VerbPrecedence prec;
     for( const ReportVerbSlot& s : slots )
     {
         if( !s.isActive )
         {
             continue;
         }
-        if( winner == nullptr )
+        if( prec.winner == nullptr )
         {
-            winner              = s.flag;
-            winnerIsQueryFamily = s.isQueryFamily;
+            prec.winner              = s.flag;
+            prec.winnerIsQueryFamily = s.isQueryFamily;
             continue;
         }
-        if( s.isQueryFamily && winnerIsQueryFamily )
+        if( s.isQueryFamily && prec.winnerIsQueryFamily )
         {
             continue;   // X9(c) already disclosed this exact pair — one collision, one warning
         }
-        if( !ignored.empty() )
+        if( !prec.ignored.empty() )
         {
-            ignored += ", ";
+            prec.ignored += ", ";
         }
-        ignored += s.flag;
+        prec.ignored += s.flag;
     }
-    if( ignored.empty() )
+    return prec;
+}
+
+void warnReportVerbPrecedence( const VerbPrecedence& prec )
+{
+    if( prec.ignored.empty() )
     {
         return; // 0 or 1 verb — nothing was dropped, so nothing is said
     }
 
     std::fprintf( stderr, "ripwire: %s takes precedence when several verbs are given — IGNORED this run: %s. "
                           "The winner is fixed by ripwire's dispatch order, NOT by the order you typed them; "
-                          "pass one verb per run.\n", winner, ignored.c_str() );
+                          "pass one verb per run.\n", prec.winner, prec.ignored.c_str() );
+}
+
+// §F1 — THE MAP-MODIFIER CLASS, the third kind §B11.4's two classes never covered.
+//
+// --expand / --outline / --pack-signatures / --pack-top-n / --map-diff are NOT verbs: not one of them selects
+// a handler. They shape what runDefaultMap RENDERS, and runDefaultMap serves exactly two runs — a flagless
+// map, and --query (which, as main() puts it, "owns no handler of its own: runDefaultMap serves it and is
+// also this chain's fallback"). That single architectural fact settles the question the audit called hard,
+// and settles it UNIFORMLY:
+//
+//   a map-modifier COMPOSES with any run that reaches the default map, and is VOIDED by any report verb that
+//   answers before it — and being voided is DISCLOSED.
+//
+// So --expand is a modifier, always; it is never a verb that "lost". It does not lose to --lint — --lint
+// returns before the map it shapes is ever rendered. Giving it a table ROW would encode the opposite claim
+// and would be provably wrong in one case the gate pins: under `--query --expand` stdout is NOT --query's
+// solo output, because the two compose, and a row means winner-or-loser with nothing in between.
+//
+// The disclosure is not cosmetic. A silently dropped --expand does not return a thinner answer to the
+// caller's question the way a dropped --top-k would; it returns an answer to a DIFFERENT question — the
+// bodies that were asked for are simply absent — which is precisely non-negotiable #3's "a zero means none
+// found, never none exists".
+//
+// composesWithQuery / composesWithFor are per-flag because the composition genuinely is: --pack-top-n also
+// budgets --for's bodies, and --map-diff is the one --query overrides (its lexical-rank branch replaces the
+// diff scope). Both are measured facts, pinned pair-by-pair in test/dispatchordercheck.sh's mapmod arm, not
+// assertions of intent.
+struct MapModifierSlot
+{
+    const char* flag;
+    bool        isActive;
+    bool        composesWithQuery;
+    bool        composesWithFor;
+};
+
+void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
+{
+    if( prec.winner == nullptr )
+    {
+        return;   // no verb answered, so the default map IS the run — every map-modifier applied
+    }
+
+    const MapModifierSlot mods[] = {
+        { "--expand",           !c.expand.empty(),   true,  false },
+        { "--outline",          !c.outline.empty(),  true,  false },
+        { "--pack-signatures",   c.packSignatures,   true,  false },
+        { "--pack-top-n",        c.packTopN > 0,     true,  true  },
+        { "--map-diff",          c.mapDiff,          false, false },
+    };
+
+    const bool winnerIsQuery = std::strcmp( prec.winner, "--query" ) == 0;
+    const bool winnerIsFor   = std::strcmp( prec.winner, "--for" )   == 0;
+
+    std::string discarded;
+    for( const MapModifierSlot& m : mods )
+    {
+        if( !m.isActive )
+        {
+            continue;
+        }
+        if( ( winnerIsQuery && m.composesWithQuery ) || ( winnerIsFor && m.composesWithFor ) )
+        {
+            continue;   // this one composed with the winner — nothing was dropped, so nothing is said
+        }
+        if( !discarded.empty() )
+        {
+            discarded += ", ";
+        }
+        discarded += m.flag;
+    }
+    if( discarded.empty() )
+    {
+        return;
+    }
+
+    std::fprintf( stderr, "ripwire: %s answered, so the default map never rendered — DISCARDED this run: %s. "
+                          "Those flags shape the map only; pass them with --query=TERMS or with no verb at all.\n",
+                  prec.winner, discarded.c_str() );
 }
 
 const char* jsonUnsupportedVerb( const rw::Config& c )
@@ -10875,14 +11004,22 @@ int main( int argc, char** argv )
         return 1;
     }
 
+    // §B11.4's table is SCANNED here and printed further down, because X9(c) below needs the winner too. The
+    // scan is pure; nothing is emitted by this line.
+    const VerbPrecedence verbPrec = scanReportVerbPrecedence( cfg );
+
     // X9(c): mode flags have a hidden precedence when more than one is given at once — the earlier-checked
     // one silently wins and the rest are ignored outright, with no signal to the caller that anything was
     // dropped. Warn once, on stderr, one line per conflict; behavior is UNCHANGED (the same flag still wins).
-    if( !cfg.forTask.empty() && ( !cfg.query.empty() || cfg.packTaskFlag ) )
+    // §F1: gated on the query family actually WINNING. Until --index-out became a row, a run containing a
+    // family flag always had one answer, so the guard was free; --index-out dispatches before ingest and
+    // beats all three, and X9(c) announcing "--for takes precedence" in a run --for never answered would be
+    // a confident lie of exactly the kind this whole section exists to delete.
+    if( verbPrec.winnerIsQueryFamily && !cfg.forTask.empty() && ( !cfg.query.empty() || cfg.packTaskFlag ) )
     {
         std::fprintf( stderr, "ripwire: --for takes precedence over --query/--pack-task when both are given (the others are ignored)\n" );
     }
-    else if( cfg.packTaskFlag && !cfg.query.empty() )
+    else if( verbPrec.winnerIsQueryFamily && cfg.packTaskFlag && !cfg.query.empty() )
     {
         std::fprintf( stderr, "ripwire: --pack-task takes precedence over --query when both are given (--query is ignored)\n" );
     }
@@ -10901,7 +11038,13 @@ int main( int argc, char** argv )
     // X9(c) keeps the intra-family pair; the row table skips it rather than repeat it.
     // §A2: those three rows are now contiguous at the TOP of the table — the family dispatches first, so in
     // every cross-family pair the query-family flag is the WINNER and the report verb is the one disclosed.
-    warnReportVerbPrecedence( cfg );
+    // §F1: the eleven verb-shaped flags that owned no row are rows now, so a pair like `--quality-panel
+    // --lint` discloses instead of dropping one in silence.
+    warnReportVerbPrecedence( verbPrec );
+
+    // §F1: and the third class — a map-modifier voided because a report verb answered first says so, while
+    // one that COMPOSED (--query --expand) stays quiet, because nothing was dropped.
+    warnMapModifierDiscarded( cfg, verbPrec );
 
     // L2: --json refuses LOUDLY for any verb it doesn't (yet) support — see jsonUnsupportedVerb's ALLOW-list
     // rationale. Checked before ANY dispatch (incl. --mcp / --doctor / the multi-root refusals below) so an
