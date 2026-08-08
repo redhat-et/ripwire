@@ -20,7 +20,7 @@ another is a vendored tree-sitter grammar plus one row in a declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
 
-### One line to install — and your coding agent already knows how to use it
+### Installed in one line. Understood by your agent from the same line.
 
 One self-contained binary on your own machine, offline — and the same line ships the task-shaped
 skills that teach your agent *when* to reach for it, not just how. Install it and ask it something
