@@ -462,3 +462,73 @@ binary on BOTH corpora; `--lint` and the map deterministic run-to-run; both well
 **What is still on the table.** `unreachableCheck` (67 ms) runs its own fourth corpus walk with the
 same crawl-order file queue; the naming lens's `getBytes` (11 ms) is a fifth read of files the walk
 already had in hand. Both are small next to what was removed, and neither was touched here.
+
+---
+
+## 2026-08-08 — lane B3: the newline byte scan, raced three ways
+
+`buildNewlineOffsets` (`src/ingest.cpp`) builds the per-file newline index that `lineAtByte` binary
+-searches. It scanned whole file buffers **one byte at a time**. The owner called this experiment
+explicitly for fun and named its ceiling in advance — the scope is well under 1% of a `--lint` run,
+so no wall-clock headline was ever available. It was run with full rigour anyway, for the precedent:
+this is the shape a one-kernel question should have.
+
+**The three arms** (`bench/bench_newline_ab.cpp`, modelled on `bench_radix_ab.cpp` — alternating
+order with a rotating lead, median of 9 rounds, `prof::BenchTimer` + `prof::escape` barriers):
+
+- **(a) scalar byte loop** — the shipping loop, lifted verbatim, so the baseline is the real thing.
+- **(b) libc `memchr` in a loop** — the "use others' efforts, even libc's" control. Not a straw man:
+  Apple's arm64 `memchr` is hand-tuned NEON.
+- **(c) `rw::findByte`** — a hand-rolled NEON/SSE2 kernel added to `src/fixedStr.h` beside that
+  header's existing branchless compare/hash, as a **free function**: it scans arbitrary byte spans,
+  so it is not a `FixedStr` member. arm64 has no `movemask`, so the NEON arm folds the compare with
+  `vshrn_n_u16(..., 4)` into a 64-bit word carrying 4 mask bits per byte and takes `ctz`; SSE2 uses
+  `_mm_movemask_epi8`. Scalar fallback on other arches behind the same interface.
+
+**16.08 MiB of real repo bytes** (227 files, 479,713 newlines; deterministic corpus — sorted paths,
+no timestamps, `.git`/build trees excluded). Both compiler settings measured, because `build/` ships
+`-O2 -mcpu=apple-m1` while `build_prof/` uses `-O3 -march=native`:
+
+| arm | ms (`-O2 -mcpu=apple-m1`) | GB/s | ms (`-O3 -march=native`) | GB/s | vs scalar |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| (a) scalar byte loop | 7.05 | 2.39 | 6.32 | 2.67 | 1.00x |
+| (b) libc `memchr` | 4.79 | 3.52 | 4.49 | 3.75 | ~1.45x |
+| (c) `rw::findByte` | **3.38** | **4.99** | **3.23** | **5.22** | **~2.05x** |
+
+**The hand-rolled kernel shipped**, beating libc `memchr` by ~1.4x and the byte loop by ~2.05x. That
+outcome was not assumed: arm (b) existed precisely so that "libc already wins, ship `memchr`" could
+be the answer, and it would have been reported as the equal result. All three ratios held across
+corpus sizes from 1 MiB (cache-resident) to 64 MiB (DRAM), so this is a kernel win, not a cache
+artifact — an early hypothesis that cache residency explained the in-situ gap was **tested and
+rejected** (1 MiB widens the margin only 2.09x → 2.36x).
+
+**In situ, `--lint` on a frozen 209 MB corpus** — two `RIPWIRE_PROFILE` binaries built from the two
+source states and run **interleaved**, 9 rounds each, warm:
+
+| `strings: buildNewlineOffsets` | median | min | calls |
+| --- | ---: | ---: | ---: |
+| before | 26.1 ms | 12.7 ms | 1847 |
+| after | **7.8 ms** | **7.2 ms** | 1847 |
+
+Read the **minimum** as the signal (1.76x) and the median gap (3.35x) as scheduler noise on a 209 MB
+corpus: the min-to-min ratio is the one that reconciles with the isolated bench's ~2.05x. The first
+"before" reading taken was 64.9 ms — a **cold page cache** on a freshly extracted corpus, discarded
+once the interleaved warm A/B was run. It is recorded here because it is exactly the trap this
+methodology exists to catch, and a single un-interleaved sample would have published an 8x claim.
+
+**Wall-clock `--lint`, same corpus, interleaved, 9 rounds:** 437.2 ms → 434.1 ms median (min 427.4 →
+426.5). That is inside the noise band, and it is the honest headline: the scope was ~1.2% of the run
+before and ~0.3% after, so **the tool is not measurably faster and this change should not be sold as
+if it were.** What it buys is a correct, tested, reusable primitive where a byte loop used to be.
+
+**Identity obligations discharged.** `rw::findByte` is **exact**, so determinism is untouched by
+construction, not merely by measurement — and the bench asserts it rather than asserting it in prose:
+all three arms must produce **identical offset vectors** over 14 edge fixtures **and** all 227 corpus
+files before a single timing number is printed. The fixtures are where a vectorised scan goes wrong —
+empty span, needle at position 0, no trailing newline, spans of 15/16/17 bytes, a match on the last
+byte of a vector and the first byte of the tail, 64 adjacent newlines, and **CRLF**: `'\r'` is not a
+line break here and never was, and that fixture is what proves every arm ignores it identically.
+Downstream, `--lint` and the map are **byte-identical** (sha256) against the pre-change binary on the
+frozen corpus; both deterministic run-to-run and well-formed under `xmllint --noout`; `lintcheck`,
+`lintrulescheck`, `matchcapturecheck`, `naminglenscheck`, `manifestcheck` and `deckcheck` green;
+`--edit-check=buildNewlineOffsets` reports `status="unchanged"`, `incompatible="0"`.
