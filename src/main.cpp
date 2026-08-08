@@ -2147,7 +2147,7 @@ struct ForLensHeaderParts
     std::string_view task;             // §B1.7's subject — the VERBATIM query, for the root attribute
     std::string_view rootOpenStr;      // ctxRootOpen( task, routeNoteRaw ), pre-built (its size is charged)
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
-    std::string_view routeNote, adaptiveNote, mentionNote, boostNote, docMentionNote;
+    std::string_view adaptiveNote, mentionNote, boostNote, docMentionNote;
     bool             anchor = false;   // --anchor's EXPERIMENTAL caveat paragraph
 };
 
@@ -2158,7 +2158,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
                                       std::string_view extraNotes )
 {
     std::string h;
-    h.reserve( 640 + p.rootOpenStr.size() + p.taskNote.size() + p.routeNote.size() + p.adaptiveNote.size()
+    h.reserve( 640 + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + extraNotes.size() );
     h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {} );
     h += "<!-- ripwire lens for ";
@@ -2167,7 +2167,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     {
         h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
     }
-    h.append( p.routeNote );
+    // L1 (density audit 2026-08-08): the comment used to append a SCRUBBED copy of the route note here —
+    // ~230-260 B saying, on every routed call, exactly what the verbatim route= attribute above already says.
+    // The attribute is the surviving copy (verbatim + machine-addressable); the ceiling ladder's rung (c)
+    // now truly is "the first rung that costs unique information" (serialize.h climbCeilingLadder).
     h.append( p.adaptiveNote );
     h.append( p.mentionNote );      // B8: present only when the task named something indexed (else "")
     h.append( p.boostNote );        // B3: present only when the co-change prior actually promoted something
@@ -2412,7 +2415,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // --anchor: ROUTE picks the base lens rank, then ANCHOR expands it; mention/co-change run after.
         LensRanking        lr        = computeLensRanking( d, cfg.forTask );
         std::vector<float> lensRank  = std::move( lr.rank );
-        std::string        routeNote = std::move( lr.routeNote );    // mutated below (G4 "--" collapse) → not const
+        const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  docMentionNote( std::move( lr.docMentionNote ) );
@@ -2443,12 +2446,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the comment early). W3FIX M3: the hand-rolled '--' collapse scrubbed dashes and NOTHING else, so a C0
         // byte or invalid UTF-8 in the task made xmllint reject the document and a '\n' put a raw newline outside
         // CDATA — xmlCommentText (serialize.h) is the ONE scrub for all three, shared with --pack-task / MCP
-        // `for` / --exemplar / --from-trace. Byte-identical on control-free input. routeNote gets it too (it can
-        // embed a query-derived identifier); V1-5: the JSON sibling below keeps the RAW text, since a JSON string
-        // needs none of this escaping ("--for's", not "-for's").
-        const std::string taskNote     = xmlCommentText( cfg.forTask );
-        const std::string routeNoteRaw = routeNote;
-        routeNote = xmlCommentText( routeNote );
+        // `for` / --exemplar / --from-trace. Byte-identical on control-free input. (L1: the route note no
+        // longer rides in the comment — route= carries it verbatim, attribute-escaped by ctxRootOpen, and
+        // the JSON sibling keeps the same RAW text.)
+        const std::string taskNote = xmlCommentText( cfg.forTask );
         int forTopN = cfg.packTopN > 0 ? cfg.packTopN : 40;
 
         // --adaptive (lever 2): cut the returned set at the relevance CLIFF — the largest
@@ -2501,7 +2502,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // through forLensHeaderText (above) rather than being appended once, because the ceiling ladder below has
         // to PRICE a header without the comment's task echo or without route= and then emit that exact shape.
         const std::string        rootOpenStr = ctxRootOpen( cfg.forTask, routeNoteRaw );
-        const ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, routeNote, adaptiveNote,
+        const ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                               mentionNote, boostNote, docMentionNote, cfg.anchor };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
