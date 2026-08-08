@@ -41,24 +41,24 @@ the tests that reach them.
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
 **58.3% against 40.0% for the best tool tested — and it answers before they finish indexing.** Every
-arm below was re-run on 2026-08-06 against one ripwire binary, one evaluator, one 60-instance
-held-out LocBench slice: paired, zero exclusions, same gold set, and the metric code imported
-unmodified into every arm. *Strict file@10 = **all** gold files inside the top 10*, which is whether
+arm below was re-run in full on 2026-08-08 — one ripwire binary (the profile-guided release build
+that now ships), one evaluator, one 60-instance held-out LocBench slice: paired, zero exclusions,
+same gold set, and the metric code imported unmodified into every arm. *Strict file@10 = **all** gold files inside the top 10*, which is whether
 your agent starts in the right place at all.
 
 | Round 4 — LocBench, Python-dominant | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
-| **ripwire `--for`** | **58.3%** | **85.0%** | **0.43 s** | 0.130 s |
-| codebase-memory-mcp 0.9.0 | 40.0% | 63.3% | 1.23 s | 0.079 s |
-| repowise 0.37.0 | 33.3% | 53.3% | 33.0 s | 1.324 s |
-| graphify 0.9.34 | 31.7% | 46.7% | 9.66 s | 0.732 s |
-| Aider repo-map 0.86.2 | 18.3% | 35.0% | *(inside query)* | 3.344 s |
-| codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 4.64 s | 0.042 s |
+| **ripwire `--for`** | **58.3%** | **85.0%** | **0.31 s** | 0.108 s |
+| codebase-memory-mcp 0.9.0 | 40.0% | 63.3% | 1.24 s | 0.075 s |
+| repowise 0.37.0 | 33.3% | 53.3% | 34.0 s | 1.159 s |
+| graphify 0.9.34 | 31.7% | 46.7% | 7.82 s | 0.614 s |
+| Aider repo-map 0.86.2 | 20.0% | 35.0% | *(inside query)* | 2.920 s |
+| codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 3.37 s | 0.040 s |
 
 Ripwire leads every arm on both accuracy metrics and in both strata. Paired, the losses are small and
 they are published: **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to graphify
-and aider. **Cold from nothing to an answer — parse, rank, reply, no cache — ripwire takes 0.299 s**,
-against a ~34 s index-then-query for repowise; its worst single index in this run was **424 s**.
+and aider. **Cold from nothing to an answer — parse, rank, reply, no cache — ripwire takes 0.213 s**,
+against a ~35 s index-then-query for repowise; its worst single index in this run was **352 s**.
 
 Three things this table costs us, said plainly. **codebase-memory-mcp is the real runner-up at 40.0%,
 not repowise** — an earlier round credited it with 26.7%, and re-running it fairly raised it. The
@@ -132,10 +132,10 @@ distant authority, and has never once been indexed at a party. Mr. Repowise find
 She is.
 
 <sub>Every figure above is a measured number from the round-4 table on this page: the index medians
-(1.23 s, 33.0 s, 4.64 s) and repowise's 424 s worst case, the 40.0% and 33.3% strict file@10, the
+(1.24 s, 34.0 s, 3.37 s) and repowise's 352 s worst case, the 40.0% and 33.3% strict file@10, the
 0-results-on-60/60 fallback arm, the absent <code>semantic_query</code> tool, graphify's 129 MB
 largest graph and its 1-of-60 empty ranking, aider's +10 pp personalization delta, and ripwire's
-0.130 s / 58.3%. Provenance in <a href="bench/headtohead/r4-2026-08-06/">bench/headtohead/r4-2026-08-06/</a>
+0.108 s / 58.3%. Provenance in <a href="bench/headtohead/r4-2026-08-06/">bench/headtohead/r4-2026-08-06/</a>
 and <a href="docs/EVALS.md">docs/EVALS.md</a>; only the manners are editorial. These are other
 people's real work, and the joke is aimed at the trade-offs, never at the authors.</sub>
 
@@ -189,10 +189,10 @@ indexed at a party. Repowise says she's abrupt.
 She is. That's why I hired her.
 
 <sub>Every figure above is a measured number from the round-4 table on this page: the index medians
-(1.23 s, 4.64 s, 33.0 s), repowise's 424 s / seven-minute worst case, the 40.0% and 33.3% strict
+(1.24 s, 3.37 s, 34.0 s), repowise's 352 s / six-minute worst case, the 40.0% and 33.3% strict
 file@10, codeseek's 0-of-60 plain-language arm, codebase-memory's advertised-but-absent semantic
 tool, graphify's 129 MB largest graph and its 1-in-60 empty return, aider's +10 pp name-drop delta,
-and ripwire's 0.130 s / 58.3%. Provenance in
+and ripwire's 0.108 s / 58.3%. Provenance in
 <a href="bench/headtohead/r4-2026-08-06/">bench/headtohead/r4-2026-08-06/</a> and
 <a href="docs/EVALS.md">docs/EVALS.md</a>; only the cynicism is editorial. These are other people's
 real work, and the joke is aimed at the trade-offs, never the authors.</sub>
@@ -304,7 +304,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 138 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 139 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 
 <details>
@@ -589,8 +589,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1768"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2104"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9339"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9375"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9541"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9577"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -685,26 +685,28 @@ check whether the tool is oversold.
 
 ### Against other tools
 
-**Round 4 (2026-08-06): 58.3% strict file@10 against 40.0% for the best competitor — a 1.46× margin,
-at a 0.43 s index.** N = 60 paired instances, zero exclusions, one binary, one evaluator, all re-run
-on the same day. *Strict file@10 = all gold files inside the top 10.*
+**Round 4 (re-run in full 2026-08-08): 58.3% strict file@10 against 40.0% for the best competitor —
+a 1.46× margin, at a 0.31 s index.** N = 60 paired instances, zero exclusions, one binary (the
+profile-guided release build that now ships), one evaluator, all arms re-run on the same day.
+*Strict file@10 = all gold files inside the top 10.*
 
 | Arm | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
-| **ripwire `--for`** | **58.3%** | **85.0%** | **0.43 s** | 0.130 s |
-| codebase-memory-mcp 0.9.0 | 40.0% | 63.3% | 1.23 s | 0.079 s |
-| repowise 0.37.0 (MCP `search_codebase`, LLM-free wiki) | 33.3% | 53.3% | 33.0 s¹ | 1.324 s¹ |
-| graphify 0.9.34 (`--code-only --no-cluster`, keyless) | 31.7% | 46.7% | 9.66 s | 0.732 s |
-| Aider repo-map 0.86.2 (ident-personalized) | 18.3% | 35.0% | *(inside query)* | 3.344 s |
-| Aider repo-map 0.86.2 (no-personalization control) | 8.3% | 21.7% | *(inside query)* | 0.919 s |
-| codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 4.64 s | 0.042 s |
-| codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 4.64 s | 0.030 s |
+| **ripwire `--for`** | **58.3%** | **85.0%** | **0.31 s** | 0.108 s |
+| codebase-memory-mcp 0.9.0 | 40.0% | 63.3% | 1.24 s | 0.075 s |
+| repowise 0.37.0 (MCP `search_codebase`, LLM-free wiki) | 33.3% | 53.3% | 34.0 s¹ | 1.159 s¹ |
+| graphify 0.9.34 (`--code-only --no-cluster`, keyless) | 31.7% | 46.7% | 7.82 s | 0.614 s |
+| Aider repo-map 0.86.2 (ident-personalized) | 20.0% | 35.0% | *(inside query)* | 2.920 s |
+| Aider repo-map 0.86.2 (no-personalization control) | 10.0% | 25.0% | *(inside query)* | 0.818 s |
+| codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 3.37 s | 0.040 s |
+| codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 3.37 s | 0.024 s |
 
 <details>
 <summary>Round-4 method and the paired losses — one binary, one evaluator, what re-running cost us, and the three limits that travel with this table</summary>
 
-**Round 4 (2026-08-06) — N = 60 paired instances, zero exclusions, one binary, one evaluator.** Every
-competitor was re-run on the same day against the same ripwire binary (`7a9a42ea`, rebuilt from HEAD)
+**Round 4 (first run 2026-08-06; re-run in full 2026-08-08 on the profile-guided release build) —
+N = 60 paired instances, zero exclusions, one binary, one evaluator.** Every
+competitor was re-run on the same day against the same ripwire binary
 and the same evaluator, so the arms are directly comparable to each other. Earlier rounds could not
 say that: r1 (2026-07-13/14) and r2 (2026-08-03) each scored a different subset against a different
 binary, which is why this page used to print two tables and ask the reader not to compare them.
@@ -713,14 +715,14 @@ reproduction recipe: [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-202
 
 Paired, ripwire's losses are **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to
 graphify and aider; codeseek never beat it. **Cold from nothing to an answer** — parse, rank, reply,
-no cache — ripwire takes **0.299 s**, against a ~34 s index-then-query for repowise, whose worst
-single index in this run was **424 s**. That comparison is only possible because ripwire's own index
+no cache — ripwire takes **0.213 s**, against a ~34 s index-then-query for repowise, whose worst
+single index in this run was **352 s**. That comparison is only possible because ripwire's own index
 was measured this round; r2 recorded competitor index walls and deliberately refused to tabulate
 them, since a one-sided cost table is not evidence.
 
 **What re-running cost us, stated because it is the reason to re-run at all.**
 **codebase-memory-mcp is the true runner-up at 40.0%** — r1 credited it with 26.7%, and scoring it
-fairly against today's binary raised it. graphify rose 21.7% → 31.7% and aider 13.3% → 18.3% the same
+fairly against today's binary raised it. graphify rose 21.7% → 31.7% and aider 13.3% → 20.0% the same
 way. The margin over the best competitor is therefore **1.46×**, not the 1.75× that two
 separately-dated tables implied; the old framing flattered us by comparing today's ripwire against
 year-old competitor runs.
