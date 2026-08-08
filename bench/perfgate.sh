@@ -180,8 +180,10 @@ if [ "$WRITE_LEDGER" -eq 1 ]; then
     {
         printf '\n## %s — perfgate ledger: label=%s\n\n' "$( date -u '+%Y-%m-%d' )" "${LABEL:-default}"
         printf 'Ledger-mode measurement (owner directive 2026-08-08: perf budgets are not the model — best\n'
-        printf 'tool first, then make it fast; no pass/fail — see bench/perfgate.sh header). BIN=%s\n' "$BIN"
-        printf 'corpus=%s runs=%s (median) machine=%s generated=%s\n\n' "$CORPUS" "$RUNS" "$( uname -sm )" "$( date -u '+%Y-%m-%d %H:%M UTC' )"
+        # ledger paths are repo-relative: absolute paths carry the checkout owner's home directory,
+        # and ripwirepubliccheck arm 5 rightly rejects personal identifiers in committed files
+        printf 'tool first, then make it fast; no pass/fail — see bench/perfgate.sh header). BIN=%s\n' "${BIN#"$ROOT"/}"
+        printf 'corpus=%s runs=%s (median) machine=%s generated=%s\n\n' "${CORPUS#"$ROOT"/}" "$RUNS" "$( uname -sm )" "$( date -u '+%Y-%m-%d %H:%M UTC' )"
         printf '| key | median (ms) |\n|---|---:|\n'
         printf '| %s | %.1f |\n' "$KEY_COLD" "$cold_ms"
         printf '| %s | %.1f |\n' "$KEY_WARM" "$warm_ms"
