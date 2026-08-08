@@ -9575,6 +9575,58 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
     return { std::move( rank ), std::move( window ) };
 }
 
+// ── M6 (density audit 2026-08-08): --expand cheapest-complete-answer serving, the two decisions ──────
+// Hoisted out of runDefaultMap (already this file's largest dispatcher) because both are nameable
+// concepts with pure inputs; the emission stays in runDefaultMap where the streams live.
+//
+// THE SCOPE: a bare --expand and nothing else. No explicit --top-k (the agent asked for the map, or for
+// its absence at 0 — serve exactly that), no --outline/--pack-signatures/--pack-top-n (composed payloads
+// keep the classic envelope), no --query/--adaptive/--max-tokens (all three shape the MAP, so the map is
+// wanted), no --json (it refuses --expand anyway), no range slice (SYM:START-END asks for LESS than the
+// symbol — serving the whole file would invert the ask; test/expandrangecheck.sh pins that contract),
+// and only when the §H7 pre-render succeeded — a degraded render has no measured bytes to compare.
+inline bool expandAutoServeScope( const rw::Config& cfg, bool anyExpandRange, bool bodiesRendered )
+{
+    return !cfg.expand.empty() && !cfg.topKExplicit && !cfg.json
+        && cfg.outline.empty() && !cfg.packSignatures && cfg.packTopN == 0
+        && cfg.query.empty() && !cfg.adaptive && cfg.maxTokens == 0
+        && !anyExpandRange && bodiesRendered;
+}
+
+// THE CHOICE: whole-file when the raw file bytes undercut the measured bundle, else bundle; ties go to
+// the bundle (the richer answer at equal cost). A wf.complete=false render (a file unreadable NOW) makes
+// whole-file not a candidate, and the reason says so instead of fabricating a byte comparison. The
+// disclosure is mandatory and deterministic — both numbers are measured, never estimated. &lt; in the
+// reason spelling: a raw '<' is ill-formed inside an XML attribute (G4).
+struct ExpandServeChoice
+{
+    bool        serveWholeFile = false;
+    std::string ctxOpen;
+};
+
+inline ExpandServeChoice chooseExpandServe( std::size_t bundleBytes, const rw::WholeFileRender& wf )
+{
+    char open[ 128 ];
+    ExpandServeChoice c;
+    if( wf.complete && wf.rawBytes < bundleBytes )
+    {
+        c.serveWholeFile = true;
+        std::snprintf( open, sizeof( open ), "<ctx mode=\"whole-file\" reason=\"file %zuB &lt; bundle %zuB\">",
+                       wf.rawBytes, bundleBytes );
+    }
+    else if( wf.complete )
+    {
+        std::snprintf( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"bundle %zuB &lt;= file %zuB\">",
+                       bundleBytes, wf.rawBytes );
+    }
+    else
+    {
+        std::snprintf( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"whole-file unavailable (file unreadable)\">" );
+    }
+    c.ctxOpen = open;
+    return c;
+}
+
 int runDefaultMap( const MainDispatch& d )
 {
     using namespace rw;
@@ -10043,10 +10095,9 @@ int runDefaultMap( const MainDispatch& d )
     TokenBudgetBuffer tbBuf = openTokenBudgetBuffer( cfg.tokenBudget, stdout );
     std::FILE* const  out   = tbBuf.out;
 
-    if( hasExtension )
-    {
-        std::fprintf( out, "<ctx>" );
-    }
+    // (M6: the `<ctx>` opener used to be printed HERE, before the §H7 pre-render. Nothing writes to `out`
+    // between here and the emission below — the pre-render goes to memstreams — so the open moved down to
+    // where the mode decision can decorate it; byte order on the wire is unchanged.)
 
     // §H7 — PRE-RENDER every block that gets appended after the map, and CHARGE it from its own emitted bytes.
     // The ordering constraint is real and it is the whole reason this block sits HERE, above serialize(): the
@@ -10094,11 +10145,49 @@ int runDefaultMap( const MainDispatch& d )
                                             expandRanges.empty() ? nullptr : &expandRanges )
                 : bodiesSection.tokens );
 
+    // ── M6 (density audit 2026-08-08, owner directive: ONE call does the smart thing, no two-step) ──────
+    // CHEAPEST-COMPLETE-ANSWER SERVING for a BARE --expand. The verb could always serve three forms:
+    //   (a) bundle     = ranked map + <bodies> (+ inline callee sigs) — today's default;
+    //   (b) lean       = the --top-k=0 bodies-only form;
+    //   (c) whole-file = the requested symbols' own file(s), CDATA-wrapped, line anchors kept.
+    // Measured on this repo, (a) is 5.65x LARGER than the whole file for a small-file symbol
+    // (--expand=pageRankDouble: 27,890 B vs src/pagerank.cpp 4,936 B — and even (b) is 1.08x the file),
+    // while on a big file (a) saves ~26x over reading the file. So with NO explicit --top-k the verb now
+    // compares (a) against (c) — both rendered-and-measured, not estimated — and emits the smaller,
+    // disclosing the choice deterministically on the root: mode="bundle|whole-file" reason="the two byte
+    // counts compared". (b) deliberately does NOT compete in the auto choice: it is a strict byte-subset
+    // of (a), so a three-way minimum could never serve the map and a bare --expand would silently lose its
+    // orientation value — lean stays the caller's EXPLICIT choice. An explicit --top-k=N (including 0)
+    // overrides auto-selection entirely and keeps the legacy undecorated shape: the agent asked for the
+    // map (or its absence), serve exactly that. Ties go to the bundle (the richer answer at equal cost).
+    // Scope and choice are the two free functions above runDefaultMap (expandAutoServeScope /
+    // chooseExpandServe — the rationale lives on them); the emission below stays here with the streams.
+    // Gate: test/expandmodecheck.sh.
+    bool                serveWholeFile = false;
+    rw::WholeFileRender wholeFile;
+    std::string         ctxOpenStr = "<ctx>";
+    if( expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered ) )
+    {
+        // Bundle total = "<ctx>" + the map as it would actually be emitted (payload token digits included)
+        // + the pre-rendered <bodies> + "</ctx>". Rendering-and-measuring beats arithmetic here: the map's
+        // est_tokens digits depend on the payload charge, and a probe that prices a shape it then fails to
+        // build is the exact climbCeilingLadder failure mode this file already documents.
+        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + measureEmittedMapBytes( mapTopK, payloadTokens )
+                                      + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
+        wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr );
+        ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile );
+        serveWholeFile = choice.serveWholeFile;
+        ctxOpenStr     = std::move( choice.ctxOpen );
+    }
+
     // r27-emitters T2: the ride-along map. A bare `--expand=SYM` costs ~24 KB for a ~1.4 KB body because the
-    // 200-symbol default map is emitted alongside it, and nothing ever said so. G5 forbids changing what the
-    // default emits, so the map stays — but the caller is TOLD, once, on stderr (stdout stays byte-identical),
-    // and --top-k=0 is the documented off switch. Fires only when the user did not choose a top-k themselves.
-    if( !cfg.topKExplicit && ( !cfg.expand.empty() || !cfg.outline.empty() ) && !cfg.json )
+    // 200-symbol default map is emitted alongside it, and nothing ever said so. The M6 auto-selection above
+    // now drops the whole bundle when the FILE is cheaper; when the bundle (map included) IS the cheaper
+    // complete answer, the map still rides and the caller is still TOLD, once, on stderr (stdout stays
+    // byte-identical), with --top-k=0 as the documented off switch. Fires only when the user did not choose
+    // a top-k themselves, and never in whole-file mode (there is no map riding along to warn about).
+    if( !cfg.topKExplicit && ( !cfg.expand.empty() || !cfg.outline.empty() ) && !cfg.json
+        && !serveWholeFile )
     {
         std::fprintf( stderr, "ripwire: note — the ranked top-%d map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
     }
@@ -10132,8 +10221,23 @@ int runDefaultMap( const MainDispatch& d )
     }
 
     std::size_t mapEstTokens = 0;   // --token-budget reads this — the SAME value serialize() puts in the header, never a second counter
-    if( mapTopK > 0 )               // --top-k=0: payload only — skip the ranked map entirely (never the payload below)
+    if( serveWholeFile )
     {
+        // M6 whole-file serving: the file IS the complete answer — no map, no <bodies>. The bytes were
+        // rendered (and the choice measured) above; --token-budget still gates the real document, charged
+        // at the BODY rate because this payload is raw code text, exactly like <src>/<bodies> sections.
+        std::fwrite( ctxOpenStr.data(), 1, ctxOpenStr.size(), out );
+        std::fwrite( wholeFile.xml.data(), 1, wholeFile.xml.size(), out );
+        std::fputs( "</ctx>", out );
+        mapEstTokens = rw::tokensForEmittedBytes( ctxOpenStr.size() + wholeFile.xml.size() + ( sizeof( "</ctx>" ) - 1 ),
+                                                  rw::kBytesPerTokenBody );
+    }
+    else if( mapTopK > 0 )          // --top-k=0: payload only — skip the ranked map entirely (never the payload below)
+    {
+        if( hasExtension )
+        {
+            std::fwrite( ctxOpenStr.data(), 1, ctxOpenStr.size(), out );   // "<ctx>", or M6 bundle mode's decorated form
+        }
         // T3: fill-aware auto important-last — ONLY on this, the default map emission. --no-auto-order opts
         // out; an explicit --most-important-last or --stable always wins (serialize.h). test/fixture
         // (est_tokens=619) and src/ (~10.6K) both stay under the ~16K threshold, so the default/golden output is
@@ -10164,7 +10268,12 @@ int runDefaultMap( const MainDispatch& d )
     {
         // --top-k=0: serialize() (which normally folds payloadTokens into mapEstTokens for exactly this
         // reason) never ran, so --token-budget would gate on 0 and pass no matter how large the payload is.
-        // The payload IS the emitted output here — budget against it.
+        // The payload IS the emitted output here — budget against it. (Explicit --top-k=0 never enters the
+        // M6 auto scope, so ctxOpenStr is the bare "<ctx>" on this path.)
+        if( hasExtension )
+        {
+            std::fwrite( ctxOpenStr.data(), 1, ctxOpenStr.size(), out );
+        }
         mapEstTokens = payloadTokens;
     }
 
@@ -10189,7 +10298,7 @@ int runDefaultMap( const MainDispatch& d )
     {
         emitSection( srcSection, [ & ]{ packSource( out, ing, rank, cfg.packTopN, cfg.packBudgetBytes, redactPtr ); } );
     }
-    if( !expandNodes.empty() )
+    if( !expandNodes.empty() && !serveWholeFile )   // M6: whole-file mode already served the file itself
     {
         emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                                                        expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr ); } );   // L3: --expand bodies surface notes
@@ -10199,7 +10308,7 @@ int runDefaultMap( const MainDispatch& d )
         emitSection( outlineSection, [ & ]{ packOutline( out, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr ); } );
     }
 
-    if( hasExtension )
+    if( hasExtension && !serveWholeFile )   // M6: the whole-file branch closed its own root
     {
         std::fprintf( out, "</ctx>" );
     }
