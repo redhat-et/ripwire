@@ -2710,7 +2710,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::size_t bundleBudget = cfg.tokenBudget > 0
             ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
             : rw::kForPayloadBudgetBytes;
-        const std::size_t fixedBytes = headerStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
+        // D2 (audit regressions, 2026-08-08): the adaptive note's own bytes are EXEMPT from the <sigs> trim
+        // charge (headerStr contains adaptiveNote verbatim, so subtracting its size prices the header as the
+        // plain run's). --adaptive's contract is that only its CUT changes the emitted set ("without it,
+        // output is byte-identical"); charging the note made a NO-CUT (flat) query drop one <d> whenever the
+        // corpus path length landed the trim boundary inside the note's ~110 B — adaptivecheck PHASE3's
+        // "kept 40 of 40" header over a set one row short of the plain run's, i.e. a disclosed-inert mode
+        // that was not inert. The note is still real bytes everywhere it matters downstream: est_tokens and
+        // the ceiling ladder measure the emitted header, so nothing under-reports; only the global default
+        // budget can overshoot, by at most the note (~0.5% of kForPayloadBudgetBytes), disclosed here.
+        const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size()
+                                     + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
 
         // The two attributes SPLICED into the header AFTER the ceiling ladder has chosen a rung — est_tokens
