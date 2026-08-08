@@ -135,9 +135,16 @@ fi
 # The precedence table used to EXCLUDE the three query-family flags, on the claim that "X9(c) above already
 # discloses those three". X9(c) only ever discloses collisions AMONG the three; against a report verb the
 # loser was dropped in total silence — stderr empty, exit 0 — which is the one thing the rest of this table
-# exists to prevent. Worse, the silent order is not uniform: --for wins everything, --query loses to
-# everything, and --pack-task sits in the middle (it loses to --skipped but beats --lint), so a caller could
-# not even infer the rule from one observation.
+# exists to prevent. M1 made all three ROWS, which closed the silence but froze an order nobody designed:
+# --for won everything, --query lost to everything, and --pack-task sat in the middle (losing to --skipped,
+# beating --lint) — three different answers to one question, so a caller could not infer the rule from any
+# number of observations.
+#
+# §A2 (audit 2026-08-08) — the family now dispatches UNIFORMLY FIRST. A typed task (--for/--pack-task/
+# --query) is the caller's PRIMARY intent; a report verb alongside it is the incidental one. One rule, three
+# flags: the query family beats every report verb, in both typed orders. This is a deliberate BEHAVIOUR
+# CHANGE — --skipped/--hotspots used to beat --pack-task, and every report verb used to beat --query.
+# Intra-family order is unchanged and still X9(c)'s: --for > --pack-task > --query.
 #
 # Same two-part demand as the adjacent-pair arm above, in BOTH typed orders: stdout must be byte-identical to
 # the winner's solo run (proving the named winner is the verb that answered) and stderr must name the winner
@@ -168,18 +175,18 @@ assertCross()
     crossOne "$WF" "$LF" "$L" "$W"
 }
 
-# --for dispatches ahead of the whole table.
+# One rule for all three: the query family dispatches ahead of the whole table. --skipped and --hotspots are
+# the two verbs that used to outrank --pack-task, and --lint is the one it already beat — all three now lose
+# to every member of the family, which is the whole point of the change.
 assertCross "--for=parse"       "--skipped"
 assertCross "--for=parse"       "--hotspots"
 assertCross "--for=parse"       "--lint"
-# --pack-task sits between --skipped and --communities: it loses above that seam, wins below it.
-assertCross "--skipped"         "--pack-task=parse"
-assertCross "--hotspots"        "--pack-task=parse"
+assertCross "--pack-task=parse" "--skipped"
+assertCross "--pack-task=parse" "--hotspots"
 assertCross "--pack-task=parse" "--lint"
-# --query dispatches behind the whole table.
-assertCross "--skipped"         "--query=parse"
-assertCross "--hotspots"        "--query=parse"
-assertCross "--lint"            "--query=parse"
+assertCross "--query=parse"     "--skipped"
+assertCross "--query=parse"     "--hotspots"
+assertCross "--query=parse"     "--lint"
 
 # X9(c) owns the INTRA-family collision. The report-verb line must stay quiet for it, or one collision gets
 # two warnings — the duplicate §B11.4 says it is avoiding, and the reason the three were excluded at all.

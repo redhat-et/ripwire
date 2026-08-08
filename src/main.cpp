@@ -10256,8 +10256,15 @@ int runDefaultMap( const MainDispatch& d )
 // The silence was also not uniform, so no caller could infer the rule from one observation: --for dispatches
 // ahead of the whole table, --query behind all of it, and --pack-task in between (it loses to --skipped and
 // wins over --lint). All three are now ROWS, at their real dispatch positions, which is this table's own
-// house rule — a verb is a row, not a special case. BEHAVIOUR IS UNCHANGED: the same verb still wins every
-// pair; only the silence is gone.
+// house rule — a verb is a row, not a special case. M1 changed no behaviour: the same verb still won every
+// pair; only the silence was gone.
+//
+// §A2 (audit 2026-08-08) — M1 disclosed the order and, in doing so, made it legible enough to see it was
+// indefensible: three flags of one family gave three different answers to "does a typed task outrank a
+// report verb?". The family now dispatches UNIFORMLY FIRST, so the three rows below are contiguous at the
+// TOP. A typed task is the caller's PRIMARY intent; a report verb passed alongside it is incidental. This IS
+// a behaviour change — --skipped/--hotspots no longer beat --pack-task, and no report verb beats --query —
+// and it is the point, not a side effect. Intra-family order stays X9(c)'s: --for > --pack-task > --query.
 //
 // The one true half of the old claim is kept as `isQueryFamily`: one run must never print two warnings about
 // the same collision, so an ignored query-family flag is skipped when the WINNER is also query-family —
@@ -10277,7 +10284,9 @@ struct ReportVerbSlot { const char* flag; bool isActive; bool isQueryFamily = fa
 void warnReportVerbPrecedence( const rw::Config& c )
 {
     const ReportVerbSlot slots[] = {
-        { "--for",              !c.forTask.empty(), true  },   // §M1: dispatches ahead of the entire table
+        // §A2: the query family, contiguous and first — these three outrank every report verb below.
+        { "--for",              !c.forTask.empty(), true  }, { "--pack-task",     c.packTaskFlag,    true },
+        { "--query",            !c.query.empty(),   true  },
         { "--lego",             !c.legoType.empty()       }, { "--exemplar",     !c.exemplar.empty()      },
         { "--recall",           !c.recall.empty()         }, { "--deps",          c.deps                  },
         { "--arch",             !c.archRules.empty()      }, { "--hotspots",      c.hotspots              },
@@ -10301,14 +10310,12 @@ void warnReportVerbPrecedence( const rw::Config& c )
         { "--layout",            c.layoutFlag             }, { "--doc-drift",     c.docDrift              },
         { "--from-trace",       !c.fromTrace.empty()      }, { "--note-add",      c.noteAddFlag           },
         { "--notes",             c.notesList              }, { "--skipped",       c.skippedList           },
-        { "--pack-task",         c.packTaskFlag,     true },   // §M1: loses to --skipped above, wins from --communities down
         { "--communities",       c.communities            },
         { "--community",         c.communityFlag          }, { "--zoom",          c.zoom                  },
         { "--seams",             c.seams                  }, { "--report",        c.report                },
         { "--tree",              c.tree                   }, { "--grep",         !c.grep.empty()          },
         { "--match",            !c.match.empty()          }, { "--lint",          c.lint                  },
         { "--around",           !c.around.empty()         },
-        { "--query",            !c.query.empty(),   true  },   // §M1: dispatches behind the entire table
     };
 
     const char* winner              = nullptr;
@@ -10709,6 +10716,8 @@ int main( int argc, char** argv )
     // §M1: the three flags X9(c) speaks for are rows here too now, so a CROSS-family pair (`--pack-task
     // --skipped`, `--for --hotspots`) discloses like every other pair instead of dropping one in silence.
     // X9(c) keeps the intra-family pair; the row table skips it rather than repeat it.
+    // §A2: those three rows are now contiguous at the TOP of the table — the family dispatches first, so in
+    // every cross-family pair the query-family flag is the WINNER and the report verb is the one disclosed.
     warnReportVerbPrecedence( cfg );
 
     // L2: --json refuses LOUDLY for any verb it doesn't (yet) support — see jsonUnsupportedVerb's ALLOW-list
@@ -11547,6 +11556,28 @@ int main( int argc, char** argv )
         return *handled;
     }
 
+    // §A2 (audit 2026-08-08) — the query family dispatches FIRST, as one contiguous block. A typed task
+    // (--for/--pack-task/--query) is the caller's PRIMARY intent; a report verb handed in alongside it is the
+    // incidental one, so the task answers and the report verb is disclosed as ignored by §B11.4's table.
+    // Before this, the family had three different answers to that one question — --for won everything,
+    // --pack-task lost to --skipped/--hotspots but beat --lint, and --query lost to all ~50 — an order nobody
+    // designed and no caller could infer. Intra-family order is X9(c)'s and UNCHANGED: --for (above) >
+    // --pack-task > --query. Deliberate behaviour change; test/dispatchordercheck.sh pins every pair.
+    if( std::optional<int> handled = runPackTask( dsp ) )
+    {
+        return *handled;
+    }
+
+    // --query owns no handler of its own: runDefaultMap serves it (the lexical-rank branch at its top) and is
+    // also this chain's fallback, so hoisting the CALL is what moves --query's precedence. Reaching
+    // runDefaultMap from here is byte-identical to falling through to it — every handler in between takes
+    // `const MainDispatch&` and none mutate it, so skipping them changes which verb answers and nothing else.
+    // Guarded on --query, so a run without it still falls through the whole table exactly as before.
+    if( !cfg.query.empty() )
+    {
+        return runDefaultMap( dsp );
+    }
+
     if( std::optional<int> handled = runTargetedViews( dsp ) )
     {
         return *handled;
@@ -11696,10 +11727,8 @@ int main( int argc, char** argv )
         return *handled;
     }
 
-    if( std::optional<int> handled = runPackTask( dsp ) )
-    {
-        return *handled;
-    }
+    // §A2: runPackTask used to sit HERE, between --skipped and --communities. It now dispatches with the rest
+    // of the query family, immediately after runForLens.
 
     if( std::optional<int> handled = runCommunities( dsp ) )
     {
