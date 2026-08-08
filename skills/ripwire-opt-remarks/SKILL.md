@@ -167,9 +167,11 @@ Two failure modes this bar exists for, both hit during the pass that wrote this 
   cold median at −3.9%, −4.6%, −0.8% and −5.9%. Quoting the best one would be a fabricated
   precision; what is actually established is a range plus a direction that never flipped.
 
-`bench/perfgate.sh` (median of 5, cold + warm, against `bench/perf_budgets.txt`) is the committed
-harness for the whole-pipeline number; use `RIPWIRE_BIN=` to point it at each arm. For a change inside
-one phase, `-DRIPWIRE_PROFILE=ON` gives per-phase medians that a 160 ms wall clock cannot resolve.
+`bench/perfgate.sh` (median of 5, cold + warm; ledger mode since 2026-08-08 — it prints the medians and
+appends them to `bench/PROFILE.md`, no pass/fail against a budget) is the committed harness for the
+whole-pipeline number; use `RIPWIRE_BIN=` to point it at each arm and read the two printed medians off
+stdout. For a change inside one phase, `-DRIPWIRE_PROFILE=ON` gives per-phase medians that a 160 ms wall
+clock cannot resolve.
 
 Then, before you keep it:
 

@@ -1,31 +1,44 @@
 #!/usr/bin/env bash
-# perfgate.sh — the drift alarm (Wave 2 #8: "make the perf story self-guarding").
+# perfgate.sh — the perf LEDGER (Wave 2 #8 originally "make the perf story self-guarding"; retired from
+# threshold-gating to informational-ledger mode by owner directive 2026-08-08: "perf budgets are NOT the
+# model — best tool first, then make it fast"; measurement stays a ledger, never red CI).
 #
 # Builds NOTHING. Times a selected corpus (default: this repo's own root — src/ + third_party/ +
 # everything else the denylist keeps, checked into git — stable unless someone adds/removes a lot
-# of files) cold (--no-cache) and warm (--cache) with RIPWIRE_BIN,
-# takes the MEDIAN of 5 runs each via /usr/bin/time, and compares against budgets recorded in
-# bench/perf_budgets.txt. Exits 1 with a loud message the moment a median exceeds its budget — that's
-# the whole point: a silent regression (someone adds an O(n^2) loop, a rehash cascade, an accidental
-# un-cached re-parse) shows up as a hard failure instead of a shrug next time someone eyeballs PROFILE.md.
+# of files) cold (--no-cache) and warm (--cache) with RIPWIRE_BIN, takes the MEDIAN of 5 runs each via a
+# high-resolution timer, prints the table, and appends a dated entry to bench/PROFILE.md. It does NOT
+# compare the medians against any budget and it does NOT fail because a number moved — corpus growth,
+# machine variance and deliberate feature additions all move these numbers for reasons that have nothing
+# to do with a regression, and a red gate that fires on all three trains everyone to ignore it. Read the
+# ledger; a human (or a future automated trend check over PROFILE.md's history) decides what a moving
+# number means.
 #
-# NOT wired into test/regression.sh. Perf gates flake in CI (shared runners, thermal throttling, noisy
-# neighbors) — this is an ON-DEMAND + PRE-RELEASE gate, run by a human (or a release script) on a quiet
-# machine, not on every push. Budgets carry 1.5x headroom over a measured baseline for exactly this
-# reason (see bench/perf_budgets.txt header for the rationale).
+# What this script STILL fails loudly on: the binary is missing, a timed command itself crashes or hangs,
+# or a semantic preflight shows the tool produced garbage (no core map, cache not transparent, degrade
+# note absent, ...). Those are correctness bugs, not perf drift, and retiring the budget comparison does
+# not mean retiring the harness's ability to notice its own tool is broken.
+#
+# NOT wired into test/regression.sh as a full run (perf gates flake in CI: shared runners, thermal
+# throttling, noisy neighbors) — this is an ON-DEMAND + PRE-RELEASE measurement, run by a human (or a
+# release script) on a quiet machine, not on every push. test/perfharnesscheck.sh DOES run this script's
+# --preflight-only mode under test/regression.sh, to prove the harness itself still works.
+#
+# bench/perf_budgets.txt is kept as a HISTORICAL reference (the last budgets this script ever enforced,
+# and the rationale for the 1.5x headroom convention) — it is no longer read by this script. See its own
+# header.
 #
 # Usage:
 #   bench/perfgate.sh                          # uses ./build/ripwire
 #   RIPWIRE_BIN=build_prof/ripwire bench/perfgate.sh
 #   RIPWIRE_PERF_CORPUS=../your-large-cpp-corpus RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh
 #   RIPWIRE_PERF_NAV_ARG=--deps RIPWIRE_PERF_NAV_KEY=deps_cpp RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh
-#   bench/perfgate.sh --preflight-only          # semantic harness checks only; no timing/budget comparison
-#   bench/perfgate.sh --write-budgets           # (re)generate perf_budgets.txt from THIS machine's
-#                                                # measured medians x 1.5 — use when you've made a
-#                                                # deliberate, verified perf change and want a new floor.
+#   bench/perfgate.sh --preflight-only          # semantic harness checks only; no timing/ledger entry
+#   bench/perfgate.sh --no-ledger               # measure + print the table, skip the bench/PROFILE.md
+#                                                # append (for a throwaway A/B, e.g. via RIPWIRE_BIN=)
 #
-# Exit codes: 0 = all medians within budget. 1 = at least one median exceeded its budget (or a run
-# failed). 2 = usage / missing binary error.
+# Exit codes: 0 = measurement completed (this is now the ONLY outcome once the binary runs cleanly — a
+# slow median is a data point, not a failure). 1 = a timed command crashed or a semantic preflight failed
+# (the harness itself is broken). 2 = usage / missing binary error.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -61,15 +74,15 @@ case "$NAV_KEY" in
         exit 2
         ;;
 esac
-BUDGETS="$ROOT/bench/perf_budgets.txt"
+PROFILE_MD="$ROOT/bench/PROFILE.md"
 RUNS=5
-WRITE_BUDGETS=0
 PREFLIGHT_ONLY=0
+WRITE_LEDGER=1
 case "${1:-}" in
     "") ;;
-    --write-budgets)  WRITE_BUDGETS=1 ;;
     --preflight-only) PREFLIGHT_ONLY=1 ;;
-    *) echo "usage: bench/perfgate.sh [--write-budgets|--preflight-only]"; exit 2 ;;
+    --no-ledger)      WRITE_LEDGER=0 ;;
+    *) echo "usage: bench/perfgate.sh [--preflight-only|--no-ledger]"; exit 2 ;;
 esac
 
 [ -x "$BIN" ] || { echo "perfgate: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -154,80 +167,27 @@ if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
     exit 0
 fi
 
-# key_to_ms KEY — looks up the measured median for a budget key by name (bash-3.2-safe: no assoc arrays)
-key_to_ms()
-{
-    case "$1" in
-        "$KEY_COLD") echo "$cold_ms" ;;
-        "$KEY_WARM") echo "$warm_ms" ;;
-        "$NAV_KEY") echo "$nav_ms" ;;
-        *) echo "" ;;
-    esac
-}
-
-# ---- write-budgets mode: regenerate perf_budgets.txt from these medians x 1.5, then exit ----
-if [ "$WRITE_BUDGETS" -eq 1 ]; then
-    {
-        echo "# perf_budgets.txt — perfgate.sh budgets (Wave 2 #8: the drift alarm)"
-        echo "#"
-        echo "# format: <key> <max_ms>   (one per line; # comments and blank lines ignored)"
-        echo "#"
-        echo "# Rationale: each budget = measured median x 1.5 on the machine/date below. The 1.5x"
-        echo "# headroom absorbs normal machine variance (thermal throttling, background load, P/E core"
-        echo "# scheduling jitter) WITHOUT masking a real regression — a genuine perf bug is rarely a 10-20%"
-        echo "# wobble, it's a missing cache hit or an added O(n^2) pass, which blows well past 1.5x."
-        echo "# Regenerate one label with: bench/perfgate.sh --write-budgets   (only after a DELIBERATE,"
-        echo "# verified perf change — don't silently ratchet budgets up to make a regression disappear)."
-        echo "#"
-        echo "# updated label: ${LABEL:-default}"
-        echo "# updated corpus: $CORPUS"
-        echo "# generated: $( date -u '+%Y-%m-%d %H:%M UTC' )  machine: $( uname -sm )"
-        echo "#"
-        if [ -f "$BUDGETS" ]; then
-            awk -v cold="$KEY_COLD" -v warm="$KEY_WARM" -v nav="$NAV_KEY" 'NF && $1 !~ /^#/ && $1 != cold && $1 != warm && (nav == "" || $1 != nav) { print }' "$BUDGETS"
-        fi
-        printf '%s %.0f\n' "$KEY_COLD" "$( awk -v v="$cold_ms" 'BEGIN{print v*1.5}' )"
-        printf '%s %.0f\n' "$KEY_WARM" "$( awk -v v="$warm_ms" 'BEGIN{print v*1.5}' )"
-        if [ -n "$NAV_ARG" ]; then
-            printf '%s %.0f\n' "$NAV_KEY" "$( awk -v v="$nav_ms" 'BEGIN{print v*1.5}' )"
-        fi
-    } > "$TMP/perf_budgets.txt"
-    mv "$TMP/perf_budgets.txt" "$BUDGETS"
-    echo "perfgate: wrote $BUDGETS"
-    exit 0
-fi
-
-# ---- compare against recorded budgets ----
-[ -f "$BUDGETS" ] || { echo "perfgate: no budgets file at $BUDGETS — run 'bench/perfgate.sh --write-budgets' once to seed it"; exit 2; }
-
-fail=0
-matchCount=0
-while read -r key max_ms; do
-    [ -z "${key:-}" ] && continue
-    case "$key" in \#*) continue ;; esac
-    m="$( key_to_ms "$key" )"
-    [ -z "$m" ] && continue
-    matchCount=$(( matchCount + 1 ))
-    over="$( awk -v m="$m" -v b="$max_ms" 'BEGIN{ print (m > b) ? 1 : 0 }' )"
-    if [ "$over" -eq 1 ]; then
-        printf '  FAIL  %-6s %8.1f ms  >  budget %s ms\n' "$key" "$m" "$max_ms"
-        fail=1
-    else
-        printf '  PASS  %-6s %8.1f ms  <=  budget %s ms\n' "$key" "$m" "$max_ms"
-    fi
-done < "$BUDGETS"
-
+# ---- ledger mode (owner directive 2026-08-08): print a recap table, append a dated bench/PROFILE.md
+# entry, exit 0 unconditionally. No budget file is read or written — bench/perf_budgets.txt is retired
+# to a historical reference (see its own header) and --write-budgets no longer exists.
+echo "-- measured (ledger, no pass/fail) --"
+printf '  %-24s %8.1f ms\n' "$KEY_COLD" "$cold_ms"
+printf '  %-24s %8.1f ms\n' "$KEY_WARM" "$warm_ms"
+[ -n "$NAV_ARG" ] && printf '  %-24s %8.1f ms\n' "$NAV_KEY" "$nav_ms"
 echo ""
-if [ "$matchCount" -eq 0 ]; then
-    echo "perfgate: no matching budgets for label '${LABEL:-default}' in $BUDGETS"
-    echo "perfgate: run with --write-budgets for this label, or choose an existing RIPWIRE_PERF_LABEL."
-    exit 2
+
+if [ "$WRITE_LEDGER" -eq 1 ]; then
+    {
+        printf '\n## %s — perfgate ledger: label=%s\n\n' "$( date -u '+%Y-%m-%d' )" "${LABEL:-default}"
+        printf 'Ledger-mode measurement (owner directive 2026-08-08: perf budgets are not the model — best\n'
+        printf 'tool first, then make it fast; no pass/fail — see bench/perfgate.sh header). BIN=%s\n' "$BIN"
+        printf 'corpus=%s runs=%s (median) machine=%s generated=%s\n\n' "$CORPUS" "$RUNS" "$( uname -sm )" "$( date -u '+%Y-%m-%d %H:%M UTC' )"
+        printf '| key | median (ms) |\n|---|---:|\n'
+        printf '| %s | %.1f |\n' "$KEY_COLD" "$cold_ms"
+        printf '| %s | %.1f |\n' "$KEY_WARM" "$warm_ms"
+        [ -n "$NAV_ARG" ] && printf '| %s | %.1f |\n' "$NAV_KEY" "$nav_ms"
+    } >> "$PROFILE_MD"
+    echo "perfgate: appended ledger entry to $PROFILE_MD"
 fi
-if [ "$fail" -eq 1 ]; then
-    echo "*** PERFGATE FAILED — a median exceeded its budget. This is the drift alarm firing: a hot"
-    echo "*** path likely regressed (rehash cascade, dropped cache hit, new O(n^2) pass, ...). Profile"
-    echo "*** with -DRIPWIRE_PROFILE=ON (see bench/PROFILE.md) before assuming it's just machine noise."
-    exit 1
-fi
-echo "perfgate: all medians within budget."
+echo "perfgate: measurement complete."
 exit 0
