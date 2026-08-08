@@ -1,0 +1,10 @@
+paired corrected LocBench: arm=for n=306 repos=88
+  strict file@10 delta +0.65pp; clustered bootstrap 95% lower +0.00pp
+  lenient file@10 delta +0.98pp; symbol MRR delta +0.0142
+  multi-file strict@10 delta +0.00pp (n=53)
+  warm latency p50 delta -1.0%; p95 delta +5.3%
+  production payload token ceiling p50 +0.0%; p95 +6.2%
+  cold p50/p95 +0.0%/+0.0%; index p50/p95 +0.0%/+0.0%
+  category deltas single strict/lenient +0.79pp/+0.79pp; multi +0.00pp/+1.89pp
+  all-patch secondary strict@10 delta +0.65pp (zero-primary rows count as failures)
+REJECT

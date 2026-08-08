@@ -1,0 +1,8 @@
+== webpack: splits
+qstem-guard: "split" df=292 cap=237 rejected
+== webpack: generates
+qstem-guard: "generat" df=0 cap=237 admitted
+qstem-guard: "generate" df=282 cap=237 rejected
+== cpp: resolved
+qstem-guard: "resolv" df=0 cap=138 admitted
+qstem-guard: "resolve" df=275 cap=138 rejected

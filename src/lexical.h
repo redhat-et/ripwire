@@ -97,6 +97,9 @@ inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 // exemplar kind-donation, --recall) = the pre-§P4 scores, byte for byte. The tiered form is a SEPARATE
 // entry point (not a 7th parameter on lexicalScores) so the widely-called public contract keeps its arity;
 // lexicalScores below forwards here with no multiplier.
+// defined with the LB-2 anchor-plausibility machinery below; the LB-3 variant guard reuses the bound
+inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept;
+
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
@@ -154,6 +157,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     {
         const char* qstemEnv = std::getenv( "RIPWIRE_QSTEM" );
         const bool  qstemOn  = qstemEnv != nullptr && *qstemEnv == '1';
+        // derived variants are CANDIDATES first: admission into the match table happens only after the
+        // IDF guard below — the guard sees the deduped candidate set, never the user's exact tokens
+        std::vector<LexMatchTok> stemCandidates;
         const auto  pushVariant = [ & ]( std::string v, std::uint32_t u )
         {
             if( v.size() < 3 )
@@ -167,7 +173,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     return;                                    // first-wins: string already claimed
                 }
             }
-            matchToks.push_back( { std::move( v ), u } );
+            for( const LexMatchTok& cand : stemCandidates )
+            {
+                if( cand.tok == v )
+                {
+                    return;                                    // first-wins among candidates too
+                }
+            }
+            stemCandidates.push_back( { std::move( v ), u } );
         };
         const auto isConsonant = []( char c )
         {
@@ -209,13 +222,31 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 }
             }
         }
+        // ── IDF guard, rung R3 (LB-3 retry, scratchpad lb3retry/preregistration.md) ──────────────────
+        // The un-guarded round measured the failure: a corpus-common variant ("split" on webpack) hands
+        // its term-frequency mass to every competitor whose doc/body rides the same subtoken, displacing
+        // currently-hit truths (EVALS §7) — and the mass is BODY frequency (`.split()` call sites), which
+        // is why the name-carrier bound (rungs R1/R2) measured too low to catch it. So every candidate
+        // enters the match table PROVISIONALLY, owning its own tf column (m ≥ uniqueCount); admission is
+        // decided AFTER pass 2, when both scoring branches have measured the variant's doc/body document
+        // frequency as the SAME integers (postings rows on the rich path, the scan's own counts on the
+        // lean path — parity by construction), and only a corpus-rare variant (df ≤ max(8, S/64)) is
+        // folded into its original token's row; a common one is discarded untouched. The guard never
+        // sees a user's EXACT query token — only derived variants — so it structurally cannot drop a
+        // truth's own carrier (the LB-1 IDF-floor failure).
+        for( LexMatchTok& cand : stemCandidates )
+        {
+            matchToks.push_back( std::move( cand ) );
+        }
     }
     const std::size_t matchCount = matchToks.size();
 
-    // per-doc integer stats (SoA): dl[i] = weighted subtoken count, tfFlat[i*uniqueCount+u] = weighted term
-    // frequency of unique query token u in doc i
+    // per-doc integer stats (SoA): dl[i] = weighted subtoken count, tfFlat[i*matchCount+m] = weighted term
+    // frequency of match-table row m in doc i. Disarmed, matchCount == uniqueCount and the layout is the
+    // historical one byte-for-byte; armed, provisional variant columns sit at m ≥ uniqueCount until the
+    // post-pass-2 guard folds the admitted ones and the array shrinks back to uniqueCount stride.
     std::vector<int> dl( S, 0 );
-    std::vector<int> tfFlat( S * uniqueCount, 0 );
+    std::vector<int> tfFlat( S * matchCount, 0 );
 
     // Field weights: a query term in a symbol's NAME outranks one in its DOC-COMMENT, which outranks one
     // buried in its BODY — so an exactly-named function beats a struct that merely mentions the word, and an
@@ -243,12 +274,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             fieldTokenWt += w;
             const char* tok  = text.data() + tokStartByte;
             const char  head = ( tok[0] >= 'A' && tok[0] <= 'Z' ) ? char( tok[0] - 'A' + 'a' ) : tok[0];
-            for( const LexMatchTok& mt : matchToks )
+            for( std::size_t m = 0; m < matchCount; ++m )
             {
-                const std::string& q = mt.tok;
+                const std::string& q = matchToks[m].tok;
                 if( q.size() == tokLen && q[0] == head && std::memcmp( q.data() + 1, tok + 1, tokLen - 1 ) == 0 )
                 {
-                    tfRow[mt.u] += w;
+                    tfRow[m] += w;                    // exact tokens own rows 0..uniqueCount (m == u there)
                     break;                            // table strings are distinct → at most one can match
                 }
             }
@@ -257,7 +288,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     };
     const auto scanField = [ & ]( std::size_t docIndex, std::string_view text, int w )
     {
-        scanTextInto( tfFlat.data() + docIndex * uniqueCount, dl[ docIndex ], text, w );
+        scanTextInto( tfFlat.data() + docIndex * matchCount, dl[ docIndex ], text, w );
     };
 
     // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text
@@ -314,14 +345,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         if( kwBase > 0 )
         {
             const std::size_t fileCount = ing.files.size();
-            std::vector<int>  fileTf( fileCount * uniqueCount, 0 );
+            std::vector<int>  fileTf( fileCount * matchCount, 0 );
             std::vector<int>  fileWt( fileCount, 0 );
             for( std::size_t f = 0; f < fileCount; ++f )
             {
                 const std::string_view path = ing.files[f];
                 const std::size_t      cut  = path.find_last_of( '/' );
                 const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
-                scanTextInto( fileTf.data() + f * uniqueCount, fileWt[f], base, kwBase );
+                scanTextInto( fileTf.data() + f * matchCount, fileWt[f], base, kwBase );
             }
             for( std::size_t i = 0; i < S; ++i )
             {
@@ -330,16 +361,21 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 {
                     continue;
                 }
-                int* const       tfRow = tfFlat.data() + i * uniqueCount;
-                const int* const fRow  = fileTf.data() + std::size_t( f ) * uniqueCount;
-                for( std::size_t u = 0; u < uniqueCount; ++u )
+                int* const       tfRow = tfFlat.data() + i * matchCount;
+                const int* const fRow  = fileTf.data() + std::size_t( f ) * matchCount;
+                for( std::size_t m = 0; m < matchCount; ++m )
                 {
-                    tfRow[u] += fRow[u];
+                    tfRow[m] += fRow[m];
                 }
                 dl[i] += fileWt[f];
             }
         }
     }
+
+    // per-variant doc/body document frequency, measured by whichever pass-2 branch runs — the guard's
+    // admission signal (rung R3). Both branches accumulate the same integers, so admission is identical.
+    const std::size_t          variantCount = matchCount - uniqueCount;
+    std::vector<std::uint32_t> dfVariant( variantCount, 0u );
 
     // pass 2 — doc-comment (×kwDoc) + body (×kwBody) evidence.
     //
@@ -360,17 +396,18 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
 
         // query-token hashes — the same normalized-lowercase hash index time used, over the FULL match
-        // table (exact tokens + LB-3 stem variants), so a body carrying only the variant still transfers
-        // its tf into the original token's row — the same mapping the scan branch's table walk applies.
+        // table (exact tokens + LB-3 stem variants), each hash mapped to its own tf ROW (a variant's tf
+        // lands in its provisional column; the post-pass-2 guard decides whether it folds into the
+        // original token's row) — the same row targeting the scan branch's table walk applies.
         // try_emplace keeps the FIRST entry on the astronomically-unlikely 64-bit collision between two
         // DISTINCT table strings, so both transfer strategies below agree deterministically.
         std::vector<std::uint64_t>            matchHash( matchCount );
-        HashMap<std::uint64_t, std::uint32_t> uniqueIndexOfHash;
-        uniqueIndexOfHash.reserve( matchCount );
+        HashMap<std::uint64_t, std::uint32_t> rowIndexOfHash;
+        rowIndexOfHash.reserve( matchCount );
         for( std::size_t m = 0; m < matchCount; ++m )
         {
             matchHash[m] = lexSubtokenHash( matchToks[m].tok.data(), matchToks[m].tok.size() );
-            uniqueIndexOfHash.try_emplace( matchHash[m], matchToks[m].u );
+            rowIndexOfHash.try_emplace( matchHash[m], std::uint32_t( m ) );
         }
 
         // B0.1 per-file pre-filter: skip a whole file's tf walks when its 512-bit signature excludes every
@@ -414,27 +451,35 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             // exact tf transfer — walk whichever side is smaller: probe the query map per stored token, or
             // binary-search each DISTINCT query hash in the symbol's sorted row. Identical sums either way
             // (the map dedupes hash-colliding query tokens for both strategies).
-            int* const           tfRow   = tfFlat.data() + i * uniqueCount;
+            int* const           tfRow   = tfFlat.data() + i * matchCount;
             const std::uint64_t* rowHash = ing.lexTokenHashes.data();
             if( std::size_t( rowEnd - rowBegin ) <= matchCount * 8 )       // ~log2(row) probes vs one map probe per entry
             {
                 for( std::uint32_t e = rowBegin; e < rowEnd; ++e )
                 {
-                    if( const auto it = uniqueIndexOfHash.find( rowHash[e] ); it != uniqueIndexOfHash.end() )
+                    if( const auto it = rowIndexOfHash.find( rowHash[e] ); it != rowIndexOfHash.end() )
                     {
                         tfRow[ it->second ] += int( ing.lexTokenTfs[e] );
+                        if( it->second >= uniqueCount )
+                        {
+                            ++dfVariant[ it->second - uniqueCount ];       // stored rows hold each hash once → one df bump per symbol
+                        }
                     }
                 }
             }
             else
             {
-                for( const auto& [ hash, u ] : uniqueIndexOfHash )         // iteration order is score-irrelevant: rows are disjoint per HASH (two hashes may share a u; += commutes)
+                for( const auto& [ hash, m ] : rowIndexOfHash )            // iteration order is score-irrelevant: rows are disjoint per HASH (+= commutes)
                 {
                     const std::uint64_t* lo = rowHash + rowBegin;
                     const std::uint64_t* hi = rowHash + rowEnd;
                     if( const std::uint64_t* it = std::lower_bound( lo, hi, hash ); it != hi && *it == hash )
                     {
-                        tfRow[u] += int( ing.lexTokenTfs[ std::size_t( it - rowHash ) ] );
+                        tfRow[m] += int( ing.lexTokenTfs[ std::size_t( it - rowHash ) ] );
+                        if( m >= uniqueCount )
+                        {
+                            ++dfVariant[ m - uniqueCount ];
+                        }
                     }
                 }
             }
@@ -475,9 +520,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         // ONE writer (no locks needed). Determinism: all pooled writes are exact integer counts and the float
         // scoring below stays single-threaded in doc order, so worker scheduling cannot change a byte of
         // output (no cross-doc float reductions — the det-gate rule).
+        // per-(file, variant) doc/body df tallies — a file's tally has exactly ONE writer (the worker
+        // that claimed the file), merged single-threaded below in file order; integer sums commute, so
+        // worker scheduling cannot change the totals (the det-gate rule). Sized only when armed.
+        std::vector<std::uint32_t> dfPerFile( variantCount > 0 ? fileCount * variantCount : 0, 0u );
         const auto scanFileSymbols = [ & ]( std::size_t f, const std::string& src )
         {
             const std::string_view sv = src;
+            std::vector<int>       variantTfBefore( variantCount );
             for( std::uint32_t r = fileRowOffsets[f]; r < fileRowOffsets[ f + 1 ]; ++r )
             {
                 const std::size_t i         = fileSymbolIds[r];
@@ -485,6 +535,11 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const std::size_t bodyStart = std::min<std::size_t>( s.sigStartByte, src.size() );
                 const std::size_t end       = std::min<std::size_t>( s.endByte, src.size() );
                 const std::size_t docStart  = docCommentStart( src, bodyStart );
+                if( variantCount > 0 )                 // snapshot the variant columns: df must count ONLY
+                {                                      // pass-2 (doc/body) growth, never pass-1 name/callee tf
+                    const int* tfRow = tfFlat.data() + i * matchCount + uniqueCount;
+                    std::copy( tfRow, tfRow + variantCount, variantTfBefore.begin() );
+                }
                 if( bodyStart > docStart )
                 {
                     scanField( i, sv.substr( docStart, bodyStart - docStart ), kwDoc );
@@ -492,6 +547,17 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 if( end > bodyStart )
                 {
                     scanField( i, sv.substr( bodyStart, end - bodyStart ), kwBody );
+                }
+                if( variantCount > 0 )
+                {
+                    const int* tfRow = tfFlat.data() + i * matchCount + uniqueCount;
+                    for( std::size_t v = 0; v < variantCount; ++v )
+                    {
+                        if( tfRow[v] > variantTfBefore[v] )
+                        {
+                            ++dfPerFile[ f * variantCount + v ];
+                        }
+                    }
                 }
             }
         };
@@ -552,6 +618,54 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 worker.join();
             }
         }
+        for( std::size_t f = 0; f < fileCount && variantCount > 0; ++f )   // deterministic df merge, file order
+        {
+            for( std::size_t v = 0; v < variantCount; ++v )
+            {
+                dfVariant[v] += dfPerFile[ f * variantCount + v ];
+            }
+        }
+    }
+
+    // ── IDF-guard admission + fold (rung R3) — runs identically after EITHER pass-2 branch ──────────
+    // A variant whose doc/body document frequency is corpus-common (df > max(8, S/64)) is discarded:
+    // its provisional column is simply never folded, so its evidence — name, callee, path, basename,
+    // doc, body — vanishes without touching dl (document length counts all subtokens scanned, never
+    // matches). An admitted (corpus-rare) variant folds its column into the original token's row, the
+    // exact integers the un-guarded arm would have accumulated there. The array then shrinks back to
+    // uniqueCount stride, and everything below — corpus stats, both scoring branches — is untouched
+    // code operating on the historical layout.
+    if( variantCount > 0 )
+    {
+        const std::uint32_t sOver64    = std::uint32_t( S / 64 );
+        const std::uint32_t variantCap = sOver64 > 8u ? sOver64 : 8u;
+        if( std::getenv( "RIPWIRE_QSTEM_DEBUG" ) != nullptr )
+        {
+            for( std::size_t v = 0; v < variantCount; ++v )
+            {
+                std::fprintf( stderr, "qstem-guard: \"%s\" df=%u cap=%u %s\n",
+                              matchToks[ uniqueCount + v ].tok.c_str(), dfVariant[v], variantCap,
+                              dfVariant[v] <= variantCap ? "admitted" : "rejected" );
+            }
+        }
+        std::vector<int> tfFolded( S * uniqueCount, 0 );
+        for( std::size_t i = 0; i < S; ++i )
+        {
+            const int* const src = tfFlat.data() + i * matchCount;
+            int* const       dst = tfFolded.data() + i * uniqueCount;
+            for( std::size_t u = 0; u < uniqueCount; ++u )
+            {
+                dst[u] = src[u];
+            }
+            for( std::size_t v = 0; v < variantCount; ++v )
+            {
+                if( dfVariant[v] <= variantCap )
+                {
+                    dst[ matchToks[ uniqueCount + v ].u ] += src[ uniqueCount + v ];
+                }
+            }
+        }
+        tfFlat = std::move( tfFolded );
     }
 
     // corpus stats — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =

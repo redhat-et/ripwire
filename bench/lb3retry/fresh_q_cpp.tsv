@@ -1,0 +1,20 @@
+Where does the tool flag confusing C/C++ micro-patterns, like the comma operator, embedded increments, or an assignment whose value gets consumed, that are known to make code easy to misread?	src/atoms.h
+Where does the ranker split identifiers into camelCase and snake_case subtokens and score them against a search query using BM25?	src/lexical.h
+Where does the tool turn resolved symbol references into the compressed sparse-row structure used for ranking?	src/graph.h
+Where is the power-iteration algorithm that assigns each symbol an importance score based on who references it implemented?	src/pagerank.cpp
+Where does the tool narrow an ambiguous method call to its actual receiver's class before falling back to matching every same-named function in the repo?	src/resolve.h
+Where does the tool check for memory-layout anti-patterns, like a vector of raw pointers or a vector of vectors, that hurt data locality?	src/cachelint.h
+Where does the tool measure whether a doc comment's words actually add information beyond what the function's own name already says?	src/commentcoherence.h
+Where is the hand-rolled HTTP transport that lets the tool's protocol server be reached remotely, with loopback-only binding and a bearer token by default?	src/mcpserver.h
+Where does the code live that safely inserts or replaces a named symbol's body in a file, locking it, checking a freshness hash, then writing atomically?	src/mcpedit.h
+Where does the tool shell out to git to mine per-commit changed-file sets and compute which files tend to change together?	src/gitmine.h
+Where does the tool figure out whether an identifier ever existed anywhere in the repository's history, even if it isn't in any file today?	src/gitoracle.h
+Where does the tool compare several branches pairwise to find which ones touch the same symbols, so it can suggest a safe order to land them?	src/mergescout.h
+Where does the tool implement plain literal and regular-expression text matching, scanning every file in parallel instead of maintaining an index?	src/search.h
+Where does the tool rank and return the full text of the markdown notes and design docs most relevant to a described task?	src/recall.h
+Where does the tool pick the single best existing instance of a function or class to imitate, based on complexity and how well-tested and well-used it is, rather than by matching similar text?	src/exemplar.h
+Where does the tool check whether a documentation file's references to specific line numbers, symbol names, or counts still hold true against the current code?	src/docdrift.h
+Where does the tool work out what code would start running and which tests cover it if a single currently-inactive build flag were turned on?	src/flipimpact.h
+Where does the tool combine a change's blast radius, the tests that reach it, and the files usually edited alongside it into one after-the-edit report?	src/situ.h
+Where does the tool read hardware performance counters, such as cycles, instructions, and cache misses, on Apple Silicon and Linux?	src/infra/profilePmc.h
+Where is the custom sorted associative container, a SIMD-accelerated B+ tree, that stands in for the standard map types the project isn't allowed to use?	src/infra/dynamic_map.hpp
