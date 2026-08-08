@@ -3570,8 +3570,18 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 // already deterministic), the file body CDATA-wrapped through the same redact + scrub pipeline
 // packSource uses, sym= carrying every requested symbol's name:line anchor, and each symbol's field
 // notes still surfaced (L3 — the notes must not vanish just because the serving form changed).
-// rawBytes is the Σ of raw on-disk bytes — the number the caller's reason= attribute discloses and
-// compares; the rendered form differs from it only by the envelope and CDATA-safety expansion.
+// D2 (audit regressions, 2026-08-08): body-shaping modifiers COMPOSE with this form instead of being
+// silently dropped when the serving mode flips —
+//   * compress=true strips comments through the SAME compressBody + anti-growth guard packBodies uses,
+//     so a --compress caller gets a compressed file, not a silently-uncompressed one (compresscheck);
+//   * each requested symbol whose canonical id ADDS an enclosing scope (the S6-C rule — canon != bare
+//     name) gets an <s n= id= l=/> anchor row before the CDATA, so the canonical-id surface downstream
+//     tooling reads off --expand output (usesselectorcheck resolves NoteIndex::empty through it) does
+//     not vanish with the ranked map.
+// rawBytes is the Σ of the SERVED body bytes — post-compress when compress is on, the raw on-disk
+// bytes otherwise — the number the caller's reason= attribute discloses and compares, so the auto
+// choice always weighs SHAPED candidate against SHAPED candidate. The rendered form differs from it
+// only by the envelope, anchors and CDATA-safety expansion.
 // complete=false (any file unreadable or empty) means this form is NOT a candidate: the caller serves
 // the bundle instead — a degraded read must never masquerade as the complete answer.
 struct WholeFileRender
@@ -3582,7 +3592,8 @@ struct WholeFileRender
 };
 
 inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vector<NodeId>& nodes,
-                                         RedactCounts* redact, const notes::NoteIndex* noteIndex )
+                                         RedactCounts* redact, const notes::NoteIndex* noteIndex,
+                                         bool compress )
 {
     WholeFileRender r;
     std::vector<std::uint32_t> fileOrder;
@@ -3623,10 +3634,26 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
         {
             return WholeFileRender{};   // vanished/empty since ingest => same fallback
         }
+
+        // D2: --compress composes with whole-file serving — the same compressBody + anti-growth guard
+        // packBodies applies to a bundle body (never grows, deterministic), applied BEFORE rawBytes is
+        // counted so the caller's auto choice compares the compressed file against the compressed bundle.
+        if( compress )
+        {
+            std::string compressed = compressBody( body );
+            if( compressed.size() < body.size() )
+            {
+                body = std::move( compressed );
+            }
+        }
         r.rawBytes += body.size();
 
-        // sym= anchors (name:line per requested node in this file, request order) + their field notes.
+        // sym= anchors (name:line per requested node in this file, request order) + their field notes,
+        // plus (D2) an <s n= id= l=/> row per symbol whose canonical id adds an enclosing scope — the
+        // exact S6-C emit-only-when-disambiguating rule the map rows follow, so the canonical-id surface
+        // survives the serving-mode flip at zero cost for scope-less symbols.
         std::string anchors;
+        std::string anchorRows;
         std::string noteStr;
         for( NodeId id : nodes )
         {
@@ -3642,6 +3669,17 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
             anchors += s.name;
             anchors += ':';
             anchors += std::to_string( s.line );
+            const std::string canon = canonicalId( ing.files[f], s.scope, s.name );
+            if( canon != s.name )
+            {
+                anchorRows += "<s n=\"";
+                anchorRows += escapeXml( s.name, esc );
+                anchorRows += "\" id=\"";
+                anchorRows += escapeXml( canon, esc );
+                anchorRows += "\" l=\"";
+                anchorRows += std::to_string( s.line );
+                anchorRows += "\"/>";
+            }
             noteStr += renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );
         }
 
@@ -3655,6 +3693,7 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
         r.xml += "\" sym=\"";
         r.xml += escapeXml( anchors, esc );
         r.xml += "\">";
+        r.xml += anchorRows;
         r.xml += noteStr;
         r.xml += "<![CDATA[";
         r.xml += safe;
