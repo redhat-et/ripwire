@@ -130,6 +130,74 @@ else
     fail "precedence: the two typed orders disagree, or --clones is not the winner the message claims"
 fi
 
+# ── M1 — the CROSS-FAMILY seam: --for / --query / --pack-task against the ~50 report verbs ────────────
+#
+# The precedence table used to EXCLUDE the three query-family flags, on the claim that "X9(c) above already
+# discloses those three". X9(c) only ever discloses collisions AMONG the three; against a report verb the
+# loser was dropped in total silence — stderr empty, exit 0 — which is the one thing the rest of this table
+# exists to prevent. Worse, the silent order is not uniform: --for wins everything, --query loses to
+# everything, and --pack-task sits in the middle (it loses to --skipped but beats --lint), so a caller could
+# not even infer the rule from one observation.
+#
+# Same two-part demand as the adjacent-pair arm above, in BOTH typed orders: stdout must be byte-identical to
+# the winner's solo run (proving the named winner is the verb that answered) and stderr must name the winner
+# and the ignored flag. The expected winners are read off the dispatch order the table now encodes, NOT
+# observed-and-frozen.
+crossOne()
+{
+    local WF="$1" LF="$2" A="$3" B="$4"
+    "$BIN" "$FIX" "$A" "$B" >"$PRECTMP/xboth" 2>"$PRECTMP/xerr"
+    if ! cmp -s "$PRECTMP/xsolo" "$PRECTMP/xboth"; then
+        fail "cross-family [$A $B]: stdout is not $WF's solo output — $WF did not answer"
+    elif ! grep -q "ripwire: $WF takes precedence" "$PRECTMP/xerr"; then
+        fail "cross-family [$A $B]: stderr does not name $WF as the winner (got: $( head -c 140 "$PRECTMP/xerr" ))"
+    elif ! grep -q "IGNORED this run: .*$LF" "$PRECTMP/xerr"; then
+        fail "cross-family [$A $B]: stderr does not name $LF as ignored (got: $( head -c 140 "$PRECTMP/xerr" ))"
+    else
+        pass "cross-family [$A $B]: $WF wins, $LF disclosed as ignored"
+    fi
+}
+
+# assertCross WINNER LOSER — runs the pair in both typed orders; the winner must not depend on typed order.
+assertCross()
+{
+    local W="$1" L="$2"
+    local WF="${W%%=*}" LF="${L%%=*}"
+    "$BIN" "$FIX" "$W" >"$PRECTMP/xsolo" 2>/dev/null
+    crossOne "$WF" "$LF" "$W" "$L"
+    crossOne "$WF" "$LF" "$L" "$W"
+}
+
+# --for dispatches ahead of the whole table.
+assertCross "--for=parse"       "--skipped"
+assertCross "--for=parse"       "--hotspots"
+assertCross "--for=parse"       "--lint"
+# --pack-task sits between --skipped and --communities: it loses above that seam, wins below it.
+assertCross "--skipped"         "--pack-task=parse"
+assertCross "--hotspots"        "--pack-task=parse"
+assertCross "--pack-task=parse" "--lint"
+# --query dispatches behind the whole table.
+assertCross "--skipped"         "--query=parse"
+assertCross "--hotspots"        "--query=parse"
+assertCross "--lint"            "--query=parse"
+
+# X9(c) owns the INTRA-family collision. The report-verb line must stay quiet for it, or one collision gets
+# two warnings — the duplicate §B11.4 says it is avoiding, and the reason the three were excluded at all.
+"$BIN" "$FIX" --for=parse --query=parse >/dev/null 2>"$PRECTMP/xf"
+if grep -q 'takes precedence over --query/--pack-task' "$PRECTMP/xf" && ! grep -q 'IGNORED this run' "$PRECTMP/xf"; then
+    pass "intra-family --for+--query: X9(c) discloses it once, the report-verb line stays quiet"
+else
+    fail "intra-family --for+--query: expected the X9(c) line alone (got: $( head -c 200 "$PRECTMP/xf" ))"
+fi
+
+# ...and when BOTH kinds of collision happen in one run, each line takes exactly its own half.
+"$BIN" "$FIX" --for=parse --query=parse --lint >/dev/null 2>"$PRECTMP/xm"
+if grep -q 'takes precedence over --query/--pack-task' "$PRECTMP/xm" && grep -q 'IGNORED this run: --lint\.' "$PRECTMP/xm"; then
+    pass "mixed --for+--query+--lint: X9(c) takes --query, the report line takes --lint, neither repeats the other"
+else
+    fail "mixed --for+--query+--lint: expected X9(c) plus 'IGNORED this run: --lint.' (got: $( head -c 240 "$PRECTMP/xm" ))"
+fi
+
 # a SINGLE verb must stay silent — a warning that fires when nothing was dropped is worse than none.
 "$BIN" "$FIX" --clones >/dev/null 2>"$PRECTMP/e3"
 grep -q 'takes precedence when several verbs' "$PRECTMP/e3" \
