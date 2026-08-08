@@ -11,6 +11,13 @@
 #   3. Assert every live verb name appears in the wrap output (word-boundary match, so e.g.
 #      "for" doesn't false-positive on "before").
 #   4. Assert the wrap output names skills/install.sh.
+#   5. Every agent recipe (and every --all stanza) carries the pasteable use-when blurb block,
+#      naming the right context file per client (CLAUDE.md / AGENTS.md / .cursor/rules / …).
+#   6. The blurb body is emitted from ONE shared source — byte-identical across agents.
+#   7. The skills-install line is a three-way probe, not an unconditional `bash skills/install.sh`:
+#      (a) cwd has ./skills/install.sh → the checkout line; (b) else <exeDir>/../share/ripwire/
+#      skills/install.sh exists (the curl installer's staged copy) → `bash "<abs path>"`;
+#      (c) else a clone-pointer comment, never a dead command. Plus byte-determinism per case.
 #
 # Usage:
 #   test/wrapverbscheck.sh                          # uses build/ripwire
@@ -143,6 +150,137 @@ if [ "$WRAP_ALL_OUT" = "$WRAP_ALL_OUT2" ]; then
     ok "wrap --all output is deterministic (byte-identical on two runs)"
 else
     no "wrap --all output is NOT deterministic"
+fi
+
+echo
+echo "=== 5. use-when blurb block — every agent, right target file ==="
+
+# extract the blurb body (the lines BETWEEN the paste fences) from a recipe on stdin
+blurb_body() {
+    sed -n '/^# --- paste into /,/^# --- end paste ---$/p' | sed '1d;$d'
+}
+
+check_blurb() {
+    _agent="$1"; _target="$2"
+    _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
+    if echo "$_out" | grep -qF -- "# --- paste into $_target"; then
+        ok "wrap $_agent blurb fence names $_target"
+    else
+        no "wrap $_agent blurb fence missing or names the wrong file (wanted $_target)"
+    fi
+    if echo "$_out" | grep -qF -- "# --- end paste ---"; then
+        ok "wrap $_agent blurb fence is closed"
+    else
+        no "wrap $_agent blurb fence never closes"
+    fi
+    _bodylines="$( echo "$_out" | blurb_body | wc -l | tr -d ' ' )"
+    if [ "$_bodylines" -ge 10 ] && [ "$_bodylines" -le 20 ]; then
+        ok "wrap $_agent blurb body is $_bodylines lines (10-20 band)"
+    else
+        no "wrap $_agent blurb body is $_bodylines lines — outside the 10-20 band"
+    fi
+}
+
+check_blurb claude   "CLAUDE.md"
+check_blurb codex    "AGENTS.md"
+check_blurb cursor   ".cursor/rules"
+check_blurb windsurf ".windsurfrules"
+check_blurb gemini   "GEMINI.md"
+check_blurb aider    "CONVENTIONS.md"
+
+# --all: each detected stanza carries its own blurb (fake HOME detects claude + codex + aider)
+if echo "$WRAP_ALL_OUT" | grep -qF -- "# --- paste into CLAUDE.md" \
+   && echo "$WRAP_ALL_OUT" | grep -qF -- "# --- paste into AGENTS.md" \
+   && echo "$WRAP_ALL_OUT" | grep -qF -- "# --- paste into CONVENTIONS.md"; then
+    ok "wrap --all stanzas each carry their blurb (CLAUDE.md + AGENTS.md + CONVENTIONS.md fences)"
+else
+    no "wrap --all is missing a per-stanza blurb fence"
+fi
+
+echo
+echo "=== 6. blurb body — one shared source, byte-identical across agents ==="
+
+"$BIN" wrap claude 2>/dev/null | blurb_body >"$TMP/blurb_claude"
+"$BIN" wrap gemini 2>/dev/null | blurb_body >"$TMP/blurb_gemini"
+"$BIN" wrap aider  2>/dev/null | blurb_body >"$TMP/blurb_aider"
+if cmp -s "$TMP/blurb_claude" "$TMP/blurb_gemini" && cmp -s "$TMP/blurb_claude" "$TMP/blurb_aider"; then
+    ok "blurb body is byte-identical across claude/gemini/aider (single source of truth)"
+else
+    no "blurb body DIVERGES between agents — the shared-source contract is broken"
+fi
+
+# the body must carry the load-bearing verbs of the use-when protocol
+for _needle in '--for=' '--pack-task=' '--from-trace=' '--callers=' '--impact=' '--uses=' \
+               '--edit-check=' '--exemplar=' '--quality-delta' '--test-gate' 'counts_floor'; do
+    if grep -qF -- "$_needle" "$TMP/blurb_claude"; then
+        ok "blurb names $_needle"
+    else
+        no "blurb is missing $_needle — the use-when protocol lost a verb"
+    fi
+done
+
+echo
+echo "=== 7. skills-line three-way probe ==="
+
+REAL_TMP="$( cd "$TMP" && pwd -P )"
+
+# case a — cwd is a checkout (./skills/install.sh exists) → the relative checkout line
+mkdir -p "$TMP/case_a/skills"
+: > "$TMP/case_a/skills/install.sh"
+A_OUT="$( cd "$TMP/case_a" && "$BIN" wrap claude 2>/dev/null )"
+if echo "$A_OUT" | grep -q '^bash skills/install\.sh'; then
+    ok "case a (checkout cwd): relative 'bash skills/install.sh' line kept"
+else
+    no "case a (checkout cwd): relative skills line missing"
+fi
+
+# case b — prebuilt prefix layout: <prefix>/bin/<binary> + <prefix>/share/ripwire/skills/install.sh
+# (the curl installer's staged copy — a fixed design contract). Copy, don't symlink: the binary
+# realpath()s itself, and a symlink would resolve back to the build tree.
+mkdir -p "$TMP/prefix/bin" "$TMP/prefix/share/ripwire/skills" "$TMP/case_b"
+cp "$BIN" "$TMP/prefix/bin/ripwire-copy"
+: > "$TMP/prefix/share/ripwire/skills/install.sh"
+STAGED="$REAL_TMP/prefix/share/ripwire/skills/install.sh"
+B_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/null )"
+if echo "$B_OUT" | grep -qF "bash \"$STAGED\""; then
+    ok "case b (prebuilt prefix): absolute staged path printed ($STAGED)"
+else
+    no "case b (prebuilt prefix): absolute staged path NOT printed"
+fi
+B_CODEX_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap codex 2>/dev/null )"
+if echo "$B_CODEX_OUT" | grep -qF "bash \"$STAGED\" --codex"; then
+    ok "case b (prebuilt prefix, codex): staged path printed with --codex"
+else
+    no "case b (prebuilt prefix, codex): staged --codex line NOT printed"
+fi
+
+# case c — no checkout, no staged copy → a clone-pointer comment, never a dead command
+mkdir -p "$TMP/bare/bin" "$TMP/case_c"
+cp "$BIN" "$TMP/bare/bin/ripwire-copy"
+C_OUT="$( cd "$TMP/case_c" && "$TMP/bare/bin/ripwire-copy" wrap claude 2>/dev/null )"
+if echo "$C_OUT" | grep -q 'skills not found locally' && echo "$C_OUT" | grep -qF 'github.com/redhat-et/ripwire'; then
+    ok "case c (nothing local): clone-pointer comment printed"
+else
+    no "case c (nothing local): clone-pointer comment missing"
+fi
+if echo "$C_OUT" | grep -q '^bash skills/install\.sh'; then
+    no "case c (nothing local): still prints the DEAD 'bash skills/install.sh' command"
+else
+    ok "case c (nothing local): no dead install command"
+fi
+
+# determinism per probe case: same invocation twice, byte-identical
+B_OUT2="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/null )"
+if [ "$B_OUT" = "$B_OUT2" ]; then
+    ok "case b output is deterministic (byte-identical on two runs)"
+else
+    no "case b output is NOT deterministic"
+fi
+C_OUT2="$( cd "$TMP/case_c" && "$TMP/bare/bin/ripwire-copy" wrap claude 2>/dev/null )"
+if [ "$C_OUT" = "$C_OUT2" ]; then
+    ok "case c output is deterministic (byte-identical on two runs)"
+else
+    no "case c output is NOT deterministic"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
