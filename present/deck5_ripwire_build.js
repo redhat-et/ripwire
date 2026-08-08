@@ -101,7 +101,7 @@ function stat(s, big, label, x, y, w, color, opts={}){
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
     ["11 languages", "C/C++, ObjC, Python, TS/JS, Java, Go, Rust, Ruby, Swift, C#, Bash — plus JSON and Metal (a C++ dialect)"],
-    ["agent-native", "an MCP server and 138 long flags behind one `--help` that is always the authority"],
+    ["agent-native", "an MCP server and 139 long flags behind one `--help` that is always the authority"],
   ];
   let y = 4.15;
   for (const [h2, b] of props){
@@ -134,7 +134,7 @@ function stat(s, big, label, x, y, w, color, opts={}){
     s.addText(flags, { x: MX+6.6,  y: y+0.04, w: 5.35, h: 0.58, fontFace: MONO, fontSize: 9.5, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "ripwire --help is generated from the binary's own flag table — 138 long flags; docs/COMMANDS.md documents 90 of them with real recorded output");
+  foot(s, "ripwire --help is generated from the binary's own flag table — 139 long flags; docs/COMMANDS.md documents 90 of them with real recorded output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
