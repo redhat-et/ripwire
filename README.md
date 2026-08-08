@@ -364,6 +364,16 @@ tree-sitter's core, all 15 grammars and the test framework are vendored under `t
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
+Two builds, two jobs — pick by what you are doing:
+
+```bash
+# building to USE it — the fast binary (Release implies LTO; scripts/pgobuild.sh adds PGO, what CI ships)
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-release -j
+
+# building to WORK ON it — plain configure, no build type (why that matters: the trap, under the fold below)
+cmake -S . -B build && cmake --build build -j
+```
+
 Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
 Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
 
@@ -397,9 +407,12 @@ The CLI is the recommended baseline because it works in every shell-capable agen
 optional, for agents whose workflow benefits from persistent tool registration. Full walkthrough,
 all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
 
-> **Do not** configure a local tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`,
-> which compiles the degrade-path alerts out and blinds the gates that assert them. CI builds both
-> flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> **The trap, spelled out:** never configure the *dev* tree (`build/`) with
+> `-DCMAKE_BUILD_TYPE=Release`. Release defines `NDEBUG`, which compiles the degrade-path alerts out
+> and blinds the gates that assert them — and every gate and bench number is measured against
+> `build/`, so changing that tree's flavour silently moves all of them at once. Release belongs in
+> its own tree (`build-release/` above; `./install.sh` builds its own `build-install/` the same way).
+> CI builds both flavours on purpose — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
 floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
@@ -491,7 +504,7 @@ about the code, and the annotation is emitted on **no** row.
 </details>
 
 <details>
-<summary>Four verbs that sit <i>beside</i> the six-family join — <code>--field-affinity</code>, <code>--readability</code>, <code>--naming-consistency</code>, <code>--lint --naming-locals</code></summary>
+<summary>Five lenses that sit <i>beside</i> the six-family join — <code>--field-affinity</code>, the <code>cache-*</code> lint pack with <code>--with-profile</code>, <code>--readability</code>, <code>--naming-consistency</code>, <code>--lint --naming-locals</code></summary>
 
 **Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
 rather than blurring it:
@@ -522,6 +535,24 @@ rather than blurring it:
   mostly-null result, so the ranking-affecting half of this feature is a provable no-op until a
   blind real-corpus validation session clears it — reported here at the same honesty level as
   everything else in this table, not oversold ahead of the evidence.
+- **The `cache-*` lint pack + `--with-profile`** (cache-friendly *access patterns* — the other half
+  of the locality story, shipped 2026-08-07/08) covers what `--field-affinity` deliberately does not:
+  eight AST shapes practitioners agree hurt — node-based containers, `vector<T*>`/vector-of-indirect
+  (the "matrix as vector of vectors"), heap allocation inside loops, `p = p->next` chase advances,
+  `a[b[i]]` gather subscripts, by-value `shared_ptr` parameters, and existing manual prefetches
+  flagged for re-measurement — loop-fenced by span algebra, C-family only, facts never verdicts. The
+  honesty numbers, both directions: on this repository the aggressive rules fire **only in benches
+  and test fixtures, zero in shipping `src/`** (guardrail G2 holding is itself the check the rules
+  aren't firing at random), and a 13-agent adversarial triage of all 327 findings confirmed **zero**
+  as fix-worthy — every plausible refactor died on "win unmeasurable without a profile". That gap is
+  exactly what **`--lint --with-profile=FILE`** closes: it joins a `RIPWIRE_PROFILE` build's own
+  per-scope hardware counters (`#PROF_TSV`) onto findings, so a row carries `heat_total_ms` /
+  `heat_l1d_mpki` from a real run — static shape × measured PMU weight, the two halves of SYZYGY's
+  advice mode (Hundt, CGO 2006) finally in one command. Worked example: the one surviving refactor
+  candidate (flattening the Louvain adjacency) was settled by its new `PROFILE_SCOPE` in a single
+  measured run — **5.2 ms, 5.9% of the verb** — a wasted afternoon prevented by a number
+  ([`docs/CACHELINT.md`](docs/CACHELINT.md) holds the full catalog, the wave-2 specs, and the
+  compiler-handled myths deliberately *not* checked).
 - **`--readability`** is a sibling lens, not a panel family either — the one classic model in the tree
   with a published closed form: Halstead volume (Halstead, *Elements of Software Science*, 1977) and
   the Posnett/Hindle/Devanbu sigmoid fit (MSR 2011, [doi:10.1145/1985441.1985454](https://doi.org/10.1145/1985441.1985454)),
