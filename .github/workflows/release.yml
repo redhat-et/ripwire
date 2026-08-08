@@ -35,6 +35,7 @@ jobs:
             os: macos-14 # Apple Silicon (arm64) hosted runner
             asset_arch: arm64
             asset_os: macos
+            pgo: true
           - name: macos-x64
             os: macos-14 # cross-compiled: the macos-13 Intel runner pool is retired — the v0.1.0 and
                          # first v0.2.0 runs both left its leg queued until the 24h auto-cancel. Built
@@ -42,6 +43,8 @@ jobs:
                          # Rosetta 2 (installed on GitHub's macos-14 images).
             asset_arch: x64
             asset_os: macos
+            pgo: true # trains under Rosetta 2 — instrumentation counts edges of the same code, so the
+                      # profile is valid x86_64 data; it is just slower to collect
             cmake_extra: -DCMAKE_OSX_ARCHITECTURES=x86_64
           - name: linux-x64
             os: ubuntu-24.04
@@ -75,10 +78,36 @@ jobs:
 
 
       - name: Configure (portable — no RIPWIRE_NATIVE, this binary ships to other machines)
+        if: ${{ !matrix.pgo }}
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra || '' }}
 
       - name: Build
+        if: ${{ !matrix.pgo }}
         run: cmake --build build -j --target ripwire
+
+      # PGO for the shipped binary (macOS legs only): scripts/pgobuild.sh is the same one-command
+      # instrument -> train -> merge -> optimize flow a dev runs, trained on this checkout (the
+      # script's own mixed workload). The Linux legs deliberately STAY LTO-only: their manylinux
+      # gcc-toolset is load-bearing for the RHEL static-libstdc++ compat model, and CMake's PGO arm
+      # refuses GCC (its -fprofile-* is the incompatible .gcda flavour) — moving Linux to clang is a
+      # separate toolchain decision, not a rider on this step. Package/smoke read build/ripwire on
+      # every leg, so the optimized binary is staged there — a plain file copy; what CMakeLists
+      # refuses is CONFIGURING a PGO tree named build/, which this is not.
+      - name: Build (profile-guided — instrument, train, merge, optimize)
+        if: ${{ matrix.pgo }}
+        run: |
+          scripts/pgobuild.sh --cmake-extra -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra && format('--cmake-extra {0}', matrix.cmake_extra) || '' }}
+          mkdir -p build
+          cp build_pgo/ripwire build/ripwire
+
+      # Determinism is a contract and PGO is an optimizer change — the exact class the contract
+      # guards against. Two runs must be byte-identical before this binary may ship.
+      - name: PGO determinism check
+        if: ${{ matrix.pgo }}
+        run: |
+          ./build/ripwire test/fixture --no-cache > a.xml
+          ./build/ripwire test/fixture --no-cache > b.xml
+          diff a.xml b.xml
 
       - name: Smoke-test the freshly built binary
         run: |
