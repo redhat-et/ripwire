@@ -731,6 +731,27 @@ environment variable. One anchor-expansion candidate scored **+0.41pp** paired w
 of **+0.00pp** and was rejected outright by the acceptance gate. A negative result recorded is worth
 more than a feature shipped on a hunch.
 
+**Stripping question words out of prose queries does not fix prose-query recall.** The r7 loss-first
+round (2026-08-08, question sets committed in `bench/r7/`) measured natural-language queries at
+**4/22** on a webpack set where terse keyword rephrasings of the same targets recovered 7 of 12
+tested misses, and attributed the gap to interrogative/filler tokens diluting subtoken+body BM25.
+The pre-registered fix — a closed filler-token strip on the routed conceptual lane plus an IDF
+floor — was built, gated green, measured, and **rejected**: predicted 12/22 (pre-registered band
+10–14), measured **5/22**, with only 1 of the 8 predicted flips materializing. The IDF floor died
+first, by its own pre-authorized rule: it dropped a truth's *own* name carrier (`module`, for
+`DeterministicModuleIdsPlugin`) and flipped a current hit to a miss. Strip-only then cost a baseline
+C++ hit (`packtask.h`, rank 3→5) whose doc prose was riding exactly the filler-token mass the strip
+removes — the dilution mechanism is real but it cuts both ways. The commit (`1a00a65`, reverted, in
+reflog only) was rolled back rather than tuned, because the misses have a different anatomy: the
+concept lives in the class/file *name* with no body carrier at all — `SplitChunksPlugin` contains
+zero `splits`/`shared` subtokens, `FlagDependencyUsagePlugin` zero `unused` — a stemming/name-field
+problem (recorded as LB-3 open headroom), not a dilution problem. The 4/22 prose number stands until
+that is built and measured. The router-plausibility fix from the same round (LB-2, `fa4639e`) *did*
+ship: terse compound queries like `split chunks` no longer hard-route onto a common stdlib anchor
+(`split`) — 5 of 6 pre-registered probes recovered with all 7 controls held, the 42 committed
+questions byte-identical, and the name-exact lane's recall@1 measured unchanged (98.0% at both the
+pre-round base and the fix, base rebuilt in a throwaway worktree to prove it).
+
 ---
 
 ## 8. Claims this project does *not* publish
