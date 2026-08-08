@@ -6527,6 +6527,56 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 }   // namespace
 
 // =====================================================================================
+// The markitdown-bridge doc cache, lifted out of ingest()'s doc post-pass worker (that function is
+// already the file's largest — the logic reads better named). A doc that needs the BRIDGE
+// (pdf/docx/pptx/xlsx) costs a popen + a Python-CLI start per file (~seconds), and the post-pass
+// reruns every invocation by design — so on a machine WITH markitdown installed every warm run paid
+// it (measured: 3.2 s wall, ~1 ms task-clock, for the two present/ decks). The extraction is a pure
+// function of the file BYTES, so bridge results are cached under the shared cache dir keyed by
+// content hash; the "ripwire-" prefix keeps eviction inside the existing family sweep (whose
+// age+size caps also bound a markitdown UPGRADE's staleness — the input-bytes key alone would never
+// notice one). An EMPTY extraction is never cached: "" means markitdown absent or errored — a fact
+// about the machine, not the bytes. Hand-rolled kinds (ipynb/html/csv) stay uncached (microseconds);
+// cacheEnabled=false (--no-cache) bypasses the sidecar entirely. tmpKey keeps concurrent workers'
+// unpublished temp files distinct; the publish itself is a whole-file rename, so a concurrent
+// reader sees every byte or none.
+inline std::string docTextViaBridgeCache( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey )
+{
+    std::string text;
+    std::string bridgeBlobPath;
+    if( cacheEnabled && docparse::docKindOf( ext ) == docparse::DocKind::Markitdown )
+    {
+        std::string docBytes;
+        if( docparse::detail::readWholeFile( path, docBytes ) )
+        {
+            char blobName[ 64 ];
+            std::snprintf( blobName, sizeof( blobName ), "ripwire-docmd-%016llx.bin",
+                           static_cast<unsigned long long>( fnv1a64( docBytes ) ) );
+            bridgeBlobPath = quality::resolveCacheBlobPath( quality::cacheDirLadder(), blobName );
+            docparse::detail::readWholeFile( bridgeBlobPath, text );   // miss ⇒ text stays empty
+        }
+    }
+    if( text.empty() )
+    {
+        text = docparse::parseDocFile( path, ext );
+        if( !text.empty() && !bridgeBlobPath.empty() )
+        {
+            const std::string tmp = bridgeBlobPath + ".tmp" + std::to_string( tmpKey );
+            std::FILE* fp = std::fopen( tmp.c_str(), "wb" );
+            if( fp != nullptr )
+            {
+                const bool wroteAll = std::fwrite( text.data(), 1, text.size(), fp ) == text.size();
+                std::fclose( fp );
+                if( !wroteAll || std::rename( tmp.c_str(), bridgeBlobPath.c_str() ) != 0 )
+                {
+                    std::remove( tmp.c_str() );
+                }
+            }
+        }
+    }
+    return text;
+}
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
                      std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel )
 {
@@ -7494,7 +7544,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         {
                             const std::uint32_t fid = docIds[ di ];
                             const std::string   ext = lowerExtensionOf( result.files[ fid ] );
-                            std::string text = docparse::parseDocFile( result.files[ fid ], ext );
+
+                            std::string text = docTextViaBridgeCache( result.files[ fid ], ext, !cacheFile.empty(), fid );
                             if( !text.empty() )
                             {
                                 if( captureValueUses )

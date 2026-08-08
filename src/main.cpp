@@ -1550,6 +1550,184 @@ struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, t
 // reason: mergeAtomsPack below fills it too.
 struct RuleCap { std::string rule; bool isUserRule; };
 
+// --with-profile (the SYZYGY advice-mode pairing: static shape × PMU weight — Hundt et al., CGO 2006,
+// already cited in fieldaffinity.h): one parsed row of the #PROF_TSV block a RIPWIRE_PROFILE build's
+// report emits (profileScope.h::print_tsv — scope, file, line, then whatever data columns that run's
+// counter tier armed). File scope like LintOut, for the same reason: runLint consumes it.
+struct ProfScopeRow
+{
+    std::string file;      // basename, exactly as PROFILE_SCOPE's Site::file records it
+    int         line = 0;  // the PROFILE_SCOPE site line
+    std::string scope;     // description text, or the trimmed function name
+    std::vector<std::pair<std::string, std::string>> cols;   // header name → raw cell, calls onward
+};
+
+// Parse FILE's #PROF_TSV block. nullopt = unreadable file, no sentinel pair, or a header that is not
+// the block's own (scope/file/line first) — the caller REFUSES loudly rather than joining nothing
+// silently, because "annotated zero findings" and "read the wrong file" must never look alike.
+std::optional<std::vector<ProfScopeRow>> parseProfTsv( const std::string& path )
+{
+    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    if( fp == nullptr )
+    {
+        return std::nullopt;
+    }
+    std::string all;
+    char        buf[ 4096 ];
+    std::size_t got = 0;
+    while( ( got = std::fread( buf, 1, sizeof( buf ), fp ) ) > 0 )
+    {
+        all.append( buf, got );
+    }
+    std::fclose( fp );
+
+    const auto splitTabs = []( std::string_view lineText )
+    {
+        std::vector<std::string> cells;
+        std::size_t              from = 0;
+        for( ;; )
+        {
+            const std::size_t tab = lineText.find( '\t', from );
+            if( tab == std::string_view::npos )
+            {
+                cells.emplace_back( lineText.substr( from ) );
+                return cells;
+            }
+            cells.emplace_back( lineText.substr( from, tab - from ) );
+            from = tab + 1;
+        }
+    };
+
+    std::vector<ProfScopeRow> rows;
+    std::vector<std::string>      header;
+    bool inBlock = false, sawEnd = false;
+    std::size_t from = 0;
+    while( from <= all.size() )
+    {
+        const std::size_t    nl       = all.find( '\n', from );
+        const std::string_view lineText( all.data() + from, ( nl == std::string::npos ? all.size() : nl ) - from );
+        from = ( nl == std::string::npos ) ? all.size() + 1 : nl + 1;
+        if( !inBlock )
+        {
+            if( lineText.rfind( "#PROF_TSV_BEGIN", 0 ) == 0 )
+            {
+                inBlock = true;
+            }
+            continue;
+        }
+        if( lineText.rfind( "#PROF_TSV_END", 0 ) == 0 )
+        {
+            sawEnd = true;
+            break;
+        }
+        if( header.empty() )
+        {
+            header = splitTabs( lineText );
+            if( header.size() < 4 || header[0] != "scope" || header[1] != "file" || header[2] != "line" )
+            {
+                return std::nullopt;   // not print_tsv's own header — wrong file, refuse
+            }
+            continue;
+        }
+        const std::vector<std::string> cells = splitTabs( lineText );
+        if( cells.size() < 4 )
+        {
+            continue;   // a short row carries nothing joinable; skip it rather than invent columns
+        }
+        ProfScopeRow row;
+        row.scope = cells[0];
+        row.file  = cells[1];
+        row.line  = std::atoi( cells[2].c_str() );
+        for( std::size_t cellIndex = 3; cellIndex < cells.size() && cellIndex < header.size(); ++cellIndex )
+        {
+            row.cols.emplace_back( header[cellIndex], cells[cellIndex] );
+        }
+        rows.push_back( std::move( row ) );
+    }
+    if( !inBlock || !sawEnd )
+    {
+        return std::nullopt;
+    }
+    return rows;
+}
+
+
+// The --with-profile join itself: annotate each finding with the NEAREST-PRECEDING PROFILE_SCOPE site
+// inside its own enclosing symbol (same basename, symbol.line <= site.line <= finding.line — scopes
+// lead the region they measure, so a later site never annotates an earlier finding). The measured
+// columns are whatever counter tier the profiled run armed; an absent column was NOT measured, never
+// zero. Returns the per-finding attribute strings (index-aligned with `outs`) plus the root
+// heat_joined= attribute — or nullopt AFTER printing the refusal (unreadable FILE, or no #PROF_TSV
+// block), so the caller exits 1: "annotated zero findings" and "read the wrong file" never look alike.
+template <class EnclosingFn>
+std::optional<std::pair<std::vector<std::string>, std::string>>
+buildHeatAnnotations( std::string_view withProfile, const rw::IngestResult& ing, const std::vector<LintOut>& outs, EnclosingFn&& enclosing )
+{
+    using namespace rw;
+    const auto profRows = parseProfTsv( std::string( withProfile ) );
+    if( !profRows )
+    {
+        std::fprintf( stderr, "ripwire: --with-profile=%s: no readable #PROF_TSV block there — generate one with a "
+                              "RIPWIRE_PROFILE build (ripwire <dir> 2>report.txt), or pass that report verbatim\n",
+                      std::string( withProfile ).c_str() );
+        return std::nullopt;
+    }
+    std::vector<char> esc;
+    const auto        ex     = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    const auto        baseOf = []( std::string_view p ) -> std::string_view
+    {
+        const std::size_t slash = p.find_last_of( '/' );
+        return slash == std::string_view::npos ? p : p.substr( slash + 1 );
+    };
+    std::vector<std::string> heatByFinding( outs.size() );
+    std::size_t              joined = 0;
+    for( std::size_t findingIndex = 0; findingIndex < outs.size(); ++findingIndex )
+    {
+        const LintOut& m = outs[ findingIndex ];
+        const Symbol*  e = enclosing( m.fileId, m.startByte );
+        if( e == nullptr )
+        {
+            continue;
+        }
+        const std::string_view fileBase = baseOf( ing.files[ m.fileId ] );
+        const ProfScopeRow*    best     = nullptr;
+        for( const ProfScopeRow& row : *profRows )
+        {
+            if( row.line <= 0 || fileBase != row.file )
+            {
+                continue;
+            }
+            if( std::uint32_t( row.line ) < e->line || std::uint32_t( row.line ) > m.line )
+            {
+                continue;
+            }
+            if( best == nullptr || row.line > best->line )
+            {
+                best = &row;
+            }
+        }
+        if( best == nullptr )
+        {
+            continue;
+        }
+        ++joined;
+        std::string attrs = " heat_scope=\"" + ex( best->scope ) + "\"";
+        for( const auto& [ colName, colValue ] : best->cols )
+        {
+            std::string attrName;
+            for( const char c : colName )
+            { // XML-safe attribute name: the TSV's own names are safe, but a hand-edited one must not break well-formedness
+                attrName += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' ) ? c : '_';
+            }
+            attrs += " heat_" + attrName + "=\"" + ex( colValue ) + "\"";
+        }
+        heatByFinding[ findingIndex ] = std::move( attrs );
+    }
+    char joinedBuf[ 48 ];
+    std::snprintf( joinedBuf, sizeof( joinedBuf ), " heat_joined=\"%zu\"", joined );
+    return std::make_pair( std::move( heatByFinding ), std::string( joinedBuf ) );
+}
+
 // Fold the atoms-of-confusion pack (src/atoms.h — Gopstein et al., ESEC/FSE 2017) into the built-in
 // lint set: its findings, its per-rule floor disclosures, and its rule names for the tally. Three of
 // its seven rules are decided by SUBTRACTION ("every update_expression EXCEPT the statement-level and
@@ -9071,6 +9249,21 @@ std::optional<int> runLint( const MainDispatch& d )
         };
         const bool anyRuleCapped = !saturatedRules.empty();
 
+        // --with-profile join, lifted into buildHeatAnnotations (runLint was already the file's largest
+        // verb): per-finding heat_* attribute strings index-aligned with `outs`, + the root attribute.
+        std::vector<std::string> heatByFinding;
+        std::string              heatJoinedAttr;
+        if( !cfg.withProfile.empty() )
+        {
+            auto heat = buildHeatAnnotations( cfg.withProfile, ing, outs, enclosing );
+            if( !heat )
+            {
+                return 1;   // refusal already printed — never join nothing silently
+            }
+            heatByFinding  = std::move( heat->first );
+            heatJoinedAttr = std::move( heat->second );
+        }
+
         // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
         std::printf( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
                      "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
@@ -9079,6 +9272,13 @@ std::optional<int> runLint( const MainDispatch& d )
                      "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
                      "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). -->" );
+        if( !cfg.withProfile.empty() )
+        {
+            std::printf( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
+                         "PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the "
+                         "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
+                         "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
+        }
         if( paging )
         {
             const bool        hasMore    = lintPage.end < outs.size();
@@ -9090,14 +9290,14 @@ std::optional<int> runLint( const MainDispatch& d )
             // exact position (immediately after shown=) so the two are attribute-for-attribute identical.
             // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
             const unsigned isLintCapped = unsigned( shownCount < outs.size() );
-            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s>",
+            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s>",
                          outs.size(), shownCount, isLintCapped, outs.size(), hasMore ? 1u : 0u, nextOffset,
                          cfg.pageOffset > 0 ? cfg.pageOffset : 0, cfg.pageLimit > 0 ? cfg.pageLimit : 0,
-                         anyRuleCapped ? " findings_capped=\"1\"" : "" );
+                         anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str() );
         }
         else
         {
-            std::printf( "<lint findings=\"%zu\"%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "" );
+            std::printf( "<lint findings=\"%zu\"%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str() );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)
@@ -9147,11 +9347,13 @@ std::optional<int> runLint( const MainDispatch& d )
             const Symbol* e = enclosing( m.fileId, m.startByte );
             if( m.sev.empty() )
             { // built-in finding — unchanged shape (no sev=)
-                std::printf( "<f rule=\"%s\" p=\"%s:%u\" in=\"%s\">", ex( m.rule ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
+                std::printf( "<f rule=\"%s\" p=\"%s:%u\" in=\"%s\"%s>", ex( m.rule ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "",
+                             heatByFinding.empty() ? "" : heatByFinding[ findingIndex ].c_str() );
             }
             else
             { // user finding — carries sev=
-                std::printf( "<f rule=\"%s\" sev=\"%s\" p=\"%s:%u\" in=\"%s\">", ex( m.rule ).c_str(), ex( m.sev ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
+                std::printf( "<f rule=\"%s\" sev=\"%s\" p=\"%s:%u\" in=\"%s\"%s>", ex( m.rule ).c_str(), ex( m.sev ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "",
+                             heatByFinding.empty() ? "" : heatByFinding[ findingIndex ].c_str() );
             }
             emitEscaped( m.text );
             std::printf( "</f>" );
