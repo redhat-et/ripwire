@@ -121,11 +121,44 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
 // them reads and parses each file ONCE and executes every group's queries against that one tree.
 // Output is unchanged by construction: captures are bucketed per group as they are produced, and each
 // bucket is then merged, sorted and truncated by exactly the code a standalone call runs.
+//
+// A group's rows normally come from its own TSQuery spec table. `walk` names a BUILT-IN TREE WALK
+// instead — a check whose traversal no tree-sitter query can express, but which needs exactly the
+// per-file work the query groups already do: one read, one parse, one newline index. Riding the shared
+// walk is what stops such a check from re-reading and re-parsing the whole corpus for a FOURTH time.
+// A walk group carries NO spec table (nothing to compile, nothing to disclose); it emits a single tag,
+// so the per-tag budget below degenerates to one truncation of the sorted list — which is exactly the
+// tail a standalone pass would run. Setting both `specs` and `walk` on one group is not supported.
+enum class AstWalk : std::uint8_t
+{
+    None = 0,          // ordinary spec-driven group
+
+    // ---- unreachable-code detection (joern-lite CFG sketch; built-in --lint rule "unreachable-code") ----
+    // Pure-syntactic, intra-block: walk every genuine block node (compound_statement / block /
+    // statement_block) and, once an UNCONDITIONAL terminator statement (return/break/continue/throw, plus
+    // Python raise) is seen at that block level, flag the NEXT non-comment sibling statement in the SAME
+    // block as unreachable. Conservative by construction: no dataflow, no cross-branch reasoning, `goto`
+    // excluded (label targets are ambiguous), and any jump-target sibling (labeled_statement /
+    // case_statement) after the terminator stops the scan. Every finding carries tag "unreachable-code";
+    // the group's rows come back sorted (file path, startByte) like any other group's. Implementation:
+    // ur_walkTree in ingest.cpp, next to the rest of the rule's helpers.
+    //
+    // This is a WALK and not a spec table because the rule is an ORDERED scan of a block's statement
+    // siblings — "the first non-comment statement after an unconditional exit" — which no tree-sitter
+    // pattern can express. What it shares with the query groups is the read, the parse and the newline
+    // index; the traversal stays its own.
+    UnreachableCode,
+};
+
+// The unreachable-code rule's own budget, named so every caller spends the same one.
+inline constexpr std::size_t kUnreachableMaxHits = 5000;
+
 struct AstQueryGroup
 {
     const std::vector<AstQuerySpec>* specs         = nullptr;   // borrowed — the caller owns the spec table
     std::size_t                      maxMatches    = 5000;      // per-TAG budget, same semantics as astQuery's
     std::vector<std::string>*        uncompiledOut = nullptr;   // optional, same semantics as astQuery's
+    AstWalk                          walk          = AstWalk::None;   // non-None ⇒ built-in walk, no specs
 };
 
 std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups );
@@ -211,16 +244,6 @@ inline AstQueryShape astQueryShape( std::string_view query )
     shape.isSingleTopLevel = ( topLevelGroupCount == 1 ) && ( depth == 0 ) && !inString && !sawContentAfterTopLevelGroup;
     return shape;
 }
-
-// ---- unreachable-code detection (joern-lite CFG sketch; --lint rule "unreachable-code") ----
-// Pure-syntactic, intra-block check: re-parse each file, walk every genuine block node
-// (compound_statement / block / statement_block) and, once an UNCONDITIONAL terminator statement
-// (return/break/continue/throw, plus Python raise) is seen at that block level, flag the NEXT
-// non-comment sibling statement in the SAME block as unreachable. Conservative by construction:
-// no dataflow, no cross-branch reasoning, `goto` excluded (label targets are ambiguous), and any
-// jump-target sibling (labeled_statement / case_statement) after the terminator stops the scan.
-// Each finding carries tag "unreachable-code"; results are sorted (fileId, startByte) → deterministic.
-std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t maxMatches = 5000 );
 
 // ---- local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ----
 // On-demand re-parse of ONE already-gated function's own byte span [sigStartByte, endByte) — reusing
