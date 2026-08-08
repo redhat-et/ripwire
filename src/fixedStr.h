@@ -78,4 +78,61 @@ static_assert( sizeof( FixedStr ) == 32, "FixedStr must be exactly 32 bytes (2 p
 
 struct FixedStrHash { std::uint64_t operator()( const FixedStr& s ) const noexcept { return s.hash(); } };
 
+// ---------------------------------------------------------------------------
+// findByte — the same branchless SIMD compare as FixedStr::operator==, aimed at an ARBITRARY byte span
+// instead of a fixed 32-byte block. It is a FREE FUNCTION, not a FixedStr member, precisely because the
+// span is arbitrary: nothing about it is 32-byte-shaped. Returns the first position in [first,last) whose
+// byte equals `needle`, or `last` if there is none — i.e. memchr's contract, restated over a pointer pair.
+//
+// EXACT, therefore determinism-neutral. This kernel computes the same answer as a byte-at-a-time loop for
+// every input, with no tolerance, no approximation, and no data-dependent ordering: the vector body only
+// ever runs where a full 16-byte load lies wholly inside the span, and the head/tail bytes go through the
+// scalar path. Substituting it for a scalar scan cannot move any downstream output, so ripwire's
+// determinism contract is untouched by construction, not merely by measurement. bench/bench_newline_ab.cpp
+// asserts that equivalence over the whole repo corpus plus the edge cases (empty span, needle at position
+// 0, no trailing needle, CRLF bytes) before it reports a single timing number.
+//
+// Alignment: both vld1q_u8 and _mm_loadu_si128 are defined for unaligned addresses, and the loop never
+// issues a load that reaches past `last`, so there is no page-crossing read and no alignment prologue to
+// get wrong. The bytes before the first full vector and after the last one are handled scalar-side.
+inline const char* findByte( const char* first, const char* last, char needle ) noexcept
+{
+#if defined( __ARM_NEON )
+    const uint8x16_t want = vdupq_n_u8( std::uint8_t( needle ) );
+    while( last - first >= 16 )
+    {
+        const uint8x16_t eq = vceqq_u8( vld1q_u8( reinterpret_cast<const std::uint8_t*>( first ) ), want );
+        // shrn-by-4 folds the 16-byte 0x00/0xFF compare result into a 64-bit word carrying 4 mask bits per
+        // input byte — arm64 has no movemask, and this is the cheapest exact substitute for one.
+        const std::uint64_t mask = vget_lane_u64( vreinterpret_u64_u8( vshrn_n_u16( vreinterpretq_u16_u8( eq ), 4 ) ), 0 );
+        if( mask != 0 )
+        {
+            return first + ( __builtin_ctzll( mask ) >> 2 );
+        }
+        first += 16;
+    }
+#elif defined( __SSE2__ ) || defined( _M_X64 )
+    const __m128i want = _mm_set1_epi8( needle );
+    while( last - first >= 16 )
+    {
+        const __m128i eq   = _mm_cmpeq_epi8( _mm_loadu_si128( reinterpret_cast<const __m128i*>( first ) ), want );
+        const int     mask = _mm_movemask_epi8( eq );
+        if( mask != 0 )
+        {
+            return first + __builtin_ctz( static_cast<unsigned>( mask ) );
+        }
+        first += 16;
+    }
+#endif
+    while( first < last )
+    {
+        if( *first == needle )
+        {
+            return first;
+        }
+        ++first;
+    }
+    return last;
+}
+
 }   // namespace rw
