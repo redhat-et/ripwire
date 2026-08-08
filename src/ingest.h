@@ -112,6 +112,24 @@ struct AstMatch     { std::uint32_t fileId; std::uint32_t startByte; std::uint32
 std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQuerySpec>& specs, std::size_t maxMatches = 5000,
                                 std::vector<std::string>* uncompiledOut = nullptr );
 
+// ---- ONE parse pass serving N independent query GROUPS ----
+// A group is a whole astQuery call's worth of work — its own spec table, its own per-TAG budget, its own
+// uncompiled-spec disclosure — and it gets back exactly the vector astQuery would have returned for it.
+// What is shared is the FILE WALK. `--lint` ran three astQuery passes (the built-in [AST] checks, the
+// atoms pack, the cache pack) and every one of them re-read and re-parsed the whole corpus: three reads
+// and three tree-sitter parses per file to answer three sets of questions about the SAME tree. Grouping
+// them reads and parses each file ONCE and executes every group's queries against that one tree.
+// Output is unchanged by construction: captures are bucketed per group as they are produced, and each
+// bucket is then merged, sorted and truncated by exactly the code a standalone call runs.
+struct AstQueryGroup
+{
+    const std::vector<AstQuerySpec>* specs         = nullptr;   // borrowed — the caller owns the spec table
+    std::size_t                      maxMatches    = 5000;      // per-TAG budget, same semantics as astQuery's
+    std::vector<std::string>*        uncompiledOut = nullptr;   // optional, same semantics as astQuery's
+};
+
+std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups );
+
 // ---- §P0.1: the shape of a user's tree-sitter query, so a capture-less one is never a silent zero ----
 // astQuery reports CAPTURES, so a query that binds none matches nothing it can report:
 // `--match='(if_statement)'` returned a clean, confident hits="0" while `--match='(if_statement) @i'`

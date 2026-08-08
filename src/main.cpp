@@ -1734,11 +1734,29 @@ buildHeatAnnotations( std::string_view withProfile, const rw::IngestResult& ing,
 // for-header ones"), which no tree-sitter query can express, so the pack spends its own astQuery pass
 // on a budget far above kLintMaxPerRule — an exclusion stream truncated at 5000 would manufacture
 // false positives on this repo alone. kAtomRuleNames is THE list, so the tally cannot drift from what
+// ONE parse pass for all three built-in packs, in the order runLint merges them: the [AST] checks it was
+// handed, the atoms pack, the cache pack. Each of those three spec tables used to drive its OWN astQuery
+// call, and each of those calls re-read and re-parsed every file in the corpus -- three reads and three
+// tree-sitter parses per file to ask three sets of questions about the SAME tree, plus three rounds of
+// compiling every spec against every linked grammar. astQueryGrouped walks the corpus once and buckets the
+// captures per group; each bucket is then sorted and budget-capped by exactly the code a standalone call
+// runs, so the three results are byte-identical to the three passes they replace.
+std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks )
+{
+    PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache)" );
+    const std::vector<rw::AstQuerySpec> atomChecks  = rw::atoms::atomsSpecs();
+    const std::vector<rw::AstQuerySpec> cacheChecks = rw::cachelint::cacheSpecs();
+    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,                 nullptr },
+                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,        nullptr },
+                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget,    nullptr } } );
+}
+
 // the pack can emit. Lifted out of runLint for the same reason lintSymbolLevelChecks was.
 void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
-                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames )
+                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames,
+                     std::vector<rw::AstMatch> captures )
 {
-    const rw::atoms::AtomsRun pack = rw::atoms::atomsOfConfusion( ing, rw::kLintMaxPerRule );
+    const rw::atoms::AtomsRun pack = rw::atoms::atomsOfConfusionFromCaptures( ing, rw::kLintMaxPerRule, std::move( captures ) );
     for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
     for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
     for( const std::string_view rule : rw::atoms::kAtomRuleNames ) { allRuleNames.emplace_back( rule ); }
@@ -1748,9 +1766,10 @@ void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
 // the layout half is --field-affinity) into the built-in lint set: its findings, its per-rule floor
 // disclosures, and its rule names for the tally. Same shape as mergeAtomsPack for the same reasons.
 void mergeCachePack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
-                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames )
+                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames,
+                     std::vector<rw::AstMatch> captures )
 {
-    const rw::cachelint::CacheRun pack = rw::cachelint::cacheFriendliness( ing, rw::kLintMaxPerRule );
+    const rw::cachelint::CacheRun pack = rw::cachelint::cacheFriendliness( ing, rw::kLintMaxPerRule, std::move( captures ) );
     for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
     for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
     for( const std::string_view rule : rw::cachelint::kCacheRuleNames ) { allRuleNames.emplace_back( rule ); }
@@ -8965,7 +8984,8 @@ std::optional<int> runLint( const MainDispatch& d )
         };
         // §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
         // by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed below.
-        ms = astQuery( ing, checks, kLintMaxPerRule );
+        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks );
+        ms = std::move( grouped[0] );
         for( const AstQuerySpec& check : checks )       // saturation is measured on the RAW captures, before the post-filters below thin them
         {
             std::size_t rawForRule = 0;
@@ -9152,9 +9172,11 @@ std::optional<int> runLint( const MainDispatch& d )
         // Note: deep-nesting uses curly-brace depth as a proxy for control-flow depth (fast, no full reparse).
         // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
         // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
+        { PROFILE_SCOPE_DESCRIBE( "lint: lintSymbolLevelChecks" );
         for( AstMatch& symHit : lintSymbolLevelChecks( ing ) )
         {
             ms.push_back( std::move( symHit ) );
+        }
         }
 
         // unreachable-code (joern-lite CFG sketch): pure-syntactic intra-block dead-code — a statement
@@ -9162,6 +9184,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
         // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
         {
+            PROFILE_SCOPE_DESCRIBE( "lint: unreachableCheck" );
             std::vector<AstMatch> urHits = unreachableCheck( ing );
             for( auto& h : urHits )
             {
@@ -9174,9 +9197,9 @@ std::optional<int> runLint( const MainDispatch& d )
         // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
         // owned by the pack — its own rule names. All run here, inside the one --lint guard, so the sort
         // below covers every built-in finding regardless of its source.
-        mergeAtomsPack( ing, ms, saturatedRules, allRuleNames );
-        mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals );
-        mergeCachePack( ing, ms, saturatedRules, allRuleNames );
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ) ); }
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals ); }
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ) ); }
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
