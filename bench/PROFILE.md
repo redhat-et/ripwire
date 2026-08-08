@@ -532,3 +532,67 @@ Downstream, `--lint` and the map are **byte-identical** (sha256) against the pre
 frozen corpus; both deterministic run-to-run and well-formed under `xmllint --noout`; `lintcheck`,
 `lintrulescheck`, `matchcapturecheck`, `naminglenscheck`, `manifestcheck` and `deckcheck` green;
 `--edit-check=buildNewlineOffsets` reports `status="unchanged"`, `incompatible="0"`.
+## 2026-08-08 — `--lint`: the fourth and fifth corpus reads folded into the same walk (lane B2)
+
+**Ledger, not a gate.** No budget or threshold added, here or in CI. This is the follow-up to the
+entry above, which closed its own round by naming exactly what it had left behind — `unreachableCheck`
+and the naming lens's `getBytes`. Both are now gone, and for the same reason the first three were:
+the cost was defect-shaped (the same file read and parsed again to ask one more question about a tree
+that had just been thrown away), not a tradeoff, and the output is byte-identical.
+
+**Method.** Profile build (`cmake -S . -B prof -DRIPWIRE_PROFILE=ON`), warm, both binaries run against
+the SAME frozen corpus so the tool's own source edits cannot move the numbers. The pre binary is the
+`prof/` build of the parent commit (`9305487`, lane B's merge), snapshotted before this round's first
+edit; the corpus is `git archive 9305487` (1460 files, 1075 indexed, twelve languages).
+
+| main-thread scope, `--lint` on the frozen corpus | pre (ms) | post (ms) |
+| --- | ---: | ---: |
+| `lint: astQueryGrouped` (built-in + atoms + cache → **+ unreachable**) | 333.4 | 334.4 |
+| `lint: unreachableCheck` | 103.3 | — |
+| `lint: mergeUnreachable` (merge only; the walk rode the shared pass) | — | 0.0 |
+| `lint: lintSymbolLevelChecks` | 45.1 | 37.7 |
+| `lint: mergeNamingLens` | 19.5 | 6.3 |
+| ` └ naminglens: getBytes whole-file read` | 12.9 (907 calls) | **— (0 calls)** |
+| `lint: mergeAtomsPack` | 1.8 | 1.8 |
+| `lint: mergeCachePack` | 0.4 | 0.4 |
+| **sum** | **503.5** | **380.6** |
+
+`ingest/readFile: fopen+read whole file` (summed over threads) falls **2335 → 1168 calls**, 102.6 →
+70.8 ms. Counting the two `getBytes` memos, which open files directly and so never appeared in that
+row, `--lint` went from roughly four thousand whole-file opens to 1168 — one per file it looks at.
+
+Two rows deserve reading twice. `astQueryGrouped` costs ~1 ms MORE, not less: it now parses 1050 files
+where it parsed 991, because a walk group wants files whose grammar compiled no spec and the
+`byGrammar`-miss `continue` had been skipping them. Those 59 files were being parsed anyway — by the
+separate pool, on top of everything else. And `lintSymbolLevelChecks` drops 7.4 ms without being the
+scope anyone set out to fix: it kept the second of the two near-identical `getBytes` memos, and it was
+handed the same retained bytes.
+
+**Warm wall clock, 6 runs each, Apple Silicon, same frozen corpus, exact argv.**
+
+```sh
+ripwire <corpus_cpp> --lint     # 0.51-0.52 s  ->  0.42-0.43 s   (-17.5%, spread <= 10 ms either side)
+```
+
+On this repo's own tree, `--lint` goes 0.71-0.73 s / 3.1-3.2 s CPU → 0.61-0.63 s / 2.2-2.6 s CPU.
+
+**What it cost.** Retaining the corpus text is opt-in (`astQueryGrouped`'s `keptBytesOut`) because it
+is not free: peak RSS **182.5 → 192.7 MB, +5.6%**, one corpus of source held for the length of the
+lint block. That is the whole trade — ~7% of the wall for ~6% of the peak — and it is only worth it
+because BOTH downstream passes use the same buffer. Wiring only one of them would have paid the full
+memory cost for half the benefit.
+
+**Identity obligations discharged.** `--lint` byte-identical (`diff -q`) against the pre binary on a
+1460-file C++ corpus AND a mixed Python/TypeScript corpus, stderr empty on every run; `--ensemble`
+(the other `appendNamingFindings` caller, which passes no retained bytes) byte-identical too; `--lint`
+and the map deterministic run-to-run and well-formed under `xmllint --noout`; the concurrent write
+into `keptBytesOut` verified under ASan+UBSan (`-fno-sanitize-recover=all`, committed LSan
+suppressions) — clean on both corpora, output still identical. 20 gates green: lane B's 14
+lint-family set plus `unreachablecheck`, `deadcheck`, `deadfiltercheck`, `deadprecisioncheck`,
+`g1freshcheck`, `manifestcheck`.
+
+**What is still on the table.** The two `getBytes` memos are still two — `lintSymbolLevelChecks`
+(src/main.cpp) and `namingLensChecks` (src/naminglens.h) carry near-identical read-and-memoize
+lambdas, and they now also carry near-identical pre-read guards. Consolidating them into one shared
+type would delete a real clone, but it is a refactor of pre-existing code rather than part of this
+fold, so it was left alone deliberately.

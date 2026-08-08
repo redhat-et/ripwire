@@ -1053,19 +1053,26 @@ PROFILE_SCOPE_DESCRIBE( "naminglens: checkScopeGroups (series + confusable)" );
 // (default false ⇒ byte-identical to before Phase 2 existed) is --naming-locals, the local-variable-
 // indexing plan Phase 2 opt-in (PLAN.md 2026-08-06 evening) — see cli.h's own comment for why it defaults
 // off.
-inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals = false );
+// preRead (optional): bytes the caller ALREADY holds for a file, indexed by fileId — astQueryGrouped's
+// keptBytesOut (src/ingest.h), when the caller ran that walk first. `--lint` does, so the naming lens no
+// longer re-opens 900-odd files the one shared corpus walk had just read and closed. Partial by
+// construction: an empty (or absent) slot falls through to the read below, which is what every file did
+// before this existed, so passing nothing costs nothing but a re-read.
+inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals = false,
+                                          const std::vector<std::string>* preRead = nullptr );
 
 // The shape runLint actually calls, matching the house pattern of the other symbol-level checks
 // (`for( AstMatch& h : lintSymbolLevelChecks( ing ) )`): findings are APPENDED to `out`, and the
 // return value is the rule names whose count= must be disclosed as a floor.
-inline std::vector<std::string> appendNamingFindings( const IngestResult& ing, std::size_t maxHitsPerRule, std::vector<AstMatch>& out, bool namingLocals = false )
+inline std::vector<std::string> appendNamingFindings( const IngestResult& ing, std::size_t maxHitsPerRule, std::vector<AstMatch>& out, bool namingLocals = false,
+                                                      const std::vector<std::string>* preRead = nullptr )
 {
-    NamingLensResult res = namingLensChecks( ing, maxHitsPerRule, namingLocals );
+    NamingLensResult res = namingLensChecks( ing, maxHitsPerRule, namingLocals, preRead );
     out.insert( out.end(), std::make_move_iterator( res.hits.begin() ), std::make_move_iterator( res.hits.end() ) );
     return std::move( res.saturatedRules );
 }
 
-inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals )
+inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals, const std::vector<std::string>* preRead )
 {
 PROFILE_SCOPE_DESCRIBE( "naminglens: namingLensChecks TOTAL" );
     detail::RuleSink sink;
@@ -1077,10 +1084,19 @@ PROFILE_SCOPE_DESCRIBE( "naminglens: namingLensChecks TOTAL" );
 
     // memoized whole-file reads (same shape as lintSymbolLevelChecks) — an unreadable file yields an
     // empty view, and every rule needing bytes goes silent for it (degrade, not failure).
+    // `preRead` short-circuits the read entirely for a file the caller's corpus walk already held; an
+    // empty slot there is indistinguishable from a genuinely empty file and both fall through to the
+    // read below, which returns the same empty string — so the FAST path and the SLOW path agree by
+    // construction and the memo cannot serve different bytes depending on who called.
     std::vector<std::string> fileBytes( ing.files.size() );
     std::vector<char>        fileRead( ing.files.size(), 0 );
     const auto getBytes = [ & ]( std::uint32_t fileId ) -> const std::string&
     {
+        if( preRead != nullptr && fileId < preRead->size() && !( *preRead )[fileId].empty() )
+        {   // the size guard is not paranoia: a caller may hand over a vector filled for a DIFFERENT
+            // corpus (or none at all), and a short one must degrade to the read, never index past its end
+            return ( *preRead )[fileId];
+        }
         if( !fileRead[fileId] )
         {
 PROFILE_SCOPE_DESCRIBE( "naminglens: getBytes whole-file read" );

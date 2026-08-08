@@ -1360,14 +1360,21 @@ struct MainDispatch
 // Symbol-level lint checks (S6-A), lifted verbatim out of the --lint block so runLint stays under the
 // complexity bar. Walks each C-family Function/Method body for large-function / deep-nesting /
 // inconsistent-return; returns the findings the caller merges into the combined lint set.
-std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing )
+std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, const std::vector<std::string>* preRead )
 {
     using namespace rw;
             // Build per-file byte map (read each file once).
+            // preRead: bytes the caller's corpus walk already holds (astQueryGrouped's keptBytesOut). An
+            // empty or missing slot falls through to the read below and yields the same bytes, so the two
+            // paths cannot disagree; the size guard keeps a vector built for another corpus in bounds.
             std::vector<std::string> fileBytes( ing.files.size() );
             HashMap<std::uint32_t, bool> fileRead;
             const auto getBytes = [ & ]( std::uint32_t fid ) -> const std::string&
             {
+                if( preRead != nullptr && fid < preRead->size() && !( *preRead )[fid].empty() )
+                {
+                    return ( *preRead )[fid];
+                }
                 if( fileRead.find( fid ) == fileRead.end() )
                 {
                     FILE* fp = std::fopen( diskPath( ing, fid ).c_str(), "rb" );
@@ -1734,21 +1741,33 @@ buildHeatAnnotations( std::string_view withProfile, const rw::IngestResult& ing,
 // for-header ones"), which no tree-sitter query can express, so the pack spends its own astQuery pass
 // on a budget far above kLintMaxPerRule — an exclusion stream truncated at 5000 would manufacture
 // false positives on this repo alone. kAtomRuleNames is THE list, so the tally cannot drift from what
-// ONE parse pass for all three built-in packs, in the order runLint merges them: the [AST] checks it was
-// handed, the atoms pack, the cache pack. Each of those three spec tables used to drive its OWN astQuery
-// call, and each of those calls re-read and re-parsed every file in the corpus -- three reads and three
-// tree-sitter parses per file to ask three sets of questions about the SAME tree, plus three rounds of
+// ONE parse pass for all four built-in producers, in the order runLint merges them: the [AST] checks it
+// was handed, the atoms pack, the cache pack, and the unreachable-code walk. Each of those used to drive
+// its OWN corpus pass, and each of those passes re-read and re-parsed every file -- four reads and four
+// tree-sitter parses per file to ask four sets of questions about the SAME tree, plus three rounds of
 // compiling every spec against every linked grammar. astQueryGrouped walks the corpus once and buckets the
-// captures per group; each bucket is then sorted and budget-capped by exactly the code a standalone call
-// runs, so the three results are byte-identical to the three passes they replace.
-std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks )
+// findings per group; each bucket is then sorted and budget-capped by exactly the code a standalone call
+// runs, so the four results are byte-identical to the four passes they replace.
+//
+// The fourth is not a spec table: unreachable-code is an ORDERED scan of a block's statement siblings
+// ("the first non-comment statement after an unconditional exit"), which no tree-sitter pattern can
+// express, so it rides the shared walk as an AstWalk group instead (src/ingest.h). What it shares is what
+// it was duplicating -- the read, the parse and the newline index -- not the traversal.
+// keptBytes receives the corpus text the walk read (astQueryGrouped's keptBytesOut). The two symbol-level
+// passes that run after it -- lintSymbolLevelChecks and the naming lens -- each opened the very files this
+// walk had just read and closed, one at a time on the main thread, to look at spans of the same text. They
+// now read from here and fall back to their own open only for a file the walk skipped.
+std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks,
+                                                            std::vector<std::string>& keptBytes )
 {
-    PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache)" );
+    PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache + unreachable)" );
     const std::vector<rw::AstQuerySpec> atomChecks  = rw::atoms::atomsSpecs();
     const std::vector<rw::AstQuerySpec> cacheChecks = rw::cachelint::cacheSpecs();
-    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,                 nullptr },
-                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,        nullptr },
-                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget,    nullptr } } );
+    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,              nullptr },
+                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,     nullptr },
+                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget, nullptr },
+                                       { nullptr,      rw::kUnreachableMaxHits,          nullptr, rw::AstWalk::UnreachableCode } },
+                                &keptBytes );
 }
 
 // the pack can emit. Lifted out of runLint for the same reason lintSymbolLevelChecks was.
@@ -1780,9 +1799,10 @@ void mergeCachePack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
 // names are NOT appended — unlike the atoms pack they are spelled in runLint's allRuleNames table, because
 // the naming rules are symbol-level built-ins that were declared there before the pack existed. Lifted out
 // of runLint for the same reason mergeAtomsPack and lintSymbolLevelChecks were.
-void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules, bool namingLocals )
+void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules, bool namingLocals,
+                      const std::vector<std::string>* preRead )
 {
-    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms, namingLocals ) )
+    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms, namingLocals, preRead ) )
     {
         saturatedRules.push_back( { std::move( namingRule ), false } );
     }
@@ -8985,7 +9005,10 @@ std::optional<int> runLint( const MainDispatch& d )
         };
         // §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
         // by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed below.
-        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks );
+        // The corpus text the one grouped walk read, kept alive for the symbol-level passes below so they
+        // do not re-open the same files a second and third time. Lives exactly as long as this lint block.
+        std::vector<std::string>           corpusBytes;
+        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes );
         ms = std::move( grouped[0] );
         for( const AstQuerySpec& check : checks )       // saturation is measured on the RAW captures, before the post-filters below thin them
         {
@@ -9174,7 +9197,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
         // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
         { PROFILE_SCOPE_DESCRIBE( "lint: lintSymbolLevelChecks" );
-        for( AstMatch& symHit : lintSymbolLevelChecks( ing ) )
+        for( AstMatch& symHit : lintSymbolLevelChecks( ing, &corpusBytes ) )
         {
             ms.push_back( std::move( symHit ) );
         }
@@ -9184,10 +9207,11 @@ std::optional<int> runLint( const MainDispatch& d )
         // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
         // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
         // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
+        // Already collected, sorted and capped: it rode the one grouped walk above as grouped[3] instead of
+        // spending a fourth read + parse of the whole corpus on its own pool.
         {
-            PROFILE_SCOPE_DESCRIBE( "lint: unreachableCheck" );
-            std::vector<AstMatch> urHits = unreachableCheck( ing );
-            for( auto& h : urHits )
+            PROFILE_SCOPE_DESCRIBE( "lint: mergeUnreachable" );
+            for( auto& h : grouped[3] )
             {
                 ms.push_back( std::move( h ) );
             }
@@ -9199,7 +9223,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // owned by the pack — its own rule names. All run here, inside the one --lint guard, so the sort
         // below covers every built-in finding regardless of its source.
         { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ) ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals ); }
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes ); }
         { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ) ); }
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
