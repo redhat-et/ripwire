@@ -851,8 +851,13 @@ inline bool isRouteStopword( std::string_view w ) noexcept
 // DISCLOSURE ONLY: not one byte of the decision moved, and test/routecheck.sh (f3) pins that as a battery.
 struct NameAnchor
 {
-    std::uint32_t fileId    = 0;   // the FIRST definition of this name in NodeId order (deterministic)
-    std::uint32_t extraDefs = 0;   // how many further definitions share it — the anchor's ambiguity, disclosed
+    std::uint32_t fileId    = 0;     // the FIRST definition of this name in NodeId order (deterministic)
+    std::uint32_t extraDefs = 0;     // how many further definitions share it — the anchor's ambiguity, disclosed
+    std::uint32_t carriers  = 0;     // symbols whose NAME contains this token as a SUBTOKEN — the token's corpus
+                                     // commonness ("split" carries in SplitChunksPlugin, splitChunks, …), measured
+                                     // from THIS corpus rather than guessed from a per-language stdlib list
+    bool          wholeName = false; // some symbol's whole lowercased name equals this key; carrier-only entries
+                                     // (a subtoken that names nothing) must NOT satisfy the whole-name membership test
 };
 
 // One anchor's path, shortened for a header that rides on every routed run. The leading "./" goes, and a
@@ -884,9 +889,9 @@ inline std::string routeAnchorEvidence( const IngestResult& ing, const HashMap<s
                                         const std::string& lowerWord )
 {
     const auto at = names.find( lowerWord );
-    if( at == names.end() )
+    if( at == names.end() || !at->second.wholeName )
     {
-        return "syntax";
+        return "syntax";                               // carrier-only entries count commonness, they name nothing
     }
     std::string evidence = routeAnchorPath( ing.files[at->second.fileId] );
     if( at->second.extraDefs != 0 )
@@ -960,34 +965,163 @@ inline std::string routeLower( std::string_view w )
 // It was a SET until the anchor-disclosure round: same single pass, same one probe per word, but each entry
 // now also carries where the name was FIRST defined (in NodeId order, which is file/line/name order, so the
 // choice is deterministic) and how many further definitions share it.
+//
+// The anchor-plausibility round (LB-2) added CARRIER counts to the same pass: for every symbol, each distinct
+// subtoken of its NAME bumps that token's `carriers` — so `carriers` measures how many symbol names in THIS
+// corpus contain the token ("split" in webpack carries in SplitChunksPlugin, splitChunks, …). Entries a
+// subtoken creates that no whole name ever claims stay wholeName=false, and both membership probes (the
+// route loop and routeAnchorEvidence) test that flag — a carrier-only entry must never read as "this word
+// names a symbol". Counts are order-independent sums and fileId still binds to the FIRST definition in
+// NodeId order, so the index stays a deterministic pure function of the corpus.
+// one symbol's WHOLE lowercased name enters (or upgrades) its entry: first definition claims fileId (NodeId
+// order — deterministic), later definitions count into extraDefs, and a carrier-only entry created earlier
+// by some other name's subtoken is upgraded rather than shadowed.
+inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s )
+{
+    const auto [ at, inserted ] = names.try_emplace( routeLower( s.name ), NameAnchor{ s.fileId, 0u, 0u, true } );
+    if( inserted )
+    {
+        return;
+    }
+    if( !at->second.wholeName )
+    {
+        at->second.wholeName = true;                   // a carrier-only entry meets its first DEFINITION — claim it
+        at->second.fileId    = s.fileId;
+    }
+    else
+    {
+        ++at->second.extraDefs;
+    }
+}
+
+// one symbol's name-subtokens bump their tokens' carrier counts — one carrier per symbol per DISTINCT
+// subtoken ("split_split" counts once). Entries this pass creates stay wholeName=false: they measure
+// commonness and must never satisfy the whole-name membership test.
+inline void countNameCarriers( HashMap<std::string, NameAnchor>& names, const std::vector<std::string>& parts )
+{
+    for( std::size_t k = 0; k < parts.size(); ++k )
+    {
+        bool repeat = false;
+        for( std::size_t j = 0; j < k; ++j )
+        {
+            if( parts[ j ] == parts[ k ] )
+            {
+                repeat = true;
+                break;
+            }
+        }
+        if( repeat )
+        {
+            continue;
+        }
+        const auto [ at, inserted ] = names.try_emplace( parts[ k ], NameAnchor{ 0u, 0u, 1u, false } );
+        if( !inserted )
+        {
+            ++at->second.carriers;
+        }
+    }
+}
+
 inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult& ing )
 {
     HashMap<std::string, NameAnchor> names;
     names.reserve( ing.symbols.size() );
+    std::vector<std::string> parts;
     for( const Symbol& s : ing.symbols )
     {
-        const auto [ at, inserted ] = names.try_emplace( routeLower( s.name ), NameAnchor{ s.fileId, 0u } );
-        at->second.extraDefs += inserted ? 0u : 1u;
+        noteWholeNameDef( names, s );
+        parts.clear();
+        subtokens( s.name, parts );
+        countNameCarriers( names, parts );
     }
     return names;
 }
 
-inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )
+// ── ANCHOR PLAUSIBILITY (LB-2) ────────────────────────────────────────────────────────────────────────
+//
+// A plain (non-camel/snake) whole-name hit is a PLAUSIBLE anchor only when the name is specific in THIS
+// corpus: defined at most kMaxAnchorDefs times AND carried as a subtoken by at most routeCarrierCap symbol
+// names. "split chunks" on webpack passes the membership test (a split() helper, a chunks() getter both
+// exist) but the target is SplitChunksPlugin — a compound name the name-exact lane scores 0.0,
+// structurally. A common carrier ("split" rides in dozens of names) or a many-definition name is
+// coincidence, not intent, and the r7 probes measured the conceptual ranker recovering 5/6 of those
+// misroutes. Both bounds are corpus-derived, never a per-language stdlib list — a fixed list is
+// per-language, permanently stale, and wrong per-corpus ("split" is a stdlib method in JS and a perfectly
+// specific free function in a C++ tree that defines it once).
+//
+// EXEMPT on purpose: nWords == 1 (the pinned, measured single-word lookup — the crater was multi-word
+// phrases, never "map"), the camel/snake short branch (explicit identifier syntax is user intent), and
+// camel/snake-shaped words inside a longer all-words query (same reason, per word) — only PLAIN whole-name
+// words are tested, and the recovery evidence (r7 probes, 5/6 via --no-route) is evidence for the
+// conceptual ranker alone, which is why a decline falls through instead of blending.
+inline constexpr std::uint32_t kMaxAnchorDefs = 3;
+
+// the carrier bound scales with corpus size and floors at 8 so a fixture-sized tree can still construct a
+// "common" name — test/routecheck.sh (g) covers the floored regime, the r7 webpack corpus the scaled one.
+inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept
 {
-    // split query on whitespace into raw words (case preserved — camelCase detection needs it)
-    std::vector<std::string_view> words;
+    const std::uint32_t sOver128 = std::uint32_t( ing.symbols.size() / 128 );
+    return sOver128 > 8u ? sOver128 : 8u;
+}
+
+// the FIRST implausible anchor of a query (query word order — deterministic), kept for the declined
+// disclosure: the reason must say why, with the failing word and its measured commonness.
+struct ImplausibleAnchor
+{
+    bool          found    = false;
+    std::string   word;
+    std::uint32_t carriers = 0;
+    std::uint32_t defs     = 0;
+};
+
+inline void noteAnchorPlausibility( ImplausibleAnchor& imp, std::string_view lowerWord, const NameAnchor& a,
+                                    std::uint32_t carrierCap )
+{
+    if( imp.found )
     {
-        std::size_t start = std::string_view::npos;
-        for( std::size_t k = 0; k <= query.size(); ++k )
+        return;
+    }
+    const std::uint32_t defs = 1u + a.extraDefs;
+    if( defs > kMaxAnchorDefs || a.carriers > carrierCap )
+    {
+        imp.found    = true;
+        imp.word     = std::string( lowerWord );
+        imp.carriers = a.carriers;
+        imp.defs     = defs;
+    }
+}
+
+// Truth in the header when name-exact is declined: say WHY — the failing anchor and its measured
+// commonness. Deliberately carries NEITHER of the name-exact-only literals `anchors:` (routecheck f2: a
+// subtoken+body route was not decided by name evidence) nor `names a symbol (` (taskechocheck parses that
+// phrase as a name-exact marker).
+inline std::string declinedRouteReason( const ImplausibleAnchor& imp )
+{
+    return "subtoken+body BM25 — name-exact declined: anchor '" + imp.word + "' is a common name ("
+         + std::to_string( imp.carriers ) + " name-carriers, " + std::to_string( imp.defs )
+         + " defs); conceptual ranker used";
+}
+
+// split a query on whitespace into raw words (case preserved — camelCase detection needs it)
+inline std::vector<std::string_view> splitRouteWords( std::string_view query )
+{
+    std::vector<std::string_view> words;
+    std::size_t                   start = std::string_view::npos;
+    for( std::size_t k = 0; k <= query.size(); ++k )
+    {
+        const bool sep = k == query.size() || query[k] == ' ' || query[k] == '\t' || query[k] == '\n' || query[k] == '\r';
+        if( sep ) { if( start != std::string_view::npos ) { words.push_back( query.substr( start, k - start ) ); start = std::string_view::npos; } }
+        else if( start == std::string_view::npos )
         {
-            const bool sep = k == query.size() || query[k] == ' ' || query[k] == '\t' || query[k] == '\n' || query[k] == '\r';
-            if( sep ) { if( start != std::string_view::npos ) { words.push_back( query.substr( start, k - start ) ); start = std::string_view::npos; } }
-            else if( start == std::string_view::npos )
-            {
-                start = k;
-            }
+            start = k;
         }
     }
+    return words;
+}
+
+inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )
+{
+    const std::vector<std::string_view> words = splitRouteWords( query );
 
     // Count non-stopword CONTENT words. For each, decide whether it is a STRONG identifier signal:
     //   • an explicit camelCase/snake token (decisive only in a short lookup-shaped query), or
@@ -1000,6 +1134,10 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     std::size_t wholeNameHits   = 0;                           // content words that equal an existing symbol name
     bool        hasCamelSnake   = false;                       // any content word is camelCase / snake_case shaped
     std::string identifierHit;                                 // the token that best evidences the name-exact route (for the reason)
+
+    // ANCHOR PLAUSIBILITY (LB-2) — see the block above ImplausibleAnchor for the mechanism and its bounds.
+    const std::uint32_t carrierCap = routeCarrierCap( ing );
+    ImplausibleAnchor   imp;
 
     // ONE lowercase-name index over all symbols, built once per query — see buildLowerNameIndex.
     const HashMap<std::string, NameAnchor> lowerSymbolNames = buildLowerNameIndex( ing );
@@ -1041,7 +1179,9 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         }
 
         // else: does the token (case-insensitively) equal an existing symbol's WHOLE name? then it names one.
-        if( lowerSymbolNames.find( lw ) != lowerSymbolNames.end() )
+        // (carrier-only entries name nothing — wholeName gates the membership test, see buildLowerNameIndex)
+        const auto at = lowerSymbolNames.find( lw );
+        if( at != lowerSymbolNames.end() && at->second.wholeName )
         {
             ++wholeNameHits;
             if( identifierHit.empty() )
@@ -1049,6 +1189,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
                 identifierHit = std::string( w );
             }
             anchors.add( w, routeAnchorEvidence( ing, lowerSymbolNames, lw ) );
+            noteAnchorPlausibility( imp, lw, at->second, carrierCap );
         }
     }
 
@@ -1060,8 +1201,14 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     // A conceptual phrase fails BOTH (it has prose words that name no symbol), so it falls back — by
     // construction, no tuned constant. The threshold IS the structure of the query, which is the point.
     constexpr std::size_t kMaxIdentifierLookupWords = 2;
-    const bool nameExact = ( hasCamelSnake && nWords <= kMaxIdentifierLookupWords )
-                        || ( nWords >= 1 && wholeNameHits == nWords );
+    const bool camelShort = hasCamelSnake && nWords <= kMaxIdentifierLookupWords;
+    const bool allNames   = nWords >= 1 && wholeNameHits == nWords;
+    // ANCHOR PLAUSIBILITY (LB-2): the all-words trigger at nWords >= 2 additionally requires every plain
+    // anchor to be plausible — a declined query FALLS THROUGH to subtoken+body (never a blend: route=
+    // discloses that scores are comparable only within one route). Exemptions and mechanism: see the
+    // ImplausibleAnchor block. nWords == 1 and the camel/snake short branch stay byte-for-byte untouched.
+    const bool declined   = !camelShort && allNames && nWords >= 2 && imp.found;
+    const bool nameExact  = ( camelShort || allNames ) && !declined;
 
     RouteChoice rc;
     if( nameExact )
@@ -1072,6 +1219,11 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         // clause above out of this same string. A subtoken+body route names no anchors because nothing
         // anchored it — an anchors list on a route the names did not decide would be evidence after the fact.
         rc.reason += anchors.clause();
+    }
+    else if( declined )
+    {
+        rc.which  = LexMode::SubtokenBody;
+        rc.reason = declinedRouteReason( imp );
     }
     else if( nWords >= 3 )
     {
