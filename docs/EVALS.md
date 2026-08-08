@@ -789,6 +789,56 @@ primary on instruments never used for tuning. The basename-alone arm (webpack 6�
 band violation) was too weak to select under the frozen selection rule. The 4/22 default-budget
 prose number still stands.
 
+**The IDF-guarded stemming retry: a VOIDED round, with a coincident negative that stands on its
+own.** The LB-3 retry (2026-08-08, prereg + sealed instruments committed at `bench/lb3retry/`)
+implemented the retry conditions above. The guard's form was to be selected by a frozen mechanical
+ladder over string-level probes only — and the ladder's own stopping rule fired: name-carrier
+bounds (rungs 1–2, the LB-2 `routeCarrierCap` reuse) measure too LOW to catch the recorded
+casualties ("split" rides only 23 webpack symbol NAMES against cap 118, but 292 doc/body rows —
+the displacing mass is `.split()` call-site BODY frequency, not name mass), and the doc/body-df
+rung (R3: admit only df ≤ max(8, S/64), computed branch-identically so the scan==postings parity
+gates hold armed) kills both recorded casualty strings but ALSO rejects "resolve" on the cpp
+corpus (df=275/8856 symbols ≈ 3.1%) — refuting this section's own worked example ("'resolve'
+passes") by the rule's own standard. The orchestrating session amended its freeze to drop the
+refuted example-check and proceed; the round's independent adversarial verifier — directed by the
+prereg to audit exactly this — ruled the amendment a **material pre-registration violation** (a
+hard stopping rule renegotiated the moment it fires is not a hard stopping rule) and VOIDED the
+round at guard selection. That ruling is accepted and recorded: the numbers below are evidence
+about the configuration broadly, not untainted evidence for the prereg's hypothesis chain.
+
+The coincident negative, verified by full independent recomputation (every grid cell, flip list,
+seal hash, gate, and probe; one verifier side-finding — alleged mid-round corpus drift — was
+retracted after a floor-division check showed every probe cap derives from constant symbol
+counts): the guard DOES eliminate the recorded casualty class — 42-set webpack@6000 **6/22 →
+12/22 with zero flips** in the selected S1B2 arm (stem variants + basename w=2; S-alone still
+flips `SplitChunksPlugin` via an admitted rare variant "share", and the basename field's
+re-anchoring is what buys the zero-flip property), cpp@2000 13→14, no cell below baseline, both
+named regression questions held, every ≥2-wide report-only band hit. Then the never-tuned
+instruments ran once. A fresh 42-question set authored blind by an independent agent and
+SHA-256-sealed before any lever run: webpack 3/22 → 5/22 with zero flips — and ONE cpp question
+flipped hit→miss ("…the compressed sparse-row structure used for ranking?", truth `src/graph.h`),
+displaced by the variant "compressed"→"compress" at **df=41, well under cap 138**. Held-out
+LocBench (arm `for`, paired vs the same binary levers-off, n=306 scored across 88 repos, settings
+identical to the r3_pathtok acceptance run): strict file@10 **+0.65pp**, clustered-bootstrap 95%
+lower bound **+0.00pp** — positive on never-tuned data but not significant; the harness's two-tier
+gate reads REJECT on that bound. Verdict on the configuration: **REJECT by the frozen no-flip
+clause, independent of the void — no defaults flipped.**
+
+The finding that matters for any third attempt: the IDF guard eliminates the common-variant
+casualty class it was designed for, and a SECOND class survives it — a genuinely corpus-rare
+variant can still displace a truth whose rank margin is thin at the budget cut. Dilution cuts both
+ways at every level measured so far: filler-strip (LB-1), un-guarded variants (first LB-3 round),
+full-weight rare variants (this round). Recorded third-attempt conditions: (1) variants contribute
+at REDUCED weight (fractional tf or a per-variant contribution cap) — attack the margin mechanism,
+not the frequency mechanism; (2) the r7 42-set AND this round's fresh set are both
+tuning-contaminated for this lever family now — a third attempt needs a new blind instrument;
+(3) a guard-form ladder must validate its named checks against measured df/carrier tables BEFORE
+freezing, so a self-contradictory check is caught before the ladder can fire (this is what voided
+the round). Audit note: the stemmer also emits second-order zero-df variants ("generat",
+"resolv"), functionally inert on postings and never named in the prereg. The R3 guard machinery is
+retained in-tree, env-gated (`RIPWIRE_QSTEM`), byte-inert off — 84/84 levers-off outputs
+byte-identical to the pre-round binary's, re-verified independently.
+
 ---
 
 ## 8. Claims this project does *not* publish

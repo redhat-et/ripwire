@@ -1,0 +1,8 @@
+== webpack: splits
+qstem-guard: "split" carriers=23 cap=118 admitted
+== webpack: generates
+qstem-guard: "generat" carriers=0 cap=118 admitted
+qstem-guard: "generate" carriers=96 cap=118 admitted
+== cpp: resolved
+qstem-guard: "resolv" carriers=0 cap=69 admitted
+qstem-guard: "resolve" carriers=50 cap=69 admitted

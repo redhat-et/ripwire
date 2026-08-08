@@ -1,0 +1,22 @@
+Which file owns the top-level object that runs a full build from start to finish and fires the lifecycle hooks plugins tap into?	lib/Compiler.js
+Where does webpack keep track of which modules belong to which chunks, and vice versa?	lib/ChunkGraph.js
+Where is the logic that decides how modules get grouped into separate shared bundles based on size limits and cache group rules?	lib/optimize/SplitChunksPlugin.js
+Where does webpack implement scope hoisting, merging multiple ES modules into a single function scope in the output?	lib/optimize/ModuleConcatenationPlugin.js
+Where does the code that treats CSS files as a first-class module type, generating and rendering their output chunks, live?	lib/css/CssModulesPlugin.js
+Where does webpack decode a compiled WebAssembly binary to extract its imports and exports as dependencies?	lib/wasm-sync/WebAssemblyParser.js
+Where does webpack handle downloading and caching modules that are imported directly from an http or https URL?	lib/schemes/HttpUriPlugin.js
+Where does webpack generate the universal wrapper that lets a bundle work as an AMD module, a CommonJS module, or a global variable depending on the environment?	lib/library/UmdLibraryPlugin.js
+Where does webpack assign short, reproducible numeric ids to chunks based on a hash of their content instead of using their full names?	lib/ids/DeterministicChunkIdsPlugin.js
+Where is the Set implementation that defers merging in additional iterables until the collection is actually iterated or checked?	lib/util/LazySet.js
+Where does webpack wrap its hashing implementations so many small updates get batched together instead of hashing data one small chunk at a time?	lib/util/createHash.js
+Where does webpack's persistent cache serializer write and read its data to disk, using gzip or brotli compression on large payloads?	lib/serialization/FileMiddleware.js
+Which file implements the strategy for persisting the whole compilation cache to disk as one combined bundle of serialized data between builds?	lib/cache/PackFileCacheStrategy.js
+Where does webpack translate a target string like node or web into the set of platform properties, such as having require or a DOM, used elsewhere in the compiler?	lib/config/target.js
+Where does webpack hook into a filesystem watcher library to detect file changes when running in watch mode under Node.js?	lib/node/NodeWatchFileSystem.js
+Where does the runtime code that loads additional chunks via a script tag and a global callback array actually get generated?	lib/web/JsonpChunkLoadingRuntimeModule.js
+Where does webpack configure chunk loading to use importScripts for the web worker build target?	lib/webworker/WebWorkerTemplatePlugin.js
+Where does webpack mark Electron's built-in main-process and renderer-process modules as external instead of bundling them?	lib/electron/ElectronTargetPlugin.js
+Where does webpack implement building a module only once it is actually requested at runtime, deferring compilation of everything else?	lib/hmr/LazyCompilationPlugin.js
+Where is the runtime helper that computes the on-disk filename for a chunk being loaded, based on its id and content hash, generated?	lib/runtime/GetChunkFilenameRuntimeModule.js
+Where does webpack turn JavaScript source into an AST using acorn and walk it to discover require and import calls and other dependencies?	lib/javascript/JavascriptParser.js
+Where does webpack build the nested plain-object representation of assets, chunks, and modules that later gets rendered into the stats output?	lib/stats/StatsFactory.js

@@ -1,0 +1,5 @@
+perf ledger (no-perf-budget: informational, never gating)
+warm --for x3, cpp corpus @6000, "where are call references resolved into graph edges"
+levers-off: 0.14 0.12 0.12 s
+QSTEM=1:    0.12 0.12 0.12 s
+verdict: no measurable warm cost; guard df pass is one in-memory pass over persisted rows / scan counts
