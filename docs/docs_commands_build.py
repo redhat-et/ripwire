@@ -306,10 +306,17 @@ def trim_sample( body, name ):
             # mangled — an omitted line is honest, a silently edited one is not.
             dropped += 1
             continue
-        if len( kept ) >= MAX_SAMPLE_LINES or total + len( line ) > MAX_SAMPLE_BYTES:
+        # Legend COMMENT lines are exempt from the byte budget (the line cap still bounds them) —
+        # same rationale as the capture's own header-comment exemption: the legends are the
+        # attribute dictionary a sample exists to expose, and on legend-heavy verbs (--metrics grew
+        # two legends past 1.5K) a byte-counted legend consumed the whole budget and the sample
+        # showed a truncation marker where the rows should be.
+        isLegend = line.lstrip().startswith( '<!--' )
+        if len( kept ) >= MAX_SAMPLE_LINES or ( not isLegend and total + len( line ) > MAX_SAMPLE_BYTES ):
             break
         kept.append( line )
-        total += len( line )
+        if not isLegend:
+            total += len( line )
     more = len( body ) - len( kept ) - dropped
     if more > 0:
         kept.append( '... [%d more line(s); run it to see the whole thing]' % more )

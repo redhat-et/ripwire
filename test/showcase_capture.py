@@ -194,7 +194,9 @@ add(S4, f'{BIN} . --hotspots --since="2 weeks ago"', "Hotspots scoped to RECENT 
 add(S4, f"{BIN} . --arch=test/archfix/rules.txt", "Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules.")
 add(S4, f"{BIN} . --lint", "Built-in AST checks (c-cast, goto, unsafe-c-fn, ...).")
 add(S4, f"{BIN} . --lint-rules=test/lintrulesfix/rules", "User lint rules (YAML, ast-grep style) from a directory.")
-add(S4, f"{ABIN} . --lint --with-profile=report.txt", "Join MEASURED heat onto --lint findings — runs in a tiny fabricated demo corpus (one pointer-chase loop under a PROFILE_SCOPE site) because a real report needs a RIPWIRE_PROFILE build; the finding inside the profiled scope gains heat_* columns from the report's #PROF_TSV row.", cwd=HEATDEMO, pre="cat report.txt")
+add(S4, f"{ABIN} . --lint --with-profile=report.txt", "Join MEASURED heat onto --lint findings — runs in a tiny fabricated demo corpus (one cache-pointer-chase-loop finding under a PROFILE_SCOPE site) because a real report needs a RIPWIRE_PROFILE build; the finding inside the profiled scope gains heat_* columns from the report's #PROF_TSV row.", cwd=HEATDEMO, pre="cat report.txt",
+    post=f"{ABIN} . --lint --with-profile=report.txt 2>/dev/null | grep -o '<f rule=[^<]*</f>'",
+    post_label="The joined finding — past the display cut above, extracted so the join is visible:")
 add(S4, f"{BIN} . --communities", "Cluster the call graph into cohesive modules.")
 add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges.")
 add(S4, f"{BIN} . --report", "Architecture summary (modules, god-files, cycles) as markdown.")
