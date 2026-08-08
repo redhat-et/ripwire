@@ -405,22 +405,29 @@ and these numbers prove **cheaper and faster, not better outcomes**.
 
 ### README-grade rows, re-measured on this repository (2026-08-08)
 
-The row above carries a private-corpus caveat. These four don't: every byte count below is `wc -c`
-on this tree, at this binary, and reproducible by running the command shown. A row qualifies for the
+The row above carries a private-corpus caveat. These don't: every byte count below is `wc -c` on
+this tree, at this binary, and reproducible by running the command shown. A row qualifies for the
 README table only if it clears three bars: it is an everyday agent moment (not a constructed best
 case), the same correct answer is verified present on both sides (named below, not asserted), and the
 ratio is published as a range — the cheap end and the honest end of "what would an agent actually
 read" — never the single most flattering number. Tokens ≈ bytes/4 throughout, per §1's instrument
-note. All four ran after `git merge --ff-only main` picked up density-wave lanes D/D2
+note. The original four ran after `git merge --ff-only main` picked up density-wave lanes D/D2
 (`7558fd9`/`2d8891b` — route-note dedup, terse panel legend, `--expand` cheapest-complete-answer
-serving), so they measure the current binary, not the pre-wave one.
+serving); the six added in lane E2 (below the rule) ran at `ec4b4ba` or later, same binary family, so
+all ten measure the current build, not a pre-wave one.
 
 | Moment | Command | ripwire | naive read | savings |
 | --- | --- | --- | --- | --- |
 | Orient me in this repo | `ripwire .` | **22,571 B** | 80,267–101,738 B (`README.md`, or `README.md`+`docs/ARCHITECTURE.md`) | 3.6×–4.5× |
 | Where is X handled? | `ripwire . --for="where is the cache staleness check for the MCP index"` | **7,501 B** | 19,463–80,037 B (`grep -rn stale src/*.h src/*.cpp`, or that grep + reading `src/mcpindex.h` whole) | 2.6×–10.7× |
+| What do I already know? | `ripwire . --recall="why is std::map banned in this codebase"` | **61,064 B** | 1,781,685 B (every markdown file this repo carries — 119 files, the same population `--recall`'s own header counts as "of 120 document files") | 29.2× |
 | Set me up for this task | `ripwire . --pack-task="add a new lint rule to cachelint.h"` | **8,512 B** | 65,378–320,597 B (the two obviously-relevant files + a locating grep, or every file the bundle itself cites, whole) | 7.7×–37.7× |
-| Show me this one function | `ripwire . --expand=mergeCachePack` (also verified on `buildGraph`) | **23,675–88,547 B** (`mode="bundle"`, auto-selected, one call) | 174,430–695,888 B (the whole file the symbol lives in) | 2.0×–29.4× |
+| Show me this one function | `ripwire . --expand=mergeCachePack --top-k=0` (body alone; also verified on `buildGraph`) | **1,038–65,908 B** (body alone) / 23,675–88,547 B (default bundle, `mode="bundle"`, ranked neighborhood riding along) | 173,647–695,888 B (the whole file the symbol lives in) | 2.6×–670× (body alone) / 2.0×–29.4× (bundle) |
+| Who calls this function? | `ripwire . --callers=langOfPath` | **2,326 B** | 160,989–207,359 B (`grep -rn langOfPath src/` — 2,010 B, mostly false positives — plus the 2–3 files opened to tell a real call from a comment mention) | 69.2×–89.1× |
+| Is it safe to change this? | `ripwire . --impact=coversOrEquals` + `ripwire . --uses=coversOrEquals` | **5,125 B** | 73,661 B (the two files `--uses` names, `src/atoms.h` + `src/lintrules.h`, read whole) | 14.4× |
+| I changed these files — which tests, what blast radius? | `ripwire . --situ` (diff: `src/graph.h`, `src/clones.h`) | **1,632 B** | 11,926–529,245 B (`git diff` + `grep -rn 'graph\.h\|clones\.h' test/` — 11,926 B before opening anything — up to every one of the 41 grep-hit files opened, 529,245 B) | 7.3×–324.2× |
+| Review this PR/diff | `ripwire . --pr-context=HEAD~6` | **7,437 B** | 19,298–204,294 B (`git diff HEAD~6` alone, or that diff + the 6 touched files read whole) | 2.6×–27.5× |
+| I have a stack trace | `ripwire . --from-trace=trace.txt` (7-frame trace, real symbols) | **5,718 B** | 497,104–1,192,992 B (grepping the 7 frame names — 5,150 B — plus the innermost file opened, or both files the trace touches) | 86.9×–208.6× |
 
 **Same-answer verification, one line per row:**
 - **Orient** — both surface the pipeline's own core files (`ingest.cpp`, `graph.h`, `serialize.h`) as
@@ -436,10 +443,59 @@ serving), so they measure the current binary, not the pre-wave one.
   reuses.
 - **Show me this function** — both hand back `mergeCachePack`'s (or `buildGraph`'s) complete,
   unmodified body: `--expand`'s `<bodies shown="1" total="1" capped="0">` on the first, byte-identical
-  source on the second — nothing paraphrased or truncated.
+  source on the second — nothing paraphrased or truncated. The two forms disclosed in the row aren't
+  two different answers, they're the same body at two honesty-disclosed radii: `--top-k=0` is the
+  function alone, a bare `--expand=SYM` adds the ranked-neighborhood map. That addition costs almost
+  exactly the same regardless of which function you ask for — 22,637 B on `mergeCachePack`, 22,639 B
+  on `buildGraph` — confirming it's a fixed floor (the default top-200 map), not per-function
+  variance, which is why the lean form's ratio swings so much wider (2.6×–670×) than the bundle's
+  (2.0×–29.4×): stripping a near-constant floor off a small body inflates the ratio for exactly the
+  functions where the floor would otherwise have dominated the number.
+- **What do I already know** — both name the same rule: `--recall`'s top-ranked doc (`AGENTS.md`)
+  states it verbatim — "No `std::map` / `std::unordered_map`" with its replacements (`HashMap<>`,
+  `gtl::btree_map`, `dynamic_map`) — and `CONTRIBUTING.md`'s container rule (not itself top-8 for this
+  phrasing) carries the fuller reasoning. Disclosed, not hidden: an agent who already knew to grep
+  `std::map` across every `.md` file would find the three genuinely relevant docs
+  (`CONTRIBUTING.md`+`AGENTS.md`+`CLAUDE.md`, 28,795 B) cheaper than `--recall`'s 61,064 B — but that
+  presupposes knowing the exact term in advance, which is the premise "what do I already know"
+  explicitly does not grant. The naive number here prices the agent who doesn't have that shortcut:
+  every doc in the repo, the population `--recall`'s own header counts against.
+- **Who calls this function** — both name the same 2 real callers (`src/lintrules.h:185`,
+  `src/lintrules.h:772`/`:781`, `src/atoms.h`'s own use is a different call chain feeding the same
+  span check) that `--callers` returns; `grep -rn langOfPath src/` returns those same lines PLUS five
+  more files (`src/gitmine.h`, `src/graph.h`, `src/nonlocalstate.h`, `src/qualitypanel.h`,
+  `src/serialize.h`) whose only "hit" is a comment mentioning the name, not a call — a naive agent has
+  to open files to find that out, which is what the naive number prices.
+- **Is it safe to change this** — both name the same direct call sites (`src/atoms.h:130`,
+  `src/lintrules.h:864`) `--uses` returns. Disclosed: `--impact`'s own transitive reach is wider than
+  what `--uses`'s file list covers — it also touches `src/ensemble.h`, `src/qualitypanel.h`, and
+  `src/main.cpp` two hops out — so a naive read that stops at the direct-use files (the naive number
+  here) under-answers "is it safe" exactly the amount `--impact` is for; pricing it wider would only
+  widen the ratio further in ripwire's favor.
+- **I changed these files** — both surface the same 6 real test harnesses `--situ`'s blast-radius walk
+  finds (`test/clonelex_harness.cpp`, `test/type3clone_harness.cpp`, `test/cloneband_harness.cpp`,
+  `test/connectcore_harness.cpp`, `test/includeprecise_unit.cpp`, `test/rustimport_unit.cpp`).
+  Disclosed, not hidden: `grep -rn 'graph\.h\|clones\.h' test/` — the naive move — surfaces 41
+  candidate files (mostly noise) containing only 4 of those 6; the other 2 reach `graph.h`/`clones.h`
+  only through the compiled call graph and are invisible to any filename grep, so even the "honest
+  end" of the naive number (every one of the 41 candidates opened) doesn't reach full parity with
+  `--situ`'s answer — a completeness gap in ripwire's favor that the byte ratio alone doesn't capture.
+- **Review this PR/diff** — both name the same co-change signal for the changed files: `--pr-context`'s
+  bundle lists `test/regression.sh`, `src/main.cpp`, and `docs/COMMANDS.md` as partners usually edited
+  alongside `README.md`/`docs/EVALS.md` that this diff (`HEAD~6`..`HEAD`) did NOT touch — a real
+  reviewer question ("did they forget something?") a raw `git diff` read cannot answer at all, since
+  it has no memory of what usually changes together.
+- **I have a stack trace** — both resolve the same 7-frame call chain to the same real definitions:
+  `--from-trace` binds all 7 frames `resolved_by="name"` to their actual signatures
+  (`collectChildren`→`ur_walkTree`→`runWalkGroups`→`astQueryGrouped`→`builtInLintCaptures`→`runLint`→
+  `main`), rank-1's full body included; `grep` for each of the 7 names returns the same definition
+  lines, mixed with call sites and comments in the same two files, which the naive number prices as
+  opened whole to tell them apart.
 
 **Reproduce any row:** `cd` to this repository, run the command in that row, `wc -c` the output; the
-naive side is the `grep`/`wc -c` invocations named above, run from the same root.
+naive side is the `grep`/`wc -c` invocations named above, run from the same root. The stack-trace row's
+`trace.txt` isn't a repo file — it's seven lines of the form
+`#N  0xADDRESS in NAME () at PATH:LINE` naming the real chain above; write it yourself to reproduce.
 
 ### The `--expand` small-file inversion, resolved (density-M6, `e6f173d`/`7558fd9`)
 
