@@ -101,6 +101,16 @@ rtk) compress the other half — what git, npm and cargo print back — at the s
 stack rather than overlap. Where they meet, prefer the graph: `--situ` and `--map-diff` answer "what
 changed and what does it mean" more densely than any filtered `git diff` can.
 
+### Saves Tokens: It answers for a fraction of the context
+
+On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
+spends — **1.7%** on the questions both arms fully answered. `--pack-signatures` returns **67% fewer
+bytes** than full bodies at top-50. The output is already dense enough that running a dedicated
+context compressor over it saved **exactly 0 tokens**.
+
+It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
+warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
+
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
 **58.3% against 40.0% for the best tool tested — and it answers before they finish indexing.** Every
@@ -328,16 +338,6 @@ then has little to grab; that gap is measured and recorded in
 per-lane table and history in [docs/EVALS.md §4](docs/EVALS.md).
 
 </details>
-
-### Saves Tokens: It answers for a fraction of the context
-
-On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
-spends — **1.7%** on the questions both arms fully answered. `--pack-signatures` returns **67% fewer
-bytes** than full bodies at top-50. The output is already dense enough that running a dedicated
-context compressor over it saved **exactly 0 tokens**.
-
-It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
-warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
 
