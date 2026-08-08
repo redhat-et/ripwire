@@ -63,8 +63,14 @@ SZ_COMPRESS="$( wc -c <"$TMP/slice_compress.xml" | tr -d ' ' )"
 [ "$SZ_COMPRESS" -lt "$SZ_PLAIN" ] && ok "compressed slice is smaller than the plain slice ($SZ_COMPRESS < $SZ_PLAIN bytes)" \
                                     || no "compressed slice not smaller (compress=$SZ_COMPRESS plain=$SZ_PLAIN) — compress may not be applying to ranged bodies"
 
-# never silently widens: whole-body (no range) is strictly larger than either sliced variant.
-"$BIN" "$CPPFIX" --expand=bigFunction --no-cache >"$TMP/whole.xml" 2>/dev/null
+# never silently widens: the whole-body BUNDLE is strictly larger than either sliced variant.
+# M6 note (2026-08-08): a bare --expand now auto-serves the cheapest complete answer and on this tiny
+# fixture that is the whole FILE (724 B < the ~1.2 KB bundle) — smaller than a sliced BUNDLE that still
+# carries the ranked map, so comparing across serving modes stopped measuring widening and started
+# measuring the mode choice. The control pins --top-k=200 (the default k, made explicit) so it is the
+# EXACT bundle shape the ranged run serves (ranges keep the legacy bundle — expandmodecheck (3b)); the
+# widen-detection power is unchanged: a slice that silently widened to the whole body would be >= this.
+"$BIN" "$CPPFIX" --expand=bigFunction --top-k=200 --no-cache >"$TMP/whole.xml" 2>/dev/null
 SZ_WHOLE="$( wc -c <"$TMP/whole.xml" | tr -d ' ' )"
 [ "$SZ_COMPRESS" -lt "$SZ_WHOLE" ] && ok "compressed slice ($SZ_COMPRESS B) is smaller than the whole body ($SZ_WHOLE B) — range did not silently widen" \
                                     || no "compressed slice is NOT smaller than the whole body — range may have silently widened to whole-body"
