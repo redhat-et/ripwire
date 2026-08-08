@@ -338,7 +338,9 @@ ranking, bodies, callers and tests in one budgeted bundle.
 **Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
-to `~/.local/bin`:
+to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
+installer stages them under `~/.local/share/ripwire/skills` — the activation one-liner is printed
+at the end of the install:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
@@ -1070,6 +1072,9 @@ ripwire --scan-skills=skills      # read the security scanner's verdict first, i
 ```
 
 The script's own header documents its other modes, including the opt-in advisory PreToolUse hook.
+`wrap` also prints a pasteable use-when blurb for your client's rules file (`CLAUDE.md`,
+`AGENTS.md`, `.cursor/rules`, …) and works from a prebuilt install with no checkout — from v0.2.2
+it points at the installer's staged copy of the skills when the cwd is not a checkout.
 
 ---
 

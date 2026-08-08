@@ -51,16 +51,114 @@ inline std::vector<std::string> wrapVerbGroupLines()
 
 // Append the install command only where this repo owns a verified discovery path. Claude is the installer
 // default; Codex uses the cross-agent ~/.agents/skills discovery root documented by current Codex.
-inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent )
+//
+// The line is a deterministic three-way probe, not an unconditional checkout command — a prebuilt-binary
+// user has no checkout, and printing `bash skills/install.sh` at them is a dead instruction:
+//   (a) ./skills/install.sh exists relative to cwd            → the relative checkout line;
+//   (b) else <exeDir>/../share/ripwire/skills/install.sh      → `bash "<that absolute path>"` — the copy
+//       the curl installer stages at <prefix>/share/ripwire/skills (fixed design contract vs
+//       <prefix>/bin/<binary>; executablePath is already realpath'd by selfExecutablePath);
+//   (c) else                                                  → a clone-pointer comment, never a dead command.
+inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, const std::string_view executablePath )
 {
-    if( agent == "claude" )
+    if( agent != "claude" && agent != "codex" )
     {
-        std::fprintf( out, "bash skills/install.sh   # deploy to ~/.claude/skills (drift-gated)\n" );
+        return;
     }
-    else if( agent == "codex" )
+    const bool  isCodex     = ( agent == "codex" );
+    const char* codexFlag   = isCodex ? " --codex" : "";
+    const char* destComment = isCodex ? "${AGENTS_HOME:-~/.agents}/skills" : "~/.claude/skills";
+
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // (a) checkout cwd — the repo's own installer is right here
+    if( fs::is_regular_file( "skills/install.sh", ec ) && !ec )
     {
-        std::fprintf( out, "bash skills/install.sh --codex   # deploy to ${AGENTS_HOME:-~/.agents}/skills (drift-gated)\n" );
+        std::fprintf( out, "bash skills/install.sh%s   # deploy to %s (drift-gated)\n", codexFlag, destComment );
+        return;
     }
+
+    // (b) prebuilt install — the staged copy next to the binary's prefix
+    ec.clear();
+    const fs::path stagedInstaller = fs::path( executablePath ).parent_path().parent_path() / "share" / "ripwire" / "skills" / "install.sh";
+    if( !executablePath.empty() && fs::is_regular_file( stagedInstaller, ec ) && !ec )
+    {
+        std::fprintf( out, "bash \"%s\"%s   # deploy to %s (drift-gated)\n", stagedInstaller.string().c_str(), codexFlag, destComment );
+        return;
+    }
+
+    // (c) nothing local — point at the source instead of printing a command that cannot run
+    std::fprintf( out, "# skills not found locally — clone https://github.com/redhat-et/ripwire and run skills/install.sh%s\n", codexFlag );
+}
+
+// agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
+struct WrapBlurbTarget
+{
+    std::string_view agent;        // agent identifier (CLI argument)
+    std::string_view targetFile;   // the file the user pastes the blurb into
+};
+
+inline constexpr WrapBlurbTarget kWrapBlurbTargets[] = {
+    { "claude",   "CLAUDE.md" },
+    { "codex",    "AGENTS.md" },
+    { "cursor",   ".cursor/rules (a .mdc file)" },
+    { "windsurf", ".windsurfrules" },
+    { "gemini",   "GEMINI.md" },
+    { "aider",    "CONVENTIONS.md" },
+};
+
+// The ONE shared use-when blurb — single source of truth for every agent recipe (the gate diffs the
+// body across agents, so a per-agent fork of this text is a red gate, not a variant). A binary on
+// PATH is invisible to an agent until its context file says when to reach for it; this is the
+// distilled protocol, sized to paste whole.
+inline std::vector<std::string_view> wrapUseWhenBlurbLines()
+{
+    return {
+        "## ripwire — deterministic codebase maps (on PATH as `ripwire`)",
+        "Reach for it BEFORE blind grep + whole-file reads. First call ~1s cold; after that warm, ~0.1s.",
+        "- Orient on a task: `ripwire <dir> --for=\"<task in words>\"` — ranked, quality-annotated",
+        "  signatures. Paste symbol/file names from the issue verbatim; named mentions get anchored.",
+        "- Everything at once under one token budget: `ripwire <dir> --pack-task=\"<task>\"`.",
+        "- Have a stack trace / build error: `ripwire <dir> --from-trace=FILE` (`-` = stdin) —",
+        "  paste the error, don't paraphrase it into a query.",
+        "- Who calls X: `--callers=SYM`. \"Is it safe to change X?\" needs the full blast radius:",
+        "  `--impact=SYM` (transitive) plus `--uses=SYM` (every read/write/import site).",
+        "- Just edited a symbol: `--edit-check=SYM` — contract change + newly incompatible callers.",
+        "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\"` — duplicates",
+        "  are born on tasks that feel too small to tool up for.",
+        "- Before calling work done: `--quality-delta` (what you made worse), then `--test-gate`.",
+        "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none",
+        "  found\", never \"none exists\".",
+    };
+}
+
+// Print the pasteable context-wiring block for one agent: a comment fence naming the client's own
+// rules file, the shared body as plain lines (they land in a markdown-ish context file, so no `#`
+// prefix — a leading `#` would turn prose into headings on paste), and a closing comment fence.
+inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
+{
+    std::string_view targetFile;
+    for( const WrapBlurbTarget& t : kWrapBlurbTargets )
+    {
+        if( t.agent == agent )
+        {
+            targetFile = t.targetFile;
+        }
+    }
+    if( targetFile.empty() )
+    {
+        return;
+    }
+
+    std::fprintf( out, "#\n# context wiring — a binary on PATH is invisible to an agent until its rules file says when\n"
+                       "# to reach for it. Paste the block below into %.*s:\n", int( targetFile.size() ), targetFile.data() );
+    std::fprintf( out, "# --- paste into %.*s ---\n", int( targetFile.size() ), targetFile.data() );
+    for( const std::string_view line : wrapUseWhenBlurbLines() )
+    {
+        std::fprintf( out, "%.*s\n", int( line.size() ), line.data() );
+    }
+    std::fprintf( out, "# --- end paste ---\n" );
 }
 
 inline void wrapList( std::FILE* out )
@@ -271,7 +369,10 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     }
 
     // A4-S2: adoption recipes name a skill install step only for verified agent discovery paths.
-    wrapPrintSkillsLine( stdout, agent );
+    wrapPrintSkillsLine( stdout, agent, executablePath );
+
+    // context wiring: every recipe ends with the pasteable use-when blurb for the client's rules file.
+    wrapPrintBlurb( stdout, agent );
 }
 
 inline int runWrap( int argc, char** argv, const std::string_view executablePath )
