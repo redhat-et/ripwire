@@ -484,6 +484,11 @@ inline std::vector<AstMatch> collapseNestedTernaries( const IngestResult& ing, s
 // different question (byte layout) over a different extension set.
 using atomdetail::isCFamilyPath;
 
+// The AstMatch→Span bridge, re-exported for the same one-copy reason: the cache pack (cachelint.h)
+// runs the same span algebra over the same engine's captures, and a second spelling of this
+// two-liner is exactly the clone --quality-delta exists to catch.
+using atomdetail::spanOf;
+
 // Run the pack. One astQuery pass over the already-crawled files; everything after it is span algebra
 // and text tests over the captures. Deterministic: astQuery returns (file path, startByte, endByte,
 // tag) order and every filter below is order-preserving, so no hash iteration, thread arrival order,

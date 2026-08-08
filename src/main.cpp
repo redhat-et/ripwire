@@ -72,6 +72,7 @@
 #include "htmlexport.h"
 #include "lintrules.h"
 #include "atoms.h"          // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
+#include "cachelint.h"      // --lint: the cache-friendliness pack (access-pattern half; layout half is --field-affinity)
 #include "naminglens.h"     // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
 #include "prcontext.h"
 #include "ccjson.h"
@@ -1563,6 +1564,18 @@ void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
     for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
     for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
     for( const std::string_view rule : rw::atoms::kAtomRuleNames ) { allRuleNames.emplace_back( rule ); }
+}
+
+// Fold the cache-friendliness pack (src/cachelint.h — the access-pattern half of the locality story;
+// the layout half is --field-affinity) into the built-in lint set: its findings, its per-rule floor
+// disclosures, and its rule names for the tally. Same shape as mergeAtomsPack for the same reasons.
+void mergeCachePack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
+                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames )
+{
+    const rw::cachelint::CacheRun pack = rw::cachelint::cacheFriendliness( ing, rw::kLintMaxPerRule );
+    for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
+    for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
+    for( const std::string_view rule : rw::cachelint::kCacheRuleNames ) { allRuleNames.emplace_back( rule ); }
 }
 
 // Fold the identifier-naming lens (src/naminglens.h) into the built-in lint set: its findings go straight
@@ -8978,12 +8991,14 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
-        // The two packs that live outside this function: the atoms-of-confusion pack (src/atoms.h) and the
-        // identifier-naming lens (src/naminglens.h). Each merges its own findings, its own floor disclosures
-        // and — for atoms, whose rule list is owned by the pack — its own rule names. Both run here, inside
-        // the one --lint guard, so the sort below covers every built-in finding regardless of its source.
+        // The packs that live outside this function: the atoms-of-confusion pack (src/atoms.h), the
+        // identifier-naming lens (src/naminglens.h) and the cache-friendliness pack (src/cachelint.h).
+        // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
+        // owned by the pack — its own rule names. All run here, inside the one --lint guard, so the sort
+        // below covers every built-in finding regardless of its source.
         mergeAtomsPack( ing, ms, saturatedRules, allRuleNames );
         mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals );
+        mergeCachePack( ing, ms, saturatedRules, allRuleNames );
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
