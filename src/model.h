@@ -169,15 +169,21 @@ struct Symbol
     // functions/methods; 0 for other kinds. `loc` is the def's physical line span (body-inclusive).
     std::uint32_t loc          = 0;    // physical lines the def spans = 1-based end line − start line + 1; --metrics loc=
     // local-variable-indexing plan, Phase 1 (2026-08-06 evening, PLAN.md): a FLOOR count of the def's own
-    // local-variable declarations, populated by the SAME fused-DFS complexity walk that computes cx/ccx/
+    // local-variable DECLARATORS, populated by the SAME fused-DFS complexity walk that computes cx/ccx/
     // maxNest (ingest.cpp complexityOf/cc_walk) — zero new tree-sitter queries. MVP scope is C/C++ only
     // (see localsCountedLang below); meaningful for fns/methods only (0 for other kinds, same convention
-    // as params/maxNest). Counts a `declaration` node whose PARENT is the enclosing `compound_statement`
-    // (a direct block-statement local) — this naturally excludes if-init/switch-condition/for-init/catch-
-    // clause declarators (their parent is the control-structure node, not compound_statement) without any
-    // per-shape special case; a structured-binding declarator (`auto [a,b] = …`) is explicitly excluded too
-    // (one declaration, ambiguous name count) — see cc_walk's locals-counting block. `--metrics` emits it as
-    // locals="N" locals_floor="1" (never a bare 0 for an uncovered language — see localsCountedLang).
+    // as params/maxNest). Counts every `declarator`-fielded child of a `declaration` node whose PARENT is
+    // the enclosing `compound_statement` (a direct block-statement local) — this naturally excludes
+    // if-init/switch-condition/for-init/catch-clause declarators (their parent is the control-structure
+    // node, not compound_statement) without any per-shape special case. L3 fix (2026-08-08): a
+    // comma-separated statement (`int a=1,b=2,c=3;`) is ONE `declaration` node but THREE declarators, so
+    // it counts as 3, not 1 (cc_countLocalDeclarators, ingest.cpp) — counting the statement instead of the
+    // declarator undercounted on the exact axis the structured-binding exclusion below exists to avoid. A
+    // structured-binding declarator (`auto [a,b] = …`) is still explicitly excluded (one declaration,
+    // ambiguous per-declarator name count — see cc_walk's locals-counting block); a type-only declaration
+    // with no declarator (a local forward decl, e.g. `struct Foo;`) now correctly counts as 0 rather than
+    // the pre-fix "1". `--metrics` emits it as locals="N" locals_floor="1" (never a bare 0 for an
+    // uncovered language — see localsCountedLang).
     std::uint32_t locals       = 0;
     // PPALT DISCLOSURE — count of ALTERNATIVE-introducing preprocessor nodes (`#else`/`#elif`/`#elifdef`)
     // inside the def, filled by the SAME fused cc_walk DFS that computes cx/ccx/maxNest/locals (zero new

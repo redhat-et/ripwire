@@ -101,6 +101,38 @@ int bigFunction( int n )
     return n + a + b + c + d + e + f + g + reallyLongLocalVariableNameThatHasSixWords + top_mixedCase;
 }
 
+// COMMA-LIST: gated ONLY if locals= counts DECLARATORS, not declaration STATEMENTS. maxNest=5 (>4)
+// clears the size/complexity half of namingLocalsGate; the locals half (>=8) is reachable ONLY through
+// the ONE comma-separated declaration below, which introduces exactly TEN declarators
+// (a,b,c,d,e,f,g,h,reallyLongLocalVariableNameThatHasSixWords,top_mixedCase) in a SINGLE `declaration`
+// node — no other local anywhere in the function, so --metrics locals= on this function is a direct,
+// unambiguous read of the counting rule. Before the per-declarator fix, cc_isCountableLocalDecl's caller
+// counted that one node as "1" local — under the locals>=8 floor, so namingLocalsGate never cleared and
+// no naming-* finding could ever fire here, no matter how badly-named the declarators were. After the
+// fix each declarator counts (10 >= 8), the gate clears, and naming-case fires on top_mixedCase
+// (depth-1, no depth gate — same proof shape as arm 4's DECLDEPTH check on bigFunction).
+int commaListFunction( int n )
+{
+    int a=1,b=2,c=3,d=4,e=5,f=6,g=7,h=8,reallyLongLocalVariableNameThatHasSixWords=9,top_mixedCase=10;
+    if( n > 0 )
+    {
+        if( n > 1 )
+        {
+            if( n > 2 )
+            {
+                if( n > 3 )
+                {
+                    if( n > 4 )
+                    {
+                        (void)a;
+                    }
+                }
+            }
+        }
+    }
+    return n + a + b + c + d + e + f + g + h + reallyLongLocalVariableNameThatHasSixWords + top_mixedCase;
+}
+
 // UN-gated: shallow (nest=1), no size/complexity trigger, only 1 local — namingLocalsGate must stay false.
 int smallFunction( int n )
 {
@@ -123,6 +155,8 @@ presence "$FIXDIR/big.cpp" 'top_mixedCase'                              'a snake
 presence "$FIXDIR/big.cpp" 'int x = a + b;'                             'a nested 1-2 letter local present (declDepth>=2)'
 presence "$FIXDIR/big.cpp" '__reserved'                                 'a reserved-underscore-form local present'
 presence "$FIXDIR/big.cpp" 'int smallFunction'                          'the un-gated control function present'
+presence "$FIXDIR/big.cpp" 'int a=1,b=2,c=3,d=4,e=5,f=6,g=7,h=8,reallyLongLocalVariableNameThatHasSixWords=9,top_mixedCase=10;' \
+                                                                          'a ten-declarator comma-list local declaration present'
 
 # ══ 1. DEFAULT-OFF ═══════════════════════════════════════════════════════════════════════════════════
 OFF="$( xml_lint_off "$FIXDIR" )"
@@ -184,6 +218,30 @@ if [ "$short_rows" = "1" ]; then
     ok "for-init: naming-short fired exactly once (the block-declared x) — the depth-6 for-init counter q did NOT fire"
 else
     no "for-init: naming-short fired $short_rows time(s), expected exactly 1 — a for-init counter may be leaking through"
+fi
+
+# ══ 4c. COMMA-LIST — locals= counts DECLARATORS, not declaration STATEMENTS (the bug this round fixes) ═
+# Direct numeric proof, independent of --naming-locals: commaListFunction's ONLY locals are the ten names
+# in its one comma-separated declaration, so --metrics locals= on it is an unambiguous read of the
+# counting rule (10 = per-declarator, 1 = per-statement — the bug this test was written to catch).
+METRICS_XML="$( "$BIN" "$FIXDIR" --metrics --no-cache 2>/dev/null )"
+comma_locals="$( printf '%s' "$METRICS_XML" | tr '>' '\n' | grep 'n="commaListFunction"' | grep -oE 'locals="[0-9]+"' | grep -oE '[0-9]+' )"
+if [ "$comma_locals" = "10" ]; then
+    ok "comma-list: --metrics reports locals=10 for a single ten-declarator comma-list statement (per-declarator counting)"
+else
+    no "comma-list: --metrics reports locals=$comma_locals for commaListFunction, want 10 — locals= is counting declaration STATEMENTS, not declarators"
+fi
+# End-to-end proof: the gate (namingLocalsGate: size/complexity clears at maxNest=5, locals needs >=8) is
+# reachable ONLY via the comma list's per-declarator count, so a fire here is proof the count feeds the
+# gate. Scoped to naming-* rules specifically (rule="naming-...") — commaListFunction ALSO trips
+# unrelated always-on rules (deep-nesting, magic-number, c-style-cast on the (void) cast) that fire
+# regardless of --naming-locals, so a bare "does this function appear anywhere in the output" check would
+# pass vacuously even with the bug present.
+comma_naming_hits="$( printf '%s' "$ON" | tr '>' '\n' | grep '^<f rule="naming-' | grep -c 'in="commaListFunction"' || true )"
+if [ "$comma_naming_hits" -gt 0 ]; then
+    ok "comma-list: --naming-locals fires $comma_naming_hits naming-* finding(s) on commaListFunction (e.g. naming-case on top_mixedCase, depth-1) — namingLocalsGate's locals>=8 floor is reachable via a comma list"
+else
+    no "comma-list: --naming-locals fired NO naming-* finding on commaListFunction — namingLocalsGate's locals>=8 floor is unreachable via a comma list (the bug: locals= undercounts a comma-declarator statement as 1)"
 fi
 
 # ══ 5. TAG-REUSE ═════════════════════════════════════════════════════════════════════════════════════
