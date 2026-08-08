@@ -93,6 +93,17 @@ jobs:
           mkdir -p "dist/${asset}"
           cp build/ripwire "dist/${asset}/ripwire"
           cp README.md LICENSE "dist/${asset}/" 2>/dev/null || cp README.md "dist/${asset}/"
+          # skills/ is the payload that teaches an agent WHEN to reach for ripwire (17 ripwire-*/ dirs +
+          # skills/install.sh, which symlinks from its OWN location — so it must travel with the tarball,
+          # not just live in the repo checkout). scripts/install.sh stages this subtree straight into
+          # $prefix/share/ripwire/skills; asset names and the top-level ripwire/README.md/LICENSE layout
+          # are unchanged, this is purely additive.
+          # no trailing slash on the glob: BSD cp (macOS runners) with a trailing slash copies each
+          # source dir's CONTENTS into the destination (flattening/overwriting same-named files like
+          # SKILL.md across skills) instead of copying the directory itself — verified live on this repo.
+          mkdir -p "dist/${asset}/skills"
+          cp -R skills/ripwire-* "dist/${asset}/skills/"
+          cp skills/install.sh "dist/${asset}/skills/"
           tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
           # basename inside the checksum file — `shasum -a 256 "dist/..."` bakes the dist/ prefix into
           # the published .sha256, which breaks `shasum -c` beside the downloaded pair (and therefore

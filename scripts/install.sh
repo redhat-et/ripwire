@@ -3,19 +3,19 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/<owner>/ripwire/main/scripts/install.sh | bash
 #
-# UNTESTED UNTIL THE FIRST GITHUB RELEASE EXISTS (P3/L1): this script is written
-# against .github/workflows/release.yml's asset naming and the GitHub Releases API contract, but neither
-# has ever actually run — there is no release to download yet. Do not point users at this script until a
-# `vX.Y.Z` tag has produced release assets and the happy path below has been exercised for real.
+# VALIDATED against v0.2.1 on 2026-08-07: the happy path (resolve latest release, download the
+# macos-arm64 asset, list it) was exercised live against the real GitHub Releases API and worked. v0.2.1
+# published all 8 assets (4 platforms x tarball + .sha256). Re-check this note if release.yml's asset
+# naming or layout changes again.
 #
 # This is DIFFERENT from the repo-root `install.sh`: that one builds ripwire FROM SOURCE (clones this repo,
 # runs cmake). This one downloads a prebuilt binary from GitHub Releases — no compiler, no FetchContent, no
 # 15-grammar clone, seconds instead of minutes. Prefer this one unless you're developing ripwire itself.
 #
 # Env overrides:
-#   RIPWIRE_REPO             "owner/repo" on GitHub. TODO(P6): set the real default once the fresh-history
-#                             public export lands; until then this MUST be passed explicitly (see error
-#                             below) — the script refuses to guess a plausible-looking but wrong org/repo.
+#   RIPWIRE_REPO             "owner/repo" on GitHub, e.g. redhat-et/ripwire (see README.md). No default on
+#                             purpose: this MUST be passed explicitly (see error below) — the script
+#                             refuses to guess a plausible-looking but wrong org/repo.
 #   RIPWIRE_VERSION           a specific tag (e.g. "v0.2.0"); default: latest release.
 #   RIPWIRE_INSTALL_PREFIX    install prefix; the binary lands in "$RIPWIRE_INSTALL_PREFIX/bin". Default:
 #                             ~/.local/bin (no sudo needed). Pass /usr/local for the traditional location
@@ -27,7 +27,8 @@ set -eu
 repo="${RIPWIRE_REPO:-}"
 if [ -z "$repo" ]; then
     echo "install.sh: RIPWIRE_REPO is not set." >&2
-    echo "  This installer has no default GitHub org/repo yet (P6, the public export, hasn't landed)." >&2
+    echo "  This installer has no default GitHub org/repo — deliberate, so it never guesses a" >&2
+    echo "  plausible-looking but wrong one. See README.md, e.g. RIPWIRE_REPO=redhat-et/ripwire." >&2
     echo "  Re-run as: RIPWIRE_REPO=<owner>/<repo> bash install.sh" >&2
     exit 2
 fi
@@ -136,3 +137,26 @@ case ":$PATH:" in
     *":$binDir:"*) ;;
     *) echo "install.sh: $binDir is not on PATH — add it, e.g. export PATH=\"$binDir:\$PATH\"" ;;
 esac
+
+# ── stage bundled skills (curl-pipe users never get a repo checkout otherwise) ─────────────────────────
+# skills/ teaches a coding agent WHEN to reach for ripwire mid-task; release.yml packages it into the
+# tarball alongside the binary. $prefix/share/ripwire/skills is a fixed, shared contract with the rest of
+# the toolchain (other pieces are being wired to look there) — do not relocate this path independently.
+# This directory is a STAGING AREA OWNED BY THIS INSTALLER (nothing else writes here), so blowing it away
+# and recopying on every run is safe and keeps a stale skill from a previous version lingering forever.
+skillsShareDir="$prefix/share/ripwire/skills"
+if [ -d "$extractedDir/skills" ]; then
+    rm -rf "$skillsShareDir"
+    mkdir -p "$( dirname "$skillsShareDir" )"
+    cp -R "$extractedDir/skills" "$skillsShareDir"
+    chmod +x "$skillsShareDir/install.sh" 2>/dev/null || true
+
+    echo "install.sh: staged agent skills at $skillsShareDir"
+    echo "  Activate them (symlinks into the agent's skill dir, safe to re-run):"
+    echo "    Claude Code: bash \"$skillsShareDir/install.sh\""
+    echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex"
+else
+    # Older releases (pre-skills-bundling) simply don't have this directory — never fail the install over
+    # a missing extra; just tell the user honestly how to get them.
+    echo "install.sh: this release predates bundled skills — clone https://github.com/redhat-et/ripwire and run skills/install.sh to get them"
+fi
