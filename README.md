@@ -504,8 +504,19 @@ about the code, and the annotation is emitted on **no** row.
 
 </details>
 
+**Five lenses sit *beside* the six-family join — deliberately outside its vote.** Each is out for a
+stated reason, not an oversight:
+
+| Lens | Asks | Why beside the join | On this repo |
+| --- | --- | --- | --- |
+| `--field-affinity` | which struct fields are read together but declared far apart; each loop's access shape (index vs pointer-chase) | its subject is a **type**, not a function — attributing a struct's finding to the functions touching it is a claim the lens never makes | `MainDispatch`: **12** findings at separation cost **92.88**; **1,374** loops classified, **5** genuine pointer-chases |
+| `cache-*` lint rules + `--with-profile` | cache-hostile access shapes (alloc-in-loop, `p=p->next`, `a[b[i]]`, node containers, …), then which are *measured* hot | rows are facts about **sites**, joined to per-scope hardware counters — not per-function evidence a family vote could count | aggressive rules: **0** hits in shipping `src/`; **327** findings adversarially triaged → **0** fix-worthy; the one open refactor settled by measurement (5.2 ms) |
+| `--readability` | least-readable-first ordering (Halstead volume, Posnett sigmoid) | the fitted score **saturates past 20 lines** — only the ordering is meaningful, and an ordering cannot vote in a count | ordering only, never a grade |
+| `--naming-consistency` | off-convention names, each with a computed `propose=` | the one lens that emits **advice** — a fix is not evidence, so it does not vote | camelCase dominant at **93.0%**; **136** names flagged with proposals |
+| `--lint --naming-locals` | the naming rules pointed at local variables inside already-flagged functions | **opt-in and unvalidated** — stays outside any join until a real-corpus audit clears it (the withdrawn-rule lesson) | +**973** findings that were structurally invisible before |
+
 <details>
-<summary>Five lenses that sit <i>beside</i> the six-family join — <code>--field-affinity</code>, the <code>cache-*</code> lint pack with <code>--with-profile</code>, <code>--readability</code>, <code>--naming-consistency</code>, <code>--lint --naming-locals</code></summary>
+<summary>The depth on each lens — citations, caveats, and the withdrawn-rule note</summary>
 
 **Two verbs sit *beside* the panel, not inside its six-family join** — worth knowing the boundary
 rather than blurring it:
