@@ -21,6 +21,11 @@
 #       merely LOOKS like a leak (--hotspots `top=`, community `sym@file.ext` labels, --layout
 #       `owner=`) must survive untouched: an over-broad scrub corrupts output, which is worse than
 #       the leak because the corruption ships as the tool's answer
+#   (G) REGENERATION PARITY — regenerating from the binary plus the newest capture in the tree must
+#       reproduce docs/COMMANDS.md byte for byte. Arms (A)-(F) all passed while the shipped doc was
+#       built from a capture (and a generator variant) that were never committed — (B) compares flag
+#       NAME sets, not content — so the next honest regen silently deleted sample content. Content
+#       that cannot be reproduced from the committed tree is content that is already lost
 #
 # Usage:  bash test/docscommandscheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exit:   0 = clean · 1 = at least one arm failed · 2 = usage / missing prerequisite
@@ -193,6 +198,27 @@ if printf '%s' "$mutateOut" | grep -q '^MUTATE 0$'; then
 else
     no "(F) mutation control failed — the scrub is inert or over-broad:"
     printf '%s\n' "$mutateOut" | sed 's/^/          /'
+fi
+
+# ── (G) regeneration parity — the doc must be reproducible from the COMMITTED capture ─────────────
+# The failure this arm exists to catch (found 2026-08-08): docs/COMMANDS.md had been regenerated
+# from a FRESHER capture — and a modified generator — that were never committed, so the sole
+# committed capture predated the doc's own sample rows (ev=/humps=/locals= appeared in the doc but
+# in no capture on disk), and an honest regen DELETED them. The direct assertion is
+# reproducibility: the generator is deterministic over (binary --help, newest capture), so a regen
+# into a scratch path must give back the shipped doc byte for byte. This subsumes any "is the
+# capture newer than attribute X" heuristic — a capture too old to know an attribute the doc's
+# samples carry cannot reproduce the doc, and goes red here, as does an uncommitted generator edit.
+regenOut="$( python3 "$GEN" --bin "$BIN" --out "$TMP/regen.md" 2>&1 )"
+regenRc=$?
+if [ "$regenRc" != 0 ]; then
+    no "(G) regeneration failed (exit $regenRc) — cannot prove docs/COMMANDS.md is reproducible from the tree:"
+    printf '%s\n' "$regenOut" | sed 's/^/          /'
+elif diff -q "$DOC" "$TMP/regen.md" >/dev/null; then
+    ok "(G) docs/COMMANDS.md is byte-identical to a regeneration from the newest capture in the tree"
+else
+    no "(G) docs/COMMANDS.md does NOT match a regeneration from the newest capture in the tree — the doc was built from a capture or generator that is not committed, or moved without a regen. First differing lines:"
+    diff "$DOC" "$TMP/regen.md" | head -12 | sed 's/^/          /'
 fi
 
 if [ "$fail" = 0 ]; then printf 'ALL PASS\n'; else printf 'FAILURES ABOVE\n'; fi
