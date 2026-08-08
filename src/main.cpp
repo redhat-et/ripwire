@@ -10249,19 +10249,35 @@ int runDefaultMap( const MainDispatch& d )
 // each handler's own arm order). One row per verb-selecting flag, so adding a verb is adding a ROW rather
 // than editing a message — the house rule for exactly this shape.
 //
-// Deliberately EXCLUDES --for/--query/--pack-task: X9(c) above already discloses those three with a more
-// specific sentence, and one run must never print two warnings about the same collision. Also excludes pure
-// MODIFIERS (--metrics, --stable, --format=, --top-k…), which shape whatever verb runs rather than selecting
-// one, and --scan-skills/--scan-skill, which dispatch before the graph is built and never reach this chain.
+// §M1 (audit 2026-08-08) — this table used to EXCLUDE --for/--query/--pack-task, on the claim that "X9(c)
+// above already discloses those three". That claim was false in the direction that mattered: X9(c) discloses
+// collisions AMONG the three and nothing else, so a query-family flag paired with any of the ~50 report verbs
+// below was dropped in TOTAL silence — stderr empty, exit 0 — the exact hazard this table exists to close.
+// The silence was also not uniform, so no caller could infer the rule from one observation: --for dispatches
+// ahead of the whole table, --query behind all of it, and --pack-task in between (it loses to --skipped and
+// wins over --lint). All three are now ROWS, at their real dispatch positions, which is this table's own
+// house rule — a verb is a row, not a special case. BEHAVIOUR IS UNCHANGED: the same verb still wins every
+// pair; only the silence is gone.
+//
+// The one true half of the old claim is kept as `isQueryFamily`: one run must never print two warnings about
+// the same collision, so an ignored query-family flag is skipped when the WINNER is also query-family —
+// that pair is X9(c)'s, and X9(c) words it better. Every other combination is this table's.
+//
+// Still excludes pure MODIFIERS (--metrics, --stable, --format=, --top-k…), which shape whatever verb runs
+// rather than selecting one, and --scan-skills/--scan-skill, which dispatch before the graph is built and
+// never reach this chain.
 //
 // The order below is not asserted by reading: test/dispatchordercheck.sh runs every PAIR and checks that the
 // verb this table names as the winner is the verb whose bytes actually came out, so a table that rots reds
 // by name instead of shipping a confident lie.
-struct ReportVerbSlot { const char* flag; bool isActive; };
+// isQueryFamily marks the three flags X9(c) speaks for; it defaults to false, so the ~50 report rows below
+// stay two-field and only the three query-family rows spell the third value.
+struct ReportVerbSlot { const char* flag; bool isActive; bool isQueryFamily = false; };
 
 void warnReportVerbPrecedence( const rw::Config& c )
 {
     const ReportVerbSlot slots[] = {
+        { "--for",              !c.forTask.empty(), true  },   // §M1: dispatches ahead of the entire table
         { "--lego",             !c.legoType.empty()       }, { "--exemplar",     !c.exemplar.empty()      },
         { "--recall",           !c.recall.empty()         }, { "--deps",          c.deps                  },
         { "--arch",             !c.archRules.empty()      }, { "--hotspots",      c.hotspots              },
@@ -10285,15 +10301,18 @@ void warnReportVerbPrecedence( const rw::Config& c )
         { "--layout",            c.layoutFlag             }, { "--doc-drift",     c.docDrift              },
         { "--from-trace",       !c.fromTrace.empty()      }, { "--note-add",      c.noteAddFlag           },
         { "--notes",             c.notesList              }, { "--skipped",       c.skippedList           },
+        { "--pack-task",         c.packTaskFlag,     true },   // §M1: loses to --skipped above, wins from --communities down
         { "--communities",       c.communities            },
         { "--community",         c.communityFlag          }, { "--zoom",          c.zoom                  },
         { "--seams",             c.seams                  }, { "--report",        c.report                },
         { "--tree",              c.tree                   }, { "--grep",         !c.grep.empty()          },
         { "--match",            !c.match.empty()          }, { "--lint",          c.lint                  },
         { "--around",           !c.around.empty()         },
+        { "--query",            !c.query.empty(),   true  },   // §M1: dispatches behind the entire table
     };
 
-    const char* winner = nullptr;
+    const char* winner              = nullptr;
+    bool        winnerIsQueryFamily = false;
     std::string ignored;
     for( const ReportVerbSlot& s : slots )
     {
@@ -10301,7 +10320,16 @@ void warnReportVerbPrecedence( const rw::Config& c )
         {
             continue;
         }
-        if( winner == nullptr ) { winner = s.flag;  continue; }
+        if( winner == nullptr )
+        {
+            winner              = s.flag;
+            winnerIsQueryFamily = s.isQueryFamily;
+            continue;
+        }
+        if( s.isQueryFamily && winnerIsQueryFamily )
+        {
+            continue;   // X9(c) already disclosed this exact pair — one collision, one warning
+        }
         if( !ignored.empty() )
         {
             ignored += ", ";
@@ -10678,6 +10706,9 @@ int main( int argc, char** argv )
     // CLONES — because the winner is fixed by ripwire's internal DISPATCH ORDER, not by the order the flags
     // were typed, which is the part no caller can guess. Behaviour is unchanged: the same verb still wins,
     // and this only says so. Warns ONCE per run, listing every verb that was dropped.
+    // §M1: the three flags X9(c) speaks for are rows here too now, so a CROSS-family pair (`--pack-task
+    // --skipped`, `--for --hotspots`) discloses like every other pair instead of dropping one in silence.
+    // X9(c) keeps the intra-family pair; the row table skips it rather than repeat it.
     warnReportVerbPrecedence( cfg );
 
     // L2: --json refuses LOUDLY for any verb it doesn't (yet) support — see jsonUnsupportedVerb's ALLOW-list
