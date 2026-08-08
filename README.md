@@ -43,24 +43,25 @@ the tests that reach them.
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
-Ten everyday moments, re-measured on this repository, 2026-08-08. Every ratio is a real byte count
-from a real run, reproduced by the command in its row — instruments in
+Ten everyday moments, re-measured on this repository, 2026-08-08. Figures are ~tokens (≈ bytes/4);
+every ratio comes from a real run, reproduced by the command in its row — raw byte counts and exact
+commands in
 [`docs/EVALS.md` §5](docs/EVALS.md#readme-grade-rows-re-measured-on-this-repository-2026-08-08).
 
 Ordered understand → navigate → review-the-change:
 
 | Ask it | Command | ripwire | naive read | savings |
 | --- | --- | --- | --- | --- |
-| "Orient me in this repo" | `ripwire .` | **22,571 B** | 80,267–101,738 B (`README.md`, or +`ARCHITECTURE.md`) | 3.6×–4.5× |
-| "Where is X handled?" | `ripwire . --for="…"` | **7,501 B** | 19,463–80,037 B (grep, or grep + the file) | 2.6×–10.7× |
-| "What do I already know?" | `ripwire . --recall="…"` | **61,064 B** | 1,781,685 B (every doc this repo carries) | 29.2× |
-| "Set me up for this task" | `ripwire . --pack-task="…"` | **8,512 B** | 65,378–320,597 B (the relevant files, whole) | 7.7×–37.7× |
-| "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **1,038–65,908 B** body (+22.6 KB for the ranked-neighborhood bundle) | 173,647–695,888 B (the file it lives in) | 2.6×–670× |
-| "Who calls this function?" | `ripwire . --callers=SYM` | **2,326 B** | 160,989–207,359 B (grep — mostly noise — + the files to sort real calls from mentions) | 69.2×–89.1× |
-| "Is it safe to change this?" | `ripwire . --impact=SYM` + `--uses=SYM` | **5,125 B** | 73,661 B (the direct-use files, whole) | 14.4× |
-| "I have a stack trace" | `ripwire . --from-trace=FILE` | **5,718 B** | 497,104–1,192,992 B (grep each frame + the file(s) it touches) | 86.9×–208.6× |
-| "I changed these files — tests? blast radius?" | `ripwire . --situ` | **1,632 B** | 11,926–529,245 B (diff + grep `test/`, + the candidates opened) | 7.3×–324.2× |
-| "Review this PR/diff" | `ripwire . --pr-context=REF` | **7,437 B** | 19,298–204,294 B (diff alone, or diff + the touched files) | 2.6×–27.5× |
+| "Orient me in this repo" | `ripwire .` | **~5.6K tok** | ~20K–25K tok (`README.md`, or +`ARCHITECTURE.md`) | 3.6×–4.5× |
+| "Where is X handled?" | `ripwire . --for="…"` | **~1.9K tok** | ~4.9K–20K tok (grep, or grep + the file) | 2.6×–10.7× |
+| "What do I already know?" | `ripwire . --recall="…"` | **~15K tok** | ~445K tok (every doc this repo carries) | 29.2× |
+| "Set me up for this task" | `ripwire . --pack-task="…"` | **~2.1K tok** | ~16K–80K tok (the relevant files, whole) | 7.7×–37.7× |
+| "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **~260–16.5K tok** body (+~5.7K for the ranked-neighborhood bundle) | ~43K–174K tok (the file it lives in) | 2.6×–670× |
+| "Who calls this function?" | `ripwire . --callers=SYM` | **~580 tok** | ~40K–52K tok (grep — mostly noise — + the files to sort real calls from mentions) | 69.2×–89.1× |
+| "Is it safe to change this?" | `ripwire . --impact=SYM` + `--uses=SYM` | **~1.3K tok** | ~18K tok (the direct-use files, whole) | 14.4× |
+| "I have a stack trace" | `ripwire . --from-trace=FILE` | **~1.4K tok** | ~124K–298K tok (grep each frame + the file(s) it touches) | 86.9×–208.6× |
+| "I changed these files — tests? blast radius?" | `ripwire . --situ` | **~410 tok** | ~3K–132K tok (diff + grep `test/`, + the candidates opened) | 7.3×–324.2× |
+| "Review this PR/diff" | `ripwire . --pr-context=REF` | **~1.9K tok** | ~4.8K–51K tok (diff alone, or diff + the touched files) | 2.6×–27.5× |
 
 <details>
 <summary>Same-correct-answer verification, and the honesty line these ratios come with</summary>
