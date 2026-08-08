@@ -398,3 +398,67 @@ machine=Darwin/arm64 (Mac17,8) fixture=08352db35d9c93c4fc7e3af7f38469af8f8b86d1 
 | quality-delta | 142.838 |
 | dead-code | 62.362 |
 | mcp-warm-request | 1.309 |
+
+## 2026-08-08 — `--lint`: three astQuery passes collapsed to one walk, one tree walk per file, one compile per PRESENT grammar
+
+**Ledger, not a gate.** No budget or threshold was added, here or in CI — per the owner's directive
+these numbers are a record, never a red build. What justified the change is that the cost removed was
+defect-shaped (duplicate work, not a tradeoff) and that the output is byte-identical.
+
+**How the cost was localized.** A profile build (`cmake -S . -B prof -DRIPWIRE_PROFILE=ON`) with
+`PROFILE_SCOPE` armed inside the naming lens and around each phase of `runLint`. The audit finding
+that opened this round attributed the regression to the `naming-*` rule family; the profile does not
+support that. `namingLensChecks TOTAL` is **15.2 ms of a 1365 ms run — 1.1%**. The three astQuery
+passes are 1175 ms of it:
+
+| scope (pre-fix, `--lint` on the frozen HEAD tree) | calls | ms |
+| --- | ---: | ---: |
+| `lint: mergeAtomsPack` | 1 | 498.0 |
+| `lint: astQuery built-in checks` | 1 | 344.2 |
+| `lint: mergeCachePack` | 1 | 333.4 |
+| `ingest/readFile: fopen+read whole file` (summed over threads) | 4281 | 159.5 |
+| `lint: unreachableCheck` | 1 | 66.9 |
+| `lint: lintSymbolLevelChecks` | 1 | 23.4 |
+| `lint: mergeNamingLens` | 1 | **15.2** |
+| ` └ naminglens: checkScopeGroups (series + confusable)` | 1 | 2.4 |
+| ` └ naminglens: buildNameCorpusStats (subtoken df)` | 1 | 0.6 |
+
+That also reconciles the regression arithmetically against the Aug-4 baseline: 422 (Aug-4) + 498
+(atoms, `8acab2c`, Aug-5) + 333 (cache, `c049627`, Aug-7) + 15 (naming lens, `a63a9f1`, Aug-5) = 1268,
+against ~1300 measured. The `readFile` count is the tell: 4281 ≈ 4 × 1070 files.
+
+**Three defects, one per layer.** (1) each pack called `astQuery` itself, so the corpus was read and
+parsed three times; (2) `ts_query_cursor_exec` walks the subtree once **per query**, so ~45
+single-pattern specs walked every C++ file ~45 times; (3) every spec was compiled against all sixteen
+linked grammars, single-threaded, in front of a fully parallel walk.
+
+| scope (post-fix, same corpus) | calls | ms | vs pre |
+| --- | ---: | ---: | ---: |
+| `astQuery/worker: cursor exec + captures` (summed over threads) | 894 | 463 | 4939 → 463 |
+| `astQuery/worker: tree-sitter parse` (summed over threads) | 894 | 772 | ~3× fewer parse passes |
+| `astQuery: compile queries per grammar` (SERIAL pre-fix) | 1 | 628 → ~40 | present grammars only, one per thread |
+
+**Warm medians, 7 runs each, Apple Silicon (18 hw threads), exact argv.**
+Pre-fix binary is `git archive HEAD` (`d06f4db`) built in its own tree; both binaries run against the
+same frozen corpora so the tool's own source edits cannot move the numbers.
+
+```sh
+# corpus_cpp = git archive d06f4db (1075 indexed files, twelve languages)
+# corpus_py  = every .py in that tree, flattened (67 files)
+ripwire /tmp/lane_b/corpus_cpp --lint      # 1.34 s / 7.58 s CPU  ->  0.40 s / 2.73 s CPU   (-70% wall, -64% CPU)
+ripwire /tmp/lane_b/corpus_py  --lint      # 0.59 s / 0.81 s CPU  ->  0.19 s / 0.32 s CPU   (-68% wall, -60% CPU)
+ripwire /tmp/lane_b/corpus_cpp --match='(goto_statement) @g'
+                                           # 0.10 s / 0.53 s CPU  ->  0.09 s / 0.53 s CPU   (one group: unchanged, as designed)
+ripwire /tmp/lane_b/corpus_cpp             # 0.03 s               ->  0.03 s                (map untouched)
+```
+
+**Identity obligations discharged.** `--lint` output byte-identical (`diff -q`) against the pre-fix
+binary on BOTH corpora; `--lint` and the map deterministic run-to-run; both well-formed under
+`xmllint --noout`; 14 lint-family gates (`lintcheck`, `lintbudgetcheck`, `lintdedupcheck`,
+`lintprecisioncheck`, `lintrulescheck`, `lintscopecheck`, `atomscheck`, `cachelintcheck`,
+`naminglenscheck`, `naminglocalscheck`, `namingcalibrationcheck`, `namingconsistencycheck`,
+`matchcapturecheck`, `coplintcheck`) plus 20 astQuery-adjacent gates green.
+
+**What is still on the table.** `unreachableCheck` (67 ms) runs its own fourth corpus walk with the
+same crawl-order file queue; the naming lens's `getBytes` (11 ms) is a fifth read of files the walk
+already had in hand. Both are small next to what was removed, and neither was touched here.
