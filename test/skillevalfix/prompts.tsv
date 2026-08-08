@@ -10,18 +10,21 @@
 #                          follows the router's moment map, only the words are new. These are the hard set:
 #                          they share no vocabulary with the descriptions by construction.
 #                neg     — hand-written prompt where NO ripwire skill should fire (author-judged).
-#   split      = test | dev — FROZEN HELD-OUT SPLIT (added 2026-07-25, round r26). Every row in THIS
-#                file today is `test`: the n=128 rows (43 of them `judged` — the hard, vocabulary-free
-#                paraphrase set that first made bm25-desc's win/loss margin measurable, 24/43) are the
-#                committed benchmark. Do NOT edit a description and re-measure against these SAME rows
-#                next round — that is train-on-test with extra steps. Rows meant for iterating on a
-#                description change belong in a NEW row with split=dev instead (none exist yet — the dev
-#                split is intentionally empty until a future round adds tuning rows there). --eval-skills
-#                enforces this split (parses the column, refuses an unrecognized value, reports test/dev
-#                metrics SEPARATELY with their sizes) — this paragraph is documentation of that behavior,
-#                not the enforcement itself. A row with no 4th column defaults to split=test (back-compat
-#                for hand-built ad-hoc TSVs in other gates), but every row actually in this file states it
-#                explicitly so the freeze is visible on read, not inferred.
+#   split      = test | dev — FROZEN HELD-OUT SPLIT (added 2026-07-25, round r26). The n=128 `test` rows
+#                (43 of them `judged` — the hard, vocabulary-free paraphrase set that first made
+#                bm25-desc's win/loss margin measurable, 24/43) are the committed benchmark and are FROZEN:
+#                do NOT edit a description and re-measure against these SAME rows next round — that is
+#                train-on-test with extra steps. Rows meant for iterating on a description change belong in
+#                a NEW row with split=dev instead. 2026-08-08 (audit H1 follow-up): the dev split gained its
+#                first n=20 rows (16 positive + 4 negative), covering the 2026-08-05..08 routing moments
+#                (nest-profile/essential-complexity trust, cache-lint pack, --skipped-vs---doctor,
+#                opt-remarks triage + its hard negatives) — free to grow or be replaced round to round,
+#                unlike the rows above this comment. --eval-skills enforces this split (parses the column,
+#                refuses an unrecognized value, reports test/dev metrics SEPARATELY with their sizes) —
+#                this paragraph is documentation of that behavior, not the enforcement itself. A row with no
+#                4th column defaults to split=test (back-compat for hand-built ad-hoc TSVs in other gates),
+#                but every row actually in this file states it explicitly so the freeze is visible on read,
+#                not inferred.
 # ripwire-router itself is never a legal label: it is the fallback map, not a routing destination.
 # Keep this file ASCII; the harness truncates prompts at a byte boundary when reporting misses.
 #
@@ -166,3 +169,26 @@ What permits do I need before building a backyard shed?	none	neg	test
 How do I improve my 5K running pace?	none	neg	test
 What is a good practice test format for a driver's license exam?	none	neg	test
 I need a fresh pair of reading glasses - what prescription strength ranges are common?	none	neg	test
+# ── split=dev: tuning rows for the 2026-08-05..08-08 moments (nest-profile/essential-complexity/cache-lint/
+# --skipped/opt-remarks). Per the header discipline above: NOT scored against the frozen split=test floor,
+# reported separately, safe to iterate on next round without touching a single row above this line.
+This function keeps sprouting branches and I cannot tell if it is one tangled mess or just a long plain sequence - what shape is it actually?	ripwire-fresh-eyes	judged	dev
+I already have the humps and deep numbers for this function from a subsystem review - which refactor does that shape actually call for?	ripwire-quality-bar	router	dev
+The profiler says we are memory-bound in this struct-heavy loop - which fields are actually read together versus how the struct is laid out?	ripwire-perf-target	judged	dev
+Before I reach for a heavier profiler pass, are there any obvious bad data-layout patterns a plain lint run would already catch?	ripwire-perf-target	judged	dev
+The map that came back looks short - did some files just get dropped for being too big to index?	ripwire-orient	judged	dev
+I expected this function to show up in the ranked output and it is just not there at all - is my ripwire setup broken?	ripwire-orient	judged	dev
+I am wrapping up for the day and want to leave a clean summary of this subsystem for whoever picks it up tomorrow.	ripwire-handoff	judged	dev
+Write up the entry points and the design rationale here so a teammate does not have to re-read the whole module cold.	ripwire-handoff	judged	dev
+I have a dozen old feature branches and no idea which ones still hold work that never made it to main.	ripwire-change-check	judged	dev
+Which ref actually still defines this function - I keep finding stale references to it across branches.	ripwire-change-check	judged	dev
+This function's complexity score looks huge, but half of it sits inside an #ifdef for a platform we do not even build - can I trust the number as reported?	ripwire-fresh-eyes	judged	dev
+The complexity number on this function is high, but I cannot tell if it is a genuine tangle or just a long simple sequence I could split by hand - how risky would splitting it actually be?	ripwire-quality-bar	judged	dev
+The compiler just printed "loop not vectorized" for a function I am editing in ripwire's own source - is that actually worth chasing with a code change?	ripwire-opt-remarks	judged	dev
+I am working on ripwire's C++ and clang keeps telling me a call "will not be inlined" - should I change the source or just move on?	ripwire-opt-remarks	judged	dev
+I have a huge pile of optimization-record YAML from a remarks build of this repo - how do I actually triage it instead of reading a gigabyte of output?	ripwire-opt-remarks	judged	dev
+Before I chase this LICM-failed-to-hoist remark with a source change, is a build flag more likely to be the real fix here?	ripwire-opt-remarks	judged	dev
+Our deploy pipeline is slow and the whole team is annoyed about it - where do we even start looking?	none	neg	dev
+This service feels sluggish under load - any general tips for speeding it up?	none	neg	dev
+My teammate left a bunch of code review remarks I still need to address before this merges.	none	neg	dev
+Can you optimize this paragraph so it reads faster for a non-technical audience?	none	neg	dev

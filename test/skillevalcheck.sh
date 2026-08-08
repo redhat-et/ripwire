@@ -48,11 +48,14 @@ grep -q "${posWant} positive + ${negWant} negative prompts" "$TMP/a" \
 # ── 3) the JUDGED split stays past the resolution floor (2026-07-25 growth pass) ────────────────────
 # n=16 judged rows resolves +-6pp per row, coarse enough to hide real movement — grown to 43. Pin the
 # corpus size itself, not just the harness's own row count, so a future edit cannot silently shrink the
-# hard (paraphrase) set back toward noise without this gate objecting.
-judgedWant=$( awk -F'\t' '!/^#/ && NF>=3 && $3=="judged"{n++} END{print n+0}' "$CORPUS" )
+# hard (paraphrase) set back toward noise without this gate objecting. Scoped to split=test ONLY (a 4th
+# column of "test", or absent, back-compat default): the 2026-08-08 dev split also carries judged-
+# provenance rows, and counting them in here would let a shrink of the FROZEN test set hide behind an
+# unrelated dev-row addition — the two pools must be protected independently.
+judgedWant=$( awk -F'\t' '!/^#/ && NF>=3 && $3=="judged" && ( NF<4 || $4=="test" ){n++} END{print n+0}' "$CORPUS" )
 awk -v j="$judgedWant" 'BEGIN{exit !(j+0 >= 40)}' \
-    && ok "judged split = ${judgedWant} rows (floor 40 — the resolution this gate was grown to reach)" \
-    || no "judged split = ${judgedWant} rows fell under the 40-row floor — resolution regressed to +-6pp-ish noise"
+    && ok "judged split (split=test) = ${judgedWant} rows (floor 40 — the resolution this gate was grown to reach)" \
+    || no "judged split (split=test) = ${judgedWant} rows fell under the 40-row floor — resolution regressed to +-6pp-ish noise"
 
 # ── 4) the TRIVIAL baseline is measured (printed as a row), never just asserted ──────────────────────
 awk '$1=="overlap"{found=1} END{exit !found}' "$TMP/a" \
@@ -62,15 +65,18 @@ awk '$1=="overlap"{found=1} END{exit !found}' "$TMP/a" \
 # ── 5) headline-arm floors: a description edit that tanks routing must fail HERE ─────────────────────
 # (floors sit ~8-9pp / 0.06-0.07 under the 2026-07-25 measured values on the grown n=43-judged corpus —
 # bm25-desc hit@1 77.3%, sep-auc 0.970; drift room, not free fall. Superseded the pre-growth 78.7%/0.969
-# floor pair, which was pinned against the n=16 corpus and is no longer the corpus this binary scores.)
-h1=$(  awk '$1=="bm25-desc"{gsub("%","",$2); print $2}' "$TMP/a" )
-auc=$( awk '$1=="bm25-desc"{print $5}' "$TMP/a" )
+# floor pair, which was pinned against the n=16 corpus and is no longer the corpus this binary scores.
+# 2026-08-08: scoped to the split=test row, NOT the whole-corpus arm line — since the dev split gained
+# rows this round, the whole-corpus number is now a mix of the frozen benchmark and free-to-iterate
+# tuning rows, and this floor exists to protect the FROZEN half specifically.)
+h1=$(  awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
+auc=$( awk '$1=="split=test" && $2=="bm25-desc"{print $6}' "$TMP/a" )
 awk -v v="$h1"  'BEGIN{exit !(v+0 >= 69.0)}' \
-    && ok "bm25-desc hit@1 = ${h1}% (floor 69.0%)" \
-    || no "bm25-desc hit@1 = ${h1}% fell under the 69.0% floor — a skill description likely broke routing"
+    && ok "bm25-desc hit@1 (split=test) = ${h1}% (floor 69.0%)" \
+    || no "bm25-desc hit@1 (split=test) = ${h1}% fell under the 69.0% floor — a skill description likely broke routing"
 awk -v v="$auc" 'BEGIN{exit !(v+0 >= 0.90)}' \
-    && ok "bm25-desc sep-auc = ${auc} (floor 0.90 — negatives stay quiet)" \
-    || no "bm25-desc sep-auc = ${auc} fell under 0.90 — positives/negatives no longer separate"
+    && ok "bm25-desc sep-auc (split=test) = ${auc} (floor 0.90 — negatives stay quiet)" \
+    || no "bm25-desc sep-auc (split=test) = ${auc} fell under 0.90 — positives/negatives no longer separate"
 
 # ── 6) the actionable diagnostics exist: per-skill table + per-provenance split ──────────────────────
 { grep -q 'per-skill (bm25-desc)' "$TMP/a" && grep -q 'provenance hit@1' "$TMP/a" && grep -q 'router-magnet' "$TMP/a"; } \
@@ -114,6 +120,40 @@ mkdir -p "$TMP/notskills"; printf 'int main(){return 0;}\n' >"$TMP/notskills/m.c
 { [ $rc_ns -ne 0 ] && grep -q 'ROOT must be a skills directory' "$TMP/nserr"; } \
     && ok "non-skills root refuses with guidance (rc=$rc_ns)" \
     || no "non-skills root did not refuse cleanly (rc=$rc_ns)"
+
+# ── 11) every skill directory has >= 1 permitted row in the corpus. A skill with zero permitted rows
+#     can never win, lose, or be measured for routing accuracy — it silently free-rides forever, and it
+#     can still steal top-1 away from a permitted skill without this gate ever noticing (2026-08-08 audit
+#     H1: ripwire-opt-remarks, added 08-05, shipped with 0 permitted rows and stole top-1 on several
+#     for-routed prompts + a bm25-desc negative fire before anyone had a row to prove it wrong). ripwire-
+#     router is exempt: it is the fallback map, never a legal label (see gate 9 above).
+skillDirs=$( find "$SKILLS" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort )
+missingSkills=""
+for sd in $skillDirs; do
+    [ "$sd" = "ripwire-router" ] && continue
+    awk -F'\t' -v s="$sd" '!/^#/ && NF>=3 && $2!="none" { n=split($2,a,","); for(i=1;i<=n;i++) if(a[i]==s) f=1 } END{exit !f}' "$CORPUS" \
+        || missingSkills="$missingSkills $sd"
+done
+[ -z "$missingSkills" ] \
+    && ok "every skill directory (except ripwire-router) has >=1 permitted row in the corpus" \
+    || no "skill(s) with ZERO permitted rows in the corpus, unmeasurable for routing:$missingSkills"
+
+# ── 12) dev-split floor: bm25-desc must not fall below a measured-with-margin floor on the TUNING rows
+#     (test/skillevalfix/prompts.tsv split=dev, added 2026-08-08 for the Aug 5-8 routing findings — nest-
+#     profile/essential-complexity trust, cache-lint pack, --skipped-vs---doctor, opt-remarks triage +
+#     its hard negatives). MEASURED on this commit: hit@1=62.5% (10/16), sep-auc=0.969, N=20 (16 positive
+#     + 4 negative). Coarse resolution (1 row = 6.25pp, 5x coarser than the n=128 test split) gets a WIDE
+#     margin — 15pp under hit@1, 0.15 under sep-auc — deliberately looser than test's 8-9pp/0.06-0.07.
+#     Recalibrate only on a deliberate dev-split edit (new rows, a description iteration you mean to
+#     measure), never silently.
+h1d=$(  awk '$1=="split=dev" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
+aucd=$( awk '$1=="split=dev" && $2=="bm25-desc"{print $6}' "$TMP/a" )
+awk -v v="$h1d"  'BEGIN{exit !(v+0 >= 45.0)}' \
+    && ok "dev-split bm25-desc hit@1 = ${h1d}% (floor 45.0%)" \
+    || no "dev-split bm25-desc hit@1 = ${h1d}% fell under the 45.0% floor"
+awk -v v="$aucd" 'BEGIN{exit !(v+0 >= 0.80)}' \
+    && ok "dev-split bm25-desc sep-auc = ${aucd} (floor 0.80)" \
+    || no "dev-split bm25-desc sep-auc = ${aucd} fell under 0.80"
 
 [ $fail -eq 0 ] && echo "skillevalcheck: ALL PASS" || echo "skillevalcheck: FAILURES"
 exit $fail

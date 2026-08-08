@@ -29,37 +29,46 @@ echo "skillevalsplitcheck: BIN=$BIN  CORPUS=$CORPUS"
 "$BIN" "$SKILLS" --eval-skills="$CORPUS" --no-cache >"$TMP/a" 2>"$TMP/aerr"; rc_a=$?
 [ $rc_a -eq 0 ] || { no "harness failed on the committed corpus (rc=$rc_a)"; head -4 "$TMP/aerr"; }
 
-# ── 1) every row in the committed corpus is explicitly split=test (the freeze is on the file, not left
-#    to the parser's back-compat default) — and there are no dev rows yet (empty today, as designed) ──
+# ── 1) the FROZEN test split holds at exactly 128 rows (that count must never move — see prompts.tsv's
+#    own header), and test+dev accounts for every row in the corpus with none silently falling through.
+#    2026-08-08: the dev split gained its first n=20 tuning rows (audit H1 follow-up), so this gate no
+#    longer asserts dev is empty — it asserts the FROZEN half stays frozen and the accounting still closes.
 testRows=$( awk -F'\t' '!/^#/ && NF>=4 && $4=="test"{n++} END{print n+0}' "$CORPUS" )
 devRows=$(  awk -F'\t' '!/^#/ && NF>=4 && $4=="dev"{n++}  END{print n+0}' "$CORPUS" )
 dataRows=$( awk -F'\t' '!/^#/ && NF>=3 {n++} END{print n+0}' "$CORPUS" )
-{ [ "$testRows" = "$dataRows" ] && [ "$devRows" = "0" ]; } \
-    && ok "all ${dataRows} committed rows are split=test, 0 are split=dev (frozen, dev empty today)" \
-    || no "split accounting off: dataRows=$dataRows testRows=$testRows devRows=$devRows"
+{ [ "$testRows" = "128" ] && [ "$(( testRows + devRows ))" = "$dataRows" ]; } \
+    && ok "frozen test split holds at 128 rows; test+dev (${testRows}+${devRows}) accounts for all ${dataRows} corpus rows" \
+    || no "split accounting off: dataRows=$dataRows testRows=$testRows devRows=$devRows (test must stay exactly 128)"
 
-judgedRows=$( awk -F'\t' '!/^#/ && NF>=3 && $3=="judged"{n++} END{print n+0}' "$CORPUS" )
+# Scoped to split=test: the frozen hard set this round names lives there, and the 2026-08-08 dev split
+# also carries judged-provenance rows that must not be able to mask a shrink of the frozen ones.
+judgedRows=$( awk -F'\t' '!/^#/ && NF>=3 && $3=="judged" && ( NF<4 || $4=="test" ){n++} END{print n+0}' "$CORPUS" )
 awk -v j="$judgedRows" 'BEGIN{exit !(j+0 >= 40)}' \
-    && ok "judged rows = ${judgedRows} (>= 40, the frozen hard set this round names)" \
-    || no "judged rows = ${judgedRows} fell under 40 — the frozen set this gate protects shrank"
+    && ok "judged rows (split=test) = ${judgedRows} (>= 40, the frozen hard set this round names)" \
+    || no "judged rows (split=test) = ${judgedRows} fell under 40 — the frozen set this gate protects shrank"
 
 # ── 2) --eval-skills' own header reports split sizes, and they match the corpus exactly ─────────────
-grep -q "split test=${dataRows} dev=0" "$TMP/a" \
-    && ok "header reports split test=${dataRows} dev=0 (matches the corpus, not just asserted)" \
-    || { no "header split counts missing/wrong (want test=${dataRows} dev=0)"; grep -o 'split test=[0-9]* dev=[0-9]*' "$TMP/a"; }
+grep -q "split test=${testRows} dev=${devRows}" "$TMP/a" \
+    && ok "header reports split test=${testRows} dev=${devRows} (matches the corpus, not just asserted)" \
+    || { no "header split counts missing/wrong (want test=${testRows} dev=${devRows})"; grep -o 'split test=[0-9]* dev=[0-9]*' "$TMP/a"; }
 
-# ── 3) the split-specific report section exists, split=test's numbers equal the whole-corpus numbers
-#    (today: whole corpus == test split, dev is empty) — and it does NOT collide with the existing
-#    arm-name-keyed lookups skillevalcheck.sh performs (field 1 must be "split=test", never a bare arm) ─
+# ── 3) the split-specific report section exists, and does NOT collide with the existing arm-name-keyed
+#    lookups skillevalcheck.sh performs (field 1 must be "split=test"/"split=dev", never a bare arm) ────
 grep -q '^  split=test ' "$TMP/a" && grep -q '^  split=dev ' "$TMP/a" \
     && ok "split=test and split=dev report sections both present" \
     || no "split report section(s) missing"
 
-h1Overall=$( awk '$1=="bm25-desc"{gsub("%","",$2); print $2}' "$TMP/a" )
-h1Split=$(   awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
-[ -n "$h1Overall" ] && [ "$h1Overall" = "$h1Split" ] \
-    && ok "split=test bm25-desc hit@1 (${h1Split}%) matches the whole-corpus number (${h1Overall}%) — dev is empty, so they must agree" \
-    || no "split=test bm25-desc hit@1 ('$h1Split') != whole-corpus ('$h1Overall')"
+h1Split=$( awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
+
+# split=test's OWN numbers must be invariant to whatever lives in split=dev — proved by comparing against
+# a temp corpus with every dev row stripped, rather than the (now populated, since 2026-08-08) whole-corpus
+# number, which no longer equals split=test's number and is not what this gate is protecting.
+awk -F'\t' '/^#/||$0==""{print;next} NF<4 || $4!="dev"{print}' "$CORPUS" >"$TMP/onlytest.tsv"
+"$BIN" "$SKILLS" --eval-skills="$TMP/onlytest.tsv" --no-cache >"$TMP/onlytestrun" 2>/dev/null
+h1TestAlone=$( awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/onlytestrun" )
+[ -n "$h1Split" ] && [ "$h1Split" = "$h1TestAlone" ] \
+    && ok "split=test bm25-desc hit@1 (${h1Split}%) is IDENTICAL whether or not dev rows are present — no conflation" \
+    || no "split=test bm25-desc hit@1 changed when dev rows were stripped (${h1Split}% vs ${h1TestAlone}%) — conflation bug"
 
 # field-1 must never be the bare arm name for a split row (that would silently corrupt skillevalcheck.sh's
 # `awk '$1=="bm25-desc"'`-style floors by adding a second matching line).
@@ -68,9 +77,10 @@ splitLinesWithBareArmField1=$( awk '$1=="bm25-desc" || $1=="overlap" || $1=="nam
     && ok "exactly 5 bare-arm-name field-1 lines in the whole output (the one overall table only — no collision)" \
     || no "found ${splitLinesWithBareArmField1} bare-arm-name field-1 lines (want exactly 5 — a split line is colliding)"
 
-# ── 4) dev split, being empty, reports cleanly (no crash, no garbage, no div-by-zero) ───────────────
-awk '/^  split=dev /{getline; print; exit}' "$TMP/a" | grep -q 'no positive rows in this split yet' \
-    && ok "empty dev split reports cleanly instead of computing garbage stats" \
+# ── 4) an EMPTY dev split still reports cleanly (no crash, no garbage, no div-by-zero) — the committed
+#    corpus's dev split is populated now, so this exercises it against the dev-stripped temp corpus above ─
+awk '/^  split=dev /{getline; print; exit}' "$TMP/onlytestrun" | grep -q 'no positive rows in this split yet' \
+    && ok "an empty dev split (temp corpus, dev rows stripped) reports cleanly instead of computing garbage stats" \
     || no "empty dev split did not print the expected empty-split message"
 
 # ── 5) split membership is STABLE: two independent runs (fresh temp corpus copy, --no-cache) agree ──
@@ -87,8 +97,9 @@ cmp -s "$TMP/split_a" "$TMP/split_copy" \
 cp "$CORPUS" "$TMP/plusdev.tsv"
 printf 'Wire ripwire into Cursor as an MCP server, tuning row.\tripwire-mcp\tjudged\tdev\n' >>"$TMP/plusdev.tsv"
 "$BIN" "$SKILLS" --eval-skills="$TMP/plusdev.tsv" --no-cache >"$TMP/plusdevrun" 2>/dev/null
-grep -q "split test=${dataRows} dev=1" "$TMP/plusdevrun" \
-    && ok "an added split=dev row is counted as dev=1, test stays at ${dataRows}" \
+devRowsAfter=$(( devRows + 1 ))
+grep -q "split test=${testRows} dev=${devRowsAfter}" "$TMP/plusdevrun" \
+    && ok "an added split=dev row bumps dev to ${devRowsAfter}, test stays at ${testRows}" \
     || { no "added dev row not reflected in header split counts"; grep -o 'split test=[0-9]* dev=[0-9]*' "$TMP/plusdevrun"; }
 h1TestAfter=$( awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/plusdevrun" )
 [ "$h1TestAfter" = "$h1Split" ] \
