@@ -84,11 +84,16 @@ printf '%s' "$PLAIN" | grep -q 'int plain() { return 42; }' \
     || no "--outline mangled a body-less function — got: $( printf '%s' "$PLAIN" | grep -oE '<o[^<]*<!\[CDATA\[[^]]*' | head -c 200 )"
 
 # ── 6) the token win is REAL: outline of classify < its full body (--expand) ─────────────────────────
-OLEN="$( run --outline=classify | wc -c | tr -d ' ' )"
-ELEN="$( run --expand=classify  | wc -c | tr -d ' ' )"
+# M6 (density audit 2026-08-08): compared at --top-k=0 (payload vs payload). A bare --expand now
+# auto-serves the CHEAPEST complete answer (test/expandmodecheck.sh) — on this small fixture that is the
+# whole FILE, which made the old bare-vs-bare comparison measure the serving mode, not the elision. The
+# claim this arm exists for is "the skeleton is smaller than the full body", and the lean forms compare
+# exactly that.
+OLEN="$( run --outline=classify --top-k=0 | wc -c | tr -d ' ' )"
+ELEN="$( run --expand=classify  --top-k=0 | wc -c | tr -d ' ' )"
 { [ "$OLEN" -gt 0 ] && [ "$ELEN" -gt 0 ] && [ "$OLEN" -lt "$ELEN" ]; } \
-    && ok "--outline smaller than --expand for classify ($OLEN < $ELEN bytes) — the elision saves tokens" \
-    || no "--outline not smaller than --expand (outline=$OLEN expand=$ELEN)"
+    && ok "--outline smaller than --expand for classify ($OLEN < $ELEN bytes, both at --top-k=0) — the elision saves tokens" \
+    || no "--outline not smaller than --expand (outline=$OLEN expand=$ELEN, both at --top-k=0)"
 
 # ── 7) determinism + xml well-formed ────────────────────────────────────────────────────────────────
 [ "$( run --outline=classify )" = "$( run --outline=classify )" ] \

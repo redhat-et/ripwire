@@ -3562,6 +3562,108 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     w.flush();
 }
 
+// ── M6 (density audit 2026-08-08): the WHOLE-FILE form a bare --expand can serve ─────────────────────
+// When every requested symbol's own FILE is byte-cheaper than the default bundle (ranked map + <bodies>),
+// the cheapest COMPLETE answer is the file itself — measured live at 5.65x bundle-over-file on a small
+// file (--expand=pageRankDouble: 27,890 B bundle vs 4,936 B src/pagerank.cpp). This renders that form:
+// one <src p= sym=> block per DISTINCT file of the requested nodes (first-appearance order — nodes is
+// already deterministic), the file body CDATA-wrapped through the same redact + scrub pipeline
+// packSource uses, sym= carrying every requested symbol's name:line anchor, and each symbol's field
+// notes still surfaced (L3 — the notes must not vanish just because the serving form changed).
+// rawBytes is the Σ of raw on-disk bytes — the number the caller's reason= attribute discloses and
+// compares; the rendered form differs from it only by the envelope and CDATA-safety expansion.
+// complete=false (any file unreadable or empty) means this form is NOT a candidate: the caller serves
+// the bundle instead — a degraded read must never masquerade as the complete answer.
+struct WholeFileRender
+{
+    std::string xml;              // the <src ...>...</src> blocks, ready to splice inside <ctx>
+    std::size_t rawBytes = 0;     // Σ raw file bytes of the distinct files (what reason= compares)
+    bool        complete = false; // every file read whole; false => caller falls back to the bundle
+};
+
+inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vector<NodeId>& nodes,
+                                         RedactCounts* redact, const notes::NoteIndex* noteIndex )
+{
+    WholeFileRender r;
+    std::vector<std::uint32_t> fileOrder;
+    for( NodeId id : nodes )
+    {
+        if( id >= ing.symbols.size() )
+        {
+            continue;
+        }
+        const std::uint32_t f = ing.symbols[id].fileId;
+        if( std::find( fileOrder.begin(), fileOrder.end(), f ) == fileOrder.end() )
+        {
+            fileOrder.push_back( f );
+        }
+    }
+    if( fileOrder.empty() )
+    {
+        return r;
+    }
+
+    std::vector<char> esc;
+    for( std::uint32_t f : fileOrder )
+    {
+        std::FILE* in = std::fopen( diskPath( ing, f ).c_str(), "rb" );
+        if( !in )
+        {
+            return WholeFileRender{};   // unreadable => not a candidate, never a partial "complete" answer
+        }
+        std::string body;
+        char        buf[ 4096 ];
+        std::size_t n = 0;
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            body.append( buf, n );
+        }
+        std::fclose( in );
+        if( body.empty() )
+        {
+            return WholeFileRender{};   // vanished/empty since ingest => same fallback
+        }
+        r.rawBytes += body.size();
+
+        // sym= anchors (name:line per requested node in this file, request order) + their field notes.
+        std::string anchors;
+        std::string noteStr;
+        for( NodeId id : nodes )
+        {
+            if( id >= ing.symbols.size() || ing.symbols[id].fileId != f )
+            {
+                continue;
+            }
+            const Symbol& s = ing.symbols[id];
+            if( !anchors.empty() )
+            {
+                anchors += ',';
+            }
+            anchors += s.name;
+            anchors += ':';
+            anchors += std::to_string( s.line );
+            noteStr += renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );
+        }
+
+        redactInPlace( body, redact );          // §B10.1: raw file text is the widest credential seam
+        std::string safe;
+        safe.reserve( body.size() );
+        appendCdataSafe( body, safe );          // split ]]>, scrub C0 controls (G4) + invalid UTF-8
+
+        r.xml += "<src p=\"";
+        r.xml += escapeXml( ing.files[f], esc );
+        r.xml += "\" sym=\"";
+        r.xml += escapeXml( anchors, esc );
+        r.xml += "\">";
+        r.xml += noteStr;
+        r.xml += "<![CDATA[";
+        r.xml += safe;
+        r.xml += "]]></src>";
+    }
+    r.complete = true;
+    return r;
+}
+
 // --expand est_tokens bugfix: estimate the token cost of the <bodies> block packBodies
 // will emit for `nodes`, so serialize()'s header can report header+body (not map-only). Mirrors the
 // packBodies byte accounting closely enough for an honest ±15% estimate: per node it reads the def span
