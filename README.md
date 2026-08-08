@@ -264,11 +264,70 @@ real work, and the joke is aimed at the trade-offs, never the authors.</sub>
 
 ---
 
-**Name a symbol and it is the first hit.** A confidence-gated router detects when a query *names*
-something and switches rankers: recall@1 on name-shaped queries **76.7% → 98.7%** in `src/`,
-**63.3% → 87.3%** at the repository root. The gate is the load-bearing part — route everything and
-doc-phrase queries collapse from 0.993 MRR to 0.427 — so both numbers ship together. Reproduce
-either with `ripwire <dir> --eval-retrieval`.
+**Name a symbol and it is the first hit — and it is never a mystery which ranker answered.** Every
+`--for` query is served by one of three lanes; a confidence-gated router picks by reading the
+query's *shape*, discloses its choice on the output (`route=`), and `--no-route` overrides it.
+Routing lifts recall@1 on name-shaped queries **70.0% → 98.0%** in `src/`, **56.0% → 81.3%** at the
+repository root — and the gate is load-bearing in both directions: route *everything* to the name
+lane and prose queries collapse from **0.982 MRR to 0.018**. Both numbers ship together. Reproduce
+with `ripwire <dir> --eval-retrieval`.
+
+| Lane | Built for | Why it wins there | Where it loses |
+| --- | --- | --- | --- |
+| **name-exact** | identifier-shaped queries (`chooseForRanker`, `pack task`) | whole-name match ignores body noise: **98.0%** recall@1, **0.990** MRR in `src/` | scores zero on any word that is not literally a name — forced onto prose it dies (**0.018** MRR) |
+| **subtoken+body** | prose and task queries ("where is the content hash computed") | the only lane that matches vocabulary living in doc comments and bodies | exact names drown in shared subtokens (**70.0%** recall@1 on name queries) |
+| **mention anchor** | a pasted path, `Type.method`, or issue URL | a literal mention is lifted above any score — paste the ticket, don't paraphrase it | adds nothing when the query names no artifact |
+
+<details>
+<summary><b>How each lane finds things, and how the router picks — step by step</b></summary>
+
+<br>
+
+**How the conceptual lane finds what you didn't name.** The subtoken+body lane is why a query with
+no symbol name in it still lands:
+
+- **Both sides are split into subtokens.** `SplitChunksPlugin` becomes `split`+`chunks`+`plugin`, and
+  so does your query — so words match *pieces* of names you never typed.
+- **Three evidence fields, not one.** A symbol is scored on its name subtokens, its doc comment, and
+  its body — vocabulary that only exists in a comment or an implementation still finds its symbol.
+- **BM25 with per-query IDF.** Rare, discriminating words dominate the score; words the whole corpus
+  shares contribute almost nothing. Type the three words only the right function uses and they carry
+  the query.
+- **Lookalikes are down-weighted, not hidden.** Fixture, test-data, and generated paths score at a
+  fraction, so a test vocabulary-twin cannot outrank the real source (adversarial-class pollution@5:
+  28% → 0%, `docs/EVALS.md` §4) — but they stay in the index and are still found when *asked for*.
+- **The list ends at a cliff, not a quota.** The cut is adaptive: output stops where the scores drop
+  off, so a sharp answer is a short list and a diffuse one is disclosed as such, instead of a fixed
+  top-k padding both.
+
+**How the router picks.** The gate is built on cheap, corpus-derived evidence, and its bias reflects
+an asymmetry the table above makes plain: a *missed* name-route costs a few ranks; a *false* one is
+catastrophic (0.018 MRR).
+
+1. **Identifier shape is trusted outright.** A camelCase/snake token — or a short query carrying
+   one — routes name-exact. Someone who types `chooseForRanker` is naming, not describing.
+2. **The all-words test.** If *every* content word equals some symbol's whole name (`pack task`
+   where both `pack` and `task` are real symbols), that is strong evidence of a name query.
+3. **The plausibility test.** Present is not enough — each matched name must be *specific*: few
+   definitions, and not a subtoken carried by half the corpus's symbol names (thresholds derived
+   from the index itself, not a hardcoded stdlib list). This is what catches `split chunks`:
+   every word names a symbol, but `split` names a String method defined everywhere — so the route
+   is **declined** and the conceptual lane runs, which finds `SplitChunksPlugin` easily.
+4. **Every decision is disclosed.** `route=` states the lane that ran; a decline names the anchor
+   that failed and why. `--no-route` forces the conceptual lane when you disagree.
+
+The proof the gate earns its keep: the routed lane matches the *best* single lane on both query
+modes simultaneously — 0.990 MRR on names (equal to forced name-exact) and 0.982 on prose (within
+noise of pure subtoken+body, `src/`). No single lane does that.
+
+The honest boundary: the router classifies the query's shape — it cannot rescue vocabulary that is
+not in the index. A prose query whose concept lives only in a compound class name
+(`SplitChunksPlugin` contains no `splits` subtoken) is correctly sent to the conceptual lane, which
+then has little to grab; that gap is measured and recorded in
+[docs/EVALS.md §7](docs/EVALS.md), not hidden. Numbers re-derived 2026-08-08 on this tree;
+per-lane table and history in [docs/EVALS.md §4](docs/EVALS.md).
+
+</details>
 
 ### Saves Tokens: It answers for a fraction of the context
 
