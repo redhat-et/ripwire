@@ -200,16 +200,20 @@ inline std::string_view escapeXml( std::string_view s, std::vector<char>& out )
 // `git grep -c 'xmlCommentText(' -- src/` (excluding this definition) and FAILS if it disagrees with the
 // count on the CALL-SITES line below, so the next divergence is a red gate rather than a stale sentence.
 //
-//   CALL-SITES: 14
-//     main.cpp     --for task echo · --for route note · --query route note ·
-//                  --exemplar request note                                              (4)
-//     packtask.h   task · route · mention · co-change-boost · doc-mention notes         (5)
-//     mcpverbs.h   for/pack-task task · its route reason · exemplar request note        (3)
+//   CALL-SITES: 11
+//     main.cpp     --for task echo · --exemplar request note · --query route note       (3)
+//     packtask.h   task · mention · co-change-boost · doc-mention notes                 (4)
+//     mcpverbs.h   for/pack-task task · exemplar request note                           (2)
 //     tracelocus.h --from-trace src note                                                (1)
 //     serialize.h  the <b>/<o> per-symbol name echo inside a comment                    (1)
-// The 14th (`main.cpp`'s queryRouteNote, --query) landed in the wave-3 merge, and the mechanism worked as
-// designed: this line still read 13, (S4) went red naming the true figure, and the fix was one line. That is
-// the whole point — the count is now load-bearing rather than decorative.
+// 2026-08-08 (final-sweep): 14 -> 11. L1 (density audit) dropped the comment-echoed `route note` from THREE
+// of the fourteen sites — main.cpp's --for route note, packtask.h's route note, and mcpverbs.h's route
+// reason — because the route= attribute (ctxRootOpen, attribute-escaped) is now the ONE copy of that text
+// (test/routeoncecheck.sh pins the single-copy contract); the comment echo was a duplicated ~230-260 B per
+// routed call that a scrub still had to run over. The 14th (`main.cpp`'s queryRouteNote, --query) landed in
+// the wave-3 merge, and the mechanism worked as designed: this line still read 13, (S4) went red naming the
+// true figure, and the fix was one line. That is the whole point — the count is now load-bearing rather
+// than decorative.
 inline std::string xmlCommentText( std::string_view raw )
 {
     std::string out;
