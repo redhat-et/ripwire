@@ -8309,6 +8309,7 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
 //   line(b) = 1 + (# of '\n' at offset < b) = 1 + lower_bound(offsets, b) position.
 inline std::vector<std::uint32_t> buildNewlineOffsets( std::string_view src )
 {
+PROFILE_SCOPE_DESCRIBE( "strings: buildNewlineOffsets (byte scan for newline)" );
     std::vector<std::uint32_t> off;
     for( std::uint32_t i = 0; i < src.size(); ++i )
     {
@@ -8705,6 +8706,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                                     --cutLen;
                                 }
                             }
+                            PROFILE_SCOPE_DESCRIBE( "strings: capture text substr + whitespace scrub" );
                             std::string text = bytes.substr( a, cutLen );
                             for( char& ch : text )
                             {
