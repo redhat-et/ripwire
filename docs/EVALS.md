@@ -221,16 +221,31 @@ Known-item retrieval over deterministically sampled doc-commented symbols, two s
 symbol (the whole name; a stopworded phrase from the doc comment's first line), four rankers, gold
 rank measured. Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.
 
-| Query shape | Before | After |
-| --- | --- | --- |
-| Name-shaped queries, `src/` — MRR | 0.859 | **0.993** |
-| Name-shaped queries, `src/` — recall@1 | 76.7% | **98.7%** |
-| Name-shaped queries, repository root — MRR | 0.725 | **0.929** |
-| Name-shaped queries, repository root — recall@1 | 63.3% | **87.3%** |
+Re-derived 2026-08-08 at the anchor-plausibility fix (`fa4639e`, §7's r7 entry): the corpus has
+grown since the original measurement, so both sides were re-measured on the current tree —
+"ungated" is the subtoken+body lane of the current binary, "routed" the default. Root numbers
+verified identical on a pristine worktree (no untracked local files in the sample).
 
-The router is **confidence-gated**, and the gate is the interesting part: doc-phrase queries scored
-**0.993** (`src/`) and **0.789** (root) with the gate, against **0.427** and **0.146** without it. An
-ungated router routes the wrong queries. Both numbers are published together.
+| Query shape | ungated (subtoken) | routed |
+| --- | --- | --- |
+| Name-shaped queries, `src/` — MRR | 0.797 | **0.990** |
+| Name-shaped queries, `src/` — recall@1 | 70.0% | **98.0%** |
+| Name-shaped queries, repository root — MRR | 0.683 | **0.876** |
+| Name-shaped queries, repository root — recall@1 | 56.0% | **81.3%** |
+
+The router is **confidence-gated**, and the gate is the interesting part: doc-phrase queries score
+**0.982** MRR (`src/`) and **0.794** (root) with the gate, against **0.018** and **0.002** if every
+query is forced down the name-exact lane. An ungated router routes the wrong queries — and the cost
+is not degradation but collapse. Both numbers are published together. Since `fa4639e` the gate also
+declines in the other direction: a query whose words all name symbols is still refused the
+name-exact route when its only anchors are common names (definition-count and name-carrier
+thresholds derived from the index; `test/routecheck.sh` arm (g) pins the decline and its `route=`
+disclosure).
+
+*Original rows at router introduction, kept as the record of that delta on the then-corpus:*
+*`src/` MRR 0.859→0.993, recall@1 76.7%→98.7%; root MRR 0.725→0.929, recall@1 63.3%→87.3%;*
+*gate ablation 0.993/0.789 with vs 0.427/0.146 without (the ablation then compared against an*
+*earlier router formulation, not the forced-name-exact lane measured above).*
 
 ### Fixture and generated-path de-prioritization
 

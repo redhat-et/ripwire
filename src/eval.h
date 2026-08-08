@@ -596,8 +596,10 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     row( "routed",   "doc-phrase",rtP );
     std::printf( "  note: routing chose name-exact on %zu/%zu NAME queries (a NAME query is always identifier-shaped);\n"
                  "        the confidence gate routes doc-phrase queries to name-exact ONLY when EVERY content word names a symbol\n"
-                 "        (or an explicit camel/snake token appears), so conceptual prose falls back to subtoken+body — routed tracks\n"
-                 "        the better ranker on BOTH modes (routed==name-exact on name, ~=subtoken+body on doc-phrase).\n",
+                 "        (or an explicit camel/snake token appears) AND every matched name is specific enough to anchor on —\n"
+                 "        a common name (many definitions, or a subtoken carried by many symbol names) declines the route — so\n"
+                 "        conceptual prose falls back to subtoken+body; routed tracks the better ranker on BOTH modes\n"
+                 "        (routed==name-exact on name, ~=subtoken+body on doc-phrase).\n",
                  routedNameExactPicks, sample.size() );
     return 0;
 }
