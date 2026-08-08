@@ -489,16 +489,20 @@ using atomdetail::isCFamilyPath;
 // two-liner is exactly the clone --quality-delta exists to catch.
 using atomdetail::spanOf;
 
+// The pack's QUERY table, re-exported so `--lint` can hand it to the one grouped astQuery walk that also
+// serves the built-in checks and the cache pack (astQueryGrouped, src/ingest.h) instead of this pack
+// paying for a second read+parse of the whole corpus. Same one-copy reason as the two above.
+using atomdetail::atomsSpecs;
+
 // Run the pack. One astQuery pass over the already-crawled files; everything after it is span algebra
 // and text tests over the captures. Deterministic: astQuery returns (file path, startByte, endByte,
 // tag) order and every filter below is order-preserving, so no hash iteration, thread arrival order,
 // or wall clock can reach a row.
-inline AtomsRun atomsOfConfusion( const IngestResult& ing, std::size_t maxPerRule )
+inline AtomsRun atomsOfConfusionFromCaptures( const IngestResult& ing, std::size_t maxPerRule, std::vector<AstMatch> ms )
 {
     using namespace atomdetail;
 
     AtomsRun              run;
-    std::vector<AstMatch> ms   = astQuery( ing, atomsSpecs(), kAtomsQueryBudget );
     const Exclusions      ex   = collectExclusions( ing, ms, kAtomsQueryBudget );
     std::vector<AstMatch> kept = applyExclusions( ing, ms, ex );
     std::vector<AstMatch> rows = collapseNestedTernaries( ing, kept );
@@ -533,6 +537,16 @@ inline AtomsRun atomsOfConfusion( const IngestResult& ing, std::size_t maxPerRul
         }
     }
     return run;
+}
+
+// The standalone spelling: run the pack's own astQuery pass, then the shared body above. `--lint` does
+// NOT come through here — it hands atomsOfConfusionFromCaptures the captures from the one grouped walk
+// that also serves the built-in checks and the cache pack (astQueryGrouped, src/ingest.h), so the corpus
+// is read and parsed once for three packs instead of three times. Every other caller (--ensemble) wants
+// the pack on its own and pays for its own walk.
+inline AtomsRun atomsOfConfusion( const IngestResult& ing, std::size_t maxPerRule )
+{
+    return atomsOfConfusionFromCaptures( ing, maxPerRule, astQuery( ing, atomsSpecs(), kAtomsQueryBudget ) );
 }
 
 }   // namespace rw::atoms
