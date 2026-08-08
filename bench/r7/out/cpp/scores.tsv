@@ -1,0 +1,21 @@
+idx	hit_rw	hit_cg	bytes_rw	bytes_cg	question	truth
+1	1	1	7281	19887	where is personalized pagerank power iteration computed	src/pagerank.cpp
+2	1	1	7316	19560	where are symbols extracted from source with tree-sitter	src/ingest.cpp
+3	0	1	7470	13839	where are call references resolved into graph edges	src/resolve.h
+4	1	0	7409	13432	where is the minified xml map written to stdout	src/serialize.h
+5	1	1	7181	19849	where is the MCP server json-rpc request loop	src/mcpserver.h
+6	0	0	7401	14519	where are duplicate code bodies detected	src/clones.h
+7	1	1	7261	15347	where is the quality regression compared against git HEAD	src/quality.h
+8	1	1	7387	11607	where is git commit churn history mined	src/gitmine.h
+9	1	0	7407	16348	where is the command line flag table parsed	src/cli.h
+10	0	1	7104	17783	where are struct fields checked for cache line locality	src/fieldaffinity.h
+11	1	1	7340	12223	where is the pairwise branch conflict analysis done	src/mergescout.h
+12	1	1	7234	16380	where are the built-in AST lint rules defined	src/lintrules.h
+13	1	1	7352	20488	where are field notes read from and written to disk	src/notes.h
+14	1	1	7470	17694	where is the best in class exemplar picked by role	src/exemplar.h
+15	1	1	7394	19049	where is the one call task bundle assembled under a budget	src/packtask.h
+16	1	1	7398	19705	where is a stack trace frame mapped onto an indexed symbol	src/tracein.h
+17	1	0	7131	9562	where is a symbol contract compared for parameter changes	src/editcheck.h
+18	1	1	7511	18261	where are architecture layering rules enforced	src/arch.h
+19	0	0	7508	13872	where is the nesting profile of a function measured	src/readability.h
+20	0	0	7487	16343	where is the incremental parse cache written and restored	src/serialize.h

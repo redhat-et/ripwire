@@ -1,0 +1,391 @@
+**Exploration: where is the command line flag table parsed**
+
+Found 58 symbols across 4 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `parse` (src/layout.h:631) — 2 callers in `src/layout.h`; ⚠️ no covering tests found
+- `writeFlags` (src/darkflags.h:1078) — 2 callers in `src/main.cpp`, `src/mcpverbs.h`; ⚠️ no covering tests found
+- `forEachLine` (src/darkflags.h:212) — 5 callers in `src/darkflags.h`, `src/docdrift.h`, `src/flipimpact.h`; ⚠️ no covering tests found
+- `computeFlags` (src/darkflags.h:911) — 3 callers in `src/flipimpact.h`, `src/main.cpp`, `src/mcpverbs.h`; ⚠️ no covering tests found
+- `regionEndLine` (src/darkflags.h:86) — 1 caller in `src/flipimpact.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/darkflags.h`** — identByte(calls), siteLess(function), regionEndLine(function), forEachLine(function), trimView(function), +4 more
+
+```cpp
+68	    std::uint32_t line = 0;
+69	};
+70	
+71	inline bool siteLess( const Site& a, const Site& b )
+72	{
+73	    return a.path != b.path ? a.path < b.path : a.line < b.line;
+74	}
+75	
+76	// One `#if`-family region whose condition mentions a gate, kept as a SPAN rather than folded straight into
+77	// the counters. `--flags` only ever prints the counts, but `--flip` (flipimpact.h) needs the span itself to
+
+... (gap) ...
+
+83	    std::uint32_t lines = 0;        // lines strictly INSIDE it (the same number folded into guardedLines)
+84	};
+85	
+86	inline std::uint32_t regionEndLine( const Region& r ) noexcept { return r.site.line + r.lines + 1; }   // the `#endif`
+87	
+88	struct Gate
+89	{
+
+... (gap) ...
+
+209	// `lineIndex` (the 1-based number handed to `perLine`) and `lineCount` (what this returns) are the same
+210	// number only because the last visited index IS the count; they are named apart on purpose.
+211	template<class PerLine>
+212	inline std::uint32_t forEachLine( std::string_view bytes, PerLine&& perLine )
+213	{
+214	    std::uint32_t lineCount = 0;
+215	    for( std::size_t i = 0; i < bytes.size(); )
+216	    {
+217	        std::size_t e = bytes.find( '\n', i );
+218	        if( e == std::string_view::npos )
+219	        {
+220	            e = bytes.size();
+221	        }
+222	        std::string_view line = bytes.substr( i, e - i );
+223	        if( !line.empty() && line.back() == '\r' )
+224	        {
+225	            line.remove_suffix( 1 );
+226	        }
+227	        ++lineCount;
+228	        perLine( line, lineCount );
+229	        if( e == bytes.size() )
+230	        {
+231	            break;
+232	        }
+233	        i = e + 1;
+234	    }
+235	    return lineCount;
+236	}
+237	
+238	inline std::string_view trimView( std::string_view s )
+239	{
+240	    std::size_t a = 0, b = s.size();
+241	    while( a < b && std::isspace( (unsigned char)s[a] ) )
+242	    {
+243	        ++a;
+244	    }
+245	    while( b > a && std::isspace( (unsigned char)s[b - 1] ) )
+246	    {
+247	        --b;
+248	    }
+249	    return s.substr( a, b - a );
+250	}
+251	
+252	// The identifier starting at `i` (empty if src[i] does not open one), advancing `i` past it.
+253	inline std::string_view takeIdent( std::string_view src, std::size_t& i )
+254	{
+255	    const std::size_t s = i;
+256	    while( i < src.size() && identByte( (unsigned char)src[i] ) )
+257	    {
+258	        ++i;
+259	    }
+260	    return src.substr( s, i - s );
+261	}
+262	
+263	// Every identifier mentioned in `expr` (a preprocessor condition), skipping the `defined` keyword itself.
+264	inline std::vector<std::string_view> identsIn( std::string_view expr )
+265	{
+266	    std::vector<std::string_view> out;
+267	    for( std::size_t i = 0; i < expr.size(); )
+268	    {
+269	        if( !identByte( (unsigned char)expr[i] ) ) { ++i; continue; }
+270	        const std::string_view id = takeIdent( expr, i );
+271	        if( !id.empty() && id != "defined" && !std::isdigit( (unsigned char)id[0] ) )
+272	        {
+273	            out.push_back( id );
+274	        }
+275	    }
+276	    return out;
+277	}
+278	
+279	// ── per-file harvest ─────────────────────────────────────────────────────────────────────────────────────
+280	
+```
+
+**`src/gitmine.h`** — GitCommandLines(struct), gitCommandLines(function), readByteSafeLine(calls), push_back(calls)
+
+```cpp
+455	// failed", which the two main.cpp probes decide differently. Extracted when the §H6 fix made those two
+456	// probes' tails one shared call each and left this loop as the only thing they still cloned (216 tokens, and
+457	// --quality-delta flagged it: the boilerplate had been duplicated all along, the fix merely exposed it).
+458	struct GitCommandLines
+459	{
+460	    std::vector<std::string> lines;
+461	    bool                     isStarted = false;
+462	    int                      status    = 0;
+463	};
+464	
+465	inline GitCommandLines gitCommandLines( const std::string& cmd )
+466	{
+467	    GitCommandLines out;
+468	    std::FILE* pipe = popen( cmd.c_str(), "r" );
+469	    if( !pipe )
+470	    {
+471	        return out;
+472	    }
+473	    out.isStarted = true;
+474	
+475	    // R4's readByteSafeLine, not a `char line[4096]` + fgets — the rule for EVERY git-pipe reader in this file.
+476	    // F6 found the claim applied at one of five readers; G3 found three MORE survivors after the fix that
+477	    // recorded F6, in the same file in the same wave, so the claim is now re-derived the only way that works
+478	    // (trap #10): by grepping this file for the OLD pattern's survivors, not the new one's adoptions.
+479	    // As of G3 every hit for `fgets` / `char line[` / `char buf[` in this file is inside a COMMENT — there is
+480	    // no such code left; every reader is this one, or gitCommandLines, which is this one. That is not a claim
+481	    // to be trusted from here: churnjoincheck §9c re-derives it from the source on every run, because a
+482	    // comment asserting a file-wide property is exactly what rotted twice.
+483	    // It grows dynamically, so a path longer than the buffer arrives as
+484	    // ONE line instead of two truncated ones, and it keeps an embedded NUL instead of ending the string there
+485	    // (`std::string s( line )` on an fgets buffer stops at the first NUL). Under a fuzzy join a split tail
+486	    // could bind to a real but WRONG file; under the exact join above it binds to nothing, so the residual cost
+487	    // is a silently DROPPED commit rather than a fabricated one — still a number the reader would trust.
+488	    // It leaves a trailing '\r' in place by contract, which is why the strip below still runs.
+489	    std::string line;
+490	    while( readByteSafeLine( pipe, line ) )
+491	    {
+492	        while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) )
+493	        {
+494	            line.pop_back();
+495	        }
+496	        if( !line.empty() )
+497	        {
+498	            out.lines.push_back( line );
+499	        }
+500	    }
+501	    out.status = pclose( pipe );
+502	    return out;
+503	}
+504	
+505	// The repo TOPLEVEL enclosing `absDir` (absolute and already realpath'd), or empty when `absDir` is not inside
+506	// a git repo at all. realpath'd on the way out so it compares byte-for-byte with a realpath'd file path — on
+```
+
+**`src/layout.h`** — level(calls), skipWs(calls), IntEval(instantiates), parse(calls), IntEval(struct), +13 more
+
+```cpp
+622	// A tiny recursive-descent evaluator over `+ - * / ( )`, integer literals, and CONSTANT NAMES resolved
+623	// through the table above. Deliberately small: an extent it cannot evaluate becomes an UNKNOWN extent
+624	// (which un-sizes the field, which un-sizes the aggregate) rather than a guess.
+625	struct IntEval
+626	{
+627	    const ConstTable& table;
+628	    std::size_t       depth = 0;
+629	    bool              ok    = true;
+630	
+631	    std::int64_t parse( std::string_view s )
+632	    {
+633	        std::size_t        i = 0;
+634	        const std::int64_t v = level( s, i, 0 );
+635	        skipWs( s, i );
+636	        if( i != s.size() )
+637	        {
+638	            ok = false;
+639	        }
+640	        return v;
+641	    }
+642	
+643	private:
+644	    // Precedence-climbing: ONE binary level parameterized by rank, rather than a sum()/product() pair whose
+645	    // bodies would be the same eleven lines twice (the clone the quality gate would — correctly — flag).
+646	    // Rank 0 is `+ -`, rank 1 is `* /`, rank 2 falls through to atom().
+647	    static constexpr std::string_view kOpsAtRank[] = { "+-", "*/" };
+648	
+649	    static void skipWs( std::string_view s, std::size_t& i )
+650	    {
+651	        while( i < s.size() && std::isspace( (unsigned char)s[i] ) != 0 )
+652	        {
+653	            ++i;
+654	        }
+655	    }
+656	
+657	    std::int64_t apply( char op, std::int64_t a, std::int64_t b )
+658	    {
+659	        if( ( op == '/' ) && b == 0 ) { ok = false; return 0; }        // never divide by zero under G1
+660	        switch( op )
+661	        {
+662	            case '+': return a + b;
+663	            case '-': return a - b;
+664	            case '*': return a * b;
+665	            default:  return a / b;
+666	        }
+667	    }
+668	
+669	    std::int64_t level( std::string_view s, std::size_t& i, std::size_t rank )
+670	    {
+671	        if( rank >= std::size( kOpsAtRank ) )
+672	        {
+673	            return atom( s, i );
+674	        }
+675	        const std::string_view ops = kOpsAtRank[ rank ];
+676	        std::int64_t           v   = level( s, i, rank + 1 );
+677	        for( skipWs( s, i ); ok && i < s.size() && ops.find( s[i] ) != std::string_view::npos; skipWs( s, i ) )
+678	        {
+679	            const char op = s[ i++ ];
+680	            v = apply( op, v, level( s, i, rank + 1 ) );
+681	        }
+682	        return v;
+683	    }
+684	
+685	    std::int64_t atom( std::string_view s, std::size_t& i )
+686	    {
+687	        skipWs( s, i );
+688	        if( i >= s.size() || !ok ) { ok = false; return 0; }
+689	        if( s[i] == '(' )
+690	        {
+691	            ++i;
+692	            const std::int64_t v = level( s, i, 0 );
+693	            skipWs( s, i );
+694	            if( i < s.size() && s[i] == ')' ) { ++i; }
+695	            else
+696	            {
+697	                ok = false;
+698	            }
+699	            return v;
+700	        }
+701	        if( std::isdigit( (unsigned char)s[i] ) != 0 )
+702	        {
+703	            std::int64_t v = 0;
+704	            while( i < s.size() && std::isdigit( (unsigned char)s[i] ) != 0 )
+705	            {
+706	                if( v > ( 1ll << 40 ) ) { ok = false; return 0; }      // absurd literal — refuse, never wrap
+707	                v = v * 10 + ( s[ i++ ] - '0' );
+708	            }
+709	            while( i < s.size() && ( s[i] == 'u' || s[i] == 'U' || s[i] == 'l' || s[i] == 'L' ) )
+710	            {
+711	                ++i;
+712	            }
+713	            return v;
+714	        }
+715	        if( !identByte( (unsigned char)s[i] ) ) { ok = false; return 0; }
+716	
+717	        const std::string_view name = takeQualifiedIdent( s, i );
+718	        if( name.empty() || depth >= kMaxMacroDepth ) { ok = false; return 0; }   // bounded: an A→B→A cycle stops here
+719	        const auto it = table.find( std::string( name ) );
+720	        if( it == table.end() || it->second.empty() ) { ok = false; return 0; }
+721	
+722	        // Every definition of the name must agree, or the extent is not knowable (the dual-compile rule).
+723	        std::int64_t first = 0;
+724	        for( std::size_t k = 0; k < it->second.size(); ++k )
+725	        {
+726	            IntEval            inner{ table, depth + 1, true };
+727	            const std::int64_t v = inner.parse( it->second[k] );
+728	            if( !inner.ok ) { ok = false; return 0; }
+729	            if( k == 0 )
+730	            {
+731	                first = v;
+732	            }
+733	            else if( v != first )
+734	            {
+735	                ok = false;
+736	                return 0;
+737	            }
+738	        }
+739	        return first;
+740	    }
+741	};
+742	
+743	inline bool evalExtent( const ConstTable& table, std::string_view expr, std::uint32_t& out )
+744	{
+745	    IntEval            ev{ table, 0, true };
+746	    const std::int64_t v = ev.parse( expr );
+747	    if( !ev.ok || v <= 0 || v > std::int64_t( kMaxArrayElems ) )
+748	    {
+749	        return false;
+750	    }
+751	    out = std::uint32_t( v );
+752	    return true;
+753	}
+754	
+755	// ── type sizing ──────────────────────────────────────────────────────────────────────────────────────
+756	
+```
+
+**`src/docparse.h`** — docKindOf(calls), shellQuote(function), calls(calls), runMarkitdown(function), shellQuote(calls), +6 more
+
+```cpp
+439	// moot: the canonical implementation moved to jsonesc.h (STL-only, zero project includes), which both
+440	// docparse.h and gitmine.h can pull in for free. This is a thin forwarder so the local `shellQuote`
+441	// name/call sites below don't need to change.
+442	inline std::string shellQuote( const std::string& s )
+443	{
+444	    return rw::shSingleQuote( s );
+445	}
+446	
+447	}   // namespace detail
+448	
+449	// Run `markitdown <path>` and return its stdout (Markdown), or "" if markitdown is not on PATH / it failed.
+450	// NOTE: this performs a subprocess call — used only for binary doc formats, only when they are ingested.
+451	inline std::string runMarkitdown( const std::string& path )
+452	{
+453	    const std::string cmd = "markitdown " + detail::shellQuote( path ) + " 2>/dev/null";
+454	    std::FILE* pipe = ::popen( cmd.c_str(), "r" );
+455	    if( pipe == nullptr )
+456	    {
+457	        DEGRADED_PATH_ALERT( "docparse: popen failed for markitdown bridge" );
+458	        return {};
+459	    }
+460	    std::string         out;
+461	    std::array<char, 65536> buf;
+462	    std::size_t         n = 0;
+463	    while( ( n = std::fread( buf.data(), 1, buf.size(), pipe ) ) > 0 )
+464	    {
+465	        out.append( buf.data(), n );
+466	    }
+467	    const int rc = ::pclose( pipe );
+468	    if( rc != 0 )
+469	    { // markitdown absent or errored → degrade to no-doc
+470	        return {};
+471	    }
+472	    return out;
+473	}
+474	
+475	// ── top-level entry: path → extracted text (or "" = not a doc / extraction empty) ───────────────────
+476	
+477	inline std::string parseDocFile( const std::string& path, std::string_view extLower )
+478	{
+479	    switch( docKindOf( extLower ) )
+480	    {
+481	        case DocKind::Markitdown:
+482	            return runMarkitdown( path );
+483	
+484	        case DocKind::Ipynb:
+485	        case DocKind::Html:
+486	        case DocKind::Csv:
+487	        {
+488	            std::string bytes;
+489	            if( !detail::readWholeFile( path, bytes ) )
+490	            {
+491	                DEGRADED_PATH_ALERT( "docparse: cannot read document file" );
+492	                return {};
+493	            }
+494	            switch( docKindOf( extLower ) )
+495	            {
+496	                case DocKind::Ipynb: return extractIpynb( bytes );
+497	                case DocKind::Html:  return extractHtml( bytes );
+498	                case DocKind::Csv:   return extractCsv( bytes );
+499	                default:             return {};
+500	            }
+501	        }
+502	
+503	        default:
+504	            return {};
+505	    }
+506	}
+507	
+508	// ── generated-document signals ───────────────────────────────────────────────────────────────────────
+509	//
+```
+
+
+> Some file sections were trimmed for size. For a specific symbol you still need, run another `codegraph_explore` (or `codegraph_node`) with its exact name — line-numbered source, cheaper and more complete than Read.

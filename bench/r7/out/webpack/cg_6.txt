@@ -1,0 +1,664 @@
+**Exploration: what generates the hot module replacement update manifest**
+
+Found 85 symbols across 6 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `createModuleHotObject` (lib/hmr/HotModuleReplacement.runtime.js:104) — 1 caller in `lib/hmr/HotModuleReplacement.runtime.js`; ⚠️ no covering tests found
+- `HotModuleReplacementPlugin` (lib/HotModuleReplacementPlugin.js:83) — 6 callers; tests: `examples/lazy-compilation/webpack.config.js`, `test/HotModuleReplacementPlugin.test.js`, `test/HotTestCases.template.js`, `test/TestCasesAllCombined.longtest.js` +2
+
+**Relationships**
+
+**extends:**
+- HotModuleReplacementRuntimeModule → RuntimeModule
+- HotUpdateChunk → Chunk
+- HotUpdateChunk → Chunk
+- NormalModule → Module
+- CssModule → NormalModule
+- Entrypoint → ChunkGroup
+
+**calls:**
+- createModuleHotObject → slice
+- createModuleHotObject → __webpack_require__
+- createModuleHotObject → push
+- createModuleHotObject → forEach
+- createModuleHotObject → setStatus
+- errors → slice
+- passStringToWasm0 → slice
+- getChildIdsByOrders → slice
+- getChunkModuleRenderedHashMap → slice
+- getChildrenByOrders → slice
+- apply → slice
+- getLogger → slice
+- finish → slice
+- createModuleHashes → slice
+- _createModuleHash → slice
+- ... and 166 more
+
+**references:**
+- createModuleHotObject → $hmrInvalidateModuleHandlers$
+- createModuleHotObject → __webpack_require__
+- createModuleHotObject → hotCheck
+- createModuleHotObject → hotApply
+- getParserHooks → parserHooksMap
+- getParserHooks → JavascriptParser
+- constructor → RuntimeModule
+- generate → RuntimeGlobals
+- generate → Template
+- apply → PLUGIN_NAME
+- UpdateHashContextGenerator → NormalModule
+- UpdateHashContextGenerator → ChunkGraph
+- UpdateHashContextGenerator → RuntimeSpec
+- UpdateHashContextGenerator → RuntimeTemplate
+- Generator → UpdateHashContextGenerator
+- ... and 170 more
+
+**instantiates:**
+- describeCases → HotModuleReplacementPlugin
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`types.d.ts`** — Module(references), references(references), NormalModule(references), ModuleGraph(references), RuntimeSpec(references), SortableSet(references), Generator(class), Source(references), Hash(references), UpdateHashContextGenerator(references), Generator(references), HotUpdateChunk(class), Chunk(extends), ModuleGraph(class), RuntimeSpec(type_alias), +3 more
+
+```typescript
+5763		 */
+5764		source?: string;
+5765	}
+5766	declare class Generator {
+5767		constructor();
+5768		getTypes(module: NormalModule): ReadonlySet<string>;
+5769		getSize(module: NormalModule, type?: string): number;
+5770		generate(module: NormalModule, __1: GenerateContext): null | Source;
+5771		getConcatenationBailoutReason(
+5772			module: NormalModule,
+5773			context: ConcatenationBailoutReasonContext
+5774		): undefined | string;
+5775		updateHash(hash: Hash, __1: UpdateHashContextGenerator): void;
+5776		static byType(map: Record<string, Generator>): ByTypeGenerator;
+5777	}
+5778	declare interface GeneratorOptions {
+5779		[index: string]: any;
+5780	}
+
+... (gap) ...
+
+6076	declare interface HotModuleReplacementPluginLoaderContext {
+6077		hot?: boolean;
+6078	}
+6079	declare class HotUpdateChunk extends Chunk {
+6080		constructor();
+6081	}
+6082	
+6083	/**
+6084	 * Options for building http resources.
+
+... (gap) ...
+
+9970				module: StatsModule,
+9971				type: "module" | "chunk" | "root-of-chunk" | "nested"
+9972		  ) => boolean);
+9973	declare class ModuleGraph {
+9974		constructor();
+9975		setParents(
+9976			dependency: Dependency,
+9977			block: DependenciesBlock,
+9978			module: Module,
+9979			indexInBlock?: number
+9980		): void;
+9981		setParentDependenciesBlockIndex(dependency: Dependency, index: number): void;
+9982		getParentModule(dependency: Dependency): undefined | Module;
+9983		getParentBlock(dependency: Dependency): undefined | DependenciesBlock;
+9984		getParentBlockIndex(dependency: Dependency): number;
+9985		setResolvedModule(
+9986			originModule: null | Module,
+9987			dependency: Dependency,
+9988			module: Module
+9989		): void;
+9990		updateModule(dependency: Dependency, module: Module): void;
+9991		updateParent(
+9992			dependency: Dependency,
+9993			connection?: ModuleGraphConnection,
+9994			parentModule?: Module
+9995		): void;
+9996		removeConnection(dependency: Dependency): void;
+9997		addExplanation(dependency: Dependency, explanation: string): void;
+9998		cloneModuleAttributes(sourceModule: Module, targetModule: Module): void;
+9999		removeModuleAttributes(module: Module): void;
+10000		removeAllModuleAttributes(): void;
+10001		moveModuleConnections(
+10002			oldModule: Module,
+10003			newModule: Module,
+10004			filterConnection: (moduleGraphConnection: ModuleGraphConnection) => boolean
+10005		): void;
+10006		copyOutgoingModuleConnections(
+10007			oldModule: Module,
+10008			newModule: Module,
+10009			filterConnection: (moduleGraphConnection: ModuleGraphConnection) => boolean
+10010		): void;
+10011		addExtraReason(module: Module, explanation: string): void;
+10012		getResolvedModule(dependency: Dependency): null | Module;
+10013		getConnection(dependency: Dependency): undefined | ModuleGraphConnection;
+10014		getModule(dependency: Dependency): null | Module;
+10015		getOrigin(dependency: Dependency): null | Module;
+10016		getResolvedOrigin(dependency: Dependency): null | Module;
+10017		getIncomingConnections(module: Module): Iterable<ModuleGraphConnection>;
+10018		getOutgoingConnections(module: Module): Iterable<ModuleGraphConnection>;
+10019		getIncomingConnectionsByOriginModule(
+10020			module: Module
+10021		): Map<undefined | null | Module, ReadonlyArray<ModuleGraphConnection>>;
+10022		getOutgoingConnectionsByModule(
+10023			module: Module
+10024		): undefined | Map<undefined | Module, ReadonlyArray<ModuleGraphConnection>>;
+10025		getProfile(module: Module): undefined | ModuleProfile;
+10026		setProfile(module: Module, profile?: ModuleProfile): void;
+10027		getIssuer(module: Module): undefined | null | Module;
+10028		setIssuer(module: Module, issuer: null | Module): void;
+10029		setIssuerIfUnset(module: Module, issuer: null | Module): void;
+10030		getOptimizationBailout(
+10031			module: Module
+10032		): (string | ((requestShortener: RequestShortener) => string))[];
+10033		getProvidedExports(module: Module): null | true | string[];
+10034		isExportProvided(
+10035			module: Module,
+10036			exportName: string | string[]
+10037		): null | boolean;
+10038		getExportsInfo(module: Module): ExportsInfo;
+10039		getExportInfo(module: Module, exportName: string): ExportInfo;
+10040		getReadOnlyExportInfo(module: Module, exportName: string): ExportInfo;
+10041		getUsedExports(
+10042			module: Module,
+10043			runtime: RuntimeSpec
+10044		): null | boolean | SortableSet<string>;
+10045		getPreOrderIndex(module: Module): null | number;
+10046		getPostOrderIndex(module: Module): null | number;
+10047		setPreOrderIndex(module: Module, index: number): void;
+10048		setPreOrderIndexIfUnset(module: Module, index: number): boolean;
+10049		setPostOrderIndex(module: Module, index: number): void;
+10050		setPostOrderIndexIfUnset(module: Module, index: number): boolean;
+10051		getDepth(module: Module): null | number;
+10052		setDepth(module: Module, depth: number): void;
+10053		setDepthIfLower(module: Module, depth: number): boolean;
+10054		isAsync(module: Module): boolean;
+10055		isDeferred(module: Module): boolean;
+10056		setAsync(module: Module): void;
+10057		getMeta(thing: object): any;
+10058		getMetaIfExisting(thing: object): any;
+10059		freeze(cacheStage?: string): void;
+10060		unfreeze(): void;
+10061		cached<T, R>(
+10062			fn: (moduleGraph: ModuleGraph, ...args: T[]) => R,
+10063			...args: T[]
+10064		): R;
+10065		setModuleMemCaches(
+10066			moduleMemCaches: Map<Module, WeakTupleMap<any[], any>>
+10067		): void;
+10068		dependencyCacheProvide<D extends Dependency, ARGS extends any[], R>(
+10069			dependency: D,
+10070			...args: [
+10071				ARGS,
+10072				...((moduleGraph: ModuleGraph, dependency: D, ...args: ARGS) => R)[]
+10073			]
+10074		): R;
+10075		static getModuleGraphForModule(
+10076			module: Module,
+10077			deprecateMessage: string,
+10078			deprecationCode: string
+10079		): ModuleGraph;
+10080		static setModuleGraphForModule(
+10081			module: Module,
+10082			moduleGraph: ModuleGraph
+10083		): void;
+10084		static clearModuleGraphForModule(module: Module): void;
+10085		static ModuleGraphConnection: typeof ModuleGraphConnection;
+10086	}
+10087	declare class ModuleGraphConnection {
+10088		constructor(
+10089			originModule: null | Module,
+
+... (gap) ...
+
+14965		 */
+14966		codeGenerationResults: CodeGenerationResults;
+14967	}
+14968	type RuntimeSpec = undefined | string | SortableSet<string>;
+14969	declare class RuntimeSpecMap<T, R = T> {
+14970		constructor(clone?: RuntimeSpecMap<T, R>);
+14971		get(runtime: RuntimeSpec): undefined | R;
+
+... (gap) ...
+
+16832		runtime: RuntimeSpec;
+16833		runtimeTemplate?: RuntimeTemplate;
+16834	}
+16835	declare interface UpdateHashContextGenerator {
+16836		/**
+16837		 * the module
+16838		 */
+16839		module: NormalModule;
+16840		chunkGraph: ChunkGraph;
+16841		runtime: RuntimeSpec;
+16842		runtimeTemplate?: RuntimeTemplate;
+16843	}
+16844	type UsageStateType = 0 | 1 | 2 | 3 | 4;
+16845	type UsedName = string | false | string[];
+16846	type Value = string | number | boolean | RegExp;
+```
+
+**`declarations/WebpackOptions.d.ts`** — references(references), ChunkLoading(type_alias), AmdContainer(type_alias), AuxiliaryComment(type_alias), AssetModuleFilename(type_alias), Charset(type_alias), ChunkFilename(type_alias), ChunkFormat(type_alias), ChunkLoadTimeout(type_alias), ChunkLoadingGlobal(type_alias), Clean(type_alias), CompareBeforeEmit(type_alias), CrossOriginLoading(type_alias), CssChunkFilename(type_alias), CssFilename(type_alias), +8 more
+
+```typescript
+66	/**
+67	 * The method of loading chunks (methods included by default are 'jsonp' (web), 'import' (ESM), 'importScripts' (WebWorker), 'require' (sync node.js), 'async-node' (async node.js), but others might be added by plugins).
+68	 */
+69	export type ChunkLoading = false | ChunkLoadingType;
+70	/**
+71	 * The method of loading chunks (methods included by default are 'jsonp' (web), 'import' (ESM), 'importScripts' (WebWorker), 'require' (sync node.js), 'async-node' (async node.js), but others might be added by plugins).
+72	 */
+
+... (gap) ...
+
+93	/**
+94	 * Add a container for define/require functions in the AMD module.
+95	 */
+96	export type AmdContainer = string;
+97	/**
+98	 * Add a comment in the UMD wrapper.
+99	 */
+100	export type AuxiliaryComment = string | LibraryCustomUmdCommentObject;
+101	/**
+102	 * Specify which export should be exposed as library.
+103	 */
+
+... (gap) ...
+
+464	/**
+465	 * The filename of asset modules as relative path inside the 'output.path' directory.
+466	 */
+467	export type AssetModuleFilename =
+468		| string
+469		| ((
+470				pathData: import("../lib/Compilation").PathData,
+471				assetInfo?: import("../lib/Compilation").AssetInfo
+472		  ) => string);
+473	/**
+474	 * Add charset attribute for script tag.
+475	 */
+476	export type Charset = boolean;
+477	/**
+478	 * Specifies the filename template of output files of non-initial chunks on disk. You must **not** specify an absolute path here, but the path may contain folders separated by '/'! The specified path is joined with the value of the 'output.path' option to determine the location on disk.
+479	 */
+480	export type ChunkFilename = FilenameTemplate;
+481	/**
+482	 * The format of chunks (formats included by default are 'array-push' (web/WebWorker), 'commonjs' (node.js), 'module' (ESM), but others might be added by plugins).
+483	 */
+484	export type ChunkFormat =
+485		| ("array-push" | "commonjs" | "module" | false)
+486		| string;
+487	/**
+488	 * Number of milliseconds before chunk request expires.
+489	 */
+490	export type ChunkLoadTimeout = number;
+491	/**
+492	 * The global variable used by webpack for loading of chunks.
+493	 */
+494	export type ChunkLoadingGlobal = string;
+495	/**
+496	 * Clean the output directory before emit.
+497	 */
+498	export type Clean = boolean | CleanOptions;
+499	/**
+500	 * Check if to be emitted file already exists and have the same content before writing to output filesystem.
+501	 */
+502	export type CompareBeforeEmit = boolean;
+503	/**
+504	 * This option enables cross-origin loading of chunks.
+505	 */
+506	export type CrossOriginLoading = false | "anonymous" | "use-credentials";
+507	/**
+508	 * Specifies the filename template of non-initial output css files on disk. You must **not** specify an absolute path here, but the path may contain folders separated by '/'! The specified path is joined with the value of the 'output.path' option to determine the location on disk.
+509	 */
+510	export type CssChunkFilename = FilenameTemplate;
+511	/**
+512	 * Specifies the filename template of output css files on disk. You must **not** specify an absolute path here, but the path may contain folders separated by '/'! The specified path is joined with the value of the 'output.path' option to determine the location on disk.
+513	 */
+514	export type CssFilename = FilenameTemplate;
+515	/**
+516	 * Similar to `output.devtoolModuleFilenameTemplate`, but used in the case of duplicate module identifiers.
+517	 */
+518	export type DevtoolFallbackModuleFilenameTemplate =
+519		| string
+520		| ((context: TODO) => string);
+521	/**
+522	 * Filename template string of function for the sources array in a generated SourceMap.
+523	 */
+524	export type DevtoolModuleFilenameTemplate =
+525		| string
+526		| import("../lib/ModuleFilenameHelpers").ModuleFilenameTemplateFunction;
+527	/**
+528	 * Module namespace to use when interpolating filename template string for the sources array in a generated SourceMap. Defaults to `output.library` if not set. It's useful for avoiding runtime collisions in sourcemaps from multiple webpack projects built as libraries.
+529	 */
+530	export type DevtoolNamespace = string;
+531	/**
+532	 * List of chunk loading types enabled for use by entry points.
+533	 */
+534	export type EnabledChunkLoadingTypes = ChunkLoadingType[];
+535	/**
+536	 * List of library types enabled for use by entry points.
+537	 */
+538	export type EnabledLibraryTypes = LibraryType[];
+539	/**
+540	 * List of wasm loading types enabled for use by entry points.
+541	 */
+542	export type EnabledWasmLoadingTypes = WasmLoadingType[];
+543	/**
+544	 * Specifies the filename of output files on disk. You must **not** specify an absolute path here, but the path may contain folders separated by '/'! The specified path is joined with the value of the 'output.path' option to determine the location on disk.
+545	 */
+546	export type Filename = FilenameTemplate;
+547	/**
+548	 * An expression which is used to address the global object/scope in runtime code.
+549	 */
+
+... (gap) ...
+
+571	/**
+572	 * The global variable used by webpack for loading of hot update chunks.
+573	 */
+574	export type HotUpdateGlobal = string;
+575	/**
+576	 * The filename of the Hot Update Main File. It is inside the 'output.path' directory.
+577	 */
+```
+
+**`lib/hmr/HotModuleReplacementRuntimeModule.js`** — HotModuleReplacementRuntimeModule(class), RuntimeModule(constant), constructor(method), generate(method), RuntimeGlobals(constant), Template(constant)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const RuntimeGlobals = require("../RuntimeGlobals");
+9	const RuntimeModule = require("../RuntimeModule");
+10	const Template = require("../Template");
+11	
+12	class HotModuleReplacementRuntimeModule extends RuntimeModule {
+13		constructor() {
+14			super("hot module replacement", RuntimeModule.STAGE_BASIC);
+15		}
+16	
+17		/**
+18		 * @returns {string | null} runtime code
+19		 */
+20		generate() {
+21			return Template.getFunctionContent(
+22				require("./HotModuleReplacement.runtime")
+23			)
+24				.replace(
+25					/\$interceptModuleExecution\$/g,
+26					RuntimeGlobals.interceptModuleExecution
+27				)
+28				.replace(/\$moduleCache\$/g, RuntimeGlobals.moduleCache)
+29				.replace(/\$hmrModuleData\$/g, RuntimeGlobals.hmrModuleData)
+30				.replace(/\$hmrDownloadManifest\$/g, RuntimeGlobals.hmrDownloadManifest)
+31				.replace(
+32					/\$hmrInvalidateModuleHandlers\$/g,
+33					RuntimeGlobals.hmrInvalidateModuleHandlers
+34				)
+35				.replace(
+36					/\$hmrDownloadUpdateHandlers\$/g,
+37					RuntimeGlobals.hmrDownloadUpdateHandlers
+38				);
+39		}
+40	}
+41	
+42	module.exports = HotModuleReplacementRuntimeModule;
+```
+
+**`lib/NormalModuleReplacementPlugin.js`** — NormalModuleReplacementPlugin(class), constructor(method), apply(method), PLUGIN_NAME(constant)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const { dirname, join } = require("./util/fs");
+9	
+10	/** @typedef {import("./Compiler")} Compiler */
+11	/** @typedef {import("./NormalModuleFactory").ResolveData} ResolveData */
+12	/** @typedef {import("./util/fs").InputFileSystem} InputFileSystem */
+13	
+14	/** @typedef {(resolveData: ResolveData) => void} ModuleReplacer */
+15	
+16	const PLUGIN_NAME = "NormalModuleReplacementPlugin";
+17	
+18	class NormalModuleReplacementPlugin {
+19		/**
+20		 * Create an instance of the plugin
+21		 * @param {RegExp} resourceRegExp the resource matcher
+22		 * @param {string | ModuleReplacer} newResource the resource replacement
+23		 */
+24		constructor(resourceRegExp, newResource) {
+25			this.resourceRegExp = resourceRegExp;
+26			this.newResource = newResource;
+27		}
+28	
+29		/**
+30		 * Apply the plugin
+31		 * @param {Compiler} compiler the compiler instance
+32		 * @returns {void}
+33		 */
+34		apply(compiler) {
+35			const resourceRegExp = this.resourceRegExp;
+36			const newResource = this.newResource;
+37			compiler.hooks.normalModuleFactory.tap(PLUGIN_NAME, (nmf) => {
+38				nmf.hooks.beforeResolve.tap(PLUGIN_NAME, (result) => {
+39					if (resourceRegExp.test(result.request)) {
+40						if (typeof newResource === "function") {
+41							newResource(result);
+42						} else {
+43							result.request = newResource;
+44						}
+45					}
+46				});
+47				nmf.hooks.afterResolve.tap(PLUGIN_NAME, (result) => {
+48					const createData = result.createData;
+49					if (resourceRegExp.test(/** @type {string} */ (createData.resource))) {
+50						if (typeof newResource === "function") {
+51							newResource(result);
+52						} else {
+53							const fs =
+54								/** @type {InputFileSystem} */
+55								(compiler.inputFileSystem);
+56							if (
+57								newResource.startsWith("/") ||
+58								(newResource.length > 1 && newResource[1] === ":")
+59							) {
+60								createData.resource = newResource;
+61							} else {
+62								createData.resource = join(
+63									fs,
+64									dirname(fs, /** @type {string} */ (createData.resource)),
+65									newResource
+66								);
+67							}
+68						}
+69					}
+70				});
+71			});
+72		}
+73	}
+74	
+75	module.exports = NormalModuleReplacementPlugin;
+```
+
+**`lib/HotUpdateChunk.js`** — HotUpdateChunk(class), Chunk(constant), constructor(method)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const Chunk = require("./Chunk");
+9	
+10	/** @typedef {import("./ChunkGraph")} ChunkGraph */
+11	/** @typedef {import("./util/Hash")} Hash */
+12	
+13	class HotUpdateChunk extends Chunk {
+14		constructor() {
+15			super();
+16		}
+17	}
+18	
+19	module.exports = HotUpdateChunk;
+```
+
+**`lib/hmr/HotModuleReplacement.runtime.js`** — push(calls), forEach(calls), calls(calls), $hmrInvalidateModuleHandlers$(variable), __webpack_require__(variable), createModuleHotObject(function), slice(calls), __webpack_require__(calls), setStatus(calls), hotCheck(references), hotApply(references), setStatus(function)
+
+```javascript
+12	/** @type {() => Promise}  */
+13	var $hmrDownloadManifest$ = undefined;
+14	var $hmrDownloadUpdateHandlers$ = undefined;
+15	var $hmrInvalidateModuleHandlers$ = undefined;
+16	var __webpack_require__ = undefined;
+17	
+18	module.exports = function () {
+19		var currentModuleData = {};
+
+... (gap) ...
+
+101			return fn;
+102		}
+103	
+104		function createModuleHotObject(moduleId, me) {
+105			var _main = currentChildModule !== moduleId;
+106			var hot = {
+107				// private stuff
+108				_acceptedDependencies: {},
+109				_acceptedErrorHandlers: {},
+110				_declinedDependencies: {},
+111				_selfAccepted: false,
+112				_selfDeclined: false,
+113				_selfInvalidated: false,
+114				_disposeHandlers: [],
+115				_main: _main,
+116				_requireSelf: function () {
+117					currentParents = me.parents.slice();
+118					currentChildModule = _main ? undefined : moduleId;
+119					__webpack_require__(moduleId);
+120				},
+121	
+122				// Module API
+123				active: true,
+124				accept: function (dep, callback, errorHandler) {
+125					if (dep === undefined) hot._selfAccepted = true;
+126					else if (typeof dep === "function") hot._selfAccepted = dep;
+127					else if (typeof dep === "object" && dep !== null) {
+128						for (var i = 0; i < dep.length; i++) {
+129							hot._acceptedDependencies[dep[i]] = callback || function () {};
+130							hot._acceptedErrorHandlers[dep[i]] = errorHandler;
+131						}
+132					} else {
+133						hot._acceptedDependencies[dep] = callback || function () {};
+134						hot._acceptedErrorHandlers[dep] = errorHandler;
+135					}
+136				},
+137				decline: function (dep) {
+138					if (dep === undefined) hot._selfDeclined = true;
+139					else if (typeof dep === "object" && dep !== null)
+140						for (var i = 0; i < dep.length; i++)
+141							hot._declinedDependencies[dep[i]] = true;
+142					else hot._declinedDependencies[dep] = true;
+143				},
+144				dispose: function (callback) {
+145					hot._disposeHandlers.push(callback);
+146				},
+147				addDisposeHandler: function (callback) {
+148					hot._disposeHandlers.push(callback);
+149				},
+150				removeDisposeHandler: function (callback) {
+151					var idx = hot._disposeHandlers.indexOf(callback);
+152					if (idx >= 0) hot._disposeHandlers.splice(idx, 1);
+153				},
+154				invalidate: function () {
+155					this._selfInvalidated = true;
+156					switch (currentStatus) {
+157						case "idle":
+158							currentUpdateApplyHandlers = [];
+159							Object.keys($hmrInvalidateModuleHandlers$).forEach(function (key) {
+160								$hmrInvalidateModuleHandlers$[key](
+161									moduleId,
+162									currentUpdateApplyHandlers
+163								);
+164							});
+165							setStatus("ready");
+166							break;
+167						case "ready":
+168							Object.keys($hmrInvalidateModuleHandlers$).forEach(function (key) {
+169								$hmrInvalidateModuleHandlers$[key](
+170									moduleId,
+171									currentUpdateApplyHandlers
+172								);
+173							});
+174							break;
+175						case "prepare":
+176						case "check":
+177						case "dispose":
+178						case "apply":
+179							(queuedInvalidatedModules = queuedInvalidatedModules || []).push(
+180								moduleId
+181							);
+182							break;
+183						default:
+184							// ignore requests in error states
+185							break;
+186					}
+187				},
+188	
+189				// Management API
+190				check: hotCheck,
+191				apply: hotApply,
+192				status: function (l) {
+193					if (!l) return currentStatus;
+194					registeredStatusHandlers.push(l);
+195				},
+196				addStatusHandler: function (l) {
+197					registeredStatusHandlers.push(l);
+198				},
+199				removeStatusHandler: function (l) {
+200					var idx = registeredStatusHandlers.indexOf(l);
+201					if (idx >= 0) registeredStatusHandlers.splice(idx, 1);
+202				},
+203	
+204				// inherit from previous dispose call
+205				data: currentModuleData[moduleId]
+206			};
+207			currentChildModule = undefined;
+208			return hot;
+209		}
+210	
+211		function setStatus(newStatus) {
+212			currentStatus = newStatus;
+213			var results = [];
+214	
+215			for (var i = 0; i < registeredStatusHandlers.length; i++)
+216				results[i] = registeredStatusHandlers[i].call(null, newStatus);
+217	
+218			return Promise.all(results).then(function () {});
+219		}
+220	
+221		function unblock() {
+222			if (--blockingPromises === 0) {
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

@@ -1,0 +1,723 @@
+**Exploration: what creates a normal module from a resolve request**
+
+Found 72 symbols across 2 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `NormalModule` (lib/NormalModule.js:263) — 1 caller in `lib/NormalModule.js`; ⚠️ no covering tests found
+- `NormalModuleCreateData` (types.d.ts:10743) — 3 callers in `types.d.ts`; ⚠️ no covering tests found
+- `NormalModule` (types.d.ts:10660) — 11 callers in `declarations/LoaderContext.d.ts`, `types.d.ts`; ⚠️ no covering tests found
+
+**Relationships**
+
+**extends:**
+- NormalModule → Module
+- NormalModuleFactory → ModuleFactory
+- NormalModule → Module
+- Module → DependenciesBlock
+- NormalModuleFactory → ModuleFactory
+- CssModule → NormalModule
+
+**calls:**
+- constructor → freeze
+- constructor → compile
+- constructor → callback
+- constructor → deprecationChangedHookMessage
+- constructor → call
+- constructor → getResolver
+- constructor → getScheme
+- constructor → exec
+- constructor → join
+- constructor → slice
+- constructor → split
+- constructor → needCalls
+- constructor → get
+- constructor → getParser
+- constructor → getGenerator
+- ... and 114 more
+
+**references:**
+- NormalModuleCreateData → LoaderItem
+- NormalModuleCreateData → ResourceSchemeData
+- NormalModuleCreateData → ParserClass
+- NormalModuleCreateData → ParserOptions
+- NormalModuleCreateData → Generator
+- NormalModuleCreateData → GeneratorOptions
+- NormalModuleCreateData → ResolveOptions
+- NormalModule → NormalModuleCreateData
+- ResolveData → NormalModuleCreateData
+- NormalModule → LoaderItem
+- NormalModuleCompilationHooks → LoaderItem
+- NormalModuleFactory → LoaderItem
+- ResourceDataWithData → ResourceSchemeData
+- NormalModule → NormalModuleFactory
+- NormalModule → RawSourceMap
+- ... and 71 more
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`types.d.ts`** — references(references), NormalModule(references), ResolveData(references), LoaderItem(references), ParserOptions(references), GeneratorOptions(references), Module(references), NormalModuleCreateData(references), LoaderContextObject(references), ResolveRequest(references), ParserClass(references), Generator(references), RawSourceMap(references), ResolverWithOptions(references), Source(references), +26 more
+
+```typescript
+10657		 */
+10658		asyncChunkLoading?: boolean;
+10659	}
+10660	declare class NormalModule extends Module {
+10661		constructor(__0: NormalModuleCreateData);
+10662		request: string;
+10663		userRequest: string;
+10664		rawRequest: string;
+10665		binary: boolean;
+10666		parser?: ParserClass;
+10667		parserOptions?: ParserOptions;
+10668		generator?: Generator;
+10669		generatorOptions?: GeneratorOptions;
+10670		resource: string;
+10671		resourceResolveData?: ResourceSchemeData & Partial<ResolveRequest>;
+10672		matchResource?: string;
+10673		loaders: LoaderItem[];
+10674		error: null | WebpackError;
+10675	
+10676		/**
+10677		 * restore unsafe cache data
+10678		 */
+10679		restoreFromUnsafeCache(
+10680			unsafeCacheData: UnsafeCacheData,
+10681			normalModuleFactory: NormalModuleFactory
+10682		): void;
+10683		createSourceForAsset(
+10684			context: string,
+10685			name: string,
+10686			content: string | Buffer,
+10687			sourceMap?: string | RawSourceMap,
+10688			associatedObjectForCache?: object
+10689		): Source;
+10690		getCurrentLoader(
+10691			loaderContext: LoaderContextObject<any>,
+10692			index?: number
+10693		): null | LoaderItem;
+10694		createSource(
+10695			context: string,
+10696			content: string | Buffer,
+10697			sourceMap?: null | string | RawSourceMap,
+10698			associatedObjectForCache?: object
+10699		): Source;
+10700		markModuleAsErrored(error: WebpackError): void;
+10701		applyNoParseRule(rule: Exclude<NoParse, any[]>, content: string): boolean;
+10702		shouldPreventParsing(
+10703			noParseRule:
+10704				| undefined
+10705				| string
+10706				| RegExp
+10707				| (string | RegExp | ((content: string) => boolean))[]
+10708				| ((content: string) => boolean),
+10709			request: string
+10710		): boolean;
+10711		static getCompilationHooks(
+10712			compilation: Compilation
+10713		): NormalModuleCompilationHooks;
+10714		static deserialize(context: ObjectDeserializerContext): NormalModule;
+10715	}
+10716	declare interface NormalModuleCompilationHooks {
+10717		loader: SyncHook<[LoaderContextObject<any>, NormalModule]>;
+10718		beforeLoaders: SyncHook<
+10719			[LoaderItem[], NormalModule, LoaderContextObject<any>]
+10720		>;
+10721		beforeParse: SyncHook<[NormalModule]>;
+10722		beforeSnapshot: SyncHook<[NormalModule]>;
+10723		readResourceForScheme: HookMap<
+10724			FakeHook<
+10725				AsyncSeriesBailHook<[string, NormalModule], null | string | Buffer>
+10726			>
+10727		>;
+10728		readResource: HookMap<
+10729			AsyncSeriesBailHook<[LoaderContextObject<any>], null | string | Buffer>
+10730		>;
+10731		processResult: SyncWaterfallHook<
+10732			[
+10733				[
+10734					string | Buffer,
+10735					undefined | string | RawSourceMap,
+10736					undefined | PreparsedAst
+10737				],
+10738				NormalModule
+10739			]
+10740		>;
+10741		needBuild: AsyncSeriesBailHook<[NormalModule, NeedBuildContext], boolean>;
+10742	}
+10743	declare interface NormalModuleCreateData {
+10744		/**
+10745		 * an optional layer in which the module is
+10746		 */
+10747		layer?: string;
+10748	
+10749		/**
+10750		 * module type. When deserializing, this is set to an empty string "".
+10751		 */
+10752		type: string;
+10753	
+10754		/**
+10755		 * request string
+10756		 */
+10757		request: string;
+10758	
+10759		/**
+10760		 * request intended by user (without loaders from config)
+10761		 */
+10762		userRequest: string;
+10763	
+10764		/**
+10765		 * request without resolving
+10766		 */
+10767		rawRequest: string;
+10768	
+10769		/**
+10770		 * list of loaders
+10771		 */
+10772		loaders: LoaderItem[];
+10773	
+10774		/**
+10775		 * path + query of the real resource
+10776		 */
+10777		resource: string;
+10778	
+10779		/**
+10780		 * resource resolve data
+10781		 */
+10782		resourceResolveData?: ResourceSchemeData & Partial<ResolveRequest>;
+10783	
+10784		/**
+10785		 * context directory for resolving
+10786		 */
+10787		context: string;
+10788	
+10789		/**
+10790		 * path + query of the matched resource (virtual)
+10791		 */
+10792		matchResource?: string;
+10793	
+10794		/**
+10795		 * the parser used
+10796		 */
+10797		parser: ParserClass;
+10798	
+10799		/**
+10800		 * the options of the parser used
+10801		 */
+10802		parserOptions?: ParserOptions;
+10803	
+10804		/**
+10805		 * the generator used
+10806		 */
+10807		generator: Generator;
+10808	
+10809		/**
+10810		 * the options of the generator used
+10811		 */
+10812		generatorOptions?: GeneratorOptions;
+10813	
+10814		/**
+10815		 * options used for resolving requests from this module
+10816		 */
+10817		resolveOptions?: ResolveOptions;
+10818	}
+10819	declare abstract class NormalModuleFactory extends ModuleFactory {
+10820		hooks: Readonly<{
+10821			resolve: AsyncSeriesBailHook<[ResolveData], false | void | Module>;
+10822			resolveForScheme: HookMap<
+10823				AsyncSeriesBailHook<[ResourceDataWithData, ResolveData], true | void>
+10824			>;
+10825			resolveInScheme: HookMap<
+10826				AsyncSeriesBailHook<[ResourceDataWithData, ResolveData], true | void>
+10827			>;
+10828			factorize: AsyncSeriesBailHook<[ResolveData], undefined | Module>;
+10829			beforeResolve: AsyncSeriesBailHook<[ResolveData], false | void>;
+10830			afterResolve: AsyncSeriesBailHook<[ResolveData], false | void>;
+10831			createModule: AsyncSeriesBailHook<
+10832				[
+10833					Partial<NormalModuleCreateData & { settings: ModuleSettings }>,
+10834					ResolveData
+10835				],
+10836				void | Module
+10837			>;
+10838			module: SyncWaterfallHook<
+10839				[
+10840					Module,
+10841					Partial<NormalModuleCreateData & { settings: ModuleSettings }>,
+10842					ResolveData
+10843				]
+10844			>;
+10845			createParser: HookMap<SyncBailHook<[ParserOptions], void | ParserClass>>;
+10846			parser: HookMap<SyncBailHook<[any, ParserOptions], void>>;
+10847			createGenerator: HookMap<
+10848				SyncBailHook<[GeneratorOptions], void | Generator>
+10849			>;
+10850			generator: HookMap<SyncBailHook<[any, GeneratorOptions], void>>;
+10851			createModuleClass: HookMap<
+10852				SyncBailHook<
+10853					[
+10854						Partial<NormalModuleCreateData & { settings: ModuleSettings }>,
+10855						ResolveData
+10856					],
+10857					void | Module
+10858				>
+10859			>;
+10860		}>;
+10861		resolverFactory: ResolverFactory;
+10862		ruleSet: RuleSet;
+10863		context: string;
+10864		fs: InputFileSystem;
+10865		parserCache: Map<string, WeakMap<ParserOptions, ParserClass>>;
+10866		generatorCache: Map<string, WeakMap<GeneratorOptions, Generator>>;
+10867		cleanupForCache(): void;
+10868		resolveResource(
+10869			contextInfo: ModuleFactoryCreateDataContextInfo,
+10870			context: string,
+10871			unresolvedResource: string,
+10872			resolver: ResolverWithOptions,
+10873			resolveContext: ResolveContext,
+10874			callback: (
+10875				err: null | Error,
+10876				res?: string | false,
+10877				req?: ResolveRequest
+10878			) => void
+10879		): void;
+10880		resolveRequestArray(
+10881			contextInfo: ModuleFactoryCreateDataContextInfo,
+10882			context: string,
+10883			array: LoaderItem[],
+10884			resolver: ResolverWithOptions,
+10885			resolveContext: ResolveContext,
+10886			callback: CallbackNormalModuleFactory<LoaderItem[]>
+10887		): void;
+10888		getParser(type: string, parserOptions?: ParserOptions): ParserClass;
+10889		createParser(type: string, parserOptions?: ParserOptions): ParserClass;
+10890		getGenerator(type: string, generatorOptions?: GeneratorOptions): Generator;
+10891		createGenerator(type: string, generatorOptions?: GeneratorOptions): Generator;
+10892		getResolver(
+10893			type: string,
+10894			resolveOptions?: ResolveOptionsWithDependencyType
+10895		): ResolverWithOptions;
+10896	}
+10897	
+10898	/**
+10899	 * These properties are added by the NormalModule
+10900	 */
+10901	declare interface NormalModuleLoaderContext<OptionsType> {
+10902		version: number;
+10903		getOptions(): OptionsType;
+10904		getOptions(schema: Parameters<typeof validateFunction>[0]): OptionsType;
+10905		emitWarning(warning: Error): void;
+10906		emitError(error: Error): void;
+10907		getLogger(name?: string): WebpackLogger;
+10908		resolve(
+10909			context: string,
+10910			request: string,
+10911			callback: (
+10912				err: null | ErrorWithDetail,
+10913				res?: string | false,
+10914				req?: ResolveRequest
+10915			) => void
+10916		): any;
+10917		getResolve(options?: ResolveOptionsWithDependencyType): {
+10918			(
+10919				context: string,
+10920				request: string,
+10921				callback: (
+10922					err: null | ErrorWithDetail,
+10923					res?: string | false,
+10924					req?: ResolveRequest
+10925				) => void
+10926			): void;
+10927			(context: string, request: string): Promise<string>;
+10928		};
+10929		emitFile(
+10930			name: string,
+10931			content: string | Buffer,
+10932			sourceMap?: string,
+10933			assetInfo?: AssetInfo
+10934		): void;
+10935		addBuildDependency(dep: string): void;
+10936		utils: {
+10937			absolutify: (context: string, request: string) => string;
+10938			contextify: (context: string, request: string) => string;
+10939			createHash: (algorithm?: string | typeof Hash) => Hash;
+10940		};
+10941		rootContext: string;
+10942		fs: InputFileSystem;
+10943		sourceMap?: boolean;
+10944		mode: "none" | "development" | "production";
+10945		webpack?: boolean;
+10946		hashFunction: HashFunction;
+10947		hashDigest: string;
+10948		hashDigestLength: number;
+10949		hashSalt: string;
+10950		_module?: NormalModule;
+10951		_compilation?: Compilation;
+10952		_compiler?: Compiler;
+10953	}
+10954	declare class NormalModuleReplacementPlugin {
+10955		/**
+10956		 * Create an instance of the plugin
+```
+
+**`lib/NormalModuleFactory.js`** — callback(calls), calls(calls), instantiates(instantiates), call(calls), slice(calls), get(calls), getScheme(calls), resolveRequestArray(calls), deprecationChangedHookMessage(calls), getResolver(calls), exec(calls), join(calls), needCalls(calls), ModuleFactory(extends), constructor(method), +19 more
+
+```javascript
+252		new UseEffectRulePlugin()
+253	]);
+254	
+255	class NormalModuleFactory extends ModuleFactory {
+256		/**
+257		 * @param {object} param params
+258		 * @param {string=} param.context context
+259		 * @param {InputFileSystem} param.fs file system
+260		 * @param {ResolverFactory} param.resolverFactory resolverFactory
+261		 * @param {ModuleOptions} param.options options
+262		 * @param {AssociatedObjectForCache} param.associatedObjectForCache an object to which the cache will be attached
+263		 * @param {boolean=} param.layers enable layers
+264		 */
+265		constructor({
+266			context,
+267			fs,
+268			resolverFactory,
+269			options,
+270			associatedObjectForCache,
+271			layers = false
+272		}) {
+273			super();
+274			this.hooks = Object.freeze({
+275				/** @type {AsyncSeriesBailHook<[ResolveData], Module | false | void>} */
+276				resolve: new AsyncSeriesBailHook(["resolveData"]),
+277				/** @type {HookMap<AsyncSeriesBailHook<[ResourceDataWithData, ResolveData], true | void>>} */
+278				resolveForScheme: new HookMap(
+279					() => new AsyncSeriesBailHook(["resourceData", "resolveData"])
+280				),
+281				/** @type {HookMap<AsyncSeriesBailHook<[ResourceDataWithData, ResolveData], true | void>>} */
+282				resolveInScheme: new HookMap(
+283					() => new AsyncSeriesBailHook(["resourceData", "resolveData"])
+284				),
+285				/** @type {AsyncSeriesBailHook<[ResolveData], Module | undefined>} */
+286				factorize: new AsyncSeriesBailHook(["resolveData"]),
+287				/** @type {AsyncSeriesBailHook<[ResolveData], false | void>} */
+288				beforeResolve: new AsyncSeriesBailHook(["resolveData"]),
+289				/** @type {AsyncSeriesBailHook<[ResolveData], false | void>} */
+290				afterResolve: new AsyncSeriesBailHook(["resolveData"]),
+291				/** @type {AsyncSeriesBailHook<[CreateData, ResolveData], Module | void>} */
+292				createModule: new AsyncSeriesBailHook(["createData", "resolveData"]),
+293				/** @type {SyncWaterfallHook<[Module, CreateData, ResolveData]>} */
+294				module: new SyncWaterfallHook(["module", "createData", "resolveData"]),
+295				/** @type {HookMap<SyncBailHook<[ParserOptions], Parser | void>>} */
+296				createParser: new HookMap(() => new SyncBailHook(["parserOptions"])),
+297				/** @type {HookMap<SyncBailHook<[TODO, ParserOptions], void>>} */
+298				parser: new HookMap(() => new SyncHook(["parser", "parserOptions"])),
+299				/** @type {HookMap<SyncBailHook<[GeneratorOptions], Generator | void>>} */
+300				createGenerator: new HookMap(
+301					() => new SyncBailHook(["generatorOptions"])
+302				),
+303				/** @type {HookMap<SyncBailHook<[TODO, GeneratorOptions], void>>} */
+304				generator: new HookMap(
+305					() => new SyncHook(["generator", "generatorOptions"])
+306				),
+307				/** @type {HookMap<SyncBailHook<[CreateData, ResolveData], Module | void>>} */
+308				createModuleClass: new HookMap(
+309					() => new SyncBailHook(["createData", "resolveData"])
+310				)
+311			});
+312			this.resolverFactory = resolverFactory;
+313			this.ruleSet = ruleSetCompiler.compile([
+314				{
+315					rules: /** @type {RuleSetRules} */ (options.defaultRules)
+316				},
+317				{
+318					rules: /** @type {RuleSetRules} */ (options.rules)
+319				}
+320			]);
+321			this.context = context || "";
+322			this.fs = fs;
+323			this._globalParserOptions = options.parser;
+324			this._globalGeneratorOptions = options.generator;
+325			/** @type {Map<string, WeakMap<ParserOptions, Parser>>} */
+326			this.parserCache = new Map();
+327			/** @type {Map<string, WeakMap<GeneratorOptions, Generator>>} */
+328			this.generatorCache = new Map();
+329			/** @type {Set<Module>} */
+330			this._restoredUnsafeCacheEntries = new Set();
+331	
+332			/** @type {(resource: string) => import("./util/identifier").ParsedResource} */
+333			const cacheParseResource = parseResource.bindCache(
+334				associatedObjectForCache
+335			);
+336			const cachedParseResourceWithoutFragment =
+337				parseResourceWithoutFragment.bindCache(associatedObjectForCache);
+338			this._parseResourceWithoutFragment = cachedParseResourceWithoutFragment;
+339	
+340			this.hooks.factorize.tapAsync(
+341				{
+342					name: "NormalModuleFactory",
+343					stage: 100
+344				},
+345				(resolveData, callback) => {
+346					this.hooks.resolve.callAsync(resolveData, (err, result) => {
+347						if (err) return callback(err);
+348	
+349						// Ignored
+350						if (result === false) return callback();
+351	
+352						// direct module
+353						if (result instanceof Module) return callback(null, result);
+354	
+355						if (typeof result === "object") {
+356							throw new Error(
+357								`${deprecationChangedHookMessage(
+358									"resolve",
+359									this.hooks.resolve
+360								)} Returning a Module object will result in this module used as result.`
+361							);
+362						}
+363	
+364						this.hooks.afterResolve.callAsync(resolveData, (err, result) => {
+365							if (err) return callback(err);
+366	
+367							if (typeof result === "object") {
+368								throw new Error(
+369									deprecationChangedHookMessage(
+370										"afterResolve",
+371										this.hooks.afterResolve
+372									)
+373								);
+374							}
+375	
+376							// Ignored
+377							if (result === false) return callback();
+378	
+379							const createData = resolveData.createData;
+380	
+381							this.hooks.createModule.callAsync(
+382								createData,
+383								resolveData,
+384								(err, createdModule) => {
+385									if (!createdModule) {
+386										if (!resolveData.request) {
+387											return callback(new Error("Empty dependency (no request)"));
+388										}
+389	
+390										// TODO webpack 6 make it required and move javascript/wasm/asset properties to own module
+391										createdModule = this.hooks.createModuleClass
+392											.for(
+393												/** @type {ModuleSettings} */
+394												(createData.settings).type
+395											)
+396											.call(createData, resolveData);
+397	
+398										if (!createdModule) {
+399											createdModule = /** @type {Module} */ (
+400												new NormalModule(
+401													/** @type {NormalModuleCreateData} */
+402													(createData)
+403												)
+404											);
+405										}
+406									}
+407	
+408									createdModule = this.hooks.module.call(
+409										createdModule,
+410										createData,
+411										resolveData
+412									);
+413	
+414									return callback(null, createdModule);
+415								}
+416							);
+417						});
+418					});
+419				}
+420			);
+421			this.hooks.resolve.tapAsync(
+422				{
+423					name: "NormalModuleFactory",
+424					stage: 100
+425				},
+426				(data, callback) => {
+427					const {
+428						contextInfo,
+429						context,
+430						dependencies,
+431						dependencyType,
+432						request,
+433						assertions,
+434						resolveOptions,
+435						fileDependencies,
+436						missingDependencies,
+437						contextDependencies
+438					} = data;
+439					const loaderResolver = this.getResolver("loader");
+440	
+441					/** @type {ResourceData | undefined} */
+442					let matchResourceData;
+443					/** @type {string} */
+444					let unresolvedResource;
+445					/** @type {ParsedLoaderRequest[]} */
+446					let elements;
+447					let noPreAutoLoaders = false;
+448					let noAutoLoaders = false;
+449					let noPrePostAutoLoaders = false;
+450	
+451					const contextScheme = getScheme(context);
+452					/** @type {string | undefined} */
+453					let scheme = getScheme(request);
+454	
+455					if (!scheme) {
+456						/** @type {string} */
+457						let requestWithoutMatchResource = request;
+458						const matchResourceMatch = MATCH_RESOURCE_REGEX.exec(request);
+459						if (matchResourceMatch) {
+460							let matchResource = matchResourceMatch[1];
+461							// Check if matchResource starts with ./ or ../
+462							if (matchResource.charCodeAt(0) === 46) {
+463								// 46 is "."
+464								const secondChar = matchResource.charCodeAt(1);
+465								if (
+466									secondChar === 47 || // 47 is "/"
+467									(secondChar === 46 && matchResource.charCodeAt(2) === 47) // "../"
+468								) {
+469									// Resolve relative path against context
+470									matchResource = join(this.fs, context, matchResource);
+471								}
+472							}
+473	
+474							matchResourceData = {
+475								...cacheParseResource(matchResource),
+476								resource: matchResource
+477							};
+478							requestWithoutMatchResource = request.slice(
+479								matchResourceMatch[0].length
+480							);
+481						}
+482	
+483						scheme = getScheme(requestWithoutMatchResource);
+484	
+485						if (!scheme && !contextScheme) {
+486							const firstChar = requestWithoutMatchResource.charCodeAt(0);
+487							const secondChar = requestWithoutMatchResource.charCodeAt(1);
+488							noPreAutoLoaders = firstChar === 45 && secondChar === 33; // startsWith "-!"
+489							noAutoLoaders = noPreAutoLoaders || firstChar === 33; // startsWith "!"
+490							noPrePostAutoLoaders = firstChar === 33 && secondChar === 33; // startsWith "!!";
+491							const rawElements = requestWithoutMatchResource
+492								.slice(
+493									noPreAutoLoaders || noPrePostAutoLoaders
+494										? 2
+495										: noAutoLoaders
+496											? 1
+497											: 0
+498								)
+499								.split(/!+/);
+500							unresolvedResource = /** @type {string} */ (rawElements.pop());
+501							elements = rawElements.map((el) => {
+502								const { path, query } = cachedParseResourceWithoutFragment(el);
+503								return {
+504									loader: path,
+505									options: query ? query.slice(1) : undefined
+506								};
+507							});
+508							scheme = getScheme(unresolvedResource);
+509						} else {
+510							unresolvedResource = requestWithoutMatchResource;
+511							elements = EMPTY_ELEMENTS;
+512						}
+513					} else {
+514						unresolvedResource = request;
+515						elements = EMPTY_ELEMENTS;
+516					}
+517	
+518					/** @type {ResolveContext} */
+519					const resolveContext = {
+520						fileDependencies,
+521						missingDependencies,
+522						contextDependencies
+523					};
+524	
+525					/** @type {ResourceDataWithData} */
+526					let resourceData;
+527	
+528					/** @type {undefined | LoaderItem[]} */
+529					let loaders;
+530	
+531					const continueCallback = needCalls(2, (err) => {
+532						if (err) return callback(err);
+533	
+534						// translate option idents
+535						try {
+536							for (const item of /** @type {LoaderItem[]} */ (loaders)) {
+537								if (typeof item.options === "string" && item.options[0] === "?") {
+538									const ident = item.options.slice(1);
+539									if (ident === "[[missing ident]]") {
+540										throw new Error(
+541											"No ident is provided by referenced loader. " +
+542												"When using a function for Rule.use in config you need to " +
+543												"provide an 'ident' property for referenced loader options."
+544										);
+545									}
+546									item.options = this.ruleSet.references.get(ident);
+547									if (item.options === undefined) {
+548										throw new Error(
+549											"Invalid ident is provided by referenced loader"
+550										);
+551									}
+552									item.ident = ident;
+553								}
+554							}
+555						} catch (identErr) {
+556							return callback(/** @type {Error} */ (identErr));
+557						}
+558	
+559						if (!resourceData) {
+560							// ignored
+561							return callback(null, dependencies[0].createIgnoredModule(context));
+562						}
+563	
+564						const userRequest =
+565							(matchResourceData !== undefined
+566								? `${matchResourceData.resource}!=!`
+567								: "") +
+568							stringifyLoadersAndResource(
+569								/** @type {LoaderItem[]} */ (loaders),
+570								resourceData.resource
+571							);
+572	
+573						/** @type {ModuleSettings} */
+574						const settings = {};
+575						/** @type {LoaderItem[]} */
+576						const useLoadersPost = [];
+577						/** @type {LoaderItem[]} */
+578						const useLoaders = [];
+579						/** @type {LoaderItem[]} */
+580						const useLoadersPre = [];
+581	
+582						// handle .webpack[] suffix
+583						let resource;
+584						let match;
+585						if (
+586							matchResourceData &&
+587							typeof (resource = matchResourceData.resource) === "string" &&
+588							(match = /\.webpack\[([^\]]+)\]$/.exec(resource))
+589						) {
+590							settings.type = match[1];
+591							matchResourceData.resource = matchResourceData.resource.slice(
+592								0,
+593								-settings.type.length - 10
+594							);
+595						} else {
+596							settings.type = JAVASCRIPT_MODULE_TYPE_AUTO;
+597							const resourceDataForRules = matchResourceData || resourceData;
+598							const result = this.ruleSet.exec({
+599								resource: resourceDataForRules.path,
+600								realResource: resourceData.path,
+601								resourceQuery: resourceDataForRules.query,
+602								resourceFragment: resourceDataForRules.fragment,
+603								scheme,
+604								assertions,
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

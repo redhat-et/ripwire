@@ -1,0 +1,22 @@
+where is the content hash for a chunk computed	lib/optimize/RealContentHashPlugin.js
+what splits modules into shared chunks	lib/optimize/SplitChunksPlugin.js
+where are unused exports flagged for tree shaking	lib/FlagDependencyUsagePlugin.js
+what implements scope hoisting module concatenation	lib/optimize/ModuleConcatenationPlugin.js
+where are deterministic module ids assigned	lib/ids/DeterministicModuleIdsPlugin.js
+what generates the hot module replacement update manifest	lib/HotModuleReplacementPlugin.js
+where are compile time constants substituted into the source	lib/DefinePlugin.js
+what renders the UMD library wrapper output	lib/library/UmdLibraryPlugin.js
+where is an asset module encoded as a data URI	lib/asset/AssetGenerator.js
+where does the persistent cache serialize packs to disk	lib/cache/PackFileCacheStrategy.js
+what creates a normal module from a resolve request	lib/NormalModuleFactory.js
+where is the user config validated against the schema	lib/webpack.js
+what parses dynamic import expressions	lib/dependencies/ImportParserPlugin.js
+what parses commonjs require calls	lib/dependencies/CommonJsImportsParserPlugin.js
+where is the stats output printed and formatted	lib/stats/DefaultStatsPrinterPlugin.js
+where does watch mode detect changed files	lib/node/NodeWatchFileSystem.js
+what generates source map dev tool output	lib/SourceMapDevToolPlugin.js
+where is inner graph tracking for side effect free exports	lib/optimize/InnerGraph.js
+what mangles export names to shorter identifiers	lib/optimize/MangleExportsPlugin.js
+where does the entry dependency get added to the compilation	lib/EntryPlugin.js
+what stores module to dependency connections in the graph	lib/ModuleGraph.js
+where is the runtime code template for module require generated	lib/RuntimeTemplate.js

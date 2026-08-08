@@ -1,0 +1,246 @@
+**Exploration: where is a symbol contract compared for parameter changes**
+
+Found 11 symbols across 4 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `contractGraph` (src/graph.h:3436) — 1 caller in `src/graph.h`; ⚠️ no covering tests found
+- `rankOfSymbol` (src/eval.h:386) — 1 caller in `src/eval.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/flipimpact.h`** — size(calls), symbolEndLine(calls), push_back(calls), buildSymbolLineIndex(function), symbolsByFile(calls), +3 more
+
+```cpp
+339	    std::vector<std::vector<NodeId>> byFile;        // fileId → def ids, ascending start line
+340	};
+341	
+342	inline SymbolLineIndex buildSymbolLineIndex( const IngestResult& ing )
+343	{
+344	    // model.h::symbolsByFile is the shared bucket-and-sort (see its note); this index keeps EVERY symbol and
+345	    // orders by source line, tie-broken on the id, exactly as it always did.
+346	    SymbolLineIndex ix;
+347	    ix.byFile = symbolsByFile( ing,
+348	                               []( const Symbol& ) { return true; },
+349	                               [ & ]( NodeId a, NodeId b )
+350	                               { return ing.symbols[a].line != ing.symbols[b].line ? ing.symbols[a].line < ing.symbols[b].line : a < b; } );
+351	    return ix;
+352	}
+353	
+354	inline std::uint32_t symbolEndLine( const Symbol& s ) noexcept
+355	{
+356	    return s.line + ( s.loc > 0 ? s.loc - 1 : 0 );
+357	}
+358	
+359	// The defs a `#if` region [lo, hi] makes live, in the two shapes a region actually takes:
+360	//   CONTAINED — a def wholly inside the region: a whole function the flip adds.
+
+... (gap) ...
+
+364	// credits an unrelated earlier function as a host — measured on the motivating repo, where a `#if` inside
+365	// a 3-line function also named the 40-line function above it. Innermost-wins is exactly the rule --grep's
+366	// `in=` breadcrumb uses, so a flip host and a grep hit never disagree about which function code is in.
+367	inline std::vector<NodeId> hostsForSpan( const IngestResult& ing, const SymbolLineIndex& ix,
+368	                                         std::uint32_t fileId, std::uint32_t lo, std::uint32_t hi )
+369	{
+370	    std::vector<NodeId> hosts;
+371	    if( fileId >= ix.byFile.size() )
+372	    {
+373	        return hosts;
+374	    }
+375	    NodeId innermost = kNoNode;
+376	    for( NodeId id : ix.byFile[ fileId ] )
+377	    {
+378	        const Symbol& s = ing.symbols[ id ];
+379	        if( s.line > hi )
+380	        {
+381	            break; // sorted by start line ⇒ nothing later can begin inside
+382	        }
+383	        const std::uint32_t end = symbolEndLine( s );
+384	        if( s.line >= lo && end <= hi )
+385	        {
+386	            hosts.push_back( id );
+387	            continue;
+388	        }
+389	        if( s.line <= lo && end >= lo && ( innermost == kNoNode || s.line >= ing.symbols[innermost].line ) )
+390	        {
+391	            innermost = id;
+392	        }
+393	    }
+394	    if( innermost != kNoNode )
+395	    {
+396	        hosts.push_back( innermost );
+397	    }
+398	    return hosts;
+399	}
+400	
+401	// the INNERMOST def covering one line (greatest start line among the covers) — a branch site sits in exactly
+402	// one function, and reporting its whole enclosing-class chain instead would blur the radius.
+403	inline NodeId innermostAtLine( const IngestResult& ing, const SymbolLineIndex& ix, std::uint32_t fileId, std::uint32_t line )
+404	{
+405	    if( fileId >= ix.byFile.size() )
+406	    {
+407	        return kNoNode;
+408	    }
+409	    NodeId best = kNoNode;
+410	    for( NodeId id : ix.byFile[ fileId ] )
+411	    {
+412	        const Symbol& s = ing.symbols[ id ];
+413	        if( s.line > line )
+414	        {
+415	            break;
+416	        }
+417	        if( symbolEndLine( s ) >= line && ( best == kNoNode || s.line >= ing.symbols[best].line ) )
+418	        {
+419	            best = id;
+420	        }
+421	    }
+422	    return best;
+423	}
+424	
+425	// ── the family a single flip lights ──────────────────────────────────────────────────────────────────────
+426	// Descendants of `root` over the IMMEDIATE alias link, breadth-first and bounded: flipping a master lights
+```
+
+**`src/model.h`** — symbolsByFile(function), size(calls), push_back(calls)
+
+```cpp
+599	// Deterministic by construction: the caller's `less` must be a total order (both current ones tie-break on a
+600	// unique per-symbol field), and file buckets are indexed, never hashed.
+601	template<typename Keep, typename Less>
+602	inline std::vector<std::vector<NodeId>> symbolsByFile( const IngestResult& ing, Keep keep, Less less )
+603	{
+604	    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
+605	    for( const Symbol& s : ing.symbols )
+606	    {
+607	        if( s.fileId < byFile.size() && keep( s ) )
+608	        {
+609	            byFile[ s.fileId ].push_back( s.id );
+610	        }
+611	    }
+612	    for( std::vector<NodeId>& bucket : byFile )
+613	    {
+614	        std::sort( bucket.begin(), bucket.end(), less );
+615	    }
+616	    return byFile;
+617	}
+618	
+619	}   // namespace rw
+620	
+```
+
+**`src/namingconsistency.h`** — calls(calls), StyledSymbol(struct), scanNamingConsistency(function), size(calls), eligibleSymbol(calls), +1 more
+
+```cpp
+199	    return k == SymKind::Var ? KindBucket::Var : KindBucket::Fn;
+200	}
+201	
+202	struct StyledSymbol
+203	{
+204	    NodeId                    id = 0;
+205	    Lang                      lang;
+206	    KindBucket                kind;
+207	    ConventionStyle           style;
+208	    std::vector<std::string>  toks;
+209	};
+210	
+211	struct ConventionGroup
+212	{
+
+... (gap) ...
+
+243	
+244	// The measurement pass: classify every voting-eligible name, tally its group, then decide each group.
+245	// `ing.symbols` is already in deterministic (file, line, name) order, so `id` alone orders any row by it.
+246	inline ConventionScan scanNamingConsistency( const IngestResult& ing )
+247	{
+248	    ConventionScan scan;
+249	    std::vector<std::string> toks;
+250	    for( std::size_t symbolIndex = 0; symbolIndex < ing.symbols.size(); ++symbolIndex )
+251	    {
+252	        const Symbol& s = ing.symbols[symbolIndex];
+253	        if( !naminglens::detail::eligibleSymbol( s ) )
+254	        {
+255	            continue;
+256	        }
+257	        naminglens::splitIdentifier( s.name, toks );
+258	        if( toks.size() < 2 )
+259	        {
+260	            continue;   // no signal — nothing to vote and nothing to flag
+261	        }
+262	        const ConventionStyle style = classifyConventionStyle( s.name );
+263	        if( style == ConventionStyle::NoSignal )
+264	        {
+265	            continue;
+266	        }
+267	
+268	        StyledSymbol styled;
+269	        styled.id    = NodeId( symbolIndex );
+270	        styled.lang  = s.lang;
+271	        styled.kind  = kindBucketOf( s.kind );
+272	        styled.style = style;
+273	        styled.toks  = toks;
+274	
+275	        const std::size_t groupIndex = groupIndexOf( scan.groups, styled.lang, styled.kind );
+276	        if( votingStyle( style ) )
+277	        {
+278	            ++scan.groups[groupIndex].votes[ std::uint8_t( style ) ];
+279	            ++scan.groups[groupIndex].total;
+280	        }
+281	        scan.symbols.push_back( std::move( styled ) );
+282	    }
+283	
+284	    // Groups so far are in first-seen order — sort before anyone can see them, then decide each.
+285	    std::sort( scan.groups.begin(), scan.groups.end(),
+286	               []( const ConventionGroup& a, const ConventionGroup& b ) noexcept
+287	               {
+288	                   if( a.lang != b.lang ) { return a.lang < b.lang; }
+289	                   return a.kind < b.kind;
+290	               } );
+291	    for( ConventionGroup& group : scan.groups )
+292	    {
+293	        if( group.total < kMinGroupVotes )
+294	        {
+295	            group.why = "insufficient-sample";
+296	            continue;
+297	        }
+298	        std::size_t bestIndex = 0;
+299	        for( std::size_t i = 1; i < 4; ++i )
+300	        {
+301	            if( group.votes[i] > group.votes[bestIndex] )
+302	            {
+303	                bestIndex = i;
+304	            }
+305	        }
+306	        const double agreement = double( group.votes[bestIndex] ) / double( group.total );
+307	        if( agreement < kMinAgreement )
+308	        {
+309	            group.why = "no-clear-convention";
+310	            continue;
+311	        }
+312	        group.dominant = ConventionStyle( bestIndex );
+313	        group.decided  = true;
+314	    }
+315	    return scan;
+316	}
+317	
+318	inline const ConventionGroup* groupFor( const ConventionScan& scan, Lang lang, KindBucket kind )
+319	{
+```
+
+**`src/lanes.h`** — CoreSymbol(struct)
+
+```cpp
+262	    std::uint32_t sharedSymbols = 0, unionSymbols = 0;
+263	};
+264	
+265	struct CoreSymbol { std::string path, name, scope, id; std::uint32_t line = 0; };
+266	
+267	struct PlanLanesResult
+268	{
+```
+
+
+> Some file sections were trimmed for size. For a specific symbol you still need, run another `codegraph_explore` (or `codegraph_node`) with its exact name — line-numbered source, cheaper and more complete than Read.

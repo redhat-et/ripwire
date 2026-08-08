@@ -1,0 +1,309 @@
+**Exploration: where is personalized pagerank power iteration computed**
+
+Found 20 symbols across 1 file.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `computeDmm` (src/dmm.h:282) — 1 caller in `src/main.cpp`; ⚠️ no covering tests found
+- `pageRankDouble` (src/pagerank.cpp:36) — 1 caller in `src/graph.h`; ⚠️ no covering tests found
+- `computeDelta` (src/quality.h:2747) — 2 callers in `src/main.cpp`, `src/mcpverbs.h`; ⚠️ no covering tests found
+- `computeFlip` (src/flipimpact.h:958) — 2 callers in `src/main.cpp`, `src/mcpverbs.h`; ⚠️ no covering tests found
+- `computePlan` (src/landingplan.h:104) — 1 caller in `src/main.cpp`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/quality.h`** — size(calls), empty(calls), push_back(calls), end(calls), find(calls), +22 more
+
+```cpp
+2744	// `excludes`/`maxFileBytes` mirror the working-tree ingest config and are threaded into the churn kind's
+2745	// window-ref snapshot (computeWindowRefBodyHashes) so both sides of the evidence compare see one file set —
+2746	// the same A4-F5 discipline computeHeadSnapshot follows. Defaults keep the MCP call site unchanged.
+2747	inline std::vector<Regression> computeDelta( const IngestResult& ing, const Graph& g, const Snapshot& base,
+2748	                                             std::string_view root = {},
+2749	                                             const std::vector<std::string>& excludes = {},
+2750	                                             std::size_t maxFileBytes = kDefaultMaxFileBytes )
+2751	{
+2752	    std::vector<Regression> regs;
+2753	
+2754	    // A4-P10 — HOIST the per-symbol baseline key. `fnv1a64( baselineCanonId(...) )` materializes a canonical-id
+2755	    // string + hashes it; the passes below (4 metric kinds × 2 loops each, dead, api-surface, error-masking,
+2756	    // short-horizon-churn) each recomputed it per symbol → ~8× redundant string builds per symbol per call.
+2757	    // Compute it ONCE here (0 for a symbol with no canonId — those are skipped by every pass anyway) and let the
+2758	    // passes index `keyByNode[i]`. Byte-identical output: same hash values, just computed once instead of eight.
+2759	    std::vector<std::uint64_t> keyByNode( ing.symbols.size(), 0 );
+2760	    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+2761	    {
+2762	        if( i < g.canonId.size() && !g.canonId[i].empty() )
+2763	        {
+2764	            keyByNode[i] = fnv1a64( baselineCanonId( ing, i, root ) );
+2765	        }
+2766	    }
+2767	
+2768	    // ─── r26 ORIGIN AXIS: preexisting-worse vs new-symbol ──────────────────────────────────────────────
+2769	    // The exit code used to fire on ANY major unacked finding, which meant every large-but-fine NEW symbol
+2770	    // ("was=0" complexity/verbosity/nesting/params rows, and one api-surface row per new export) landed in
+2771	    // the same exit-2 pile as the genuinely-useful "this function that already existed got worse" catch.
+2772	    // A report whose acceptance criterion is negotiated per finding is not an acceptance criterion, so the
+2773	    // two are now separated: only PREEXISTING-worse findings gate; new-symbol findings stay printed.
+2774	    //
+2775	    // THE ORACLE is `base.locBySym` — computeSnapshot populates it for EVERY symbol that has a canonId
+2776	    // (public or not, body or not), so "is this canonId in locBySym" is the one clean, kind-independent
+2777	    // "existed at the baseline" test. It generalizes the api-surface kind's own isNewSymbol tier (B10.2e),
+2778	    // which used exactly this map, to all ten kinds rather than adding a parallel mechanism.
+2779	    //
+2780	    // PER-KIND RULE (the ambiguous kinds decided deliberately, not by default):
+2781	    //   complexity / verbosity / nesting / params / api-surface / error-masking — the finding IS a symbol:
+2782	    //     classify by that symbol's canonId. Direct.
+2783	    //   dead-code — the finding is "this symbol is now dead". A symbol that existed and LOST its last caller
+2784	    //     is preexisting-worse; a symbol born uncalled is new-symbol (that is a "you have not wired it up
+2785	    //     yet" note about new code, not a regression of anything that worked before).
+2786	    //   duplication / new-clone-of-reused-helper — the finding is a RELATION over a member set, not one
+2787	    //     symbol, so "the symbol existed" needs a decision: a group counts as preexisting-worse iff AT LEAST
+2788	    //     ONE member existed at the baseline — i.e. the new copy eroded code that was already there (the
+2789	    //     high-value half of these kinds, and the whole point of the reuse-decline kind: the reused helper is
+2790	    //     preexisting — r27 made that an ENFORCED precondition at the reuse kind's own fan-in test, where it
+2791	    //     had until then been only an assertion in this comment). A group whose members are ALL new is new code duplicating itself:
+2792	    //     real information, still printed, but nothing that existed got worse. A member with no canonId
+2793	    //     (key 0) is unclassifiable and is NOT counted as evidence of preexistence.
+2794	    //   short-horizon-churn — ALWAYS preexisting by construction: its gate 2 already requires the symbol to
+2795	    //     be present in the baseline's bodyHashBySym ("a symbol absent from the baseline is a first write,
+2796	    //     never a REwrite"), so this kind can never produce a new-symbol row. Recorded explicitly below
+2797	    //     rather than derived, so the invariant is visible at the push site.
+2798	    //
+2799	    // WHAT "PREEXISTING" CANNOT DETECT (stated in the XML comment + --help too): identity is the
+2800	    // root-relative canonId `path::scope::name`, so a symbol that was RENAMED or MOVED to another file reads
+2801	    // as new on the current side — a regression carried in with a move classifies new-symbol and does not
+2802	    // gate. There is no rename detection here and adding one would make the classification non-deterministic
+2803	    // (a similarity heuristic), which the determinism law forbids.
+2804	    //
+2805	    // DEGRADE, FAIL-CLOSED: a pre-Q1 (v1-format) baseline sidecar carries no `loc ` lines at all, so the
+2806	    // oracle is empty and NOTHING could be classified. Rather than silently disarming the exit code on an
+2807	    // unreadably-old baseline, classify every finding as preexisting-worse (gating) and alert — the honest
+2808	    // outcome is "re-baseline", never "green because I could not tell".
+2809	    // r27 SUSPICION-A FIX — `!base.locBySym.empty()` alone CONFLATED two opposite situations, and got the
+2810	    // second one factually wrong:
+2811	    //   (i)  a pre-Q1 (v1-format) sidecar, which has ccx/clone/dead/api records but no `loc ` lines → the
+2812	    //        oracle really is unavailable → fail closed (gate everything) + alert. Correct, keep.
+2813	    //   (ii) a baseline that is legitimately, COMPLETELY empty — a README-only first commit, a docs/JSON-only
+2814	    //        HEAD, a root pointed at a non-source subdirectory. HEAD genuinely has no canonId symbols, so the
+2815	    //        oracle is PERFECT ("nothing existed; every finding is new"), yet every finding was classified
+2816	    //        preexisting-worse and GATED, under an alert that told the user their baseline was in a stale
+2817	    //        pre-Q1 format. Wrong answer AND wrong explanation.
+2818	    // The discriminator is exact, not a heuristic: computeSnapshot populates locBySym for EVERY symbol that has
+2819	    // a canonId, so ANY other per-symbol record existing while locBySym is empty is only possible for a v1
+2820	    // sidecar; a genuinely-empty HEAD leaves every map and vector empty together.
+2821	    const bool baselineIsWhollyEmpty = base.locBySym.empty() && base.ccxBySym.empty() && base.nestBySym.empty()
+2822	                                    && base.paramsBySym.empty() && base.maskBySym.empty() && base.bodyHashBySym.empty()
+2823	                                    && base.cloneGroups.empty() && base.dead.empty() && base.publicApi.empty();
+2824	    const bool originOracleOk = !base.locBySym.empty() || baselineIsWhollyEmpty;
+2825	    if( !originOracleOk )
+2826	    {
+2827	        DEGRADED_PATH_ALERT( "quality: baseline has no per-symbol loc map (pre-Q1 format) — origin unclassifiable, gating every finding" );
+2828	    }
+2829	
+2830	    const auto existedAtBaseline = [ & ]( std::uint64_t symKey )
+2831	    {
+2832	        if( !originOracleOk )
+2833	        {
+2834	            return true; // fail closed — see the degrade note above
+2835	        }
+2836	        return base.locBySym.find( symKey ) != base.locBySym.end();
+2837	    };
+2838	
+2839	    // A clone group is new-symbol only when EVERY member is new (see the per-kind rule above).
+2840	    // r27 SUSPICION-B FIX: this loop asked `existedAtBaseline` per member, but a member with key 0 (no
+2841	    // canonId) short-circuits past it, so with the oracle UNAVAILABLE a group of such members still returned
+2842	    // true — "new-symbol", never gates — while every OTHER kind was busy failing CLOSED on the same missing
+2843	    // oracle. One unclassifiable kind silently disarming the exit code is exactly the shape of the bug the
+2844	    // fail-closed rule exists to prevent. Answer the oracle question FIRST, once, for the whole group.
+2845	    const auto cloneGroupIsNew = [ & ]( const CloneGroup& cg )
+2846	    {
+2847	        if( !originOracleOk )
+2848	        {
+2849	            return false; // fail closed — preexisting-worse, gates
+2850	        }
+2851	        for( NodeId m : cg.members )
+2852	        {
+2853	            if( m < keyByNode.size() && keyByNode[m] != 0 && existedAtBaseline( keyByNode[m] ) )
+2854	            {
+2855	                return false;
+2856	            }
+2857	        }
+2858	        return true;
+2859	    };
+2860	
+2861	    // P2.5 (r27) — the LOCATOR stamp. Fill the row's p="path:line" from the symbol that produced it, right
+2862	    // after the push so no call site has to restate the whole aggregate initializer. Root-relative path (the
+2863	    // relForHash spelling every sidecar key already uses) + the symbol's own 1-based start line.
+2864	    const auto stampLoc = [ & ]( NodeId i )
+2865	    {
+2866	        VERIFY( !regs.empty() );
+2867	        if( i >= ing.symbols.size() )
+2868	        {
+2869	            return; // degrade: no locator rather than a wrong one
+2870	        }
+2871	        const Symbol& s = ing.symbols[i];
+2872	        if( s.fileId >= ing.files.size() )
+2873	        {
+2874	            return;
+2875	        }
+2876	        regs.back().path = std::string( relForHash( ing.files[ s.fileId ], root ) );
+2877	        regs.back().line = s.line;
+2878	    };
+2879	
+2880	    // The clone kinds' locator: the member whose canonId sorts FIRST, so p= names the same symbol that leads
+2881	    // the emitted members= list rather than an arbitrary NodeId-order pick.
+2882	    const auto stampCloneLoc = [ & ]( const CloneGroup& cg )
+2883	    {
+2884	        NodeId      best   = NodeId( -1 );
+2885	        std::string bestId;
+2886	        for( NodeId m : cg.members )
+2887	        {
+2888	            if( m >= g.canonId.size() || g.canonId[m].empty() )
+2889	            {
+2890	                continue;
+2891	            }
+2892	            if( best == NodeId( -1 ) || g.canonId[m] < bestId ) { best = m; bestId = g.canonId[m]; }
+2893	        }
+2894	        if( best != NodeId( -1 ) )
+2895	        {
+2896	            stampLoc( best );
+2897	        }
+2898	    };
+2899	
+2900	    // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores
+2901	    // (overloads share an id), compare per-id MAX vs the baseline's per-id MAX, report each id once at its
+2902	    // first symbol, and flag only when it GREW and now exceeds the bar. `metricOf` reads the metric off a
+2903	    // Symbol; `baseMap` is the matching baseline map. Identical treatment for ccx/loc/nest/params guarantees
+2904	    // the trap is handled the same way for every one of them.
+2905	    // `minorDelta` is the kind's materiality tier: a regression whose growth (now − was) is under it is
+2906	    // reported sev="minor" and does not gate exit 2 (0 = no tier, every regression is major).
+2907	    const auto perSymbolKind =
+2908	        [ & ]( const char* kindName, std::uint32_t bar, std::uint32_t minorDelta,
+2909	               const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap,
+2910	               auto metricOf )
+2911	    {
+2912	        ScratchMap<std::uint32_t> nowBySym( ing.symbols.size() );
+2913	        for( NodeId i = 0; i < ing.symbols.size(); ++i )
+2914	        {
+2915	            if( i >= g.canonId.size() || g.canonId[i].empty() )
+2916	            {
+2917	                continue;
+2918	            }
+2919	            std::uint32_t& slot = nowBySym[ keyByNode[i] ];
+2920	            slot = std::max( slot, metricOf( ing.symbols[i] ) );
+2921	        }
+2922	        ScratchMap<std::uint8_t> reported( ing.symbols.size() );
+2923	        for( NodeId i = 0; i < ing.symbols.size(); ++i )
+2924	        {
+2925	            if( i >= g.canonId.size() || g.canonId[i].empty() )
+2926	            {
+2927	                continue;
+2928	            }
+2929	            const std::uint64_t key   = keyByNode[i];
+2930	            if( !insertScratchSeen( reported, key, "quality: per-symbol seen scratch capacity exceeded" ) )
+2931	            {
+2932	                continue; // already reported at an earlier overload
+2933	            }
+2934	            const auto          nowIt = nowBySym.find( key );
+2935	            if( nowIt == nowBySym.end() )
+2936	            {
+2937	                continue; // corrupt/inconsistent ids: degrade by skipping
+2938	            }
+2939	            const std::uint32_t now = nowIt->second;
+2940	            const auto          it  = baseMap.find( key );
+2941	            const std::uint32_t was = ( it == baseMap.end() ) ? 0u : it->second;
+2942	            if( now > was && now > bar )
+2943	            {
+2944	                regs.push_back( { kindName, g.canonId[i], was, now, key, minorDelta > 0 && now - was < minorDelta,
+2945	                                  {}, !existedAtBaseline( key ) } );          // origin: the finding IS this symbol
+2946	                stampLoc( i );
+2947	            }
+2948	        }
+2949	    };
+2950	
+2951	    perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   base.ccxBySym,    []( const Symbol& s ){ return s.ccx; } );
+2952	    perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   base.locBySym,    []( const Symbol& s ){ return s.loc; } );
+2953	    perSymbolKind( "nesting",    kNestBar,  0,                base.nestBySym,   []( const Symbol& s ){ return std::uint32_t( s.maxNest ); } );
+2954	    perSymbolKind( "params",     kParamBar, kMinorParamDelta, base.paramsBySym, []( const Symbol& s ){ return std::uint32_t( s.params ); } );
+2955	
+2956	    // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
+2957	    // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE
+2958	    // function of the working tree (ing), yet BOTH consumers below — the `duplication`/§D#4-3 new-clone report
+2959	    // AND the reuse-connectivity report — used to call findClones/findClonesType3 independently, so each pass
+2960	    // ran TWICE per call (~46 % of the whole verb was redundant recompute). Compute each pass ONCE here and let
+2961	    // both consumers read the same vectors. Byte-identical BY CONSTRUCTION: both functions are deterministic
+2962	    // pure functions, so their single result is field-for-field the value both call sites received before.
+2963	    const std::vector<CloneGroup> exactClones = findClones( ing, int( kMinCloneTokens ) );
+2964	    const std::vector<CloneGroup> type3Clones = findClonesType3( ing, int( kMinCloneTokens ) );
+2965	
+2966	    // duplication: a clone group (exact Type-1/2 OR gapped Type-3) whose member-set is not in the
+2967	    // baseline set. Both passes hash by the same sorted-member-canonId identity, so a change that
+2968	    // introduces a NEW near-clone (Type-3) is flagged exactly like a new exact copy. `now` carries the
+2969	    // group's tokens; the reported set is deduped by the same emitted-hash guard both passes share (an
+2970	    // exact and a near group can never share a member-set hash, so no double-report).
+2971	    gtl::btree_map<std::uint64_t, std::uint8_t> dupSeen;
+2972	    const auto reportNewClones =
+2973	        [ & ]( const std::vector<CloneGroup>& cgs )
+2974	    {
+2975	        for( const CloneGroup& cg : cgs )
+2976	        {
+2977	            const std::uint64_t h = cloneGroupHash( cg, ing, root );
+2978	            if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) )
+2979	            {
+2980	                continue;
+2981	            }
+2982	            // B10.1a: a clone group ENTIRELY composed of test-SCRIPT members is fixture-class noise — sibling
+2983	            // shell test scripts repeat near-identical setup/ok/no boilerplate by convention (see
+2984	            // isTestScriptPath); exempt only when every member is a test script, so a real src/ ↔ test-script
+2985	            // clone (still worth a look) is unaffected.
+2986	            bool allTestScript = !cg.members.empty();
+2987	            for( NodeId m : cg.members )
+2988	            {
+2989	                if( m >= ing.symbols.size() || !isTestScriptPath( ing.files[ ing.symbols[m].fileId ] ) ) { allTestScript = false; break; }
+2990	            }
+2991	            if( allTestScript )
+2992	            {
+2993	                continue;
+2994	            }
+2995	            if( !dupSeen.insert( { h, 1 } ).second )
+2996	            {
+2997	                continue; // same member-set already reported this run
+2998	            }
+2999	            std::vector<std::string> ids;
+3000	            for( NodeId m : cg.members )
+3001	            {
+3002	                if( m < g.canonId.size() )
+3003	                {
+3004	                    ids.push_back( g.canonId[m] );
+3005	                }
+3006	            }
+3007	            std::sort( ids.begin(), ids.end() );
+3008	            std::string joined;
+3009	            for( std::size_t k = 0; k < ids.size(); ++k )
+3010	            {
+3011	                joined += ids[k];
+3012	                if( k + 1 < ids.size() )
+3013	                {
+3014	                    joined += " | ";
+3015	                }
+3016	            }
+3017	            regs.push_back( { "duplication", joined, 0, cg.tokens, h, false, {}, cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
+3018	            stampCloneLoc( cg );
+3019	        }
+3020	    };
+3021	    reportNewClones( exactClones );
+3022	    reportNewClones( type3Clones );
+3023	
+3024	    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+3025	    {
+3026	        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i ) )
+3027	        {
+3028	            continue;
+3029	        }
+3030	        if( !std::binary_search( base.dead.begin(), base.dead.end(), keyByNode[i] ) )
+3031	        {
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

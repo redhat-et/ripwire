@@ -1,0 +1,288 @@
+**Exploration: where is the nesting profile of a function measured**
+
+Found 39 symbols across 4 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `collapseNestedTernaries` (src/atoms.h:444) — 1 caller in `src/atoms.h`; ⚠️ no covering tests found
+- `sizeNestedAggregate` (src/layout.h:1391) — 1 caller in `src/layout.h`; ⚠️ no covering tests found
+- `profileOf` (src/dmm.h:161) — 1 caller in `src/dmm.h`; ⚠️ no covering tests found
+- `measureOverlap` (src/partition.h:333) — 2 callers in `src/lanes.h`, `src/partition.h`; ⚠️ no covering tests found
+- `measureLaneOverlap` (src/lanes.h:960) — 1 caller in `src/lanes.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/dmm.h`** — RiskProfile(struct), SideProfile(struct), RiskProfile(extends), isUnit(function), isLowRisk(function), +3 more
+
+```cpp
+87	// scored" and "you asked for a revision that does not exist".
+88	enum class Status : std::uint8_t { Ok, BadRev, BadRange, NoGit, NoParent, MaterializeFailed };
+89	
+90	struct RiskProfile
+91	{
+92	    std::uint64_t lowVolume  = 0;
+93	    std::uint64_t highVolume = 0;
+94	};
+95	
+96	// One side of the comparison (base tree or target tree).
+97	struct SideProfile
+98	{
+99	    RiskProfile   byProp[kPropCount] {};
+100	    std::uint64_t unitCount = 0;   // definitions with a body that were measured
+101	    std::uint64_t volume    = 0;   // their total line span — the denominator a reader needs to size the deltas
+102	};
+103	
+104	// One property's answer. The four integers are emitted because the ratio alone is not auditable.
+105	struct PropScore
+
+... (gap) ...
+
+132	// Is this symbol a UNIT? A definition with a body, of a callable kind. A prototype, an abstract declaration
+133	// and a markdown heading are not units — they have no volume to move, and counting a one-line prototype as a
+134	// low-risk unit would let a header reshuffle manufacture a score. Same body test `--readability` uses.
+135	inline bool isUnit( const Symbol& s ) noexcept
+136	{
+137	    if( s.kind != SymKind::Function && s.kind != SymKind::Method )
+138	    {
+139	        return false;
+140	    }
+141	    return s.endByte > s.sigEndByte;
+142	}
+143	
+144	inline bool isLowRisk( const Symbol& s, std::size_t propIndex ) noexcept
+145	{
+146	    if( propIndex == 0 )
+147	    {
+148	        return s.loc <= kUnitSizeLowRiskMax;
+149	    }
+150	    if( propIndex == 1 )
+151	    {
+152	        return s.cx <= kUnitComplexityLowRiskMax;
+153	    }
+154	    return std::uint32_t( s.params ) <= kUnitInterfacingLowRiskMax;
+155	}
+156	
+157	// The risk profile of a whole ingested tree. Deliberately NOT keyed by symbol identity: DMM compares two
+158	// VOLUMES, and an unchanged unit lands in the same bin with the same volume on both sides, so it cancels to
+159	// zero without ever being matched. That is also what makes a pure file move free — the volume leaves one
+160	// path and arrives at another inside the same sum.
+161	inline SideProfile profileOf( const IngestResult& ing )
+162	{
+163	    SideProfile out;
+164	    for( const Symbol& s : ing.symbols )
+165	    {
+166	        if( !isUnit( s ) )
+167	        {
+168	            continue;
+169	        }
+170	        ++out.unitCount;
+171	        out.volume += s.loc;
+172	        for( std::size_t propIndex = 0; propIndex < kPropCount; ++propIndex )
+173	        {
+174	            RiskProfile& p = out.byProp[propIndex];
+175	            if( isLowRisk( s, propIndex ) )
+176	            {
+177	                p.lowVolume += s.loc;
+178	            }
+179	            else
+180	            {
+181	                p.highVolume += s.loc;
+182	            }
+183	        }
+184	    }
+185	    return out;
+186	}
+187	
+188	// PyDriller's `_good_change_proportion`, transcribed. The asymmetry is the model: low-risk volume ARRIVING is
+189	// good and LEAVING is bad; high-risk volume arriving is bad and leaving is good.
+```
+
+**`src/ingest.cpp`** — cc_isNestingControl(function), cc_isNestingOnly(function), cc_boolOp(function)
+
+```cpp
+2117	// else-if chains are flattened (a C-family else-if = +1, not +1+nesting). Boolean runs collapse:
+2118	// `a && b && c` = +1, `a && b || c` = +2. Reported as `ccx` (raw fact, never a gate).
+2119	// Known approximations: plain C-family `else {}` blocks aren't separately scored; recursion isn't added.
+2120	inline bool cc_isNestingControl( const char* t ) noexcept
+2121	{
+2122	    return    std::strcmp( t, "if_statement" ) == 0      || std::strcmp( t, "if_expression" ) == 0
+2123	           || std::strcmp( t, "for_statement" ) == 0     || std::strcmp( t, "for_range_loop" ) == 0
+2124	           || std::strcmp( t, "for_in_statement" ) == 0  || std::strcmp( t, "for_expression" ) == 0
+2125	           || std::strcmp( t, "while_statement" ) == 0   || std::strcmp( t, "while_expression" ) == 0
+2126	           || std::strcmp( t, "do_statement" ) == 0      || std::strcmp( t, "loop_expression" ) == 0
+2127	           || std::strcmp( t, "switch_statement" ) == 0  || std::strcmp( t, "switch_expression" ) == 0
+2128	           || std::strcmp( t, "match_expression" ) == 0
+2129	           || std::strcmp( t, "catch_clause" ) == 0      || std::strcmp( t, "except_clause" ) == 0
+2130	           || std::strcmp( t, "conditional_expression" ) == 0 || std::strcmp( t, "ternary_expression" ) == 0
+2131	           // Ruby (tree-sitter-ruby): the block control forms each open a nested body, so they raise nesting
+2132	           // AND score. `case`/`case_match` is the switch-equivalent container (flat +1, arms score via
+2133	           // isDecisionType — mirrors switch_statement). The trailing MODIFIER forms (`x if a`) have no nested
+2134	           // body and are deliberately absent here — they count as decisions only, matching the C-family model.
+2135	           || std::strcmp( t, "if" ) == 0                || std::strcmp( t, "unless" ) == 0
+2136	           || std::strcmp( t, "while" ) == 0             || std::strcmp( t, "until" ) == 0
+2137	           || std::strcmp( t, "for" ) == 0               || std::strcmp( t, "case" ) == 0
+2138	           || std::strcmp( t, "case_match" ) == 0        || std::strcmp( t, "rescue" ) == 0
+2139	           || std::strcmp( t, "conditional" ) == 0
+2140	           || std::strcmp( t, "foreach_statement" ) == 0;   // C# `foreach (var x in xs)` — a distinct loop node
+2141	           // NOTE: Ruby `elsif` is intentionally NOT here — like a C-family else-if / Python elif_clause it is a
+2142	           // flat +1 that does not deepen nesting; it is handled in the elif_clause/else_clause branch of cc_walk.
+2143	}
+2144	inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scores nothing (lambdas/closures)
+2145	{
+2146	    return    std::strcmp( t, "lambda_expression" ) == 0 || std::strcmp( t, "lambda" ) == 0
+2147	           || std::strcmp( t, "closure_expression" ) == 0;
+2148	}
+2149	// the boolean-operator spelling of a node, or "" if it isn't one (&&/|| for C-family, and/or for Python)
+2150	inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
+2151	{
+2152	    const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
+2153	    if( ts_node_is_null( op ) )
+2154	    {
+2155	        return {};
+2156	    }
+2157	    const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
+2158	    if( b > src.size() || b <= a )
+2159	    {
+2160	        return {};
+2161	    }
+2162	    const std::string_view o = src.substr( a, b - a );
+2163	    return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
+2164	}
+2165	
+2166	// ── O(children) child collection for whole-subtree walks ─────────────────────────────────────────────
+2167	// ts_node_child( n, i ) restarts tree-sitter's child iterator from the FIRST child on every call, so an
+```
+
+**`src/layout.h`** — fileBytes(function), calls(calls), sizeNestedAggregate(function), find(calls), end(calls), +5 more
+
+```cpp
+1362	    return true;
+1363	}
+1364	
+1365	inline const std::string& fileBytes( ModelCtx& ctx, std::uint32_t fileId )
+1366	{
+1367	    static const std::string kEmpty;
+1368	    return ensureFileLoaded( ctx, fileId ) ? ctx.bytes[ fileId ] : kEmpty;
+1369	}
+1370	
+1371	// The file with every comment blanked. Both the constant harvest and the `#pragma pack` probe read THIS,
+1372	// never the raw bytes: a header whose prose merely MENTIONS `#pragma pack` (this module's own fixture does)
+
+... (gap) ...
+
+1388	// Size a nested user-defined aggregate BY NAME: model its definition(s) and accept the answer only when
+1389	// every definition in the index agrees. A type whose own mirrors disagree cannot size the field that
+1390	// holds it — that IS the bug, and a number here would hide it one level down.
+1391	inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, std::uint32_t preferFileId, std::string& note )
+1392	{
+1393	    TypeSize out;
+1394	    if( ctx.depth >= kMaxNestDepth ) { note = "nest-depth"; return out; }
+1395	    for( const std::string& active : ctx.inProgress )
+1396	    {
+1397	        if( active == typeName ) { note = "recursive-type"; return out; }
+1398	    }
+1399	
+1400	    const auto it = ctx.byName.find( std::string( typeName ) );
+1401	    if( it == ctx.byName.end() )
+1402	    {
+1403	        return out;
+1404	    }
+1405	
+1406	    // Prefer a definition in the SAME file (the dual-compile header's own slot type), so a same-file
+1407	    // reader and this model compute the same number.
+1408	    std::vector<NodeId> order = it->second;
+1409	    std::stable_sort( order.begin(), order.end(), [ & ]( NodeId a, NodeId b )
+1410	    {
+1411	        const bool sa = ctx.ing.symbols[a].fileId == preferFileId, sb = ctx.ing.symbols[b].fileId == preferFileId;
+1412	        return ( sa != sb ) ? sa : ( a < b );
+1413	    } );
+1414	
+1415	    ctx.inProgress.emplace_back( typeName );
+1416	    ++ctx.depth;
+1417	    bool                                first = true;
+1418	    gtl::btree_map<std::uint64_t, bool> seenSite;                      // dedupe the typedef-alias twin
+1419	    for( NodeId id : order )
+1420	    {
+1421	        const Symbol& s = ctx.ing.symbols[ id ];
+1422	        if( !isCFamilyPath( ctx.ing.files[s.fileId] ) )
+1423	        {
+1424	            continue; // only a C-family aggregate has a byte layout
+1425	        }
+1426	        DefSite       site;
+1427	        {
+1428	            const std::string& src = fileBytes( ctx, s.fileId );
+1429	            if( src.empty() || !findDefBody( src, typeName, s.sigStartByte, site ) )
+1430	            {
+1431	                continue;
+1432	            }
+1433	        }
+1434	        site.fileId = s.fileId;
+1435	        const std::uint64_t key = ( std::uint64_t( s.fileId ) << 32 ) | std::uint64_t( site.braceStart & 0xFFFFFFFFull );
+1436	        if( seenSite.find( key ) != seenSite.end() )
+1437	        {
+1438	            continue;
+1439	        }
+1440	        seenSite.emplace( key, true );
+1441	
+1442	        const LayoutDef d = modelDef( ctx, s.fileId, site, typeName );
+1443	        if( !d.modeled ) { note = "nested-unmodelled"; out = TypeSize{}; break; }
+1444	        const TypeSize here{ d.size, d.align, true };
+1445	        if( first ) { out = here; first = false; }
+1446	        else if( here.size != out.size || here.align != out.align ) { note = "nested-mirrors-disagree"; out = TypeSize{}; break; }
+1447	    }
+1448	    --ctx.depth;
+1449	    ctx.inProgress.pop_back();
+1450	    return out;
+1451	}
+1452	
+1453	// Where a type spelling is being resolved: the corpus, the DEFINING FILE's constant/alias table, and that
+1454	// file's id (the "prefer a same-file nested definition" tiebreak). One parameter instead of three.
+```
+
+**`src/atoms.h`** — size(calls), SpanIndex(instantiates), add(calls), spanOf(calls), push_back(calls), +2 more
+
+```cpp
+441	// one bare and one parenthesised inner ternary satisfies both), and `a ? b : c ? d : e ? f : g` makes
+442	// both the outer and the middle ternary a match for what a reader sees as one confusing chain. Keep
+443	// the first occurrence of each span, and only the widest span of any nest.
+444	inline std::vector<AstMatch> collapseNestedTernaries( const IngestResult& ing, std::vector<AstMatch>& kept )
+445	{
+446	    SpanIndex everyNest( ing.files.size() );
+447	    for( const AstMatch& m : kept )
+448	    {
+449	        if( m.tag == kAtomRuleNames[3] )
+450	        {
+451	            everyNest.add( spanOf( m ) );
+452	        }
+453	    }
+454	
+455	    SpanIndex             alreadyEmitted( ing.files.size() );
+456	    std::vector<AstMatch> out;
+457	    out.reserve( kept.size() );
+458	    for( AstMatch& m : kept )
+459	    {
+460	        if( m.tag != kAtomRuleNames[3] )
+461	        {
+462	            out.push_back( std::move( m ) );
+463	            continue;
+464	        }
+465	        const Span mine = spanOf( m );
+466	        if( alreadyEmitted.excludes( mine, SpanRelation::Exact )        // the same node, via the other pattern
+467	         || everyNest.excludes( mine, SpanRelation::WiderThan ) )       // an enclosing ternary already reports this nest
+468	        {
+469	            continue;
+470	        }
+471	        alreadyEmitted.add( mine );
+472	        out.push_back( std::move( m ) );
+473	    }
+474	    return out;
+475	}
+476	
+477	}   // namespace atomdetail
+478	
+```
+
+
+> Some file sections were trimmed for size. For a specific symbol you still need, run another `codegraph_explore` (or `codegraph_node`) with its exact name — line-numbered source, cheaper and more complete than Read.

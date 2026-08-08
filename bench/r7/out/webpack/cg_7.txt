@@ -1,0 +1,822 @@
+**Exploration: where are compile time constants substituted into the source**
+
+Found 49 symbols across 3 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `isCompileTimeValue` (lib/javascript/BasicEvaluatedExpression.js:164) — 2 callers in `lib/dependencies/WorkerPlugin.js`, `lib/javascript/JavascriptParser.js`; ⚠️ no covering tests found
+- `asCompileTimeValue` (lib/javascript/BasicEvaluatedExpression.js:184) — 2 callers in `lib/dependencies/WorkerPlugin.js`, `lib/javascript/JavascriptParser.js`; ⚠️ no covering tests found
+- `isSourceEqual` (lib/util/source.js:36) — 3 callers in `lib/Compilation.js`, `lib/Compiler.js`; ⚠️ no covering tests found
+- `_isSourceEqual` (lib/util/source.js:18) — 1 caller in `lib/util/source.js`; ⚠️ no covering tests found
+
+**Relationships**
+
+**extends:**
+- AssetSourceParser → Parser
+- RuntimeModule → Module
+
+**calls:**
+- apply → isCompileTimeValue
+- _initializeEvaluating → isCompileTimeValue
+- apply → asCompileTimeValue
+- _initializeEvaluating → asCompileTimeValue
+- isSourceEqual → get
+- isSourceEqual → _isSourceEqual
+- isSourceEqual → set
+- emitAsset → isSourceEqual
+- renameAsset → isSourceEqual
+- emitAssets → isSourceEqual
+- get → callback
+- get → makeWebpackError
+- get → needCalls
+- apply → get
+- _getChunkGraphModule → get
+- ... and 215 more
+
+**references:**
+- isCompileTimeValue → TypeBigInt
+- isCompileTimeValue → TypeConstArray
+- isCompileTimeValue → TypeRegExp
+- isCompileTimeValue → TypeBoolean
+- isCompileTimeValue → TypeNumber
+- isCompileTimeValue → TypeString
+- isCompileTimeValue → TypeNull
+- isCompileTimeValue → TypeUndefined
+- asCompileTimeValue → TypeBigInt
+- asCompileTimeValue → TypeConstArray
+- asCompileTimeValue → TypeRegExp
+- asCompileTimeValue → TypeBoolean
+- asCompileTimeValue → TypeNumber
+- asCompileTimeValue → TypeString
+- asCompileTimeValue → TypeNull
+- ... and 16 more
+
+**instantiates:**
+- constructor → SyncHook
+- codeGeneration → OriginalSource
+- codeGeneration → RawSource
+- generate → AbstractMethodError
+- apply → AssetSourceParser
+- apply → AssetParser
+- apply → AssetGenerator
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`lib/javascript/BasicEvaluatedExpression.js`** — TypeUndefined(constant), TypeNull(constant), TypeString(constant), TypeNumber(constant), TypeBoolean(constant), TypeRegExp(constant), TypeConstArray(constant), TypeBigInt(constant), constructor(method), isUnknown(method), isNull(method), isUndefined(method), isString(method), isNumber(method), isBigInt(method), +8 more
+
+```javascript
+10	/** @typedef {import("./JavascriptParser").VariableInfo} VariableInfo */
+11	
+12	const TypeUnknown = 0;
+13	const TypeUndefined = 1;
+14	const TypeNull = 2;
+15	const TypeString = 3;
+16	const TypeNumber = 4;
+17	const TypeBoolean = 5;
+18	const TypeRegExp = 6;
+19	const TypeConditional = 7;
+20	const TypeArray = 8;
+21	const TypeConstArray = 9;
+22	const TypeIdentifier = 10;
+23	const TypeWrapped = 11;
+24	const TypeTemplateString = 12;
+25	const TypeBigInt = 13;
+26	
+27	class BasicEvaluatedExpression {
+28		constructor() {
+29			this.type = TypeUnknown;
+30			/** @type {Range | undefined} */
+31			this.range = undefined;
+32			/** @type {boolean} */
+33			this.falsy = false;
+34			/** @type {boolean} */
+35			this.truthy = false;
+36			/** @type {boolean | undefined} */
+37			this.nullish = undefined;
+38			/** @type {boolean} */
+39			this.sideEffects = true;
+40			/** @type {boolean | undefined} */
+41			this.bool = undefined;
+42			/** @type {number | undefined} */
+43			this.number = undefined;
+44			/** @type {bigint | undefined} */
+45			this.bigint = undefined;
+46			/** @type {RegExp | undefined} */
+47			this.regExp = undefined;
+48			/** @type {string | undefined} */
+49			this.string = undefined;
+50			/** @type {BasicEvaluatedExpression[] | undefined} */
+51			this.quasis = undefined;
+52			/** @type {BasicEvaluatedExpression[] | undefined} */
+53			this.parts = undefined;
+54			/** @type {EXPECTED_ANY[] | undefined} */
+55			this.array = undefined;
+56			/** @type {BasicEvaluatedExpression[] | undefined} */
+57			this.items = undefined;
+58			/** @type {BasicEvaluatedExpression[] | undefined} */
+59			this.options = undefined;
+60			/** @type {BasicEvaluatedExpression | undefined | null} */
+61			this.prefix = undefined;
+62			/** @type {BasicEvaluatedExpression | undefined | null} */
+63			this.postfix = undefined;
+64			/** @type {BasicEvaluatedExpression[] | undefined} */
+65			this.wrappedInnerExpressions = undefined;
+66			/** @type {string | VariableInfo | undefined} */
+67			this.identifier = undefined;
+68			/** @type {string | VariableInfo | undefined} */
+69			this.rootInfo = undefined;
+70			/** @type {(() => string[]) | undefined} */
+71			this.getMembers = undefined;
+72			/** @type {(() => boolean[]) | undefined} */
+73			this.getMembersOptionals = undefined;
+74			/** @type {(() => Range[]) | undefined} */
+75			this.getMemberRanges = undefined;
+76			/** @type {Node | undefined} */
+77			this.expression = undefined;
+78		}
+79	
+80		isUnknown() {
+81			return this.type === TypeUnknown;
+82		}
+83	
+84		isNull() {
+85			return this.type === TypeNull;
+86		}
+87	
+88		isUndefined() {
+89			return this.type === TypeUndefined;
+90		}
+91	
+92		isString() {
+93			return this.type === TypeString;
+94		}
+95	
+96		isNumber() {
+97			return this.type === TypeNumber;
+98		}
+99	
+100		isBigInt() {
+101			return this.type === TypeBigInt;
+102		}
+103	
+104		isBoolean() {
+105			return this.type === TypeBoolean;
+106		}
+107	
+108		isRegExp() {
+109			return this.type === TypeRegExp;
+110		}
+111	
+112		isConditional() {
+113			return this.type === TypeConditional;
+114		}
+115	
+116		isArray() {
+117			return this.type === TypeArray;
+118		}
+119	
+120		isConstArray() {
+121			return this.type === TypeConstArray;
+122		}
+123	
+124		isIdentifier() {
+125			return this.type === TypeIdentifier;
+126		}
+127	
+128		isWrapped() {
+129			return this.type === TypeWrapped;
+
+... (gap) ...
+
+161		 * Is expression a runtime or compile-time value?
+162		 * @returns {boolean} true: compile time value, false: runtime value
+163		 */
+164		isCompileTimeValue() {
+165			switch (this.type) {
+166				case TypeUndefined:
+167				case TypeNull:
+168				case TypeString:
+169				case TypeNumber:
+170				case TypeBoolean:
+171				case TypeRegExp:
+172				case TypeConstArray:
+173				case TypeBigInt:
+174					return true;
+175				default:
+176					return false;
+177			}
+178		}
+179	
+180		/**
+181		 * Gets the compile-time value of the expression
+182		 * @returns {undefined | null | string | number | boolean | RegExp | EXPECTED_ANY[] | bigint} the javascript value
+183		 */
+184		asCompileTimeValue() {
+185			switch (this.type) {
+186				case TypeUndefined:
+187					return;
+188				case TypeNull:
+189					return null;
+190				case TypeString:
+191					return this.string;
+192				case TypeNumber:
+193					return this.number;
+194				case TypeBoolean:
+195					return this.bool;
+196				case TypeRegExp:
+197					return this.regExp;
+198				case TypeConstArray:
+199					return this.array;
+200				case TypeBigInt:
+201					return this.bigint;
+202				default:
+203					throw new Error(
+204						"asCompileTimeValue must only be called for compile-time values"
+205					);
+206			}
+207		}
+208	
+209		isTruthy() {
+210			return this.truthy;
+```
+
+**`lib/RuntimeModule.js`** — getSourceTypes(method), RuntimeModule(class), constructor(method), attach(method), identifier(method), readableIdentifier(method), needBuild(method), build(method), updateHash(method), codeGeneration(method), size(method), generate(method), getGeneratedCode(method), shouldIsolate(method), Module(constant), +1 more
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const { RawSource } = require("webpack-sources");
+9	const OriginalSource = require("webpack-sources").OriginalSource;
+10	const Module = require("./Module");
+11	const { RUNTIME_TYPES } = require("./ModuleSourceTypesConstants");
+12	const { WEBPACK_MODULE_TYPE_RUNTIME } = require("./ModuleTypeConstants");
+13	
+14	/** @typedef {import("webpack-sources").Source} Source */
+15	/** @typedef {import("../declarations/WebpackOptions").WebpackOptionsNormalized} WebpackOptions */
+16	/** @typedef {import("./Chunk")} Chunk */
+17	/** @typedef {import("./ChunkGraph")} ChunkGraph */
+18	/** @typedef {import("./Compilation")} Compilation */
+19	/** @typedef {import("./Dependency").UpdateHashContext} UpdateHashContext */
+20	/** @typedef {import("./Generator").SourceTypes} SourceTypes */
+21	/** @typedef {import("./Module").BuildCallback} BuildCallback */
+22	/** @typedef {import("./Module").CodeGenerationContext} CodeGenerationContext */
+23	/** @typedef {import("./Module").CodeGenerationResult} CodeGenerationResult */
+24	/** @typedef {import("./Module").NeedBuildCallback} NeedBuildCallback */
+25	/** @typedef {import("./Module").NeedBuildContext} NeedBuildContext */
+26	/** @typedef {import("./RequestShortener")} RequestShortener */
+27	/** @typedef {import("./ResolverFactory").ResolverWithOptions} ResolverWithOptions */
+28	/** @typedef {import("./WebpackError")} WebpackError */
+29	/** @typedef {import("./util/Hash")} Hash */
+30	/** @typedef {import("./util/fs").InputFileSystem} InputFileSystem */
+31	
+32	class RuntimeModule extends Module {
+33		/**
+34		 * @param {string} name a readable name
+35		 * @param {number=} stage an optional stage
+36		 */
+37		constructor(name, stage = 0) {
+38			super(WEBPACK_MODULE_TYPE_RUNTIME);
+39			this.name = name;
+40			this.stage = stage;
+41			this.buildMeta = {};
+42			this.buildInfo = {};
+43			/** @type {Compilation | undefined} */
+44			this.compilation = undefined;
+45			/** @type {Chunk | undefined} */
+46			this.chunk = undefined;
+47			/** @type {ChunkGraph | undefined} */
+48			this.chunkGraph = undefined;
+49			this.fullHash = false;
+50			this.dependentHash = false;
+51			/** @type {string | undefined | null} */
+52			this._cachedGeneratedCode = undefined;
+53		}
+54	
+55		/**
+56		 * @param {Compilation} compilation the compilation
+57		 * @param {Chunk} chunk the chunk
+58		 * @param {ChunkGraph} chunkGraph the chunk graph
+59		 * @returns {void}
+60		 */
+61		attach(compilation, chunk, chunkGraph = compilation.chunkGraph) {
+62			this.compilation = compilation;
+63			this.chunk = chunk;
+64			this.chunkGraph = chunkGraph;
+65		}
+66	
+67		/**
+68		 * @returns {string} a unique identifier of the module
+69		 */
+70		identifier() {
+71			return `webpack/runtime/${this.name}`;
+72		}
+73	
+74		/**
+75		 * @param {RequestShortener} requestShortener the request shortener
+76		 * @returns {string} a user readable identifier of the module
+77		 */
+78		readableIdentifier(requestShortener) {
+79			return `webpack/runtime/${this.name}`;
+80		}
+81	
+82		/**
+83		 * @param {NeedBuildContext} context context info
+84		 * @param {NeedBuildCallback} callback callback function, returns true, if the module needs a rebuild
+85		 * @returns {void}
+86		 */
+87		needBuild(context, callback) {
+88			return callback(null, false);
+89		}
+90	
+91		/**
+92		 * @param {WebpackOptions} options webpack options
+93		 * @param {Compilation} compilation the compilation
+94		 * @param {ResolverWithOptions} resolver the resolver
+95		 * @param {InputFileSystem} fs the file system
+96		 * @param {BuildCallback} callback callback function
+97		 * @returns {void}
+98		 */
+99		build(options, compilation, resolver, fs, callback) {
+100			// do nothing
+101			// should not be called as runtime modules are added later to the compilation
+102			callback();
+103		}
+104	
+105		/**
+106		 * @param {Hash} hash the hash used to track dependencies
+107		 * @param {UpdateHashContext} context context
+108		 * @returns {void}
+109		 */
+110		updateHash(hash, context) {
+111			hash.update(this.name);
+112			hash.update(`${this.stage}`);
+113			try {
+114				if (this.fullHash || this.dependentHash) {
+115					// Do not use getGeneratedCode here, because i. e. compilation hash might be not
+116					// ready at this point. We will cache it later instead.
+117					hash.update(/** @type {string} */ (this.generate()));
+118				} else {
+119					hash.update(/** @type {string} */ (this.getGeneratedCode()));
+120				}
+121			} catch (err) {
+122				hash.update(/** @type {Error} */ (err).message);
+123			}
+124			super.updateHash(hash, context);
+125		}
+126	
+127		/**
+128		 * @returns {SourceTypes} types available (do not mutate)
+129		 */
+130		getSourceTypes() {
+131			return RUNTIME_TYPES;
+132		}
+133	
+134		/**
+135		 * @param {CodeGenerationContext} context context for code generation
+136		 * @returns {CodeGenerationResult} result
+137		 */
+138		codeGeneration(context) {
+139			const sources = new Map();
+140			const generatedCode = this.getGeneratedCode();
+141			if (generatedCode) {
+142				sources.set(
+143					WEBPACK_MODULE_TYPE_RUNTIME,
+144					this.useSourceMap || this.useSimpleSourceMap
+145						? new OriginalSource(generatedCode, this.identifier())
+146						: new RawSource(generatedCode)
+147				);
+148			}
+149			return {
+150				sources,
+151				runtimeRequirements: null
+152			};
+153		}
+154	
+155		/**
+156		 * @param {string=} type the source type for which the size should be estimated
+157		 * @returns {number} the estimated size of the module (must be non-zero)
+158		 */
+159		size(type) {
+160			try {
+161				const source = this.getGeneratedCode();
+162				return source ? source.length : 0;
+163			} catch (_err) {
+164				return 0;
+165			}
+166		}
+167	
+168		/* istanbul ignore next */
+169		/**
+170		 * @abstract
+171		 * @returns {string | null} runtime code
+172		 */
+173		generate() {
+174			const AbstractMethodError = require("./AbstractMethodError");
+175	
+176			throw new AbstractMethodError();
+177		}
+178	
+179		/**
+180		 * @returns {string | null} runtime code
+181		 */
+182		getGeneratedCode() {
+183			if (this._cachedGeneratedCode) {
+184				return this._cachedGeneratedCode;
+185			}
+186			return (this._cachedGeneratedCode = this.generate());
+187		}
+188	
+189		/**
+190		 * @returns {boolean} true, if the runtime module should get it's own scope
+191		 */
+192		shouldIsolate() {
+193			return true;
+194		}
+195	}
+196	
+197	/**
+198	 * Runtime modules without any dependencies to other runtime modules
+199	 */
+200	RuntimeModule.STAGE_NORMAL = 0;
+201	
+202	/**
+203	 * Runtime modules with simple dependencies on other runtime modules
+204	 */
+205	RuntimeModule.STAGE_BASIC = 5;
+206	
+207	/**
+208	 * Runtime modules which attach to handlers of other runtime modules
+209	 */
+210	RuntimeModule.STAGE_ATTACH = 10;
+211	
+212	/**
+213	 * Runtime modules which trigger actions on bootstrap
+214	 */
+215	RuntimeModule.STAGE_TRIGGER = 20;
+216	
+217	module.exports = RuntimeModule;
+```
+
+**`lib/rules/RuleSetCompiler.js`** — error(calls), isArray(calls), fn(calls), push(calls), compileCondition(calls), compileRules(calls), call(calls), constructor(method), freeze(calls), SyncHook(instantiates), apply(calls), compile(method), compileRules(method), map(calls), compileRule(calls), +9 more
+
+```javascript
+91		/**
+92		 * @param {RuleSetPlugin[]} plugins plugins
+93		 */
+94		constructor(plugins) {
+95			this.hooks = Object.freeze({
+96				/** @type {SyncHook<[string, RuleSetRule, Set<string>, CompiledRule, References]>} */
+97				rule: new SyncHook([
+98					"path",
+99					"rule",
+100					"unhandledProperties",
+101					"compiledRule",
+102					"references"
+103				])
+104			});
+105			if (plugins) {
+106				for (const plugin of plugins) {
+107					plugin.apply(this);
+108				}
+109			}
+110		}
+111	
+112		/**
+113		 * @param {RuleSetRules} ruleSet raw user provided rules
+114		 * @returns {RuleSet} compiled RuleSet
+115		 */
+116		compile(ruleSet) {
+117			const refs = new Map();
+118			const rules = this.compileRules("ruleSet", ruleSet, refs);
+119	
+120			/**
+121			 * @param {EffectData} data data passed in
+122			 * @param {CompiledRule} rule the compiled rule
+123			 * @param {Effect[]} effects an array where effects are pushed to
+124			 * @returns {boolean} true, if the rule has matched
+125			 */
+126			const execRule = (data, rule, effects) => {
+127				for (const condition of rule.conditions) {
+128					const p = condition.property;
+129					if (Array.isArray(p)) {
+130						/** @type {EffectData | EffectData[keyof EffectData] | undefined} */
+131						let current = data;
+132						for (const subProperty of p) {
+133							if (
+134								current &&
+135								typeof current === "object" &&
+136								Object.prototype.hasOwnProperty.call(current, subProperty)
+137							) {
+138								current = current[/** @type {keyof EffectData} */ (subProperty)];
+139							} else {
+140								current = undefined;
+141								break;
+142							}
+143						}
+144						if (current !== undefined) {
+145							if (!condition.fn(current)) return false;
+146							continue;
+147						}
+148					} else if (p in data) {
+149						const value = data[/** @type {keyof EffectData} */ (p)];
+150						if (value !== undefined) {
+151							if (!condition.fn(value)) return false;
+152							continue;
+153						}
+154					}
+155					if (!condition.matchWhenEmpty) {
+156						return false;
+157					}
+158				}
+159				for (const effect of rule.effects) {
+160					if (typeof effect === "function") {
+161						const returnedEffects = effect(data);
+162						for (const effect of returnedEffects) {
+163							effects.push(effect);
+164						}
+165					} else {
+166						effects.push(effect);
+167					}
+168				}
+169				if (rule.rules) {
+170					for (const childRule of rule.rules) {
+171						execRule(data, childRule, effects);
+172					}
+173				}
+174				if (rule.oneOf) {
+175					for (const childRule of rule.oneOf) {
+176						if (execRule(data, childRule, effects)) {
+177							break;
+178						}
+179					}
+180				}
+181				return true;
+182			};
+183	
+184			return {
+185				references: refs,
+186				exec: (data) => {
+187					/** @type {Effect[]} */
+188					const effects = [];
+189					for (const rule of rules) {
+190						execRule(data, rule, effects);
+191					}
+192					return effects;
+193				}
+194			};
+195		}
+196	
+197		/**
+198		 * @param {string} path current path
+199		 * @param {RuleSetRules} rules the raw rules provided by user
+200		 * @param {References} refs references
+201		 * @returns {CompiledRule[]} rules
+202		 */
+203		compileRules(path, rules, refs) {
+204			return rules
+205				.filter(Boolean)
+206				.map((rule, i) =>
+207					this.compileRule(
+208						`${path}[${i}]`,
+209						/** @type {RuleSetRule} */ (rule),
+210						refs
+211					)
+212				);
+213		}
+214	
+215		/**
+216		 * @param {string} path current path
+217		 * @param {RuleSetRule} rule the raw rule provided by user
+218		 * @param {References} refs references
+219		 * @returns {CompiledRule} normalized and compiled rule for processing
+220		 */
+221		compileRule(path, rule, refs) {
+222			/** @type {Set<string>} */
+223			const unhandledProperties = new Set(
+224				Object.keys(rule).filter(
+225					(key) => rule[/** @type {keyof RuleSetRule} */ (key)] !== undefined
+226				)
+227			);
+228	
+229			/** @type {CompiledRule} */
+230			const compiledRule = {
+231				conditions: [],
+232				effects: [],
+233				rules: undefined,
+234				oneOf: undefined
+235			};
+236	
+237			this.hooks.rule.call(path, rule, unhandledProperties, compiledRule, refs);
+238	
+239			if (unhandledProperties.has("rules")) {
+240				unhandledProperties.delete("rules");
+241				const rules = rule.rules;
+242				if (!Array.isArray(rules)) {
+243					throw this.error(path, rules, "Rule.rules must be an array of rules");
+244				}
+245				compiledRule.rules = this.compileRules(`${path}.rules`, rules, refs);
+246			}
+247	
+248			if (unhandledProperties.has("oneOf")) {
+249				unhandledProperties.delete("oneOf");
+250				const oneOf = rule.oneOf;
+251				if (!Array.isArray(oneOf)) {
+252					throw this.error(path, oneOf, "Rule.oneOf must be an array of rules");
+253				}
+254				compiledRule.oneOf = this.compileRules(`${path}.oneOf`, oneOf, refs);
+255			}
+256	
+257			if (unhandledProperties.size > 0) {
+258				throw this.error(
+259					path,
+260					rule,
+261					`Properties ${[...unhandledProperties].join(", ")} are unknown`
+262				);
+263			}
+264	
+265			return compiledRule;
+266		}
+267	
+268		/**
+269		 * @param {string} path current path
+270		 * @param {RuleSetLoaderOptions} condition user provided condition value
+271		 * @returns {Condition} compiled condition
+272		 */
+273		compileCondition(path, condition) {
+274			if (condition === "") {
+275				return {
+276					matchWhenEmpty: true,
+277					fn: (str) => str === ""
+278				};
+279			}
+280			if (!condition) {
+281				throw this.error(
+282					path,
+283					condition,
+284					"Expected condition but got falsy value"
+285				);
+286			}
+287			if (typeof condition === "string") {
+288				return {
+289					matchWhenEmpty: condition.length === 0,
+290					fn: (str) => typeof str === "string" && str.startsWith(condition)
+291				};
+292			}
+293			if (typeof condition === "function") {
+294				try {
+295					return {
+296						matchWhenEmpty: condition(""),
+297						fn: /** @type {RuleConditionFunction} */ (condition)
+298					};
+299				} catch (_err) {
+300					throw this.error(
+301						path,
+302						condition,
+303						"Evaluation of condition function threw error"
+304					);
+305				}
+306			}
+307			if (condition instanceof RegExp) {
+308				return {
+309					matchWhenEmpty: condition.test(""),
+310					fn: (v) => typeof v === "string" && condition.test(v)
+311				};
+312			}
+313			if (Array.isArray(condition)) {
+314				const items = condition.map((c, i) =>
+315					this.compileCondition(`${path}[${i}]`, c)
+316				);
+317				return this.combineConditionsOr(items);
+318			}
+319	
+320			if (typeof condition !== "object") {
+321				throw this.error(
+322					path,
+323					condition,
+324					`Unexpected ${typeof condition} when condition was expected`
+325				);
+326			}
+327	
+328			const conditions = [];
+329			for (const key of Object.keys(condition)) {
+330				const value = condition[key];
+331				switch (key) {
+332					case "or":
+333						if (value) {
+334							if (!Array.isArray(value)) {
+335								throw this.error(
+336									`${path}.or`,
+337									condition.or,
+338									"Expected array of conditions"
+339								);
+340							}
+341							conditions.push(this.compileCondition(`${path}.or`, value));
+342						}
+343						break;
+344					case "and":
+345						if (value) {
+346							if (!Array.isArray(value)) {
+347								throw this.error(
+348									`${path}.and`,
+349									condition.and,
+350									"Expected array of conditions"
+351								);
+352							}
+353							let i = 0;
+354							for (const item of value) {
+355								conditions.push(this.compileCondition(`${path}.and[${i}]`, item));
+356								i++;
+357							}
+358						}
+359						break;
+360					case "not":
+361						if (value) {
+362							const matcher = this.compileCondition(`${path}.not`, value);
+363							const fn = matcher.fn;
+364							conditions.push({
+365								matchWhenEmpty: !matcher.matchWhenEmpty,
+366								fn: /** @type {RuleConditionFunction} */ ((v) => !fn(v))
+367							});
+368						}
+369						break;
+370					default:
+371						throw this.error(
+372							`${path}.${key}`,
+373							condition[key],
+374							`Unexpected property ${key} in condition`
+375						);
+376				}
+377			}
+378			if (conditions.length === 0) {
+379				throw this.error(
+380					path,
+381					condition,
+382					"Expected condition, but got empty thing"
+383				);
+384			}
+385			return this.combineConditionsAnd(conditions);
+386		}
+387	
+388		/**
+389		 * @param {Condition[]} conditions some conditions
+390		 * @returns {Condition} merged condition
+391		 */
+392		combineConditionsOr(conditions) {
+393			if (conditions.length === 0) {
+394				return {
+395					matchWhenEmpty: false,
+396					fn: () => false
+397				};
+398			} else if (conditions.length === 1) {
+399				return conditions[0];
+400			}
+401			return {
+402				matchWhenEmpty: conditions.some((c) => c.matchWhenEmpty),
+403				fn: (v) => conditions.some((c) => c.fn(v))
+404			};
+405		}
+406	
+407		/**
+408		 * @param {Condition[]} conditions some conditions
+409		 * @returns {Condition} merged condition
+410		 */
+411		combineConditionsAnd(conditions) {
+412			if (conditions.length === 0) {
+413				return {
+414					matchWhenEmpty: false,
+415					fn: () => false
+416				};
+417			} else if (conditions.length === 1) {
+418				return conditions[0];
+419			}
+420			return {
+421				matchWhenEmpty: conditions.every((c) => c.matchWhenEmpty),
+422				fn: (v) => conditions.every((c) => c.fn(v))
+423			};
+424		}
+425	
+426		/**
+427		 * @param {string} path current path
+428		 * @param {EXPECTED_ANY} value value at the error location
+429		 * @param {string} message message explaining the problem
+430		 * @returns {Error} an error object
+431		 */
+432		error(path, value, message) {
+433			return new Error(
+434				`Compiling RuleSet failed: ${message} (at ${path}: ${value})`
+435			);
+436		}
+437	}
+438	
+439	module.exports = RuleSetCompiler;
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

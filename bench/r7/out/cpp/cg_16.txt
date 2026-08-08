@@ -1,0 +1,307 @@
+**Exploration: where is a stack trace frame mapped onto an indexed symbol**
+
+Found 8 symbols across 1 file.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `traceEnclosingSymbol` (src/tracelocus.h:90) — 2 callers in `src/docdrift.h`, `src/tracelocus.h`; ⚠️ no covering tests found
+- `partitionTraceFrames` (src/tracelocus.h:265) — 1 caller in `src/tracelocus.h`; ⚠️ no covering tests found
+- `extractFrames` (src/tracein.h:385) — 1 caller in `src/tracelocus.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/tracelocus.h`** — size(calls), calls(calls), push_back(calls), formatSpec(calls), empty(calls), +15 more
+
+```cpp
+262	// bucket every frame of an ALREADY innermost-first-sorted `frames` (whose storage must outlive the result —
+263	// the buckets hold pointers into it). Name-first resolution per §A2a, line-enclosure fallback, dedup by
+264	// resolved symbol so a recursive/looping trace ranks each symbol once and COUNTS the folds.
+265	inline TracePartition partitionTraceFrames( const IngestResult& ing, const std::vector<tracein::ParsedFrame>& frames )
+266	{
+267	    TracePartition    part;
+268	    std::vector<char> seenSym( ing.symbols.size(), 0 );
+269	    part.parsedCount = frames.size();
+270	
+271	    for( const tracein::ParsedFrame& fr : frames )
+272	    {
+273	        if( fr.lineOverflowed ) { part.skipped.push_back( &fr ); continue; }
+274	        const std::uint32_t fileId = traceMatchFile( ing, fr.path );
+275	        if( fileId == kNoTraceFile ) { part.skipped.push_back( &fr ); continue; }
+276	        ++part.inCorpusCount;
+277	
+278	        // name first (the stable half of a frame), line-enclosure second (the half a stale binary invalidates)
+279	        const NodeId byName = traceResolveByName( ing, fr.func, fileId );
+280	        const NodeId byLine = traceEnclosingSymbol( ing, fileId, fr.line );
+281	        const NodeId chosen = byName != kNoNode ? byName : byLine;
+282	        if( chosen == kNoNode ) { part.unresolved.push_back( &fr ); continue; }
+283	        if( seenSym[ chosen ] ) { ++part.mergedCount; continue; }
+284	        seenSym[ chosen ] = 1;
+285	
+286	        TraceSuspect sus;
+287	        sus.frame            = &fr;
+288	        sus.symbolId         = chosen;
+289	        sus.isResolvedByName = byName != kNoNode;
+290	        if( byName != kNoNode && byLine != kNoNode && byLine != byName )
+291	        {
+292	            sus.lineEnclosesId = byLine;
+293	        }
+294	        part.suspects.push_back( sus );
+295	    }
+296	
+297	    VERIFY( part.inCorpusCount == part.suspects.size() + part.mergedCount + part.unresolved.size() );
+298	    return part;
+299	}
+300	
+301	// render the <trace> block (the ranked suspect map + the two listed-but-unranked buckets) to a string, so
+302	// the caller can subtract its exact byte cost from the sigs budget. Built through open_memstream so no
+303	// attribute is ever truncated regardless of path length (F6: a fixed-size row buffer truncated long
+304	// sanitizer paths mid-attribute, dropping the closing `"/>` and breaking G4).
+305	inline std::string renderTraceBlock( const IngestResult& ing, tracein::FrameFormat dominant, std::string_view srcNote,
+306	                                     const TracePartition& part )
+307	{
+308	    std::vector<char> esc;
+309	    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+310	
+311	    char*       buf = nullptr;
+312	    std::size_t sz  = 0;
+313	    std::FILE*  m   = open_memstream( &buf, &sz );
+314	    if( !m )
+315	    {
+316	        DEGRADED_PATH_ALERT( "renderTraceBlock: open_memstream failed — trace block omitted" );
+317	        return {};
+318	    }
+319	    std::fprintf( m, "<trace src=\"%s\" format=\"%s\" frame_lines=\"%zu\" parsed=\"%zu\" in_corpus=\"%u\" skipped=\"%zu\" merged=\"%u\" unresolved=\"%zu\" suspects=\"%zu\">",
+320	        ex( srcNote ).c_str(), tracein::formatSpec( dominant ).label, part.frameLinesSeen, part.parsedCount, part.inCorpusCount,
+321	        part.skipped.size(), part.mergedCount, part.unresolved.size(), part.suspects.size() );
+322	    for( std::size_t i = 0; i < part.suspects.size(); ++i )
+323	    {
+324	        const TraceSuspect& sus = part.suspects[i];
+325	        const Symbol&       s   = ing.symbols[ sus.symbolId ];
+326	
+327	        // the name/line disagreement, disclosed inline: today's line sits in a DIFFERENT def than the frame names
+328	        std::string encloses;
+329	        if( sus.lineEnclosesId != kNoNode )
+330	        {
+331	            encloses = " line_encloses=\"" + ex( ing.symbols[ sus.lineEnclosesId ].name ) + "\"";
+332	        }
+333	
+334	        std::fprintf( m, "<frame rank=\"%zu\" n=\"%s\" t=\"%s\" p=\"%s:%u\" resolved_by=\"%s\"%s%s/>",
+335	            i + 1, ex( s.name ).c_str(), symTag( s.kind ), ex( sus.frame->path ).c_str(), sus.frame->line,
+336	            sus.isResolvedByName ? "name" : "line", encloses.c_str(), i == 0 ? " innermost=\"1\"" : "" );
+337	    }
+338	    for( const tracein::ParsedFrame* ur : part.unresolved )
+339	    {
+340	        std::string named;
+341	        if( !ur->func.empty() )
+342	        {
+343	            named = " n=\"" + ex( ur->func ) + "\"";
+344	        }
+345	        std::fprintf( m, "<unresolved p=\"%s:%u\"%s/>", ex( ur->path ).c_str(), ur->line, named.c_str() );
+346	    }
+347	    for( const tracein::ParsedFrame* sk : part.skipped )
+348	    {
+349	        std::fprintf( m, "<skipped p=\"%s\" line=\"%u\"/>", ex( sk->path ).c_str(), sk->line );
+350	    }
+351	    std::fprintf( m, "</trace>" );
+352	    std::fflush( m );  std::fclose( m );
+353	    std::string out;
+354	    if( buf ) { out.assign( buf, sz );  std::free( buf ); }
+355	    return out;
+356	}
+357	
+358	// optional Q3/redaction/notes inputs, same graceful-degrade contract as packtask.h's PackTaskInputs — every
+359	// field defaults to "not available" (attribute simply omitted downstream).
+360	struct FromTraceInputs
+361	{
+362	    std::size_t                        bundleBudgetBytes    = kForPayloadBudgetBytes;   // overall <ctx> budget; caller resolves --token-budget/budget_tokens into bytes
+363	    std::size_t                        sigLadderBudgetBytes = 0;                        // packSignatures per-doc ladder (0 = unlimited)
+364	    std::size_t                        bodyBudgetBytes      = 0;                        // packBodies budget for the rank-1 full body (0 = unlimited)
+365	    bool                                compress             = false;
+366	    const std::vector<std::uint32_t>*  fanIn  = nullptr;
+367	    const std::vector<char>*           impure = nullptr;
+368	    const std::vector<std::uint8_t>*   tested = nullptr;
+369	    const std::vector<std::uint32_t>*  amp    = nullptr;
+370	    // §B10.1 — R14's UNNAMED TWIN, named here. R14 records `PackTaskInputs::redact = nullptr` as the residual
+371	    // W3-N1's "REQUIRED redact, no default" discipline could not reach; this field is the identical shape in
+372	    // the identical position and was never listed beside it. Both keep the default DELIBERATELY: an aggregate
+373	    // whose whole contract is "every field defaults to not-available, each degrades gracefully" cannot make
+374	    // ONE field required — dropping the initialiser on a POD member does not force a caller to spell it, it
+375	    // makes `FromTraceInputs in;` leave it INDETERMINATE, which is strictly worse than nullptr. The
+376	    // CalleeCallsSink shape (no defaults on ANY member, so the aggregate must be spelled in full) is the
+377	    // pattern that does work, and converting these two to it is a separate change with a real call-site cost.
+378	    // Until then the net is held by test/fixedbufsweep.sh's population sweep, not by the compiler.
+379	    RedactCounts*                      redact = nullptr;
+380	    const notes::NoteIndex*            notes  = nullptr;
+381	};
+382	
+383	struct FromTraceResult
+384	{
+385	    bool        ok         = false;   // false = zero parseable frames — caller refuses loudly, xml is empty
+386	    std::size_t frameCount = 0;
+387	    std::size_t inCorpus   = 0;
+388	    std::string xml;                  // the <ctx>…</ctx> bundle; only meaningful when ok
+389	};
+390	
+391	// extracts frames (tracein.h, table-driven), ranks the enclosing symbols INNERMOST-first over in-corpus
+392	// frames ONLY (out-of-corpus frames are listed + counted, never ranked — no silent caps), and returns a
+393	// --for-style bundle: the <trace> map, the suspects' signatures, and the innermost in-corpus symbol's FULL
+394	// body. `srcNote` is the trace's human-readable source label (a filename, "<stdin>", or an MCP caller's own
+395	// label) — "--" runs are collapsed here so it stays legal inside the emitted XML comment (G4).
+396	inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph& g, const std::string& text,
+397	                                            std::string_view srcNoteIn, const FromTraceInputs& inArg )
+398	{
+399	    FromTraceResult res;
+400	
+401	    // P2.4: --from-trace emitted in="0" on every row while --for reported the truth for the SAME symbol —
+402	    // it told the reader "nobody calls this" about the frame it had just ranked. packSignatures now omits
+403	    // in= when no vector is supplied, so silence was already honest; supplying the real thing is better, and
+404	    // it is free (one O(symbols) pass over the in-edge CSR that is already built).
+405	    std::vector<std::uint32_t> localFanIn;
+406	    FromTraceInputs            in = inArg;
+407	    if( !in.fanIn )
+408	    {
+409	        localFanIn = fanInFromInEdges( ing, g );
+410	        if( !localFanIn.empty() )
+411	        {
+412	            in.fanIn = &localFanIn;
+413	        }
+414	    }
+415	
+416	    tracein::FrameScan                scan   = tracein::extractFrames( text );
+417	    std::vector<tracein::ParsedFrame>& frames = scan.frames;
+418	    if( frames.empty() )
+419	    {
+420	        return res; // ok=false — nothing parseable
+421	    }
+422	
+423	    const tracein::FrameFormat dominant   = tracein::dominantFormat( frames );
+424	    const std::size_t          frameCount = frames.size();
+425	    std::stable_sort( frames.begin(), frames.end(), [ & ]( const tracein::ParsedFrame& a, const tracein::ParsedFrame& b )
+426	    {
+427	        return tracein::innermostKey( a, dominant, frameCount ) < tracein::innermostKey( b, dominant, frameCount );
+428	    } );
+429	
+430	    TracePartition part = partitionTraceFrames( ing, frames );
+431	    part.frameLinesSeen = scan.frameShapedLines;   // §B10: the outer denominator, from the only scope holding the raw text
+432	
+433	    std::vector<float> rank( ing.symbols.size(), 0.0f );
+434	    for( std::size_t i = 0; i < part.suspects.size(); ++i )
+435	    {
+436	        rank[part.suspects[i].symbolId] = float( part.suspects.size() - i );
+437	    }
+438	
+439	    // W3FIX M3: srcNote is a FILENAME (or an MCP caller's own label), and a filename may legally contain a
+440	    // newline on this platform — `--from-trace=$'…/tr\nace.txt'` put a raw newline both in this comment and in
+441	    // <trace src=…>, two G4 breaches out of one byte. xmlCommentText is the shared comment scrub (dash collapse
+442	    // + control bytes + invalid UTF-8); the attribute half is escapeXml's character references (M2).
+443	    const std::string srcNote = xmlCommentText( srcNoteIn );
+444	
+445	    const std::size_t bundleBudget = in.bundleBudgetBytes > 0 ? in.bundleBudgetBytes : kForPayloadBudgetBytes;
+446	
+447	    // CA4 §B3 — the budget ledger + the ceiling ladder, the third member of the family cli.h enumerates BY
+448	    // NAME ("--for / --pack-task / --from-trace"). This lens STATED a budget and never labelled an overrun:
+449	    // when the header floor exceeds it, `sigsBudget` clamps to 1 and the whole bundle is emitted anyway —
+450	    // measured on base_w3 at --token-budget=50: 4 833 B against a 135 B allowance (35.8x) with zero
+451	    // over_ceiling, while --pack-task printed its ledger and --for and --recall both labelled themselves.
+452	    // Verbatim the W3FIX-H2 mechanism. THE HEADER IS NOW A BUILDER for exactly the reason the two siblings
+453	    // are: the ladder must be able to PRICE a shape before choosing it, and a header built once cannot be.
+454	    //
+455	    // Rungs, cheapest information loss first (climbCeilingLadder owns the order):
+456	    //   (a) as built;
+457	    //   (b) the comment's src echo dropped — a byte-for-byte DUPLICATE, since ctxRootOpen's task= attribute
+458	    //       above still carries the verbatim copy;
+459	    //   (c) skipped: this lens has no route= attribute (hasRouteAttr=false), so rung (c) is not available;
+460	    //   (d) over_ceiling — the complete bundle plus an honest label, never a mutilated bundle.
+461	    const auto buildTraceHeader = [ & ]( bool withSrcEcho, std::string_view extraNotes ) -> std::string
+462	    {
+463	        // §B1.7 root attrs: the trace SOURCE is this lens's request text — the same slot --for/--pack-task put
+464	        // the user's query in — so it is machine-readable and VERBATIM (escapeXml + M2 character references),
+465	        // beside the lossy readable echo in the comment. This lens emitted a bare `<ctx>` and had neither.
+466	        std::string h = ctxRootOpen( srcNoteIn, {} );
+467	        h += "<!-- ripwire trace-to-locus for ";
+468	        if( withSrcEcho ) { h += "\"";  h += srcNote;  h += "\""; }
+469	        else
+470	        {
+471	            h += "[src_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+472	        }
+473	        h += ": frames of a ";
+474	        h += tracein::formatSpec( dominant ).label;
+475	        h += " trace mapped onto indexed symbols, ranked INNERMOST-first. ";
+476	        h += "frame_lines=";  h += std::to_string( part.frameLinesSeen );
+477	        h += " parsed=";      h += std::to_string( part.parsedCount );
+478	        h += " in_corpus=";   h += std::to_string( part.inCorpusCount );
+479	        h += " skipped=";     h += std::to_string( part.skipped.size() );
+480	        h += " (out of every root - listed, never ranked) merged=";
+481	        h += std::to_string( part.mergedCount );
+482	        h += " unresolved=";  h += std::to_string( part.unresolved.size() );
+483	        h += ". ";
+484	
+485	        // §A2b/§A2c legend: the closing arithmetic, HOW each frame bound, and which line convention p= carries
+486	        // §B10: the OUTER denominator, stated before the inner partition — parsed= was previously the largest
+487	        // number in the report, so a frame-shaped line no format shape could read (a dyld frame with no source
+488	        // location) simply lowered parsed= and left no trace of itself anywhere.
+489	        h += "frame_lines = frame-shaped lines the INPUT presented (a #N marker, a leading \"at \", or a Python File \"...\" "
+490	             "line, plus every line that did extract); parsed = how many of them yielded a usable path:line, so "
+491	             "frame_lines - parsed is the count that matched no format shape and enters no bucket below. ";
+492	        h += "in_corpus = suspects + merged + unresolved, so every file-matched frame is visible: merged= folded into an "
+493	             "already-claimed symbol, unresolved= listed as <unresolved> (indexed file, no def by name or by line). ";
+494	        h += "resolved_by=\"name\" means the frame's OWN function name bound to a unique def (line_encloses=, when present, "
+495	             "names the different symbol today's line sits in: the tell that the trace predates this checkout); "
+496	             "resolved_by=\"line\" means the name was absent, unknown or ambiguous, so the def enclosing that line was used. ";
+497	        h += "p= on a frame is the FRAME's own locator (the trace's path:line, verbatim); definition sites live in <sigs> l=. ";
+498	        // §B7.5 (CA4): the <sigs> rows this verb emits carry the same ranking-row vocabulary --pack-task
+499	        // spells out, and this legend defined only the frame half — a reader met cx=/ccx=/in= on the
+500	        // signature rows with nothing to read them against, the identical gap on the identical rows.
+501	        h += "On a <sigs> row: n=name, id=canonical(when scoped), t=kind, cx=cyclomatic complexity, "
+502	             "ccx=cognitive complexity, in=reuse-count (absent = not measured, never a false 0). ";
+503	        h += "rank 1 = the innermost in-corpus frame; its FULL body follows, other suspects as signatures. ";
+504	        // §B3 the BUDGET LEDGER, the fact this bundle never stated. The two numbers are the working budget the
+505	        // caller resolved (--token-budget x kMinBytesPerToken x kBudgetHeadroom, or the default) and the bar
+506	        // this lens is JUDGED against — the same single-entry overshoot tolerance --for and --pack-task use,
+507	        // re-expressed against a post-headroom byte budget (serialize.h ceilingAllowanceFromBudgetBytes).
+508	        h += "budget=";  h += std::to_string( bundleBudget );
+509	        h += " bytes (allowance ";  h += std::to_string( ceilingAllowanceFromBudgetBytes( bundleBudget ) );
+510	        h += " bytes = ceiling + the single-entry overshoot a whole first signature costs).";
+511	        h += extraNotes;
+512	        h += " -->";
+513	        return h;
+514	    };
+515	
+516	    std::string       headerStr = buildTraceHeader( /*withSrcEcho=*/true, {} );
+517	    const std::string traceStr  = renderTraceBlock( ing, dominant, srcNote, part );
+518	
+519	    const std::size_t fixedBytes   = headerStr.size() + traceStr.size() + 6;   // + "</ctx>"
+520	    const std::size_t sigsBudget   = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
+521	
+522	    std::string whole;
+523	    whole += headerStr;
+524	    whole += traceStr;
+525	    if( !part.suspects.empty() )
+526	    {
+527	        char*       buf = nullptr;  std::size_t sz = 0;
+528	        std::FILE*  m   = open_memstream( &buf, &sz );
+529	        if( m )
+530	        {
+531	            packSignatures( m, ing, rank, int( part.suspects.size() ), in.sigLadderBudgetBytes, /*metrics=*/true,
+532	                            in.fanIn, in.impure, in.redact,
+533	                            nullptr, nullptr, in.tested, in.amp,     // Q3: tested/amp folded on; churn/clone omitted (no git walk here)
+534	                            /*rankAdaptivePayload=*/true, sigsBudget,
+535	                            in.notes );                              // L3: field-notes surfacing (inert when null)
+536	
+537	            const std::vector<NodeId> bodyIds{ part.suspects[0].symbolId };
+538	            packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, in.compress, in.redact,
+539	                        /*ranges=*/nullptr, in.notes );               // L3: the rank-1 body surfaces notes too
+540	            std::fflush( m );  std::fclose( m );
+541	            if( buf ) { whole.append( buf, sz );  std::free( buf ); }
+542	        }
+543	        else
+544	        {
+545	            DEGRADED_PATH_ALERT( "from-trace: open_memstream failed — signature/body section skipped" );
+546	        }
+547	    }
+548	    whole += "</ctx>";
+549	
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)
