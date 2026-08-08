@@ -20,8 +20,11 @@ another is a vendored tree-sitter grammar plus one row in a declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
 
-One self-contained binary on your own machine, offline. Install it and ask it something before you
-finish reading this page:
+### One line to install — and your coding agent already knows how to use it
+
+One self-contained binary on your own machine, offline — and the same line ships the task-shaped
+skills that teach your agent *when* to reach for it, not just how. Install it and ask it something
+before you finish reading this page:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
