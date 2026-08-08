@@ -35,9 +35,12 @@ JOBS="${RIPWIRE_PGO_JOBS:-6}"
 CORPUS="$ROOT"
 reuse=0
 
+cmake_extra=()   # --cmake-extra ARG (repeatable): appended to BOTH configures — the release
+                 # pipeline passes -DCMAKE_BUILD_TYPE=Release (and the cross leg its OSX arch)
 while [ $# -gt 0 ]; do
     case "$1" in
         --corpus)         CORPUS="${2:-}"; shift 2 ;;
+        --cmake-extra)    cmake_extra+=( "${2:-}" ); shift 2 ;;
         --reuse-profile)  reuse=1; shift ;;
         --clean)          rm -rf "$GEN" "$OPT"; echo "removed $GEN and $OPT"; exit 0 ;;
         -h|--help)        sed -n '2,27p' "$0"; exit 0 ;;
@@ -62,7 +65,7 @@ if [ "$reuse" -eq 0 ]; then
     # ── phase 1: instrumented build ────────────────────────────────────────────────────────────────
     echo "pgobuild: [1/4] configuring the instrumented tree ($GEN)"
     rm -rf "$GEN"
-    cmake -S "$ROOT" -B "$GEN" -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=generate >"$GEN.cfg.log" 2>&1 || {
+    cmake -S "$ROOT" -B "$GEN" -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=generate ${cmake_extra[@]+"${cmake_extra[@]}"} >"$GEN.cfg.log" 2>&1 || {
         echo "configure failed — see $GEN.cfg.log" >&2; tail -20 "$GEN.cfg.log" >&2; exit 1; }
     rm -f "$GEN.cfg.log"
     echo "pgobuild: [2/4] building instrumented (this binary is SLOW by design — counters on every edge)"
@@ -98,7 +101,7 @@ fi
 # ── phase 3: the optimized build ───────────────────────────────────────────────────────────────────
 echo "pgobuild: [4/4] configuring + building the optimized tree ($OPT)"
 rm -rf "$OPT"
-cmake -S "$ROOT" -B "$OPT" -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=use -DRIPWIRE_PGO_PROFILE="$PROFILE" >"$OPT.cfg.log" 2>&1 || {
+cmake -S "$ROOT" -B "$OPT" -DRIPWIRE_LTO=ON -DRIPWIRE_PGO=use -DRIPWIRE_PGO_PROFILE="$PROFILE" ${cmake_extra[@]+"${cmake_extra[@]}"} >"$OPT.cfg.log" 2>&1 || {
     echo "configure failed — see $OPT.cfg.log" >&2; tail -20 "$OPT.cfg.log" >&2; exit 1; }
 rm -f "$OPT.cfg.log"
 # The optimized tree builds EVERY target, not just `ripwire`. The instrumented phase above needs only
