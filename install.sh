@@ -3,6 +3,11 @@
 # pointed at a symlink straight into build/, which breaks on any clean rebuild). Idempotent — safe to
 # re-run after any source change. Run: ./install.sh
 #
+# Builds in its OWN tree (build-install/), as Release: an installed binary is one you USE, so it gets
+# the fast flavour (Release implies LTO — see CMakeLists). build/ stays the plain dev flavour every
+# gate and bench number is measured against; configuring THAT tree as Release or -march=native would
+# silently move all of them at once (the same argument CMakeLists uses to refuse PGO in build/).
+#
 # The install prefix is detected, not hardcoded: /opt/homebrew is wrong on Intel macOS (brew
 # lives at /usr/local there) and on any machine with no Homebrew at all (most Linux). Detect instead:
 #   1) RIPWIRE_INSTALL_PREFIX env override, for anyone who wants a specific location
@@ -21,9 +26,9 @@ else
     echo "install.sh: no brew on PATH — installing under $prefix (set RIPWIRE_INSTALL_PREFIX to override)"
 fi
 
-cmake -S . -B build -DRIPWIRE_NATIVE=ON
-cmake --build build -j
-cmake --install build --prefix "$prefix" --component ripwire
+cmake -S . -B build-install -DCMAKE_BUILD_TYPE=Release -DRIPWIRE_NATIVE=ON
+cmake --build build-install -j
+cmake --install build-install --prefix "$prefix" --component ripwire
 
 case ":$PATH:" in
     *":$prefix/bin:"*) ;;
