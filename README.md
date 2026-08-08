@@ -43,16 +43,24 @@ the tests that reach them.
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
-Four everyday moments, re-measured on this repository, 2026-08-08. Every ratio is a real byte count
+Ten everyday moments, re-measured on this repository, 2026-08-08. Every ratio is a real byte count
 from a real run, reproduced by the command in its row — instruments in
 [`docs/EVALS.md` §5](docs/EVALS.md#readme-grade-rows-re-measured-on-this-repository-2026-08-08).
+
+Ordered understand → navigate → review-the-change:
 
 | Ask it | Command | ripwire | naive read | savings |
 | --- | --- | --- | --- | --- |
 | "Orient me in this repo" | `ripwire .` | **22,571 B** | 80,267–101,738 B (`README.md`, or +`ARCHITECTURE.md`) | 3.6×–4.5× |
 | "Where is X handled?" | `ripwire . --for="…"` | **7,501 B** | 19,463–80,037 B (grep, or grep + the file) | 2.6×–10.7× |
+| "What do I already know?" | `ripwire . --recall="…"` | **61,064 B** | 1,781,685 B (every doc this repo carries) | 29.2× |
 | "Set me up for this task" | `ripwire . --pack-task="…"` | **8,512 B** | 65,378–320,597 B (the relevant files, whole) | 7.7×–37.7× |
-| "Show me this one function" | `ripwire . --expand=SYM` | **23,675–88,547 B** | 174,430–695,888 B (the file it lives in) | 2.0×–29.4× |
+| "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **1,038–65,908 B** body (+22.6 KB for the ranked-neighborhood bundle) | 173,647–695,888 B (the file it lives in) | 2.6×–670× |
+| "Who calls this function?" | `ripwire . --callers=SYM` | **2,326 B** | 160,989–207,359 B (grep — mostly noise — + the files to sort real calls from mentions) | 69.2×–89.1× |
+| "Is it safe to change this?" | `ripwire . --impact=SYM` + `--uses=SYM` | **5,125 B** | 73,661 B (the direct-use files, whole) | 14.4× |
+| "I have a stack trace" | `ripwire . --from-trace=FILE` | **5,718 B** | 497,104–1,192,992 B (grep each frame + the file(s) it touches) | 86.9×–208.6× |
+| "I changed these files — tests? blast radius?" | `ripwire . --situ` | **1,632 B** | 11,926–529,245 B (diff + grep `test/`, + the candidates opened) | 7.3×–324.2× |
+| "Review this PR/diff" | `ripwire . --pr-context=REF` | **7,437 B** | 19,298–204,294 B (diff alone, or diff + the touched files) | 2.6×–27.5× |
 
 <details>
 <summary>Same-correct-answer verification, and the honesty line these ratios come with</summary>
@@ -61,11 +69,22 @@ from a real run, reproduced by the command in its row — instruments in
 same-correct-answer-or-it-doesn't-count, and both sides were checked, not assumed: orient surfaces
 this repo's own pipeline files (`ingest.cpp`, `graph.h`, `serialize.h`) in the first screen, the same
 three `docs/ARCHITECTURE.md` names as central; the `--for` row lands `mcpStale`
-(`src/mcpindex.h:633`), the actual staleness check, 5th-ranked; `--pack-task` names the same three
-touch points a human would — `cachelint.h`, `mergeCachePack` (`src/main.cpp:1787`), the
-`lintrules.h` helpers it reuses; `--expand` hands back the requested function's complete,
-unmodified body either way. The map ranks and discloses — it never paraphrases your code — and every
-truncation is disclosed in the header.
+(`src/mcpindex.h:633`), the actual staleness check, 5th-ranked; `--recall` lands the container-rule
+doc (`AGENTS.md`) that states, verbatim, the same "no `std::map`" rule `CONTRIBUTING.md` explains in
+full; `--pack-task` names the same three touch points a human would — `cachelint.h`, `mergeCachePack`
+(`src/main.cpp:1787`), the `lintrules.h` helpers it reuses; `--expand --top-k=0` hands back the
+requested function's complete, unmodified body — the ranked-neighborhood addition costs the same
+~22.6 KB regardless of which function you ask for, confirmed on two (a fixed floor, not per-function
+variance); `--callers` on `langOfPath` names its 2 real callers, the same ones a `grep` hit-list
+buries under 5 files of comment-only mentions; `--impact`+`--uses` on `coversOrEquals` names the same
+2 direct call sites `--uses` alone would, plus (disclosed) a transitive reach `--uses` doesn't cover
+at all; `--from-trace` resolves all 7 frames of a real call chain by name to the same definitions a
+per-frame grep would eventually find, mixed with call sites and comments; `--situ` on a 2-file diff
+names the same 6 real test harnesses, 2 of which a filename grep across `test/` cannot find even
+after opening every one of its 41 candidates — a completeness gap, not just a byte one; `--pr-context`
+surfaces co-change partners (`test/regression.sh`, `src/main.cpp`) a raw `git diff` has no way to
+know were usually touched and weren't this time. The map ranks and discloses — it never paraphrases
+your code — and every truncation is disclosed in the header.
 
 **The honesty line, made concrete:** the same auto-selection behind the `--expand` row also runs the
 other way. On a small file (`pageRankDouble` in `src/pagerank.cpp`, 5,559 B) the ranked bundle would
