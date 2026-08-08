@@ -8479,9 +8479,14 @@ inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root
     }
 }
 
-std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups )
+std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups,
+                                                    std::vector<std::string>* keptBytesOut )
 {
     std::vector<std::vector<AstMatch>> out( groups.size() );
+    if( keptBytesOut != nullptr )
+    {
+        keptBytesOut->assign( ing.files.size(), std::string() );   // sized BEFORE the pool starts: workers only ever write distinct slots
+    }
     bool                               anySpecs = false;
     bool                               anyWalk  = false;
     for( const AstQueryGroup& group : groups )
@@ -8699,7 +8704,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                 return;
             }
             TSQueryCursor* cur = ts_query_cursor_new();
-            std::string    bytes;
+            std::string    readBuf;   // worker-local scratch, reused across files unless the read is retained below
             for( ;; )
             {
                 const std::size_t slot = nextSlot.fetch_add( 1, std::memory_order_relaxed );
@@ -8717,15 +8722,15 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     {
                         continue;
                     }
-                    if( !readFile( path, bytes ) )
+                    if( !readFile( path, readBuf ) )
                     {
                         continue;
                     }
-                    if( looksBinary( bytes ) )
+                    if( looksBinary( readBuf ) )
                     {
                         continue;
                     }
-                    if( ext == ".h" && looksObjC( bytes ) )
+                    if( ext == ".h" && looksObjC( readBuf ) )
                     {
                         if( const LangEntry* objcLe = lookupLang( ".m" ) )
                         {
@@ -8744,6 +8749,15 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     {
                         continue; // no spec applies to this grammar, and no built-in walk wants the tree either
                     }
+
+                    // THE retention point, and the reason it is here rather than at any of the exits below:
+                    // handing the read over BEFORE the tree is built means every path that follows works from
+                    // the retained slot, so no exit can forget to keep it and no branch can keep it twice. When
+                    // nothing is retaining, `bytes` binds the worker's own scratch and the loop reuses one
+                    // buffer exactly as it always did. Markdown is already gone by here — a file with no
+                    // grammar has no symbol a later pass could ask about.
+                    std::string& bytes = ( keptBytesOut != nullptr ) ? ( ( *keptBytesOut )[fileId] = std::move( readBuf ) ) : readBuf;
+
                     if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
                     {
                         continue;

@@ -161,7 +161,19 @@ struct AstQueryGroup
     AstWalk                          walk          = AstWalk::None;   // non-None ⇒ built-in walk, no specs
 };
 
-std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups );
+// keptBytesOut (optional): the walk is where the corpus gets READ, so a pass that runs after it and needs
+// the same text was re-reading every file the walk had just closed. Pass a vector and the walk MOVES each
+// file's bytes into it at slot fileId (resized here, written only by the worker that owns that file, so
+// distinct indices never race) — the reader downstream then works from memory instead of the disk.
+// PARTIAL BY CONSTRUCTION, and the caller must treat it that way: only files the walk got as far as
+// resolving a grammar for are populated, so a slot can be empty because the file was skipped (unknown
+// extension, unreadable, binary, markdown) or because the file is genuinely empty. Both cases mean the
+// same thing to a consumer — fall back to your own read, which is what every consumer did for every file
+// before this existed — so an empty slot needs no separate "was it filled" flag to stay correct.
+// Costs one corpus's worth of bytes held for as long as the caller keeps the vector; the caller decides
+// whether that trade is worth it, which is why this is opt-in and not the default.
+std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups,
+                                                    std::vector<std::string>* keptBytesOut = nullptr );
 
 // ---- §P0.1: the shape of a user's tree-sitter query, so a capture-less one is never a silent zero ----
 // astQuery reports CAPTURES, so a query that binds none matches nothing it can report:
