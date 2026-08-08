@@ -80,7 +80,7 @@ struct PackTaskHeaderParts
     std::string_view task;             // §B1.7's subject — the VERBATIM query, for the root attribute
     std::string_view rootOpenStr;      // ctxRootOpen( task, routeNote ), pre-built (its size is charged)
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
-    std::string_view routeNote, mentionNote, boostNote, docMentionNote;
+    std::string_view mentionNote, boostNote, docMentionNote;   // L1: no routeNote — route= is the one copy
     std::string_view report;           // the per-section truncation ledger
 };
 
@@ -97,7 +97,8 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     {
         h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
     }
-    h.append( p.routeNote );
+    // L1 (density audit 2026-08-08): the scrubbed route-note echo that rode here duplicated the verbatim
+    // route= attribute byte-for-byte in meaning; the attribute is the one copy (test/routeoncecheck.sh).
     h.append( p.mentionNote );
     h.append( p.boostNote );
     h.append( p.docMentionNote );
@@ -662,7 +663,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     //    invalid UTF-8 in the task made xmllint reject the document, and a '\n' wrote a raw newline outside
     //    CDATA. xmlCommentText (serialize.h) is the ONE scrub for all three, byte-identical on clean input.
     const std::string taskNote       = xmlCommentText( task );
-    const std::string routeNote      = xmlCommentText( lr.routeNote );
+    // L1 (density audit 2026-08-08): no scrubbed routeNote here any more — the comment used to echo the
+    // route= attribute's text verbatim-but-scrubbed (~230-260 duplicated B per routed call). route= is the
+    // one copy (test/routeoncecheck.sh pins it).
     const std::string mentionNote    = xmlCommentText( lr.mentionNote );
     const std::string boostNote      = xmlCommentText( lr.boostNote );
     const std::string docMentionNote = xmlCommentText( lr.docMentionNote );
@@ -680,7 +683,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // trim knob of its own, so it belongs in the floor the section shares are divided under, exactly like the
     // header's own user-length parts. 0 for every caller that splices nothing.
     const std::size_t headerFloor = kPackTaskHeaderReserve + rootOpenStr.size() + taskNote.size()
-                                  + routeNote.size() + mentionNote.size() + boostNote.size() + docMentionNote.size()
+                                  + mentionNote.size() + boostNote.size() + docMentionNote.size()
                                   + in.trailingSectionBytes;
     std::size_t       remaining   = bundleBudget > headerFloor ? bundleBudget - headerFloor : 1;
 
@@ -1009,7 +1012,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     report += "tests: "   + listStatus( testsTotal,   testsStr,   testsKept );
     report += " | far: "  + listStatus( farTotal,      rankOut.farXml, farKept );   // R2: d2plus name-only tier (nested in <sigs>)
 
-    const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, routeNote, mentionNote, boostNote,
+    const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
                                             docMentionNote, report };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
     { return packTaskHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
