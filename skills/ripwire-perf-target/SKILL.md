@@ -52,6 +52,9 @@ source shape.
    nesting bar) and `deep=` (lines inside them, a floor) on the same row are what separate a body that
    *sustains* depth from a long flat one whose max is a single inner loop; `deep/loc` is the discriminator
    (→ **ripwire-quality-bar**). Confirm every suspected bottleneck with the benchmark/profile.
+   **On C-family/C# code, discount a `ppalt=`-carrying body:** `cx=`/`ccx=`/`nest=`/`loc=`/`locals=` sum
+   ALL `#else`/`#ifdef` branches, not just the one your build compiles, so a hot function that also happens
+   to be preprocessor-heavy can look structurally worse than the code path actually executing.
 
 4a2. **Join the measured heat onto the static findings** — `ripwire <dir> --lint --with-profile=REPORT`
 
@@ -62,7 +65,11 @@ source shape.
    actually HOT": static shape × PMU weight (SYZYGY's advice mode, Hundt CGO 2006). `heat_joined="0"` on
    the root is honest — no finding sits inside a profiled scope — never an error.
 
-4b. **If the profile points at MEMORY, not compute** — `ripwire <dir> --field-affinity[=STRUCT]`
+4b. **If the profile points at MEMORY, not compute** — cheapest first, `ripwire <dir> --lint` runs the
+   built-in **cache-\* pack** (8 static data-layout checks, e.g. `cache-gather-subscript`,
+   `cache-vector-of-indirect`, `cache-pointer-chase-loop`) as part of an ordinary lint pass — no profile
+   required, so it is worth a look before reaching for the heavier lens below. When a specific struct is
+   already implicated, `--field-affinity[=STRUCT]`
 
    **When to reach for it.** The measurement already implicates a struct-heavy path and the *shape* of the
    evidence says data layout, not algorithm: cache-miss or memory-stall counters dominating the profile,

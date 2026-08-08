@@ -50,6 +50,10 @@ sections your question needs.
    the code is hard — the highest-leverage places to improve. `top=` names the worst function.
    **Recent regression, not an all-time read?** `--hotspots --since="2 weeks ago"` (or `--since=HEAD~20`)
    scopes churn to commits after that point; unresolvable/absent `--since` degrades silently to all-history.
+   **On C-family/C# code, discount a body carrying `ppalt=`:** its `cx=`/`ccx=`/`nest=`/`loc=`/`locals=` are
+   summed over EVERY `#else`/`#ifdef` branch (deterministic, but an over-count vs any single build), so a
+   high score on a `ppalt=`-heavy function can be the preprocessor fan-out, not the logic — read `ppalt=`
+   before calling a row the worst in the file.
 
 1b. **What is BUILT but DARK here?** — `ripwire <dir> --flags` (`=SUBSTR` to narrow)
    ```
@@ -266,7 +270,10 @@ sections your question needs.
    (low — a dispatch table or a setup block), and **`deep/humps`** separates one giant tangle (high — the
    expensive fix) from many tiny touches (low — repeated missing abstractions, each its own cheap
    extraction). `locals=` on the same row is the reader's working set — a FLOOR (`locals_floor="1"`),
-   **C/C++ only**, absent rather than `0` elsewhere. **Which fix each shape calls for, and its precondition
+   **C/C++ only**, absent rather than `0` elsewhere. **`ev=` on the same row (essential complexity, McCabe:
+   absent/`1` = single-entry/single-exit, extract-method applies mechanically; `2+` = a jump — see
+   `ev_why=`) — tells you whether the shape you are about to prescribe a fix for is a cheap lift or an
+   expensive rewrite before you commit to one.** **Which fix each shape calls for, and its precondition
    → ripwire-quality-bar's shape → refactor playbook.**
    **The numbers in the example rows on this page are ILLUSTRATIVE OF A SHAPE, not values to expect** — these
    counters are under active calibration (an else-clause over-count fix in flight moves `humps=` down
