@@ -41,6 +41,41 @@ the tests that reach them.
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
 | pays for every line it read, right or wrong | measured at **7.3%** of what that grep-and-read pass spends |
 
+### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
+
+Four everyday moments, re-measured on this repository, 2026-08-08. Every ratio is a real byte count
+from a real run, reproduced by the command in its row — instruments in
+[`docs/EVALS.md` §5](docs/EVALS.md#readme-grade-rows-re-measured-on-this-repository-2026-08-08).
+
+| Ask it | Command | ripwire | naive read | savings |
+| --- | --- | --- | --- | --- |
+| "Orient me in this repo" | `ripwire .` | **22,571 B** | 80,267–101,738 B (`README.md`, or +`ARCHITECTURE.md`) | 3.6×–4.5× |
+| "Where is X handled?" | `ripwire . --for="…"` | **7,501 B** | 19,463–80,037 B (grep, or grep + the file) | 2.6×–10.7× |
+| "Set me up for this task" | `ripwire . --pack-task="…"` | **8,512 B** | 65,378–320,597 B (the relevant files, whole) | 7.7×–37.7× |
+| "Show me this one function" | `ripwire . --expand=SYM` | **23,675–88,547 B** | 174,430–695,888 B (the file it lives in) | 2.0×–29.4× |
+
+<details>
+<summary>Same-correct-answer verification, and the honesty line these ratios come with</summary>
+
+**These aren't summaries that gamble with information.** Each row is scored
+same-correct-answer-or-it-doesn't-count, and both sides were checked, not assumed: orient surfaces
+this repo's own pipeline files (`ingest.cpp`, `graph.h`, `serialize.h`) in the first screen, the same
+three `docs/ARCHITECTURE.md` names as central; the `--for` row lands `mcpStale`
+(`src/mcpindex.h:633`), the actual staleness check, 5th-ranked; `--pack-task` names the same three
+touch points a human would — `cachelint.h`, `mergeCachePack` (`src/main.cpp:1787`), the
+`lintrules.h` helpers it reuses; `--expand` hands back the requested function's complete,
+unmodified body either way. The map ranks and discloses — it never paraphrases your code — and every
+truncation is disclosed in the header.
+
+**The honesty line, made concrete:** the same auto-selection behind the `--expand` row also runs the
+other way. On a small file (`pageRankDouble` in `src/pagerank.cpp`, 5,559 B) the ranked bundle would
+cost 27,916 B — nearly 5× more than the file — so ripwire serves the file itself instead, disclosed
+as `mode="whole-file"` on the response, not silently.
+[`docs/EVALS.md` §7](docs/EVALS.md#7-honest-counterexamples) lists that and the other counterexamples
+this project publishes against itself.
+
+</details>
+
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
 **58.3% against 40.0% for the best tool tested — and it answers before they finish indexing.** Every
