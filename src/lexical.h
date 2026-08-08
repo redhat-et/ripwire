@@ -100,7 +100,8 @@ inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
-                                               const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0 )
+                                               const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
+                                               int basenameFieldDefaultW = 0 )
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
@@ -129,6 +130,88 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     }
     const std::size_t uniqueCount = uniqueToks.size();
 
+    // ── LB-3 arm S: conservative query-side stem variants ─────────────────────────────────────────────
+    // A plural/participle query token ("splits", "resolved", "hoisting") cannot exact-match the singular
+    // subtoken a compound name carries (SplitChunksPlugin → split; resolve.h → resolve) — the measured
+    // LB-3 anatomy (bench/r7 + r8, three independent confirmations). Variants are QUERY-side only and
+    // score into the ORIGINAL token's tf/idf row, so corpus stats and the cache format are untouched.
+    // ONE shared table drives the scan branch, the persisted-stats branch, and every field pass —
+    // parity by construction (test/postingscheck.sh; armed arm in test/lb3namecheck.sh). A variant
+    // string already claimed by an earlier token (or equal to any exact token) is dropped, first-wins,
+    // so a doc token maps to exactly one row in either branch. RIPWIRE_QSTEM=1 arms it; the shipped
+    // default stays OFF until the LB-3 acceptance verdict (scratchpad lb3/preregistration.md) lands.
+    struct LexMatchTok
+    {
+        std::string   tok;
+        std::uint32_t u;
+    };
+    std::vector<LexMatchTok> matchToks;
+    matchToks.reserve( uniqueCount * 2 );
+    for( std::size_t u = 0; u < uniqueCount; ++u )
+    {
+        matchToks.push_back( { uniqueToks[u], std::uint32_t( u ) } );
+    }
+    {
+        const char* qstemEnv = std::getenv( "RIPWIRE_QSTEM" );
+        const bool  qstemOn  = qstemEnv != nullptr && *qstemEnv == '1';
+        const auto  pushVariant = [ & ]( std::string v, std::uint32_t u )
+        {
+            if( v.size() < 3 )
+            {
+                return;                                        // sub-3-byte stems are noise, frozen rule
+            }
+            for( const LexMatchTok& mt : matchToks )
+            {
+                if( mt.tok == v )
+                {
+                    return;                                    // first-wins: string already claimed
+                }
+            }
+            matchToks.push_back( { std::move( v ), u } );
+        };
+        const auto isConsonant = []( char c )
+        {
+            return c >= 'a' && c <= 'z' && c != 'a' && c != 'e' && c != 'i' && c != 'o' && c != 'u';
+        };
+        if( qstemOn )
+        {
+            for( std::size_t u = 0; u < uniqueCount; ++u )
+            {
+                const std::string& t    = uniqueToks[u];
+                const std::size_t  L    = t.size();
+                const auto         ends = [ & ]( std::string_view suf )
+                { return L >= suf.size() && t.compare( L - suf.size(), suf.size(), suf ) == 0; };
+                if( ends( "s" ) && !ends( "ss" ) && L >= 4 )
+                {
+                    pushVariant( t.substr( 0, L - 1 ), std::uint32_t( u ) );          // splits → split
+                    if( ends( "es" ) && L >= 5 )
+                    {
+                        pushVariant( t.substr( 0, L - 2 ), std::uint32_t( u ) );      // classes → class
+                    }
+                }
+                if( ends( "ed" ) && L >= 5 )
+                {
+                    pushVariant( t.substr( 0, L - 1 ), std::uint32_t( u ) );          // resolved → resolve
+                    pushVariant( t.substr( 0, L - 2 ), std::uint32_t( u ) );          // parsed → pars (rarely useful, harmless)
+                    if( L >= 6 && t[L - 3] == t[L - 4] && isConsonant( t[L - 3] ) )
+                    {
+                        pushVariant( t.substr( 0, L - 3 ), std::uint32_t( u ) );      // flagged → flag
+                    }
+                }
+                if( ends( "ing" ) && L >= 6 )
+                {
+                    pushVariant( t.substr( 0, L - 3 ), std::uint32_t( u ) );                // hoisting → hoist
+                    pushVariant( t.substr( 0, L - 3 ) + "e", std::uint32_t( u ) );          // caching → cache
+                    if( L >= 7 && t[L - 4] == t[L - 5] && isConsonant( t[L - 4] ) )
+                    {
+                        pushVariant( t.substr( 0, L - 4 ), std::uint32_t( u ) );            // running → run
+                    }
+                }
+            }
+        }
+    }
+    const std::size_t matchCount = matchToks.size();
+
     // per-doc integer stats (SoA): dl[i] = weighted subtoken count, tfFlat[i*uniqueCount+u] = weighted term
     // frequency of unique query token u in doc i
     std::vector<int> dl( S, 0 );
@@ -147,10 +230,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // uppercase][lowercase/digit]* run between separators, so only a token's FIRST byte can be uppercase,
     // which the matcher exploits. Tokens shorter than 2 bytes are dropped, exactly like subtokens().
     // No strings, no maps — just in-place span-vs-query compares.
-    const auto scanField = [ & ]( std::size_t docIndex, std::string_view text, int w )
+    const auto scanTextInto = [ & ]( int* tfRow, int& wtAccum, std::string_view text, int w )
     {
-        int* const tfRow        = tfFlat.data() + docIndex * uniqueCount;
-        int        fieldTokenWt = 0;
+        int fieldTokenWt = 0;
         forEachLexSubtoken( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
         {
             const std::size_t tokLen = tokEndByte - tokStartByte;
@@ -161,17 +243,21 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             fieldTokenWt += w;
             const char* tok  = text.data() + tokStartByte;
             const char  head = ( tok[0] >= 'A' && tok[0] <= 'Z' ) ? char( tok[0] - 'A' + 'a' ) : tok[0];
-            for( std::size_t u = 0; u < uniqueCount; ++u )
+            for( const LexMatchTok& mt : matchToks )
             {
-                const std::string& q = uniqueToks[u];
+                const std::string& q = mt.tok;
                 if( q.size() == tokLen && q[0] == head && std::memcmp( q.data() + 1, tok + 1, tokLen - 1 ) == 0 )
                 {
-                    tfRow[u] += w;
-                    break;                            // unique tokens are distinct → at most one can match
+                    tfRow[mt.u] += w;
+                    break;                            // table strings are distinct → at most one can match
                 }
             }
         } );
-        dl[ docIndex ] += fieldTokenWt;
+        wtAccum += fieldTokenWt;
+    };
+    const auto scanField = [ & ]( std::size_t docIndex, std::string_view text, int w )
+    {
+        scanTextInto( tfFlat.data() + docIndex * uniqueCount, dl[ docIndex ], text, w );
     };
 
     // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text
@@ -212,6 +298,49 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
+    // pass 1.6 — LB-3 arm B: basename-only field (×kwBase). The r3_pathtok retry, narrowed per that
+    // round's own rejection note (bench/locbench/results/r3_pathtok/PREREG.md): FULL paths lost
+    // held-out to generic-directory noise, so only the basename is scanned, and the scan is amortized
+    // per FILE (each basename tokenized once, its row added per symbol) honoring r3's "amortize
+    // first". Needs no file text → runs before the pass-2 branch split; parity and the cache format
+    // untouched. RIPWIRE_BASENAME_W (0..8) overrides basenameFieldDefaultW; a nonzero shipped default
+    // requires the LB-3 acceptance verdict (gate: test/lb3namecheck.sh).
+    {
+        int kwBase = basenameFieldDefaultW;
+        if( const char* baseEnv = std::getenv( "RIPWIRE_BASENAME_W" ) )
+        {
+            kwBase = std::clamp( std::atoi( baseEnv ), 0, 8 );
+        }
+        if( kwBase > 0 )
+        {
+            const std::size_t fileCount = ing.files.size();
+            std::vector<int>  fileTf( fileCount * uniqueCount, 0 );
+            std::vector<int>  fileWt( fileCount, 0 );
+            for( std::size_t f = 0; f < fileCount; ++f )
+            {
+                const std::string_view path = ing.files[f];
+                const std::size_t      cut  = path.find_last_of( '/' );
+                const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
+                scanTextInto( fileTf.data() + f * uniqueCount, fileWt[f], base, kwBase );
+            }
+            for( std::size_t i = 0; i < S; ++i )
+            {
+                const std::uint32_t f = ing.symbols[i].fileId;
+                if( f >= fileCount || fileWt[f] == 0 )
+                {
+                    continue;
+                }
+                int* const       tfRow = tfFlat.data() + i * uniqueCount;
+                const int* const fRow  = fileTf.data() + std::size_t( f ) * uniqueCount;
+                for( std::size_t u = 0; u < uniqueCount; ++u )
+                {
+                    tfRow[u] += fRow[u];
+                }
+                dl[i] += fileWt[f];
+            }
+        }
+    }
+
     // pass 2 — doc-comment (×kwDoc) + body (×kwBody) evidence.
     //
     // B0.2 (R1 hypothesis #1): a RICH ingest carries per-symbol weighted subtoken statistics built ONCE at
@@ -230,16 +359,18 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             dl[i] += int( ing.lexDocBodyDl[i] );
         }
 
-        // query-token hashes — the same normalized-lowercase hash index time used. try_emplace keeps the
-        // FIRST unique index on the astronomically-unlikely 64-bit collision between two DISTINCT query
-        // tokens, so both transfer strategies below agree deterministically.
-        std::vector<std::uint64_t>            uniqueHash( uniqueCount );
+        // query-token hashes — the same normalized-lowercase hash index time used, over the FULL match
+        // table (exact tokens + LB-3 stem variants), so a body carrying only the variant still transfers
+        // its tf into the original token's row — the same mapping the scan branch's table walk applies.
+        // try_emplace keeps the FIRST entry on the astronomically-unlikely 64-bit collision between two
+        // DISTINCT table strings, so both transfer strategies below agree deterministically.
+        std::vector<std::uint64_t>            matchHash( matchCount );
         HashMap<std::uint64_t, std::uint32_t> uniqueIndexOfHash;
-        uniqueIndexOfHash.reserve( uniqueCount );
-        for( std::size_t u = 0; u < uniqueCount; ++u )
+        uniqueIndexOfHash.reserve( matchCount );
+        for( std::size_t m = 0; m < matchCount; ++m )
         {
-            uniqueHash[u] = lexSubtokenHash( uniqueToks[u].data(), uniqueToks[u].size() );
-            uniqueIndexOfHash.try_emplace( uniqueHash[u], std::uint32_t( u ) );
+            matchHash[m] = lexSubtokenHash( matchToks[m].tok.data(), matchToks[m].tok.size() );
+            uniqueIndexOfHash.try_emplace( matchHash[m], matchToks[m].u );
         }
 
         // B0.1 per-file pre-filter: skip a whole file's tf walks when its 512-bit signature excludes every
@@ -266,9 +397,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     lastFileId       = f;
                     lastFileMayMatch = false;
                     const std::uint64_t* sig = ing.lexFileSig.data() + std::size_t( f ) * kLexFileSigWords;
-                    for( std::size_t u = 0; u < uniqueCount && !lastFileMayMatch; ++u )
+                    for( std::size_t m = 0; m < matchCount && !lastFileMayMatch; ++m )
                     {
-                        if( sig[lexSigWord( uniqueHash[u] )] & lexSigBit( uniqueHash[u] ) )
+                        if( sig[lexSigWord( matchHash[m] )] & lexSigBit( matchHash[m] ) )
                         {
                             lastFileMayMatch = true;
                         }
@@ -285,7 +416,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             // (the map dedupes hash-colliding query tokens for both strategies).
             int* const           tfRow   = tfFlat.data() + i * uniqueCount;
             const std::uint64_t* rowHash = ing.lexTokenHashes.data();
-            if( std::size_t( rowEnd - rowBegin ) <= uniqueCount * 8 )      // ~log2(row) probes vs one map probe per entry
+            if( std::size_t( rowEnd - rowBegin ) <= matchCount * 8 )       // ~log2(row) probes vs one map probe per entry
             {
                 for( std::uint32_t e = rowBegin; e < rowEnd; ++e )
                 {
@@ -297,7 +428,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
             else
             {
-                for( const auto& [ hash, u ] : uniqueIndexOfHash )         // iteration order is score-irrelevant: rows are disjoint per u
+                for( const auto& [ hash, u ] : uniqueIndexOfHash )         // iteration order is score-irrelevant: rows are disjoint per HASH (two hashes may share a u; += commutes)
                 {
                     const std::uint64_t* lo = rowHash + rowBegin;
                     const std::uint64_t* hi = rowHash + rowEnd;

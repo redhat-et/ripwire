@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 366 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 367 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -559,7 +559,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **366 gate scripts**, all of which exist on disk.
+naming **367 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -767,6 +767,28 @@ ship: terse compound queries like `split chunks` no longer hard-route onto a com
 questions byte-identical, and the name-exact lane's recall@1 measured unchanged (98.0% at both the
 pre-round base and the fix, base rebuilt in a throwaway worktree to prove it).
 
+**Un-guarded query stemming recovers prose misses — and displaces existing hits; rejected by its
+own rules.** The LB-3 fix round (2026-08-08, same committed `bench/r7/` sets at token-budget tiers
+2000/6000 against the r8-pinned corpora) built the name-field levers the previous entry named as
+the real anatomy: query-side stem variants ("splits"→"split", "resolved"→"resolve") scoring into
+the original token's tf/idf row, and a basename-only BM25 field (the r3_pathtok retry, narrowed to
+basenames per that round's own rejection note and amortized per file). Both env-gated, byte-inert
+off, parity-gated (`test/lb3namecheck.sh`, red-first). Measured over the pre-registered 8-arm grid:
+stemming genuinely recovers the diagnosed misses — webpack@6000 **6/22 → 11/22** alone, **12/22**
+with basename w=2, webpack@2000 4→11, zero cells below baseline — but **every stem arm violated the
+frozen rules**: cpp@6000 landed 19/20 against a pre-registered 20/20 point band (the predicted
+`resolve.h` flip moved rank 24→18, short of the budget cut), and each stem arm flipped a
+currently-hit question to a miss (`SplitChunksPlugin` and/or `HotModuleReplacementPlugin`) — the
+common-stem variant `split` hands term frequency to corpus-wide competitors, the same
+dilution-cuts-both-ways mechanism that killed the LB-1 filler strip, one level down. Verdict:
+**REJECT, no defaults flipped** — verified by independent recomputation of all 32 grid cells, the
+flip lists, and the five frozen gates. The recorded retry conditions: IDF-guard the variants (a
+variant whose corpus document frequency is high may not be added — "resolve" passes, "split"
+fails), bands at least 2 wide (a 20/20 point prediction is a coin flip, not a band), and acceptance
+primary on instruments never used for tuning. The basename-alone arm (webpack 6→7, no flips, no
+band violation) was too weak to select under the frozen selection rule. The 4/22 default-budget
+prose number still stands.
+
 ---
 
 ## 8. Claims this project does *not* publish
@@ -783,7 +805,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 366. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 367. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
