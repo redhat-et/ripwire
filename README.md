@@ -362,7 +362,9 @@ cmake -S . -B build && cmake --build build -j
 <details>
 <summary>Why there is no download step — vendored grammars, the offline-build proof, the languages parsed, and putting it on <code>PATH</code></summary>
 
-**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler. Nothing else —
+**Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler — that means clang 16+ /
+AppleClang 15+ (Xcode 15) / gcc 13+ / MSVC 19.36+, and if your distro's CMake is older than 3.24,
+`pip install cmake` or `brew install cmake` gets a current one everywhere. Nothing else —
 tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
