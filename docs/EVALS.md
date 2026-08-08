@@ -403,6 +403,82 @@ The benchmark states its own scope limit, and it is worth repeating verbatim in 
 baseline is *a model of a naive agent read* — a documented, auditable proxy, not a live agent trace —
 and these numbers prove **cheaper and faster, not better outcomes**.
 
+### README-grade rows, re-measured on this repository (2026-08-08)
+
+The row above carries a private-corpus caveat. These four don't: every byte count below is `wc -c`
+on this tree, at this binary, and reproducible by running the command shown. A row qualifies for the
+README table only if it clears three bars: it is an everyday agent moment (not a constructed best
+case), the same correct answer is verified present on both sides (named below, not asserted), and the
+ratio is published as a range — the cheap end and the honest end of "what would an agent actually
+read" — never the single most flattering number. Tokens ≈ bytes/4 throughout, per §1's instrument
+note. All four ran after `git merge --ff-only main` picked up density-wave lanes D/D2
+(`7558fd9`/`2d8891b` — route-note dedup, terse panel legend, `--expand` cheapest-complete-answer
+serving), so they measure the current binary, not the pre-wave one.
+
+| Moment | Command | ripwire | naive read | savings |
+| --- | --- | --- | --- | --- |
+| Orient me in this repo | `ripwire .` | **22,571 B** | 80,267–101,738 B (`README.md`, or `README.md`+`docs/ARCHITECTURE.md`) | 3.6×–4.5× |
+| Where is X handled? | `ripwire . --for="where is the cache staleness check for the MCP index"` | **7,501 B** | 19,463–80,037 B (`grep -rn stale src/*.h src/*.cpp`, or that grep + reading `src/mcpindex.h` whole) | 2.6×–10.7× |
+| Set me up for this task | `ripwire . --pack-task="add a new lint rule to cachelint.h"` | **8,512 B** | 65,378–320,597 B (the two obviously-relevant files + a locating grep, or every file the bundle itself cites, whole) | 7.7×–37.7× |
+| Show me this one function | `ripwire . --expand=mergeCachePack` (also verified on `buildGraph`) | **23,675–88,547 B** (`mode="bundle"`, auto-selected, one call) | 174,430–695,888 B (the whole file the symbol lives in) | 2.0×–29.4× |
+
+**Same-answer verification, one line per row:**
+- **Orient** — both surface the pipeline's own core files (`ingest.cpp`, `graph.h`, `serialize.h`) as
+  central: ripwire ranks them into the first screen (positions 5, 7, 11 of the flagless map); the two
+  docs name them explicitly in `docs/ARCHITECTURE.md` §1 ("The pipeline").
+- **Where is X handled** — both name `mcpStale` (`src/mcpindex.h:633`) as the staleness check: it is
+  the 5th ranked symbol in the `--for` bundle, and the only match in `src/mcpindex.h` whose signature
+  is literally `inline bool mcpStale(...)`.
+- **Set me up** — both name the same three touch points: `src/cachelint.h::cacheFriendliness` (the
+  existing cache-lint rules to imitate), `mergeCachePack` (`src/main.cpp:1787`, the dispatch that
+  folds a new rule's findings into `--lint`, called from `runLint`), and the `src/lintrules.h` span
+  helpers (`langOfPath`, `collapseEnclosed`, `contains`, `coversOrEquals`) `cacheFriendliness` itself
+  reuses.
+- **Show me this function** — both hand back `mergeCachePack`'s (or `buildGraph`'s) complete,
+  unmodified body: `--expand`'s `<bodies shown="1" total="1" capped="0">` on the first, byte-identical
+  source on the second — nothing paraphrased or truncated.
+
+**Reproduce any row:** `cd` to this repository, run the command in that row, `wc -c` the output; the
+naive side is the `grep`/`wc -c` invocations named above, run from the same root.
+
+### The `--expand` small-file inversion, resolved (density-M6, `e6f173d`/`7558fd9`)
+
+§7 records the inversion this fixes and keeps it — a negative result stays recorded even after the
+fix. What changed: a bare `--expand=SYM` no longer blindly emits the bundle. It measures the default
+bundle (ranked map + bodies, rendered exactly as it would be emitted) against the requested symbols'
+whole-file bytes and serves the smaller, disclosed on the `<ctx>` root as
+`mode="whole-file"`/`mode="bundle"` with `reason="file NB &lt; bundle MB"` (or the reverse). Re-run on
+`pageRankDouble` at this head:
+
+| Form | Bytes | Disclosure |
+| --- | --- | --- |
+| Old unconditional bundle (as measured 2026-08-01, no auto-selection existed) | 27,890 B | none — always the bundle |
+| Current `--expand=pageRankDouble` (auto-selected) | **5,911 B** | `mode="whole-file" reason="file 5559B &lt; bundle 27916B"` |
+| Raw file (`src/pagerank.cpp`) | 5,559 B | — |
+
+The 5.65×-over-the-file loss is gone: the served form now costs **1.06×** the raw file (envelope +
+CDATA overhead only), not 5.65× more than it. The inversion is self-correcting — the tool notices its
+own bundle would cost more than the file and stops emitting it — which is why this is filed as a
+*resolution*, not a retraction: the original measurement was correct for the binary it measured, and
+`test/expandmodecheck.sh` (registered in `test/regression.sh`) now gates both arms so it cannot
+regress silently in either direction.
+
+### Density-wave savings, one-line before/afters
+
+Two more density-wave fixes, cited by their merge commits, each re-verified at this head:
+
+- **Route disclosure emitted once** (`dbda0ec`, merged `7558fd9`, lane D): `--for=pageRankDouble` on
+  this repo went from 6,934 B to 6,821 B (**−1.6%**, −113 B) by dropping the duplicated `routed: …`
+  text that used to appear in both the `route=` attribute and the legend comment. Re-measured at this
+  head: still **6,821 B**, unchanged since the fix landed — the `route=` attribute is the sole
+  surviving copy.
+- **Quality-panel legend terse by contract** (`2e8835f`, merged `7558fd9`, lane D): on this repo,
+  `--quality-panel`'s leading legend comment went from 7,179 B to 4,087 B (**−43%**), and the whole
+  emission from 24,473 B to 21,381 B (**−12.6%**) — the legend had been re-emitted in full on every
+  call and, at audit time, out-sized the panel's own payload. Re-measured at this head: comment is
+  still **4,087 B** (fixed text, unchanged in size), against a **17,967 B** total on this repo's
+  current (smaller) ranked set — the comment-vs-payload ratio the fix targeted still holds.
+
 ---
 
 ## 6. Correctness and quality instruments
@@ -492,6 +568,21 @@ Every one of these is measured, in-tree, and published on purpose.
 A signature plus its doc comment is nearly **twice** the size of a short body. The headline reduction
 is a property of large result sets, not of every symbol — and a small, trivial body inverts it. The
 same inversion applies to the columnar output format. *(Re-derived on this corpus, 2026-07-31.)*
+
+**A bare `--expand=SYM` used to be 5.65× larger than the file it was summarizing, on a small file.**
+On this repository, `--expand=pageRankDouble` (as measured at audit time, before any auto-selection
+existed): the unconditional bundle cost **27,890 B** against the raw `src/pagerank.cpp` at
+**4,936 B** — nearly six times the size of the file for the privilege of one function's body, and
+still 1.08× the file even at the caller's lean `--top-k=0` escape hatch. **Resolved, not retracted**
+(density-M6, `e6f173d`/`7558fd9`): the verb now measures its own default bundle against the
+requested symbols' whole-file bytes, before emitting, and serves whichever is smaller — disclosed on
+the `<ctx>` root as `mode="whole-file"`/`mode="bundle"`. Re-run today on the same symbol:
+`--expand=pageRankDouble` costs **5,911 B** (`mode="whole-file" reason="file 5559B &lt; bundle
+27916B"`, `src/pagerank.cpp` now 4,936→5,559 B as the file grew) — **1.06×** the file, not 5.65×. The
+inversion is self-correcting: the tool notices when it would cost more than the file and stops
+emitting the losing form, so this counterexample's own failure mode is now caught by the tool at
+call time rather than by a reader after the fact. See §5 for the full before/after table and the
+`test/expandmodecheck.sh` gate that now pins both arms.
 
 **The mention anchor is worth +0.0pp on the wrong corpus.** SFML commit-message queries: no gain,
 only wall-clock cost. See §4.
