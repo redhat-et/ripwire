@@ -207,6 +207,106 @@ case "$identReason" in
     *)                               no "(f5) the anchors replaced the existing reason phrasing; test/taskechocheck.sh reads 'names a symbol (…)' out of this same string: [$identReason]" ;;
 esac
 
+# ── (g) ANCHOR PLAUSIBILITY (LB-2): the all-words trigger at nWords>=2 additionally requires every
+# plain anchoring word to be SPECIFIC — defined at most 3 times AND carried as a name-subtoken by at most
+# max(8, symbols/128) symbol names. A 2-word query whose every word coincidentally equals SOME symbol's
+# whole name ("split chunks" — a split() helper, a chunks() getter) used to hard-route name-exact, where a
+# compound target (SplitChunksThing) scores a structural 0.0; the r7 probes measured the conceptual ranker
+# recovering 5/6 of those. On an implausible anchor the router now DECLINES name-exact and falls through to
+# subtoken+body, saying why. Single-word lookups and camelCase/snake syntax are exempt — those branches are
+# the lane's measured recall mass and are pinned unchanged by (f3) and (g4).
+# The trap corpus is built INLINE (dupfix pattern), never added to test/routefix/ — arm (a) pins the
+# routefix golden byte-identical, and this arm must not force a golden re-pin.
+mkdir -p "$TMP/commonfix"
+cat >"$TMP/commonfix/splitters.cpp" <<'SRC'
+// split — a one-use helper whose name is also this corpus's most common name-subtoken (10 carriers > cap 8).
+void split()
+{
+    int cut = 0;
+    (void)cut;
+}
+void splitHelper() {}
+void splitBuffer() {}
+void splitLine() {}
+void splitPath() {}
+void splitName() {}
+void splitEdge() {}
+void splitNode() {}
+void splitToken() {}
+SRC
+cat >"$TMP/commonfix/chunks.cpp" <<'SRC'
+// chunks — a getter whose whole name completes the 2-of-2 whole-name coincidence.
+int chunks()
+{
+    return 3;
+}
+
+// SplitChunksThing — splits modules into shared chunks; the compound target only the subtoken+body
+// (conceptual) ranker can surface, because name-exact scores a compound name 0.0 against "split chunks".
+void SplitChunksThing()
+{
+    int sharedChunkCount = 0;
+    (void)sharedChunkCount;
+}
+SRC
+
+# (g1) the common-anchor query DECLINES name-exact: routes subtoken+body with a truthful reason that names
+# the failing anchor and its carrier count — and carries neither of the name-exact-only literals.
+declinedReason="$( reasonOf commonfix --for="split chunks" )"
+declinedRoute="$( routeOf commonfix --for="split chunks" )"
+if [ "$declinedRoute" = "subtoken+body" ]; then
+    ok "(g1) 'split chunks' (2-of-2 whole-name coincidence, common anchor) declines name-exact → subtoken+body"
+else
+    no "(g1) 'split chunks' still routes '$declinedRoute' — an implausible anchor must decline name-exact. Got: [$declinedReason]"
+fi
+# NOTE the quotes around the anchor word arrive attribute-escaped (&apos;) — match on the words, not the quotes.
+case "$declinedReason" in
+    *"name-exact declined: anchor"*"split"*"name-carriers"*"defs"*)
+        ok "(g1) the declined reason names the failing anchor and its carrier count: [$declinedReason]" ;;
+    *)  no "(g1) the declined reason must say WHY (failing anchor + carrier count) — got: [$declinedReason]" ;;
+esac
+case "$declinedReason" in
+    *"anchors:"*|*"names a symbol ("*)
+        no "(g1) a declined (subtoken+body) reason carried a name-exact-only literal ('anchors:' / 'names a symbol (') — downstream gates parse those as name-exact markers: [$declinedReason]" ;;
+    *)  ok "(g1) the declined reason carries neither 'anchors:' nor 'names a symbol ('" ;;
+esac
+
+# (g2) the decline is a RECOVERY, not a shrug: the conceptual ranking surfaces the compound target.
+"$BIN" commonfix --no-cache --for="split chunks" >"$TMP/declined.xml" 2>/dev/null
+grep -q 'SplitChunksThing' "$TMP/declined.xml" \
+    && ok "(g2) the declined route's conceptual ranking surfaces the compound target SplitChunksThing" \
+    || no "(g2) SplitChunksThing missing from the declined route's output — the fallthrough did not recover the compound target"
+
+# (g3) a multi-word all-name query on RARE anchors still routes name-exact — lowercase-typed so the camel
+# branch cannot mask a regression in the all-words branch. The deliberate multi-symbol lookup must survive.
+rareRoute="$( routeOf routefix --for="buildgraph resolvecall" )"
+[ "$rareRoute" = "name-exact" ] \
+    && ok "(g3) 'buildgraph resolvecall' (rare anchors, all-words branch) still routes name-exact" \
+    || no "(g3) rare-anchor multi-word lookup flipped to '$rareRoute' — the plausibility predicate over-fired"
+
+# (g4) the nWords==1 exemption: a single word that IS the common name still routes name-exact (the pinned,
+# measured single-word-lookup behavior; the crater was multi-word phrases, never this).
+oneRoute="$( routeOf commonfix --for="split" )"
+[ "$oneRoute" = "name-exact" ] \
+    && ok "(g4) single-word 'split' still routes name-exact (nWords==1 exempt from plausibility)" \
+    || no "(g4) single-word lookup flipped to '$oneRoute' — the exemption for nWords==1 broke"
+
+# (g5) determinism + well-formedness on the declined route.
+"$BIN" commonfix --no-cache --for="split chunks" >"$TMP/declined2.xml" 2>/dev/null
+diff -q "$TMP/declined.xml" "$TMP/declined2.xml" >/dev/null \
+    && ok "(g5) declined route deterministic (two runs byte-identical)" \
+    || no "(g5) declined route non-deterministic"
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$TMP/declined.xml" 2>/dev/null && ok "(g5) xml well-formed (declined route)" || no "(g5) xml malformed (declined route)"
+fi
+
+# (g6) MUTATION arm — the declined-disclosure assertion must FAIL against a --no-route run of the same
+# query (no routed: note at all there), proving the assertion is live and reads real output.
+"$BIN" commonfix --no-cache --for="split chunks" --no-route >"$TMP/declined_noroute.xml" 2>/dev/null
+GMUT="$( grep -q 'name-exact declined' "$TMP/declined_noroute.xml" && echo BAD || echo TRIPPED )"
+[ "$GMUT" = "TRIPPED" ] && ok "(g6) mutation self-test (the declined assertion fails on the --no-route run, so it is live)" \
+                        || no "(g6) mutation self-test broke — the declined assertion cannot fail"
+
 # ── MUTATION self-test — the name-exact routing assertion must FAIL against the --no-route run ─────────
 MUT="$( grep -q 'routed: name-exact' "$TMP/ident_noroute.xml" && echo BAD || echo TRIPPED )"
 [ "$MUT" = "TRIPPED" ] && ok "mutation self-test (the routing assertion fails on the --no-route run, so it is live)" \
