@@ -74,6 +74,38 @@ BRIEF = ("add a --since filter to the doc-drift verb\n"
 brief_path = os.path.join(AUX, "lanes_brief.txt")
 open(brief_path, "w").write(BRIEF)
 
+# A minimal two-file corpus for the --lint --with-profile heat-join demo: one function with a
+# pointer-chase loop (trips cache-pointer-chase-loop) and a PROFILE_SCOPE site above it, plus a
+# fabricated report whose #PROF_TSV row names that site. Fabricated because a real RIPWIRE_PROFILE
+# report needs a profile build of ripwire itself; the row's shape is print_tsv's own
+# (src/infra/profileScope.h) so the join is being asked a fair question. Line 9 below IS the
+# PROFILE_SCOPE line — the TSV row must point inside walk() and at-or-above the finding line.
+HEATDEMO = os.path.join(AUX, "heatdemo")
+os.makedirs(os.path.join(HEATDEMO, "src"), exist_ok=True)
+open(os.path.join(HEATDEMO, "src", "x.cpp"), "w").write(
+"""struct Node
+{
+    int   value;
+    Node* next;
+};
+
+int walk( const Node* head )
+{
+    PROFILE_SCOPE( "walk: chase pass" );
+    int total = 0;
+    for( const Node* p = head; p != nullptr; p = p->next )
+    {
+        total += p->value;
+    }
+    return total;
+}
+""")
+open(os.path.join(HEATDEMO, "report.txt"), "w").write(
+    "#PROF_TSV_BEGIN\tone row per scope, aggregated across threads; counters are RAW integers\n"
+    "scope\tfile\tline\tcalls\ttotal_ms\tl1d_mpki\n"
+    "walk: chase pass\tx.cpp\t9\t12\t48.500\t7.250\n"
+    "#PROF_TSV_END\n")
+
 html_out = os.path.join(AUX, "map2.html")
 cc_out = os.path.join(AUX, "ripwire2.cc.json")
 cache_out = os.path.join(AUX, "warm2.ripwirecache")
@@ -162,6 +194,9 @@ add(S4, f'{BIN} . --hotspots --since="2 weeks ago"', "Hotspots scoped to RECENT 
 add(S4, f"{BIN} . --arch=test/archfix/rules.txt", "Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules.")
 add(S4, f"{BIN} . --lint", "Built-in AST checks (c-cast, goto, unsafe-c-fn, ...).")
 add(S4, f"{BIN} . --lint-rules=test/lintrulesfix/rules", "User lint rules (YAML, ast-grep style) from a directory.")
+add(S4, f"{ABIN} . --lint --with-profile=report.txt", "Join MEASURED heat onto --lint findings — runs in a tiny fabricated demo corpus (one cache-pointer-chase-loop finding under a PROFILE_SCOPE site) because a real report needs a RIPWIRE_PROFILE build; the finding inside the profiled scope gains heat_* columns from the report's #PROF_TSV row.", cwd=HEATDEMO, pre="cat report.txt",
+    post=f"{ABIN} . --lint --with-profile=report.txt 2>/dev/null | grep -o '<f rule=[^<]*</f>'",
+    post_label="The joined finding — past the display cut above, extracted so the join is visible:")
 add(S4, f"{BIN} . --communities", "Cluster the call graph into cohesive modules.")
 add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges.")
 add(S4, f"{BIN} . --report", "Architecture summary (modules, god-files, cycles) as markdown.")
@@ -284,7 +319,10 @@ src = open( sortutil_path ).read()
 
 OLD_LESS = """inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
 {
-    if( scores[ a ] != scores[ b ] ) return scores[ a ] > scores[ b ];
+    if( scores[a] != scores[b] )
+    {
+        return scores[a] > scores[b];
+    }
     return a < b;
 }"""
 NEW_LESS = """inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
@@ -340,7 +378,9 @@ OLD_DESC = """inline std::uint32_t nonNegativeFloatDescKey( float value ) noexce
 {
     std::uint32_t bits = std::bit_cast<std::uint32_t>( value );
     if( ( bits & 0x7fffffffu ) == 0u )
+    {
         bits = 0u;   // bitwise normalization survives the global no-signed-zeros fast-math contract
+    }
     return ~bits;
 }"""
 NEW_DESC = """inline std::uint32_t nonNegativeFloatDescKey( float value, bool flushDenormals ) noexcept
