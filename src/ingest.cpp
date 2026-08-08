@@ -14,6 +14,7 @@
 #include "embedded_queries.h"    // configure-generated constexpr tags.scm table; no runtime source-tree dependency
 #include "hashutil.h"            // sanitizer-clean modulo-2^64 FNV multiplication
 #include "namesplit.h"           // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
+#include "fixedStr.h"            // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
 #include "lexindex.h"            // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 
 #include "Diagnostics.h"
@@ -8358,16 +8359,26 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
 // Replaces the per-capture "scan [0,startByte) counting '\n'" (byte-0 rescan, O(startByte) EACH match)
 // with one O(fileBytes) pass + a binary search per capture. Byte-identical result:
 //   line(b) = 1 + (# of '\n' at offset < b) = 1 + lower_bound(offsets, b) position.
+// The pass itself rides rw::findByte (src/fixedStr.h) — a NEON/SSE2 find-'\n' kernel that is EXACT, so the
+// offsets are bit-identical to the byte-at-a-time loop this replaced and determinism is untouched. '\r' is
+// not a line break here and never was. bench/bench_newline_ab.cpp races the two against libc memchr and
+// asserts all three agree byte-for-byte before it reports a number; the kernel won at ~1.4x over memchr.
 inline std::vector<std::uint32_t> buildNewlineOffsets( std::string_view src )
 {
 PROFILE_SCOPE_DESCRIBE( "strings: buildNewlineOffsets (byte scan for newline)" );
     std::vector<std::uint32_t> off;
-    for( std::uint32_t i = 0; i < src.size(); ++i )
+    const char* const          begin = src.data();
+    const char*                first = begin;
+    const char* const          last  = begin + src.size();
+    while( first < last )
     {
-        if( src[i] == '\n' )
+        first = rw::findByte( first, last, '\n' );   // NEON/SSE2 kernel, exact — same answer as the byte loop it replaced
+        if( first == last )
         {
-            off.push_back( i );
+            break;
         }
+        off.push_back( std::uint32_t( first - begin ) );
+        ++first;
     }
     return off;
 }
