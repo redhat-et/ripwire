@@ -64,3 +64,4 @@
 --code-only	graphify (competitor) flag, quoted in README's r4 head-to-head arm description — selects its keyless local AST path, not a ripwire flag (the --no-prose precedent)
 --no-cluster	graphify (competitor) flag, quoted in README's r4 head-to-head arm description — skips its clustering pass, not a ripwire flag (the --no-prose precedent)
 --clean-first	CMake's own build-tool flag ("cmake --build build --clean-first -j"), quoted in CLAUDE.md §Build as the remedy for a mixed-object tree after a branch switch or an edit-during-build — not a ripwire flag
+--ff-only	git merge's own flag ("git merge --ff-only main"), quoted in docs/EVALS.md §5 as the lane-E measurement provenance — not a ripwire flag
