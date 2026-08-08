@@ -57,6 +57,7 @@
 #include "model.h"
 #include "ingest.h"     // AstMatch — naming findings ride the shared lint finding shape
 #include "lexindex.h"   // lexSubtokenHash — the SAME normalized-token hash the BM25 postings path uses
+#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 namespace rw
 {
@@ -616,6 +617,7 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
 // checkNameShapeCore that supplies the Symbol-specific message wording and Var-vs-fn/method role text.
 inline void checkNameShape( const Symbol& s, const std::vector<std::string>& toks, RuleSink& sink )
 {
+PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameShape" );
     const NameShapeFacts facts = checkNameShapeCore( s.name, s.lang, toks );
 
     if( facts.shortName )
@@ -726,6 +728,7 @@ inline bool namingLocalsGate( const Symbol& s ) noexcept
 // unparseable type keeps both rules silent.
 inline void checkRoleReturnTypes( const Symbol& s, std::string_view sig, RuleSink& sink )
 {
+PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkRoleReturnTypes" );
     if( ( s.kind != SymKind::Function && s.kind != SymKind::Method ) || sig.empty() )
     {
         return;
@@ -794,6 +797,7 @@ struct NameCorpusStats
 // ONCE for that name — df is a document count, not a token count — via the per-name `seen` scratch.
 inline NameCorpusStats buildNameCorpusStats( const IngestResult& ing )
 {
+PROFILE_SCOPE_DESCRIBE( "naminglens: buildNameCorpusStats (subtoken df)" );
     NameCorpusStats            stats;
     std::vector<std::string>   toks;
     std::vector<std::uint64_t> seen;
@@ -878,6 +882,7 @@ inline void checkNameInformativeness( const Symbol& s, const std::vector<std::st
 inline void checkNameInformativenessInBytes( const Symbol& s, const std::vector<std::string>& toks, const NameCorpusStats& corpus,
                                              std::string_view bytes, RuleSink& sink )
 {
+PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameInformativenessInBytes" );
     const std::uint32_t bodyA = std::min( s.sigEndByte, std::uint32_t( bytes.size() ) );
     const std::uint32_t bodyB = std::min( s.endByte,    std::uint32_t( bytes.size() ) );
     if( bodyB <= bodyA )
@@ -898,6 +903,7 @@ inline void checkNameInformativenessInBytes( const Symbol& s, const std::vector<
 // N3 + N7: the pair rules over names co-visible in one (file, scope) group.
 inline void checkScopeGroups( const IngestResult& ing, RuleSink& sink )
 {
+PROFILE_SCOPE_DESCRIBE( "naminglens: checkScopeGroups (series + confusable)" );
     // eligible symbols, ordered by (fileId, scope, name, sigStartByte) — fileId order IS the sorted
     // crawl-path order, so the walk (and therefore the output) is deterministic.
     std::vector<const Symbol*> pool;
@@ -1061,6 +1067,7 @@ inline std::vector<std::string> appendNamingFindings( const IngestResult& ing, s
 
 inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t maxHitsPerRule, bool namingLocals )
 {
+PROFILE_SCOPE_DESCRIBE( "naminglens: namingLensChecks TOTAL" );
     detail::RuleSink sink;
     sink.maxHitsPerRule = maxHitsPerRule;
 
@@ -1076,6 +1083,7 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
     {
         if( !fileRead[fileId] )
         {
+PROFILE_SCOPE_DESCRIBE( "naminglens: getBytes whole-file read" );
             std::FILE* fp = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
             if( fp )
             {
@@ -1152,6 +1160,7 @@ inline NamingLensResult namingLensChecks( const IngestResult& ing, std::size_t m
         }
     }
     // runLint re-sorts the combined set; sorting here as well keeps this unit independently deterministic.
+PROFILE_SCOPE_DESCRIBE( "naminglens: final sort" );
     std::sort( res.hits.begin(), res.hits.end(), [ & ]( const AstMatch& x, const AstMatch& y )
                {
         if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];

@@ -283,12 +283,20 @@ inline std::vector<AstMatch> collapseAuxCaptures( std::vector<AstMatch> eligible
 
 }   // namespace cachedetail
 
-inline CacheRun cacheFriendliness( const IngestResult& ing, std::size_t maxPerRule )
+// The pack's QUERY table, re-exported at pack level so `--lint` can hand it to the one grouped astQuery
+// walk (astQueryGrouped, src/ingest.h) that also serves the built-in checks and the atoms pack, instead
+// of this pack paying for a second read+parse of the whole corpus.
+using cachedetail::cacheSpecs;
+
+// `ms` is this pack's own captures, produced by the ONE grouped astQuery walk that also serves the
+// built-in [AST] checks and the atoms pack (astQueryGrouped, src/ingest.h). The pack does not run its own
+// pass: `--lint` is its only caller, and a second full read+parse of the corpus to ask this pack's
+// questions of trees the same run already built was most of what made the verb slow.
+inline CacheRun cacheFriendliness( const IngestResult& ing, std::size_t maxPerRule, std::vector<AstMatch> ms )
 {
     using namespace cachedetail;
 
     CacheRun              run;
-    std::vector<AstMatch> ms = astQuery( ing, cacheSpecs(), kCacheQueryBudget );
 
     // The language fence first: every downstream count is computed on C-family rows only.
     ms.erase( std::remove_if( ms.begin(), ms.end(), [ &ing ]( const AstMatch& m )
