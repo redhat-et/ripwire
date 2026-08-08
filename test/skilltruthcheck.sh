@@ -65,4 +65,46 @@ grep -q 'all 21 MCP verbs' "$ROOT/src/wrap.h" \
     && no "wrap source retains the stale 21-verb comment" \
     || ok "wrap source does not hardcode a stale MCP verb count"
 
+# 2026-08-08 audit M3/L4/M5: --help must document ev=/ev_why= (essential complexity) and humps=/deep=/
+# locals= (the nesting profile) next to amp=/ppalt=, and --lint's help line must name the cache-* pack.
+# Both claims are executed against the binary, not just grepped as prose: --metrics really emits ev= on a
+# known guard-return function, and --lint really fires a cache-* rule on the cachelint fixture.
+helpOut="$( "$BIN" --help 2>/dev/null )"
+{ grep -q 'ev=N essential complexity' <<<"$helpOut" && grep -q 'ev_why=' <<<"$helpOut"; } \
+    && ok "--help documents ev=/ev_why= (essential complexity) next to amp=/ppalt=" \
+    || no "--help does not document ev=/ev_why="
+{ grep -q 'humps=' <<<"$helpOut" && grep -q 'deep=' <<<"$helpOut" && grep -q 'locals=' <<<"$helpOut"; } \
+    && ok "--help documents the humps=/deep=/locals= nesting profile" \
+    || no "--help does not document humps=/deep=/locals="
+grep -q -- '--lint .*cache-\* data-layout' <<<"$helpOut" \
+    && ok "--help's --lint line names the cache-* data-layout pack" \
+    || no "--help's --lint line does not name the cache-* pack"
+
+pushBackRow="$( "$BIN" "$ROOT" --metrics --no-cache --top-k=5000 2>/dev/null | grep -o '<s[^>]*n="push_back"[^>]*svector\.h::svector::push_back[^>]*>' | head -1 )"
+{ [ -n "$pushBackRow" ] && grep -q 'ev="2"' <<<"$pushBackRow" && grep -q 'ev_why="guard-return:1"' <<<"$pushBackRow"; } \
+    && ok "--metrics actually emits ev=/ev_why= on a known guard-return function (svector::push_back)" \
+    || no "--metrics did not emit the expected ev=/ev_why= on svector::push_back"
+
+cacheLintOut="$( "$BIN" "$ROOT/test/cachefix" --lint --no-cache 2>/dev/null )"
+grep -q 'rule="cache-gather-subscript"' <<<"$cacheLintOut" \
+    && ok "--lint actually fires a cache-* rule (cache-gather-subscript) on the cachelint fixture" \
+    || no "--lint did not fire any cache-* rule on test/cachefix"
+
+# The three skills touched for M3/M5/L6 must carry the claims they now make, on the shipped files.
+FRESH="$ROOT/skills/ripwire-fresh-eyes/SKILL.md"
+PERF2="$ROOT/skills/ripwire-perf-target/SKILL.md"
+QUAL2="$ROOT/skills/ripwire-quality-bar/SKILL.md"
+grep -q '`ev=`' "$QUAL2" \
+    && ok "quality-bar's shape -> refactor playbook names ev=" \
+    || no "quality-bar's playbook does not name ev="
+grep -q '`ev=`' "$FRESH" \
+    && ok "fresh-eyes' profile-reading paragraph names ev=" \
+    || no "fresh-eyes does not name ev="
+grep -qiF 'cache-\* pack' "$PERF2" \
+    && ok "perf-target names the cache-* pack next to --field-affinity" \
+    || no "perf-target does not name the cache-* pack"
+{ grep -qi 'ppalt' "$FRESH" && grep -qi 'ppalt' "$PERF2"; } \
+    && ok "fresh-eyes and perf-target both carry a ppalt= discount caveat" \
+    || no "fresh-eyes and/or perf-target is missing the ppalt= discount caveat"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
