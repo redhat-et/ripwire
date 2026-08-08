@@ -1,0 +1,308 @@
+**Exploration: where is the pairwise branch conflict analysis done**
+
+Found 29 symbols across 3 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `conflictScoreAgainstRemaining` (src/mergescout.h:565) — 1 caller in `src/mergescout.h`; ⚠️ no covering tests found
+- `planHeadConflictLane` (src/mergescout.h:397) — 1 caller in `src/mergescout.h`; ⚠️ no covering tests found
+- `collectValueBranches` (src/flipimpact.h:814) — 1 caller in `src/flipimpact.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/infra/fastSort.h`** — unstableBranchless(function)
+
+```cpp
+1	// SPDX-License-Identifier: Apache-2.0
+2	// Copyright 2026 David Brewster
+3	
+4	//
+5	//  fastSort.h
+6	//
+7	//  Small facade over vendored no-allocation comparison sorters.
+8	//  Use explicit algorithms for shape-sensitive hot paths:
+9	//      * infra::sort::unstable           -> pdqsort, general comparator sort
+10	//      * infra::sort::unstableBranchless -> branchless pdqsort for arithmetic/default comparators
+11	//
+12	
+13	#pragma once
+14	
+15	#include "pdqsort.hpp"
+16	
+17	#include <functional>
+18	#include <iterator>
+19	#include <ranges>
+20	#include <utility>
+21	
+22	namespace infra::sort
+23	{
+24	
+25	template<class Iterator, class Compare = std::less<>>
+26	void unstable( Iterator first, Iterator last, Compare comp = Compare{} )
+27	{
+28	    ::pdqsort( first, last, std::move( comp ) );
+29	}
+30	
+31	template<
+32	    std::ranges::random_access_range Range,
+33	    class Compare = std::ranges::less,
+34	    class Projection = std::identity
+35	>
+36	    requires std::sortable<std::ranges::iterator_t<Range>, Compare, Projection>
+37	auto unstable( Range&& range, Compare comp = {}, Projection proj = {} )
+38	    -> std::ranges::borrowed_iterator_t<Range>
+39	{
+40	    auto first = std::ranges::begin( range );
+41	    auto last  = std::ranges::end( range );
+42	
+43	    ::pdqsort( first, last,
+44	               [ & ]( auto&& lhs, auto&& rhs )
+45	               {
+46	                   return std::invoke( comp, std::invoke( proj, lhs ), std::invoke( proj, rhs ) );
+47	               } );
+48	
+49	    return last;
+50	}
+51	
+52	template<class Iterator, class Compare>
+53	void unstableBranchless( Iterator first, Iterator last, Compare comp )
+54	{
+55	    ::pdqsort_branchless( first, last, std::move( comp ) );
+56	}
+57	
+58	template<class Iterator>
+59	void unstableBranchless( Iterator first, Iterator last )
+60	{
+61	    ::pdqsort_branchless( first, last );
+62	}
+63	
+64	}   // namespace infra::sort
+```
+
+**`src/mergescout.h`** — reserve(calls), splitRefs(function), calls(calls), planHeadConflictLane(function), try_emplace(calls), +5 more
+
+```cpp
+233	
+234	// Split "A,B,C" on commas, dropping empty tokens — the same primitive workspace.h's segmentsOf uses for
+235	// path segments, reused here with ',' instead of hand-rolling a second copy of the same loop.
+236	inline std::vector<std::string_view> splitRefs( std::string_view csv )
+237	{
+238	    return wsdetail::segmentsOf( csv, ',' );
+239	}
+240	
+241	struct ScoutResult
+242	{
+
+... (gap) ...
+
+394	
+395	// Which bases the lane will actually diff. Empty on the common "everything forked off current HEAD" shape,
+396	// so that shape pays nothing: no extra tree, no extra diff, no extra memo reservation.
+397	inline HeadChangedByBase planHeadConflictLane( const std::vector<std::string>& baseShas, const std::string& headSha )
+398	{
+399	    HeadChangedByBase plan;
+400	    for( const std::string& baseSha : baseShas )
+401	    {
+402	        if( !baseSha.empty() && baseSha != headSha )
+403	        {
+404	            plan.try_emplace( baseSha );
+405	        }
+406	    }
+407	    return plan;
+408	}
+409	
+410	// Register the lane's future memo.get() calls — one extra use of each side per distinct base — BEFORE any
+411	// tree is materialized, so TreeIndexMemo still frees a tree right after its true LAST consumer (Y1).
+412	inline void reserveHeadConflictLane( const HeadChangedByBase& plan, const std::string& headSha, TreeIndexMemo& memo )
+413	{
+414	    for( const auto& [ baseSha, keys ] : plan )
+415	    {
+416	        (void)keys;
+417	        memo.reserve( baseSha );
+418	        memo.reserve( headSha );
+419	    }
+420	}
+421	
+422	// The dirty working tree as an implicit extra arm — base = HEAD directly (a working tree is never
+423	// diverged by commits, so no merge-base call is needed); `workingIng` is the real on-disk tree, the
+
+... (gap) ...
+
+562	
+563	// True-conflict count between arm `i` and every OTHER not-yet-landed arm — landingOrder's per-candidate
+564	// score. Split out so landingOrder's own greedy loop stays two levels deep.
+565	inline std::size_t conflictScoreAgainstRemaining( std::size_t i, const std::vector<PairOverlap>& pairs, const std::vector<char>& landed )
+566	{
+567	    std::size_t score = 0;
+568	    for( const PairOverlap& p : pairs )
+569	    {
+570	        if( p.conflicts.empty() )
+571	        {
+572	            continue;
+573	        }
+574	        if( p.a == i && !landed[p.b] )
+575	        {
+576	            ++score;
+577	        }
+578	        else if( p.b == i && !landed[p.a] )
+579	        {
+580	            ++score;
+581	        }
+582	    }
+583	    return score;
+584	}
+585	
+586	// The not-yet-landed arm with the lowest conflictScoreAgainstRemaining; ties break on ref name ascending.
+587	inline std::size_t pickNextToLand( const std::vector<Arm>& arms, const std::vector<PairOverlap>& pairs, const std::vector<char>& landed )
+588	{
+589	    std::size_t best = 0, bestScore = std::size_t( -1 );
+590	    bool haveBest = false;
+591	    for( std::size_t i = 0; i < arms.size(); ++i )
+592	    {
+593	        if( landed[i] )
+594	        {
+595	            continue;
+596	        }
+597	        const std::size_t score = conflictScoreAgainstRemaining( i, pairs, landed );
+598	        if( !haveBest || score < bestScore || ( score == bestScore && arms[i].ref < arms[best].ref ) )
+599	        { best = i; bestScore = score; haveBest = true; }
+600	    }
+601	    return best;
+602	}
+603	
+604	// Fewest-conflicts-first GREEDY landing order: repeatedly land the not-yet-landed arm with the fewest
+605	// true conflicts against arms still remaining; tie-break by ref name ascending. Deterministic.
+```
+
+**`src/flipimpact.h`** — calls(calls), push_back(calls), fileIdFor(calls), isCMakePath(calls), attachHost(calls), +12 more
+
+```cpp
+705	    HashMap<std::string, std::uint32_t> fileIdOf;
+706	};
+707	
+708	inline SiteLocator buildSiteLocator( const IngestResult& ing, const std::string& root )
+709	{
+710	    SiteLocator loc;
+711	    loc.lines = buildSymbolLineIndex( ing );
+712	    loc.fileIdOf.reserve( ing.files.size() );
+713	    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+714	    {
+715	        loc.fileIdOf[ std::string( relForHash( ing.files[f], root ) ) ] = f;
+716	    }
+717	    return loc;
+718	}
+719	
+720	inline std::uint32_t fileIdFor( const SiteLocator& loc, const std::string& rel ) noexcept
+721	{
+722	    const auto it = loc.fileIdOf.find( rel );
+723	    return it == loc.fileIdOf.end() ? UINT32_MAX : it->second;
+724	}
+725	
+726	// Join ONE branch site to the def it sits inside. A site with no host is still real code becoming live (a
+727	// file-scope constexpr, a doctest macro body tree-sitter does not index) — counted, never silently dropped.
+728	inline void attachHost( const IngestResult& ing, const SiteLocator& loc, LitBranch& b, FlipResult& res )
+729	{
+730	    const std::uint32_t f = fileIdFor( loc, b.path );
+731	    if( f != UINT32_MAX )
+732	    {
+733	        b.host = innermostAtLine( ing, loc.lines, f, b.line );
+734	    }
+735	    if( b.host != kNoNode )
+736	    {
+737	        res.hosts.push_back( b.host ); // deduped once, in computeFlip
+738	    }
+739	    else
+740	    {
+741	        ++res.fileScopeLights;
+742	    }
+743	}
+744	
+745	// The `#if` lane: every family member's region spans, joined to the defs they hold. Also picks off each
+746	// member's CMake read sites, which are build-graph reach this verb reports but deliberately does not follow.
+747	inline void collectRegions( const IngestResult& ing, const SiteLocator& loc,
+748	                            const gtl::btree_map<std::string, darkflags::Gate>& byName,
+749	                            const std::vector<std::string>& family, FlipResult& res )
+750	{
+751	    for( const std::string& member : family )
+752	    {
+753	        const auto m = byName.find( member );
+754	        if( m == byName.end() )
+755	        {
+756	            continue;
+757	        }
+758	        for( const darkflags::Region& r : m->second.regionSpans )
+759	        {
+760	            LitRegion           lit{ member, r.site.path, r.site.line, r.lines, 0 };
+761	            const std::uint32_t f = fileIdFor( loc, r.site.path );
+762	            if( f != UINT32_MAX )
+763	            {
+764	                const std::vector<NodeId> hosts = hostsForSpan( ing, loc.lines, f, r.site.line, darkflags::regionEndLine( r ) );
+765	                lit.hostCount = std::uint32_t( hosts.size() );
+766	                res.hosts.insert( res.hosts.end(), hosts.begin(), hosts.end() );
+767	            }
+768	            if( lit.hostCount == 0 )
+769	            {
+770	                ++res.fileScopeLights;
+771	            }
+772	            res.totalRegions += 1;
+773	            res.totalLines   += r.lines;
+774	            res.regions.push_back( std::move( lit ) );
+775	        }
+776	        for( const darkflags::Site& s : m->second.reads )
+777	        {
+778	            if( isCMakePath( s.path ) )
+779	            {
+780	                res.buildSites.push_back( s );
+781	            }
+782	        }
+783	    }
+784	}
+785	
+786	// The ENV lane: no delimited region exists, so the branch points are the getenv read sites the harvest
+787	// already found, and the hosts are the symbols that consult the variable. Language-agnostic on purpose —
+788	// the harvest recognises Python's os.environ too, so the C-family allowlist must NOT apply here.
+789	inline void collectEnvBranches( const IngestResult& ing, const SiteLocator& loc,
+790	                                const gtl::btree_map<std::string, darkflags::Gate>& byName,
+791	                                const std::vector<std::string>& family, FlipResult& res )
+792	{
+793	    for( const std::string& member : family )
+794	    {
+795	        const auto m = byName.find( member );
+796	        if( m == byName.end() )
+797	        {
+798	            continue;
+799	        }
+800	        for( const darkflags::Site& s : m->second.reads )
+801	        {
+802	            if( isCMakePath( s.path ) || isProsePath( s.path ) )
+803	            {
+804	                continue; // a build row / a doc mention, not a read
+805	            }
+806	            LitBranch b{ member, "getenv", s.path, s.line, kNoNode };
+807	            attachHost( ing, loc, b, res );
+808	            res.branches.push_back( std::move( b ) );
+809	        }
+810	    }
+811	}
+812	
+813	// The VALUE lane's sites, hosted. (The scan itself is scanValueLane above; this only joins it to the index.)
+814	inline void collectValueBranches( const IngestResult& ing, const SiteLocator& loc, const std::string& root,
+815	                                  const std::vector<std::string>& family, FlipResult& res )
+816	{
+817	    ValueScanResult vs = scanValueLane( ing, root, family );
+818	    res.bindings = std::move( vs.bindings );
+819	    for( LitBranch& b : vs.branches )
+820	    {
+821	        attachHost( ing, loc, b, res );
+822	        res.branches.push_back( std::move( b ) );
+823	    }
+824	}
+825	
+826	// The radius, from the hosts: who depends on them (in-edges), which of those are tests, what the tests
+827	// cover, and what the hosts themselves call. Two graph primitives — transitiveCallers and forwardReach —
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

@@ -1,0 +1,723 @@
+**Exploration: where are deterministic module ids assigned**
+
+Found 58 symbols across 5 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `DeterministicModuleIdsPlugin` (lib/ids/DeterministicModuleIdsPlugin.js:32) — 5 callers in `lib/WebpackOptionsApply.js`; tests: `test/configCases/css/css-modules-broken-keyframes/webpack.config.js`, `test/configCases/css/css-modules-in-node/webpack.config.js`, `test/configCases/css/css-modules/webpack.config.js`, `test/configCases/hash-length/deterministic-module-ids/webpack.config.js`
+- `DeterministicChunkIdsPlugin` (lib/ids/DeterministicChunkIdsPlugin.js:26) — 2 callers in `lib/WebpackOptionsApply.js`; tests: `test/configCases/optimization/chunk/webpack.config.js`
+- `DeterministicModuleIdsPluginOptions` (types.d.ts:3904) — 2 callers in `types.d.ts`; ⚠️ no covering tests found
+- `SyncModuleIdsPlugin` (lib/ids/SyncModuleIdsPlugin.js:25) — 3 callers; tests: `test/configCases/css/css-modules-broken-keyframes/webpack.config.js`, `test/configCases/css/css-modules-in-node/webpack.config.js`, `test/configCases/css/css-modules/webpack.config.js`
+
+**Relationships**
+
+**instantiates:**
+- process → DeterministicModuleIdsPlugin
+- process → ExternalsPlugin
+- process → NodeTargetPlugin
+- process → ElectronTargetPlugin
+- process → ChunkPrefetchPreloadPlugin
+- process → ArrayPushCallbackChunkFormatPlugin
+- process → CommonJsChunkFormatPlugin
+- process → ModuleChunkFormatPlugin
+- process → EnableChunkLoadingPlugin
+- process → DeterministicChunkIdsPlugin
+- process → EnableWasmLoadingPlugin
+- apply → WebpackError
+- process → NamedModuleIdsPlugin
+- process → HashedModuleIdsPlugin
+- process → NaturalModuleIdsPlugin
+- ... and 1 more
+
+**calls:**
+- apply → getUsedModuleIdsAndModules
+- apply → assignDeterministicIds
+- apply → getFullModuleName
+- apply → compareModulesByPreOrderIndexOrIdentifier
+- apply → setModuleId
+- process → apply
+- process → callback
+- process → extend
+- process → call
+- process → getInfrastructureLogger
+- process → cleverMerge
+- apply → compareChunksNatural
+- apply → getUsedChunkIds
+- apply → assignDeterministicIds
+- apply → getFullChunkName
+- ... and 64 more
+
+**references:**
+- apply → PLUGIN_NAME
+- process → ChunkPrefetchPreloadPlugin
+- DeterministicModuleIdsPlugin → DeterministicModuleIdsPluginOptions
+- DeterministicModuleIdsPlugin → Compiler
+- DeterministicModuleIdsPluginOptions → Module
+- Compiler → WebpackOptionsNormalized
+- Compiler → CacheFacade
+- Compiler → WebpackLogger
+- Compiler → WatchOptions
+- Compiler → RunCallback
+- Compiler → Stats
+- Compiler → Watching
+- Compiler → Chunk
+- Compiler → Compilation
+- Compiler → CallbackFunction_2
+- ... and 108 more
+
+**extends:**
+- Module → DependenciesBlock
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`types.d.ts`** — references(references), Chunk(references), WebpackError(references), ModuleGraph(references), ChunkGraph(references), DependencyTemplates(references), DeterministicModuleIdsPluginOptions(references), Module(references), RequestShortener(references), Dependency(references), Compilation(references), Source(references), DependencyTemplates(class), DeterministicModuleIdsPlugin(class), options(property), +13 more
+
+```typescript
+3851		 */
+3852		chunkInitFragments: InitFragment<GenerateContext>[];
+3853	}
+3854	declare abstract class DependencyTemplates {
+3855		get(dependency: DependencyConstructor): undefined | DependencyTemplate;
+3856		set(
+3857			dependency: DependencyConstructor,
+3858			dependencyTemplate: DependencyTemplate
+3859		): void;
+3860		updateHash(part: string): void;
+3861		getHash(): string;
+3862		clone(): DependencyTemplates;
+3863	}
+3864	
+3865	/**
+3866	 * Helper function for joining two ranges into a single range. This is useful
+
+... (gap) ...
+
+3892		 */
+3893		maxLength?: number;
+3894	}
+3895	declare class DeterministicModuleIdsPlugin {
+3896		constructor(options?: DeterministicModuleIdsPluginOptions);
+3897		options: DeterministicModuleIdsPluginOptions;
+3898	
+3899		/**
+3900		 * Apply the plugin
+3901		 */
+3902		apply(compiler: Compiler): void;
+3903	}
+3904	declare interface DeterministicModuleIdsPluginOptions {
+3905		/**
+3906		 * context relative to which module identifiers are computed
+3907		 */
+3908		context?: string;
+3909	
+3910		/**
+3911		 * selector function for modules
+3912		 */
+3913		test?: (module: Module) => boolean;
+3914	
+3915		/**
+3916		 * maximum id length in digits (used as starting point)
+3917		 */
+3918		maxLength?: number;
+3919	
+3920		/**
+3921		 * hash salt for ids
+3922		 */
+3923		salt?: number;
+3924	
+3925		/**
+3926		 * do not increase the maxLength to find an optimal id space size
+3927		 */
+3928		fixedLength?: boolean;
+3929	
+3930		/**
+3931		 * throw an error when id conflicts occur (instead of rehashing)
+3932		 */
+3933		failOnConflict?: boolean;
+3934	}
+3935	type DevtoolModuleFilenameTemplate = string | ((context?: any) => string);
+3936	declare interface Dirent<T extends string | Buffer = string> {
+3937		/**
+
+... (gap) ...
+
+9645			options?: null | string | number | MakeDirectoryOptions
+9646		): undefined | string;
+9647	}
+9648	declare class Module extends DependenciesBlock {
+9649		constructor(type: string, context?: null | string, layer?: null | string);
+9650		type: string;
+9651		context: null | string;
+9652		layer: null | string;
+9653		needId: boolean;
+9654		debugId: number;
+9655		resolveOptions?: ResolveOptions;
+9656		factoryMeta?: FactoryMeta;
+9657		useSourceMap: boolean;
+9658		useSimpleSourceMap: boolean;
+9659		hot: boolean;
+9660		buildMeta?: BuildMeta;
+9661		buildInfo?: BuildInfo;
+9662		presentationalDependencies?: Dependency[];
+9663		codeGenerationDependencies?: Dependency[];
+9664		id: null | string | number;
+9665		get hash(): string;
+9666		get renderedHash(): string;
+9667		profile?: ModuleProfile;
+9668		index: null | number;
+9669		index2: null | number;
+9670		depth: null | number;
+9671		issuer?: null | Module;
+9672		get usedExports(): null | boolean | SortableSet<string>;
+9673		get optimizationBailout(): (
+9674			| string
+9675			| ((requestShortener: RequestShortener) => string)
+9676		)[];
+9677		get optional(): boolean;
+9678		addChunk(chunk: Chunk): boolean;
+9679		removeChunk(chunk: Chunk): void;
+9680		isInChunk(chunk: Chunk): boolean;
+9681		isEntryModule(): boolean;
+9682		getChunks(): Chunk[];
+9683		getNumberOfChunks(): number;
+9684		get chunksIterable(): Iterable<Chunk>;
+9685		isProvided(exportName: string): null | boolean;
+9686		get exportsArgument(): string;
+9687		get moduleArgument(): string;
+9688		getExportsType(moduleGraph: ModuleGraph, strict?: boolean): ExportsType;
+9689		addPresentationalDependency(presentationalDependency: Dependency): void;
+9690		addCodeGenerationDependency(codeGenerationDependency: Dependency): void;
+9691		addWarning(warning: WebpackError): void;
+9692		getWarnings(): undefined | Iterable<WebpackError>;
+9693		getNumberOfWarnings(): number;
+9694		addError(error: WebpackError): void;
+9695		getErrors(): undefined | Iterable<WebpackError>;
+9696		getNumberOfErrors(): number;
+9697	
+9698		/**
+9699		 * removes all warnings and errors
+9700		 */
+9701		clearWarningsAndErrors(): void;
+9702		isOptional(moduleGraph: ModuleGraph): boolean;
+9703		isAccessibleInChunk(
+9704			chunkGraph: ChunkGraph,
+9705			chunk: Chunk,
+9706			ignoreChunk?: Chunk
+9707		): boolean;
+9708		isAccessibleInChunkGroup(
+9709			chunkGraph: ChunkGraph,
+9710			chunkGroup: ChunkGroup,
+9711			ignoreChunk?: Chunk
+9712		): boolean;
+9713		hasReasonForChunk(
+9714			chunk: Chunk,
+9715			moduleGraph: ModuleGraph,
+9716			chunkGraph: ChunkGraph
+9717		): boolean;
+9718		hasReasons(moduleGraph: ModuleGraph, runtime: RuntimeSpec): boolean;
+9719		needBuild(
+9720			context: NeedBuildContext,
+9721			callback: (err?: null | WebpackError, needBuild?: boolean) => void
+9722		): void;
+9723		needRebuild(
+9724			fileTimestamps: Map<string, null | number>,
+9725			contextTimestamps: Map<string, null | number>
+9726		): boolean;
+9727		invalidateBuild(): void;
+9728		identifier(): string;
+9729		readableIdentifier(requestShortener: RequestShortener): string;
+9730		build(
+9731			options: WebpackOptionsNormalized,
+9732			compilation: Compilation,
+9733			resolver: ResolverWithOptions,
+9734			fs: InputFileSystem,
+9735			callback: (err?: WebpackError) => void
+9736		): void;
+9737		getSourceTypes(): ReadonlySet<string>;
+9738		source(
+9739			dependencyTemplates: DependencyTemplates,
+9740			runtimeTemplate: RuntimeTemplate,
+9741			type?: string
+9742		): Source;
+9743		size(type?: string): number;
+9744		libIdent(options: LibIdentOptions): null | string;
+9745		nameForCondition(): null | string;
+9746		getConcatenationBailoutReason(
+9747			context: ConcatenationBailoutReasonContext
+9748		): undefined | string;
+9749		getSideEffectsConnectionState(moduleGraph: ModuleGraph): ConnectionState;
+9750		codeGeneration(context: CodeGenerationContext): CodeGenerationResult;
+9751		chunkCondition(chunk: Chunk, compilation: Compilation): boolean;
+9752		hasChunkCondition(): boolean;
+9753	
+9754		/**
+9755		 * Assuming this module is in the cache. Update the (cached) module with
+9756		 * the fresh module from the factory. Usually updates internal references
+9757		 * and properties.
+9758		 */
+9759		updateCacheModule(module: Module): void;
+9760	
+9761		/**
+9762		 * Module should be unsafe cached. Get data that's needed for that.
+9763		 * This data will be passed to restoreFromUnsafeCache later.
+9764		 */
+9765		getUnsafeCacheData(): UnsafeCacheData;
+9766	
+9767		/**
+9768		 * Assuming this module is in the cache. Remove internal references to allow freeing some memory.
+9769		 */
+9770		cleanupForCache(): void;
+9771		originalSource(): null | Source;
+9772		addCacheDependencies(
+9773			fileDependencies: LazySet<string>,
+9774			contextDependencies: LazySet<string>,
+9775			missingDependencies: LazySet<string>,
+9776			buildDependencies: LazySet<string>
+9777		): void;
+9778		get hasEqualsChunks(): any;
+9779		get isUsed(): any;
+9780		get errors(): any;
+9781		get warnings(): any;
+9782		used: any;
+9783	}
+9784	declare class ModuleChunkLoadingRuntimeModule extends RuntimeModule {
+9785		constructor(runtimeRequirements: ReadonlySet<string>);
+9786		static getCompilationHooks(
+```
+
+**`lib/ids/SyncModuleIdsPlugin.js`** — SyncModuleIdsPlugin(class), constructor(method), apply(method)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const { WebpackError } = require("..");
+9	const { getUsedModuleIdsAndModules } = require("./IdHelpers");
+10	
+11	/** @typedef {import("../Compiler")} Compiler */
+12	/** @typedef {import("../Module")} Module */
+13	/** @typedef {import("../util/fs").IntermediateFileSystem} IntermediateFileSystem */
+14	
+15	const plugin = "SyncModuleIdsPlugin";
+16	
+17	/**
+18	 * @typedef {object} SyncModuleIdsPluginOptions
+19	 * @property {string} path path to file
+20	 * @property {string=} context context for module names
+21	 * @property {((module: Module) => boolean)=} test selector for modules
+22	 * @property {"read" | "create" | "merge" | "update"=} mode operation mode (defaults to merge)
+23	 */
+24	
+25	class SyncModuleIdsPlugin {
+26		/**
+27		 * @param {SyncModuleIdsPluginOptions} options options
+28		 */
+29		constructor({ path, context, test, mode }) {
+30			this._path = path;
+31			this._context = context;
+32			this._test = test || (() => true);
+33			const readAndWrite = !mode || mode === "merge" || mode === "update";
+34			this._read = readAndWrite || mode === "read";
+35			this._write = readAndWrite || mode === "create";
+36			this._prune = mode === "update";
+37		}
+38	
+39		/**
+40		 * Apply the plugin
+41		 * @param {Compiler} compiler the compiler instance
+42		 * @returns {void}
+43		 */
+44		apply(compiler) {
+45			/** @type {Map<string, string | number>} */
+46			let data;
+47			let dataChanged = false;
+48			if (this._read) {
+49				compiler.hooks.readRecords.tapAsync(plugin, (callback) => {
+50					const fs =
+51						/** @type {IntermediateFileSystem} */
+52						(compiler.intermediateFileSystem);
+53					fs.readFile(this._path, (err, buffer) => {
+54						if (err) {
+55							if (err.code !== "ENOENT") {
+56								return callback(err);
+57							}
+58							return callback();
+59						}
+60						const json = JSON.parse(/** @type {Buffer} */ (buffer).toString());
+61						data = new Map();
+62						for (const key of Object.keys(json)) {
+63							data.set(key, json[key]);
+64						}
+65						dataChanged = false;
+66						return callback();
+67					});
+68				});
+69			}
+70			if (this._write) {
+71				compiler.hooks.emitRecords.tapAsync(plugin, (callback) => {
+72					if (!data || !dataChanged) return callback();
+73					/** @type {{[key: string]: string | number}} */
+74					const json = {};
+75					const sorted = [...data].sort(([a], [b]) => (a < b ? -1 : 1));
+76					for (const [key, value] of sorted) {
+77						json[key] = value;
+78					}
+79					const fs =
+80						/** @type {IntermediateFileSystem} */
+81						(compiler.intermediateFileSystem);
+82					fs.writeFile(this._path, JSON.stringify(json), callback);
+83				});
+84			}
+85			compiler.hooks.thisCompilation.tap(plugin, (compilation) => {
+86				const associatedObjectForCache = compiler.root;
+87				const context = this._context || compiler.context;
+88				if (this._read) {
+89					compilation.hooks.reviveModules.tap(plugin, (_1, _2) => {
+90						if (!data) return;
+91						const { chunkGraph } = compilation;
+92						const [usedIds, modules] = getUsedModuleIdsAndModules(
+93							compilation,
+94							this._test
+95						);
+96						for (const module of modules) {
+97							const name = module.libIdent({
+98								context,
+99								associatedObjectForCache
+100							});
+101							if (!name) continue;
+102							const id = data.get(name);
+103							const idAsString = `${id}`;
+104							if (usedIds.has(idAsString)) {
+105								const err = new WebpackError(
+106									`SyncModuleIdsPlugin: Unable to restore id '${id}' from '${this._path}' as it's already used.`
+107								);
+108								err.module = module;
+109								compilation.errors.push(err);
+110							}
+111							chunkGraph.setModuleId(module, /** @type {string | number} */ (id));
+112							usedIds.add(idAsString);
+113						}
+114					});
+115				}
+116				if (this._write) {
+117					compilation.hooks.recordModules.tap(plugin, (modules) => {
+118						const { chunkGraph } = compilation;
+119						let oldData = data;
+120						if (!oldData) {
+121							oldData = data = new Map();
+122						} else if (this._prune) {
+123							data = new Map();
+124						}
+125						for (const module of modules) {
+126							if (this._test(module)) {
+127								const name = module.libIdent({
+128									context,
+129									associatedObjectForCache
+130								});
+131								if (!name) continue;
+132								const id = chunkGraph.getModuleId(module);
+133								if (id === null) continue;
+134								const oldId = oldData.get(name);
+135								if (oldId !== id) {
+136									dataChanged = true;
+137								} else if (data === oldData) {
+138									continue;
+139								}
+140								data.set(name, id);
+141							}
+142						}
+143						if (data.size !== oldData.size) dataChanged = true;
+144					});
+145				}
+146			});
+147		}
+148	}
+149	
+150	module.exports = SyncModuleIdsPlugin;
+```
+
+**`lib/ids/DeterministicModuleIdsPlugin.js`** — DeterministicModuleIdsPlugin(class), constructor(method), apply(method), PLUGIN_NAME(constant)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Florent Cailhol @ooflorent
+4	*/
+5	
+6	"use strict";
+7	
+8	const {
+9		compareModulesByPreOrderIndexOrIdentifier
+10	} = require("../util/comparators");
+11	const {
+12		assignDeterministicIds,
+13		getFullModuleName,
+14		getUsedModuleIdsAndModules
+15	} = require("./IdHelpers");
+16	
+17	/** @typedef {import("../Compiler")} Compiler */
+18	/** @typedef {import("../Module")} Module */
+19	
+20	/**
+21	 * @typedef {object} DeterministicModuleIdsPluginOptions
+22	 * @property {string=} context context relative to which module identifiers are computed
+23	 * @property {((module: Module) => boolean)=} test selector function for modules
+24	 * @property {number=} maxLength maximum id length in digits (used as starting point)
+25	 * @property {number=} salt hash salt for ids
+26	 * @property {boolean=} fixedLength do not increase the maxLength to find an optimal id space size
+27	 * @property {boolean=} failOnConflict throw an error when id conflicts occur (instead of rehashing)
+28	 */
+29	
+30	const PLUGIN_NAME = "DeterministicModuleIdsPlugin";
+31	
+32	class DeterministicModuleIdsPlugin {
+33		/**
+34		 * @param {DeterministicModuleIdsPluginOptions=} options options
+35		 */
+36		constructor(options = {}) {
+37			this.options = options;
+38		}
+39	
+40		/**
+41		 * Apply the plugin
+42		 * @param {Compiler} compiler the compiler instance
+43		 * @returns {void}
+44		 */
+45		apply(compiler) {
+46			compiler.hooks.compilation.tap(PLUGIN_NAME, (compilation) => {
+47				compilation.hooks.moduleIds.tap(PLUGIN_NAME, () => {
+48					const chunkGraph = compilation.chunkGraph;
+49					const context = this.options.context
+50						? this.options.context
+51						: compiler.context;
+52					const maxLength = this.options.maxLength || 3;
+53					const failOnConflict = this.options.failOnConflict || false;
+54					const fixedLength = this.options.fixedLength || false;
+55					const salt = this.options.salt || 0;
+56					let conflicts = 0;
+57	
+58					const [usedIds, modules] = getUsedModuleIdsAndModules(
+59						compilation,
+60						this.options.test
+61					);
+62					assignDeterministicIds(
+63						modules,
+64						(module) => getFullModuleName(module, context, compiler.root),
+65						failOnConflict
+66							? () => 0
+67							: compareModulesByPreOrderIndexOrIdentifier(
+68									compilation.moduleGraph
+69								),
+70						(module, id) => {
+71							const size = usedIds.size;
+72							usedIds.add(`${id}`);
+73							if (size === usedIds.size) {
+74								conflicts++;
+75								return false;
+76							}
+77							chunkGraph.setModuleId(module, id);
+78							return true;
+79						},
+80						[10 ** maxLength],
+81						fixedLength ? 0 : 10,
+82						usedIds.size,
+83						salt
+84					);
+85					if (failOnConflict && conflicts) {
+86						throw new Error(
+87							`Assigning deterministic module ids has lead to ${conflicts} conflict${
+88								conflicts > 1 ? "s" : ""
+89							}.\nIncrease the 'maxLength' to increase the id space and make conflicts less likely (recommended when there are many conflicts or application is expected to grow), or add an 'salt' number to try another hash starting value in the same id space (recommended when there is only a single conflict).`
+90						);
+91					}
+92				});
+93			});
+94		}
+95	}
+96	
+97	module.exports = DeterministicModuleIdsPlugin;
+```
+
+**`lib/ids/HashedModuleIdsPlugin.js`** — HashedModuleIdsPlugin(class), constructor(method), apply(method), validate(constant), createHash(constant), PLUGIN_NAME(constant)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const { DEFAULTS } = require("../config/defaults");
+9	const {
+10		compareModulesByPreOrderIndexOrIdentifier
+11	} = require("../util/comparators");
+12	const createSchemaValidation = require("../util/create-schema-validation");
+13	const createHash = require("../util/createHash");
+14	const {
+15		getFullModuleName,
+16		getUsedModuleIdsAndModules
+17	} = require("./IdHelpers");
+18	
+19	/** @typedef {import("../../declarations/plugins/HashedModuleIdsPlugin").HashedModuleIdsPluginOptions} HashedModuleIdsPluginOptions */
+20	/** @typedef {import("../Compiler")} Compiler */
+21	
+22	const validate = createSchemaValidation(
+23		require("../../schemas/plugins/HashedModuleIdsPlugin.check"),
+24		() => require("../../schemas/plugins/HashedModuleIdsPlugin.json"),
+25		{
+26			name: "Hashed Module Ids Plugin",
+27			baseDataPath: "options"
+28		}
+29	);
+30	
+31	const PLUGIN_NAME = "HashedModuleIdsPlugin";
+32	
+33	class HashedModuleIdsPlugin {
+34		/**
+35		 * @param {HashedModuleIdsPluginOptions=} options options object
+36		 */
+37		constructor(options = {}) {
+38			validate(options);
+39	
+40			/** @type {HashedModuleIdsPluginOptions} */
+41			this.options = {
+42				context: undefined,
+43				hashFunction: DEFAULTS.HASH_FUNCTION,
+44				hashDigest: "base64",
+45				hashDigestLength: 4,
+46				...options
+47			};
+48		}
+49	
+50		/**
+51		 * Apply the plugin
+52		 * @param {Compiler} compiler the compiler instance
+53		 * @returns {void}
+54		 */
+55		apply(compiler) {
+56			const options = this.options;
+57			compiler.hooks.compilation.tap(PLUGIN_NAME, (compilation) => {
+58				compilation.hooks.moduleIds.tap(PLUGIN_NAME, () => {
+59					const chunkGraph = compilation.chunkGraph;
+60					const context = this.options.context
+61						? this.options.context
+62						: compiler.context;
+63	
+64					const [usedIds, modules] = getUsedModuleIdsAndModules(compilation);
+65					const modulesInNaturalOrder = modules.sort(
+66						compareModulesByPreOrderIndexOrIdentifier(compilation.moduleGraph)
+67					);
+68					for (const module of modulesInNaturalOrder) {
+69						const ident = getFullModuleName(module, context, compiler.root);
+70						const hash = createHash(
+71							/** @type {NonNullable<HashedModuleIdsPluginOptions["hashFunction"]>} */ (
+72								options.hashFunction
+73							)
+74						);
+75						hash.update(ident || "");
+76						const hashId = /** @type {string} */ (
+77							hash.digest(options.hashDigest)
+78						);
+79						let len = options.hashDigestLength;
+80						while (usedIds.has(hashId.slice(0, len))) {
+81							/** @type {number} */ (len)++;
+82						}
+83						const moduleId = hashId.slice(0, len);
+84						chunkGraph.setModuleId(module, moduleId);
+85						usedIds.add(moduleId);
+86					}
+87				});
+88			});
+89		}
+90	}
+91	
+92	module.exports = HashedModuleIdsPlugin;
+```
+
+**`lib/ids/DeterministicChunkIdsPlugin.js`** — DeterministicChunkIdsPlugin(class), constructor(method), apply(method), PLUGIN_NAME(constant)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Florent Cailhol @ooflorent
+4	*/
+5	
+6	"use strict";
+7	
+8	const { compareChunksNatural } = require("../util/comparators");
+9	const {
+10		assignDeterministicIds,
+11		getFullChunkName,
+12		getUsedChunkIds
+13	} = require("./IdHelpers");
+14	
+15	/** @typedef {import("../Compiler")} Compiler */
+16	/** @typedef {import("../Module")} Module */
+17	
+18	/**
+19	 * @typedef {object} DeterministicChunkIdsPluginOptions
+20	 * @property {string=} context context for ids
+21	 * @property {number=} maxLength maximum length of ids
+22	 */
+23	
+24	const PLUGIN_NAME = "DeterministicChunkIdsPlugin";
+25	
+26	class DeterministicChunkIdsPlugin {
+27		/**
+28		 * @param {DeterministicChunkIdsPluginOptions=} options options
+29		 */
+30		constructor(options = {}) {
+31			this.options = options;
+32		}
+33	
+34		/**
+35		 * Apply the plugin
+36		 * @param {Compiler} compiler the compiler instance
+37		 * @returns {void}
+38		 */
+39		apply(compiler) {
+40			compiler.hooks.compilation.tap(PLUGIN_NAME, (compilation) => {
+41				compilation.hooks.chunkIds.tap(PLUGIN_NAME, (chunks) => {
+42					const chunkGraph = compilation.chunkGraph;
+43					const context = this.options.context
+44						? this.options.context
+45						: compiler.context;
+46					const maxLength = this.options.maxLength || 3;
+47	
+48					const compareNatural = compareChunksNatural(chunkGraph);
+49	
+50					const usedIds = getUsedChunkIds(compilation);
+51					assignDeterministicIds(
+52						[...chunks].filter((chunk) => chunk.id === null),
+53						(chunk) =>
+54							getFullChunkName(chunk, chunkGraph, context, compiler.root),
+55						compareNatural,
+56						(chunk, id) => {
+57							const size = usedIds.size;
+58							usedIds.add(`${id}`);
+59							if (size === usedIds.size) return false;
+60							chunk.id = id;
+61							chunk.ids = [id];
+62							return true;
+63						},
+64						[10 ** maxLength],
+65						10,
+66						usedIds.size
+67					);
+68				});
+69			});
+70		}
+71	}
+72	
+73	module.exports = DeterministicChunkIdsPlugin;
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

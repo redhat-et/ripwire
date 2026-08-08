@@ -1,0 +1,481 @@
+**Exploration: where is inner graph tracking for side effect free exports**
+
+Found 38 symbols across 3 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `InnerGraphPlugin` (lib/optimize/InnerGraphPlugin.js:36) — 1 caller in `lib/WebpackOptionsApply.js`; ⚠️ no covering tests found
+- `moduleHasSideEffects` (lib/optimize/SideEffectsFlagPlugin.js:404) — 2 callers in `lib/optimize/SideEffectsFlagPlugin.js`; tests: `test/SideEffectsFlagPlugin.unittest.js`
+- `SideEffectsFlagPlugin` (lib/optimize/SideEffectsFlagPlugin.js:71) — 1 caller in `lib/WebpackOptionsApply.js`; ⚠️ no covering tests found
+
+**Relationships**
+
+**extends:**
+- HarmonyImportSideEffectDependency → HarmonyImportDependency
+- HarmonyExportSpecifierDependency → NullDependency
+
+**instantiates:**
+- process → InnerGraphPlugin
+- apply → Template
+- apply → PureExpressionDependency
+- process → ExternalsPlugin
+- process → NodeTargetPlugin
+- process → ElectronTargetPlugin
+- process → SideEffectsFlagPlugin
+
+**calls:**
+- apply → getLogger
+- apply → set
+- apply → addDependency
+- apply → time
+- apply → timeAggregate
+- apply → isPure
+- apply → walkExpression
+- apply → timeAggregateEnd
+- process → apply
+- process → callback
+- process → extend
+- process → call
+- process → getInfrastructureLogger
+- process → cleverMerge
+- moduleHasSideEffects → test
+- ... and 149 more
+
+**references:**
+- apply → PLUGIN_NAME
+- apply → InnerGraph
+- apply → PureExpressionDependency
+- apply → formatLocation
+- SideEffectsFlagPlugin → Compiler
+- Compiler → WebpackOptionsNormalized
+- Compiler → CacheFacade
+- Compiler → WebpackLogger
+- Compiler → WatchOptions
+- Compiler → RunCallback
+- Compiler → Stats
+- Compiler → Watching
+- Compiler → Chunk
+- Compiler → Compilation
+- Compiler → CallbackFunction_2
+- ... and 41 more
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`lib/dependencies/HarmonyImportSideEffectDependency.js`** — HarmonyImportSideEffectDependency(class), getModuleEvaluationSideEffectsState(method), HarmonyImportDependency(constant), constructor(method), type(method), getCondition(method)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const makeSerializable = require("../util/makeSerializable");
+9	const HarmonyImportDependency = require("./HarmonyImportDependency");
+10	
+11	/** @typedef {import("webpack-sources").ReplaceSource} ReplaceSource */
+12	/** @typedef {import("../Dependency")} Dependency */
+13	/** @typedef {import("../Dependency").GetConditionFn} GetConditionFn */
+14	/** @typedef {import("../DependencyTemplate").DependencyTemplateContext} DependencyTemplateContext */
+15	/** @typedef {import("../Module")} Module */
+16	/** @typedef {import("../ModuleGraph")} ModuleGraph */
+17	/** @typedef {import("../ModuleGraphConnection")} ModuleGraphConnection */
+18	/** @typedef {import("../ModuleGraphConnection").ConnectionState} ConnectionState */
+19	/** @typedef {import("../WebpackError")} WebpackError */
+20	/** @typedef {import("../javascript/JavascriptParser").ImportAttributes} ImportAttributes */
+21	/** @typedef {import("../util/Hash")} Hash */
+22	/** @typedef {import("../util/runtime").RuntimeSpec} RuntimeSpec */
+23	
+24	class HarmonyImportSideEffectDependency extends HarmonyImportDependency {
+25		/**
+26		 * @param {string} request the request string
+27		 * @param {number} sourceOrder source order
+28		 * @param {ImportAttributes=} attributes import attributes
+29		 * @param {boolean=} defer is defer phase
+30		 */
+31		constructor(request, sourceOrder, attributes, defer) {
+32			super(request, sourceOrder, attributes, defer);
+33		}
+34	
+35		get type() {
+36			return "harmony side effect evaluation";
+37		}
+38	
+39		/**
+40		 * @param {ModuleGraph} moduleGraph module graph
+41		 * @returns {null | false | GetConditionFn} function to determine if the connection is active
+42		 */
+43		getCondition(moduleGraph) {
+44			return (connection) => {
+45				const refModule = connection.resolvedModule;
+46				if (!refModule) return true;
+47				return refModule.getSideEffectsConnectionState(moduleGraph);
+48			};
+49		}
+50	
+51		/**
+52		 * @param {ModuleGraph} moduleGraph the module graph
+53		 * @returns {ConnectionState} how this dependency connects the module to referencing modules
+54		 */
+55		getModuleEvaluationSideEffectsState(moduleGraph) {
+56			const refModule = moduleGraph.getModule(this);
+57			if (!refModule) return true;
+58			return refModule.getSideEffectsConnectionState(moduleGraph);
+59		}
+60	}
+61	
+62	makeSerializable(
+63		HarmonyImportSideEffectDependency,
+64		"webpack/lib/dependencies/HarmonyImportSideEffectDependency"
+65	);
+66	
+67	HarmonyImportSideEffectDependency.Template = class HarmonyImportSideEffectDependencyTemplate extends (
+68		HarmonyImportDependency.Template
+69	) {
+70		/**
+71		 * @param {Dependency} dependency the dependency for which the template should be applied
+72		 * @param {ReplaceSource} source the current replace source which can be modified
+73		 * @param {DependencyTemplateContext} templateContext the context object
+74		 * @returns {void}
+75		 */
+76		apply(dependency, source, templateContext) {
+77			const { moduleGraph, concatenationScope } = templateContext;
+78			if (concatenationScope) {
+79				const module = /** @type {Module} */ (moduleGraph.getModule(dependency));
+80				if (concatenationScope.isModuleInScope(module)) {
+81					return;
+82				}
+83			}
+84			super.apply(dependency, source, templateContext);
+85		}
+86	};
+87	
+88	module.exports = HarmonyImportSideEffectDependency;
+```
+
+**`lib/dependencies/HarmonyExportSpecifierDependency.js`** — getModuleEvaluationSideEffectsState(method), HarmonyExportSpecifierDependency(class), constructor(method), type(method), getExports(method), serialize(method), deserialize(method), NullDependency(constant)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const makeSerializable = require("../util/makeSerializable");
+9	const HarmonyExportInitFragment = require("./HarmonyExportInitFragment");
+10	const NullDependency = require("./NullDependency");
+11	
+12	/** @typedef {import("webpack-sources").ReplaceSource} ReplaceSource */
+13	/** @typedef {import("../Dependency")} Dependency */
+14	/** @typedef {import("../Dependency").ExportsSpec} ExportsSpec */
+15	/** @typedef {import("../DependencyTemplate").DependencyTemplateContext} DependencyTemplateContext */
+16	/** @typedef {import("../ModuleGraph")} ModuleGraph */
+17	/** @typedef {import("../ModuleGraphConnection").ConnectionState} ConnectionState */
+18	/** @typedef {import("../serialization/ObjectMiddleware").ObjectDeserializerContext} ObjectDeserializerContext */
+19	/** @typedef {import("../serialization/ObjectMiddleware").ObjectSerializerContext} ObjectSerializerContext */
+20	
+21	class HarmonyExportSpecifierDependency extends NullDependency {
+22		/**
+23		 * @param {string} id the id
+24		 * @param {string} name the name
+25		 */
+26		constructor(id, name) {
+27			super();
+28			this.id = id;
+29			this.name = name;
+30		}
+31	
+32		get type() {
+33			return "harmony export specifier";
+34		}
+35	
+36		/**
+37		 * Returns the exported names
+38		 * @param {ModuleGraph} moduleGraph module graph
+39		 * @returns {ExportsSpec | undefined} export names
+40		 */
+41		getExports(moduleGraph) {
+42			return {
+43				exports: [this.name],
+44				priority: 1,
+45				terminalBinding: true,
+46				dependencies: undefined
+47			};
+48		}
+49	
+50		/**
+51		 * @param {ModuleGraph} moduleGraph the module graph
+52		 * @returns {ConnectionState} how this dependency connects the module to referencing modules
+53		 */
+54		getModuleEvaluationSideEffectsState(moduleGraph) {
+55			return false;
+56		}
+57	
+58		/**
+59		 * @param {ObjectSerializerContext} context context
+60		 */
+61		serialize(context) {
+62			const { write } = context;
+63			write(this.id);
+64			write(this.name);
+65			super.serialize(context);
+66		}
+67	
+68		/**
+69		 * @param {ObjectDeserializerContext} context context
+70		 */
+71		deserialize(context) {
+72			const { read } = context;
+73			this.id = read();
+74			this.name = read();
+75			super.deserialize(context);
+76		}
+77	}
+78	
+79	makeSerializable(
+80		HarmonyExportSpecifierDependency,
+81		"webpack/lib/dependencies/HarmonyExportSpecifierDependency"
+82	);
+83	
+84	HarmonyExportSpecifierDependency.Template = class HarmonyExportSpecifierDependencyTemplate extends (
+85		NullDependency.Template
+86	) {
+87		/**
+88		 * @param {Dependency} dependency the dependency for which the template should be applied
+89		 * @param {ReplaceSource} source the current replace source which can be modified
+90		 * @param {DependencyTemplateContext} templateContext the context object
+91		 * @returns {void}
+92		 */
+93		apply(
+94			dependency,
+95			source,
+96			{ module, moduleGraph, initFragments, runtime, concatenationScope }
+97		) {
+98			const dep = /** @type {HarmonyExportSpecifierDependency} */ (dependency);
+99			if (concatenationScope) {
+100				concatenationScope.registerExport(dep.name, dep.id);
+101				return;
+102			}
+103			const used = moduleGraph
+104				.getExportsInfo(module)
+105				.getUsedName(dep.name, runtime);
+106			if (!used) {
+107				const set = new Set();
+108				set.add(dep.name || "namespace");
+109				initFragments.push(
+110					new HarmonyExportInitFragment(module.exportsArgument, undefined, set)
+111				);
+112				return;
+113			}
+114	
+115			const map = new Map();
+116			map.set(used, `/* binding */ ${dep.id}`);
+117			initFragments.push(
+118				new HarmonyExportInitFragment(module.exportsArgument, map, undefined)
+119			);
+120		}
+121	};
+122	
+123	module.exports = HarmonyExportSpecifierDependency;
+```
+
+**`types.d.ts`** — references(references), Compilation(references), RunCallback(references), NormalModuleFactory(references), ContextModuleFactory(references), CallbackFunction_2(references), CacheFacade(references), Stats(references), Compiler(references), CompilationParams(references), CacheFacade(class), CompilationParams(interface), Compiler(class), WebpackOptionsNormalized(references), WebpackLogger(references), +6 more
+
+```typescript
+1020		static STAGE_DISK: number;
+1021		static STAGE_NETWORK: number;
+1022	}
+1023	declare abstract class CacheFacade {
+1024		getChildCache(name: string): CacheFacade;
+1025		getItemCache(identifier: string, etag: null | Etag): ItemCacheFacade;
+1026		getLazyHashedEtag(obj: HashableObject): Etag;
+1027		mergeEtags(a: Etag, b: Etag): Etag;
+1028		get<T>(
+1029			identifier: string,
+1030			etag: null | Etag,
+1031			callback: CallbackCacheCacheFacade<T>
+1032		): void;
+1033		getPromise<T>(identifier: string, etag: null | Etag): Promise<T>;
+1034		store<T>(
+1035			identifier: string,
+1036			etag: null | Etag,
+1037			data: T,
+1038			callback: CallbackCacheCacheFacade<void>
+1039		): void;
+1040		storePromise<T>(
+1041			identifier: string,
+1042			etag: null | Etag,
+1043			data: T
+1044		): Promise<void>;
+1045		provide<T>(
+1046			identifier: string,
+1047			etag: null | Etag,
+1048			computer: (callback: CallbackNormalErrorCache<T>) => void,
+1049			callback: CallbackNormalErrorCache<T>
+1050		): void;
+1051		providePromise<T>(
+1052			identifier: string,
+1053			etag: null | Etag,
+1054			computer: () => T | Promise<T>
+1055		): Promise<T>;
+1056	}
+1057	declare interface CacheGroupSource {
+1058		key: string;
+1059		priority?: number;
+
+... (gap) ...
+
+2593	declare interface CompilationHooksRealContentHashPlugin {
+2594		updateHash: SyncBailHook<[Buffer[], string], string | void>;
+2595	}
+2596	declare interface CompilationParams {
+2597		normalModuleFactory: NormalModuleFactory;
+2598		contextModuleFactory: ContextModuleFactory;
+2599	}
+2600	declare class Compiler {
+2601		constructor(context: string, options?: WebpackOptionsNormalized);
+2602		hooks: Readonly<{
+2603			initialize: SyncHook<[]>;
+2604			shouldEmit: SyncBailHook<[Compilation], boolean | void>;
+2605			done: AsyncSeriesHook<[Stats]>;
+2606			afterDone: SyncHook<[Stats]>;
+2607			additionalPass: AsyncSeriesHook<[]>;
+2608			beforeRun: AsyncSeriesHook<[Compiler]>;
+2609			run: AsyncSeriesHook<[Compiler]>;
+2610			emit: AsyncSeriesHook<[Compilation]>;
+2611			assetEmitted: AsyncSeriesHook<[string, AssetEmittedInfo]>;
+2612			afterEmit: AsyncSeriesHook<[Compilation]>;
+2613			thisCompilation: SyncHook<[Compilation, CompilationParams]>;
+2614			compilation: SyncHook<[Compilation, CompilationParams]>;
+2615			normalModuleFactory: SyncHook<[NormalModuleFactory]>;
+2616			contextModuleFactory: SyncHook<[ContextModuleFactory]>;
+2617			beforeCompile: AsyncSeriesHook<[CompilationParams]>;
+2618			compile: SyncHook<[CompilationParams]>;
+2619			make: AsyncParallelHook<[Compilation]>;
+2620			finishMake: AsyncParallelHook<[Compilation]>;
+2621			afterCompile: AsyncSeriesHook<[Compilation]>;
+2622			readRecords: AsyncSeriesHook<[]>;
+2623			emitRecords: AsyncSeriesHook<[]>;
+2624			watchRun: AsyncSeriesHook<[Compiler]>;
+2625			failed: SyncHook<[Error]>;
+2626			invalid: SyncHook<[null | string, number]>;
+2627			watchClose: SyncHook<[]>;
+2628			shutdown: AsyncSeriesHook<[]>;
+2629			infrastructureLog: SyncBailHook<
+2630				[string, string, undefined | any[]],
+2631				true | void
+2632			>;
+2633			environment: SyncHook<[]>;
+2634			afterEnvironment: SyncHook<[]>;
+2635			afterPlugins: SyncHook<[Compiler]>;
+2636			afterResolvers: SyncHook<[Compiler]>;
+2637			entryOption: SyncBailHook<[string, EntryNormalized], boolean | void>;
+2638		}>;
+2639		webpack: typeof exports;
+2640		name?: string;
+2641		parentCompilation?: Compilation;
+2642		root: Compiler;
+2643		outputPath: string;
+2644		watching?: Watching;
+2645		outputFileSystem: null | OutputFileSystem;
+2646		intermediateFileSystem: null | IntermediateFileSystem;
+2647		inputFileSystem: null | InputFileSystem;
+2648		watchFileSystem: null | WatchFileSystem;
+2649		recordsInputPath: null | string;
+2650		recordsOutputPath: null | string;
+2651		records: Records;
+2652		managedPaths: Set<string | RegExp>;
+2653		unmanagedPaths: Set<string | RegExp>;
+2654		immutablePaths: Set<string | RegExp>;
+2655		modifiedFiles?: ReadonlySet<string>;
+2656		removedFiles?: ReadonlySet<string>;
+2657		fileTimestamps?: Map<string, FileSystemInfoEntry | "ignore">;
+2658		contextTimestamps?: Map<string, FileSystemInfoEntry | "ignore">;
+2659		fsStartTime?: number;
+2660		resolverFactory: ResolverFactory;
+2661		infrastructureLogger?: (
+2662			value: string,
+2663			type: LogTypeEnum,
+2664			args?: any[]
+2665		) => void;
+2666		platform: Readonly<PlatformTargetProperties>;
+2667		options: WebpackOptionsNormalized;
+2668		context: string;
+2669		requestShortener: RequestShortener;
+2670		cache: CacheClass;
+2671		moduleMemCaches?: Map<Module, ModuleMemCachesItem>;
+2672		compilerPath: string;
+2673		running: boolean;
+2674		idle: boolean;
+2675		watchMode: boolean;
+2676		getCache(name: string): CacheFacade;
+2677		getInfrastructureLogger(name: string | (() => string)): WebpackLogger;
+2678		watch(watchOptions: WatchOptions, handler: RunCallback<Stats>): Watching;
+2679		run(callback: RunCallback<Stats>): void;
+2680		runAsChild(
+2681			callback: (
+2682				err: null | Error,
+2683				entries?: Chunk[],
+2684				compilation?: Compilation
+2685			) => any
+2686		): void;
+2687		purgeInputFileSystem(): void;
+2688		emitAssets(
+2689			compilation: Compilation,
+2690			callback: CallbackFunction_2<void>
+2691		): void;
+2692		emitRecords(callback: CallbackFunction_2<void>): void;
+2693		readRecords(callback: CallbackFunction_2<void>): void;
+2694		createChildCompiler(
+2695			compilation: Compilation,
+2696			compilerName: string,
+2697			compilerIndex: number,
+2698			outputOptions?: Partial<OutputNormalized>,
+2699			plugins?: WebpackPluginInstance[]
+2700		): Compiler;
+2701		isChild(): boolean;
+2702		createCompilation(params: CompilationParams): Compilation;
+2703		newCompilation(params: CompilationParams): Compilation;
+2704		createNormalModuleFactory(): NormalModuleFactory;
+2705		createContextModuleFactory(): ContextModuleFactory;
+2706		newCompilationParams(): {
+2707			normalModuleFactory: NormalModuleFactory;
+2708			contextModuleFactory: ContextModuleFactory;
+2709		};
+2710		compile(callback: RunCallback<Compilation>): void;
+2711		close(callback: RunCallback<void>): void;
+2712	}
+2713	declare class ConcatSource extends Source {
+2714		constructor(...args: ConcatSourceChild[]);
+2715		getChildren(): Source[];
+
+... (gap) ...
+
+15555	declare interface SharedObject {
+15556		[index: string]: string | SharedConfig;
+15557	}
+15558	declare class SideEffectsFlagPlugin {
+15559		constructor(analyseSource?: boolean);
+15560	
+15561		/**
+15562		 * Apply the plugin
+15563		 */
+15564		apply(compiler: Compiler): void;
+15565		static moduleHasSideEffects(
+15566			moduleName: string,
+15567			flagValue: undefined | string | boolean | string[],
+15568			cache: Map<string, RegExp>
+15569		): undefined | boolean;
+15570	}
+15571	type SimpleType = "string" | "number" | "boolean";
+15572	declare class SizeOnlySource extends Source {
+15573		constructor(size: number);
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

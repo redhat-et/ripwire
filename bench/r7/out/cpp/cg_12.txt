@@ -1,0 +1,285 @@
+**Exploration: where are the built-in AST lint rules defined**
+
+Found 29 symbols across 2 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `runLintRules` (src/lintrules.h:698) — 1 caller in `src/main.cpp`; ⚠️ no covering tests found
+- `parseLintRuleFile` (src/lintrules.h:250) — 1 caller in `src/lintrules.h`; ⚠️ no covering tests found
+- `loadLintRules` (src/lintrules.h:499) — 1 caller in `src/main.cpp`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/lintrules.h`** — push_back(calls), size(calls), langOfPath(calls), collapseEnclosed(calls), contains(calls), +8 more
+
+```cpp
+685	// every number literal can no longer starve the rule next to it out of the pool. A rule whose raw candidate
+686	// stream lands ON that budget has a count= that is a FLOOR; its id comes back in `saturatedRuleIds` so the
+687	// caller can disclose it rather than print a truncated tally as a total.
+688	struct LintRulesRun
+689	{
+690	    std::vector<LintFinding> findings;
+691	    std::vector<std::string> saturatedRuleIds;   // rule ids whose candidate stream spent its whole budget
+692	};
+693	
+694	// The per-rule astQuery budget shared by the built-in checks (--lint) and the user rules (--lint-rules).
+695	// ONE constant so the two tallies are capped on the same scale and `capped="1"` means the same thing in both.
+696	inline constexpr std::size_t kLintMaxPerRule = 5000;
+697	
+698	inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<LintRule>& rules )
+699	{
+700	    using namespace lintdetail;
+701	    std::vector<LintFinding> out;
+702	    std::vector<std::string> saturatedRuleIds;
+703	    if( rules.empty() || ing.files.empty() )
+704	    {
+705	        return { std::move( out ), std::move( saturatedRuleIds ) };
+706	    }
+707	
+708	    // Constraint-group encoding: pack (ruleIdx, kind, slot) into one std::size_t `group` distinct from any
+709	    // candidate group (a bare ruleIdx). kind ∈ {1:inside, 2:not-inside, 3:not-matches}; slot = block index.
+710	    const auto constraintGroup = []( std::size_t ruleIdx, std::size_t kind, std::size_t slot ) noexcept -> std::size_t
+711	    {
+712	        // reserve the low bit-band for candidates (kind 0); shift so candidate ruleIdx (kind 0) never collides.
+713	        return ( ruleIdx << 8 ) | ( kind << 4 ) | ( slot & 0xF );   // ≤16 blocks/kind, ≤2^56 rules — ample
+714	    };
+715	    const std::size_t kindInside = 1, kindNotInside = 2, kindNotMatches = 3;
+716	
+717	    // Build astQuery specs: the main query per rule PLUS one spec per combinator query. Each combinator spec
+718	    // gets a UNIQUE tag ("<rule tag>\x1c<kind><slot>", \x1c never appears in a path) so its spans route back
+719	    // to the right (rule, kind, slot). Invalid ts queries alert+drop inside astQuery — a bad combinator query
+720	    // simply contributes no constraint spans (inside → the rule matches nothing; not-* → nothing filtered).
+721	    std::vector<AstQuerySpec>                     specs;
+722	    HashMap<std::string, std::size_t>             tagToGroup;   // combinator tag → encoded constraint group
+723	    HashMap<std::string, std::size_t>             tagToRule;    // main-query tag → rule index (candidates)
+724	    specs.reserve( rules.size() * 2 );  tagToGroup.reserve( rules.size() * 2 );  tagToRule.reserve( rules.size() );
+725	
+726	    const auto addCombinator = [ & ]( std::size_t ruleIdx, std::size_t kind, const std::vector<std::string>& qs )
+727	    {
+728	        for( std::size_t slot = 0; slot < qs.size(); ++slot )
+729	        {
+730	            std::string tag = rules[ruleIdx].tag + "\x1c" + char( '0' + kind ) + std::to_string( slot );
+731	            specs.push_back( { qs[slot], tag } );
+732	            tagToGroup.emplace( std::move( tag ), constraintGroup( ruleIdx, kind, slot ) );
+733	        }
+734	    };
+735	    for( std::size_t i = 0; i < rules.size(); ++i )
+736	    {
+737	        specs.push_back( { rules[i].query, rules[i].tag } );
+738	        tagToRule.emplace( rules[i].tag, i );
+739	        addCombinator( i, kindInside,     rules[i].inside );
+740	        addCombinator( i, kindNotInside,  rules[i].notInside );
+741	        addCombinator( i, kindNotMatches, rules[i].notMatches );
+742	    }
+743	
+744	    const std::vector<AstMatch> ms = astQuery( ing, specs, kLintMaxPerRule );
+745	
+746	    for( const LintRule& r : rules )    // saturation is measured on the RAW candidate stream, before the combinators thin it
+747	    {
+748	        std::size_t rawForRule = 0;
+749	        for( const AstMatch& m : ms )
+750	        {
+751	            if( m.tag == r.tag )
+752	            {
+753	                ++rawForRule;
+754	            }
+755	        }
+756	        if( rawForRule >= kLintMaxPerRule )
+757	        {
+758	            saturatedRuleIds.push_back( r.id );
+759	        }
+760	    }
+761	
+762	    // Split matches into candidate spans (main query, keyed by rule index) and constraint spans (combinator
+763	    // queries, keyed by the encoded group). Language-gate BOTH by the owning rule's language so a constraint
+764	    // never fires on a foreign-language file (a candidate can only exist on a rule-language file anyway).
+765	    std::vector<Span> candidates;   candidates.reserve( ms.size() );
+766	    std::vector<Span> constraints;  constraints.reserve( ms.size() );
+767	    for( const AstMatch& m : ms )
+768	    {
+769	        if( const auto it = tagToRule.find( m.tag ); it != tagToRule.end() )
+770	        {
+771	            const LintRule& r = rules[ it->second ];
+772	            if( langOfPath( ing.files[m.fileId] ) != r.lang )
+773	            {
+774	                continue;
+775	            }
+776	            candidates.push_back( { m.fileId, m.startByte, m.endByte, m.line, it->second } );
+777	        }
+778	        else if( const auto jt = tagToGroup.find( m.tag ); jt != tagToGroup.end() )
+779	        {
+780	            const std::size_t ruleIdx = jt->second >> 8;
+781	            if( langOfPath( ing.files[m.fileId] ) != rules[ruleIdx].lang )
+782	            {
+783	                continue;
+784	            }
+785	            constraints.push_back( { m.fileId, m.startByte, m.endByte, m.line, jt->second } );
+786	        }
+787	    }
+788	
+789	    // Collapse both sets to widest-per-match spans (candidate `@hit`, constraint `@scope`/`@x`/…).
+790	    collapseEnclosed( candidates );
+791	    collapseEnclosed( constraints );
+792	
+793	    // Index constraint spans by (group, file) → contiguous ranges for O(1)-ish lookup during filtering.
+794	    // constraints is already sorted by (group, file, start) from collapseEnclosed; record range starts.
+795	    struct Range { std::size_t begin, end; };
+796	    HashMap<std::uint64_t, Range> constraintIndex;   // key = group<<32 | fileId  → [begin,end) in constraints
+797	    constraintIndex.reserve( constraints.size() );
+798	    for( std::size_t i = 0; i < constraints.size(); )
+799	    {
+800	        std::size_t j = i + 1;
+801	        while( j < constraints.size() && constraints[j].group == constraints[i].group && constraints[j].fileId == constraints[i].fileId )
+802	        {
+803	            ++j;
+804	        }
+805	        const std::uint64_t key = ( std::uint64_t( constraints[i].group ) << 32 ) | constraints[i].fileId;
+806	        constraintIndex.emplace( key, Range{ i, j } );
+807	        i = j;
+808	    }
+809	    const auto lookup = [ & ]( std::size_t group, std::uint32_t fileId ) -> Range
+810	    {
+811	        const std::uint64_t key = ( std::uint64_t( group ) << 32 ) | fileId;
+812	        const auto it = constraintIndex.find( key );
+813	        return it == constraintIndex.end() ? Range{ 0, 0 } : it->second;
+814	    };
+815	
+816	    // Filter each candidate through its rule's combinators, then emit the survivors.
+817	    for( const Span& cand : candidates )
+818	    {
+819	        const std::size_t ruleIdx = cand.group;
+820	        const LintRule&   r       = rules[ruleIdx];
+821	
+822	        // inside: AND across every inside block — the candidate must be contained in ≥1 span of EACH.
+823	        bool keptByInside = true;
+824	        for( std::size_t slot = 0; slot < r.inside.size() && keptByInside; ++slot )
+825	        {
+826	            const Range rg = lookup( constraintGroup( ruleIdx, kindInside, slot ), cand.fileId );
+827	            bool anyContains = false;
+828	            for( std::size_t k = rg.begin; k < rg.end && !anyContains; ++k )
+829	            {
+830	                if( contains( constraints[k], cand ) )
+831	                {
+832	                    anyContains = true;
+833	                }
+834	            }
+835	            keptByInside = anyContains;                                 // this block unsatisfied ⇒ candidate dropped
+836	        }
+837	        if( !keptByInside )
+838	        {
+839	            continue;
+840	        }
+841	
+842	        // not-inside: OR across blocks — dropped if contained in ≥1 span of ANY not-inside query.
+843	        bool droppedByNotInside = false;
+844	        for( std::size_t slot = 0; slot < r.notInside.size() && !droppedByNotInside; ++slot )
+845	        {
+846	            const Range rg = lookup( constraintGroup( ruleIdx, kindNotInside, slot ), cand.fileId );
+847	            for( std::size_t k = rg.begin; k < rg.end; ++k )
+848	            {
+849	                if( contains( constraints[k], cand ) ) { droppedByNotInside = true; break; }
+850	            }
+851	        }
+852	        if( droppedByNotInside )
+853	        {
+854	            continue;
+855	        }
+856	
+857	        // not-matches: OR across blocks — dropped if some constraint span equals/covers the candidate.
+858	        bool droppedByNotMatches = false;
+859	        for( std::size_t slot = 0; slot < r.notMatches.size() && !droppedByNotMatches; ++slot )
+860	        {
+861	            const Range rg = lookup( constraintGroup( ruleIdx, kindNotMatches, slot ), cand.fileId );
+862	            for( std::size_t k = rg.begin; k < rg.end; ++k )
+863	            {
+864	                if( coversOrEquals( constraints[k], cand ) ) { droppedByNotMatches = true; break; }
+865	            }
+866	        }
+867	        if( droppedByNotMatches )
+868	        {
+869	            continue;
+870	        }
+871	
+872	        out.push_back( { cand.fileId, cand.startByte, cand.line, r.id, r.severity, r.message } );
+873	    }
+874	
+875	    // Deterministic final order: by (file path, startByte, id) — identical discipline to the built-ins.
+876	    std::sort( out.begin(), out.end(), [ & ]( const LintFinding& a, const LintFinding& b )
+877	               {
+878	        if( ing.files[a.fileId] != ing.files[b.fileId] ) { return ing.files[a.fileId] < ing.files[b.fileId];
+879	}
+880	        if( a.startByte != b.startByte ) { return a.startByte < b.startByte;
+881	}
+882	        return a.id < b.id; } );
+883	    return { std::move( out ), std::move( saturatedRuleIds ) };
+884	}
+885	
+886	// ── built-in ERROR-MASKING rule table (GitClear 2026: +47% error-masking constructs in AI-authored code,
+887	//    2023→2026) ──────────────────────────────────────────────────────────────────────────────────────────
+```
+
+**`src/main.cpp`** — push_back(calls), calls(calls), builtInLintCaptures(function), astQueryGrouped(calls), mergeAtomsPack(function), +3 more
+
+```cpp
+1757	// passes that run after it -- lintSymbolLevelChecks and the naming lens -- each opened the very files this
+1758	// walk had just read and closed, one at a time on the main thread, to look at spans of the same text. They
+1759	// now read from here and fall back to their own open only for a file the walk skipped.
+1760	std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks,
+1761	                                                            std::vector<std::string>& keptBytes )
+1762	{
+1763	    PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache + unreachable)" );
+1764	    const std::vector<rw::AstQuerySpec> atomChecks  = rw::atoms::atomsSpecs();
+1765	    const std::vector<rw::AstQuerySpec> cacheChecks = rw::cachelint::cacheSpecs();
+1766	    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,              nullptr },
+1767	                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,     nullptr },
+1768	                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget, nullptr },
+1769	                                       { nullptr,      rw::kUnreachableMaxHits,          nullptr, rw::AstWalk::UnreachableCode } },
+1770	                                &keptBytes );
+1771	}
+1772	
+1773	// the pack can emit. Lifted out of runLint for the same reason lintSymbolLevelChecks was.
+1774	void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
+1775	                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames,
+1776	                     std::vector<rw::AstMatch> captures )
+1777	{
+1778	    const rw::atoms::AtomsRun pack = rw::atoms::atomsOfConfusionFromCaptures( ing, rw::kLintMaxPerRule, std::move( captures ) );
+1779	    for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
+1780	    for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
+1781	    for( const std::string_view rule : rw::atoms::kAtomRuleNames ) { allRuleNames.emplace_back( rule ); }
+1782	}
+1783	
+1784	// Fold the cache-friendliness pack (src/cachelint.h — the access-pattern half of the locality story;
+1785	// the layout half is --field-affinity) into the built-in lint set: its findings, its per-rule floor
+1786	// disclosures, and its rule names for the tally. Same shape as mergeAtomsPack for the same reasons.
+1787	void mergeCachePack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
+1788	                     std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames,
+1789	                     std::vector<rw::AstMatch> captures )
+1790	{
+1791	    const rw::cachelint::CacheRun pack = rw::cachelint::cacheFriendliness( ing, rw::kLintMaxPerRule, std::move( captures ) );
+1792	    for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
+1793	    for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
+1794	    for( const std::string_view rule : rw::cachelint::kCacheRuleNames ) { allRuleNames.emplace_back( rule ); }
+1795	}
+1796	
+1797	// Fold the identifier-naming lens (src/naminglens.h) into the built-in lint set: its findings go straight
+1798	// into ms, and a rule that spent its per-rule budget comes back here to be disclosed as a floor. Its rule
+1799	// names are NOT appended — unlike the atoms pack they are spelled in runLint's allRuleNames table, because
+1800	// the naming rules are symbol-level built-ins that were declared there before the pack existed. Lifted out
+1801	// of runLint for the same reason mergeAtomsPack and lintSymbolLevelChecks were.
+1802	void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules, bool namingLocals,
+1803	                      const std::vector<std::string>* preRead )
+1804	{
+1805	    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms, namingLocals, preRead ) )
+1806	    {
+1807	        saturatedRules.push_back( { std::move( namingRule ), false } );
+1808	    }
+1809	}
+1810	
+1811	// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text). sev and text are part of
+1812	// the KEY, not decoration. (file, startByte, rule) alone is NOT a total order — one rule can emit two
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

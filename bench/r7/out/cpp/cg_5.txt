@@ -1,0 +1,323 @@
+**Exploration: where is the MCP server json-rpc request loop**
+
+Found 30 symbols across 3 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `jsonRpcError` (src/mcpserver.h:145) — 1 caller in `src/mcpserver.h`; ⚠️ no covering tests found
+- `runMcpHttp` (src/mcpserver.h:415) — 1 caller in `src/main.cpp`; ⚠️ no covering tests found
+- `isLoopbackHost` (src/mcpserver.h:406) — 1 caller in `src/mcpserver.h`; ⚠️ no covering tests found
+- `isJsonContentType` (src/mcpserver.h:377) — 1 caller in `src/mcpserver.h`; ⚠️ no covering tests found
+- `acceptsMcpResponseTypes` (src/mcpserver.h:372) — 1 caller in `src/mcpserver.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/mcpserver.h`** — respond(function), calls(calls), jsonRpcError(function), Request(struct)
+
+```cpp
+126	}
+127	
+128	// build + send a minimal HTTP/1.1 response. Connection: close — one request per connection (§2b serialize).
+129	inline void respond( int fd, const char* status, const char* contentType, const std::string& body ) noexcept
+130	{
+131	    std::string out;
+132	    out.reserve( body.size() + 160 );
+133	    out += "HTTP/1.1 ";
+134	    out += status;
+135	    out += "\r\nContent-Type: ";
+136	    out += contentType;
+137	    out += "\r\nContent-Length: ";
+138	    out += std::to_string( body.size() );
+139	    out += "\r\nConnection: close\r\n\r\n";
+140	    out += body;
+141	    sendAll( fd, out );
+142	}
+143	
+144	// a JSON-RPC error envelope (id:null — a transport-level rejection has no request id to echo).
+145	inline std::string jsonRpcError( int code, const char* message )
+146	{
+147	    return std::string( "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":" ) + std::to_string( code )
+148	         + ",\"message\":\"" + message + "\"}}";
+149	}
+150	
+151	// one parsed request (only the fields we act on). ok=false ⇒ malformed → 400.
+152	struct Request
+153	{
+154	    bool        ok                   = false;
+155	    bool        hasContentLength     = false;
+156	    bool        hasAuthorization     = false;
+157	    bool        hasOrigin            = false;
+158	    bool        hasAccept            = false;
+159	    bool        hasContentType       = false;
+160	    bool        hasProtocolVersion   = false;
+161	    bool        hasTransferEncoding  = false;
+162	    std::string method;                  // "POST", "GET", …
+163	    std::string target;                  // "/mcp" (query stripped)
+164	    std::size_t contentLength         = 0;
+165	    std::string authorization;
+166	    std::string origin;
+167	    std::string accept;
+168	    std::string contentType;
+169	    std::string protocolVersion;
+170	    std::string body;                    // the JSON-RPC request body
+171	};
+172	
+173	// read + parse one HTTP request off `fd`. Returns Request{ok=false} on malformed input (→ 400) so the
+174	// caller can answer politely and move on; the server process NEVER dies on bad input. Oversized header
+```
+
+**`src/wrap.h`** — push_back(calls), wrapUseWhenBlurbLines(function), wrapPrintBlurb(function), wrapUseWhenBlurbLines(calls), wrapList(function), +2 more
+
+```cpp
+112	// body across agents, so a per-agent fork of this text is a red gate, not a variant). A binary on
+113	// PATH is invisible to an agent until its context file says when to reach for it; this is the
+114	// distilled protocol, sized to paste whole.
+115	inline std::vector<std::string_view> wrapUseWhenBlurbLines()
+116	{
+117	    return {
+118	        "## ripwire — deterministic codebase maps (on PATH as `ripwire`)",
+119	        "Reach for it BEFORE blind grep + whole-file reads. First call ~1s cold; after that warm, ~0.1s.",
+120	        "- Orient on a task: `ripwire <dir> --for=\"<task in words>\"` — ranked, quality-annotated",
+121	        "  signatures. Paste symbol/file names from the issue verbatim; named mentions get anchored.",
+122	        "- Everything at once under one token budget: `ripwire <dir> --pack-task=\"<task>\"`.",
+123	        "- Have a stack trace / build error: `ripwire <dir> --from-trace=FILE` (`-` = stdin) —",
+124	        "  paste the error, don't paraphrase it into a query.",
+125	        "- Who calls X: `--callers=SYM`. \"Is it safe to change X?\" needs the full blast radius:",
+126	        "  `--impact=SYM` (transitive) plus `--uses=SYM` (every read/write/import site).",
+127	        "- Just edited a symbol: `--edit-check=SYM` — contract change + newly incompatible callers.",
+128	        "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\"` — duplicates",
+129	        "  are born on tasks that feel too small to tool up for.",
+130	        "- Before calling work done: `--quality-delta` (what you made worse), then `--test-gate`.",
+131	        "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none",
+132	        "  found\", never \"none exists\".",
+133	    };
+134	}
+135	
+136	// Print the pasteable context-wiring block for one agent: a comment fence naming the client's own
+137	// rules file, the shared body as plain lines (they land in a markdown-ish context file, so no `#`
+138	// prefix — a leading `#` would turn prose into headings on paste), and a closing comment fence.
+139	inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
+140	{
+141	    std::string_view targetFile;
+142	    for( const WrapBlurbTarget& t : kWrapBlurbTargets )
+143	    {
+144	        if( t.agent == agent )
+145	        {
+146	            targetFile = t.targetFile;
+147	        }
+148	    }
+149	    if( targetFile.empty() )
+150	    {
+151	        return;
+152	    }
+153	
+154	    std::fprintf( out, "#\n# context wiring — a binary on PATH is invisible to an agent until its rules file says when\n"
+155	                       "# to reach for it. Paste the block below into %.*s:\n", int( targetFile.size() ), targetFile.data() );
+156	    std::fprintf( out, "# --- paste into %.*s ---\n", int( targetFile.size() ), targetFile.data() );
+157	    for( const std::string_view line : wrapUseWhenBlurbLines() )
+158	    {
+159	        std::fprintf( out, "%.*s\n", int( line.size() ), line.data() );
+160	    }
+161	    std::fprintf( out, "# --- end paste ---\n" );
+162	}
+163	
+164	inline void wrapList( std::FILE* out )
+165	{
+166	    std::fprintf( out,
+167	        "ripwire wrap <agent> — print the recipe to wire ripwire into an agent's loop.\n"
+168	        "  MCP agents:  claude  cursor  codex  windsurf  gemini\n"
+169	        "  repo-map:    aider\n"
+170	        "  example:     ripwire wrap claude\n"
+171	        "  --all        detect every installed agent + emit each one's config\n" );
+172	}
+173	
+174	// TOML basic-string escape for the executable path embedded in the Codex registration stanza.
+175	// The path is machine-local adoption output, not part of the deterministic repository map.
+176	inline std::string wrapTomlString( const std::string_view value )
+177	{
+178	    std::string out;
+179	    out.reserve( value.size() + 8 );
+180	    for( const char c : value )
+181	    {
+182	        if( c == '\\' || c == '"' )
+183	        {
+184	            out.push_back( '\\' );
+185	        }
+186	        out.push_back( c );
+187	    }
+188	    return out;
+189	}
+190	
+191	// emit a standard JSON MCP-server stanza for the editors that share that shape
+192	inline void wrapMcpJson( const char* configPath )
+193	{
+194	    std::printf(
+195	        "# ripwire -> add to %s\n"
+196	        "{\n"
+197	        "  \"mcpServers\": {\n"
+198	        "    \"ripwire\": { \"command\": \"ripwire\", \"args\": [\"--mcp\"] }\n"
+199	        "  }\n"
+200	        "}\n", configPath );
+201	}
+202	
+203	// Agent configuration: name, config directory path (using ~ for home), and a lambda to
+204	// check if it's installed (directory exists). The lambda captures the home expansion.
+```
+
+**`src/mcp.h`** — calls(calls), empty(calls), jsonEscape(calls), getIndex(calls), mcpCanonRoot(calls), +15 more
+
+```cpp
+330	// JSON-RPC layer is byte-identical; only the transport wrapper is new"). `policy` carries the only
+331	// transport-specific behaviour (workspace pinning + edit refusal). Never throws — a bad path / OOM must
+332	// not std::terminate a long-lived server.
+333	inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, bool stable, bool noRedact,
+334	                                          const McpDispatchPolicy& policy )
+335	{
+336	    McpDispatchResult out;
+337	    {
+338	        // ── §H3: the FRAMING GATE — before a single field is read out of this frame ─────────────────────────
+339	        //
+340	        // A truncated frame used to be DISPATCHED, because the key-position scanner happily reads a complete
+341	        // `params` out of a cut-off envelope: a mid-stream `replace_symbol_body` with no closing brace REWROTE
+342	        // THE FILE, a `tools/list` with no closing brace returned a full successful listing, and the truncated
+343	        // tail at EOF was refused with a cause about a field whose value was sitting in the bytes. See
+344	        // mcpjson.h's checkFrame for the scan and for why it is a completeness gate, not a second parser.
+345	        //
+346	        // Placed in the SHARED handler, so stdio (where the edit verbs live and where `ripwire wrap claude`
+347	        // runs) gets the check the HTTP transport got for free from Content-Length. Answered with id:null on
+348	        // purpose: JSON-RPC 2.0 requires a null id whenever the id could not be reliably detected, and in a
+349	        // frame we have just judged un-whole no field is reliable — including that one.
+350	        if( const mcpdetail::FrameCheck frame = mcpdetail::checkFrame( line );
+351	            frame.shape != mcpdetail::FrameShape::Object )
+352	        {
+353	            const mcprefuse::McpFrameRefusal fr = mcprefuse::frameRefusal( frame.shape, frame.got );
+354	            out.resp = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":" + std::to_string( fr.code )
+355	                     + ",\"message\":\"" + mcpdetail::jsonEscape( fr.message ) + "\"}}";
+356	            return out;
+357	        }
+358	
+359	        const mcpdetail::RawId rid = mcpdetail::findRawId( line );
+360	
+361	        // §B6 M6a/M7: `method` is read for its SHAPE first. A present-but-wrong-typed method (`"method":5`) used
+362	        // to read as ABSENT and land on `-32700 "parse error"` — a JSON document that parsed perfectly, told its
+363	        // sender their writer was broken. Absent and wrong-shaped are now two different sentences, both naming
+364	        // the field, both from mcprefusal.h's row for it.
+365	        const mcpdetail::RawValue methodRaw = mcpdetail::findRawValue( line, "method" );
+366	        const std::string         method    = methodRaw.isQuoted ? mcpdetail::findString( line, "method" ) : std::string{};
+367	
+368	        std::string timingVerb = method;   // refined to the tool name inside the tools/call branch
+369	
+370	        // JSON-RPC 2.0: a message with a method but WITHOUT an "id" key is a NOTIFICATION — replying is
+371	        // forbidden (every MCP client sends notifications/initialized right after initialize; answering it
+372	        // with an error breaks handshakes). A literal id:null still gets a reply (the key was present).
+373	        // An envelope with no usable method is NOT a notification — a notification is defined by its method —
+374	        // so it falls through to the two envelope refusals below and is answered, and the server stays alive.
+375	        if( !rid.hasId && !method.empty() )
+376	        {
+377	            out.isNotification = true;
+378	            out.timingVerb     = timingVerb;
+379	            return out;
+380	        }
+381	
+382	        const std::string id = rid.token;
+383	        std::string       resp;
+384	
+385	        // the envelope's own two shape/presence faults, checked once for all three methods.
+386	        const McpObjectArg paramsArg = mcpObjectArg( line, "params" );
+387	        if( methodRaw.isPresent && !methodRaw.isQuoted )
+388	        {
+389	            resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32600,\"message\":\""
+390	                 + mcpdetail::jsonEscape( mcprefuse::badValueRefusal( "method", methodRaw.text ) ) + "\"}}";
+391	        }
+392	        else if( !methodRaw.isPresent )
+393	        {
+394	            resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32600,\"message\":\""
+395	                 + mcpdetail::jsonEscape( mcprefuse::missingEnvelopeField( "method" ) ) + "\"}}";
+396	        }
+397	        else if( !paramsArg.refusal.empty() )
+398	        {
+399	            resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32600,\"message\":\""
+400	                 + mcpdetail::jsonEscape( paramsArg.refusal ) + "\"}}";
+401	        // §B6 M11: `ping` — the one utility method both advertised protocol versions define, and the server
+402	        // answered it with "method not found". A client using it as a liveness probe concludes the server is
+403	        // broken. The spec's contract is exactly this: an empty result object, no params read, no side effect.
+404	        }
+405	        else if( method == "ping" )
+406	        {
+407	            resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{}}";
+408	        }
+409	        else if( method == "initialize" )
+410	        {
+411	            // W3FIX H3: the key lookups are TOP-LEVEL-only now (mcpjson.h's findKeyValuePos), and
+412	            // protocolVersion is the ONE argument that legitimately lives one level down — the spec puts it at
+413	            // `params.protocolVersion`. Spelled as two explicit reads (the spec position first, then a
+414	            // top-level fallback for the clients that flatten it) rather than as an any-depth mode every other
+415	            // caller would then have to reason about.
+416	            const std::string initParams  = paramsArg.span;   // §B6 M7: the SHAPE-checked span (a wrong-typed `params` refused above)
+417	
+418	            // §B6 M11: a WRONG-TYPED protocolVersion (`protocolVersion:5`) used to read as ABSENT, because
+419	            // findString returns "" for a non-string value — so the server silently negotiated its latest
+420	            // version for a client that had asked for something it could not even parse. That is the exact
+421	            // absent-vs-wrong-shape collapse M7 fixed one level up the envelope, surviving on the one field
+422	            // the envelope's own handshake reads. Both positions are shape-checked (spec position first, then
+423	            // the top-level fallback for clients that flatten it), and a present-but-not-a-string value is
+424	            // REFUSED with the domain and the value as typed instead of being answered around.
+425	            //
+426	            // An unknown but well-formed STRING version still negotiates the latest supported one — that is
+427	            // the spec's own handshake behaviour ("If the server does not support the requested version, it
+428	            // MUST respond with a version it does support"), and it is not the finding.
+429	            const McpStringArg nestedVerArg = mcpStringArg( initParams, "protocolVersion" );
+430	            const McpStringArg lineVerArg   = nestedVerArg.value.empty() && nestedVerArg.refusal.empty()
+431	                                            ? mcpStringArg( line, "protocolVersion" )
+432	                                            : McpStringArg{};
+433	            if( !nestedVerArg.refusal.empty() || !lineVerArg.refusal.empty() )
+434	            {
+435	                resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32602,\"message\":\""
+436	                     + mcpdetail::jsonEscape( !nestedVerArg.refusal.empty() ? nestedVerArg.refusal : lineVerArg.refusal )
+437	                     + "\"}}";
+438	            }
+439	            else
+440	            {
+441	                const std::string requestedVersion = !nestedVerArg.value.empty() ? nestedVerArg.value : lineVerArg.value;
+442	                const std::string_view negotiatedVersion = isMcpProtocolVersionSupported( requestedVersion )
+443	                                                         ? std::string_view( requestedVersion )
+444	                                                         : kMcpLatestProtocolVersion;
+445	                resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+446	                       ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
+447	                       "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{}},"
+448	                       "\"instructions\":\"" + mcpdetail::jsonEscape( std::string( kMcpServerInstructions ) ) + "\"}}";
+449	            }
+450	        }
+451	        else if( method == "tools/list" )
+452	        {
+453	            // §B6 M4: is `path` actually REQUIRED of this caller? Only when this server cannot supply a root
+454	            // itself — no `ripwire <root> --mcp` startup root and no pinned remote workspace. That is the
+455	            // DEFAULT shipped install (`ripwire wrap claude` passes no startup root), which is why every
+456	            // `required` omitting `path` was wrong for almost every real deployment; but it is not a constant,
+457	            // and a schema that declared it unconditionally would be newly wrong for the rooted server. Each
+458	            // server answers for itself.
+459	            //
+460	            // V4: the try is here for the same reason as the one in the tools/call branch, which states the
+461	            // invariant — a bad path or an OOM must not std::terminate a long-lived server. This branch was
+462	            // outside it, and it is the single LARGEST allocation the server ever makes: one ~60 KB string
+463	            // built by concatenating 30 verb stanzas, two of which (`exemplar`'s spliced selection rule and
+464	            // `batch`'s std::to_string count) allocate again mid-expression. Those were the two sites the
+465	            // verifier named as pre-existing; they are covered here, at the statement that owns them.
+466	            //
+467	            // Honest limit, stated rather than implied: the fallback below itself allocates, so this converts
+468	            // "terminate on OOM" into "reply -32603 on OOM unless even a ~90-byte string cannot be built". It
+469	            // is not a total no-allocation guarantee and does not claim to be — it is the same guarantee the
+470	            // tools/call try already provides, now covering the branch that allocates the most.
+471	            try
+472	            {
+473	            const bool pathIsRequired = policy.defaultRoot.empty() && policy.pinnedRoot.empty();
+474	            // A4-R7: descriptions trimmed to decision-relevant content (when to use / what it answers /
+475	            // the one non-obvious caveat) — cut repeated boilerplate ("Reach for this...", restated XML
+476	            // shape agents don't need to CHOOSE the verb) that every connected agent paid for at session
+477	            // start. Parameter schemas and every verb name are unchanged.
+478	            resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+479	                   ",\"result\":{\"tools\":["
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

@@ -1,0 +1,252 @@
+**Exploration: where is git commit churn history mined**
+
+Found 39 symbols across 4 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `gitRecentCommitFileSets` (src/gitmine.h:1090) — 3 callers in `src/main.cpp`, `src/mcpverbs.h`; ⚠️ no covering tests found
+- `mineChurnPerFile` (src/main.cpp:3601) — 2 callers in `src/main.cpp`; ⚠️ no covering tests found
+- `gitCommitFileSets` (src/gitmine.h:1076) — 8 callers in `src/eval.h`, `src/gitmine.h`, `src/main.cpp`, `src/prcontext.h` +1 more; ⚠️ no covering tests found
+- `gitFileCommitCountsInDayWindow` (src/gitmine.h:1290) — 1 caller in `src/quality.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/gitmine.h`** — resolveGitPath(function), calls(calls), gitRecentCommitFileSets(function), gitLogFileSets(calls), gitCoChangeAndChurn(function), +2 more
+
+```cpp
+926	// function of (byGitPath, rawGp) with no side effects: the three states worth disclosing are all properties of
+927	// the INDEX and are disclosed once when it is built, not once per lookup — so this is the thin sugar the five
+928	// stream miners share.
+929	inline std::uint32_t resolveGitPath( const GitPathIndex& byGitPath, const std::string& rawGp )
+930	{
+931	    return bindGitPathToFile( byGitPath, rawGp ).fileId;
+932	}
+933	
+934	// Mark the ingested files a git CHANGED-PATH list names (§H6). A mask, not a tally, so the consequence of a
+935	// wrong join differs and was just as wrong: the bare boundary-suffix test let a root-level `util.cpp` mark
+
+... (gap) ...
+
+1087	// a "18 months ago" approxidate drifts with the wall clock), and (2) it stays meaningful on HISTORICAL
+1088	// checkouts (a repo pinned to a 2024 base commit has nothing inside a wall-clock window measured in 2026,
+1089	// which is exactly the LocBench-eval shape). Degrades to empty on no-git / no-history, like every miner here.
+1090	inline std::vector<std::vector<std::uint32_t>> gitRecentCommitFileSets( const std::string& root, const IngestResult& ing, std::uint32_t commitCount, std::size_t maxFiles,
+1091	                                                                        std::uint32_t onlyRoot = UINT32_MAX )
+1092	{
+1093	    PROFILE_SCOPE_DESCRIBE( "gitmine: gitRecentCommitFileSets (co-change boost window)" );
+1094	    return gitLogFileSets( root, ing, "-" + std::to_string( commitCount ) + " ", maxFiles, onlyRoot );
+1095	}
+1096	
+1097	// git's approxidate for "<months> months ago" is calendar-month subtraction from the current local time
+1098	// (date.c: tm_mon -= months, normalize); mirror it with localtime/mktime so a self-computed churn cutoff
+
+... (gap) ...
+
+1265	// any caller that doesn't want the memoized path. The two rich-verb call sites (main.cpp's --metrics/--for
+1266	// amp=/churn= computation) go through quality::gitCoChangeAndChurnCached instead, which memoizes exactly
+1267	// the expensive part (gitLogNameOnlyRaw) this function also calls.
+1268	inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurn(
+1269	    const std::string& root, const IngestResult& ing, const char* coSince, std::size_t maxFiles,
+1270	    unsigned churnMonths = 0, std::vector<std::uint32_t>* outChurn = nullptr,
+1271	    std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: resolve ONLY against files of that root
+1272	{
+1273	    PROFILE_SCOPE_DESCRIBE( "gitmine: gitCoChangeAndChurn (single git log --name-only popen)" );
+1274	    const RawCommitStream raw = gitLogNameOnlyRaw( root, coSince );
+1275	    return resolveCommitStream( raw, ing, maxFiles, churnMonths, outChurn, onlyRoot );
+1276	}
+1277	
+1278	// ── short-horizon churn (GitClear 2026: +15% "new code rewritten within two weeks" in AI-authored code) ──
+1279	//
+```
+
+**`src/main.cpp`** — size(calls), gitChurnCounts(calls), mineChurnPerFile(function), resolveSinceScope(calls), runQualityPanel(function), +2 more
+
+```cpp
+3598	// `since`/`rootScope`: the single-root path uses the caller's ALREADY-RESOLVED scope (so --hotspots does not
+3599	// resolve it twice); the multi-root path resolves per root, because a revision is only meaningful inside the
+3600	// repository that contains it. An empty `since` means "the default window", exactly as before.
+3601	bool mineChurnPerFile( const rw::IngestResult& ing, const std::string& root, bool multiRoot,
+3602	                       const std::vector<rw::WorkspaceRoot>& ws, std::string_view since,
+3603	                       const rw::SinceScope& rootScope, const char* defaultWindow, std::vector<std::uint32_t>& churn )
+3604	{
+3605	    if( !multiRoot )
+3606	    {
+3607	        return gitChurnCounts( root, ing, churn, defaultWindow, since.empty() ? nullptr : &rootScope );
+3608	    }
+3609	    // §5: churn mined per root against that root's files only; merged into one labeled list below.
+3610	    bool churnOk = false;
+3611	    for( std::uint32_t r = 0; r < ws.size(); ++r )
+3612	    {
+3613	        const rw::SinceScope       perRootScope = rw::resolveSinceScope( ws[r].arg, since );
+3614	        std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
+3615	        if( !gitChurnCounts( ws[r].arg, ing, rootChurn, defaultWindow, since.empty() ? nullptr : &perRootScope, r ) )
+3616	        {
+3617	            continue;
+3618	        }
+3619	        churnOk = true;
+3620	        for( std::size_t f = 0; f < churn.size(); ++f )
+3621	        {
+3622	            churn[f] += rootChurn[f];
+3623	        }
+3624	    }
+3625	    return churnOk;
+3626	}
+3627	
+3628	// §P11.3: the worst-function lookup for one --hotspots row, isolated so the row-emission loop inside the
+3629	// already-oversized runMaintenanceViews dispatcher gains a function CALL, not another decision point.
+
+... (gap) ...
+
+4843	// mining pass hands the join a nullptr and the historical family is reported UNAVAILABLE rather than as
+4844	// "did not fire". --since is deliberately not plumbed in — the churn window is part of the disclosed
+4845	// threshold set and one fixed 12-month window keeps hrank= comparable between runs.
+4846	int runQualityPanel( const MainDispatch& d )
+4847	{
+4848	    using namespace rw;
+4849	    const Config&       cfg = d.cfg;
+4850	    const IngestResult& ing = d.ing;
+4851	
+4852	    qpanel::Preset preset = qpanel::Preset::Default;
+4853	    if( !cfg.qualityPanelPreset.empty() && !qpanel::parsePreset( cfg.qualityPanelPreset, preset ) )
+4854	    {
+4855	        std::fprintf( stderr, "ripwire: --quality-panel: unknown preset '%.*s' (supported: strict|default|lenient; "
+4856	                              "bare --quality-panel is default)\n",
+4857	                      int( cfg.qualityPanelPreset.size() ), cfg.qualityPanelPreset.data() );
+4858	        return 1;
+4859	    }
+4860	
+4861	    std::vector<std::uint32_t> churn( ing.files.size(), 0 );
+4862	    const rw::SinceScope       noScope;
+4863	    const bool                 churnOk = mineChurnPerFile( ing, d.root, d.multiRoot, d.ws, std::string_view(), noScope,
+4864	                                                           rw::ensemble::kEnsembleChurnSince, churn );
+4865	    return qpanel::writePanelReport( ing, d.g, churnOk ? &churn : nullptr, d.root, preset, cfg.pageLimit, cfg.pageOffset );
+4866	}
+4867	
+4868	// The residual of §6.3's extraction: --dead-code, the only branch left in runQualityViews. main() calls it
+4869	// immediately after runQualityDelta, i.e. in the position the old two-branch chain evaluated it.
+```
+
+**`src/gitoracle.h`** — walkGitPatch(function)
+
+```cpp
+516	};
+517	
+518	template<class OnLine, class KeepWalking>
+519	inline PatchWalk walkGitPatch( const std::string& cmd, OnLine onLine, KeepWalking keepWalking )
+520	{
+521	    PatchWalk  walk;
+522	    std::FILE* pipe = popen( cmd.c_str(), "r" );
+523	    if( !pipe )
+524	    {
+525	        return walk;                                          // the CALLER names the degrade — it knows what it lost
+526	    }
+527	    walk.started = true;
+528	
+529	    std::string       line;
+530	    std::vector<char> chunk( kProbeChunk );
+531	    while( keepWalking() && walk.bytesRead < kMaxProbeBytes )
+532	    {
+533	        const std::size_t got = std::fread( chunk.data(), 1, chunk.size(), pipe );
+534	        if( got == 0 )
+535	        {
+536	            break;
+537	        }
+538	        walk.bytesRead += got;
+539	
+540	        std::size_t at = 0;
+541	        while( at < got )
+542	        {
+543	            const void* nl = std::memchr( chunk.data() + at, '\n', got - at );
+544	            if( !nl ) { line.append( chunk.data() + at, got - at ); break; }
+545	            const std::size_t e = std::size_t( static_cast<const char*>( nl ) - chunk.data() );
+546	            if( line.empty() )
+547	            {
+548	                onLine( std::string_view( chunk.data() + at, e - at ) );
+549	            }
+550	            else
+551	            {
+552	                line.append( chunk.data() + at, e - at );
+553	                onLine( line );
+554	                line.clear();
+555	            }
+556	            at = e + 1;
+557	        }
+558	    }
+559	    if( !line.empty() )
+560	    {
+561	        onLine( line );
+562	    }
+563	
+564	    // A bound hit is not a failure — it is an answer of a different STRENGTH, and saying so is the whole
+565	    // difference between this oracle and a guess. Drain rather than SIGPIPE git mid-write.
+566	    if( !keepWalking() || walk.bytesRead >= kMaxProbeBytes )
+567	    {
+568	        walk.truncated = true;
+569	        char sink[ 65536 ];
+570	        while( std::fread( sink, 1, sizeof( sink ), pipe ) > 0 ) {}
+571	    }
+572	    walk.status = pclose( pipe );
+573	    return walk;
+574	}
+575	
+576	// Walk `git log` newest-first and fold every removed line into `idx`. ONE process, ONE pass, whatever the
+577	// number of names anyone will later ask about.
+```
+
+**`src/infra/dynamic_map.hpp`** — calls(calls), extends(extends), empty(method), size(method), begin(method), +2 more
+
+```cpp
+532	    using Rank     = node_rank<Key, B>;
+533	
+534	    // --- pools (allocated once) ---
+535	    Internal* internal_pool_ = nullptr;
+536	    Leaf*     leaf_pool_     = nullptr;
+537	    std::uint32_t internal_capacity_ = 0;
+538	    std::uint32_t leaf_capacity_     = 0;
+539	
+
+... (gap) ...
+
+806	
+807	public:
+808	    // ------------------------------------------------------------- capacity
+809	    bool empty() const noexcept
+810	    {
+811	        return size_ == 0;
+812	    }
+813	
+814	    size_type size() const noexcept
+815	    {
+816	        return size_;
+817	    }
+818	
+819	    // The declared element bound from construction. Inserting a NEW key while
+820	    // full() is rejected ({end(), false}); pre-check with remaining()/full()
+
+... (gap) ...
+
+1110	        return iterator(this, c.leaf_h_, c.index_);
+1111	    }
+1112	
+1113	    const_iterator begin() const
+1114	    {
+1115	        if (size_ == 0)
+1116	        {
+1117	            return end();
+1118	        }
+1119	        return const_iterator(this, leftmost_leaf(), 0);
+1120	    }
+1121	
+1122	    const_iterator end() const
+1123	    {
+1124	        return const_iterator(this, NIL, 0);
+1125	    }
+1126	
+1127	    iterator begin()
+1128	    {
+```
+
+
+> Some file sections were trimmed for size. For a specific symbol you still need, run another `codegraph_explore` (or `codegraph_node`) with its exact name — line-numbered source, cheaper and more complete than Read.

@@ -1,0 +1,741 @@
+**Exploration: what mangles export names to shorter identifiers**
+
+Found 41 symbols across 2 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `MangleExportsPlugin` (lib/optimize/MangleExportsPlugin.js:148) — 1 caller in `lib/WebpackOptionsApply.js`; ⚠️ no covering tests found
+- `identifier` (lib/ContextModule.js:267) — 15 callers in `lib/CaseSensitiveModulesWarning.js`, `lib/ChunkGroup.js`, `lib/Compilation.js`, `lib/ContextModule.js` +5 more; tests: `test/ContextModule.unittest.js`, `test/configCases/deep-scope-analysis/remove-export-scope-hoisting/webpack.config.js`, `test/configCases/deep-scope-analysis/remove-export/webpack.config.js`, `test/statsCases/ignore-warnings/webpack.config.js`
+- `identifier` (lib/DelegatedModule.js:103) — 1 caller in `lib/DelegatedModule.js`; ⚠️ no covering tests found
+
+**Relationships**
+
+**instantiates:**
+- process → MangleExportsPlugin
+- process → ExternalsPlugin
+- process → NodeTargetPlugin
+- process → ElectronTargetPlugin
+- process → ChunkPrefetchPreloadPlugin
+- process → ArrayPushCallbackChunkFormatPlugin
+- process → CommonJsChunkFormatPlugin
+- process → ModuleChunkFormatPlugin
+- process → EnableChunkLoadingPlugin
+- process → EnableWasmLoadingPlugin
+- process → EnableLibraryPlugin
+- process → FlagDependencyExportsPlugin
+- deserialize → CssModule
+- deserialize → DelegatedModule
+- codeGeneration → OriginalSource
+- ... and 8 more
+
+**calls:**
+- apply → getExportsInfo
+- apply → mangleExportsInfo
+- process → apply
+- process → callback
+- process → extend
+- process → call
+- process → getInfrastructureLogger
+- process → cleverMerge
+- createModulesListMessage → identifier
+- sortOrigin → identifier
+- _processModuleDependencies → identifier
+- getSource → identifier
+- noModuleIdErrorMessage → identifier
+- apply → identifier
+- apply → identifier
+- ... and 154 more
+
+**references:**
+- apply → PLUGIN_NAME
+- process → FlagDependencyExportsPlugin
+- process → ChunkPrefetchPreloadPlugin
+- codeGeneration → RUNTIME_REQUIREMENTS
+- build → DelegatedSourceDependency
+- codeGeneration → RUNTIME_REQUIREMENTS
+- codeGeneration → RuntimeGlobals
+- RUNTIME_REQUIREMENTS → RuntimeGlobals
+
+**extends:**
+- CssModule → NormalModule
+- DelegatedModule → Module
+- DllModule → Module
+- ExternalModule → Module
+- RawModule → Module
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`lib/DllModule.js`** — identifier(method), DllModule(class), constructor(method), getSourceTypes(method), readableIdentifier(method), build(method), codeGeneration(method), needBuild(method), size(method), updateHash(method), serialize(method), deserialize(method), updateCacheModule(method), cleanupForCache(method), Module(constant), +2 more
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const { RawSource } = require("webpack-sources");
+9	const Module = require("./Module");
+10	const { JS_TYPES } = require("./ModuleSourceTypesConstants");
+11	const { JAVASCRIPT_MODULE_TYPE_DYNAMIC } = require("./ModuleTypeConstants");
+12	const RuntimeGlobals = require("./RuntimeGlobals");
+13	const makeSerializable = require("./util/makeSerializable");
+14	
+15	/** @typedef {import("webpack-sources").Source} Source */
+16	/** @typedef {import("../declarations/WebpackOptions").WebpackOptionsNormalized} WebpackOptions */
+17	/** @typedef {import("./ChunkGraph")} ChunkGraph */
+18	/** @typedef {import("./Compilation")} Compilation */
+19	/** @typedef {import("./Dependency")} Dependency */
+20	/** @typedef {import("./Dependency").UpdateHashContext} UpdateHashContext */
+21	/** @typedef {import("./DependencyTemplates")} DependencyTemplates */
+22	/** @typedef {import("./Generator").SourceTypes} SourceTypes */
+23	/** @typedef {import("./Module").BuildCallback} BuildCallback */
+24	/** @typedef {import("./Module").CodeGenerationContext} CodeGenerationContext */
+25	/** @typedef {import("./Module").CodeGenerationResult} CodeGenerationResult */
+26	/** @typedef {import("./Module").NeedBuildCallback} NeedBuildCallback */
+27	/** @typedef {import("./Module").NeedBuildContext} NeedBuildContext */
+28	/** @typedef {import("./Module").SourceContext} SourceContext */
+29	/** @typedef {import("./RequestShortener")} RequestShortener */
+30	/** @typedef {import("./ResolverFactory").ResolverWithOptions} ResolverWithOptions */
+31	/** @typedef {import("./RuntimeTemplate")} RuntimeTemplate */
+32	/** @typedef {import("./WebpackError")} WebpackError */
+33	/** @typedef {import("./serialization/ObjectMiddleware").ObjectDeserializerContext} ObjectDeserializerContext */
+34	/** @typedef {import("./serialization/ObjectMiddleware").ObjectSerializerContext} ObjectSerializerContext */
+35	/** @typedef {import("./util/Hash")} Hash */
+36	/** @typedef {import("./util/fs").InputFileSystem} InputFileSystem */
+37	
+38	const RUNTIME_REQUIREMENTS = new Set([
+39		RuntimeGlobals.require,
+40		RuntimeGlobals.module
+41	]);
+42	
+43	class DllModule extends Module {
+44		/**
+45		 * @param {string} context context path
+46		 * @param {Dependency[]} dependencies dependencies
+47		 * @param {string} name name
+48		 */
+49		constructor(context, dependencies, name) {
+50			super(JAVASCRIPT_MODULE_TYPE_DYNAMIC, context);
+51	
+52			// Info from Factory
+53			/** @type {Dependency[]} */
+54			this.dependencies = dependencies;
+55			this.name = name;
+56		}
+57	
+58		/**
+59		 * @returns {SourceTypes} types available (do not mutate)
+60		 */
+61		getSourceTypes() {
+62			return JS_TYPES;
+63		}
+64	
+65		/**
+66		 * @returns {string} a unique identifier of the module
+67		 */
+68		identifier() {
+69			return `dll ${this.name}`;
+70		}
+71	
+72		/**
+73		 * @param {RequestShortener} requestShortener the request shortener
+74		 * @returns {string} a user readable identifier of the module
+75		 */
+76		readableIdentifier(requestShortener) {
+77			return `dll ${this.name}`;
+78		}
+79	
+80		/**
+81		 * @param {WebpackOptions} options webpack options
+82		 * @param {Compilation} compilation the compilation
+83		 * @param {ResolverWithOptions} resolver the resolver
+84		 * @param {InputFileSystem} fs the file system
+85		 * @param {BuildCallback} callback callback function
+86		 * @returns {void}
+87		 */
+88		build(options, compilation, resolver, fs, callback) {
+89			this.buildMeta = {};
+90			this.buildInfo = {};
+91			return callback();
+92		}
+93	
+94		/**
+95		 * @param {CodeGenerationContext} context context for code generation
+96		 * @returns {CodeGenerationResult} result
+97		 */
+98		codeGeneration(context) {
+99			const sources = new Map();
+100			sources.set(
+101				"javascript",
+102				new RawSource(`module.exports = ${RuntimeGlobals.require};`)
+103			);
+104			return {
+105				sources,
+106				runtimeRequirements: RUNTIME_REQUIREMENTS
+107			};
+108		}
+109	
+110		/**
+111		 * @param {NeedBuildContext} context context info
+112		 * @param {NeedBuildCallback} callback callback function, returns true, if the module needs a rebuild
+113		 * @returns {void}
+114		 */
+115		needBuild(context, callback) {
+116			return callback(null, !this.buildMeta);
+117		}
+118	
+119		/**
+120		 * @param {string=} type the source type for which the size should be estimated
+121		 * @returns {number} the estimated size of the module (must be non-zero)
+122		 */
+123		size(type) {
+124			return 12;
+125		}
+126	
+127		/**
+128		 * @param {Hash} hash the hash used to track dependencies
+129		 * @param {UpdateHashContext} context context
+130		 * @returns {void}
+131		 */
+132		updateHash(hash, context) {
+133			hash.update(`dll module${this.name || ""}`);
+134			super.updateHash(hash, context);
+135		}
+136	
+137		/**
+138		 * @param {ObjectSerializerContext} context context
+139		 */
+140		serialize(context) {
+141			context.write(this.name);
+142			super.serialize(context);
+143		}
+144	
+145		/**
+146		 * @param {ObjectDeserializerContext} context context
+147		 */
+148		deserialize(context) {
+149			this.name = context.read();
+150			super.deserialize(context);
+151		}
+152	
+153		/**
+154		 * Assuming this module is in the cache. Update the (cached) module with
+155		 * the fresh module from the factory. Usually updates internal references
+156		 * and properties.
+157		 * @param {Module} module fresh module
+158		 * @returns {void}
+159		 */
+160		updateCacheModule(module) {
+161			super.updateCacheModule(module);
+162			this.dependencies = module.dependencies;
+163		}
+164	
+165		/**
+166		 * Assuming this module is in the cache. Remove internal references to allow freeing some memory.
+167		 */
+168		cleanupForCache() {
+169			super.cleanupForCache();
+170			this.dependencies = /** @type {EXPECTED_ANY} */ (undefined);
+171		}
+172	}
+173	
+174	makeSerializable(DllModule, "webpack/lib/DllModule");
+175	
+176	module.exports = DllModule;
+```
+
+**`lib/ExternalModule.js`** — calls(calls), write(calls), read(calls), _resolveExternalType(calls), RawSource(instantiates), callback(calls), _getRequestAndExternalType(calls), getSourceForGlobalVariableExternal(calls), getSourceForCommonJsExternal(calls), identifier(calls), ExternalModule(class), Module(extends), constructor(method), getSourceTypes(method), libIdent(method), +27 more
+
+```javascript
+597	
+598	/** @typedef {Record<string, string | string[]>} RequestRecord */
+599	
+600	class ExternalModule extends Module {
+601		/**
+602		 * @param {string | string[] | RequestRecord} request request
+603		 * @param {string} type type
+604		 * @param {string} userRequest user request
+605		 * @param {DependencyMeta=} dependencyMeta dependency meta
+606		 */
+607		constructor(request, type, userRequest, dependencyMeta) {
+608			super(JAVASCRIPT_MODULE_TYPE_DYNAMIC, null);
+609	
+610			// Info from Factory
+611			/** @type {string | string[] | Record<string, string | string[]>} */
+612			this.request = request;
+613			/** @type {string} */
+614			this.externalType = type;
+615			/** @type {string} */
+616			this.userRequest = userRequest;
+617			/** @type {DependencyMeta=} */
+618			this.dependencyMeta = dependencyMeta;
+619		}
+620	
+621		/**
+622		 * @returns {SourceTypes} types available (do not mutate)
+623		 */
+624		getSourceTypes() {
+625			if (
+626				this.externalType === "asset" &&
+627				this.dependencyMeta &&
+628				/** @type {AssetDependencyMeta} */
+629				(this.dependencyMeta).sourceType === "css-url"
+630			) {
+631				return CSS_URL_TYPES;
+632			} else if (this.externalType === "css-import") {
+633				return CSS_IMPORT_TYPES;
+634			}
+635	
+636			return JS_TYPES;
+637		}
+638	
+639		/**
+640		 * @param {LibIdentOptions} options options
+641		 * @returns {string | null} an identifier for library inclusion
+642		 */
+643		libIdent(options) {
+644			return this.userRequest;
+645		}
+646	
+647		/**
+648		 * @param {Chunk} chunk the chunk which condition should be checked
+649		 * @param {Compilation} compilation the compilation
+650		 * @returns {boolean} true, if the chunk is ok for the module
+651		 */
+652		chunkCondition(chunk, { chunkGraph }) {
+653			return this.externalType === "css-import"
+654				? true
+655				: chunkGraph.getNumberOfEntryModules(chunk) > 0;
+656		}
+657	
+658		/**
+659		 * @returns {string} a unique identifier of the module
+660		 */
+661		identifier() {
+662			return `external ${this._resolveExternalType(this.externalType)} ${JSON.stringify(this.request)}`;
+663		}
+664	
+665		/**
+666		 * @param {RequestShortener} requestShortener the request shortener
+667		 * @returns {string} a user readable identifier of the module
+668		 */
+669		readableIdentifier(requestShortener) {
+670			return `external ${JSON.stringify(this.request)}`;
+671		}
+672	
+673		/**
+674		 * @param {NeedBuildContext} context context info
+675		 * @param {NeedBuildCallback} callback callback function, returns true, if the module needs a rebuild
+676		 * @returns {void}
+677		 */
+678		needBuild(context, callback) {
+679			return callback(null, !this.buildMeta);
+680		}
+681	
+682		/**
+683		 * @param {WebpackOptions} options webpack options
+684		 * @param {Compilation} compilation the compilation
+685		 * @param {ResolverWithOptions} resolver the resolver
+686		 * @param {InputFileSystem} fs the file system
+687		 * @param {BuildCallback} callback callback function
+688		 * @returns {void}
+689		 */
+690		build(options, compilation, resolver, fs, callback) {
+691			this.buildMeta = {
+692				async: false,
+693				exportsType: undefined
+694			};
+695			this.buildInfo = {
+696				strict: true,
+697				topLevelDeclarations: new Set(),
+698				javascriptModule: compilation.outputOptions.module
+699			};
+700			const { request, externalType } = this._getRequestAndExternalType();
+701			this.buildMeta.exportsType = "dynamic";
+702			let canMangle = false;
+703			this.clearDependenciesAndBlocks();
+704			switch (externalType) {
+705				case "this":
+706					this.buildInfo.strict = false;
+707					break;
+708				case "system":
+709					if (!Array.isArray(request) || request.length === 1) {
+710						this.buildMeta.exportsType = "namespace";
+711						canMangle = true;
+712					}
+713					break;
+714				case "module":
+715					if (this.buildInfo.javascriptModule) {
+716						if (!Array.isArray(request) || request.length === 1) {
+717							this.buildMeta.exportsType = "namespace";
+718							canMangle = true;
+719						}
+720					} else {
+721						this.buildMeta.async = true;
+722						EnvironmentNotSupportAsyncWarning.check(
+723							this,
+724							compilation.runtimeTemplate,
+725							"external module"
+726						);
+727						if (!Array.isArray(request) || request.length === 1) {
+728							this.buildMeta.exportsType = "namespace";
+729							canMangle = false;
+730						}
+731					}
+732					break;
+733				case "script":
+734					this.buildMeta.async = true;
+735					EnvironmentNotSupportAsyncWarning.check(
+736						this,
+737						compilation.runtimeTemplate,
+738						"external script"
+739					);
+740					break;
+741				case "promise":
+742					this.buildMeta.async = true;
+743					EnvironmentNotSupportAsyncWarning.check(
+744						this,
+745						compilation.runtimeTemplate,
+746						"external promise"
+747					);
+748					break;
+749				case "import":
+750					this.buildMeta.async = true;
+751					EnvironmentNotSupportAsyncWarning.check(
+752						this,
+753						compilation.runtimeTemplate,
+754						"external import"
+755					);
+756					if (!Array.isArray(request) || request.length === 1) {
+757						this.buildMeta.exportsType = "namespace";
+758						canMangle = false;
+759					}
+760					break;
+761			}
+762			this.addDependency(new StaticExportsDependency(true, canMangle));
+763			callback();
+764		}
+765	
+766		/**
+767		 * restore unsafe cache data
+768		 * @param {UnsafeCacheData} unsafeCacheData data from getUnsafeCacheData
+769		 * @param {NormalModuleFactory} normalModuleFactory the normal module factory handling the unsafe caching
+770		 */
+771		restoreFromUnsafeCache(unsafeCacheData, normalModuleFactory) {
+772			this._restoreFromUnsafeCache(unsafeCacheData, normalModuleFactory);
+773		}
+774	
+775		/**
+776		 * @param {ConcatenationBailoutReasonContext} context context
+777		 * @returns {string | undefined} reason why this module can't be concatenated, undefined when it can be concatenated
+778		 */
+779		getConcatenationBailoutReason(context) {
+780			switch (this.externalType) {
+781				case "amd":
+782				case "amd-require":
+783				case "umd":
+784				case "umd2":
+785				case "system":
+786				case "jsonp":
+787					return `${this.externalType} externals can't be concatenated`;
+788			}
+789			return undefined;
+790		}
+791	
+792		_getRequestAndExternalType() {
+793			let { request, externalType } = this;
+794			if (typeof request === "object" && !Array.isArray(request)) {
+795				request = request[externalType];
+796			}
+797			externalType = this._resolveExternalType(externalType);
+798			return { request, externalType };
+799		}
+800	
+801		/**
+802		 * Resolve the detailed external type from the raw external type.
+803		 * e.g. resolve "module" or "import" from "module-import" type
+804		 * @param {string} externalType raw external type
+805		 * @returns {string} resolved external type
+806		 */
+807		_resolveExternalType(externalType) {
+808			if (externalType === "module-import") {
+809				if (
+810					this.dependencyMeta &&
+811					/** @type {ImportDependencyMeta} */
+812					(this.dependencyMeta).externalType
+813				) {
+814					return /** @type {ImportDependencyMeta} */ (this.dependencyMeta)
+815						.externalType;
+816				}
+817				return "module";
+818			} else if (externalType === "asset") {
+819				if (
+820					this.dependencyMeta &&
+821					/** @type {AssetDependencyMeta} */
+822					(this.dependencyMeta).sourceType
+823				) {
+824					return /** @type {AssetDependencyMeta} */ (this.dependencyMeta)
+825						.sourceType;
+826				}
+827	
+828				return "asset";
+829			}
+830	
+831			return externalType;
+832		}
+833	
+834		/**
+835		 * @private
+836		 * @param {string | string[]} request request
+837		 * @param {string} externalType the external type
+838		 * @param {RuntimeTemplate} runtimeTemplate the runtime template
+839		 * @param {ModuleGraph} moduleGraph the module graph
+840		 * @param {ChunkGraph} chunkGraph the chunk graph
+841		 * @param {RuntimeSpec} runtime the runtime
+842		 * @param {DependencyMeta | undefined} dependencyMeta the dependency meta
+843		 * @param {ConcatenationScope=} concatenationScope concatenationScope
+844		 * @returns {SourceData} the source data
+845		 */
+846		_getSourceData(
+847			request,
+848			externalType,
+849			runtimeTemplate,
+850			moduleGraph,
+851			chunkGraph,
+852			runtime,
+853			dependencyMeta,
+854			concatenationScope
+855		) {
+856			switch (externalType) {
+857				case "this":
+858				case "window":
+859				case "self":
+860					return getSourceForGlobalVariableExternal(request, this.externalType);
+861				case "global":
+862					return getSourceForGlobalVariableExternal(
+863						request,
+864						runtimeTemplate.globalObject
+865					);
+866				case "commonjs":
+867				case "commonjs2":
+868				case "commonjs-module":
+869				case "commonjs-static":
+870					return getSourceForCommonJsExternal(request);
+871				case "node-commonjs":
+872					return /** @type {BuildInfo} */ (this.buildInfo).javascriptModule
+873						? getSourceForCommonJsExternalInNodeModule(request, runtimeTemplate)
+874						: getSourceForCommonJsExternal(request);
+875				case "amd":
+876				case "amd-require":
+877				case "umd":
+878				case "umd2":
+879				case "system":
+880				case "jsonp": {
+881					const id = chunkGraph.getModuleId(this);
+882					return getSourceForAmdOrUmdExternal(
+883						id !== null ? id : this.identifier(),
+884						this.isOptional(moduleGraph),
+885						request,
+886						runtimeTemplate
+887					);
+888				}
+889				case "import":
+890					return getSourceForImportExternal(
+891						request,
+892						runtimeTemplate,
+893						/** @type {ImportDependencyMeta} */ (dependencyMeta)
+894					);
+895				case "script":
+896					return getSourceForScriptExternal(request, runtimeTemplate);
+897				case "module": {
+898					if (!(/** @type {BuildInfo} */ (this.buildInfo).javascriptModule)) {
+899						if (!runtimeTemplate.supportsDynamicImport()) {
+900							throw new Error(
+901								`The target environment doesn't support dynamic import() syntax so it's not possible to use external type 'module' within a script${
+902									runtimeTemplate.supportsEcmaScriptModuleSyntax()
+903										? "\nDid you mean to build a EcmaScript Module ('output.module: true')?"
+904										: ""
+905								}`
+906							);
+907						}
+908						return getSourceForImportExternal(
+909							request,
+910							runtimeTemplate,
+911							/** @type {ImportDependencyMeta} */ (dependencyMeta)
+912						);
+913					}
+914					if (!runtimeTemplate.supportsEcmaScriptModuleSyntax()) {
+915						throw new Error(
+916							"The target environment doesn't support EcmaScriptModule syntax so it's not possible to use external type 'module'"
+917						);
+918					}
+919					return getSourceForModuleExternal(
+920						request,
+921						moduleGraph.getExportsInfo(this),
+922						runtime,
+923						runtimeTemplate,
+924						/** @type {ImportDependencyMeta} */ (dependencyMeta),
+925						concatenationScope
+926					);
+927				}
+928				case "var":
+929				case "promise":
+930				case "const":
+931				case "let":
+932				case "assign":
+933				default:
+934					return getSourceForDefaultCase(
+935						this.isOptional(moduleGraph),
+936						request,
+937						runtimeTemplate
+938					);
+939			}
+940		}
+941	
+942		/**
+943		 * @param {CodeGenerationContext} context context for code generation
+944		 * @returns {CodeGenerationResult} result
+945		 */
+946		codeGeneration({
+947			runtimeTemplate,
+948			moduleGraph,
+949			chunkGraph,
+950			runtime,
+951			concatenationScope
+952		}) {
+953			const { request, externalType } = this._getRequestAndExternalType();
+954			switch (externalType) {
+955				case "asset": {
+956					const sources = new Map();
+957					sources.set(
+958						"javascript",
+959						new RawSource(`module.exports = ${JSON.stringify(request)};`)
+960					);
+961					const data = new Map();
+962					data.set("url", { javascript: request });
+963					return { sources, runtimeRequirements: RUNTIME_REQUIREMENTS, data };
+964				}
+965				case "css-url": {
+966					const sources = new Map();
+967					const data = new Map();
+968					data.set("url", { "css-url": request });
+969					return { sources, runtimeRequirements: RUNTIME_REQUIREMENTS, data };
+970				}
+971				case "css-import": {
+972					const sources = new Map();
+973					const dependencyMeta = /** @type {CssImportDependencyMeta} */ (
+974						this.dependencyMeta
+975					);
+976					const layer =
+977						dependencyMeta.layer !== undefined
+978							? ` layer(${dependencyMeta.layer})`
+979							: "";
+980					const supports = dependencyMeta.supports
+981						? ` supports(${dependencyMeta.supports})`
+982						: "";
+983					const media = dependencyMeta.media ? ` ${dependencyMeta.media}` : "";
+984					sources.set(
+985						"css-import",
+986						new RawSource(
+987							`@import url(${JSON.stringify(
+988								request
+989							)})${layer}${supports}${media};`
+990						)
+991					);
+992					return {
+993						sources,
+994						runtimeRequirements: EMPTY_RUNTIME_REQUIREMENTS
+995					};
+996				}
+997				default: {
+998					const sourceData = this._getSourceData(
+999						request,
+1000						externalType,
+1001						runtimeTemplate,
+1002						moduleGraph,
+1003						chunkGraph,
+1004						runtime,
+1005						this.dependencyMeta,
+1006						concatenationScope
+1007					);
+1008	
+1009					// sourceString can be empty str only when there is concatenationScope
+1010					let sourceString = sourceData.expression;
+1011					if (sourceData.iife) {
+1012						sourceString = `(function() { return ${sourceString}; }())`;
+1013					}
+1014	
+1015					const specifiers = sourceData.specifiers;
+1016					if (specifiers) {
+1017						sourceString = "";
+1018						const scope = /** @type {ConcatenationScope} */ (concatenationScope);
+1019						for (const [specifier, finalName] of specifiers) {
+1020							scope.registerRawExport(specifier, finalName);
+1021						}
+1022					} else if (concatenationScope) {
+1023						sourceString = `${
+1024							runtimeTemplate.supportsConst() ? "const" : "var"
+1025						} ${ConcatenationScope.NAMESPACE_OBJECT_EXPORT} = ${sourceString};`;
+1026						concatenationScope.registerNamespaceExport(
+1027							ConcatenationScope.NAMESPACE_OBJECT_EXPORT
+1028						);
+1029					} else {
+1030						sourceString = `module.exports = ${sourceString};`;
+1031					}
+1032					if (sourceData.init) {
+1033						sourceString = `${sourceData.init}\n${sourceString}`;
+1034					}
+1035	
+1036					let data;
+1037					if (sourceData.chunkInitFragments) {
+1038						data = new Map();
+1039						data.set("chunkInitFragments", sourceData.chunkInitFragments);
+1040					}
+1041	
+1042					const sources = new Map();
+1043					if (this.useSourceMap || this.useSimpleSourceMap) {
+1044						sources.set(
+1045							"javascript",
+1046							new OriginalSource(sourceString, this.identifier())
+1047						);
+1048					} else {
+1049						sources.set("javascript", new RawSource(sourceString));
+1050					}
+1051	
+1052					let runtimeRequirements = sourceData.runtimeRequirements;
+1053					if (!concatenationScope) {
+1054						if (!runtimeRequirements) {
+1055							runtimeRequirements = RUNTIME_REQUIREMENTS;
+1056						} else {
+1057							const set = new Set(runtimeRequirements);
+1058							set.add(RuntimeGlobals.module);
+1059							runtimeRequirements = set;
+1060						}
+1061					}
+1062	
+1063					return {
+1064						sources,
+1065						runtimeRequirements:
+1066							runtimeRequirements || EMPTY_RUNTIME_REQUIREMENTS,
+1067						data
+1068					};
+1069				}
+1070			}
+1071		}
+1072	
+1073		/**
+1074		 * @param {string=} type the source type for which the size should be estimated
+1075		 * @returns {number} the estimated size of the module (must be non-zero)
+1076		 */
+1077		size(type) {
+1078			return 42;
+1079		}
+1080	
+1081		/**
+1082		 * @param {Hash} hash the hash used to track dependencies
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

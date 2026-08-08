@@ -1,0 +1,377 @@
+**Exploration: where is the incremental parse cache written and restored**
+
+Found 63 symbols across 2 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `parseDocFile` (src/docparse.h:477) — 1 caller in `src/ingest.cpp`; ⚠️ no covering tests found
+- `cacheFriendliness` (src/cachelint.h:295) — 1 caller in `src/main.cpp`; ⚠️ no covering tests found
+- `parse` (src/layout.h:631) — 2 callers in `src/layout.h`; ⚠️ no covering tests found
+- `parseAlt` (src/search.h:553) — 2 callers in `src/search.h`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/ingest.cpp`** — finalSegment(function), parseTree(function)
+
+```cpp
+301	}
+302	
+303	// ---- final identifier segment (ns::f / pkg.F / mod::f -> last segment) ----
+304	std::string finalSegment( std::string_view raw )   // allocates a std::string → not noexcept
+305	{
+306	    // A C++ OPERATOR name (`operator<`, `operator<<`, `operator<=>`, `operator bool`) is the one place a
+307	    // name legitimately carries `<`/`::`-looking punctuation that is NOT a scope/type-arg separator — the
+308	    // `<`-strip and "::"/"." splits below would mangle it to a bare `operator`. Detect the `operator`
+309	    // keyword segment (bare `operator...` or the last `Scope::operator...`) and return it whole. Guarded on
+310	    // a following non-identifier char so a normal identifier that merely starts with "operator" (e.g.
+311	    // `operatorId`) still falls through to the generic path unchanged.
+312	    if( const std::size_t op = raw.rfind( "operator" ); op != std::string_view::npos )
+313	    {
+314	        const bool atSegStart = ( op == 0 ) || ( raw[ op - 1 ] == ':' ) || ( raw[ op - 1 ] == '.' );
+315	        const std::size_t after = op + 8;   // one-past `operator`
+316	        const bool isOpToken = after >= raw.size()
+317	                            || !( std::isalnum( static_cast<unsigned char>( raw[ after ] ) ) || raw[ after ] == '_' );
+318	        if( atSegStart && isOpToken )
+319	        {
+320	            return std::string( raw.substr( op ) );   // `operator<<`, `operator bool`, etc. — verbatim
+321	        }
+322	    }
+323	
+324	    // FIX #1 (generic base/impl): drop a type-argument list before ANYTHING else. A base/impl name
+325	    // handed back as `generic_type` carries `<...>` (Java `Base<String>`, Rust `Wrapper<T>`) whose
+326	    // bare form (`Base`/`Wrapper`) is what byName keys on. The strip MUST precede the "::"/"." split,
+327	    // or a `::` INSIDE the args (`Foo<A::B>`) would be mistaken for the segment separator. A name never
+328	    // legitimately contains a bare '<' (only a type-argument list opens one), so truncating at the FIRST
+329	    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical).
+330	    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos )
+331	    {
+332	        raw = raw.substr( 0, lt );
+333	    }
+334	
+335	    // already a bare identifier in nearly all cases; defensive split on '.' and "::".
+336	    std::size_t pos = raw.rfind( "::" );
+337	    if( pos != std::string_view::npos )
+338	    {
+339	        raw = raw.substr( pos + 2 );
+340	    }
+341	    pos = raw.rfind( '.' );
+342	    if( pos != std::string_view::npos )
+343	    {
+344	        raw = raw.substr( pos + 1 );
+345	    }
+346	
+347	    // trim trailing whitespace a `Base <String>` / `Wrapper <T>` spacing left behind (grammars usually
+348	    // hand back tight text, but a space before the '<' would otherwise leave `Base ` after the strip).
+349	    while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' ) )
+350	    {
+351	        raw.remove_suffix( 1 );
+352	    }
+353	    return std::string( raw );
+354	}
+355	
+356	// ---- skip rules ----
+357	bool isDenylistedName( std::string_view name ) noexcept
+
+... (gap) ...
+
+6126	    return true;
+6127	}
+6128	
+6129	TSTree* parseTree( TSParser* parser, std::string_view src )
+6130	{
+6131	    TSTree* tree = nullptr;
+6132	    {
+6133	        PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tree-sitter parse" );
+6134	        tree = ts_parser_parse_string( parser, nullptr, src.data(), static_cast<uint32_t>( src.size() ) );
+6135	    }
+6136	    return tree;
+6137	}
+6138	
+6139	struct TreeGuard
+6140	{
+```
+
+**`src/search.h`** — next(calls), eof(calls), peek(calls), calls(calls), riAnchor(calls), +24 more
+
+```cpp
+524	// Anything we don't model precisely (backrefs, lookarounds, unicode props, complex classes) degrades to
+525	// riAnyChar()/ALL — SOUND. The parser builds RegexInfo directly (no separate AST node type needed). It is
+526	// PREFILTER-ONLY: precision of this parse never affects correctness, because std::regex re-verifies.
+527	class RegexAnalyzer
+528	{
+529	public:
+530	    explicit RegexAnalyzer( const std::string& pat ) : s_( pat ) {}
+531	
+532	    // Parse the whole pattern → the sound trigram query. On any parse shortfall we are conservative (ALL).
+533	    TriQuery analyze()
+534	    {
+535	        pos_ = 0;
+536	        RegexInfo r = parseAlt();
+537	        // trailing unparsed input (shouldn't happen for valid regex) ⇒ be safe
+538	        if( pos_ != s_.size() )
+539	        {
+540	            return TriQuery::all();
+541	        }
+542	        return finishQuery( std::move( r ) );
+543	    }
+544	
+545	private:
+546	    const std::string& s_;
+547	    std::size_t        pos_ = 0;
+548	
+549	    bool   eof()  const { return pos_ >= s_.size(); }
+550	    char   peek() const { return s_[ pos_ ]; }
+551	    char   next()       { return s_[ pos_++ ]; }
+552	
+553	    RegexInfo parseAlt()
+554	    {
+555	        RegexInfo left = parseConcat();
+556	        while( !eof() && peek() == '|' )
+557	        {
+558	            next();                              // consume '|'
+559	            RegexInfo right = parseConcat();
+560	            left = riAlternate( std::move( left ), std::move( right ) );
+561	        }
+562	        return left;
+563	    }
+564	
+565	    RegexInfo parseConcat()
+566	    {
+567	        RegexInfo acc = riEmpty();
+568	        bool      any = false;
+569	        while( !eof() && peek() != '|' && peek() != ')' )
+570	        {
+571	            const std::size_t before = pos_;
+572	            RegexInfo piece = parseRepeat();
+573	            acc = any ? riConcat( std::move( acc ), std::move( piece ) ) : std::move( piece );
+574	            any = true;
+575	            if( pos_ == before )
+576	            {
+577	                break; // no progress on malformed input (e.g. unterminated `a{2,`): stop —
+578	            }
+579	                                          // analyze() then sees pos_ != size and returns ALL (sound full-scan).
+580	        }
+581	        return any ? acc : riEmpty();
+582	    }
+583	
+584	    RegexInfo parseRepeat()
+585	    {
+586	        RegexInfo atom = parseAtom();
+587	        if( eof() )
+588	        {
+589	            return atom;
+590	        }
+591	        const char c = peek();
+592	        if( c == '*' ) { next(); return riStar(  std::move( atom ) ); }
+593	        if( c == '+' ) { next(); return riPlus(  std::move( atom ) ); }
+594	        if( c == '?' ) { next(); return riQuest( std::move( atom ) ); }
+595	        if( c == '{' )                                   // bounded/unbounded repetition {n}, {n,}, {n,m}
+596	        {
+597	            // We don't model the exact count for the prefilter — treat {0,*}/{1,*} soundly:
+598	            //   {0,...} or {n,...} with n==0 ⇒ optional ⇒ ALL; {n,...} with n>=1 ⇒ child trigrams required.
+599	            const std::size_t save = pos_;
+600	            next();                                      // consume '{'
+601	            long lo = 0; bool sawLo = false;
+602	            while( !eof() && std::isdigit( (unsigned char)peek() ) ) { lo = lo * 10 + ( next() - '0' ); sawLo = true; }
+603	            // skip to closing '}' (we only need lo's zero-ness)
+604	            while( !eof() && peek() != '}' )
+605	            {
+606	                next();
+607	            }
+608	            if( !eof() && peek() == '}' )
+609	            {
+610	                next();
+611	            }
+612	            else
+613	            {
+614	                pos_ = save;
+615	                return atom;
+616	            } // malformed → treat '{' as a literal atom already parsed
+617	            if( sawLo && lo >= 1 )
+618	            {
+619	                return riPlus( std::move( atom ) ); // ≥1 mandatory copy
+620	            }
+621	            return riQuest( std::move( atom ) );                         // 0 mandatory copies ⇒ optional
+622	        }
+623	        return atom;
+624	    }
+625	
+626	    RegexInfo parseAtom()
+627	    {
+628	        const char c = peek();
+629	        if( c == '(' )
+630	        {
+631	            next();                                      // consume '('
+632	            // skip a non-capturing / lookaround prefix "(?...":   (?:  (?=  (?!  (?<=  (?<!
+633	            if( !eof() && peek() == '?' )
+634	            {
+635	                // lookarounds are zero-width assertions for matching; for INDEXING treat the whole group as
+636	                // ε (anchor-like) — sound, since we can't rely on its content appearing literally.
+637	                // Consume to the matching ')'.
+638	                int depth = 1; next();                   // consume '?'
+639	                while( !eof() && depth > 0 )
+640	                {
+641	                    char d = next();
+642	                    if( d == '(' ) { ++depth; }
+643	                    else if( d == ')' ) { --depth; }
+644	                    else if( d == '\\' && !eof() )
+645	                    {
+646	                        next();
+647	                    }
+648	                }
+649	                return riAnchor();
+650	            }
+651	            RegexInfo inner = parseAlt();
+652	            if( !eof() && peek() == ')' )
+653	            {
+654	                next(); // consume ')'
+655	            }
+656	            return inner;
+657	        }
+658	        if( c == '[' )
+659	        {
+660	            return parseClass();
+661	        }
+662	        if( c == '.' ) { next(); return riAnyChar(); }
+663	        if( c == '^' || c == '$' ) { next(); return riAnchor(); }
+664	        if( c == '\\' )
+665	        {
+666	            next();                                      // consume '\'
+667	            if( eof() )
+668	            {
+669	                return riAnchor();
+670	            }
+671	            const char e = next();
+672	            // word/space/digit classes and boundaries → unknown char or anchor (sound)
+673	            if( e == 'b' || e == 'B' || e == 'A' || e == 'Z' || e == 'z' )
+674	            {
+675	                return riAnchor();
+676	            }
+677	            if( e == 'w' || e == 'W' || e == 'd' || e == 'D' || e == 's' || e == 'S' )
+678	            {
+679	                return riAnyChar();
+680	            }
+681	            // an escaped metacharacter / ordinary char → that literal byte
+682	            return riLiteral( std::string( 1, unescape( e ) ) );
+683	        }
+684	        if( c == ')' || c == '|' )
+685	        {
+686	            return riEmpty(); // shouldn't reach here (caller guards), be safe
+687	        }
+688	        // ordinary literal char — but greedily absorb a RUN of ordinary chars NOT followed by a quantifier
+689	        // that would bind only the last char. We must stop the run before a char that has a quantifier,
+690	        // because `abc*` means `ab` then `c*` (the * binds only `c`). So peek the NEXT char's quantifier.
+691	        std::string run;
+692	        while( !eof() )
+693	        {
+694	            const char ch = peek();
+695	            if( std::strchr( ".[](){}|^$\\*+?", ch ) != nullptr )
+696	            {
+697	                break; // a metachar ends the literal run
+698	            }
+699	            // if the char AFTER ch is a quantifier, ch must be its own atom — stop the run before ch
+700	            // (unless run is empty, in which case ch IS this atom and we let the run hold just ch).
+701	            const bool nextIsQuant = ( pos_ + 1 < s_.size() ) && std::strchr( "*+?{", s_[ pos_ + 1 ] ) != nullptr;
+702	            if( nextIsQuant && !run.empty() )
+703	            {
+704	                break;
+705	            }
+706	            run += ch; next();
+707	            if( nextIsQuant )
+708	            {
+709	                break; // ch is a single-char atom that a quantifier will bind
+710	            }
+711	        }
+712	        return riLiteral( run );
+713	    }
+714	
+715	    // [...] character class. We ENUMERATE only simple positive classes of literal chars / short ranges into
+716	    // a small exact set; negated `[^...]`, large ranges, or class-escapes degrade to riAnyChar() (ALL).
+717	    RegexInfo parseClass()
+718	    {
+719	        next();                                          // consume '['
+720	        if( !eof() && peek() == '^' )                    // negated class — unknown byte, sound
+721	        {
+722	            // consume to closing ']'
+723	            while( !eof() && peek() != ']' )
+724	            {
+725	                if( peek() == '\\' )
+726	                {
+727	                    next();
+728	                    if( !eof() )
+729	                    {
+730	                        next();
+731	                    }
+732	                }
+733	                else
+734	                {
+735	                    next();
+736	                }
+737	            }
+738	            if( !eof() )
+739	            {
+740	                next();
+741	            }
+742	            return riAnyChar();
+743	        }
+744	        std::vector<std::string> chars;
+745	        bool degrade = false;
+746	        while( !eof() && peek() != ']' )
+747	        {
+748	            char lo;
+749	            if( peek() == '\\' ) { next(); if( eof() ) { degrade = true; break; } char e = next(); if( std::strchr( "wWdDsS", e ) ) { degrade = true; } lo = unescape( e ); }
+750	            else
+751	            {
+752	                lo = next();
+753	            }
+754	            if( !eof() && peek() == '-' && pos_ + 1 < s_.size() && s_[ pos_ + 1 ] != ']' )   // a range lo-hi
+755	            {
+756	                next();                                  // consume '-'
+757	                char hi = ( peek() == '\\' ) ? ( next(), unescape( next() ) ) : next();
+758	                if( hi < lo || ( hi - lo ) > 6 )
+759	                {
+760	                    degrade = true; // wide range ⇒ don't enumerate (ALL)
+761	                }
+762	                else
+763	                {
+764	                    for( char ch = lo; ch <= hi; ++ch )
+765	                    {
+766	                        chars.push_back( std::string( 1, ch ) );
+767	                    }
+768	                }
+769	            }
+770	            else if( !degrade )
+771	            {
+772	                chars.push_back( std::string( 1, lo ) );
+773	            }
+774	            if( chars.size() > kMaxExactSet )
+775	            {
+776	                degrade = true;
+777	            }
+778	        }
+779	        if( !eof() )
+780	        {
+781	            next(); // consume ']'
+782	        }
+783	        if( degrade || chars.empty() || chars.size() > kMaxExactSet )
+784	        {
+785	            return riAnyChar();
+786	        }
+787	        return riCharSet( std::move( chars ) );
+788	    }
+789	
+790	    // map an escaped char to its literal byte (the common ones); default = the char itself.
+791	    static char unescape( char e )
+792	    {
+793	        switch( e ) { case 'n': return '\n'; case 't': return '\t'; case 'r': return '\r'; case 'f': return '\f'; case 'v': return '\v'; case '0': return '\0'; default: return e; }
+794	    }
+795	};
+796	
+797	// Evaluate a TriQuery against ONE file's bytes → "could this file match?". This replaces the posting-list
+798	// evaluator: with no index, the question "is trigram T in file F" is answered by searching F's bytes for
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

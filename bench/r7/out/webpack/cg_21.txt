@@ -1,0 +1,801 @@
+**Exploration: what stores module to dependency connections in the graph**
+
+Found 92 symbols across 6 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `_getModuleGraphModule` (lib/ModuleGraph.js:182) — 36 callers in `lib/ModuleGraph.js`; ⚠️ no covering tests found
+- `moveModuleConnections` (lib/ModuleGraph.js:425) — 1 caller in `lib/optimize/ModuleConcatenationPlugin.js`; ⚠️ no covering tests found
+- `getConnectionsByModule` (lib/ModuleGraph.js:75) — 1 caller in `lib/ModuleGraph.js`; ⚠️ no covering tests found
+
+**Relationships**
+
+**extends:**
+- LocalModuleDependency → NullDependency
+- ExternalModuleDependency → CachedConstDependency
+
+**calls:**
+- serialize → write
+- serialize → serialize
+- deserialize → read
+- deserialize → deserialize
+- write → push
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- serialize → write
+- ... and 151 more
+
+**instantiates:**
+- moveModuleConnections → SortableSet
+
+**references:**
+- moveModuleConnections → SortableSet
+- getOutgoingConnectionsByModule → getConnectionsByModule
+- setResolvedModule → SortableSet
+- copyOutgoingModuleConnections → SortableSet
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`lib/ModuleGraph.js`** — get(calls), set(calls), SortableSet(constant), setAsync(method), _getModuleGraphModule(calls), getModuleGraphForModule(method), fn(calls), setModuleGraphForModule(method), moduleGraphForModuleMap(constant), deprecateMap(constant)
+
+```javascript
+8	const util = require("util");
+9	const ExportsInfo = require("./ExportsInfo");
+10	const ModuleGraphConnection = require("./ModuleGraphConnection");
+11	const SortableSet = require("./util/SortableSet");
+12	const WeakTupleMap = require("./util/WeakTupleMap");
+13	const { sortWithSourceOrder } = require("./util/comparators");
+14	const memoize = require("./util/memoize");
+
+... (gap) ...
+
+858		 * @param {Module} module the module
+859		 * @returns {void}
+860		 */
+861		setAsync(module) {
+862			const mgm = this._getModuleGraphModule(module);
+863			mgm.async = true;
+864		}
+865	
+866		/**
+867		 * @param {MetaKey} thing any thing
+
+... (gap) ...
+
+952		 * @param {string} deprecationCode code for the deprecation
+953		 * @returns {ModuleGraph} the module graph
+954		 */
+955		static getModuleGraphForModule(module, deprecateMessage, deprecationCode) {
+956			const fn = deprecateMap.get(deprecateMessage);
+957			if (fn) return fn(module);
+958			const newFn = util.deprecate(
+959				/**
+960				 * @param {Module} module the module
+961				 * @returns {ModuleGraph} the module graph
+962				 */
+963				(module) => {
+964					const moduleGraph = moduleGraphForModuleMap.get(module);
+965					if (!moduleGraph) {
+966						throw new Error(
+967							`${
+968								deprecateMessage
+969							}There was no ModuleGraph assigned to the Module for backward-compat (Use the new API)`
+970						);
+971					}
+972					return moduleGraph;
+973				},
+974				`${deprecateMessage}: Use new ModuleGraph API`,
+975				deprecationCode
+976			);
+977			deprecateMap.set(deprecateMessage, newFn);
+978			return newFn(module);
+979		}
+980	
+981		// TODO remove in webpack 6
+982		/**
+983		 * @param {Module} module the module
+984		 * @param {ModuleGraph} moduleGraph the module graph
+985		 * @returns {void}
+986		 */
+987		static setModuleGraphForModule(module, moduleGraph) {
+988			moduleGraphForModuleMap.set(module, moduleGraph);
+989		}
+990	
+991		// TODO remove in webpack 6
+992		/**
+993		 * @param {Module} module the module
+994		 * @returns {void}
+995		 */
+996		static clearModuleGraphForModule(module) {
+997			moduleGraphForModuleMap.delete(module);
+998		}
+999	}
+1000	
+1001	// TODO remove in webpack 6
+1002	/** @type {WeakMap<Module, ModuleGraph>} */
+1003	const moduleGraphForModuleMap = new WeakMap();
+1004	
+1005	// TODO remove in webpack 6
+1006	/** @type {Map<string, (module: Module) => ModuleGraph>} */
+1007	const deprecateMap = new Map();
+1008	
+1009	module.exports = ModuleGraph;
+1010	module.exports.ModuleGraphConnection = ModuleGraphConnection;
+```
+
+**`lib/dependencies/ExternalModuleDependency.js`** — ExternalModuleDependency(class), CachedConstDependency(constant), constructor(method), _createHashUpdate(method), serialize(method), deserialize(method)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Ivan Kopeykin @vankop
+4	*/
+5	
+6	"use strict";
+7	
+8	const makeSerializable = require("../util/makeSerializable");
+9	const CachedConstDependency = require("./CachedConstDependency");
+10	const ExternalModuleInitFragment = require("./ExternalModuleInitFragment");
+11	
+12	/** @typedef {import("webpack-sources").ReplaceSource} ReplaceSource */
+13	/** @typedef {import("../Dependency")} Dependency */
+14	/** @typedef {import("../Dependency").UpdateHashContext} UpdateHashContext */
+15	/** @typedef {import("../DependencyTemplate").DependencyTemplateContext} DependencyTemplateContext */
+16	/** @typedef {import("../javascript/JavascriptModulesPlugin").ChunkRenderContext} ChunkRenderContext */
+17	/** @typedef {import("../javascript/JavascriptParser").Range} Range */
+18	/** @typedef {import("../serialization/ObjectMiddleware").ObjectDeserializerContext} ObjectDeserializerContext */
+19	/** @typedef {import("../serialization/ObjectMiddleware").ObjectSerializerContext} ObjectSerializerContext */
+20	/** @typedef {import("../util/Hash")} Hash */
+21	
+22	class ExternalModuleDependency extends CachedConstDependency {
+23		/**
+24		 * @param {string} module module
+25		 * @param {{ name: string, value: string }[]} importSpecifiers import specifiers
+26		 * @param {string | undefined} defaultImport default import
+27		 * @param {string} expression expression
+28		 * @param {Range} range range
+29		 * @param {string} identifier identifier
+30		 */
+31		constructor(
+32			module,
+33			importSpecifiers,
+34			defaultImport,
+35			expression,
+36			range,
+37			identifier
+38		) {
+39			super(expression, range, identifier);
+40	
+41			this.importedModule = module;
+42			this.specifiers = importSpecifiers;
+43			this.default = defaultImport;
+44		}
+45	
+46		/**
+47		 * @returns {string} hash update
+48		 */
+49		_createHashUpdate() {
+50			return `${this.importedModule}${JSON.stringify(this.specifiers)}${
+51				this.default || "null"
+52			}${super._createHashUpdate()}`;
+53		}
+54	
+55		/**
+56		 * @param {ObjectSerializerContext} context context
+57		 */
+58		serialize(context) {
+59			super.serialize(context);
+60			const { write } = context;
+61			write(this.importedModule);
+62			write(this.specifiers);
+63			write(this.default);
+64		}
+65	
+66		/**
+67		 * @param {ObjectDeserializerContext} context context
+68		 */
+69		deserialize(context) {
+70			super.deserialize(context);
+71			const { read } = context;
+72			this.importedModule = read();
+73			this.specifiers = read();
+74			this.default = read();
+75		}
+76	}
+77	
+78	makeSerializable(
+79		ExternalModuleDependency,
+80		"webpack/lib/dependencies/ExternalModuleDependency"
+81	);
+82	
+83	ExternalModuleDependency.Template = class ExternalModuleDependencyTemplate extends (
+84		CachedConstDependency.Template
+85	) {
+86		/**
+87		 * @param {Dependency} dependency the dependency for which the template should be applied
+88		 * @param {ReplaceSource} source the current replace source which can be modified
+89		 * @param {DependencyTemplateContext} templateContext the context object
+90		 * @returns {void}
+91		 */
+92		apply(dependency, source, templateContext) {
+93			super.apply(dependency, source, templateContext);
+94			const dep = /** @type {ExternalModuleDependency} */ (dependency);
+95			const { chunkInitFragments, runtimeTemplate } = templateContext;
+96	
+97			chunkInitFragments.push(
+98				new ExternalModuleInitFragment(
+99					`${runtimeTemplate.supportNodePrefixForCoreModules() ? "node:" : ""}${
+100						dep.importedModule
+101					}`,
+102					dep.specifiers,
+103					dep.default
+104				)
+105			);
+106		}
+107	};
+108	
+109	module.exports = ExternalModuleDependency;
+```
+
+**`lib/dependencies/LocalModuleDependency.js`** — LocalModuleDependency(class), NullDependency(constant), constructor(method), serialize(method), deserialize(method)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	const makeSerializable = require("../util/makeSerializable");
+9	const NullDependency = require("./NullDependency");
+10	
+11	/** @typedef {import("webpack-sources").ReplaceSource} ReplaceSource */
+12	/** @typedef {import("../Dependency")} Dependency */
+13	/** @typedef {import("../DependencyTemplate").DependencyTemplateContext} DependencyTemplateContext */
+14	/** @typedef {import("../javascript/JavascriptParser").Range} Range */
+15	/** @typedef {import("../serialization/ObjectMiddleware").ObjectDeserializerContext} ObjectDeserializerContext */
+16	/** @typedef {import("../serialization/ObjectMiddleware").ObjectSerializerContext} ObjectSerializerContext */
+17	/** @typedef {import("./LocalModule")} LocalModule */
+18	
+19	class LocalModuleDependency extends NullDependency {
+20		/**
+21		 * @param {LocalModule} localModule local module
+22		 * @param {Range | undefined} range range
+23		 * @param {boolean} callNew true, when the local module should be called with new
+24		 */
+25		constructor(localModule, range, callNew) {
+26			super();
+27	
+28			this.localModule = localModule;
+29			this.range = range;
+30			this.callNew = callNew;
+31		}
+32	
+33		/**
+34		 * @param {ObjectSerializerContext} context context
+35		 */
+36		serialize(context) {
+37			const { write } = context;
+38	
+39			write(this.localModule);
+40			write(this.range);
+41			write(this.callNew);
+42	
+43			super.serialize(context);
+44		}
+45	
+46		/**
+47		 * @param {ObjectDeserializerContext} context context
+48		 */
+49		deserialize(context) {
+50			const { read } = context;
+51	
+52			this.localModule = read();
+53			this.range = read();
+54			this.callNew = read();
+55	
+56			super.deserialize(context);
+57		}
+58	}
+59	
+60	makeSerializable(
+61		LocalModuleDependency,
+62		"webpack/lib/dependencies/LocalModuleDependency"
+63	);
+64	
+65	LocalModuleDependency.Template = class LocalModuleDependencyTemplate extends (
+66		NullDependency.Template
+67	) {
+68		/**
+69		 * @param {Dependency} dependency the dependency for which the template should be applied
+70		 * @param {ReplaceSource} source the current replace source which can be modified
+71		 * @param {DependencyTemplateContext} templateContext the context object
+72		 * @returns {void}
+73		 */
+74		apply(dependency, source, templateContext) {
+75			const dep = /** @type {LocalModuleDependency} */ (dependency);
+76			if (!dep.range) return;
+77			const moduleInstance = dep.callNew
+78				? `new (function () { return ${dep.localModule.variableName()}; })()`
+79				: dep.localModule.variableName();
+80			source.replace(dep.range[0], dep.range[1] - 1, moduleInstance);
+81		}
+82	};
+83	
+84	module.exports = LocalModuleDependency;
+```
+
+**`lib/Module.js`** — getModuleGraphForModule(calls), write(calls), calls(calls), profile(method), index(method), index2(method), depth(method), issuer(method), getProfile(calls), setProfile(calls), getPreOrderIndex(calls), setPreOrderIndex(calls), getPostOrderIndex(calls), setPostOrderIndex(calls), getDepth(calls), +10 more
+
+```javascript
+297			).getRenderedModuleHash(this, undefined);
+298		}
+299	
+300		get profile() {
+301			return ModuleGraph.getModuleGraphForModule(
+302				this,
+303				"Module.profile",
+304				"DEP_WEBPACK_MODULE_PROFILE"
+305			).getProfile(this);
+306		}
+307	
+308		set profile(value) {
+309			ModuleGraph.getModuleGraphForModule(
+310				this,
+311				"Module.profile",
+312				"DEP_WEBPACK_MODULE_PROFILE"
+313			).setProfile(this, value);
+314		}
+315	
+316		/**
+317		 * @returns {number | null} the pre order index
+318		 */
+319		get index() {
+320			return ModuleGraph.getModuleGraphForModule(
+321				this,
+322				"Module.index",
+323				"DEP_WEBPACK_MODULE_INDEX"
+324			).getPreOrderIndex(this);
+325		}
+326	
+327		/**
+328		 * @param {number} value the pre order index
+329		 */
+330		set index(value) {
+331			ModuleGraph.getModuleGraphForModule(
+332				this,
+333				"Module.index",
+334				"DEP_WEBPACK_MODULE_INDEX"
+335			).setPreOrderIndex(this, value);
+336		}
+337	
+338		/**
+339		 * @returns {number | null} the post order index
+340		 */
+341		get index2() {
+342			return ModuleGraph.getModuleGraphForModule(
+343				this,
+344				"Module.index2",
+345				"DEP_WEBPACK_MODULE_INDEX2"
+346			).getPostOrderIndex(this);
+347		}
+348	
+349		/**
+350		 * @param {number} value the post order index
+351		 */
+352		set index2(value) {
+353			ModuleGraph.getModuleGraphForModule(
+354				this,
+355				"Module.index2",
+356				"DEP_WEBPACK_MODULE_INDEX2"
+357			).setPostOrderIndex(this, value);
+358		}
+359	
+360		/**
+361		 * @returns {number | null} the depth
+362		 */
+363		get depth() {
+364			return ModuleGraph.getModuleGraphForModule(
+365				this,
+366				"Module.depth",
+367				"DEP_WEBPACK_MODULE_DEPTH"
+368			).getDepth(this);
+369		}
+370	
+371		/**
+372		 * @param {number} value the depth
+373		 */
+374		set depth(value) {
+375			ModuleGraph.getModuleGraphForModule(
+376				this,
+377				"Module.depth",
+378				"DEP_WEBPACK_MODULE_DEPTH"
+379			).setDepth(this, value);
+380		}
+381	
+382		/**
+383		 * @returns {Module | null | undefined} issuer
+384		 */
+385		get issuer() {
+386			return ModuleGraph.getModuleGraphForModule(
+387				this,
+388				"Module.issuer",
+389				"DEP_WEBPACK_MODULE_ISSUER"
+390			).getIssuer(this);
+391		}
+392	
+393		/**
+394		 * @param {Module | null} value issuer
+395		 */
+396		set issuer(value) {
+397			ModuleGraph.getModuleGraphForModule(
+398				this,
+399				"Module.issuer",
+400				"DEP_WEBPACK_MODULE_ISSUER"
+401			).setIssuer(this, value);
+402		}
+403	
+404		get usedExports() {
+405			return ModuleGraph.getModuleGraphForModule(
+406				this,
+407				"Module.usedExports",
+408				"DEP_WEBPACK_MODULE_USED_EXPORTS"
+409			).getUsedExports(this, undefined);
+410		}
+411	
+412		/**
+413		 * @deprecated
+414		 * @returns {(string | OptimizationBailoutFunction)[]} list
+415		 */
+416		get optimizationBailout() {
+417			return ModuleGraph.getModuleGraphForModule(
+418				this,
+419				"Module.optimizationBailout",
+420				"DEP_WEBPACK_MODULE_OPTIMIZATION_BAILOUT"
+421			).getOptimizationBailout(this);
+422		}
+423	
+424		get optional() {
+425			return this.isOptional(
+426				ModuleGraph.getModuleGraphForModule(
+427					this,
+428					"Module.optional",
+429					"DEP_WEBPACK_MODULE_OPTIONAL"
+430				)
+431			);
+432		}
+433	
+434		/**
+435		 * @param {Chunk} chunk the chunk
+
+... (gap) ...
+
+508		 * null, if it's unknown.
+509		 * false, if it's not provided.
+510		 */
+511		isProvided(exportName) {
+512			return ModuleGraph.getModuleGraphForModule(
+513				this,
+514				"Module.usedExports",
+515				"DEP_WEBPACK_MODULE_USED_EXPORTS"
+516			).isExportProvided(this, exportName);
+517		}
+518		// BACKWARD-COMPAT END
+519	
+520		/**
+
+... (gap) ...
+
+1105		/**
+1106		 * @param {ObjectSerializerContext} context context
+1107		 */
+1108		serialize(context) {
+1109			const { write } = context;
+1110			write(this.type);
+1111			write(this.layer);
+1112			write(this.context);
+1113			write(this.resolveOptions);
+1114			write(this.factoryMeta);
+1115			write(this.useSourceMap);
+1116			write(this.useSimpleSourceMap);
+1117			write(this.hot);
+1118			write(
+1119				this._warnings !== undefined && this._warnings.length === 0
+1120					? undefined
+1121					: this._warnings
+1122			);
+1123			write(
+1124				this._errors !== undefined && this._errors.length === 0
+1125					? undefined
+1126					: this._errors
+1127			);
+1128			write(this.buildMeta);
+1129			write(this.buildInfo);
+1130			write(this.presentationalDependencies);
+1131			write(this.codeGenerationDependencies);
+1132			super.serialize(context);
+1133		}
+1134	
+1135		/**
+1136		 * @param {ObjectDeserializerContext} context context
+```
+
+**`lib/Compilation.js`** — calls(calls), get(calls), set(calls), setModuleGraphForModule(calls), _addModule(method), getProfile(calls), instantiates(instantiates), addRuntimeModule(method), getExportsInfo(calls)
+
+```javascript
+1424		 * it could be the passed one (if new), or an already existing in the compilation
+1425		 * @returns {void}
+1426		 */
+1427		_addModule(module, callback) {
+1428			const identifier = module.identifier();
+1429			const alreadyAddedModule = this._modules.get(identifier);
+1430			if (alreadyAddedModule) {
+1431				return callback(null, alreadyAddedModule);
+1432			}
+1433	
+1434			const currentProfile = this.profile
+1435				? this.moduleGraph.getProfile(module)
+1436				: undefined;
+1437			if (currentProfile !== undefined) {
+1438				currentProfile.markRestoringStart();
+1439			}
+1440	
+1441			this._modulesCache.get(identifier, null, (err, cacheModule) => {
+1442				if (err) return callback(new ModuleRestoreError(module, err));
+1443	
+1444				if (currentProfile !== undefined) {
+1445					currentProfile.markRestoringEnd();
+1446					currentProfile.markIntegrationStart();
+1447				}
+1448	
+1449				if (cacheModule) {
+1450					cacheModule.updateCacheModule(module);
+1451	
+1452					module = cacheModule;
+1453				}
+1454				this._modules.set(identifier, module);
+1455				this.modules.add(module);
+1456				if (this._backCompat) {
+1457					ModuleGraph.setModuleGraphForModule(module, this.moduleGraph);
+1458				}
+1459				if (currentProfile !== undefined) {
+1460					currentProfile.markIntegrationEnd();
+1461				}
+1462				callback(null, module);
+1463			});
+1464		}
+1465	
+1466		/**
+1467		 * Fetches a module from a compilation by its identifier
+
+... (gap) ...
+
+3859		 * @param {ChunkGraph} chunkGraph the chunk graph
+3860		 * @returns {void}
+3861		 */
+3862		addRuntimeModule(chunk, module, chunkGraph = this.chunkGraph) {
+3863			// Deprecated ModuleGraph association
+3864			if (this._backCompat) {
+3865				ModuleGraph.setModuleGraphForModule(module, this.moduleGraph);
+3866			}
+3867	
+3868			// add it to the list
+3869			this.modules.add(module);
+3870			this._modules.set(module.identifier(), module);
+3871	
+3872			// connect to the chunk graph
+3873			chunkGraph.connectChunkAndModule(chunk, module);
+3874			chunkGraph.connectChunkAndRuntimeModule(chunk, module);
+3875			if (module.fullHash) {
+3876				chunkGraph.addFullHashModuleToChunk(chunk, module);
+3877			} else if (module.dependentHash) {
+3878				chunkGraph.addDependentHashModuleToChunk(chunk, module);
+3879			}
+3880	
+3881			// attach runtime module
+3882			module.attach(this, chunk, chunkGraph);
+3883	
+3884			// Setup internals
+3885			const exportsInfo = this.moduleGraph.getExportsInfo(module);
+3886			exportsInfo.setHasProvideInfo();
+3887			if (typeof chunk.runtime === "string") {
+3888				exportsInfo.setUsedForSideEffectsOnly(chunk.runtime);
+3889			} else if (chunk.runtime === undefined) {
+3890				exportsInfo.setUsedForSideEffectsOnly(undefined);
+3891			} else {
+3892				for (const runtime of chunk.runtime) {
+3893					exportsInfo.setUsedForSideEffectsOnly(runtime);
+3894				}
+3895			}
+3896			chunkGraph.addModuleRuntimeRequirements(
+3897				module,
+3898				chunk.runtime,
+3899				new Set([RuntimeGlobals.requireScope])
+3900			);
+3901	
+3902			// runtime modules don't need ids
+3903			chunkGraph.setModuleId(module, "");
+3904	
+3905			// Call hook
+3906			this.hooks.runtimeModule.call(module, chunk);
+3907		}
+3908	
+3909		/**
+3910		 * If `module` is passed, `loc` and `request` must also be passed.
+```
+
+**`lib/util/StackedCacheMap.js`** — get(method), set(method)
+
+```javascript
+1	/*
+2		MIT License http://www.opensource.org/licenses/mit-license.php
+3		Author Tobias Koppers @sokra
+4	*/
+5	
+6	"use strict";
+7	
+8	new Map().entries();
+9	
+10	/**
+11	 * The StackedCacheMap is a data structure designed as an alternative to a Map
+12	 * in situations where you need to handle multiple item additions and
+13	 * frequently access the largest map.
+14	 *
+15	 * It is particularly optimized for efficiently adding multiple items
+16	 * at once, which can be achieved using the `addAll` method.
+17	 *
+18	 * It has a fallback Map that is used when the map to be added is mutable.
+19	 *
+20	 * Note: `delete` and `has` are not supported for performance reasons.
+21	 * @example
+22	 * ```js
+23	 * const map = new StackedCacheMap();
+24	 * map.addAll(new Map([["a", 1], ["b", 2]]), true);
+25	 * map.addAll(new Map([["c", 3], ["d", 4]]), true);
+26	 * map.get("a"); // 1
+27	 * map.get("d"); // 4
+28	 * for (const [key, value] of map) {
+29	 * 		console.log(key, value);
+30	 * }
+31	 * ```
+32	 * @template K
+33	 * @template V
+34	 */
+35	class StackedCacheMap {
+36		constructor() {
+37			/** @type {Map<K, V>} */
+38			this.map = new Map();
+39			/** @type {ReadonlyMap<K, V>[]} */
+40			this.stack = [];
+41		}
+42	
+43		/**
+44		 * If `immutable` is true, the map can be referenced by the StackedCacheMap
+45		 * and should not be changed afterwards. If the map is mutable, all items
+46		 * are copied into a fallback Map.
+47		 * @param {ReadonlyMap<K, V>} map map to add
+48		 * @param {boolean=} immutable if 'map' is immutable and StackedCacheMap can keep referencing it
+49		 */
+50		addAll(map, immutable) {
+51			if (immutable) {
+52				this.stack.push(map);
+53	
+54				// largest map should go first
+55				for (let i = this.stack.length - 1; i > 0; i--) {
+56					const beforeLast = this.stack[i - 1];
+57					if (beforeLast.size >= map.size) break;
+58					this.stack[i] = beforeLast;
+59					this.stack[i - 1] = map;
+60				}
+61			} else {
+62				for (const [key, value] of map) {
+63					this.map.set(key, value);
+64				}
+65			}
+66		}
+67	
+68		/**
+69		 * @param {K} item the key of the element to add
+70		 * @param {V} value the value of the element to add
+71		 * @returns {void}
+72		 */
+73		set(item, value) {
+74			this.map.set(item, value);
+75		}
+76	
+77		/**
+78		 * @param {K} item the item to delete
+79		 * @returns {void}
+80		 */
+81		delete(item) {
+82			throw new Error("Items can't be deleted from a StackedCacheMap");
+83		}
+84	
+85		/**
+86		 * @param {K} item the item to test
+87		 * @returns {boolean} true if the item exists in this set
+88		 */
+89		has(item) {
+90			throw new Error(
+91				"Checking StackedCacheMap.has before reading is inefficient, use StackedCacheMap.get and check for undefined"
+92			);
+93		}
+94	
+95		/**
+96		 * @param {K} item the key of the element to return
+97		 * @returns {V | undefined} the value of the element
+98		 */
+99		get(item) {
+100			for (const map of this.stack) {
+101				const value = map.get(item);
+102				if (value !== undefined) return value;
+103			}
+104			return this.map.get(item);
+105		}
+106	
+107		clear() {
+108			this.stack.length = 0;
+109			this.map.clear();
+110		}
+111	
+112		/**
+113		 * @returns {number} size of the map
+114		 */
+115		get size() {
+116			let size = this.map.size;
+117			for (const map of this.stack) {
+118				size += map.size;
+119			}
+120			return size;
+121		}
+122	
+123		/**
+124		 * @returns {Iterator<[K, V]>} iterator
+125		 */
+126		[Symbol.iterator]() {
+127			const iterators = this.stack.map((map) => map[Symbol.iterator]());
+128			let current = this.map[Symbol.iterator]();
+129			return {
+130				next() {
+131					let result = current.next();
+132					while (result.done && iterators.length > 0) {
+133						current = /** @type {MapIterator<[K, V]>} */ (iterators.pop());
+134						result = current.next();
+135					}
+136					return result;
+137				}
+138			};
+139		}
+140	}
+141	
+142	module.exports = StackedCacheMap;
+```
+
+**Not shown above — explore these names for their source**
+
+- test/helpers/captureStdio.js: write:11
+- test/statsCases/define-plugin/webpack.config.js: read:11
+- lib/AsyncDependenciesBlock.js: serialize:81
+- lib/ContextModule.js: serialize:1241
+- lib/CssModule.js: serialize:119
+- lib/DelegatedModule.js: serialize:217
+- lib/DependenciesBlock.js: serialize:103
+- lib/Dependency.js: serialize:308
+- lib/ExportsInfo.js: serialize:68
+- lib/ExternalModule.js: serialize:1099
+- ... and 18 more files
+
+---
+> **Complete source for 6 files is included above — do NOT re-read them.** If your question also needs files/symbols listed under "Not shown above" (or any area this call didn't cover), make ANOTHER codegraph_explore targeting those names — it returns the same source with line numbers and is cheaper and more complete than reading. Reserve Read for a single specific line range explore can't surface.
+
+> **Explore budget: 3 calls for this project (7,489 files indexed).** Each call covers ~6 files; if your question spans more, spend your remaining calls on the uncovered area BEFORE falling back to Read — another explore is cheaper and more complete than reading those files. Synthesize once you've used 3.

@@ -1,0 +1,390 @@
+**Exploration: where is the best in class exemplar picked by role**
+
+Found 36 symbols across 4 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `resolveExemplarKind` (src/exemplar.h:217) — 1 caller in `src/exemplar.h`; ⚠️ no covering tests found
+- `exemplarKindFromToken` (src/exemplar.h:134) — 1 caller in `src/exemplar.h`; ⚠️ no covering tests found
+- `exemplarText` (src/mcpverbs.h:1224) — 2 callers in `src/mcp.h`, `src/mcpverbs.h`; ⚠️ no covering tests found
+- `roleOf` (src/ingest.cpp:280) — 1 caller in `src/ingest.cpp`; ⚠️ no covering tests found
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`src/exemplar.h`** — size(calls), subtokens(calls), pickWinnerOfKind(calls), ExemplarPick(struct), shareNameSubtoken(function), +8 more
+
+```cpp
+178	    "counts the ELIGIBLE instances of the kind (post-ceiling), not every instance";
+179	
+180	// The selection result. `winner == kNoNode` ⇒ no candidate of the kind (caller reports not-found).
+181	struct ExemplarPick
+182	{
+183	    NodeId      winner        = kNoNode;
+184	    SymKind     targetKind    = SymKind::Other;
+185	    std::size_t candidateCount = 0;      // ELIGIBLE candidates considered (post-ceiling; the number emitted as candidates=)
+186	    bool        fromTask       = false;  // the arg was a task string, not a kind token
+187	    bool        lowConfidence  = false;  // INVARIANT 3: weak task→kind, fell back to Function
+188	    bool        overCcxBar     = false;  // INVARIANT 1 relaxed: nothing under the ceiling, winner is over it
+189	};
+190	
+191	// does the winner's NAME share at least one subtoken with the task? (INVARIANT 3 confidence gate.)
+192	inline bool shareNameSubtoken( std::string_view name, const std::vector<std::string>& taskToks )
+193	{
+194	    if( taskToks.empty() )
+195	    {
+196	        return false;
+197	    }
+198	    std::vector<std::string> nameToks;
+199	    subtokens( name, nameToks );
+200	    for( const std::string& nt : nameToks )
+201	    {
+202	        for( const std::string& qt : taskToks )
+203	        {
+204	            if( nt == qt )
+205	            {
+206	                return true;
+207	            }
+208	        }
+209	    }
+210	    return false;
+211	}
+212	
+213	// resolveExemplarKind — step 1: a kind token selects the target kind directly; a task string donates its
+214	// top-lexical-match's kind, but only when TRUSTWORTHY (INVARIANT 3). Writes targetKind/fromTask/lowConfidence
+215	// into `pick`; leaves winner=kNoNode. Returns false only when the corpus has no exemplifiable symbol at all
+216	// (caller = not-found).
+217	inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::string_view kindOrTask, ExemplarPick& pick )
+218	{
+219	    pick.targetKind = exemplarKindFromToken( kindOrTask );
+220	    if( pick.targetKind != SymKind::Other )
+221	    {
+222	        return true; // a kind token — done
+223	    }
+224	
+225	    // TASK path: rank lexically, then sort the eligible symbols by (score DESC, id ASC) — a byte-stable
+226	    // total order, so both the top-1 pick and the confidence window below are deterministic.
+227	    pick.fromTask = true;
+228	    const std::vector<float> lensRank = lexicalScores( ing, g.outOff, g.outTargets, kindOrTask );
+229	    std::vector<std::pair<float, NodeId>> ranked;
+230	    ranked.reserve( ing.symbols.size() );
+231	    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+232	    {
+233	        const SymKind k = ing.symbols[i].kind;
+234	        if( k == SymKind::Section || k == SymKind::Other )
+235	        {
+236	            continue; // never exemplify a doc heading / unknown
+237	        }
+238	        ranked.emplace_back( lensRank[i], i );
+239	    }
+240	    if( ranked.empty() )
+241	    {
+242	        return false; // no exemplifiable symbol in the whole corpus
+243	    }
+244	    std::sort( ranked.begin(), ranked.end(), []( const auto& a, const auto& b )
+245	    {
+246	        return ( a.first != b.first ) ? ( a.first > b.first ) : ( a.second < b.second );
+247	    } );
+248	    const NodeId best      = ranked.front().second;
+249	    const float  bestScore = ranked.front().first;
+250	
+251	    // INVARIANT 3: trust the donated kind only when the match is corroborated, not just present. Checking
+252	    // ONLY the #1 hit's name (the pre-fix check) is fooled both ways — see kExemplarConfWindow's comment
+253	    // above. Instead: of the top kExemplarConfWindow lexical hits, what FRACTION carry a task subtoken in
+254	    // their own name (not just their body)? A real topical match clusters; an incidental one doesn't.
+255	    std::vector<std::string> taskToks;
+256	    subtokens( kindOrTask, taskToks );
+257	    const std::size_t window = std::min( kExemplarConfWindow, ranked.size() );
+258	    std::size_t corroborating = 0;
+259	    for( std::size_t j = 0; j < window; ++j )
+260	    {
+261	        if( shareNameSubtoken( ing.symbols[ranked[j].second].name, taskToks ) )
+262	        {
+263	            ++corroborating;
+264	        }
+265	    }
+266	    const float shareOfWindow = window ? float( corroborating ) / float( window ) : 0.f;
+267	    const bool  trustworthy   = bestScore > 0.f && shareOfWindow > kExemplarConfMinShare;
+268	
+269	    pick.targetKind    = trustworthy ? ing.symbols[best].kind : SymKind::Function;
+270	    pick.lowConfidence = !trustworthy;
+271	    return true;
+272	}
+273	
+274	// pickWinnerOfKind — step 2, ONE pass: the best-in-class of `targetKind` among candidates with ccx ≤ ceiling
+275	// when `eligibleOnly`, else all of the kind. Sets pick.winner + pick.candidateCount. The composite (most-
+276	// significant first): fixture ASC → tested DESC → fan-in DESC → ccx ASC → loc ASC → id ASC — all stable
+277	// integers/flags, so the winner is byte-stable run-to-run.
+278	inline void pickWinnerOfKind( const IngestResult& ing, const std::vector<std::uint32_t>& fanIn,
+279	                              const std::vector<std::uint8_t>& tested, bool eligibleOnly, ExemplarPick& pick )
+280	{
+281	    const auto fin = [ & ]( NodeId i ) -> std::uint32_t { return ( i < fanIn.size() )  ? fanIn[i]  : 0u; };
+282	    const auto ts  = [ & ]( NodeId i ) -> std::uint8_t  { return ( i < tested.size() ) ? tested[i] : std::uint8_t( 0 ); };
+283	    const auto fx  = [ & ]( NodeId i ) -> bool          { return isFixturePath( ing.files[ ing.symbols[i].fileId ] ); };
+284	    const auto better = [ & ]( NodeId cand, NodeId cur ) -> bool   // is `cand` a BETTER exemplar than `cur`?
+285	    {
+286	        const Symbol& a = ing.symbols[cand];  const Symbol& b = ing.symbols[cur];
+287	        const bool candFx = fx( cand ), curFx = fx( cur );
+288	        return
+289	            ( candFx != curFx )           ? ( !candFx && curFx ) :   // INVARIANT 2: non-fixture beats fixture
+290	            ( ts( cand ) != ts( cur ) )   ? ts( cand ) > ts( cur ) :
+291	            ( fin( cand ) != fin( cur ) ) ? fin( cand ) > fin( cur ) :
+292	            ( a.ccx != b.ccx )            ? a.ccx < b.ccx :
+293	            ( a.loc != b.loc )            ? a.loc < b.loc :
+294	                                            a.id  < b.id;             // final id tie-break → deterministic
+295	    };
+296	
+297	    pick.candidateCount = 0;
+298	    pick.winner         = kNoNode;
+299	    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+300	    {
+301	        const bool ofKind    = ing.symbols[i].kind == pick.targetKind;
+302	        const bool ineligible = eligibleOnly && ing.symbols[i].ccx > kExemplarCcxCeiling;   // INVARIANT 1
+303	        if( !ofKind || ineligible )
+304	        {
+305	            continue;
+306	        }
+307	        ++pick.candidateCount;
+308	        if( pick.winner == kNoNode || better( i, pick.winner ) )
+309	        {
+310	            pick.winner = i;
+311	        }
+312	    }
+313	}
+314	
+315	// selectExemplar — resolve the target kind, then pick the best-in-class instance by ROLE under the three
+316	// A3-F5 invariants. `fanIn` = in-edge CSR row lengths (reused-count), `tested` = the computeQMetrics flag;
+317	// both indexed by NodeId (short/absent vectors degrade to 0 — no crash). The ccx ceiling is tried FIRST;
+318	// only when nothing of the kind is under it (a corpus of all-blobs) does it relax and flag overCcxBar, so
+319	// the verb still returns SOMETHING rather than an empty result.
+320	inline ExemplarPick selectExemplar( const IngestResult& ing, const Graph& g,
+321	                                    const std::vector<std::uint32_t>& fanIn,
+322	                                    const std::vector<std::uint8_t>&  tested,
+323	                                    std::string_view                  kindOrTask )
+324	{
+325	    ExemplarPick pick;
+326	    if( !resolveExemplarKind( ing, g, kindOrTask, pick ) )
+327	    {
+328	        return pick; // winner stays kNoNode → not-found
+329	    }
+330	
+331	    pickWinnerOfKind( ing, fanIn, tested, /*eligibleOnly=*/true, pick );   // pass A: under the ccx ceiling
+332	    if( pick.winner == kNoNode )
+333	    {
+334	        pickWinnerOfKind( ing, fanIn, tested, /*eligibleOnly=*/false, pick );   // pass B: nothing was under it
+335	        pick.overCcxBar = pick.winner != kNoNode;
+336	    }
+337	    return pick;
+338	}
+339	
+340	}   // namespace ripwire
+341	
+```
+
+**`src/readability.h`** — TokenRole(enum)
+
+```cpp
+67	// stable instead of depending on how std::exp rounds an overflowing argument.
+68	inline constexpr double kPosnettZClamp = 40.0;
+69	
+70	enum class TokenRole : std::uint8_t { Operator, Operand };
+71	
+72	// THE token-class table: clones.h's scanner already decided what each token IS, so this is a pure
+73	// CodeTokenKind → Halstead-role projection and not a second classifier. Deliberately total — every token the
+```
+
+**`src/ingest.cpp`** — defKind(function), roleOf(function), defKind(calls), finalSegment(function)
+
+```cpp
+220	enum class CapRole : std::uint8_t { Ignore, NameOnly, Def, Ref };
+221	
+222	// Map the part AFTER "definition."/"reference." to a SymKind. Falls back to Other.
+223	SymKind defKind( std::string_view tail ) noexcept
+224	{
+225	    if( tail == "function" )
+226	    {
+227	        return SymKind::Function;
+228	    }
+229	    if( tail == "method" )
+230	    {
+231	        return SymKind::Method;
+232	    }
+233	    if( tail == "class" )
+234	    {
+235	        return SymKind::Class;
+236	    }
+237	    if( tail == "struct" )
+238	    {
+239	        return SymKind::Struct;
+240	    }
+241	    if( tail == "interface" )
+242	    {
+243	        return SymKind::Interface;
+244	    }
+245	    if( tail == "var" )
+246	    {
+247	        return SymKind::Var;
+248	    }
+249	    if( tail == "constant" )
+250	    {
+251	        return SymKind::Var;
+252	    }
+253	    if( tail == "cjsexport" )      // JS `module.exports.NAME = fn` / `exports.NAME = fn` — gated (isCjsExportTarget)
+254	    {
+255	        return SymKind::Function;
+256	    }
+257	    if( tail == "protomethod" )    // JS `Foo.prototype.NAME = fn` — gated (isPrototypeMemberTarget)
+258	    {
+259	        return SymKind::Method;
+260	    }
+261	    if( tail == "module" )
+262	    {
+263	        return SymKind::Other;
+264	    }
+265	    if( tail == "macro" )
+266	    {
+267	        return SymKind::Function;
+268	    }
+269	    if( tail == "type" )
+270	    {
+271	        return SymKind::Struct; // typedef/alias/enum bucket
+272	    }
+273	    if( tail == "section" )
+274	    {
+275	        return SymKind::Section; // JSON object keys (t="sec"), same kind as markdown headings
+276	    }
+277	    return SymKind::Other;
+278	}
+279	
+280	CapRole roleOf( std::string_view cap, SymKind& kindOut ) noexcept
+281	{
+282	    constexpr std::string_view kDef = "definition.";
+283	    constexpr std::string_view kRef = "reference.";
+284	
+285	    if( cap == "name" )
+286	    {
+287	        return CapRole::NameOnly;
+288	    }
+289	
+290	    if( cap.size() > kDef.size() && cap.substr( 0, kDef.size() ) == kDef )
+291	    {
+292	        kindOut = defKind( cap.substr( kDef.size() ) );
+293	        return CapRole::Def;
+294	    }
+295	    if( cap.size() > kRef.size() && cap.substr( 0, kRef.size() ) == kRef )
+296	    {
+297	        return CapRole::Ref;
+298	    }
+299	
+300	    return CapRole::Ignore;   // @doc, @local.scope, etc.
+301	}
+302	
+303	// ---- final identifier segment (ns::f / pkg.F / mod::f -> last segment) ----
+304	std::string finalSegment( std::string_view raw )   // allocates a std::string → not noexcept
+305	{
+306	    // A C++ OPERATOR name (`operator<`, `operator<<`, `operator<=>`, `operator bool`) is the one place a
+307	    // name legitimately carries `<`/`::`-looking punctuation that is NOT a scope/type-arg separator — the
+308	    // `<`-strip and "::"/"." splits below would mangle it to a bare `operator`. Detect the `operator`
+309	    // keyword segment (bare `operator...` or the last `Scope::operator...`) and return it whole. Guarded on
+310	    // a following non-identifier char so a normal identifier that merely starts with "operator" (e.g.
+311	    // `operatorId`) still falls through to the generic path unchanged.
+312	    if( const std::size_t op = raw.rfind( "operator" ); op != std::string_view::npos )
+313	    {
+314	        const bool atSegStart = ( op == 0 ) || ( raw[ op - 1 ] == ':' ) || ( raw[ op - 1 ] == '.' );
+315	        const std::size_t after = op + 8;   // one-past `operator`
+316	        const bool isOpToken = after >= raw.size()
+317	                            || !( std::isalnum( static_cast<unsigned char>( raw[ after ] ) ) || raw[ after ] == '_' );
+318	        if( atSegStart && isOpToken )
+319	        {
+320	            return std::string( raw.substr( op ) );   // `operator<<`, `operator bool`, etc. — verbatim
+321	        }
+322	    }
+323	
+324	    // FIX #1 (generic base/impl): drop a type-argument list before ANYTHING else. A base/impl name
+325	    // handed back as `generic_type` carries `<...>` (Java `Base<String>`, Rust `Wrapper<T>`) whose
+326	    // bare form (`Base`/`Wrapper`) is what byName keys on. The strip MUST precede the "::"/"." split,
+327	    // or a `::` INSIDE the args (`Foo<A::B>`) would be mistaken for the segment separator. A name never
+328	    // legitimately contains a bare '<' (only a type-argument list opens one), so truncating at the FIRST
+329	    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical).
+330	    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos )
+331	    {
+332	        raw = raw.substr( 0, lt );
+333	    }
+334	
+335	    // already a bare identifier in nearly all cases; defensive split on '.' and "::".
+336	    std::size_t pos = raw.rfind( "::" );
+337	    if( pos != std::string_view::npos )
+338	    {
+339	        raw = raw.substr( pos + 2 );
+340	    }
+341	    pos = raw.rfind( '.' );
+342	    if( pos != std::string_view::npos )
+343	    {
+344	        raw = raw.substr( pos + 1 );
+345	    }
+346	
+347	    // trim trailing whitespace a `Base <String>` / `Wrapper <T>` spacing left behind (grammars usually
+348	    // hand back tight text, but a space before the '<' would otherwise leave `Base ` after the strip).
+349	    while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' ) )
+350	    {
+351	        raw.remove_suffix( 1 );
+352	    }
+353	    return std::string( raw );
+354	}
+355	
+356	// ---- skip rules ----
+357	bool isDenylistedName( std::string_view name ) noexcept
+```
+
+**`src/mergescout.h`** — conflictScoreAgainstRemaining(function), empty(calls), pickNextToLand(function), conflictScoreAgainstRemaining(calls)
+
+```cpp
+562	
+563	// True-conflict count between arm `i` and every OTHER not-yet-landed arm — landingOrder's per-candidate
+564	// score. Split out so landingOrder's own greedy loop stays two levels deep.
+565	inline std::size_t conflictScoreAgainstRemaining( std::size_t i, const std::vector<PairOverlap>& pairs, const std::vector<char>& landed )
+566	{
+567	    std::size_t score = 0;
+568	    for( const PairOverlap& p : pairs )
+569	    {
+570	        if( p.conflicts.empty() )
+571	        {
+572	            continue;
+573	        }
+574	        if( p.a == i && !landed[p.b] )
+575	        {
+576	            ++score;
+577	        }
+578	        else if( p.b == i && !landed[p.a] )
+579	        {
+580	            ++score;
+581	        }
+582	    }
+583	    return score;
+584	}
+585	
+586	// The not-yet-landed arm with the lowest conflictScoreAgainstRemaining; ties break on ref name ascending.
+587	inline std::size_t pickNextToLand( const std::vector<Arm>& arms, const std::vector<PairOverlap>& pairs, const std::vector<char>& landed )
+588	{
+589	    std::size_t best = 0, bestScore = std::size_t( -1 );
+590	    bool haveBest = false;
+591	    for( std::size_t i = 0; i < arms.size(); ++i )
+592	    {
+593	        if( landed[i] )
+594	        {
+595	            continue;
+596	        }
+597	        const std::size_t score = conflictScoreAgainstRemaining( i, pairs, landed );
+598	        if( !haveBest || score < bestScore || ( score == bestScore && arms[i].ref < arms[best].ref ) )
+599	        { best = i; bestScore = score; haveBest = true; }
+600	    }
+601	    return best;
+602	}
+603	
+604	// Fewest-conflicts-first GREEDY landing order: repeatedly land the not-yet-landed arm with the fewest
+605	// true conflicts against arms still remaining; tie-break by ref name ascending. Deterministic.
+```
+
+
+> Some file sections were trimmed for size. For a specific symbol you still need, run another `codegraph_explore` (or `codegraph_node`) with its exact name — line-numbered source, cheaper and more complete than Read.
