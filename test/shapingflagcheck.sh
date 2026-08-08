@@ -54,10 +54,10 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/
 # tripwire discipline as kTotalFlagArms. Re-derive with the commands printed below.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 15 ] && ok "(A) --max-tokens has 15 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 15 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
-[ "$TOPSITES" = 11 ] && ok "(A) --top-k has 11 read sites outside cli.h" \
-                     || no "(A) --top-k read sites moved 11 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
+[ "$MAXSITES" = 16 ] && ok "(A) --max-tokens has 16 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 16 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$TOPSITES" = 12 ] && ok "(A) --top-k has 12 read sites outside cli.h" \
+                     || no "(A) --top-k read sites moved 12 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of
 OTHER="$( grep -l 'cfg\.maxTokens\|cfg\.topK' src/*.h src/*.cpp 2>/dev/null | grep -vE 'src/(cli\.h|main\.cpp|mcpserver\.h)$' )"
 [ -z "$OTHER" ] && ok "(A) only main.cpp and mcpserver.h read the two fields" \
