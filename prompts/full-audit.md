@@ -25,9 +25,12 @@ by orders of magnitude and conflating them is how a false speed claim gets publi
 - **warm** — a second run against a live cache.
 
 Run `./build/ripwire . --doctor` first: it states the environment, the cache state and what it
-believes about the tree. `bench/perfgate.sh` and `bench/representative_perfgate.sh` are the budget
-gates; `bench/PROFILE.md` records the last profile. A regression is a number moving past a budget in
-those files, not a hunch about a slow-feeling verb.
+believes about the tree. `bench/perfgate.sh` and `bench/representative_perfgate.sh` are the measurement
+harnesses — as of 2026-08-08 (owner directive: perf budgets are not the model — "best tool first, then
+make it fast") both run in LEDGER mode: they print medians and append a dated entry to `bench/PROFILE.md`
+instead of comparing against a budget and failing. A performance finding in this lens is a measured
+number with a `bench/PROFILE.md` entry (or a fresh run) behind it, not a hunch about a slow-feeling verb —
+but it is YOUR judgment call whether a number is worth flagging, not a red exit code.
 
 ## Lens 3 — skill and verb matching
 

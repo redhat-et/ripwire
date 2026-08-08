@@ -372,3 +372,29 @@ The absolute "Type-3 pass ≤ ~1 s" aspiration was not fully reached — keeping
 the de-dup (the measured-faster choice) leaves that portion of the pass in place; the win here is the
 eliminated hashmap-bookkeeping churn on length-mismatched pairs. Byte-identity + determinism (the
 mandatory obligations) hold.
+
+## 2026-08-08 — perfgate ledger: label=default
+
+Ledger-mode measurement (owner directive 2026-08-08: perf budgets are not the model — best
+tool first, then make it fast; no pass/fail — see bench/perfgate.sh header). BIN=/Users/qgames/AppDevelopLocal/project2/ripwire/.claude/worktrees/agent-a158118bf8ee5c734/build/ripwire
+corpus=/Users/qgames/AppDevelopLocal/project2/ripwire/.claude/worktrees/agent-a158118bf8ee5c734 runs=5 (median) machine=Darwin arm64 generated=2026-08-08 14:33 UTC
+
+| key | median (ms) |
+|---|---:|
+| cold | 178.4 |
+| warm | 35.7 |
+
+## 2026-08-08 — representative_perfgate ledger
+
+Ledger-mode measurement (owner directive 2026-08-08: perf budgets are not the model — best
+tool first, then make it fast; no pass/fail — see bench/representative_perfgate.sh header).
+machine=Darwin/arm64 (Mac17,8) fixture=08352db35d9c93c4fc7e3af7f38469af8f8b86d1 copies=80 files=480 bytes=183040 runs=5 generated=2026-08-08 14:33 UTC
+
+| key | median (ms) |
+|---|---:|
+| cold | 59.439 |
+| warm-index-retrieval | 13.365 |
+| report | 59.729 |
+| quality-delta | 142.838 |
+| dead-code | 62.362 |
+| mcp-warm-request | 1.309 |

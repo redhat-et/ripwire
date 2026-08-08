@@ -1009,7 +1009,22 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 46;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 47;           // bump on any grammar/.scm/extraction change
+                                                      // 47 (L3, 2026-08-08 audit): `locals` now counts
+                                                      //    DECLARATORS, not declaration statements —
+                                                      //    cc_countLocalDeclarators sums every
+                                                      //    `declarator`-fielded child of a countable
+                                                      //    `declaration` node instead of the fused DFS
+                                                      //    incrementing by one per statement. A
+                                                      //    comma-separated local (`int a,b,c;`) moves from
+                                                      //    locals=1 to locals=3, and a type-only local
+                                                      //    declaration (no declarator at all) moves from 1
+                                                      //    to 0 — a VALUE change on the per-file RawDef
+                                                      //    record's existing `locals` u32 (no format
+                                                      //    change) → old caches carry the undercounted
+                                                      //    number and must be rejected. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME
+                                                      //    commit (P0.2).
                                                       // 46: integration/quality-fleet merge of TWO independent 45s
                                                       //    — the integrated ppalt+nestcal 45 (below) and ev(G),
                                                       //    which took 45 on feat/nest-profile (entry next; it had
@@ -2231,6 +2246,40 @@ inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
     return !cc_declHasStructuredBinding( n, 4 );
 }
 
+// shared by cc_countLocalDeclarators (below) and ln_declaratorIdentifiers (Phase 2, further down): is child
+// `ci` of `declNode` one comma-separated declarator SLOT? The vendored grammar gives every comma-separated
+// declarator its own `declarator`-FIELDED direct child of the `declaration` node (`int a=1,b=2;` has TWO) —
+// pulled out to ONE predicate so the two counting/walking loops that need it never drift on the field name.
+inline bool cc_isDeclaratorField( TSNode declNode, std::uint32_t ci ) noexcept
+{
+    const char* fieldName = ts_node_field_name_for_child( declNode, ci );
+    return fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0;
+}
+
+// L3 fix (2026-08-08 audit): a `declaration` node already proven countable by cc_isCountableLocalDecl can
+// still introduce MORE THAN ONE local — `int a=1,b=2,…,j=10;` is ONE `declaration` node holding TEN
+// comma-separated declarators, and counting the STATEMENT ("1") instead of each DECLARATOR undercounts on
+// exactly the axis cc_isCountableLocalDecl's own structured-binding exclusion exists to avoid (a `locals=`
+// that doesn't mean "how many names were declared"). Counts cc_isDeclaratorField direct children — no
+// recursion: a declarator's own nested pointer/reference/array wrapper is still one name, one
+// comma-separated slot, one `declarator` field. A declaration with ZERO declarator-fielded children (a
+// type-only statement, e.g. a local `struct Foo;` forward declaration) now correctly counts as zero rather
+// than the previous "1" — a declaration that names no local was never meant to be a local, and the old
+// per-statement count silently over-counted that shape too.
+inline std::uint32_t cc_countLocalDeclarators( TSNode n ) noexcept
+{
+    std::uint32_t count = 0;
+    const std::uint32_t childCount = ts_node_child_count( n );
+    for( std::uint32_t ci = 0; ci < childCount; ++ci )
+    {
+        if( cc_isDeclaratorField( n, ci ) )
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
 // Every accumulator the fused walk fills, in ONE bundle. It used to be six by-reference out-parameters
 // threaded through cc_walk's signature; the ppalt disclosure and the nesting-depth profile together
 // would have made that ten, which is the
@@ -2991,10 +3040,12 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
         // Phase 1 (local-variable-indexing): same fused DFS, third accumulator — zero extra tree-sitter
         // queries. countLocals is false for every non-C/C++ def (model.h localsCountedLang), so this whole
-        // check compiles to a single branch-not-taken for every other language's walk.
+        // check compiles to a single branch-not-taken for every other language's walk. L3 fix (2026-08-08):
+        // counts DECLARATORS (cc_countLocalDeclarators), not declaration statements — `int a,b,c;` is one
+        // countable `declaration` node but three locals; see cc_countLocalDeclarators' own comment.
         if( countLocals && isNamed && cc_isCountableLocalDecl( n, t ) )
         {
-            ++acc.locals;
+            acc.locals += cc_countLocalDeclarators( n );
         }
         else if( std::strcmp( t, "binary_expression" ) == 0 )
         {
@@ -3191,17 +3242,17 @@ inline void ln_extractDeclaratorIdentifiers( TSNode node, std::vector<TSNode>& o
 }
 
 // one `declaration` node (already proven countable by cc_isCountableLocalDecl) → every declarator name it
-// introduces (plural: `int a, b;` is ONE declaration with TWO "declarator:"-fielded children — Phase 1's
-// COUNT stays "1 declaration-statement" by design, but Phase 2 needs each NAME individually to judge, so
-// this deliberately extracts more granularly than Phase 1 counts — a disclosed, documented difference
-// between the two phases, not a drift).
+// introduces (plural: `int a, b;` is ONE declaration with TWO "declarator:"-fielded children — since the L3
+// fix, Phase 1's COUNT (cc_countLocalDeclarators, above) agrees with Phase 2 here at the SLOT level: both
+// count 2. They still differ one level deeper — this walk recurses INTO each slot to find the actual name
+// node(s) Phase 2 judges, where Phase 1 only needs the slot count — reusing cc_isDeclaratorField for the
+// shared "which children are declarator slots" scan, not re-typing the field-name check.
 inline void ln_declaratorIdentifiers( TSNode declNode, std::vector<TSNode>& outIdents )
 {
     const std::uint32_t n = ts_node_child_count( declNode );
     for( std::uint32_t i = 0; i < n; ++i )
     {
-        const char* fieldName = ts_node_field_name_for_child( declNode, i );
-        if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 )
+        if( cc_isDeclaratorField( declNode, i ) )
         {
             ln_extractDeclaratorIdentifiers( ts_node_child( declNode, i ), outIdents, 6 );
         }

@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-08, L3 audit (locals= per-declarator counting): kParserVer 46 -> 47 and the quality.h mirror with
+#   it, because cc_countLocalDeclarators (ingest.cpp) now sums every `declarator`-fielded child of a
+#   countable `declaration` node instead of the fused DFS incrementing by one per statement — a
+#   comma-separated local (`int a,b,c;`) moves from locals=1 to locals=3. A VALUE change on the existing
+#   `locals` u32 field (no def-record FORMAT change), so a v46 blob's locals= is provably wrong and must
+#   not be re-served. An EXTRACTION change, not a Snapshot-SEMANTICS change, so kQSnapCacheScheme
+#   deliberately did NOT move.
 # 2026-08-07, integration/quality-fleet, third renumbering: kParserVer 45/45 -> 46. The integration line
 #   had taken 45 (entry below); ev(G) independently took 45 on feat/nest-profile (its entry below — it
 #   skipped 44 to dodge this exact trap, but the integration line had already spent 45). The merged
