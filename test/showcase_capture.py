@@ -284,7 +284,10 @@ src = open( sortutil_path ).read()
 
 OLD_LESS = """inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
 {
-    if( scores[ a ] != scores[ b ] ) return scores[ a ] > scores[ b ];
+    if( scores[a] != scores[b] )
+    {
+        return scores[a] > scores[b];
+    }
     return a < b;
 }"""
 NEW_LESS = """inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
@@ -340,7 +343,9 @@ OLD_DESC = """inline std::uint32_t nonNegativeFloatDescKey( float value ) noexce
 {
     std::uint32_t bits = std::bit_cast<std::uint32_t>( value );
     if( ( bits & 0x7fffffffu ) == 0u )
+    {
         bits = 0u;   // bitwise normalization survives the global no-signed-zeros fast-math contract
+    }
     return ~bits;
 }"""
 NEW_DESC = """inline std::uint32_t nonNegativeFloatDescKey( float value, bool flushDenormals ) noexcept
