@@ -9608,6 +9608,11 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
 // wanted), no --json (it refuses --expand anyway), no range slice (SYM:START-END asks for LESS than the
 // symbol — serving the whole file would invert the ask; test/expandrangecheck.sh pins that contract),
 // and only when the §H7 pre-render succeeded — a degraded render has no measured bytes to compare.
+// D2 (audit regressions, 2026-08-08): --compress and --pack-budget-bytes are deliberately NOT in this
+// predicate — they are body-SHAPING modifiers, and shaping COMPOSES with mode selection instead of
+// disabling it: renderWholeFiles compresses the whole-file candidate, chooseExpandServe holds the
+// whole-file candidate to the same pack budget packBodies enforces on the bundle, and the reason=
+// disclosure compares the shaped candidates. Gates: compresscheck / overbudgetcommentcheck.
 inline bool expandAutoServeScope( const rw::Config& cfg, bool anyExpandRange, bool bodiesRendered )
 {
     return !cfg.expand.empty() && !cfg.topKExplicit && !cfg.json
@@ -9616,22 +9621,33 @@ inline bool expandAutoServeScope( const rw::Config& cfg, bool anyExpandRange, bo
         && !anyExpandRange && bodiesRendered;
 }
 
-// THE CHOICE: whole-file when the raw file bytes undercut the measured bundle, else bundle; ties go to
-// the bundle (the richer answer at equal cost). A wf.complete=false render (a file unreadable NOW) makes
-// whole-file not a candidate, and the reason says so instead of fabricating a byte comparison. The
-// disclosure is mandatory and deterministic — both numbers are measured, never estimated. &lt; in the
-// reason spelling: a raw '<' is ill-formed inside an XML attribute (G4).
+// THE CHOICE: whole-file when the served file bytes undercut the measured bundle, else bundle; ties go
+// to the bundle (the richer answer at equal cost). A wf.complete=false render (a file unreadable NOW)
+// makes whole-file not a candidate, and the reason says so instead of fabricating a byte comparison.
+// D2 (audit regressions, 2026-08-08): both candidates are SHAPED before they are compared — wf.rawBytes
+// is post---compress when that flag is on (renderWholeFiles), and bundleBytes was always the shaped
+// bundle — so the disclosure never claims a comparison between two forms the caller was not offered.
+// And --pack-budget-bytes composes rather than being silently outrun: a whole file cannot be
+// budget-truncated and still be "the complete answer", so a file over the budget is NOT a candidate
+// (the bundle's packBodies enforces that same budget with its over-budget omission markers), with the
+// reason saying exactly that. The disclosure is mandatory and deterministic — every number is measured,
+// never estimated. &lt; in the reason spelling: a raw '<' is ill-formed inside an XML attribute (G4).
 struct ExpandServeChoice
 {
     bool        serveWholeFile = false;
     std::string ctxOpen;
 };
 
-inline ExpandServeChoice chooseExpandServe( std::size_t bundleBytes, const rw::WholeFileRender& wf )
+inline ExpandServeChoice chooseExpandServe( std::size_t bundleBytes, const rw::WholeFileRender& wf, std::size_t budgetBytes )
 {
-    char open[ 128 ];
+    char open[ 160 ];
     ExpandServeChoice c;
-    if( wf.complete && wf.rawBytes < bundleBytes )
+    if( wf.complete && wf.rawBytes > budgetBytes )
+    {
+        std::snprintf( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"whole-file %zuB over pack-budget %zuB\">",
+                       wf.rawBytes, budgetBytes );
+    }
+    else if( wf.complete && wf.rawBytes < bundleBytes )
     {
         c.serveWholeFile = true;
         std::snprintf( open, sizeof( open ), "<ctx mode=\"whole-file\" reason=\"file %zuB &lt; bundle %zuB\">",
@@ -10197,8 +10213,8 @@ int runDefaultMap( const MainDispatch& d )
         // build is the exact climbCeilingLadder failure mode this file already documents.
         const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + measureEmittedMapBytes( mapTopK, payloadTokens )
                                       + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
-        wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr );
-        ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile );
+        wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress );   // D2: shaped candidate
+        ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile, cfg.packBudgetBytes );
         serveWholeFile = choice.serveWholeFile;
         ctxOpenStr     = std::move( choice.ctxOpen );
     }
