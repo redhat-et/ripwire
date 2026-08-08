@@ -115,5 +115,22 @@ mkdir -p "$TMP/notskills"; printf 'int main(){return 0;}\n' >"$TMP/notskills/m.c
     && ok "non-skills root refuses with guidance (rc=$rc_ns)" \
     || no "non-skills root did not refuse cleanly (rc=$rc_ns)"
 
+# ── 11) every skill directory has >= 1 permitted row in the corpus. A skill with zero permitted rows
+#     can never win, lose, or be measured for routing accuracy — it silently free-rides forever, and it
+#     can still steal top-1 away from a permitted skill without this gate ever noticing (2026-08-08 audit
+#     H1: ripwire-opt-remarks, added 08-05, shipped with 0 permitted rows and stole top-1 on several
+#     for-routed prompts + a bm25-desc negative fire before anyone had a row to prove it wrong). ripwire-
+#     router is exempt: it is the fallback map, never a legal label (see gate 9 above).
+skillDirs=$( find "$SKILLS" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort )
+missingSkills=""
+for sd in $skillDirs; do
+    [ "$sd" = "ripwire-router" ] && continue
+    awk -F'\t' -v s="$sd" '!/^#/ && NF>=3 && $2!="none" { n=split($2,a,","); for(i=1;i<=n;i++) if(a[i]==s) f=1 } END{exit !f}' "$CORPUS" \
+        || missingSkills="$missingSkills $sd"
+done
+[ -z "$missingSkills" ] \
+    && ok "every skill directory (except ripwire-router) has >=1 permitted row in the corpus" \
+    || no "skill(s) with ZERO permitted rows in the corpus, unmeasurable for routing:$missingSkills"
+
 [ $fail -eq 0 ] && echo "skillevalcheck: ALL PASS" || echo "skillevalcheck: FAILURES"
 exit $fail
