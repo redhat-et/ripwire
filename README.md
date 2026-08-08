@@ -435,19 +435,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
 second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,999) no two families correlate
 above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
-
-<details>
-<summary>How the six families are joined, and what each one actually finds in this repository's own source</summary>
-
-`--quality-panel` joins **six independent evidence families** (structural shape, lexical naming,
-syntactic-confusion idioms, git churn history, cross-file colocation, and non-local mutable state)
-and ranks by the *count* of families agreeing, never a weighted composite — averaging correlated
-metrics and calling it several is the Maintainability Index's well-known failure mode. On this
-repository the panel measures **4,956** eligible functions and narrows them to **401** worth a
-second look at 2-of-6 agreement — an **8.1%** shortlist, not a guess — and the largest correlation
-between any two families, pooled across five independent corpora (n = 27,999), is **+0.168**: the
-families really are measuring different things. What each of the six actually looks at, on this
-repository's own source, not a synthetic example:
+What each family actually looks at — on this repository's own source, not a synthetic example:
 
 | Family | Question | Backing verb | On this repo |
 | --- | --- | --- | --- |
@@ -457,6 +445,19 @@ repository's own source, not a synthetic example:
 | **historical** | git change frequency — `score = churn × cognitive complexity` | `--hotspots` | `src/main.cpp`: `churn=42 ccx=3387 score=142254` — top of `--hotspots`' ranking, and its own worst function (`main`, `ccx=387`) is where developers keep working *and* the code is hardest. One caveat the panel's own legend states and this table must too: churn is measured **per file**, so every symbol in a file carries that file's `churn=`/`hrank=` verbatim — this family is file evidence *inherited* by the row, never the row's own history |
 | **colocation** (local reasoning) | how much you must read that isn't in front of you | `--context-ratio` | `computeQualityDelta` (`src/mcpverbs.h:2031`), ~50 lines, **87.0%** of its distinct references resolve outside its own file — by the tokens a reader must actually read, **99.6%**. A refinement of Beck & Diehl's per-class congruence (FSE 2011); Martin's instability `I = Ce/(Ca+Ce)` is its cruder ancestor |
 | **state** (unintended side effects) | mutable state a change here can perturb, that `--impact` (who calls you) never asks about | `--nonlocal-state` | `ensure_global_init` (`src/infra/profilePmc.h:288`) reaches 3 distinct global/static cells through its own body and callees — a tiny, innocent-looking call site can still break state three hops away. Unsound by construction (no pointer aliasing, no indirect calls), so every count is a floor |
+
+<details>
+<summary>How the six families are joined, the churn caveat, and the <code>nest=</code> profile deep-dive</summary>
+
+`--quality-panel` joins **six independent evidence families** (structural shape, lexical naming,
+syntactic-confusion idioms, git churn history, cross-file colocation, and non-local mutable state)
+and ranks by the *count* of families agreeing, never a weighted composite — averaging correlated
+metrics and calling it several is the Maintainability Index's well-known failure mode. On this
+repository the panel measures **4,956** eligible functions and narrows them to **401** worth a
+second look at 2-of-6 agreement — an **8.1%** shortlist, not a guess — and the largest correlation
+between any two families, pooled across five independent corpora (n = 27,999), is **+0.168**: the
+families really are measuring different things. The six-family table above shows what each finds on
+this repository's own source; the sections below are the parts that need more than a row.
 
 ### `nest=` is a max, so it cannot tell a long function from a tangled one
 
