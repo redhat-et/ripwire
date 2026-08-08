@@ -1734,21 +1734,27 @@ buildHeatAnnotations( std::string_view withProfile, const rw::IngestResult& ing,
 // for-header ones"), which no tree-sitter query can express, so the pack spends its own astQuery pass
 // on a budget far above kLintMaxPerRule — an exclusion stream truncated at 5000 would manufacture
 // false positives on this repo alone. kAtomRuleNames is THE list, so the tally cannot drift from what
-// ONE parse pass for all three built-in packs, in the order runLint merges them: the [AST] checks it was
-// handed, the atoms pack, the cache pack. Each of those three spec tables used to drive its OWN astQuery
-// call, and each of those calls re-read and re-parsed every file in the corpus -- three reads and three
-// tree-sitter parses per file to ask three sets of questions about the SAME tree, plus three rounds of
+// ONE parse pass for all four built-in producers, in the order runLint merges them: the [AST] checks it
+// was handed, the atoms pack, the cache pack, and the unreachable-code walk. Each of those used to drive
+// its OWN corpus pass, and each of those passes re-read and re-parsed every file -- four reads and four
+// tree-sitter parses per file to ask four sets of questions about the SAME tree, plus three rounds of
 // compiling every spec against every linked grammar. astQueryGrouped walks the corpus once and buckets the
-// captures per group; each bucket is then sorted and budget-capped by exactly the code a standalone call
-// runs, so the three results are byte-identical to the three passes they replace.
+// findings per group; each bucket is then sorted and budget-capped by exactly the code a standalone call
+// runs, so the four results are byte-identical to the four passes they replace.
+//
+// The fourth is not a spec table: unreachable-code is an ORDERED scan of a block's statement siblings
+// ("the first non-comment statement after an unconditional exit"), which no tree-sitter pattern can
+// express, so it rides the shared walk as an AstWalk group instead (src/ingest.h). What it shares is what
+// it was duplicating -- the read, the parse and the newline index -- not the traversal.
 std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks )
 {
-    PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache)" );
+    PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache + unreachable)" );
     const std::vector<rw::AstQuerySpec> atomChecks  = rw::atoms::atomsSpecs();
     const std::vector<rw::AstQuerySpec> cacheChecks = rw::cachelint::cacheSpecs();
-    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,                 nullptr },
-                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,        nullptr },
-                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget,    nullptr } } );
+    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,              nullptr },
+                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,     nullptr },
+                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget, nullptr },
+                                       { nullptr,      rw::kUnreachableMaxHits,          nullptr, rw::AstWalk::UnreachableCode } } );
 }
 
 // the pack can emit. Lifted out of runLint for the same reason lintSymbolLevelChecks was.
@@ -9183,10 +9189,11 @@ std::optional<int> runLint( const MainDispatch& d )
         // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
         // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
         // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
+        // Already collected, sorted and capped: it rode the one grouped walk above as grouped[3] instead of
+        // spending a fourth read + parse of the whole corpus on its own pool.
         {
-            PROFILE_SCOPE_DESCRIBE( "lint: unreachableCheck" );
-            std::vector<AstMatch> urHits = unreachableCheck( ing );
-            for( auto& h : urHits )
+            PROFILE_SCOPE_DESCRIBE( "lint: mergeUnreachable" );
+            for( auto& h : grouped[3] )
             {
                 ms.push_back( std::move( h ) );
             }

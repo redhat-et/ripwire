@@ -3332,10 +3332,10 @@ inline void ln_collectLocalDecls( TSNode node, TSNode funcRoot, int depth, std::
 }
 
 // collectGatedLocalNames itself (the ingest.h-declared, EXTERNAL-linkage entry point) is defined further
-// down, OUTSIDE this anonymous namespace — same split as ingest()/unreachableCheck() in this same file:
+// down, OUTSIDE this anonymous namespace — same split as ingest()/astQueryGrouped() in this same file:
 // an anonymous-namespace definition would give it INTERNAL linkage, which cannot satisfy ingest.h's
 // declaration. The ln_* helpers above stay in here (internal-only, next to cc_walk/complexityOf which they
-// mirror) and remain visible to that later definition, exactly like ingest()/unreachableCheck() already
+// mirror) and remain visible to that later definition, exactly like ingest()/astQueryGrouped() already
 // call plenty of anonymous-namespace-scoped helpers from outside the namespace block in this same TU.
 
 // Q4 PARAMETER COUNT: find the def's parameter-list node and count its formal parameters. Parameter-list
@@ -8459,15 +8459,38 @@ GrammarQueries compileGrammarQueries( const TSLanguage* g, const std::vector<Ast
     return gqs;
 }
 
+// Defined further down this file, next to the rest of the unreachable-code check's helpers, and
+// forward-declared here so the shared file walk can drive it — the same split as
+// ingest()/astQueryGrouped() already use above.
+inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src, const std::vector<std::uint32_t>& nlOffsets, std::vector<AstMatch>& hits );
+
+// Drive every BUILT-IN WALK group over one already-parsed file, each into its own bucket. Called from the
+// shared worker loop with the tree and newline index the query groups are about to use, which is the whole
+// point: a walk group exists so a non-query check can stop re-reading and re-parsing the corpus for itself.
+inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root, std::uint32_t fileId, std::string_view bytes,
+                           const std::vector<std::uint32_t>& nlOffsets, std::vector<std::vector<AstMatch>>& perGroupHits )
+{
+    for( std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex )
+    {
+        if( groups[groupIndex].walk == AstWalk::UnreachableCode )
+        {
+            ur_walkTree( root, fileId, bytes, nlOffsets, perGroupHits[groupIndex] );
+        }
+    }
+}
+
 std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups )
 {
     std::vector<std::vector<AstMatch>> out( groups.size() );
     bool                               anySpecs = false;
+    bool                               anyWalk  = false;
     for( const AstQueryGroup& group : groups )
     {
         anySpecs = anySpecs || ( group.specs != nullptr && !group.specs->empty() );
+        anyWalk  = anyWalk  || ( group.walk != AstWalk::None );
     }
-    if( !anySpecs || ing.files.empty() )
+    // A walk group is work even with no spec anywhere: it needs the parse, not a compiled query.
+    if( ( !anySpecs && !anyWalk ) || ing.files.empty() )
     {
         return out;
     }
@@ -8714,11 +8737,12 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     {
                         continue; // markdown — no grammar (would deref a null fn ptr)
                     }
-                    const TSLanguage* g  = le->grammar();
-                    const auto        it = byGrammar.find( g );
-                    if( it == byGrammar.end() || it->second.perSpec.empty() )
+                    const TSLanguage* g          = le->grammar();
+                    const auto        it         = byGrammar.find( g );
+                    const bool        hasQueries = ( it != byGrammar.end() && !it->second.perSpec.empty() );
+                    if( !hasQueries && !anyWalk )
                     {
-                        continue; // no spec applies to this grammar
+                        continue; // no spec applies to this grammar, and no built-in walk wants the tree either
                     }
                     if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
                     {
@@ -8735,6 +8759,20 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     }
                     const TSNode root = ts_tree_root_node( tree );
                     const std::vector<std::uint32_t> nlOffsets = buildNewlineOffsets( bytes );   // one pass, then binary-search per capture
+
+                    // Built-in walk groups first: they read the SAME tree and the SAME newline index the
+                    // query groups below use, into their own per-group bucket, so nothing crosses over.
+                    if( anyWalk )
+                    {
+                        PROFILE_SCOPE_DESCRIBE( "astQuery/worker: built-in tree walk" );
+                        runWalkGroups( groups, root, std::uint32_t( fileId ), bytes, nlOffsets, tHits[t] );
+                    }
+                    if( !hasQueries )
+                    {
+                        ts_tree_delete( tree );
+                        continue;   // walk-only file — no compiled spec for this grammar
+                    }
+
                     PROFILE_SCOPE_DESCRIBE( "astQuery/worker: cursor exec + captures" );
                     // Every capture of one match, filed under the spec that owns the pattern. Shared by both
                     // execution shapes below so the ONE walk and the fallback walks cannot drift apart.
@@ -8832,7 +8870,8 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
     // sort on the total key, then spend each tag's own budget. Nothing crosses a group boundary.
     for( std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex )
     {
-        if( groups[groupIndex].specs == nullptr || groups[groupIndex].specs->empty() )
+        const bool hasSpecs = ( groups[groupIndex].specs != nullptr && !groups[groupIndex].specs->empty() );
+        if( !hasSpecs && groups[groupIndex].walk == AstWalk::None )
         {
             continue;   // a caller may pass an inert slot to keep its group indices stable
         }
@@ -8866,6 +8905,19 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                        }
                        return x.tag < y.tag;                                                // equal keys ⇒ identical records (text derives from [start,end)) — order among them can't affect output
                    } );
+
+        // A built-in walk group has no spec table to budget against, and emits ONE tag — so the per-tag
+        // cap below degenerates to a single truncation of the sorted list, which is byte-for-byte the tail
+        // the standalone spelling ran (collect all, sort on the same total key, resize to maxMatches).
+        if( !hasSpecs )
+        {
+            if( merged.size() > groups[groupIndex].maxMatches )
+            {
+                merged.resize( groups[groupIndex].maxMatches );
+            }
+            out[groupIndex] = std::move( merged );
+            continue;
+        }
 
         // ── deterministic PER-SPEC cap (§P0.2), applied AFTER the sort so the survivors are a pure function of
         // the input. One POOLED budget let the noisiest query eat it: `(number_literal)` alone filled 5000, the
@@ -9088,126 +9140,6 @@ std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, st
     }
     ts_tree_delete( tree );
     ts_parser_delete( parser );
-    return out;
-}
-
-std::vector<AstMatch> unreachableCheck( const IngestResult& ing, std::size_t maxMatches )
-{
-    std::vector<AstMatch> out;
-    if( ing.files.empty() )
-    {
-        return out;
-    }
-
-    const std::size_t nfiles = ing.files.size();
-    unsigned hw = std::thread::hardware_concurrency();
-    if( hw == 0 )
-    {
-        hw = 1;
-    }
-    const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
-
-    // Per-thread hit buckets, merged + sorted after the join (same determinism discipline as astQuery:
-    // no shared mid-flight counter, so WHICH findings survive the cap is a pure function of the input).
-    std::vector<std::vector<AstMatch>> tHits( nthreads );
-    std::atomic<std::size_t>           nextFile{ 0 };
-    std::vector<std::thread>           pool;  pool.reserve( nthreads );
-
-    for( unsigned t = 0; t < nthreads; ++t )
-    {
-        pool.emplace_back( [ &, t ]()
-        {
-            ParserGuard pg;
-            if( pg.p == nullptr )
-            {
-                return;
-            }
-            std::string bytes;
-            for( ;; )
-            {
-                const std::size_t fileId = nextFile.fetch_add( 1, std::memory_order_relaxed );
-                if( fileId >= nfiles )
-                {
-                    break;
-                }
-                try
-                {
-                    const std::string& path = diskPath( ing, std::uint32_t( fileId ) );   // multi-root: labeled ing.files → on-disk path
-                    const std::string ext = lowerExtensionOf( path );
-                    const LangEntry* le = lookupLang( ext );
-                    if( le == nullptr )
-                    {
-                        continue;
-                    }
-                    if( !readFile( path, bytes ) )
-                    {
-                        continue;
-                    }
-                    if( looksBinary( bytes ) )
-                    {
-                        continue;
-                    }
-                    if( ext == ".h" && looksObjC( bytes ) )
-                    {
-                        if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                        {
-                            le = objcLe;
-                        }
-                    }
-                    if( le->grammar == nullptr )
-                    {
-                        continue; // markdown — no grammar
-                    }
-
-                    const TSLanguage* g = le->grammar();
-                    if( !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
-                    {
-                        continue;
-                    }
-                    TSTree* tree = ts_parser_parse_string( pg.p, nullptr, bytes.data(), static_cast<std::uint32_t>( bytes.size() ) );
-                    if( !tree )
-                    {
-                        continue;
-                    }
-                    const std::vector<std::uint32_t> nlOffsets = buildNewlineOffsets( bytes );   // one pass; ur_walkTree binary-searches it
-                    ur_walkTree( ts_tree_root_node( tree ), std::uint32_t( fileId ), bytes, nlOffsets, tHits[t] );
-                    ts_tree_delete( tree );
-                }
-                catch( ... ) { /* per-file degrade — never abort the pass */ }
-            }
-        } );
-    }
-    for( std::thread& th : pool )
-    {
-        th.join();
-    }
-
-    std::size_t tot = 0;
-    for( const auto& v : tHits )
-    {
-        tot += v.size();
-    }
-    out.reserve( tot );
-    for( auto& v : tHits )
-    {
-        for( auto& m : v )
-        {
-            out.push_back( std::move( m ) );
-        }
-    }
-    std::sort( out.begin(), out.end(), [ & ]( const AstMatch& x, const AstMatch& y ) // deterministic order
-               {
-        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-        if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
-}
-        if( x.endByte   != y.endByte   ) { return x.endByte   < y.endByte;     // same total tie-break as astQuery — same-start ties must not leak thread arrival order
-}
-        return x.tag < y.tag; } );
-    if( out.size() > maxMatches )
-    {
-        out.resize( maxMatches );
-    }
     return out;
 }
 
