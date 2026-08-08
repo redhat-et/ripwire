@@ -53,6 +53,15 @@ source shape.
    *sustains* depth from a long flat one whose max is a single inner loop; `deep/loc` is the discriminator
    (→ **ripwire-quality-bar**). Confirm every suspected bottleneck with the benchmark/profile.
 
+4a2. **Join the measured heat onto the static findings** — `ripwire <dir> --lint --with-profile=REPORT`
+
+   REPORT is a RIPWIRE_PROFILE build's own stderr report (its `#PROF_TSV` block, verbatim). Every `--lint`
+   finding whose enclosing symbol contains a `PROFILE_SCOPE` site gains `heat_*` attributes — the scope's
+   measured calls, total_ms, and whichever counter columns that run armed (`heat_l1d_mpki` etc.; an ABSENT
+   column was not measured, never zero). This is the one-command answer to "which of these cache-* rows are
+   actually HOT": static shape × PMU weight (SYZYGY's advice mode, Hundt CGO 2006). `heat_joined="0"` on
+   the root is honest — no finding sits inside a profiled scope — never an error.
+
 4b. **If the profile points at MEMORY, not compute** — `ripwire <dir> --field-affinity[=STRUCT]`
 
    **When to reach for it.** The measurement already implicates a struct-heavy path and the *shape* of the

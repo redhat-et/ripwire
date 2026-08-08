@@ -343,6 +343,11 @@ struct Config
                                                              // AMBIGUITY universe stays the whole corpus either way (a field name
                                                              // declared by two aggregates is refused, never guessed) — see
                                                              // src/fieldaffinity.h::buildFieldOwners.
+    std::string_view withProfile;                           // --with-profile=FILE: join --lint findings to the #PROF_TSV
+                                                             // block a RIPWIRE_PROFILE build's report emitted — a finding whose
+                                                             // enclosing symbol contains a scope site gains measured heat_*
+                                                             // attributes (the SYZYGY advice-mode pairing: static shape ×
+                                                             // PMU weight). Modifier of --lint only; refused loudly alone.
     std::string_view fromTrace;                             // --from-trace=FILE ('-'=stdin) (B11/L2): map a stack trace /
                                                              // sanitizer report / compiler-error text onto the indexed symbols —
                                                              // table-driven frame extraction (python/asan/node/compiler/generic),
@@ -998,6 +1003,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a\n"
         "                               high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule\n"
         "    --lint-rules=DIR           load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint\n"
+        "    --with-profile=FILE        (with --lint) join MEASURED heat onto findings: FILE is a RIPWIRE_PROFILE build's report\n"
+        "                               (its #PROF_TSV block); a finding whose enclosing symbol contains a PROFILE_SCOPE site\n"
+        "                               gains heat_* attributes (scope, calls, total_ms, and whichever counter columns the\n"
+        "                               profiled run armed — l1d_mpki etc.). Static shape x measured weight; joins nothing\n"
+        "                               silently — a missing file or a FILE with no #PROF_TSV block refuses loudly\n"
         "    --communities              cluster the call graph into cohesive modules (each row's id= drills down below; drill= names the verb)\n"
         "    --community=ID             ONE module from that partition: its FULL ranked member list (40 rows by default, raise with\n"
         "                               --limit, page with --offset) plus its bridge edges to every other module it touches. ID is an\n"
@@ -1747,6 +1757,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--edit-check=",  &Config::editCheckSym    , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--edit-check=parseArgs" },
     { "--eval-stray=",  &Config::evalStray       , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-stray=bench/strayverdicts.tsv" },
     { "--from-trace=",  &Config::fromTrace       , EmptyValue::Refuse, "a trace file path, or - for stdin",      "--from-trace=crash.txt" },
+    { "--with-profile=",&Config::withProfile     , EmptyValue::Refuse, "a profile report holding a #PROF_TSV block", "--with-profile=report.txt" },
 
     // the lane plan's two inputs (each refused alone by validateConfig)
     { "--task=",        &Config::laneTask        , EmptyValue::Refuse, "a goal in words",                        "--task=\"add a --since filter\"" },
@@ -1942,7 +1953,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 17;
-inline constexpr std::size_t kTotalFlagArms       = 167;   // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization)
+inline constexpr std::size_t kTotalFlagArms       = 168;  // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2527,6 +2538,14 @@ inline void validateModifierGuards( Config& c ) noexcept
     {
         std::fprintf( stderr, "ripwire: --force only applies to `ripwire wrap <agent>` (proceed past CRITICAL skill findings) — "
                               "pass it there instead (e.g. ripwire wrap claude --force)\n" );
+        c.ok = false;
+    }
+
+    // --with-profile joins measured scope heat onto --lint findings and reaches nothing anywhere else;
+    // alone it would silently no-op exactly like the modifiers around it. Refuse loudly.
+    if( !c.withProfile.empty() && !c.lint )
+    {
+        std::fprintf( stderr, "ripwire: --with-profile=FILE modifies --lint — pass it too (e.g. ripwire <dir> --lint --with-profile=report.txt)\n" );
         c.ok = false;
     }
 

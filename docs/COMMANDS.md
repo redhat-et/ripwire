@@ -1479,6 +1479,23 @@ $ ./build/ripwire . --lint-rules=test/lintrulesfix/rules
 </lint>
 ```
 
+### `--with-profile=FILE`
+
+**Answers:** (with `--lint`) join MEASURED heat onto findings — which of these rows are actually hot?
+
+FILE is a `RIPWIRE_PROFILE` build's own stderr report (its `#PROF_TSV` block, read verbatim — generate one with `ripwire <dir> 2>report.txt` on a profile build). A finding whose enclosing symbol contains a `PROFILE_SCOPE` site gains `heat_*` attributes from the nearest preceding site: the scope name, `heat_calls`, `heat_total_ms`, and whichever counter columns that run armed (`heat_l1d_mpki` etc. on a privileged run — an ABSENT column was not measured, never zero). The root carries `heat_joined=`; `0` is honest (no finding sits inside a profiled scope), never an error. Static shape × PMU weight — SYZYGY's advice mode (Hundt, CGO 2006), see `docs/CACHELINT.md`. Refusals are loud: the flag alone (it modifies `--lint`), a missing FILE, or a FILE with no `#PROF_TSV` block all exit 1 — "joined nothing" and "read the wrong file" must never look alike.
+
+**Try it**
+
+_A finding inside a profiled scope carries that scope's measured columns._
+
+```
+$ ./build/ripwire . --lint --with-profile=report.txt
+<f rule="cache-pointer-chase-loop" p="./src/x.cpp:38" in="walk" heat_scope="walk: chase pass" heat_calls="12" heat_total_ms="48.500" heat_l1d_mpki="7.250">p = p-&gt;next</f>
+```
+
+**Shaped by:** `--lint`, `--lint-rules`
+
 ### `--communities`
 
 **Answers:** cluster the call graph into cohesive modules (each row's id= drills down below;

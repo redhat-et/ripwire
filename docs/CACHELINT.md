@@ -129,6 +129,18 @@ A loop whose whole body is one `if` testing a member/getter of the element, with
 `break/return/goto` in the consequence (that exclusion separates it from a search loop — the
 discriminating pair the fixture must pin). GPP's packed-pool prescription goes in the row text.
 
+### 3.6 The measured tier — SHIPPED (2026-08-07, same day): `--lint --with-profile=FILE`
+The judgment gap every refutation in the 327-finding triage hit ("win unmeasurable without a
+profile") is closed by pairing the static rows with the profiler's own `#PROF_TSV` block
+(profileScope.h already emits per-scope l1d/llc/dtlb misses on the kperf and perf backends): a
+finding whose enclosing symbol contains a `PROFILE_SCOPE` site gains `heat_*` attributes — the
+nearest-preceding site's scope name, calls, total_ms, and whichever counter columns the profiled
+run armed (absent = not measured, never zero; `heat_joined=` on the root; zero joins is honest).
+This is SYZYGY's advice mode (Hundt CGO 2006, cited in fieldaffinity.h) reconstructed: static
+shape × PMU weight, surfaced as review advice. Gate: `test/withprofilecheck.sh` (hand-written TSV,
+exact-value join + fence + refusal arms). `louvainLocalMoving` carries its own scope now, so the
+open Louvain-flatten question (§triage) is one privileged `--communities` run away from a verdict.
+
 ### Explicitly rejected for any wave
 Branch-predictability scoring (runtime), loop blocking profitability (needs sizes), temporal-locality
 interleaving (needs dataflow across statements), prefetch insertion advice (measure first), global

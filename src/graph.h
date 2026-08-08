@@ -3291,6 +3291,7 @@ struct WEdge { NodeId to; double w; };
 // single-level and multi-level paths cannot drift.
 inline Communities louvainLocalMoving( const std::vector<std::vector<WEdge>>& adj )
 {
+    PROFILE_SCOPE_DESCRIBE( "louvainLocalMoving: modularity local-moving passes" );
     const std::uint32_t N = std::uint32_t( adj.size() );
     Communities out;
     out.comm.assign( N, 0 );
