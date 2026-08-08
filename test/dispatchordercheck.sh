@@ -97,10 +97,21 @@ assertWinner "affected-beats-situ"        affected         --affected=src/chain.
 # --quality-baseline, --quality-ack, --note-add, --export). It is in table order; each entry is one runnable
 # invocation on this fixture. Coverage is the seams BETWEEN listed neighbours, which is stated rather than
 # implied -- the unlisted verbs sit inside those spans and are not pinned by this arm.
+#
+# §F1 (audit 2026-08-08) — eleven verb-shaped flags were missing from the table entirely and so collided in
+# TOTAL silence, exactly like the query family did before M1. They are inserted here at their real dispatch
+# positions, which extends the adjacent-pair coverage over them: --ensemble/--context-ratio (runMaintenance-
+# Views' first two arms, ahead of --hotspots), the six runQualityViews lenses ahead of --dead-code
+# (--readability, --comment-coherence, --nonlocal-state, --quality-panel, --naming-calibration,
+# --naming-consistency), --handoff (runChangeViews' first arm) and --field-affinity (between --layout and
+# --doc-drift). --index-out is verb-shaped too but WRITES cache blobs, so it stays out of this side-effect-
+# free list and gets its own arm below.
 PREC_VERBS=(
-  "--exemplar=chain" "--recall=chain" "--deps" "--clones" "--dead-code" "--edit-check=d2"
+  "--exemplar=chain" "--recall=chain" "--deps" "--ensemble" "--context-ratio" "--clones"
+  "--readability" "--comment-coherence" "--nonlocal-state" "--quality-panel"
+  "--naming-calibration" "--naming-consistency" "--dead-code" "--edit-check=d2"
   "--callers=d2" "--callees=d1" "--uses=d2" "--external-surface" "--path=d1,d3" "--connect=d1,d2,d3"
-  "--impact=d3" "--mentions=d2" "--flags" "--whereis=d2" "--doc-drift" "--notes"
+  "--impact=d3" "--mentions=d2" "--handoff" "--flags" "--whereis=d2" "--field-affinity" "--doc-drift" "--notes"
   "--communities" "--zoom" "--seams" "--report" "--tree" "--grep=d2" "--lint" "--around=d2"
 )
 PRECTMP="$( mktemp -d )"; trap 'rm -rf "$PRECTMP"' EXIT
@@ -203,6 +214,126 @@ if grep -q 'takes precedence over --query/--pack-task' "$PRECTMP/xm" && grep -q 
     pass "mixed --for+--query+--lint: X9(c) takes --query, the report line takes --lint, neither repeats the other"
 else
     fail "mixed --for+--query+--lint: expected X9(c) plus 'IGNORED this run: --lint.' (got: $( head -c 240 "$PRECTMP/xm" ))"
+fi
+
+# ── F1 — the ELEVEN verb-shaped flags the table never knew about ──────────────────────────────────────
+#
+# The adversarial verifier's F1: --quality-panel, --expand, --pack-signatures, --map-diff, --field-affinity,
+# --naming-consistency and --index-out (plus, once swept properly, --readability, --comment-coherence,
+# --nonlocal-state, --naming-calibration, --ensemble, --context-ratio and --handoff) were neither table rows
+# nor pure modifiers. Every one of them collided with a real report verb at stderr-EMPTY, exit 0 — the F1
+# reproducer being `--quality-panel --lint` (panel bytes, no signal) and `--expand=SYM --lint` (lint bytes,
+# --expand silently thrown away).
+#
+# The eleven that SELECT A HANDLER are now rows (covered by PREC_VERBS above, plus the spot checks here
+# against the two verbs that bracket them). The five that shape runDefaultMap are a separate class, below.
+assertCross "--hotspots"           "--quality-panel"
+assertCross "--quality-panel"      "--lint"
+assertCross "--hotspots"           "--readability"
+assertCross "--readability"        "--lint"
+assertCross "--hotspots"           "--naming-consistency"
+assertCross "--naming-consistency" "--lint"
+assertCross "--hotspots"           "--field-affinity"
+assertCross "--field-affinity"     "--lint"
+assertCross "--ensemble"           "--hotspots"
+assertCross "--context-ratio"      "--hotspots"
+assertCross "--hotspots"           "--handoff"
+assertCross "--handoff"            "--lint"
+
+# ── F1 — --index-out dispatches ahead of EVERYTHING, including the query family ───────────────────────
+#
+# It runs before ingest (it IS the ingest-artifact generator), so it outranks even --for. That made it the
+# one row that can beat a query-family flag, and the reason X9(c) is now gated on the family actually
+# winning: a run where --index-out answered must not also claim "--for takes precedence".
+IOTMP="$( mktemp -d )"; trap 'rm -rf "$PRECTMP" "$IOTMP"' EXIT
+"$BIN" "$FIX" --index-out="$IOTMP/ix" --lint >"$IOTMP/o" 2>"$IOTMP/e"
+if [ -s "$IOTMP/o" ]; then
+    fail "--index-out+--lint: stdout is non-empty — --lint answered instead of --index-out"
+elif ! grep -q -- '--index-out takes precedence' "$IOTMP/e"; then
+    fail "--index-out+--lint: stderr does not name --index-out as the winner (got: $( head -c 160 "$IOTMP/e" ))"
+elif ! grep -q -- 'IGNORED this run: .*--lint' "$IOTMP/e"; then
+    fail "--index-out+--lint: stderr does not name --lint as ignored (got: $( head -c 160 "$IOTMP/e" ))"
+else
+    pass "--index-out+--lint: --index-out wins, --lint disclosed as ignored"
+fi
+"$BIN" "$FIX" --index-out="$IOTMP/iy" --for=parse >"$IOTMP/o2" 2>"$IOTMP/e2"
+if grep -q -- '--for takes precedence over --query/--pack-task' "$IOTMP/e2"; then
+    fail "--index-out+--for: X9(c) claims --for won, but --index-out answered"
+elif ! grep -q -- 'IGNORED this run: .*--for' "$IOTMP/e2"; then
+    fail "--index-out+--for: stderr does not disclose --for as ignored (got: $( head -c 160 "$IOTMP/e2" ))"
+else
+    pass "--index-out+--for: --index-out wins, --for disclosed, X9(c) stays quiet"
+fi
+
+# ── F1 — the MAP-MODIFIER class: --expand / --outline / --pack-signatures / --pack-top-n / --map-diff ──
+#
+# These five are NOT verbs: none of them selects a handler. They shape what runDefaultMap renders, and
+# runDefaultMap serves exactly two runs — a flagless map and --query (which, as main() says, "owns no handler
+# of its own"). So the uniform rule is: a map-modifier COMPOSES with any run that reaches the default map and
+# is VOIDED by any report verb that answers first — and being voided is disclosed, because a silently dropped
+# --expand answers a different question than the one that was asked.
+#
+# Giving them table ROWS would be wrong in a way this arm proves: a row makes the flag a winner or a loser,
+# and `--query --expand` is neither — stdout there is NOT --query's solo output, because the two compose.
+#
+# composes NAME ARGS...  — stdout must DIFFER from the host verb's solo run, and stderr must stay quiet.
+composes()
+{
+    local name="$1" host="$2" mod="$3"
+    "$BIN" "$FIX" $host        >"$PRECTMP/csolo" 2>/dev/null
+    "$BIN" "$FIX" $host "$mod" >"$PRECTMP/cboth" 2>"$PRECTMP/cerr"
+    if cmp -s "$PRECTMP/csolo" "$PRECTMP/cboth"; then
+        fail "$name: [$host $mod] is byte-identical to '$host' alone — $mod did not compose"
+    elif grep -q 'DISCARDED this run' "$PRECTMP/cerr"; then
+        fail "$name: [$host $mod] composed but stderr still calls $mod discarded"
+    else
+        pass "$name: [$host $mod] composes, no discard warning"
+    fi
+}
+
+# voided NAME HOST MOD — stdout must equal the host verb's solo run, and the discard MUST be disclosed.
+voided()
+{
+    local name="$1" host="$2" mod="$3"
+    local mf="${mod%%=*}"
+    "$BIN" "$FIX" $host        >"$PRECTMP/vsolo" 2>/dev/null
+    "$BIN" "$FIX" $host "$mod" >"$PRECTMP/vboth" 2>"$PRECTMP/verr"
+    if ! cmp -s "$PRECTMP/vsolo" "$PRECTMP/vboth"; then
+        fail "$name: [$host $mod] is not '$host' solo — $mod changed the answer after all"
+    elif ! grep -q "DISCARDED this run: .*$mf" "$PRECTMP/verr"; then
+        fail "$name: [$host $mod] drops $mf in silence (stderr: $( head -c 160 "$PRECTMP/verr" ))"
+    else
+        pass "$name: [$host $mod] $mf voided and disclosed"
+    fi
+}
+
+# the two runs that REACH runDefaultMap — the modifiers compose and nothing is warned
+composes "mapmod-query-expand"   "--query=d2" "--expand=d2"
+composes "mapmod-query-outline"  "--query=d2" "--outline=d2"
+composes "mapmod-query-packsigs" "--query=d2" "--pack-signatures"
+composes "mapmod-query-packtopn" "--query=d2" "--pack-top-n=3"
+# --pack-top-n is the one map-modifier --for also honours (it budgets --for's bodies), so it composes there too
+composes "mapmod-for-packtopn"   "--for=parse" "--pack-top-n=3"
+
+# every report verb that answers first VOIDS them — and says so
+voided "mapmod-lint-expand"        "--lint"        "--expand=d2"
+voided "mapmod-lint-outline"       "--lint"        "--outline=d2"
+voided "mapmod-lint-packsigs"      "--lint"        "--pack-signatures"
+voided "mapmod-lint-mapdiff"       "--lint"        "--map-diff"
+voided "mapmod-hotspots-expand"    "--hotspots"    "--expand=d2"
+voided "mapmod-report-expand"      "--report"      "--expand=d2"
+voided "mapmod-for-expand"         "--for=parse"   "--expand=d2"
+voided "mapmod-packtask-expand"    "--pack-task=parse" "--expand=d2"
+voided "mapmod-packtask-packtopn"  "--pack-task=parse" "--pack-top-n=3"
+# --map-diff is the one map-modifier --query does NOT honour (its lexical-rank branch replaces the diff scope)
+voided "mapmod-query-mapdiff"      "--query=d2"    "--map-diff"
+
+# a map-modifier on a FLAGLESS run is the composing case with no host verb at all — it must stay silent.
+"$BIN" "$FIX" --expand=d2 >/dev/null 2>"$PRECTMP/mf"
+if grep -q 'DISCARDED this run\|takes precedence' "$PRECTMP/mf"; then
+    fail "mapmod-flagless: --expand alone warned, but the default map is exactly what it modifies"
+else
+    pass "mapmod-flagless: --expand alone is silent (the map it shapes is the run)"
 fi
 
 # a SINGLE verb must stay silent — a warning that fires when nothing was dropped is worse than none.
