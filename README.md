@@ -50,7 +50,7 @@ commands in
 
 Ordered understand → navigate → review-the-change:
 
-| Ask it | Command | ripwire | naive read | savings |
+| Ask it | Command | ripwire | naive read | token savings |
 | --- | --- | --- | --- | --- |
 | "Orient me in this repo" | `ripwire .` | **~5.6K tok** | ~20K–25K tok — read `README.md` (+`docs/ARCHITECTURE.md`) | 3.6×–4.5× |
 | "Where is X handled?" | `ripwire . --for="…"` | **~1.9K tok** | ~4.9K–20K tok — `grep -rn <term> src/`, then read the file it points at | 2.6×–10.7× |
