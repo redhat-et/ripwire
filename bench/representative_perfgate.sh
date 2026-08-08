@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Representative A6 performance drift gate. It builds a deterministic generated corpus from a hash-pinned
-# fixture and applies absolute budgets only on the recorded canonical machine. Other machines report the
-# same five-sample measurements without pass/fail; no shared regression is normalized away by another path.
+# Representative A6 performance LEDGER (retired from threshold-gating to informational-ledger mode by
+# owner directive 2026-08-08: "perf budgets are not the model — best tool first, then make it fast"; see
+# bench/perfgate.sh's header for the full rationale, which applies here identically). It builds a
+# deterministic generated corpus from a hash-pinned fixture and reports the same five-sample measurements
+# on every machine — no absolute budget, no pass/fail, no machine-identity branch. The semantic preflights
+# (fixture-shape, cache-transparency, blob-header checks) still fail loudly: those catch the harness being
+# broken, not the numbers moving.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -9,11 +13,14 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 RUNS="${RIPWIRE_REP_PERF_RUNS:-5}"
 FIXTURE_HASH="08352db35d9c93c4fc7e3af7f38469af8f8b86d1"
+PROFILE_MD="$ROOT/bench/PROFILE.md"
 PREFLIGHT_ONLY=0
+WRITE_LEDGER=1
 case "${1:-}" in
     "") ;;
     --preflight-only) PREFLIGHT_ONLY=1 ;;
-    *) echo "usage: bench/representative_perfgate.sh [--preflight-only]"; exit 2 ;;
+    --no-ledger)      WRITE_LEDGER=0 ;;
+    *) echo "usage: bench/representative_perfgate.sh [--preflight-only|--no-ledger]"; exit 2 ;;
 esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
@@ -107,30 +114,27 @@ printf 'representative_perfgate: machine=%s/%s fixture=%s copies=80 files=%s byt
 printf '  cold=%8.3f ms  warm-index-retrieval=%8.3f  report=%8.3f  quality-delta=%8.3f  dead-code=%8.3f  mcp=%8.3f\n' \
        "$coldMs" "$retrievalMs" "$reportMs" "$qualityMs" "$deadMs" "$mcpMs"
 
+# ledger mode (owner directive 2026-08-08): report the machine for context, but no budget comparison and
+# no machine-identity branch — every machine gets the same measurement-only treatment now.
 machineId="$( system_profiler SPHardwareDataType 2>/dev/null | awk -F': ' '/Model Identifier/{print $2; exit}' )"
-canonicalMachine="Mac17,8"
-printf '  machine_id=%s canonical_budget_machine=%s policy=absolute-on-match-report-only-otherwise\n' "${machineId:-unknown}" "$canonicalMachine"
-if [ "$machineId" != "$canonicalMachine" ]; then
-    echo "representative_perfgate: measurements only; absolute budgets apply only to $canonicalMachine"
-    exit 0
+printf '  machine_id=%s policy=ledger (no pass/fail — owner directive 2026-08-08)\n' "${machineId:-unknown}"
+
+if [ "$WRITE_LEDGER" -eq 1 ]; then
+    {
+        printf '\n## %s — representative_perfgate ledger\n\n' "$( date -u '+%Y-%m-%d' )"
+        printf 'Ledger-mode measurement (owner directive 2026-08-08: perf budgets are not the model — best\n'
+        printf 'tool first, then make it fast; no pass/fail — see bench/representative_perfgate.sh header).\n'
+        printf 'machine=%s/%s (%s) fixture=%s copies=80 files=%s bytes=%s runs=%s generated=%s\n\n' \
+               "$( uname -s )" "$( uname -m )" "${machineId:-unknown}" "$FIXTURE_HASH" "$fileCount" "$byteCount" "$RUNS" "$( date -u '+%Y-%m-%d %H:%M UTC' )"
+        printf '| key | median (ms) |\n|---|---:|\n'
+        printf '| cold | %.3f |\n' "$coldMs"
+        printf '| warm-index-retrieval | %.3f |\n' "$retrievalMs"
+        printf '| report | %.3f |\n' "$reportMs"
+        printf '| quality-delta | %.3f |\n' "$qualityMs"
+        printf '| dead-code | %.3f |\n' "$deadMs"
+        printf '| mcp-warm-request | %.3f |\n' "$mcpMs"
+    } >> "$PROFILE_MD"
+    echo "representative_perfgate: appended ledger entry to $PROFILE_MD"
 fi
-
-fail=0
-check_absolute()
-{
-    local name="$1" measured="$2" budget="$3"
-    if awk -v measured="$measured" -v budget="$budget" 'BEGIN{exit !(measured<=budget)}'; then
-        printf '  PASS  %-22s %8.3f <= %8.3f ms absolute\n' "$name" "$measured" "$budget"
-    else
-        printf '  FAIL  %-22s %8.3f >  %8.3f ms absolute\n' "$name" "$measured" "$budget"
-        fail=1
-    fi
-}
-
-check_absolute cold                 "$coldMs"      100
-check_absolute warm-index-retrieval "$retrievalMs"  30
-check_absolute report               "$reportMs"    100
-check_absolute quality-delta        "$qualityMs"   220
-check_absolute dead-code            "$deadMs"      100
-check_absolute mcp-warm-request      "$mcpMs"        80
-exit "$fail"
+echo "representative_perfgate: measurement complete."
+exit 0

@@ -733,7 +733,10 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 46;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 47;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 47 (L3, 2026-08-08 audit) = `locals` counts
+                                                          // DECLARATORS not declaration statements — see
+                                                          // ingest.cpp kParserVer's own note.
                                                           // 46 = integration/quality-fleet merge of TWO independent
                                                           // 45s (the integrated ppalt+nestcal 45 below, and ev(G)'s
                                                           // 45 on feat/nest-profile) — fresh number, neither's blobs
