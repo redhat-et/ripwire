@@ -1,18 +1,19 @@
-# perf_budgets.txt — perfgate.sh budgets (Wave 2 #8: the drift alarm)
+# perf_budgets.txt — RETIRED 2026-08-08 (owner directive: perf budgets are not the model — "best tool
+# first, then make it fast"). bench/perfgate.sh no longer reads this file, does not compare medians
+# against it, and has no --write-budgets mode to regenerate it. Kept only as a HISTORICAL record of the
+# last budgets this repo ever enforced and the 1.5x-headroom rationale below; bench/perfgate.sh now
+# appends dated measurements to bench/PROFILE.md instead. See bench/perfgate.sh's own header.
 #
-# format: <key> <max_ms>   (one per line; # comments and blank lines ignored)
+# format (historical): <key> <max_ms>   (one per line; # comments and blank lines ignored)
 #
-# Rationale: each budget = measured median x 1.5 on the machine/date below. The 1.5x
+# Rationale (historical): each budget = measured median x 1.5 on the machine/date below. The 1.5x
 # headroom absorbs normal machine variance (thermal throttling, background load, P/E core
 # scheduling jitter) WITHOUT masking a real regression — a genuine perf bug is rarely a 10-20%
 # wobble, it's a missing cache hit or an added O(n^2) pass, which blows well past 1.5x.
-# Regenerate one label with: bench/perfgate.sh --write-budgets   (only after a DELIBERATE,
-# verified perf change — don't silently ratchet budgets up to make a regression disappear).
 #
-# updated label: cpp
-# updated corpus: historical, private corpus (not reproducible publicly) — regenerate the cpp label
-# on your own large C++ corpus with RIPWIRE_PERF_CORPUS=<path> RIPWIRE_PERF_LABEL=cpp bench/perfgate.sh --write-budgets
-# generated: 2026-07-06 21:56 UTC  machine: Darwin arm64
+# updated label (historical, last-ever write): cpp
+# updated corpus (historical): private corpus (not reproducible publicly)
+# generated (historical): 2026-07-06 21:56 UTC  machine: Darwin arm64
 #
 cold 255
 warm 30
