@@ -9,9 +9,9 @@
 //  sort and profiling paths actually call.
 //
 //  This replaces the game-math header (fastmath.h/.inl) this tree was seeded from.
-//  Ripwire used five things out of ~1500 lines of vector trig, polynomial pow, easing
-//  curves and spline interpolation; the rest is gone. What survived is here, and every
-//  macro below has a call site elsewhere in src/ — nothing is kept "in case".
+//  Five things out of ~1500 lines of vector trig, polynomial pow, easing curves and
+//  spline interpolation were ever used; the rest is gone. What survived is here, and
+//  every macro below has a call site above this layer — nothing is kept "in case".
 //
 //  The NAMESPACE keeps its old name `fastmath` on purpose. CONTRIBUTING.md's layout
 //  rule is written as `alignas( fastmath::hardware_destructive_interference_size )`

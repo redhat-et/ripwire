@@ -3,7 +3,7 @@
 // svector.h — rw::svector: a small-vector with N INLINE slots that spills to the heap only past N.
 //
 // WHY THIS EXISTS ALONGSIDE the vendored martinus/svector (third_party/svector.h, ankerl::svector):
-// it's purpose-built for the ONE shape ripwire leans on hardest — a `Map<K, svector<V,N>>` of many tiny
+// it's purpose-built for the ONE shape the host graph leans on hardest — a `Map<K, svector<V,N>>` of many tiny
 // id-lists (byName / shard maps): WRITE-ONCE during the parse/merge, then READ-HOT during resolve.
 //
 //   • build win (shared with martinus): the N small lists that would each malloc become inline — one fewer

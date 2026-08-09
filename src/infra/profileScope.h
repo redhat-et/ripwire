@@ -11,10 +11,10 @@
 //    PROFILE_SCOPE_DESCRIBE( "phase B2-b" );   // ... with a label
 //    prof::report();  (or PROFILE_REPORT();)   // print to stderr; also auto-prints at exit
 //
-//  The whole report renders on STDERR: stdout is the data stream (the binary's
-//  XML map), and a report trailing it would break every `>file` / `| xmllint`
-//  workflow and make the profile flavour's map ill-formed. Split the streams to
-//  capture both:  ripwire <dir> >map.xml 2>report.txt
+//  The whole report renders on STDERR: stdout is the data stream (the host
+//  binary's own output), and a report trailing it would break every `>file` /
+//  `| xmllint` workflow and make a structured stdout ill-formed. Split the
+//  streams to capture both:  <binary> <args> >out.txt 2>report.txt
 //
 //  WHY IT IS SHAPED THIS WAY
 //    * Clock: reads CNTVCT_EL0 directly (a constant 24 MHz system counter on
@@ -379,7 +379,7 @@ private:
 // ============================================================================
 // detail — per-platform thread identity. All three values feed the REPORT only
 // (tid= column, the [main] tag, the thread name); nothing here can reach a
-// ripwire output byte, so the contract is just "stable per thread, and the two
+// host output byte, so the contract is just "stable per thread, and the two
 // queries agree with each other". Registration is once per thread, never hot.
 // ============================================================================
 namespace detail

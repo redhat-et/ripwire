@@ -7,7 +7,7 @@
 //
 // Companion to matrixDyn<T> (dense). This is the SPARSE substrate that graph ranking runs
 // on: a CSR matrix, a matrix-free SpMV (apply), and a generic power-iteration
-// dominantEigenvector(). ripwire's mixed-precision PageRank kernel lives in src/pagerank.cpp.
+// dominantEigenvector(). A host's own mixed-precision PageRank kernel builds on this, above the layer.
 //
 // Discipline (same as matrixDyn):
 //   * DOD storage: three owning, contiguous, 128-B-aligned SoA arrays — rowOffsets[rows+1],
