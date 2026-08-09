@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 370 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 369 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -559,7 +559,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **370 gate scripts**, all of which exist on disk.
+naming **369 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -839,6 +839,39 @@ the round). Audit note: the stemmer also emits second-order zero-df variants ("g
 retained in-tree, env-gated (`RIPWIRE_QSTEM`), byte-inert off — 84/84 levers-off outputs
 byte-identical to the pre-round binary's, re-verified independently.
 
+**RTA-lite (the instantiation-filtered CHA cone): rejected by its own prereg — an inert evidence
+class on real C++, a cross-namespace wrong filter, and silent devirtualization.** The preregistered
+resolver-precision round (2026-08-08; blind acceptance fixtures and per-lever binary snapshots
+sealed before implementation) landed the Bacon/Sweeney refinement of the shipped CHA-lite: a
+still-ambiguous receiver-typed tier, after the cone prune, intersected with the set of class names
+holding constructor evidence in the reference stream, degrading to the plain cone on an empty
+intersection. The implementation was faithful to the preregistered design and passed its own
+red-first gate; the design's evidence class failed three ways. (1) **Inert where C++ instantiates.**
+The only constructor forms that mint a reference are `T()` temporaries (plus `new T(…)` in
+JS/TS/Java/C#, whose tags queries capture object creation); C++ `new T`, `T{}`, and plain value
+declarations (`Circle c;` — a Rule-2 type *binding*, not a reference) are invisible at extraction —
+a gap the lever disclosed at landing, and exactly the form the blind fixture used. The fixture's
+virtual call listed all three candidates, identical to base; calibration deltas were **exactly 0 on
+all three corpora** (cpp `ambiguous=` 3045→3045 against an accepted-decrease band of [1, 300];
+webpack and the private ObjC++ validation tree likewise unmoved). Closing the gap means new extraction machinery, which the
+round's rules correctly refuse as post-hoc mechanism invention. (2) **Name-keying filters the wrong
+hierarchy.** Adversarial fixture: two namespaces each define an `Impl` (X's derived from X's base,
+Y's from Y's), only `Y::Impl` is constructed. On a call through `X::Base*`, the name-keyed set
+matched bare "Impl" from Y's evidence and DROPPED `X::Alt::draw` while keeping `X::Impl::draw` — a
+wrong filter that falsifies the in-code claim "a same-name collision only ever ENLARGES the set"
+(it enlarges the *set*, and thereby wrongly *arms* the filter over an unrelated cone). (3) **Silent
+devirtualization.** When the filter narrowed a tier to one candidate the `amb=` marker disappeared,
+so an unsound closed-world guess (extern factories can construct what the corpus never mentions)
+became indistinguishable from a sound CHA resolution — an honesty violation on its own. Verdict:
+**REJECT; the lever is reverted in full** (this entry's commit removes the set builder, the
+intersect step, and its gate). Recorded conditions for any future preregistered attempt: a
+pointer-vs-value bit on the Rule-2 binding record so value declarations become evidence while
+pointer declarations stay out; tags patterns for new-expressions and brace-init so `new T` / `T{}`
+mint references (a parser-version bump with its own vocab updates); QUALIFIED-name keying of the
+instantiated set so evidence in one namespace can never arm a filter over another's cone; and an
+explicit disclosure attribute on every RTA-narrowed call (narrowed-by-evidence is weaker than
+proof, and the map must say so) with legend coverage and a red-first gate for each.
+
 ---
 
 ## 8. Claims this project does *not* publish
@@ -855,7 +888,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 370. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 369. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
