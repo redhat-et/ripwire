@@ -741,8 +741,9 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     // §7.1 — always, on every run: the graph these numbers are derived from is name-based and incomplete.
     std::snprintf( buf, sizeof( buf ),
                    "%zu of %zu call edges are name-ambiguous and %zu reference names resolve to no in-corpus definition. "
-                   "blast_radius and contract_touch inherit that; dynamic dispatch, callbacks, function pointers and "
-                   "macro-generated calls are not edges at all, so a lane whose real coupling runs through a dispatch "
+                   "blast_radius and contract_touch inherit that; dynamic dispatch, callbacks and function pointers are "
+                   "not edges at all (a macro-generated call is an edge only when its function-like #define is indexed), "
+                   "so a lane whose real coupling runs through a dispatch "
                    "table looks independent. conflicts and same_file_risk do NOT inherit it (they are computed from "
                    "claims, not from edges).",
                    result.corpus.ambiguous, result.corpus.edges, result.corpus.unresolved );

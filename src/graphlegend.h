@@ -34,8 +34,10 @@ namespace rw
 inline constexpr const char* kGraphCountFloorLegend =
     "counts_floor=\"1\" means every count on this element is a FLOOR, never a total. Call edges are extracted "
     "from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface "
-    "or duck-typed receiver), a callback or function pointer, a macro-generated call site, or a declaration "
+    "or duck-typed receiver), a callback or function pointer, or a declaration "
     "that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. "
+    "A macro-generated call site contributes a role=\"macro\" edge when the macro's function-like #define is "
+    "indexed (C-family, t=\"macro\"); otherwise it too contributes no edge. "
     "Read a zero as \"none found\", never as \"none exists\". ";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
@@ -97,8 +99,9 @@ inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true"
 // widening round proved false and which no extractor can make true — the sentence promised exhaustiveness
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
-    "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|read|write|import|extends; "
-    "p=file:line) — a floor, see counts_floor below. ";
+    "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends; "
+    "p=file:line) — a floor, see counts_floor below. role=\"macro\" is the call-shaped invocation of an "
+    "indexed function-like #define — never labelled role=\"call\", because an expansion is not a plain call. ";
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
@@ -112,6 +115,8 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "<!-- ripwire callers/callees: the 1-hop call hierarchy read straight off the call graph. The callers form "
     "lists the symbols that CALL of=; the callees form lists the symbols of= itself calls. of= is the selector "
     "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
-    "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. ";
+    "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. "
+    "A neighbour that is an indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): "
+    "the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. ";
 
 } // namespace rw

@@ -97,9 +97,21 @@ monotonic_check()
 
     # SAME input (HEAD's src/) for both binaries → isolates the resolver change from any working-tree edits.
     local IN="$WT/src"
-    local ao an
+    local ao an so sn
     ao="$( "$OLDBIN" "$IN" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
     an="$( "$BIN"    "$IN" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+    # PRECONDITION (macro-edges round): `ambiguous=` is only comparable across two binaries whose
+    # EXTRACTION agrees — a working tree carrying a kParserVer bump (new symbol kinds, new reference
+    # classes) changes the population the resolver even sees, so NEW>OLD there measures the extraction
+    # change, not a lost narrow. Detect it by the header's own symbols= on the identical input and SKIP
+    # with the evidence; the fixture arms above remain the narrow's real gate. Self-healing: once the
+    # extraction change is COMMITTED, both binaries are the same sha and the comparison arms again.
+    so="$( "$OLDBIN" "$IN" --no-cache 2>/dev/null | grep -oE 'symbols=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+    sn="$( "$BIN"    "$IN" --no-cache 2>/dev/null | grep -oE 'symbols=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+    if [ -n "$so" ] && [ -n "$sn" ] && [ "$so" != "$sn" ]; then
+        skip "monotonicity: extraction differs between binaries (symbols=$so vs $sn — uncommitted parser change); ambiguous= incomparable, fixture arms above are the gate"
+        return
+    fi
     if [ -n "$ao" ] && [ -n "$an" ] && [ "$an" -le "$ao" ]; then
         ok "monotonicity on src/: ambiguous NEW=$an <= pre-change OLD=$ao (narrow only removes candidates)"
     else

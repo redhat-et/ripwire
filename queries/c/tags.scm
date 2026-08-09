@@ -10,8 +10,11 @@
 ;   - function DEFINITIONS (function_declarator inside a function_definition, or a bare prototype
 ;     declaration) -> the def nodes calls resolve TO
 ;   - object-like (#define X 1) and function-like (#define F(x) ...) macros -> def nodes, same
-;     @definition.macro bucket Rust's macro_definition already uses (ingest.cpp's defKind maps
-;     "macro" -> SymKind::Function, so a macro reads as a callable def, not a type)
+;     @definition.macro bucket Rust's macro_definition already uses (macro-edges round: ingest.cpp's
+;     defKind maps "macro" -> SymKind::Macro, t="macro" — the kind now says what the thing is; a
+;     call-shaped invocation of a function-like macro's name is a role="macro" edge, never role="call",
+;     and its replacement text is body-scanned for outgoing calls. Empty-body FUNCTION-LIKE macros are
+;     dropped in ingest.cpp — an empty replacement defines nothing callable; object-like stay indexed)
 ;   - calls (bare `f()` and `recv->f()` / `recv.f()` via a struct field) -> the call references (edges)
 ;   - `#include` is captured separately by ingest.cpp::captureIncludes (NOT here — matches every
 ;     other C-family language; resolve.h's `.c`/`.h` IncludeLang::CFamily entry already existed).

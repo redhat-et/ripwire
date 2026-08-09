@@ -33,8 +33,14 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
-// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec").
-enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Other };
+// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro").
+// Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
+// `#define` definition (@definition.macro — C/C++ preproc_def/preproc_function_def, Rust macro_definition).
+// Previously the C/Rust captures mapped to Function, which read as a lie on every t= surface; the kind now
+// says what the thing IS. A macro symbol is DISCLOSED-DEGRADED by construction: its body is unparsed
+// replacement text (edges out of it come from a lexical scan, see ingest.cpp captureMacroBodyCalls), and a
+// call-shaped invocation of its name is a role="macro" edge, never role="call" (RefRole::Macro below).
+enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Other };
 
 inline const char* symTag( SymKind k ) noexcept
 {
@@ -47,6 +53,7 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Interface: return "iface";
         case SymKind::Var:       return "var";
         case SymKind::Section:   return "sec";    // markdown heading (doc structure; isolated in the graph)
+        case SymKind::Macro:     return "macro";  // #define (disclosed-degraded: replacement text, not a parsed body)
         default:                 return "other";
     }
 }
@@ -113,7 +120,15 @@ enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar };
 //   Write   — the name is the LHS of an assignment / a `++`/`--`/compound-assign target (`x = …`, `x++`).
 //   Import  — the name appears in an import / #include / using directive (cross-module surface).
 //   Extends — the name is a base class / implemented interface (derived → base; was `isInherit`).
-enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends };
+//   Macro   — the macro-edges round: a call-SHAPED site whose name is an indexed C-family `#define`
+//             (SymKind::Macro). NEVER emitted as role="call" — call-edge honesty: the site is an expansion,
+//             not a plain call, and expansion semantics (stringize/paste/conditional arms) are unmodeled.
+//             Unlike Read/Write/Import/Extends it DOES enter the call graph CSR (graph.h admits Call+Macro),
+//             because the edge is the feature: the graph connects THROUGH the macro symbol. Ingest always
+//             records the site as Call (a per-file parse cannot know another file's #defines); the retag to
+//             Macro is the corpus-wide post-pass retagMacroCallReferences below, run at every ingest exit —
+//             so a cached role=Call round-trips and is re-judged fresh each run.
+enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends, Macro };
 static_assert( sizeof( RefRole ) == 1, "RefRole must be a single byte (SoA-friendly, smallest int that fits)" );
 
 // the terse `role=` attribute string for the use-site index (declarative table, not a switch chain).
@@ -126,6 +141,7 @@ inline const char* refRoleTag( RefRole r ) noexcept
         case RefRole::Write:   return "write";
         case RefRole::Import:  return "import";
         case RefRole::Extends: return "extends";
+        case RefRole::Macro:   return "macro";
         default:               return "read";
     }
 }
@@ -587,6 +603,62 @@ inline constexpr std::size_t kMaxWorkspaceRoots = 16;
 inline const std::string& diskPath( const IngestResult& ing, std::uint32_t fileId ) noexcept
 {
     return ing.realPaths.empty() ? ing.files[ fileId ] : ing.realPaths[ fileId ];
+}
+
+// The macro-edges round's honesty post-pass: a call-SHAPED reference (bare name, no receiver, no explicit
+// qualifier) whose name is defined by an indexed C-family `#define` is re-tagged RefRole::Macro, so no
+// surface can ever label an expansion role="call". Runs over the ASSEMBLED corpus — a per-file parse (and
+// therefore the per-file cache record, which stores role=Call) cannot know another file's #defines — at
+// BOTH ingest exits: the end of ingest() and the end of mergeWorkspaceIngests (a macro defined in one root,
+// invoked from another). Idempotent and deterministic (one ordered pass, membership in a name set built
+// from ing.symbols in id order). Restricted to C-family on BOTH sides: only C-family grammars have
+// `#define`, and a same-named Python/JS call must not inherit a macro tag it cannot mean.
+inline bool macroRefLang( Lang lang ) noexcept
+{
+    switch( lang )
+    {
+        case Lang::Cpp:
+        case Lang::C:
+        case Lang::ObjC:
+        {
+            return true;   // the grammars that have `#define` (ingest.cpp constCaptureNeedsScreamingGate's shape)
+        }
+        default:
+        {
+            return false;
+        }
+    }
+}
+
+inline void retagMacroCallReferences( IngestResult& ing )
+{
+    HashMap<std::string, char> macroNames;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Macro && macroRefLang( s.lang ) )
+        {
+            macroNames.emplace( s.name, 1 );
+        }
+    }
+    if( macroNames.empty() )
+    {
+        return;   // macro-free corpus: byte-identical output, zero cost beyond the symbol scan
+    }
+    for( Reference& r : ing.references )
+    {
+        if( r.role != RefRole::Call || r.isInherit || r.isDocLink || r.isCompose )
+        {
+            continue;
+        }
+        if( r.recv != RecvKind::None || !r.qualifier.empty() || !macroRefLang( r.lang ) )
+        {
+            continue;   // a receiver-qualified or scope-qualified call cannot be a macro invocation
+        }
+        if( macroNames.contains( r.calleeName ) )
+        {
+            r.role = RefRole::Macro;
+        }
+    }
 }
 
 // THE per-file symbol index every span- or line-based lookup starts from: bucket the symbol ids by file, then

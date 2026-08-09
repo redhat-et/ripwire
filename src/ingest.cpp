@@ -264,7 +264,9 @@ SymKind defKind( std::string_view tail ) noexcept
     }
     if( tail == "macro" )
     {
-        return SymKind::Function;
+        // macro-edges round: honest kind (was Function). C preproc_def/preproc_function_def, C++
+        // preproc_function_def, Rust macro_definition — t="macro", a disclosed-degraded callable.
+        return SymKind::Macro;
     }
     if( tail == "type" )
     {
@@ -1010,7 +1012,11 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 47;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 48;           // bump on any grammar/.scm/extraction change
+                                                      // 48 (macro-edges): function-like #define → t="macro"
+                                                      //    symbols (C++ gains the capture; C/Rust re-kind
+                                                      //    Function→Macro), replacement-text call scan, and
+                                                      //    the role="macro" invocation retag.
                                                       // 47 (L3, 2026-08-08 audit): `locals` now counts
                                                       //    DECLARATORS, not declaration statements —
                                                       //    cc_countLocalDeclarators sums every
@@ -3642,6 +3648,207 @@ inline void emitBaseRef( TSNode typeNode, std::uint32_t fileId, Lang lang, std::
     refs.push_back( std::move( r ) );
 }
 
+// ---- macro-edges round: function-like `#define` body handling -------------------------------------------
+// The C-family grammars expose a macro's replacement text as ONE opaque `preproc_arg` token — tree-sitter
+// does not parse it, so no tags pattern can ever see a call inside it. Two helpers close that honestly:
+//
+//   preprocFunctionDefHasBody — the indexing gate: an empty (or all-whitespace) replacement defines nothing
+//     callable, so `#define NOOP(x)` stays unindexed rather than minting a body-less callable symbol.
+//
+//   captureMacroBodyCalls — a LEXICAL scan of the replacement text for call-shaped identifiers (`ident (`),
+//     emitting one role=Call RawRef per hit at its real byte position, so the existing byte-span sweep
+//     attributes it to the macro symbol (whose span covers the whole #define) and the graph connects
+//     THROUGH the macro (handler → LOG_ERR → logImpl). Disclosed-degraded by construction — this is a
+//     lexer, not a parser — and conservative about the known noise sources: string/char literals are
+//     skipped, C/C++ control keywords are skipped, the macro's OWN parameters are skipped (`x(` where x is
+//     a param is the CALLER's token, not a body call), a `#`/`##`-preceded identifier is stringize/paste
+//     operand (a synthetic token, never emitted), and the macro's own name is skipped (a self-reference
+//     does not expand). Function-like macros ONLY — an object-like #define is not a call-edge participant.
+
+// is `w` a C/C++ keyword that can legally precede `(` in a macro body without being a call?
+bool macroBodyKeyword( std::string_view w ) noexcept
+{
+    static constexpr std::string_view kw[] = {
+        "if", "for", "while", "switch", "return", "sizeof", "defined", "do", "else", "goto",
+        "case", "default", "alignof", "typeof", "decltype", "throw", "catch", "new", "delete",
+    };
+    return std::find( std::begin( kw ), std::end( kw ), w ) != std::end( kw );
+}
+
+// the `value:` (preproc_arg) child of a preproc_function_def / preproc_def; null node if absent.
+TSNode preprocValueNode( TSNode defineNode ) noexcept
+{
+    return ts_node_child_by_field_name( defineNode, "value", 5 );
+}
+
+// the def's body node: the `body:` field for every function/class grammar, and — macro-edges round — a
+// #define's `value:` (preproc_arg) replacement text. Adopting the value as the body gives a macro symbol a
+// real signature/body split (sigEnd = replacement start), which is ALSO what makes graph.h's decl/def
+// collapse treat an indexed macro as a DEFINITION (hasBody: endByte > sigEndByte) instead of a shadowable
+// forward decl. Kept out of captureTagsFacts (the file's densest dispatch point) behind one call.
+TSNode defBodyNodeOf( TSNode roleNode, SymKind kind ) noexcept
+{
+    TSNode body = ts_node_child_by_field_name( roleNode, "body", 4 );
+    if( ts_node_is_null( body ) && kind == SymKind::Macro )
+    {
+        body = ts_node_child_by_field_name( roleNode, "value", 5 );
+    }
+    return body;
+}
+
+bool preprocFunctionDefHasBody( TSNode defineNode, std::string_view src ) noexcept
+{
+    const TSNode value = preprocValueNode( defineNode );
+    if( ts_node_is_null( value ) )
+    {
+        return false;
+    }
+    const uint32_t a = ts_node_start_byte( value );
+    const uint32_t b = ts_node_end_byte( value );
+    if( a >= b || b > src.size() )
+    {
+        return false;
+    }
+    for( uint32_t i = a; i < b; ++i )
+    {
+        const char c = src[i];
+        if( c != ' ' && c != '\t' && c != '\\' && c != '\n' && c != '\r' )
+        {
+            return true;   // at least one real token byte — a statement/expression body
+        }
+    }
+    return false;
+}
+
+void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
+{
+    // function-like `#define` only: object-like preproc_def is not a call-edge participant, and the
+    // non-C-family @definition.macro capture (Rust macro_definition) has no preproc replacement to scan.
+    // Checked HERE so the captureTagsFacts call site stays a single kind test.
+    if( std::strcmp( ts_node_type( defineNode ), "preproc_function_def" ) != 0 )
+    {
+        return;
+    }
+    const TSNode value = preprocValueNode( defineNode );
+    if( ts_node_is_null( value ) )
+    {
+        return;
+    }
+    const uint32_t va = ts_node_start_byte( value );
+    const uint32_t vb = ts_node_end_byte( value );
+    if( va >= vb || vb > src.size() )
+    {
+        return;
+    }
+
+    // the macro's own name (self-reference never expands) + its parameter names (a param used call-shaped
+    // is the ARGUMENT's business, not a body call — `#define CALL(f) f()` has no resolvable callee here).
+    std::string macroName;
+    if( const TSNode nameNode = ts_node_child_by_field_name( defineNode, "name", 4 ); !ts_node_is_null( nameNode ) )
+    {
+        const uint32_t na = ts_node_start_byte( nameNode );
+        const uint32_t nb = ts_node_end_byte( nameNode );
+        if( na < nb && nb <= src.size() )
+        {
+            macroName.assign( src.substr( na, nb - na ) );
+        }
+    }
+    std::vector<std::string> params;
+    if( const TSNode paramsNode = ts_node_child_by_field_name( defineNode, "parameters", 10 ); !ts_node_is_null( paramsNode ) )
+    {
+        const uint32_t pc = ts_node_child_count( paramsNode );
+        for( uint32_t i = 0; i < pc; ++i )
+        {
+            const TSNode ch = ts_node_child( paramsNode, i );
+            if( std::strcmp( ts_node_type( ch ), "identifier" ) == 0 )
+            {
+                const uint32_t pa = ts_node_start_byte( ch );
+                const uint32_t pb = ts_node_end_byte( ch );
+                if( pa < pb && pb <= src.size() )
+                {
+                    params.emplace_back( src.substr( pa, pb - pa ) );
+                }
+            }
+        }
+    }
+    const auto isParam = [ & ]( std::string_view w ) noexcept
+    {
+        for( const std::string& p : params )
+        {
+            if( w == p )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const uint32_t baseRow  = ts_node_start_point( value ).row;   // 0-based row of the replacement's first byte
+    uint32_t       newlines = 0;                                  // '\n' seen so far inside [va, i)
+    const auto     isIdent  = []( char c ) noexcept
+    { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+
+    uint32_t i = va;
+    while( i < vb )
+    {
+        const char c = src[i];
+        if( c == '\n' )
+        {
+            ++newlines;
+            ++i;
+            continue;
+        }
+        if( c == '"' || c == '\'' )                    // string / char literal: skip to the unescaped close
+        {
+            const char q = c;
+            ++i;
+            while( i < vb && src[i] != q )
+            {
+                if( src[i] == '\n' )
+                {
+                    ++newlines;
+                }
+                i += ( src[i] == '\\' && i + 1 < vb ) ? 2u : 1u;
+            }
+            ++i;
+            continue;
+        }
+        if( !( isIdent( c ) && !( c >= '0' && c <= '9' ) ) )
+        {
+            ++i;
+            continue;
+        }
+        // an identifier starts here. `#ident` / `##ident` is a stringize/paste operand — synthetic, skip.
+        const uint32_t idStart = i;
+        const bool     pasted  = idStart > va && src[ idStart - 1 ] == '#';
+        while( i < vb && isIdent( src[i] ) )
+        {
+            ++i;
+        }
+        const std::string_view word = src.substr( idStart, i - idStart );
+        // lookahead across whitespace + `\`-newline continuations for the call-shaped `(`. j only PEEKS —
+        // the main scan resumes at i (the identifier end), so a peeked-over '\n' is still line-counted there.
+        uint32_t j = i;
+        while( j < vb && ( src[j] == ' ' || src[j] == '\t' || src[j] == '\r'
+                           || ( src[j] == '\\' && j + 1 < vb && src[ j + 1 ] == '\n' ) ) )
+        {
+            j += ( src[j] == '\\' ) ? 2u : 1u;
+        }
+        if( j >= vb || src[j] != '(' || pasted || macroBodyKeyword( word ) || isParam( word ) || word == macroName )
+        {
+            continue;   // not a call shape (or a known non-callee) — resume the scan at the byte after the identifier
+        }
+        RawRef r;
+        r.fileId    = fileId;
+        r.startByte = idStart;                                   // real byte position → span-attributed to the macro symbol
+        r.line      = baseRow + newlines + 1;                    // 1-based physical line of the identifier
+        r.lang      = lang;
+        r.role      = RefRole::Call;                             // a real call once expanded; target resolved by name like any call
+        r.name      = std::string( word );
+        refs.push_back( std::move( r ) );
+    }
+}
+
 // Capture base classes for the inheritance/Lego view: walk a class node's base clause and emit an
 // inherit RawRef per base (derived → base). startByte sits inside the class header, so the enclosing
 // attribution assigns fromSymbol = the derived class. Explicit-syntax langs: C++/TS/JS/Java/Python/Swift/C#.
@@ -4962,6 +5169,16 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     if( defCapSv == "definition.protomethod" )
     {
         return !isPrototypeMemberTarget( nameNode, src );
+    }
+    if( defCapSv == "definition.macro" )
+    {
+        // macro-edges round: an EMPTY-body function-like `#define NOOP(x)` defines nothing callable — drop
+        // it before it mints a symbol. The @name capture's parent IS the preproc node; object-like
+        // preproc_def and Rust macro_definition fail the node-type test and are never gated.
+        const TSNode defineNode = ts_node_parent( nameNode );
+        return !ts_node_is_null( defineNode )
+            && std::strcmp( ts_node_type( defineNode ), "preproc_function_def" ) == 0
+            && !preprocFunctionDefHasBody( defineNode, src );
     }
     return false;
 }
@@ -6361,7 +6578,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // AND reference enclosing-attribution (a call in a body is now inside its function span).
             // Grammars whose @definition node already owns the body (class/struct/enum) don't climb.
             TSNode defNode = roleNode;
-            TSNode body    = ts_node_child_by_field_name( roleNode, "body", 4 );
+            // defBodyNodeOf = the `body:` field, PLUS the macro-edges round's one addition: a #define's
+            // replacement text (`value:` field) is adopted as a macro symbol's body, set before the climb
+            // below so the climb is skipped for macros.
+            TSNode body    = defBodyNodeOf( roleNode, kind );
             // A Var's span is its own declaration — never climb. The climb exists to find a FUNCTION's
             // body; for a var it can only steal a container's span (a Ruby class-level constant's parent
             // chain is body_statement → class, and class owns a "body" field, so the climb would hand the
@@ -6506,6 +6726,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
                 captureFields( defNode, fileId, le.lang, src, refs );   // HAS-A: member-variable type edges (S5-E)
+            }
+            else if( kind == SymKind::Macro )
+            {
+                captureMacroBodyCalls( roleNode, fileId, le.lang, src, refs );   // macro-edges: the graph connects THROUGH the macro
             }
             }
             else if( isRef )
@@ -8262,6 +8486,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             out.fromSymbol = routeSweep.find( ru.fileId, ru.startByte );
         }
     }
+
+    // macro-edges round: the corpus-wide role="macro" retag (model.h). AFTER the model is assembled and
+    // AFTER saveCache (which stores the per-file truth, role=Call) — a #define added in one file must
+    // re-judge every OTHER file's cached call sites on the next run, so the retag can never be persisted.
+    retagMacroCallReferences( result );
 
     return result;
 }

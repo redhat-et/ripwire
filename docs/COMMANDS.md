@@ -535,7 +535,7 @@ $ ./build/ripwire . --callees=rankGraphTeleport
 
 ### `--uses=SYM`
 
-**Answers:** the statically resolvable use-sites of SYM (role=call|read|write|import|extends, file:line);
+**Answers:** the statically resolvable use-sites of SYM (role=call|macro|read|write|import|extends, file:line);
 
 external="1" if SYM has no in-corpus def. file:name narrows defs= AND the role="call" sites (kept only where the call RESOLVES to a chosen def — --callers' own narrowing); read/write/import/extends carry no resolution and stay name-matched. narrowed_roles=/defs_of_name=/call_sites_of_name= (file: qualifier only) disclose what narrowed and the un-narrowed totals; a file: qualifier naming a file with no such def REFUSES, like --callers/--impact
 
@@ -683,7 +683,7 @@ $ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 
 **Answers:** transitive blast radius — the indexed symbols that reach SYM (a floor, see counts_floor).
 
-file:name disambiguates like --callers counts_floor="1"           on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the call graph is extracted from source text by name, so dynamic dispatch, callbacks/function pointers, macro-generated call sites and declarations that parse without a call expression (C++ most-vexing- parse) contribute no edge. Read a 0 as "none found", never as "none exists". Those five verbs also count DISTINCT (caller,callee) pairs, while --uses counts call SITES — see each verb's own legend
+file:name disambiguates like --callers counts_floor="1"           on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the call graph is extracted from source text by name, so dynamic dispatch, callbacks/function pointers and declarations that parse without a call expression (C++ most-vexing-parse) contribute no edge; a macro-generated call site contributes a role="macro" edge when its function-like #define is indexed (t="macro"), else no edge. Read a 0 as "none found", never as "none exists". Those five verbs also count DISTINCT (caller,callee) pairs, while --uses counts call SITES — see each verb's own legend
 
 **Try it**
 

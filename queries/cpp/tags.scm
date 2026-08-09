@@ -71,6 +71,19 @@
         (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
       ])) @definition.constant)
 
+; ---- function-like macros (macro-edges round) ----
+; A FUNCTION-LIKE `#define NAME(args) body` becomes an indexed symbol (ingest.cpp defKind maps "macro" ->
+; SymKind::Macro, t="macro" — a disclosed-degraded kind: the replacement text is an unparsed token in this
+; grammar, so edges out of the body come from ingest.cpp's captureMacroBodyCalls lexical scan, and a
+; call-shaped invocation of the name is re-tagged role="macro", never role="call"). This closes the
+; macro-only-header hole (a header holding nothing but macros contributed ZERO symbols; ensemble.h's
+; coverage precondition names exactly that shape). Deliberately NOT captured on the C++ path: OBJECT-LIKE
+; `#define MAXN 42` (preproc_def) — a value alias, not a call-edge participant (the C tags.scm keeps its
+; historical preproc_def capture, now honestly kinded t="macro"). Empty-body function-like macros are
+; dropped in ingest.cpp (preprocFunctionDefHasBody): an empty replacement defines nothing callable.
+(preproc_function_def
+  name: (identifier) @name) @definition.macro
+
 ; ---- references (ripwire addition — calls drive the PageRank edges) ----
 
 (call_expression

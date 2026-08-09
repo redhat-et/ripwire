@@ -873,9 +873,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     for( const Reference& r : ing.references )
     {
         // file-scope / inheritance / doc-mention / HAS-A → not a call. ABS-3: read/write/import use-sites
-        // (role != Call) are ALSO excluded here — they live only in the use-site index, NEVER in the call
-        // graph CSR, so PageRank and the default ranked map are byte-for-byte unchanged (G5).
-        if( r.fromSymbol == kNoNode || r.isInherit || r.isDocLink || r.isCompose || r.role != RefRole::Call )
+        // are ALSO excluded here — they live only in the use-site index, NEVER in the call graph CSR, so
+        // PageRank and the default ranked map are unchanged by them (G5). Role Macro (the macro-edges
+        // round) IS admitted beside Call: an invocation of an indexed function-like #define is a real
+        // control-flow edge once expanded — the honest difference is its label, not its existence.
+        if( r.fromSymbol == kNoNode || r.isInherit || r.isDocLink || r.isCompose
+            || ( r.role != RefRole::Call && r.role != RefRole::Macro ) )
         {
             continue;
         }
