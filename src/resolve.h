@@ -1349,7 +1349,7 @@ struct Narrower
     // these instead of a fresh std::string per reference. The BYTES are identical to the old `+` concats, so the
     // map lookups — and the resolved graph — are byte-for-byte unchanged; only the per-ref malloc churn is gone.
     mutable std::string keyScope;   // "Scope::name" for canonByName lookups (Rule 1 + Rule 2's type::method)
-    mutable std::string keyBind;    // "<fromSymbolId>#var" for the varType binding lookup (Rule 2)
+    mutable std::string keyBind;    // "<fromSymbolId>#var" for the varType binding lookup (Rule 2 + L3)
 
     explicit Narrower( const HashMap<std::string, rw::svector<NodeId, 2>>& canon,
                        const HashMap<std::string, std::string>&             vt,
@@ -1459,6 +1459,52 @@ struct Narrower
             return nullptr;
         }
         return &it->second;   // real `Foo::m` definition(s) — overloads stay split 1/k, but only within the type
+    }
+
+    // L3 — the fn-pointer/callback binding visible at a bare call site `fn()`. The two tables are passed
+    // per call (they live in buildGraph's FnPtrBindTables; keeping them out of the ctor keeps the Narrower
+    // contract unchanged): varFn = "<fromSymbolId>#var" LOCAL bindings, varFnFile = "<fileId>#var"
+    // file-scope bindings, "" = tombstone in both. Returns {bindingExists, target}: target == nullptr while
+    // bindingExists ⇒ the binding is tombstoned (two different functions), lambda-bound, clobbered, or a
+    // local-vs-file disagreement — the call is KNOWN-indirect and must resolve to NOTHING (the caller never
+    // falls back to the bare-name ladder: a same-named global function would be a FALSE edge, because the
+    // binding proves the call goes through the variable). Local scope is consulted first, then the
+    // file-scope table; both bound but disagreeing → nullptr — the same "any two distinct reaching targets
+    // → refuse" discipline Rule 2's type tombstone implements.
+    std::pair<bool, const std::string*> fnPtrBindingTarget( const Reference&                          r,
+                                                            const HashMap<std::string, std::string>& varFn,
+                                                            const HashMap<std::string, std::string>& varFnFile ) const
+    {
+        const std::string* localT = nullptr;
+        const std::string* fileT  = nullptr;
+        keyBind.clear();
+        appendUint( keyBind, r.fromSymbol );
+        keyBind.push_back( '#' );
+        keyBind.append( r.calleeName );
+        if( const auto lit = varFn.find( keyBind ); lit != varFn.end() )
+        {
+            localT = &lit->second;
+        }
+        keyBind.clear();
+        appendUint( keyBind, r.fileId );
+        keyBind.push_back( '#' );
+        keyBind.append( r.calleeName );
+        if( const auto fit = varFnFile.find( keyBind ); fit != varFnFile.end() )
+        {
+            fileT = &fit->second;
+        }
+        if( localT == nullptr && fileT == nullptr )
+        {
+            return { false, nullptr };
+        }
+        const std::string* tgt = ( localT != nullptr && fileT != nullptr )
+                                     ? ( ( *localT == *fileT ) ? localT : nullptr )
+                                     : ( localT != nullptr ? localT : fileT );
+        if( tgt == nullptr || tgt->empty() || *tgt == kFnBindLambdaTarget )
+        {
+            return { true, nullptr };   // kFnBindClobberTarget never appears as a VALUE (mapped to "" at build)
+        }
+        return { true, tgt };
     }
 
     // B2.1 CHA-lite input: the call's receiver STATIC TYPE name, when it is KNOWN by the same conservative

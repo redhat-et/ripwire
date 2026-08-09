@@ -940,8 +940,10 @@ struct RawBind
     std::uint32_t fileId    = 0;
     std::uint32_t startByte = 0;   // position inside the enclosing function (for enclosing-def attribution)
     Lang          lang      = Lang::Unknown;
+    LocalBindKind kind      = LocalBindKind::Type;   // Type = Rule 2 var→type; FnDecl/FnAssign = L3 var→function
     std::string   var;             // the declared variable identifier (`x`)
-    std::string   typeName;        // the written type's final segment (`Foo`)
+    std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
+                                   // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
 };
 
 // B6.3 raw client-side HTTP-route USE (pre-attribution). startByte sits at the call-expression's own
@@ -1012,7 +1014,7 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 48;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 49;           // bump on any grammar/.scm/extraction change
                                                       // 48 (macro-edges): function-like #define → t="macro"
                                                       //    symbols (C++ gains the capture; C/Rust re-kind
                                                       //    Function→Macro), replacement-text call scan, and
@@ -1536,8 +1538,8 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     return d;
 }
 inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = Lang( r.u8() ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = RecvKind( r.u8() ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = RefRole( r.u8() ); x.line = r.u32(); x.argCount = std::uint16_t( r.u32() ); x.argCountKnown = r.u8() != 0; return x; }
-inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.str( b.var ); w.str( b.typeName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.var = r.str(); b.typeName = r.str(); return b; }
+inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.str( b.var ); w.str( b.typeName ); }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.var = r.str(); b.typeName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
 inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = BindKind( r.u8() ); a.lowConf = r.u8() != 0; a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors
@@ -5375,6 +5377,157 @@ inline std::string writtenTypeOf( TSNode typeNode, std::string_view src )
     return {};   // auto / template / decltype — type not directly written → try the initializer
 }
 
+// ── L3 fn-pointer/callback binding capture helpers ───────────────────────────────────────────────────
+
+// the bound-function TARGET of an initializer/assignment RHS value node, for a var→FUNCTION binding:
+//   `&alpha` / `&ns::alpha` (address-of) → "alpha" / "ns::alpha";  `alpha` / `ns::alpha` (bare) → same;
+//   `[](){...}` (lambda) → kFnBindLambdaTarget.  "" for everything else (a call, a literal, arithmetic —
+// not a recognizable single function). `wasBareIdent` reports the bare-IDENTIFIER shape so the caller can
+// apply the primitive-type noise gate (`int a = b;` is almost never a function copy; `H h = beta;` through
+// a typedef legitimately is).
+inline std::string fnBindTargetOf( TSNode value, std::string_view src, bool& wasBareIdent )
+{
+    wasBareIdent = false;
+    if( ts_node_is_null( value ) )
+    {
+        return {};
+    }
+    const char* vt = ts_node_type( value );
+    if( std::strcmp( vt, "lambda_expression" ) == 0 )
+    {
+        return std::string( kFnBindLambdaTarget );
+    }
+    TSNode idn       = value;
+    bool   addressOf = false;
+    if( std::strcmp( vt, "pointer_expression" ) == 0 )
+    {
+        // only the ADDRESS-OF form — `*p` is also a pointer_expression, and a dereference names no function.
+        const TSNode op = ts_node_child( value, 0 );
+        if( ts_node_is_null( op ) || std::strcmp( ts_node_type( op ), "&" ) != 0 )
+        {
+            return {};
+        }
+        idn = ts_node_child_by_field_name( value, "argument", 8 );
+        if( ts_node_is_null( idn ) )
+        {
+            return {};
+        }
+        addressOf = true;
+    }
+    const char* it = ts_node_type( idn );
+    if( std::strcmp( it, "identifier" ) != 0 && std::strcmp( it, "qualified_identifier" ) != 0 )
+    {
+        return {};
+    }
+    const std::uint32_t a = ts_node_start_byte( idn ), b = ts_node_end_byte( idn );
+    if( a > b || b > src.size() )
+    {
+        return {};
+    }
+    wasBareIdent = !addressOf && std::strcmp( it, "identifier" ) == 0;
+    return std::string( src.substr( a, b - a ) );
+}
+
+// the variable name of a possibly fn-pointer declarator chain (`(*fn)()` → "fn"), descending through
+// function/parenthesized/pointer declarators. Sets `sawFnDeclarator` when the chain crosses a
+// function_declarator — the explicit fn-pointer syntax that licenses a bare-identifier initializer even
+// under a primitive written type (`void (*fn)() = handler;`). declaratorVarName (Rule 2) is NOT reused:
+// parenthesized_declarator carries its inner declarator as an UNNAMED child, which a field-only unwrap
+// cannot reach. An array_declarator bails — an ARRAY of fn pointers is table territory, never a single-var
+// binding (its indexed call must stay unresolved).
+inline std::string_view fnDeclaratorVarName( TSNode decl, std::string_view src, bool& sawFnDeclarator )
+{
+    sawFnDeclarator = false;
+    for( int guard = 0; guard < 10 && !ts_node_is_null( decl ); ++guard )
+    {
+        const char* dt = ts_node_type( decl );
+        if( std::strcmp( dt, "identifier" ) == 0 )
+        {
+            const std::uint32_t a = ts_node_start_byte( decl ), b = ts_node_end_byte( decl );
+            return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
+        }
+        if( std::strcmp( dt, "array_declarator" ) == 0 )
+        {
+            return {};
+        }
+        if( std::strcmp( dt, "function_declarator" ) == 0 )
+        {
+            sawFnDeclarator = true;
+        }
+        TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
+        if( ts_node_is_null( inner ) && std::strcmp( dt, "parenthesized_declarator" ) == 0 )
+        {
+            // the parenthesized inner declarator is an UNNAMED child — take the first named one
+            if( ts_node_named_child_count( decl ) > 0 )
+            {
+                inner = ts_node_named_child( decl, 0 );
+            }
+        }
+        if( ts_node_is_null( inner ) )
+        {
+            return {};
+        }
+        decl = inner;
+    }
+    return {};
+}
+
+// tree-sitter-cpp MIS-PARSES a raw fn-pointer declaration inside a function body —
+// `void (*fn)() = &alpha;` — as an assignment_expression whose LEFT is
+//   call_expression( function: call_expression( function: primitive_type, arguments: ((*fn)) ), arguments: () )
+// (the C grammar parses the same statement as a true declaration; only C++ takes the expression branch —
+// ground-truthed with an AST dump against the vendored grammars, 2026-08-08). Decode the variable name from
+// that shape. The inner callee must be a PRIMITIVE type — `void(...)` is never callable, so the shape is
+// unambiguous evidence of a declaration; an identifier callee (`H (*g)()`, but equally REAL code
+// `foo(*p)() = x;` assigning through a call result) stays undecoded — conservative, no false binding.
+inline std::string_view misparsedFnPtrDeclVar( TSNode lhs, std::string_view src )
+{
+    if( ts_node_is_null( lhs ) || std::strcmp( ts_node_type( lhs ), "call_expression" ) != 0 )
+    {
+        return {};
+    }
+    const TSNode inner = ts_node_child_by_field_name( lhs, "function", 8 );
+    if( ts_node_is_null( inner ) || std::strcmp( ts_node_type( inner ), "call_expression" ) != 0 )
+    {
+        return {};
+    }
+    const TSNode ty = ts_node_child_by_field_name( inner, "function", 8 );
+    if( ts_node_is_null( ty ) || std::strcmp( ts_node_type( ty ), "primitive_type" ) != 0 )
+    {
+        return {};
+    }
+    const TSNode args = ts_node_child_by_field_name( inner, "arguments", 9 );
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) != 1 )
+    {
+        return {};
+    }
+    const TSNode pe = ts_node_named_child( args, 0 );
+    if( std::strcmp( ts_node_type( pe ), "pointer_expression" ) != 0 )
+    {
+        return {};
+    }
+    const TSNode op = ts_node_child( pe, 0 );
+    if( ts_node_is_null( op ) || std::strcmp( ts_node_type( op ), "*" ) != 0 )
+    {
+        return {};
+    }
+    const TSNode idn = ts_node_child_by_field_name( pe, "argument", 8 );
+    if( ts_node_is_null( idn ) || std::strcmp( ts_node_type( idn ), "identifier" ) != 0 )
+    {
+        return {};
+    }
+    const std::uint32_t a = ts_node_start_byte( idn ), b = ts_node_end_byte( idn );
+    return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
+}
+
+// L3: an assignment whose RHS is not a recognizable single function — a CLOBBER site, emitted as a
+// kFnBindClobberTarget record at the end of the walk IF the var has a fn binding in the same file.
+struct FnBindClobber
+{
+    std::string   var;
+    std::uint32_t startByte = 0;
+};
+
 // emit a binding from one declared variable: prefer the WRITTEN type; else infer from a constructor-style
 // initializer (`auto x = Foo()`). Records nothing when neither is decidable (degrade to §2a).
 inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
@@ -5393,6 +5546,98 @@ inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std
     binds.push_back( std::move( b ) );
 }
 
+// emit one L3 var→function RawBind (kind FnDecl/FnAssign) — emitBind's record shape with the kind stamped
+// after the push, so the two emitters share ONE body instead of cloning it.
+inline void emitFnBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string target,
+                        std::uint32_t startByte, LocalBindKind kind, std::vector<RawBind>& binds )
+{
+    const std::size_t before = binds.size();
+    emitBind( fileId, lang, var, std::move( target ), startByte, binds );
+    if( binds.size() > before )
+    {
+        binds.back().kind = kind;
+    }
+}
+
+// L3 capture over one C-family `declaration` node: one FnDecl record per init_declarator whose RHS names a
+// function (`&alpha` / `beta` / a lambda). Noise gate: a bare-identifier initializer under a PRIMITIVE
+// written type (`int a = b;`) is almost never a function copy — kept only when the declarator itself spells
+// a fn pointer; typedef'd (`H h = beta;`) and auto types stay captured, `&name` and lambdas always do.
+inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src,
+                               std::vector<RawBind>& fnPos )
+{
+    const TSNode typeNode = ts_node_child_by_field_name( n, "type", 4 );
+    const char*  tt       = ts_node_is_null( typeNode ) ? "" : ts_node_type( typeNode );
+    const bool   primType = std::strcmp( tt, "primitive_type" ) == 0 || std::strcmp( tt, "sized_type_specifier" ) == 0;
+    const std::uint32_t cc = ts_node_child_count( n );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const char* fname = ts_node_field_name_for_child( n, i );
+        if( fname == nullptr || std::strcmp( fname, "declarator" ) != 0 )
+        {
+            continue;
+        }
+        const TSNode c = ts_node_child( n, i );
+        if( std::strcmp( ts_node_type( c ), "init_declarator" ) != 0 )
+        {
+            continue;   // no initializer → no binding fact here (a later assignment carries its own)
+        }
+        bool sawFnDecl = false;
+        const std::string_view var = fnDeclaratorVarName( ts_node_child_by_field_name( c, "declarator", 10 ), src, sawFnDecl );
+        bool bareIdent = false;
+        std::string target = fnBindTargetOf( ts_node_child_by_field_name( c, "value", 5 ), src, bareIdent );
+        if( bareIdent && primType && !sawFnDecl )
+        {
+            target.clear();
+        }
+        emitFnBind( fileId, lang, var, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnDecl, fnPos );
+    }
+}
+
+// L3 capture over one C-family `assignment_expression`: a recognizable RHS emits an FnAssign record; any
+// other RHS on a bare-identifier LHS (`fn = getHandler()`, `fn = nullptr`, `n += 1`) records a CLOBBER
+// candidate, emitted as a tombstone at the end of the walk IF the var has a fn binding in the same file.
+// The second branch decodes the C++-grammar MIS-PARSE of a raw fn-pointer declaration (`void (*fn)() =
+// &alpha;` — see misparsedFnPtrDeclVar): the shape itself proves a fn-pointer declarator, so a
+// bare-identifier RHS is captured too (no primitive-type noise gate — the "type" IS the evidence).
+inline void captureFnBindAssign( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src,
+                                 std::vector<RawBind>& fnPos, std::vector<FnBindClobber>& fnUnk )
+{
+    const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
+    const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
+    if( !ts_node_is_null( lhs ) && std::strcmp( ts_node_type( lhs ), "identifier" ) == 0 )
+    {
+        const std::uint32_t a = ts_node_start_byte( lhs ), b = ts_node_end_byte( lhs );
+        if( a <= b && b <= src.size() )
+        {
+            const std::string_view var = src.substr( a, b - a );
+            bool bareIdent = false;
+            std::string target = fnBindTargetOf( rhs, src, bareIdent );
+            if( !target.empty() )
+            {
+                emitFnBind( fileId, lang, var, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnAssign, fnPos );
+            }
+            else
+            {
+                fnUnk.push_back( { std::string( var ), ts_node_start_byte( n ) } );
+            }
+        }
+    }
+    else if( const std::string_view dvar = misparsedFnPtrDeclVar( lhs, src ); !dvar.empty() )
+    {
+        bool bareIdent = false;
+        std::string target = fnBindTargetOf( rhs, src, bareIdent );
+        if( !target.empty() )
+        {
+            emitFnBind( fileId, lang, dvar, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnDecl, fnPos );
+        }
+        else
+        {
+            fnUnk.push_back( { std::string( dvar ), ts_node_start_byte( n ) } );
+        }
+    }
+}
+
 void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds, int startDepth )
 {
     // iterative pre-order DFS (explicit frame stack) — this frame held several std::string locals, so the
@@ -5405,6 +5650,14 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
     kids.reserve( 64 );
+
+    // L3 fn-pointer buffers. Positives collect here (not straight into binds) so the end-of-walk clobber
+    // sweep can ask "does this var have a fn binding in this file?" — a clobbering assignment
+    // (`fn = getHandler()`) matters only then, which keeps a fn-binding-free file contributing ZERO new
+    // records (the whole feature inert there).
+    std::vector<RawBind>       fnPos;
+    std::vector<FnBindClobber> fnUnk;
+    const bool cFamilyFn = ( lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC );
 
     while( !stack.empty() )
     {
@@ -5523,11 +5776,53 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
         }
     }
 
+    // ── L3 fn-pointer/callback capture (C/C++/ObjC) — a SEPARATE if (not part of the Rule-2 chain above):
+    // the same `declaration` node can carry BOTH a Rule-2 var→type fact and a var→function fact
+    // (`H fnPtr = beta;` emits fnPtr:H for receiver narrowing AND fnPtr→beta for call resolution). ──
+    if( cFamilyFn && std::strcmp( t, "declaration" ) == 0 )
+    {
+        captureFnBindDecl( n, fileId, lang, src, fnPos );
+    }
+    else if( cFamilyFn && std::strcmp( t, "assignment_expression" ) == 0 )
+    {
+        captureFnBindAssign( n, fileId, lang, src, fnPos, fnUnk );
+    }
+
     collectChildren( n, cursor.cur, kids );
     for( std::size_t i = kids.size(); i > 0; --i )
     {
         stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
     }
+    }
+
+    // ── L3 clobber sweep + merge. A clobbering assignment forces the tombstone (kFnBindClobberTarget) so a
+    // stale earlier binding can never win (`void (*fn)() = &alpha; fn = getHandler(); fn();` → NO edge) —
+    // but only for a var that HAS a recognizable fn binding somewhere in this file, an over-approximation
+    // of "same scope" that errs toward the tombstone, never toward a resolve. posCount is captured BEFORE
+    // the emits below so the sweep scans only the walk's own positives.
+    if( !fnPos.empty() )
+    {
+        const std::size_t posCount = fnPos.size();
+        for( const FnBindClobber& u : fnUnk )
+        {
+            bool hasPos = false;
+            for( std::size_t p = 0; p < posCount; ++p )
+            {
+                if( fnPos[p].var == u.var )
+                {
+                    hasPos = true;
+                    break;
+                }
+            }
+            if( hasPos )
+            {
+                emitFnBind( fileId, lang, u.var, std::string( kFnBindClobberTarget ), u.startByte, LocalBindKind::FnAssign, binds );
+            }
+        }
+        for( RawBind& p : fnPos )
+        {
+            binds.push_back( std::move( p ) );
+        }
     }
 }
 
@@ -6417,7 +6712,10 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
 
         // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-variable narrowing. C++/ObjC/Python/TS
         // (the languages whose receiver shape `receiverOf` captures as a recvVar) — others have no consumer yet.
-        if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript )
+        // L3 adds Lang::C for the fn-pointer/callback var→function capture only: the Rule-2 branches inside
+        // gate themselves on Cpp/ObjC/Python/TS, so type narrowing is byte-identical on C files.
+        if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript
+            || le.lang == Lang::C )
         {
             captureBindings( root, fileId, le.lang, src, binds, 0 );
         }
@@ -8391,7 +8689,17 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                        {
                            return a.startByte < b.startByte;
                        }
-                       return a.var < b.var;
+                       if( a.var != b.var )
+                       {
+                           return a.var < b.var;
+                       }
+                       // L3: a decl can emit BOTH a Rule-2 type record and a fn record at one (file, byte, var) —
+                       // kind+typeName make the order strict, so the merged-across-threads sort is a total order.
+                       if( a.kind != b.kind )
+                       {
+                           return a.kind < b.kind;
+                       }
+                       return a.typeName < b.typeName;
                    } );
         result.bindings.resize( rawBinds.size() );
         DefSweep bindSweep{ defSpans, fileSpanStart };
@@ -8400,6 +8708,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         {
             Binding& b = result.bindings[ outBindIndex++ ];
             b.fileId     = rb.fileId;
+            b.kind       = rb.kind;
             b.var        = std::move( rb.var );
             b.typeName   = std::move( rb.typeName );
             b.fromSymbol = bindSweep.find( rb.fileId, rb.startByte );

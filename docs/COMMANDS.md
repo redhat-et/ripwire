@@ -683,7 +683,7 @@ $ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 
 **Answers:** transitive blast radius — the indexed symbols that reach SYM (a floor, see counts_floor).
 
-file:name disambiguates like --callers counts_floor="1"           on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the call graph is extracted from source text by name, so dynamic dispatch, callbacks/function pointers and declarations that parse without a call expression (C++ most-vexing-parse) contribute no edge; a macro-generated call site contributes a role="macro" edge when its function-like #define is indexed (t="macro"), else no edge. Read a 0 as "none found", never as "none exists". Those five verbs also count DISTINCT (caller,callee) pairs, while --uses counts call SITES — see each verb's own legend
+file:name disambiguates like --callers counts_floor="1"           on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the call graph is extracted from source text by name, so dynamic dispatch and declarations that parse without a call expression (C++ most-vexing-parse) contribute no edge; a call through a function pointer/callback is an edge only when ONE function is bound to that variable in scope (reassigned/table-indexed/lambda-bound pointers stay edge-less, C-family); a macro-generated call site contributes a role="macro" edge when its function-like #define is indexed (t="macro"), else no edge. Read a 0 as "none found", never as "none exists". Those five verbs also count DISTINCT (caller,callee) pairs, while --uses counts call SITES — see each verb's own legend
 
 **Try it**
 

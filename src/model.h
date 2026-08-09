@@ -401,12 +401,38 @@ struct Include
 // CONSERVATIVE: only an UNAMBIGUOUS binding narrows — buildGraph drops `(fromSymbol, var)` if the same var
 // is bound to two DIFFERENT types in one scope (a reassignment to another type), so a wrong narrow is
 // impossible. typeName is the WRITTEN type's final segment (`A::Foo` → `Foo`), matched against class names.
+//
+// L3 var→FUNCTION extension (fn-pointer/callback bindings): the SAME record shape also carries
+// `var = &foo` / `H h = someFunc` / `cb = <lambda>` facts, discriminated by `kind`, so a later call-shaped
+// `fn()` can resolve to the bound function. Rule 2's exact capture discipline and tombstone semantics apply:
+// a var assigned two DIFFERENT functions in one scope resolves to NOTHING (buildGraph tombstones it), and a
+// var with ANY fn binding never falls back to the bare-name ladder (the binding proves the call goes through
+// the variable, so a same-named global function would be a FALSE edge). Two sentinels ride typeName:
+//   kFnBindLambdaTarget  — the RHS was a lambda: the binding EXISTS (blocks the name ladder, participates in
+//                          tombstoning) but resolves to nothing extra — the lambda body is already attributed
+//                          to the enclosing function.
+//   kFnBindClobberTarget — an assignment whose RHS is NOT a recognizable single function (`fn = getHandler()`,
+//                          `fn = nullptr`): forces the tombstone, so a stale earlier binding can never win.
+enum class LocalBindKind : std::uint8_t
+{
+    Type,      // P2-D Rule 2: `var : typeName` (receiver-var narrowing fuel)
+    FnDecl,    // L3: a DECLARATION binding `void (*fn)() = &foo;` / `H h = foo;` / `auto cb = [](){...};`
+    FnAssign,  // L3: an ASSIGNMENT binding `fn = &foo;` (may target a FILE-scope var, so it also clobbers
+               //     a same-named file-scope entry with a different target — see buildGraph's pass 2)
+};
+
+inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so
+inline constexpr const char* kFnBindClobberTarget = "(unknown)";   //   neither sentinel can match a real def
+
 struct Binding
 {
     NodeId        fromSymbol = kNoNode;   // enclosing function/method (the binding's scope); kNoNode if file-scope
     std::uint32_t fileId     = 0;
+    LocalBindKind kind       = LocalBindKind::Type;
     std::string   var;                    // the declared variable identifier (`x`)
-    std::string   typeName;               // the written type's final segment (`Foo`) — resolved to a class in buildGraph
+    std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
+                                          //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
+                                          //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.
 };
 
 // R5 cross-language FFI binding alias. A language-binding DECLARATION found in a C/C++ file (or a

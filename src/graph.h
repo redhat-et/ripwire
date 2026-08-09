@@ -530,6 +530,143 @@ inline void rtaIntersectCone( const IngestResult& ing, const std::vector<std::st
     }
 }
 
+// ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline). Two scopes:
+//   varFn      "<fromSymbol>#var" → bound function name — LOCAL bindings (decls AND assignments inside one
+//              function). First binding wins; a DIFFERENT later target tombstones (value ""), so a var
+//              assigned two different functions resolves to NOTHING. The kFnBindClobberTarget sentinel maps
+//              to "" (tombstone from the start) and its conflict clears a live entry.
+//   varFnFile  "<fileId>#var" → file-scope binding — built from FILE-SCOPE DECLARATION records only
+//              (`static H gPtr = &alpha;`), then CLOBBERED by any in-function ASSIGNMENT to the same NAME
+//              anywhere in the corpus with a different target (`gPtr = &beta;` in b.cpp must kill a.cpp's
+//              entry — a non-static global is reassignable from any file; the sweep over-approximates
+//              toward the tombstone, never toward a resolve). A local DECL of the same name is a genuine
+//              shadow (a different variable) and does NOT clobber the file entry.
+// Both tables empty on a fn-binding-free corpus → the resolve loop's L3 block never fires → byte-identical
+// output there. Deterministic: ing.bindings is totally ordered, and every conflict outcome is
+// order-independent (any two distinct targets → "", identical targets → unchanged).
+struct FnPtrBindTables
+{
+    HashMap<std::string, std::string> varFn;
+    HashMap<std::string, std::string> varFnFile;
+};
+
+inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
+{
+    FnPtrBindTables   t;
+    std::string       key;
+    const std::string emptyTarget;
+    const auto upsert = [ & ]( HashMap<std::string, std::string>& m, const std::string& tgt )
+    {
+        const auto [ it, inserted ] = m.try_emplace( key, tgt );
+        if( !inserted && !it->second.empty() && it->second != tgt )
+        {
+            it->second.clear();   // two different bound functions → tombstone (never resolve this var)
+        }
+    };
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::Type || b.var.empty() || b.typeName.empty() )
+        {
+            continue;
+        }
+        const std::string& tgt = ( b.typeName == kFnBindClobberTarget ) ? emptyTarget : b.typeName;
+        if( b.fromSymbol != kNoNode )
+        {
+            key.clear();
+            Narrower::appendUint( key, b.fromSymbol );
+            key.push_back( '#' );
+            key.append( b.var );
+            upsert( t.varFn, tgt );
+        }
+        else if( b.kind == LocalBindKind::FnDecl )
+        {
+            key.clear();
+            Narrower::appendUint( key, b.fileId );
+            key.push_back( '#' );
+            key.append( b.var );
+            upsert( t.varFnFile, tgt );
+        }
+    }
+    if( !t.varFnFile.empty() )
+    {
+        HashMap<std::string, std::string> assignByName;   // var name → the ONE assigned target; "" on any conflict
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind != LocalBindKind::FnAssign || b.fromSymbol == kNoNode )
+            {
+                continue;
+            }
+            const std::string& tgt = ( b.typeName == kFnBindClobberTarget ) ? emptyTarget : b.typeName;
+            const auto [ it, inserted ] = assignByName.try_emplace( b.var, tgt );
+            if( !inserted && !it->second.empty() && it->second != tgt )
+            {
+                it->second.clear();
+            }
+        }
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind != LocalBindKind::FnDecl || b.fromSymbol != kNoNode )
+            {
+                continue;   // the file-scope DECL records are the only entries the sweep can clobber
+            }
+            const auto ait = assignByName.find( b.var );
+            if( ait == assignByName.end() )
+            {
+                continue;   // the name is never assigned in-function anywhere → the decl's fact stands
+            }
+            key.clear();
+            Narrower::appendUint( key, b.fileId );
+            key.push_back( '#' );
+            key.append( b.var );
+            const auto it = t.varFnFile.find( key );
+            if( it != t.varFnFile.end() && it->second != ait->second )
+            {
+                it->second.clear();
+            }
+        }
+    }
+    return t;
+}
+
+// L3: the candidate DEF ids for a bound function name — a qualified target (`ns::alpha`, `Cls::alpha`)
+// tries the canonical scope::name map on its LAST TWO segments first (Symbol::scope is a final segment),
+// then degrades to the bare final segment against byName. `key` is the caller's reused buffer. The caller
+// applies its own lang/root/kind filters to the returned ids.
+inline const rw::svector<NodeId, 2>* fnBindTargetIds( const HashMap<std::string, rw::svector<NodeId, 2>>& canonByName,
+                                                      const HashMap<std::string, rw::svector<NodeId, 2>>& byName,
+                                                      std::string_view target, std::string& key )
+{
+    std::string_view nameSeg = target;
+    std::string_view scopeSeg;
+    const std::size_t cut = target.rfind( "::" );
+    if( cut != std::string_view::npos )
+    {
+        nameSeg = target.substr( cut + 2 );
+        const std::string_view head = target.substr( 0, cut );
+        const std::size_t      pc   = head.rfind( "::" );
+        scopeSeg = ( pc == std::string_view::npos ) ? head : head.substr( pc + 2 );
+    }
+    if( !scopeSeg.empty() )
+    {
+        key.clear();
+        key.append( scopeSeg );
+        key.append( "::" );
+        key.append( nameSeg );
+        const auto cit = canonByName.find( key );
+        if( cit != canonByName.end() )
+        {
+            return &cit->second;
+        }
+    }
+    if( nameSeg.empty() )
+    {
+        return nullptr;
+    }
+    key.assign( nameSeg );
+    const auto bit = byName.find( key );
+    return ( bit != byName.end() ) ? &bit->second : nullptr;
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -705,6 +842,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
         for( const Binding& b : ing.bindings )
         {
+            if( b.kind != LocalBindKind::Type )
+            {
+                continue; // L3 var→function records live in varFn/varFnFile below — never in Rule 2's table
+            }
             if( b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() )
             {
                 continue; // file-scope/empty → unusable
@@ -720,6 +861,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     }
+
+    // ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline) — built by
+    // buildFnPtrBindTables above; consumed via Narrower::fnPtrBindingTarget in the resolve loop below.
+    const FnPtrBindTables fnBinds  = buildFnPtrBindTables( ing );
+    const bool fnBindActive        = !fnBinds.varFn.empty() || !fnBinds.varFnFile.empty();
 
     // SameInclude table: caller fileId → the sorted, deduped set of fileIds it TRANSITIVELY #includes,
     // resolved PATH-PRECISELY (resolve.h::resolvePreciseInclude: a quote `"x.h"` resolved lexically
@@ -979,13 +1125,53 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             canonical = !cand.empty();
         }
+        // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
+        // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
+        // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
+        // the binding alone (Narrower::fnPtrBindingTarget) and NEVER falls back to the bare-name ladder —
+        // a same-named global function would be a FALSE edge. A tombstoned/lambda-bound/clobbered var, or a
+        // target with no in-corpus FUNCTION def (`fn = &someGlobalVar` must never mint a call edge),
+        // resolves to NOTHING (counted into unresolvedOut — the call is KNOWN-indirect). The resulting edge
+        // keeps role="call": it IS a real call; only the RESOLUTION came from the binding — the same trust
+        // level as Rule 2 receiver narrowing.
+        bool narrowed = false;
+        if( !scipPinned && !canonical && fnBindActive && r.role == RefRole::Call
+            && r.recv == RecvKind::None && r.qualifier.empty()
+            && ( r.lang == Lang::Cpp || r.lang == Lang::C || r.lang == Lang::ObjC ) )
+        {
+            const auto [ bindingExists, fnTarget ] = narrower.fnPtrBindingTarget( r, fnBinds.varFn, fnBinds.varFnFile );
+            if( bindingExists )
+            {
+                if( fnTarget != nullptr )
+                {
+                    if( const auto* hit = fnBindTargetIds( canonByName, byName, *fnTarget, qkey ) )
+                    {
+                        for( NodeId c : *hit )
+                        {
+                            const Symbol& cs = ing.symbols[c];
+                            if( ( cs.kind == SymKind::Function || cs.kind == SymKind::Method )
+                                && langCompatible( cs.lang, r.lang ) && sameRoot( c, r.fileId ) )
+                            {
+                                cand.push_back( c );
+                            }
+                        }
+                    }
+                    narrowed = !cand.empty();
+                }
+                if( cand.empty() )
+                {
+                    ++g.unresolvedOut[r.fromSymbol];   // a KNOWN-indirect call the tool refuses to guess at
+                    continue;
+                }
+            }
+        }
         // P2-D Rule 1 (class membership): a `this->m()` / `self.m()` call resolves to the caller's enclosing
         // class's own `m`, BEFORE the bare-name spray — the deterministic [TYPE] cut to method ambiguity. Only
         // when the receiver is this/self AND the enclosing class actually defines `m` (canonByName, defs only);
         // otherwise narrowed stays false and we fall through to the unchanged name-based-fallback ladder. Skipped when the call
         // was already pinned by an explicit `A::` qualifier (canonical) — that is the more specific signal.
-        bool narrowed = false;
-        if( !scipPinned && !canonical )
+        // (`narrowed` is declared above the L3 fn-binding block, which fires ahead of Rule 1.)
+        if( !scipPinned && !canonical && !narrowed )
         {
             if( const auto* hit = narrower.rule1ClassMember( r, ing.symbols[ r.fromSymbol ].scope ) )
             {
@@ -2393,7 +2579,7 @@ inline std::vector<char> computeImpure( const IngestResult& ing, const Graph& g 
 //               are absent from the graph, so cbo counts only in-repo coupling — the honest, computable set.
 //   tested[i] — Q2: 1 iff symbol i is transitively reachable from ANY test-path symbol over the resolved
 //               out-edge call graph. This is the same coverage set --exercises and --seams use. Dynamic
-//               dispatch, callbacks and subprocess-driven shell tests remain outside the graph.
+//               dispatch, unbound callbacks and subprocess-driven shell tests remain outside the graph.
 //   lcom4[i]  — Q4 class cohesion (LCOM4 = # connected components of the method graph, edge = two methods
 //               CALL each other OR SHARE a field). Emitted ONLY for Class/Struct/Interface WITH ≥1 method
 //               (kLcom4NA = "not applicable" for free functions / method-less types — we NEVER fabricate 1).

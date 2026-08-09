@@ -26,7 +26,8 @@ int callerC( struct Ops* p, struct Ops val )
 
 int callerCFnPtr( void )
 {
-    /* 5. EXTRACTS (as `fp`), never RESOLVES — call through a function-pointer variable.
+    /* 5. EXTRACTS (as `fp`) and — since the L3 fn-pointer binding round — RESOLVES to the ONE bound
+     * function (cPtrTargetFn): the var→function binding below is unambiguous in this scope.
      * Spelled with the extra accumulate step on purpose: the minimal two-line form is the same
      * token sequence as the C++ fixture's callerFnPtr, and a matrix whose language files clone
      * each other reads as new duplication debt rather than as parallel coverage. */
