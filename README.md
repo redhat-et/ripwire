@@ -754,8 +754,8 @@ spot:
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:2035"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2371"/>
+<s t="fn" n="rankGraph" p="./src/graph.h:2048"/>
+<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2384"/>
 <s t="fn" n="churnRankedGraph" p="./src/main.cpp:9609"/>
 <s t="fn" n="runDefaultMap" p="./src/main.cpp:9713"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
@@ -764,7 +764,8 @@ $ ripwire . --callers=rankGraphTeleport
 
 `counts_floor="1"` is the point. Call edges are extracted from source text by name, so dynamic
 dispatch contributes no edge (a call through a function pointer or callback is an edge only when
-ONE function is bound to that variable in scope, and a macro-generated call site — tagged
+ONE function is bound to that variable in scope and the variable never escapes — its address taken
+or reference-bound — and a macro-generated call site — tagged
 `role="macro"` — only when its function-like `#define` is indexed): `count="6"` is a **floor**,
 and the element says so before you read a single row.
 

@@ -1470,7 +1470,9 @@ struct Narrower
     // falls back to the bare-name ladder: a same-named global function would be a FALSE edge, because the
     // binding proves the call goes through the variable). Local scope is consulted first, then the
     // file-scope table; both bound but disagreeing → nullptr — the same "any two distinct reaching targets
-    // → refuse" discipline Rule 2's type tombstone implements.
+    // → refuse" discipline Rule 2's type tombstone implements. A5 escape guard: a var whose ADDRESS is
+    // taken (`indirect_mutate(&fn)` can retarget it invisibly) or that is REFERENCE-bound (`H& r = fn;`)
+    // arrives here already tombstoned by ingest's clobber records — see buildFnPtrBindTables (graph.h).
     std::pair<bool, const std::string*> fnPtrBindingTarget( const Reference&                          r,
                                                             const HashMap<std::string, std::string>& varFn,
                                                             const HashMap<std::string, std::string>& varFnFile ) const
