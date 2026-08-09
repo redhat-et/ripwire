@@ -83,15 +83,23 @@ fi
 # Source COMMENTS are exempt on purpose: they are internal engineering notes that a user never sees.
 # What a user sees is (a) string literals the binary prints and (b) the markdown that ships. Only
 # those two are checked, so this arm stays honest instead of drowning in comment noise.
-python3 - "$TMP/tracked.z" > "$TMP/arm3" <<'PY'
+# OWNER-ACCEPTED ONE-OFF (2026-08-08): the external-tool-survey PLAN was deliberately committed at
+# 7bcd8b0 as a public roadmap — the owner accepted the internal-pattern filename and its §-coordinates
+# on record. EXACTLY this path is exempt here (arm 3) and in arm 6a; any other internal-pattern file
+# or coordinate-carrying doc still fails. Remove the exemption if the file is ever culled.
+ONEOFF_ACCEPTED='PLAN_EXTERNAL_TOOL_SURVEY_2026-08-08.md'
+python3 - "$TMP/tracked.z" "$ONEOFF_ACCEPTED" > "$TMP/arm3" <<'PY'
 import re, sys
 paths = open(sys.argv[1], 'rb').read().split(b'\0')
+oneoff = sys.argv[2]
 coord = re.compile(r'§A|§B[0-9]|§P[0-9]|V[0-9]-[0-9]|W[0-9]|r[0-9][0-9]-')
 strlit = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 for raw in paths:
     if not raw:
         continue
     p = raw.decode('utf-8', 'surrogateescape')
+    if p == oneoff:
+        continue
     # emitted strings: OUR source only. third_party/ is upstream code we do not author, and the
     # test fixtures deliberately carry adversarial literals (base64 blobs collide with W<d>).
     is_src = p.startswith('src/') and p.endswith(('.h', '.cpp', '.inl', '.hpp'))
@@ -282,7 +290,8 @@ fi
 
 # ── arm 6: internal-pattern filenames, and docs/ index coverage ───────────────────────────────────
 INTERNAL_NAME='(^|/)(PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)'
-badnames="$( tr '\0' '\n' < "$TMP/tracked.z" | grep -E "$INTERNAL_NAME" || true )"
+# ONEOFF_ACCEPTED (arm 3, same rationale): the one owner-accepted PLAN file is exempt by exact path.
+badnames="$( tr '\0' '\n' < "$TMP/tracked.z" | grep -E "$INTERNAL_NAME" | grep -Fxv "$ONEOFF_ACCEPTED" || true )"
 if [ -n "$badnames" ]; then
     no "arm 6a — internal-pattern filename committed (pattern $INTERNAL_NAME):"
     printf '%s\n' "$badnames" | sed 's/^/          /'
