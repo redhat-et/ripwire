@@ -941,6 +941,8 @@ struct RawBind
     std::uint32_t startByte = 0;   // position inside the enclosing function (for enclosing-def attribution)
     Lang          lang      = Lang::Unknown;
     LocalBindKind kind      = LocalBindKind::Type;   // Type = Rule 2 var→type; FnDecl/FnAssign = L3 var→function
+    std::uint32_t spanStart = 0;   // kind==VarDecl only: the declaring BLOCK's byte span (shadow scope);
+    std::uint32_t spanEnd   = 0;   //   {0,0} on every other kind — see model.h Binding
     std::string   var;             // the declared variable identifier (`x`)
     std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
                                    // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
@@ -1014,7 +1016,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 52;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 53;           // bump on any grammar/.scm/extraction change
+                                                      // 53 (r9 A5 fix round): shadow suppression tightened
+                                                      //    to BLOCK spans (RawBind gains spanStart/spanEnd —
+                                                      //    a bind-record FORMAT change, rejected via this
+                                                      //    bump) and the capture now sees reference
+                                                      //    declarators, structured bindings, lambda params
+                                                      //    and capture-list names. quality.h's mirror
+                                                      //    bumped in the SAME commit.
                                                       // 52 (r9 loss bucket 2): local-shadow suppression —
                                                       //    captureBindings gains kind=VarDecl records (every
                                                       //    declared C++/ObjC variable NAME incl. primitives,
@@ -1552,8 +1561,8 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     return d;
 }
 inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = Lang( r.u8() ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = RecvKind( r.u8() ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = RefRole( r.u8() ); x.line = r.u32(); x.argCount = std::uint16_t( r.u32() ); x.argCountKnown = r.u8() != 0; return x; }
-inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.str( b.var ); w.str( b.typeName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.var = r.str(); b.typeName = r.str(); return b; }
+inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
 inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = BindKind( r.u8() ); a.lowConf = r.u8() != 0; a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors
@@ -5340,12 +5349,7 @@ inline std::pair<RecvKind, std::string> receiverOf( TSNode nameNode, Lang lang, 
 
 // the innermost bare `(identifier)` reached by unwrapping pointer/reference/parenthesized declarators —
 // the actual variable name of a C++ declarator. "" if the declarator isn't a single named variable.
-// ONE unwrap loop for both name extractors below. refuseFnDeclarator=false is Rule 2's original read (any
-// declarator chain down to its identifier); true is the shadow-evidence read, which additionally refuses a
-// plain function declarator — `void helper();` declared inside a body, and the most-vexing-parse `Foo x();`,
-// both declare a FUNCTION, whose calls must never be shadow-suppressed — while a function_declarator whose
-// inner declarator is PARENTHESIZED is a fn-POINTER variable (`void (*cb)()`) and stays a variable.
-inline std::string_view declaratorVarNameImpl( TSNode decl, std::string_view src, bool refuseFnDeclarator )
+inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
 {
     for( int guard = 0; guard < 8 && !ts_node_is_null( decl ); ++guard )
     {
@@ -5361,26 +5365,9 @@ inline std::string_view declaratorVarNameImpl( TSNode decl, std::string_view src
         {
             return {};
         }
-        if( refuseFnDeclarator && std::strcmp( dt, "function_declarator" ) == 0 && std::strcmp( ts_node_type( inner ), "parenthesized_declarator" ) != 0 )
-        {
-            return {};   // a FUNCTION's name, not a variable's
-        }
         decl = inner;
     }
     return {};
-}
-
-inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
-{
-    return declaratorVarNameImpl( decl, src, false );
-}
-
-// r9 shadow suppression: the declared-VARIABLE name of a declarator — declaratorVarNameImpl's unwrap with
-// the fn-declarator refusal armed. Conservative by construction: an unrecognized shape captures nothing,
-// and a missed capture only UNDER-suppresses (the pre-round behavior).
-inline std::string_view shadowDeclaratorVarName( TSNode decl, std::string_view src )
-{
-    return declaratorVarNameImpl( decl, src, true );
 }
 
 // the type NAME of a constructor-style RHS value node: `Foo()` (call_expression) or `new Foo()`
@@ -5593,12 +5580,22 @@ struct FnBindClobber
     std::uint32_t startByte = 0;
 };
 
+// where a bind-record SITS: its own position (for enclosing-def attribution) plus, on VarDecl records,
+// the declaring BLOCK's byte range — the shadow scope model.h's suppressShadowedReferences tests sites
+// against ({0,0} on every other kind: contains nothing, inert by construction).
+struct BindSite
+{
+    std::uint32_t startByte = 0;
+    std::uint32_t spanStart = 0;
+    std::uint32_t spanEnd   = 0;
+};
+
 // the ONE bind-record emitter. A nameless declarator records nothing. kind=VarDecl is the r9 shadow-
 // evidence record: typeName stays EMPTY on it (shadow evidence, not narrowing fuel — nothing downstream
 // ever reads a type off it), so the empty-typeName refusal applies to every OTHER kind, where it is
 // load-bearing for Rule 2 (an undecidable type must degrade to §2a, not mint a half-record).
 inline void pushRawBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
-                         std::uint32_t startByte, LocalBindKind kind, std::vector<RawBind>& binds )
+                         BindSite site, LocalBindKind kind, std::vector<RawBind>& binds )
 {
     if( var.empty() || ( typeName.empty() && kind != LocalBindKind::VarDecl ) )
     {
@@ -5606,9 +5603,11 @@ inline void pushRawBind( std::uint32_t fileId, Lang lang, std::string_view var, 
     }
     RawBind b;
     b.fileId    = fileId;
-    b.startByte = startByte;
+    b.startByte = site.startByte;
     b.lang      = lang;
     b.kind      = kind;
+    b.spanStart = site.spanStart;
+    b.spanEnd   = site.spanEnd;
     b.var.assign( var );
     b.typeName  = std::move( typeName );
     binds.push_back( std::move( b ) );
@@ -5619,60 +5618,97 @@ inline void pushRawBind( std::uint32_t fileId, Lang lang, std::string_view var, 
 inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
                       std::uint32_t startByte, std::vector<RawBind>& binds )
 {
-    pushRawBind( fileId, lang, var, std::move( typeName ), startByte, LocalBindKind::Type, binds );
+    pushRawBind( fileId, lang, var, std::move( typeName ), BindSite{ startByte, 0u, 0u }, LocalBindKind::Type, binds );
 }
 
-// one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record. The two
+// r9 shadow fix round (A5): the byte span of the BLOCK a declaration's names are scoped to — the nearest
+// enclosing compound_statement. {0,0} when none encloses (file/namespace/class scope): such a record can
+// contain no site and is inert by construction.
+inline std::pair<std::uint32_t, std::uint32_t> enclosingBlockSpan( TSNode n )
+{
+    TSNode p = ts_node_parent( n );
+    for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
+    {
+        if( std::strcmp( ts_node_type( p ), "compound_statement" ) == 0 )
+        {
+            return { ts_node_start_byte( p ), ts_node_end_byte( p ) };
+        }
+        p = ts_node_parent( p );
+    }
+    return { 0u, 0u };
+}
+
+// r9 shadow fix round (A5): every VARIABLE name a declarator declares → one VarDecl record each, carrying
+// the declaring block's span. Handles the shapes the verifier refuted the first landing on:
+//   * reference_declarator / parenthesized_declarator hold their inner declarator as an UNNAMED child
+//     (no `declarator` field — same grammar fact fnDeclaratorVarName already works around), so a
+//     field-only unwrap missed `const T& key` entirely — pass-by-const-ref, the most idiomatic C++
+//     parameter shape;
+//   * structured_binding_declarator (`auto& [key, w]`) declares SEVERAL names — one record per identifier;
+//   * a plain function declarator still yields NOTHING (`void helper();` in a body and the most-vexing-
+//     parse `Foo x();` declare a FUNCTION, whose calls must never be suppressed), while a
+//     function_declarator whose inner is PARENTHESIZED is a fn-POINTER variable and stays a variable.
+// Conservative by construction: an unrecognized shape captures nothing (under-suppression, the disclosed
+// floor — e.g. the ctor-style most-vexing `std::string key( tok );`, which parses as a function decl).
+inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, std::string_view src,
+                                BindSite site, std::vector<RawBind>& binds )
+{
+    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ); ++guard )
+    {
+        const char* dt = ts_node_type( decl );
+        if( std::strcmp( dt, "identifier" ) == 0 )
+        {
+            pushRawBind( fileId, lang, nodeTextOf( decl, src ), std::string{}, site, LocalBindKind::VarDecl, binds );
+            return;
+        }
+        if( std::strcmp( dt, "structured_binding_declarator" ) == 0 )
+        {
+            const std::uint32_t cc = ts_node_named_child_count( decl );
+            for( std::uint32_t i = 0; i < cc; ++i )
+            {
+                const TSNode c = ts_node_named_child( decl, i );
+                if( std::strcmp( ts_node_type( c ), "identifier" ) == 0 )
+                {
+                    pushRawBind( fileId, lang, nodeTextOf( c, src ), std::string{}, site, LocalBindKind::VarDecl, binds );
+                }
+            }
+            return;
+        }
+        TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
+        if( ts_node_is_null( inner )
+            && ( std::strcmp( dt, "reference_declarator" ) == 0 || std::strcmp( dt, "parenthesized_declarator" ) == 0 )
+            && ts_node_named_child_count( decl ) > 0 )
+        {
+            inner = ts_node_named_child( decl, 0 );   // the inner declarator is an UNNAMED child here
+        }
+        if( ts_node_is_null( inner ) )
+        {
+            return;
+        }
+        if( std::strcmp( dt, "function_declarator" ) == 0 && std::strcmp( ts_node_type( inner ), "parenthesized_declarator" ) != 0 )
+        {
+            return;   // a FUNCTION's name, not a variable's
+        }
+        decl = inner;
+    }
+}
+
+// one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record(s). The two
 // name reads stay separate on purpose — declaratorVarName descends into a function declarator (harmless
-// for narrowing), shadowDeclaratorVarName refuses it (load-bearing for suppression).
+// for narrowing), emitShadowVarDecls refuses it (load-bearing for suppression).
 inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, std::string type,
-                           std::uint32_t startByte, std::vector<RawBind>& binds )
+                           BindSite site, std::vector<RawBind>& binds )
 {
-    emitBind( fileId, lang, declaratorVarName( declNode, src ), std::move( type ), startByte, binds );
-    pushRawBind( fileId, lang, shadowDeclaratorVarName( declNode, src ), std::string{}, startByte, LocalBindKind::VarDecl, binds );
+    emitBind( fileId, lang, declaratorVarName( declNode, src ), std::move( type ), site.startByte, binds );
+    emitShadowVarDecls( fileId, lang, declNode, src, site, binds );
 }
 
-// r9 shadow suppression: the two local-declaring shapes that live OUTSIDE `declaration` nodes (the Rule-2
-// branch never sees them), dispatched on the caller's already-read node type `t`:
-//   * a range-for's loop variable (`for( auto& s : v )`) — the node carries its own declarator field;
-//   * a C++/ObjC function DEFINITION's named parameters — one VarDecl each. Walking only the definition
-//     node's own declarator chain (never bare parameter_declaration nodes) is what keeps two non-scopes
-//     out: a PROTOTYPE's parameters (`void f(int run);` binds nothing anywhere) and a fn-pointer type's
-//     parameter list (`void (*cb)(int run)` — those names are part of a TYPE, in no scope at all).
-// startByte sits inside the definition's span, so the ordinary byte-span attribution lands the records
-// on the defined function.
-// Dispatches on the caller's already-read node type `t` (and gates the language ITSELF), so captureBindings
-// calls it unconditionally — the shapes are disjoint from every branch of the Rule-2 chain there.
-inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+// one parameter_list → VarDecl records for its named parameters, scoped to the owning BODY's span. Shared
+// by the function-definition and lambda arms below (their parameter semantics are identical: names local
+// to the body).
+inline void emitShadowParamDecls( TSNode params, std::uint32_t fileId, Lang lang, std::string_view src,
+                                  BindSite bodySite, std::vector<RawBind>& binds )
 {
-    if( lang != Lang::Cpp && lang != Lang::ObjC )
-    {
-        return;
-    }
-    if( std::strcmp( t, "for_range_loop" ) == 0 )
-    {
-        pushRawBind( fileId, lang, shadowDeclaratorVarName( ts_node_child_by_field_name( n, "declarator", 10 ), src ), std::string{}, ts_node_start_byte( n ), LocalBindKind::VarDecl, binds );
-        return;
-    }
-    if( std::strcmp( t, "function_definition" ) != 0 )
-    {
-        return;   // every other node type declares nothing this capture owns
-    }
-    const TSNode fnDef = n;
-    TSNode decl = ts_node_child_by_field_name( fnDef, "declarator", 10 );
-    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0; ++guard )
-    {
-        decl = ts_node_child_by_field_name( decl, "declarator", 10 );   // unwrap `char* f(...)` / `T& f(...)`
-    }
-    if( ts_node_is_null( decl ) || std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0 )
-    {
-        return;
-    }
-    const TSNode params = ts_node_child_by_field_name( decl, "parameters", 10 );
-    if( ts_node_is_null( params ) )
-    {
-        return;
-    }
     const std::uint32_t cc = ts_node_child_count( params );
     for( std::uint32_t i = 0; i < cc; ++i )
     {
@@ -5682,7 +5718,110 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
         {
             continue;   // commas, `...`, attribute nodes — nothing declared
         }
-        pushRawBind( fileId, lang, shadowDeclaratorVarName( ts_node_child_by_field_name( p, "declarator", 10 ), src ), std::string{}, ts_node_start_byte( p ), LocalBindKind::VarDecl, binds );
+        bodySite.startByte = ts_node_start_byte( p );
+        emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( p, "declarator", 10 ), src, bodySite, binds );
+    }
+}
+
+// A5 fix round: one LAMBDA's shadow-evidence names — parameters and capture-list names, all scoped to the
+// lambda BODY's span. Lambdas are expressions, not definitions, so the definition arm below never sees
+// them (the r9 sweep's A01 query is exactly a lambda parameter shadowing an indexed function). A simple
+// capture (`[run]`) re-binds an outer VARIABLE (a function cannot be captured, so the name always denotes
+// a variable) and an init-capture (`[trim = expr]`, node lambda_capture_initializer) introduces a NEW
+// name — both are VarDecl evidence for the body span.
+inline void captureLambdaShadowDecls( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src,
+                                      BindSite bodySite, std::vector<RawBind>& binds )
+{
+    const TSNode d = ts_node_child_by_field_name( n, "declarator", 10 );   // abstract_function_declarator
+    if( !ts_node_is_null( d ) )
+    {
+        const TSNode params = ts_node_child_by_field_name( d, "parameters", 10 );
+        if( !ts_node_is_null( params ) )
+        {
+            emitShadowParamDecls( params, fileId, lang, src, bodySite, binds );
+        }
+    }
+    const TSNode caps = ts_node_child_by_field_name( n, "captures", 8 );   // lambda_capture_specifier
+    const std::uint32_t cc = ts_node_is_null( caps ) ? 0u : ts_node_named_child_count( caps );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const TSNode c  = ts_node_named_child( caps, i );
+        const char*  ct = ts_node_type( c );
+        TSNode ident {};
+        if( std::strcmp( ct, "identifier" ) == 0 )
+        {
+            ident = c;   // simple capture `[run]` / `[&run]` (the `&` is an anonymous sibling)
+        }
+        else if( std::strcmp( ct, "lambda_capture_initializer" ) == 0 && ts_node_named_child_count( c ) > 0 )
+        {
+            const TSNode nm = ts_node_named_child( c, 0 );   // `[trim = expr]` — the FIRST named child is the introduced name
+            if( std::strcmp( ts_node_type( nm ), "identifier" ) == 0 )
+            {
+                ident = nm;
+            }
+        }
+        if( !ts_node_is_null( ident ) )
+        {
+            bodySite.startByte = ts_node_start_byte( c );
+            pushRawBind( fileId, lang, nodeTextOf( ident, src ), std::string{}, bodySite, LocalBindKind::VarDecl, binds );
+        }
+    }
+}
+
+// r9 shadow suppression (A5 fix round): the local-declaring shapes that live OUTSIDE `declaration` nodes
+// (the Rule-2 branch never sees them), dispatched on the caller's already-read node type `t`:
+//   * a range-for's loop variable (`for( auto& s : v )`, incl. structured bindings) — scoped to the LOOP
+//     BODY's span;
+//   * a C++/ObjC function DEFINITION's named parameters — scoped to the definition BODY's span. Walking
+//     only the definition node's own declarator chain (never bare parameter_declaration nodes) is what
+//     keeps two non-scopes out: a PROTOTYPE's parameters (`void f(int run);` binds nothing anywhere) and a
+//     fn-pointer type's parameter list (`void (*cb)(int run)` — those names are part of a TYPE, in no
+//     scope at all);
+//   * a LAMBDA's parameters and capture-list names — captureLambdaShadowDecls above.
+// Gates the language and node type ITSELF, so captureBindings calls it unconditionally — the shapes are
+// disjoint from every branch of the Rule-2 chain there.
+inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( lang != Lang::Cpp && lang != Lang::ObjC )
+    {
+        return;
+    }
+    const bool isRangeFor = std::strcmp( t, "for_range_loop" ) == 0;
+    const bool isLambda   = !isRangeFor && std::strcmp( t, "lambda_expression" ) == 0;
+    const bool isFnDef    = !isRangeFor && !isLambda && std::strcmp( t, "function_definition" ) == 0;
+    if( !isRangeFor && !isLambda && !isFnDef )
+    {
+        return;   // every other node type declares nothing this capture owns
+    }
+    const TSNode body = ts_node_child_by_field_name( n, "body", 4 );
+    if( ts_node_is_null( body ) )
+    {
+        return;   // a body-less shape scopes nothing (declaration-only lambda/definition never parses so)
+    }
+    const BindSite bodySite{ ts_node_start_byte( n ), ts_node_start_byte( body ), ts_node_end_byte( body ) };
+    if( isRangeFor )
+    {
+        emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( n, "declarator", 10 ), src, bodySite, binds );
+        return;
+    }
+    if( isLambda )
+    {
+        captureLambdaShadowDecls( n, fileId, lang, src, bodySite, binds );
+        return;
+    }
+    TSNode decl = ts_node_child_by_field_name( n, "declarator", 10 );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0; ++guard )
+    {
+        decl = ts_node_child_by_field_name( decl, "declarator", 10 );   // unwrap `char* f(...)` / `T& f(...)`
+    }
+    if( ts_node_is_null( decl ) || std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0 )
+    {
+        return;
+    }
+    const TSNode params = ts_node_child_by_field_name( decl, "parameters", 10 );
+    if( !ts_node_is_null( params ) )
+    {
+        emitShadowParamDecls( params, fileId, lang, src, bodySite, binds );
     }
 }
 
@@ -5858,6 +5997,9 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     {
         const TSNode typeNode = ts_node_child_by_field_name( n, "type", 4 );
         std::string  written  = writtenTypeOf( typeNode, src );
+        // A5 fix round: the declared names shadow within their enclosing BLOCK — one parent walk per
+        // declaration node, shared by every declarator child below.
+        const auto [ blockStart, blockEnd ] = enclosingBlockSpan( n );
         // a `declaration` can declare several variables (`Foo a, b;`) → one binding per declarator child.
         const std::uint32_t cc = ts_node_child_count( n );
         for( std::uint32_t i = 0; i < cc; ++i )
@@ -5879,11 +6021,11 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
             if( std::strcmp( ct, "init_declarator" ) == 0 )
             {
                 std::string type = written.empty() ? ctorTypeOf( ts_node_child_by_field_name( c, "value", 5 ), src ) : written;
-                emitDeclBinds( fileId, lang, ts_node_child_by_field_name( c, "declarator", 10 ), src, std::move( type ), ts_node_start_byte( n ), binds );
+                emitDeclBinds( fileId, lang, ts_node_child_by_field_name( c, "declarator", 10 ), src, std::move( type ), BindSite{ ts_node_start_byte( n ), blockStart, blockEnd }, binds );
             }
             else   // plain declarator (identifier / pointer_declarator / reference_declarator), no initializer
             {
-                emitDeclBinds( fileId, lang, c, src, std::string( written ), ts_node_start_byte( n ), binds );
+                emitDeclBinds( fileId, lang, c, src, std::string( written ), BindSite{ ts_node_start_byte( n ), blockStart, blockEnd }, binds );
             }
         }
     }
@@ -6715,6 +6857,31 @@ inline bool isCallCallee( TSNode id ) noexcept
     return false;
 }
 
+// A5 shadow fix round: is `id` a DECLARATION-SITE name held by a parent whose name child carries no
+// `declarator` field — so isNonValueContext's field probe (arm 2) cannot see it? Pre-fix each of these
+// leaked the DECLARED name out as a role="read" site of its own declaration (`int& key` param/local,
+// `auto& [key, w]`, `for (int key : arr)`, `[key = expr]`). An identifier directly under a
+// reference_declarator or a structured_binding_declarator is ALWAYS a declared name (value expressions
+// live under other node types); a range-for's is its `declarator` field; an init-capture's is its FIRST
+// named child (the value side of `[a = b]` stays a genuine read of b).
+inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
+{
+    if( std::strcmp( pt, "reference_declarator" ) == 0 || std::strcmp( pt, "structured_binding_declarator" ) == 0 )
+    {
+        return true;
+    }
+    if( std::strcmp( pt, "for_range_loop" ) == 0 )
+    {
+        const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
+        return !ts_node_is_null( decl ) && sameSpan( decl, id );
+    }
+    if( std::strcmp( pt, "lambda_capture_initializer" ) == 0 )
+    {
+        return ts_node_named_child_count( parent ) > 0 && sameSpan( ts_node_named_child( parent, 0 ), id );
+    }
+    return false;
+}
+
 // is `id` in a NON-VALUE context — a name being DEFINED, DECLARED, or part of a qualified/scoped name —
 // so it must NOT be counted as a read/write use-site? (Definition NAMES are captured by the tags query;
 // qualified-name segments and declarators are not value uses.) Conservative by construction: when in doubt
@@ -6746,6 +6913,11 @@ inline bool isNonValueContext( TSNode id ) noexcept
         {
             return true;
         }
+    }
+    // (2b) A5 shadow fix round: declaration-site names the field probe above cannot see (isDeclSiteName).
+    if( isDeclSiteName( id, parent, pt ) )
+    {
+        return true;
     }
     // (3) Python function / parameter NAME field (a DEF/param, not a use).
     if( std::strcmp( pt, "function_definition" ) == 0 || std::strcmp( pt, "parameters" ) == 0
@@ -8878,6 +9050,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             ref.argCountKnown = r.argCountKnown; // B2.2: whether argCount is reliable (no spread/splat)
             ref.fieldName   = std::move( r.fieldName );   // S5-E: the member variable name (e.g. "m_pool")
             ref.composeRel  = std::move( r.composeRel );  // S5-E: "creates" or "uses"
+            ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
             ref.fromSymbol  = refSweep.find( r.fileId, r.startByte );
         }
     }
@@ -8919,6 +9092,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             Binding& b = result.bindings[ outBindIndex++ ];
             b.fileId     = rb.fileId;
             b.kind       = rb.kind;
+            b.spanStart  = rb.spanStart;   // shadow fix round: the declaring block's span rides through
+            b.spanEnd    = rb.spanEnd;
             b.var        = std::move( rb.var );
             b.typeName   = std::move( rb.typeName );
             b.fromSymbol = bindSweep.find( rb.fileId, rb.startByte );

@@ -81,6 +81,34 @@ void useCb() {
 }
 EOF
 
+cat >"$FIX/refshapes.cpp" <<'EOF'
+// A5 fix-round arms: reference declarators, structured bindings, inner-block spans, lambdas.
+struct Pr { int key; int w; };
+void key();            // the shadowed function (defined in funcs2.cpp)
+void keyCaller() { key(); }                                        // genuine call — recall anchor
+int  refParam(const int& key) { int x = key; return x; }           // (f) pass-by-const-ref param shadow
+void refLocal() { int g0 = 0; int& key = g0; (void)key; }          // (g) reference-typed local shadow
+void sbRange() { Pr ps[2] = {}; for (const auto& [key, w] : ps) { (void)key; (void)w; } }  // (h)
+void lamParam() { auto f = [](int key) { return key + 1; }; (void)f; }        // (j) lambda param shadow
+void lamInit()  { auto g = [key = 3]() { return key; }; (void)g; }            // (k) init-capture shadow
+void lamCap()   { int key = 1; auto h = [key]() { return key; }; (void)h; }   // (l) simple capture of a shadowing local
+EOF
+
+cat >"$FIX/funcs2.cpp" <<'EOF'
+void key() {}
+EOF
+
+cat >"$FIX/innerblock.cpp" <<'EOF'
+#include "funcs.h"
+void innerBlock() {
+    {
+        int run = 0;   // shadows run() INSIDE THIS BLOCK only
+        run += 1;
+    }
+    run();             // (i) a GENUINE call after the block closes — block-span suppression must keep it
+}
+EOF
+
 cat >"$FIX/plain.cpp" <<'EOF'
 // no-collision control: `total` names NO indexed symbol anywhere — its local sites must STAY listed
 // (--uses on a plain local name is the external-answer feature writetargetcheck pins).
@@ -136,6 +164,36 @@ UT="$( uses total )"
 printf '%s\n' "$UT" | grep -q 'plain.cpp' \
     && ok "--uses=total (no indexed symbol named total) still lists the local's sites" \
     || no "--uses=total lost its sites — suppression fired without a name collision"
+
+# ── (f)-(h) A5 fix round: reference declarators + structured bindings generate shadow evidence ────────
+UK="$( uses key )"
+for fn in refParam refLocal sbRange; do
+    printf '%s\n' "$UK" | grep -q "in_id=\"$fn\"" \
+        && { no "--uses=key lists sites from $fn() — its shadowing declarator produced no evidence"; printf '%s\n' "$UK" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=key has ZERO sites from $fn() (reference/structured-binding declarator captured)"
+done
+printf '%s\n' "$UK" | grep 'refshapes.cpp' | grep -q 'role="call"' \
+    && ok "--uses=key keeps the genuine call in keyCaller() (recall anchor intact)" \
+    || no "--uses=key LOST keyCaller()'s genuine call — recall regression"
+
+# ── (i) inner-block shadow: block-span suppression keeps the genuine call AFTER the block ─────────────
+UR2="$( uses run )"
+printf '%s\n' "$UR2" | grep 'innerblock.cpp' | grep -q 'role="call"' \
+    && ok "--uses=run keeps innerBlock()'s genuine post-block call (block-span, not whole-function)" \
+    || no "--uses=run LOST innerBlock()'s genuine call after the shadowing block closed — silent recall loss"
+printf '%s\n' "$UR2" | grep 'innerblock.cpp' | grep -Eq 'role="(read|write)"' \
+    && { no "--uses=run lists read/write sites from inside innerBlock()'s shadowing block"; printf '%s\n' "$UR2" | grep 'innerblock.cpp'; } \
+    || ok "--uses=run has no read/write sites from innerBlock()'s shadowing block"
+rows --callers=run | grep -q 'n="innerBlock"' \
+    && ok "--callers=run lists innerBlock (the genuine edge resolved)" \
+    || no "--callers=run lost innerBlock — the genuine post-block call minted no edge"
+
+# ── (j)-(l) A5 addendum: lambda parameters, init-captures, and captured shadowing locals ──────────────
+for fn in lamParam lamInit lamCap; do
+    printf '%s\n' "$UK" | grep -q "in_id=\"$fn\"" \
+        && { no "--uses=key lists sites from $fn() — lambda-scope shadow evidence missing"; printf '%s\n' "$UK" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=key has ZERO sites from $fn() (lambda param/init-capture/captured-local suppressed)"
+done
 
 # ── (e) determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --uses=run --no-cache 2>/dev/null )"

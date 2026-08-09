@@ -363,6 +363,8 @@ struct Reference
     NodeId        fromSymbol = kNoNode;   // enclosing symbol (caller); kNoNode if file-scope
     std::uint32_t fileId     = 0;
     std::uint32_t line       = 0;         // 1-based line of the use site (ABS-3: for `--uses` p="file:line")
+    std::uint32_t startByte  = 0;         // byte offset of the use site (RawRef's own, carried through for the
+                                          //   block-span containment test in suppressShadowedReferences)
     Lang          lang       = Lang::Unknown;
     bool          isInherit  = false;     // true ⇒ a base-class/implements edge (derived → base), not a call
     bool          isDocLink  = false;     // true ⇒ a doc→code mention (backtick `ident` in markdown), not a call
@@ -434,6 +436,9 @@ struct Binding
     NodeId        fromSymbol = kNoNode;   // enclosing function/method (the binding's scope); kNoNode if file-scope
     std::uint32_t fileId     = 0;
     LocalBindKind kind       = LocalBindKind::Type;
+    std::uint32_t spanStart  = 0;         // kind==VarDecl only: byte span of the declaring BLOCK (the scope the
+    std::uint32_t spanEnd    = 0;         //   name shadows within — see suppressShadowedReferences). {0,0} on
+                                          //   every other kind and on a block-less capture (contains nothing).
     std::string   var;                    // the declared variable identifier (`x`)
     std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
@@ -718,13 +723,19 @@ inline void retagMacroCallReferences( IngestResult& ing )
     }
 }
 
-// ── LOCAL-SHADOW SUPPRESSION (r9 loss bucket 2) ──────────────────────────────────────────────────────
-// A reference site to name N inside a function whose LOCAL declarations bind N as a VARIABLE is a use of
-// the LOCAL, not of any indexed symbol named N — C++ name lookup finds the local for its scope (this pass
-// uses the whole-function approximation: a shadowed name means the local wins for the enclosing symbol's
-// span). The measured failure is real: a local `int run = 0;` put every `run` read/write inside its
-// function into --uses=run (13 false sites on one r9 query), and a callable local could mint a false call
-// edge through the bare-name ladder. Three guards keep this suppression-only, never a mislabel:
+// ── LOCAL-SHADOW SUPPRESSION (r9 loss bucket 2; block-span fix round A5) ─────────────────────────────
+// A reference site to name N inside the BLOCK where a LOCAL declaration binds N as a variable is a use of
+// the LOCAL, not of any indexed symbol named N — C++ name lookup finds the local for that scope. The
+// measured failure is real: a local `int run = 0;` put every `run` read/write inside its function into
+// --uses=run (13 false sites on one r9 query), and a callable local could mint a false call edge through
+// the bare-name ladder. SCOPE: each VarDecl record carries the byte span of its declaring block (the
+// enclosing compound_statement; a definition's parameters and a lambda's parameters/init-captures carry
+// the body span; a range-for variable the loop body span), and only a site whose own byte offset falls
+// INSIDE that span is suppressed — so `{ int run = 0; } run();` keeps the genuine post-block call. The
+// remaining over-approximation is WITHIN the block only, and deliberate: declaration-point ordering inside
+// a block is not modeled (a use ABOVE the declaration in the same block is still suppressed) — C++ makes
+// such a use ill-formed-or-different-entity anyway, and refusing to guess is the conservative side.
+// Three further guards keep this suppression-only, never a mislabel:
 //   * evidence is a VarDecl binding — a DECLARATION's variable name (ingest captureBindings). An
 //     assignment-derived Type binding (`x = Foo();` re-binding a possibly-GLOBAL x) is NOT a declaration
 //     in C++ and never suppresses.
@@ -736,83 +747,101 @@ inline void retagMacroCallReferences( IngestResult& ing )
 //     external-answer feature the writetarget gate pins) keeps its sites.
 // Runs at every ingest exit AND after the multi-root merge (workspace.h), exactly like the macro retag
 // above — a def named N in ANOTHER root only becomes visible to the collision gate once roots merge.
-// Idempotent, deterministic (erase_if preserves order; hash maps never drive output order). Runs AFTER
-// retagMacroCallReferences so a role="macro" site (preprocessor evidence, textually stronger than any
-// local) is never touched.
+// Idempotent, deterministic (erase_if preserves order; hash maps never drive output order; span lists are
+// built in ing.bindings' total order). Runs AFTER retagMacroCallReferences so a role="macro" site
+// (preprocessor evidence, textually stronger than any local) is never touched.
+// the suppression pass's evidence tables and their "<fromSymbol>#<name>" key builder — see the contract
+// comment above suppressShadowedReferences below.
+struct ShadowEvidence
+{
+    // (fromSymbol, var) → the declaring-block spans (VarDecl evidence) · the fn-binding veto set. The veto
+    // stays UN-spanned on purpose: erring toward keeping a reference is the recall-safe side.
+    HashMap<std::string, std::vector<std::pair<std::uint32_t, std::uint32_t>>> varSpans;
+    HashMap<std::string, char>                                                 fnBindKeys;
+    HashMap<std::string, char>                                                 defNames;
+};
+
+inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )
+{
+    key.clear();
+    char digits[ 10 ];
+    int  digitCount = 0;
+    do { digits[ digitCount++ ] = char( '0' + fromSymbol % 10u ); fromSymbol /= 10u; } while( fromSymbol != 0u );
+    while( digitCount > 0 ) { key.push_back( digits[ --digitCount ] ); }
+    key.push_back( '#' );
+    key.append( name );
+}
+
+// the per-reference verdict: true ⇒ the site sits inside a block where a declared local shadows the name
+// (and every guard in the contract above holds). `key` is the caller's reused buffer.
+inline bool shadowSuppressedSite( const Reference& r, const ShadowEvidence& ev, std::string& key )
+{
+    if( r.fromSymbol == kNoNode || r.isInherit || r.isDocLink || r.isCompose )
+    {
+        return false;
+    }
+    if( r.role != RefRole::Call && r.role != RefRole::Read && r.role != RefRole::Write )
+    {
+        return false;   // import/extends sites are never local-variable uses; role=macro stays (see contract)
+    }
+    if( r.recv != RecvKind::None || !r.qualifier.empty() )
+    {
+        return false;   // a receiver- or scope-qualified name can never resolve to a plain local
+    }
+    if( ev.defNames.find( r.calleeName ) == ev.defNames.end() )
+    {
+        return false;   // no indexed symbol carries the name — nothing to falsely attribute to
+    }
+    buildShadowKey( key, r.fromSymbol, r.calleeName );
+    const auto it = ev.varSpans.find( key );
+    if( it == ev.varSpans.end() || ev.fnBindKeys.find( key ) != ev.fnBindKeys.end() )
+    {
+        return false;   // no declared local — or a fn-binding var, whose references must survive
+    }
+    for( const auto& [ spanStart, spanEnd ] : it->second )
+    {
+        if( r.startByte >= spanStart && r.startByte < spanEnd )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline void suppressShadowedReferences( IngestResult& ing )
 {
-    // (fromSymbol, var) → evidence bits: 1 = a VarDecl local declaration, 2 = an L3 fn binding.
-    const auto appendUint = []( std::string& out, std::uint32_t v )
-    {
-        char digits[ 10 ];
-        int  digitCount = 0;
-        do { digits[ digitCount++ ] = char( '0' + v % 10u ); v /= 10u; } while( v != 0u );
-        while( digitCount > 0 ) { out.push_back( digits[ --digitCount ] ); }
-    };
-    HashMap<std::string, std::uint8_t> evidence;
-    std::string                        key;
-    bool                               anyVarDecl = false;
+    ShadowEvidence ev;
+    std::string    key;
     for( const Binding& b : ing.bindings )
     {
         if( b.fromSymbol == kNoNode || b.var.empty() )
         {
             continue;   // file-scope facts bind nothing here — suppression never reaches past a function
         }
-        std::uint8_t bit = 0;
-        if( b.kind == LocalBindKind::VarDecl )
-        {
-            bit = 1;
-        }
-        else if( b.kind == LocalBindKind::FnDecl || b.kind == LocalBindKind::FnAssign )
-        {
-            bit = 2;
-        }
-        if( bit == 0 )
+        const bool isVar = ( b.kind == LocalBindKind::VarDecl );
+        if( !isVar && b.kind != LocalBindKind::FnDecl && b.kind != LocalBindKind::FnAssign )
         {
             continue;   // Type bindings can come from plain assignments — declaration evidence only
         }
-        key.clear();
-        appendUint( key, b.fromSymbol );
-        key.push_back( '#' );
-        key.append( b.var );
-        std::uint8_t& slot = evidence[ key ];
-        slot       = std::uint8_t( slot | bit );
-        anyVarDecl = anyVarDecl || bit == 1;
+        buildShadowKey( key, b.fromSymbol, b.var );
+        if( isVar )
+        {
+            ev.varSpans[ key ].emplace_back( b.spanStart, b.spanEnd );
+        }
+        else
+        {
+            ev.fnBindKeys.try_emplace( key, 1 );
+        }
     }
-    if( !anyVarDecl )
+    if( ev.varSpans.empty() )
     {
         return;   // VarDecl-free corpus (no captured C++/ObjC local declarations): byte-identical output
     }
-    HashMap<std::string, char> defNames;   // the collision gate: some indexed symbol must carry the name
-    for( const Symbol& s : ing.symbols )
+    for( const Symbol& s : ing.symbols )   // the collision gate: some indexed symbol must carry the name
     {
-        defNames.try_emplace( s.name, 1 );
+        ev.defNames.try_emplace( s.name, 1 );
     }
-    std::erase_if( ing.references, [ & ]( const Reference& r )
-    {
-        if( r.fromSymbol == kNoNode || r.isInherit || r.isDocLink || r.isCompose )
-        {
-            return false;
-        }
-        if( r.role != RefRole::Call && r.role != RefRole::Read && r.role != RefRole::Write )
-        {
-            return false;   // import/extends sites are never local-variable uses; role=macro stays (see above)
-        }
-        if( r.recv != RecvKind::None || !r.qualifier.empty() )
-        {
-            return false;   // a receiver- or scope-qualified name can never resolve to a plain local
-        }
-        if( defNames.find( r.calleeName ) == defNames.end() )
-        {
-            return false;   // no indexed symbol carries the name — nothing to falsely attribute to
-        }
-        key.clear();
-        appendUint( key, r.fromSymbol );
-        key.push_back( '#' );
-        key.append( r.calleeName );
-        const auto it = evidence.find( key );
-        return it != evidence.end() && it->second == 1;   // declared local, and NOT a fn-binding var
-    } );
+    std::erase_if( ing.references, [ & ]( const Reference& r ) { return shadowSuppressedSite( r, ev, key ); } );
 }
 
 // THE per-file symbol index every span- or line-based lookup starts from: bucket the symbol ids by file, then
