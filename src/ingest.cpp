@@ -1016,7 +1016,16 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 53;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 54;           // bump on any grammar/.scm/extraction change
+                                                      // 54 (r9 A5 iteration 3): shadow spans stop at the
+                                                      //    owning CONTROL STATEMENT — a for/if/while/switch
+                                                      //    header declaration scopes to that statement's
+                                                      //    span, no longer leaking past the loop; range-for
+                                                      //    unified to the whole-statement span; catch
+                                                      //    parameters captured (handler-block span). Span
+                                                      //    VALUES land in cached bind records → extraction
+                                                      //    output changes → old caches must be rejected.
+                                                      //    quality.h's mirror bumped in the SAME commit.
                                                       // 53 (r9 A5 fix round): shadow suppression tightened
                                                       //    to BLOCK spans (RawBind gains spanStart/spanEnd —
                                                       //    a bind-record FORMAT change, rejected via this
@@ -5621,15 +5630,26 @@ inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std
     pushRawBind( fileId, lang, var, std::move( typeName ), BindSite{ startByte, 0u, 0u }, LocalBindKind::Type, binds );
 }
 
-// r9 shadow fix round (A5): the byte span of the BLOCK a declaration's names are scoped to — the nearest
-// enclosing compound_statement. {0,0} when none encloses (file/namespace/class scope): such a record can
-// contain no site and is inert by construction.
+// r9 shadow fix round (A5, iteration 3): the byte span a declaration's names are scoped to. A declaration
+// in a control statement's HEADER — for-init (`for (int run = 0; ...)`), if/while/switch condition
+// (`if (int run = f())`) — scopes to THAT STATEMENT's full span (C++: the variable lives for the whole
+// statement, else-branch included), NOT the enclosing block: the header declaration is a SIBLING of the
+// statement's body, so the plain compound_statement walk of iteration 2 leaked the scope past the loop and
+// ate every genuine call after it. A header declaration reaches its control statement BEFORE any
+// compound_statement (bodies ARE compound_statements, and C++ forbids a declaration as a braceless body),
+// so "first ancestor of either kind wins" needs no field tracking — a body declaration hits the body block
+// first, a header declaration the statement first. {0,0} when nothing encloses (file/namespace/class
+// scope): such a record can contain no site and is inert by construction.
 inline std::pair<std::uint32_t, std::uint32_t> enclosingBlockSpan( TSNode n )
 {
     TSNode p = ts_node_parent( n );
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
-        if( std::strcmp( ts_node_type( p ), "compound_statement" ) == 0 )
+        const char* pt = ts_node_type( p );
+        if(    std::strcmp( pt, "compound_statement" ) == 0
+            || std::strcmp( pt, "for_statement" ) == 0 || std::strcmp( pt, "for_range_loop" ) == 0
+            || std::strcmp( pt, "if_statement" ) == 0  || std::strcmp( pt, "while_statement" ) == 0
+            || std::strcmp( pt, "switch_statement" ) == 0 )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ) };
         }
@@ -5768,16 +5788,35 @@ inline void captureLambdaShadowDecls( TSNode n, std::uint32_t fileId, Lang lang,
     }
 }
 
+// a function DEFINITION's parameter_list, reached through its own declarator chain (`char* f(...)` /
+// `T& f(...)` unwrap to the function_declarator). Null when the shape isn't a plain definition —
+// walking only THIS chain (never bare parameter_declaration nodes) is what keeps a PROTOTYPE's
+// parameters and a fn-pointer TYPE's parameter list out of shadow evidence.
+inline TSNode fnDefParameterList( TSNode fnDef )
+{
+    TSNode decl = ts_node_child_by_field_name( fnDef, "declarator", 10 );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0; ++guard )
+    {
+        decl = ts_node_child_by_field_name( decl, "declarator", 10 );
+    }
+    if( ts_node_is_null( decl ) || std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0 )
+    {
+        return TSNode{};
+    }
+    return ts_node_child_by_field_name( decl, "parameters", 10 );
+}
+
 // r9 shadow suppression (A5 fix round): the local-declaring shapes that live OUTSIDE `declaration` nodes
 // (the Rule-2 branch never sees them), dispatched on the caller's already-read node type `t`:
-//   * a range-for's loop variable (`for( auto& s : v )`, incl. structured bindings) — scoped to the LOOP
-//     BODY's span;
+//   * a range-for's loop variable (`for( auto& s : v )`, incl. structured bindings) — scoped to the WHOLE
+//     loop statement (iteration 3, unified with enclosingBlockSpan's control-statement rule);
 //   * a C++/ObjC function DEFINITION's named parameters — scoped to the definition BODY's span. Walking
 //     only the definition node's own declarator chain (never bare parameter_declaration nodes) is what
 //     keeps two non-scopes out: a PROTOTYPE's parameters (`void f(int run);` binds nothing anywhere) and a
 //     fn-pointer type's parameter list (`void (*cb)(int run)` — those names are part of a TYPE, in no
 //     scope at all);
-//   * a LAMBDA's parameters and capture-list names — captureLambdaShadowDecls above.
+//   * a LAMBDA's parameters and capture-list names — captureLambdaShadowDecls above;
+//   * a CATCH clause's parameter — a local of its handler block (iteration 3, the noted 3b gap).
 // Gates the language and node type ITSELF, so captureBindings calls it unconditionally — the shapes are
 // disjoint from every branch of the Rule-2 chain there.
 inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
@@ -5788,8 +5827,9 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
     }
     const bool isRangeFor = std::strcmp( t, "for_range_loop" ) == 0;
     const bool isLambda   = !isRangeFor && std::strcmp( t, "lambda_expression" ) == 0;
-    const bool isFnDef    = !isRangeFor && !isLambda && std::strcmp( t, "function_definition" ) == 0;
-    if( !isRangeFor && !isLambda && !isFnDef )
+    const bool isCatch    = !isRangeFor && !isLambda && std::strcmp( t, "catch_clause" ) == 0;
+    const bool isFnDef    = !isRangeFor && !isLambda && !isCatch && std::strcmp( t, "function_definition" ) == 0;
+    if( !isRangeFor && !isLambda && !isCatch && !isFnDef )
     {
         return;   // every other node type declares nothing this capture owns
     }
@@ -5801,7 +5841,10 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
     const BindSite bodySite{ ts_node_start_byte( n ), ts_node_start_byte( body ), ts_node_end_byte( body ) };
     if( isRangeFor )
     {
-        emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( n, "declarator", 10 ), src, bodySite, binds );
+        // iteration 3, unified with enclosingBlockSpan's control-statement rule: the loop variable scopes
+        // to the WHOLE for_range_loop statement (its own span), not merely the body.
+        const BindSite loopSite{ ts_node_start_byte( n ), ts_node_start_byte( n ), ts_node_end_byte( n ) };
+        emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( n, "declarator", 10 ), src, loopSite, binds );
         return;
     }
     if( isLambda )
@@ -5809,16 +5852,10 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
         captureLambdaShadowDecls( n, fileId, lang, src, bodySite, binds );
         return;
     }
-    TSNode decl = ts_node_child_by_field_name( n, "declarator", 10 );
-    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0; ++guard )
-    {
-        decl = ts_node_child_by_field_name( decl, "declarator", 10 );   // unwrap `char* f(...)` / `T& f(...)`
-    }
-    if( ts_node_is_null( decl ) || std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0 )
-    {
-        return;
-    }
-    const TSNode params = ts_node_child_by_field_name( decl, "parameters", 10 );
+    // a catch parameter is a local of its HANDLER block (iteration 3, the noted 3b gap) — its
+    // parameter_list is a direct field; a definition's sits behind the declarator chain
+    // (fnDefParameterList above), which is what keeps prototypes and fn-pointer TYPE params out.
+    const TSNode params = isCatch ? ts_node_child_by_field_name( n, "parameters", 10 ) : fnDefParameterList( n );
     if( !ts_node_is_null( params ) )
     {
         emitShadowParamDecls( params, fileId, lang, src, bodySite, binds );
