@@ -458,7 +458,7 @@ ALWAYS_INLINE Snapshot read() noexcept
 }   // namespace pmc
 }   // namespace prof
 
-#define RIPWIRE_PMC_REAL_BACKEND 1
+#define PROF_PMC_REAL_BACKEND 1
 
 #elif defined( __linux__ )   // ===== Linux: perf_event_open backend (x86 and ARM alike) =====
 
@@ -829,7 +829,7 @@ ALWAYS_INLINE Snapshot read() noexcept
 }   // namespace pmc
 }   // namespace prof
 
-#define RIPWIRE_PMC_REAL_BACKEND 1
+#define PROF_PMC_REAL_BACKEND 1
 
 #else   // ===== other platforms: inert stubs, timing path stays intact =====
 
@@ -850,7 +850,7 @@ inline const char* event_label( unsigned ) noexcept { return ""; }
 
 #endif
 
-#if defined( RIPWIRE_PMC_REAL_BACKEND )
+#if defined( PROF_PMC_REAL_BACKEND )
 
 // ---- reporter-facing accessors, shared by every real backend ----------------
 // Both backends publish the same four PerfState fields (ok / event_count / names / labels); defining the
@@ -871,6 +871,6 @@ inline const char* event_label( unsigned i ) noexcept { return i < g_perf.event_
 }   // namespace pmc
 }   // namespace prof
 
-#undef RIPWIRE_PMC_REAL_BACKEND
+#undef PROF_PMC_REAL_BACKEND
 
 #endif

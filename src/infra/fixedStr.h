@@ -87,7 +87,7 @@ struct FixedStrHash { std::uint64_t operator()( const FixedStr& s ) const noexce
 // EXACT, therefore determinism-neutral. This kernel computes the same answer as a byte-at-a-time loop for
 // every input, with no tolerance, no approximation, and no data-dependent ordering: the vector body only
 // ever runs where a full 16-byte load lies wholly inside the span, and the head/tail bytes go through the
-// scalar path. Substituting it for a scalar scan cannot move any downstream output, so ripwire's
+// scalar path. Substituting it for a scalar scan cannot move any downstream output, so a caller's
 // determinism contract is untouched by construction, not merely by measurement. bench/bench_newline_ab.cpp
 // asserts that equivalence over the whole repo corpus plus the edge cases (empty span, needle at position
 // 0, no trailing needle, CRLF bytes) before it reports a single timing number.
