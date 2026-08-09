@@ -176,6 +176,19 @@ void sbDecl() {
 // declarator's, since one `declaration` node carries one `declarator` FIELD per declared name.
 void bareDecl()  { int run; run = 0; (void)run; }
 void bareDecl2() { int one, run; (void)one; (void)run; }
+// (q6)/(q7)/(q8) the declarator shapes arm 2's `declarator`-FIELD probe cannot reach are declarations all
+// the same. A DEFAULTED parameter hangs its name off `optional_parameter_declaration` — the sibling of the
+// `parameter_declaration` arm 2 does list — while a pack (`variadic_declarator`) and an attributed
+// declarator (`attributed_declarator`) name the child by no field at all, so the probe returns null.
+void optParam(int run = 0) { (void)run; }
+template<typename... Ts> void packParam(Ts... run) { }
+// attrDecl carries NO body use on purpose: `attributed_declarator` is a shape emitShadowVarDecls does not
+// unwrap, so it records no shadow BINDING and a body read would stay name-matched — the under-suppression
+// floor that capture already discloses. This arm pins the DECLARED name, which is never a use either way.
+void attrDecl() { int run [[maybe_unused]]; }
+// (q9) GUARD: only the DECLARATOR field is a declaration site. A parameter's DEFAULT VALUE is an ordinary
+// expression living in a different field, so a call written there stays a genuine call site.
+void defaultCall(int v = probe()) { (void)v; }
 EOF
 
 cat >"$FIX/scopeguards.cpp" <<'EOF'
@@ -354,6 +367,15 @@ for fn in bareDecl bareDecl2; do
         && { no "--uses=run lists a site from $fn() — a plain declarator's own NAME leaked out as a read"; printf '%s\n' "$PRE" | grep "in_id=\"$fn\""; } \
         || ok "--uses=run has ZERO sites from $fn() (a declaration's every declarator field is a DECLARED name)"
 done
+# ── (q6)-(q9) declarator shapes arm 2's `declarator`-field probe cannot reach ──────────────────────────
+for fn in optParam packParam attrDecl; do
+    printf '%s\n' "$PRE" | grep -q "in_id=\"$fn\"" \
+        && { no "--uses=run lists a site from $fn() — a DECLARED name leaked out as a read of the fn it shadows"; printf '%s\n' "$PRE" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=run has ZERO sites from $fn() (defaulted/pack/attributed declarators are DECLARED names)"
+done
+printf '%s\n' "$UPR" | grep 'in_id="defaultCall"' | grep -q 'role="call"' \
+    && ok "--uses=probe keeps defaultCall()'s call in a parameter's DEFAULT VALUE (only the declarator field is a decl site)" \
+    || no "--uses=probe LOST defaultCall()'s default-value call — the defaulted-parameter arm suppressed too much"
 USL="$( uses slot )"
 printf '%s\n' "$USL" | grep 'in_id="sbDecl"' | grep -q 'role="call"' \
     && ok "--uses=slot keeps sbDecl()'s genuine call above the structured-binding declaration" \
