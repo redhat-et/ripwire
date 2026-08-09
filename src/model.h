@@ -436,9 +436,12 @@ struct Binding
     NodeId        fromSymbol = kNoNode;   // enclosing function/method (the binding's scope); kNoNode if file-scope
     std::uint32_t fileId     = 0;
     LocalBindKind kind       = LocalBindKind::Type;
-    std::uint32_t spanStart  = 0;         // kind==VarDecl only: byte span of the declaring BLOCK (the scope the
-    std::uint32_t spanEnd    = 0;         //   name shadows within — see suppressShadowedReferences). {0,0} on
-                                          //   every other kind and on a block-less capture (contains nothing).
+    std::uint32_t spanStart  = 0;         // kind==VarDecl only: the byte span the name shadows within — a block
+    std::uint32_t spanEnd    = 0;         //   declaration runs from its DECLARATION POINT (end of the complete
+                                          //   declarator, [basic.scope.pdecl]) to the block's end; a whole-scope
+                                          //   shape (parameters, captures, range-for and control-statement header
+                                          //   declarations) from its scope's start. See suppressShadowedReferences.
+                                          //   {0,0} on every other kind and on a scope-less capture (contains nothing).
     std::string   var;                    // the declared variable identifier (`x`)
     std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
@@ -728,13 +731,21 @@ inline void retagMacroCallReferences( IngestResult& ing )
 // the LOCAL, not of any indexed symbol named N — C++ name lookup finds the local for that scope. The
 // measured failure is real: a local `int run = 0;` put every `run` read/write inside its function into
 // --uses=run (13 false sites on one r9 query), and a callable local could mint a false call edge through
-// the bare-name ladder. SCOPE: each VarDecl record carries the byte span of its declaring block (the
-// enclosing compound_statement; a definition's parameters and a lambda's parameters/init-captures carry
-// the body span; a range-for variable the loop body span), and only a site whose own byte offset falls
-// INSIDE that span is suppressed — so `{ int run = 0; } run();` keeps the genuine post-block call. The
-// remaining over-approximation is WITHIN the block only, and deliberate: declaration-point ordering inside
-// a block is not modeled (a use ABOVE the declaration in the same block is still suppressed) — C++ makes
-// such a use ill-formed-or-different-entity anyway, and refusing to guess is the conservative side.
+// the bare-name ladder. SCOPE: each VarDecl record carries the byte span the declared name shadows within,
+// and only a site whose own byte offset falls INSIDE that span is suppressed — so `{ int run = 0; } run();`
+// keeps the genuine post-block call. Two span shapes, because C++ has two:
+//   * an ordinary BLOCK declaration runs from its DECLARATION POINT — the end byte of the complete
+//     declarator, which is [basic.scope.pdecl] exactly (immediately after the complete declarator and
+//     before its initializer; for a structured binding, after its identifier-list) — to the end of the
+//     enclosing compound_statement. Iteration 2 started this span at the block's opening BRACE instead,
+//     which silently ate a genuine call written ABOVE the local (`key(); int key = 0;`): a recall loss,
+//     not the disclosed over-suppression, so the point is now modelled rather than approximated.
+//   * a WHOLE-SCOPE shape runs from the start of its scope, because its name is in scope there: a
+//     definition's or lambda's parameters and a lambda's captures/init-captures (the body span), a catch
+//     parameter (the handler span), a range-for variable (the loop statement), and a control-statement
+//     HEADER declaration (that statement — `for (int run = 0; ...)` never reaches past its own loop).
+// The residual over-approximation is the disclosed floor of emitShadowVarDecls, not of the span: a
+// declarator shape it refuses (the most-vexing `std::string key( tok );`) records no evidence at all.
 // Three further guards keep this suppression-only, never a mislabel:
 //   * evidence is a VarDecl binding — a DECLARATION's variable name (ingest captureBindings). An
 //     assignment-derived Type binding (`x = Foo();` re-binding a possibly-GLOBAL x) is NOT a declaration
