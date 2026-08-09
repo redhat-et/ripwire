@@ -1,6 +1,6 @@
 #include "pagerank.h"
 
-#include "csrverify.h"
+#include "infra/csrverify.h"
 
 #include <algorithm>
 #include <cmath>

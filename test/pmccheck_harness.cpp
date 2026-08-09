@@ -23,7 +23,7 @@
 
 #include "profileScope.h"
 
-#include "../src/hashutil.h"
+#include "../src/infra/hashutil.h"
 
 #include <cstdint>
 #include <cstdio>

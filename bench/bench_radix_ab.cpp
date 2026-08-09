@@ -2,7 +2,7 @@
 // Build: c++ -O3 -march=native -std=c++23 bench/bench_radix_ab.cpp src/infra/diagnostics.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_radix_ab
 
 #include "radixSort.h"
-#include "sortutil.h"
+#include "infra/sortutil.h"
 
 #include <algorithm>
 #include <array>

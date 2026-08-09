@@ -25,7 +25,7 @@
 #include "gitstamp.h"    // atAttr — at="<sha>[+dirty]"
 #include "gitmine.h"     // gitCommandLines — byte-safe git pipe reader
 #include "serialize.h"   // escapeXml + kMinBytesPerToken
-#include "jsonesc.h"     // shSingleQuote
+#include "infra/jsonesc.h"     // shSingleQuote
 #include <algorithm>
 #include <cstdio>
 #include <string>

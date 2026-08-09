@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "csrverify.h"
+#include "infra/csrverify.h"
 #include "graph.h"
 
 #include <algorithm>

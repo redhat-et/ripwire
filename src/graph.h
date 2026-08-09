@@ -9,12 +9,12 @@
                                 // restrictDependencyHealth() needs (owns the extension table, kept in sync
                                 // by hand with ingest.cpp's kLangTable per its own header comment)
 #include "sparseCsr.h"          // first-party infra math (src/infra/)
-#include "csrverify.h"          // structural gate, VERIFY'd after every production CSR build
+#include "infra/csrverify.h"          // structural gate, VERIFY'd after every production CSR build
 #include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
-#include "svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
+#include "infra/svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
 #include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"        // SCIP precision overlay (data struct only; parser lives in scip.h)
-#include "sortutil.h"           // radix edge sorting for large integer-key graph edge lists
+#include "infra/sortutil.h"           // radix edge sorting for large integer-key graph edge lists
 #include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <algorithm>

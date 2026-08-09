@@ -102,7 +102,7 @@
 #include "crossref.h"       // the ref/blob sweep: enumerateRefs / diffRaw / streamBlobs / isBlobSha / isNullSha
 #include "quality.h"        // gitRepoHasHistory / gitHeadSha / gitOneLine
 #include "arch.h"           // relForHash — ing.files' root-prefixed path -> the git-relative spelling diffRaw reports
-#include "jsonesc.h"        // shSingleQuote — the merge-base call
+#include "infra/jsonesc.h"        // shSingleQuote — the merge-base call
 #include "serialize.h"      // escapeXml
 #include "Diagnostics.h"    // VERIFY / DEGRADED_PATH_ALERT
 

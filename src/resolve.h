@@ -41,7 +41,7 @@
 
 #include "model.h"
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
-#include "svector.h"
+#include "infra/svector.h"
 
 #include <algorithm>
 #include <cstddef>

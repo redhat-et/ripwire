@@ -17,8 +17,8 @@
 #include "mcpverbs.h"      // the read/flagship verb builders runMcp dispatches to (pulls mcpindex.h → mcpjson.h)
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
 
-#include "stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
-#include "blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
+#include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
+#include "infra/blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
 
 #include <cstdio>          // stdin / std::fputs — the stdio request loop
 #include <iostream>        // no longer used HERE (R4 retired the std::cin getline) — kept because downstream

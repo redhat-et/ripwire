@@ -52,7 +52,7 @@
 #include "quality.h"      // materializeCommitTree / TmpTreeGuard / bodyHashesBySym / gitOneLine / gitHeadSha / gitRepoHasHistory
 #include "resolve.h"      // canonicalId
 #include "arch.h"         // relForHash, fnv1a64
-#include "jsonesc.h"      // shSingleQuote
+#include "infra/jsonesc.h"      // shSingleQuote
 #include "serialize.h"    // escapeXml
 #include "workspace.h"    // wsdetail::segmentsOf — the shared delimiter-split primitive (also splits the CSV ref list)
 #include "Diagnostics.h"  // DEGRADED_PATH_ALERT

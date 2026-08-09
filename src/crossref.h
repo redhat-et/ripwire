@@ -86,8 +86,8 @@
 #include "quality.h"      // gitOneLine / gitHeadSha / gitRepoHasHistory / popenTrimmed
 #include "gitoracle.h"    // the SHARED name-history oracle — the deleted-from-every-tree lane for whereis
 #include "arch.h"         // fnv1a64
-#include "hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
-#include "jsonesc.h"      // shSingleQuote
+#include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
+#include "infra/jsonesc.h"      // shSingleQuote
 #include "serialize.h"    // escapeXml
 #include "pageview.h"     // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "workspace.h"    // wsdetail::segmentsOf

@@ -35,7 +35,7 @@
 //     degrades to "not provably stale" rather than guess — false negatives over false positives.
 
 #include "quality.h"    // gitRepoHasHistory / gitOneLine / gitIsAncestor / popenTrimmed — the shared git plumbing
-#include "jsonesc.h"    // shSingleQuote
+#include "infra/jsonesc.h"    // shSingleQuote
 #include "resolve.h"    // includerDir — the SAME "directory of a path" primitive the include resolver already reuses at 4+ sites; not reimplemented here
 #include "mention.h"    // mention_detail::baseNameOf — the SAME "basename of a path" primitive doc-mention matching already reuses
 #include "btree.hpp"    // gtl::btree_map — sorted-by-directory grouping (house rule: never std::map)

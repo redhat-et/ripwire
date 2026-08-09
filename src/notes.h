@@ -46,7 +46,7 @@
 #include "model.h"         // HashMap<> — the flat, cache-friendly lookup index (never std::unordered_map)
 #include "Diagnostics.h"   // DEGRADED_PATH_ALERT — the degrade path for a malformed line / unwritable file
 #include "arch.h"          // D5: relForHash — the SAME lexical, no-I/O root-relative strip the baseline sidecars use
-#include "blanktext.h"     // §S3: rw::hasVisibleContent — the ONE "present but carries nothing" predicate
+#include "infra/blanktext.h"     // §S3: rw::hasVisibleContent — the ONE "present but carries nothing" predicate
 
 #include <algorithm>
 #include <array>
