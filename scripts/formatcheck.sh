@@ -41,15 +41,15 @@ WANT_MAJOR=22
 
 # ─── the gated set: files that already match .clang-format exactly ────────────────────────────
 read -r -d '' GATED << 'GATED_EOF' || true
-src/csrverify.h
 src/graphlegend.h
-src/hashutil.h
+src/infra/csrverify.h
+src/infra/hashutil.h
+src/infra/namesplit.h
 src/infra/radixSort.h
-src/namesplit.h
+src/infra/stdinline.h
 src/ownersview.h
 src/pagerank.cpp
 src/pagerank.h
-src/stdinline.h
 GATED_EOF
 
 mode="gate"

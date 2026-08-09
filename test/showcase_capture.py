@@ -297,14 +297,14 @@ add(S8, f"{D} . --stray-content=zz-orphan --plan", "CHANGED: --plan surfaces tho
 
 # --- build the sandbox clone (was hand-built in the 07-27 round; folded in so
 # --- regeneration stays ONE command). git clone --local + ONE deliberate
-# --- regression in src/sortutil.h carrying four shapes: a preexisting fn made
+# --- regression in src/infra/sortutil.h carrying four shapes: a preexisting fn made
 # --- deeply nested, an arity change 1 -> 2, a copy-paste duplicate helper, a
 # --- new 8-parameter public fn. Plus a parentless zz-orphan-lane branch
 # --- (git commit-tree) feeding --stray-content's no-merge-base bucket.
 def mustReplace( text, old, new, what ):
     n = text.count( old )
     if n != 1:
-        print( f"FATAL: sandbox edit anchor for '{what}' found {n}x (expected 1) — src/sortutil.h drifted; update the anchors in showcase_capture.py", file=sys.stderr )
+        print( f"FATAL: sandbox edit anchor for '{what}' found {n}x (expected 1) — src/infra/sortutil.h drifted; update the anchors in showcase_capture.py", file=sys.stderr )
         sys.exit( 1 )
     return text.replace( old, new )
 
@@ -314,7 +314,7 @@ subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, DIRTY ], check=Tru
 subprocess.run( "git branch zz-orphan-lane $(git commit-tree 'HEAD^{tree}' -m 'zz-orphan-lane: parentless probe branch for the no-merge-base bucket')",
                 shell=True, cwd=DIRTY, check=True )
 
-sortutil_path = os.path.join( DIRTY, "src", "sortutil.h" )
+sortutil_path = os.path.join( DIRTY, "src", "infra", "sortutil.h" )
 src = open( sortutil_path ).read()
 
 OLD_LESS = """inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
@@ -530,7 +530,7 @@ for r in results:
         cur_section = c["section"]
         doc.append(f"\n---\n\n# {cur_section}\n")
         if cur_section == S8:
-            doc.append(f"Everything below runs with `cwd` = the throwaway clone at `{DIRTY}` (`git clone --local` of this repo, then one deliberate regression in `src/sortutil.h`). The read-only repo is never touched. The binary is the same `build/ripwire`, addressed absolutely.\n")
+            doc.append(f"Everything below runs with `cwd` = the throwaway clone at `{DIRTY}` (`git clone --local` of this repo, then one deliberate regression in `src/infra/sortutil.h`). The read-only repo is never touched. The binary is the same `build/ripwire`, addressed absolutely.\n")
     doc.append(f"## `{c['cmd']}`\n")
     doc.append(f"*{c['what']}*\n")
     meta = []

@@ -1,4 +1,4 @@
-// test/duprowfix/box.h — a minimal const/non-const accessor-overload pair, mirroring src/svector.h's
+// test/duprowfix/box.h — a minimal const/non-const accessor-overload pair, mirroring src/infra/svector.h's
 // buf()/buf() const shape that motivated §P6.3: the two overloads canonicalize to the SAME
 // id="...Box::data" (canonicalId is path::scope::name — it has no notion of signature or
 // const-qualification), so before the fix the default map printed the identical <s ... id="...Box::data">

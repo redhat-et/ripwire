@@ -9,7 +9,7 @@
 # (implicit-integer-sign-change) and, under `-fno-sanitize-recover=all`, ABORTS the process. Pre-fix,
 # an --mcp request containing "café" answered `initialize` and then died with exit 134, so the entire
 # MCP surface was sanitizer-DARK for non-ASCII input: no gate could observe behaviour past that byte.
-# Fix (R4): src/stdinline.h's readByteSafeLine, swapped in at all three std::cin sites — src/mcp.h
+# Fix (R4): src/infra/stdinline.h's readByteSafeLine, swapped in at all three std::cin sites — src/mcp.h
 # (runMcp's loop), src/main.cpp readTraceText (--from-trace=-), src/main.cpp --batch=-.
 #
 # WHY THE GATE LOOKS LIKE THIS. The bug lived BELOW the JSON layer, so every arm here is about bytes

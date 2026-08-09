@@ -4,7 +4,7 @@
 // in-edge CSR. This benchmark pushes that exact shape past cache-sized inputs and compares:
 //   A std::sort comparator
 //   B pdqsort comparator (vendored as src/infra/fastSort.h)
-//   C stable byte-radix on the two uint32 keys (src/sortutil.h)
+//   C stable byte-radix on the two uint32 keys (src/infra/sortutil.h)
 //
 // Build:
 //   c++ -O3 -march=native -std=c++23 bench/bench_sort_large.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_bench_sort_large

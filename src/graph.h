@@ -2771,7 +2771,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // (includer → included). Shared by --deps, --arch, cycle detection, the Lakos health metrics, gitmine
 // and ccjson. PATH-PRECISE (not basename): each quote `#include "x.h"` is resolved LEXICALLY relative to
 // the includer (resolve.h::resolvePreciseInclude), so a cross-directory basename collision (this repo's
-// two svector.h: src/ vs third_party/) can no longer manufacture a WRONG file→file edge — it was
+// two svector.h: src/infra/ vs third_party/) can no longer manufacture a WRONG file→file edge — it was
 // the last silent-wrong-edge surface (the call-graph SameInclude tier already resolves precisely, see
 // buildGraph's fileIncludes). An angle `<x.h>` or any unresolvable/ambiguous include contributes NOTHING
 // (dropped, never basename-matched) — monotone: precise resolution can only REMOVE or REDIRECT a wrong

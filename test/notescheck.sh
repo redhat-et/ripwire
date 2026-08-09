@@ -315,7 +315,7 @@ printf '%s' "$XML_A" | xmllint --noout - 2>/dev/null && ok "R6: --for XML after 
 # --note-add decided "present but carries nothing" with notes::sanitizeField (\t \n \r -> space, ASCII-space
 # trim) plus .empty(). That refused an ASCII-blank note and ACCEPTED six other blank classes, committing an
 # invisible row into .ripwire_notes — a file the tool tells users to commit and merge. The verdict now comes
-# from rw::hasVisibleContent (src/blanktext.h), the SAME derived table the MCP edit verbs read, so this gate
+# from rw::hasVisibleContent (src/infra/blanktext.h), the SAME derived table the MCP edit verbs read, so this gate
 # and mcpframehonestycheck's (K) arms are two callers of one rule rather than two rules.
 #
 # The classes are the ones the audit measured, one per Unicode reason: NBSP (Zs), ZWSP (Cf), BOM (Cf),

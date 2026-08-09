@@ -38,7 +38,7 @@ cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j 6
 On this codebase the answer is stable and counterintuitive: **PageRank is ~1 ms** of a ~2.7 s cold CPU
 profile, the build-model sorts are ~1.7 ms, and ~31% sits in two phases of `src/ingest.cpp`
 (`captureTagsFacts`, `captureSideFacts`) that spend it calling tree-sitter. So a remark in
-`src/pagerank.cpp`, `src/sortutil.h` or `src/infra/radixSort.inl` is dismissible on arithmetic before
+`src/pagerank.cpp`, `src/infra/sortutil.h` or `src/infra/radixSort.inl` is dismissible on arithmetic before
 you read it. Re-derive this table if you touch the pipeline; do not trust this paragraph forever.
 
 ## Step 1 — collect
