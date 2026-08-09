@@ -90,9 +90,9 @@ Two naming corrections baked in: r7's opponent `@colbymchenry/codegraph` (npm) i
 17. **`--slice=SYM`** (Joern CPG slicing analogue) — fuse --nonlocal-state cells + call reach into
     a minimal causal subgraph. Effort M-L. Own round.
 18. **Top-N #ifdef dual-parse** (Kästner partial-preprocessing lineage, driven by the existing
-    --flags ranking) — fully fixes ppalt AND the canyonraid feature-guard gap; real determinism/
+    --flags ranking) — fully fixes ppalt AND the private validation tree's feature-guard gap; real determinism/
     symbol-ID risk. Effort L. Own pre-registered round with a promoted synthetic fixture
-    (canyonraid stays validation-only per memory).
+    (the private validation tree stays validation-only per memory).
 19. **Sub-function block clones** (CPD's Karp-Rabin core) — the biggest true clone-detection gap;
     O(N²) risk needs the same care Type-3 got. Effort L.
 20. **--graph-query power extensions** — `reachUntil(pred)` bounded-until (Joern), CodeQL-flavored
