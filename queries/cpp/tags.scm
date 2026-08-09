@@ -116,6 +116,25 @@
   function: (qualified_identifier
     name: (_) @name)) @reference.call
 
+; USING-DECLARATION RE-EXPORTS (r9 loss bucket 1): `using lib::doWork;` — at namespace scope, inside a
+; namespace body, or at class scope (`using Base::method;` — same node kind, matched wherever it appears) —
+; is a single-symbol re-export, and pre-lever it minted NO reference at all: the site was invisible to
+; --uses even though call RESOLUTION through the re-exported name already worked. The site is now a
+; role="import" use-site of the target (ingest.cpp maps @reference.import → RefRole::Import; import refs
+; never enter the call graph — graph.h admits Call+Macro only, so a never-called re-export gains the row
+; and no edge). The name field binds the INNER node, so a 3+-segment `using a::b::c;` captures `b::c` and
+; the existing H4 re-split recovers name `c` / immediate qualifier `b`, exactly as for qualified calls.
+;
+; EXCLUDED AT CAPTURE TIME, not here (ingest.cpp usingDeclarationIsDirective — passesPredicates is not
+; wired into the tags pass, same story as the cast keywords): `using namespace ns;` (no single-symbol
+; target; its qualified form `using namespace lib::nested;` matches this pattern and must be dropped) and
+; `using enum E;` (re-exports the ENUMERATORS, not the named type). `using alias = type;` is a different
+; node kind (alias_declaration) and never matches. A bare `using namespace x;` (unqualified) binds no
+; qualified_identifier and never matches either.
+(using_declaration
+  (qualified_identifier
+    name: (_) @name)) @reference.import
+
 ; EXPLICIT-TEMPLATE-ARGUMENT CALLS: `tmplFn<int>( a )` parses as
 ; call_expression function: (template_function name: (identifier) arguments: (template_argument_list)) —
 ; a distinct node kind none of the patterns above match, so these were dropped by the same silent mechanism

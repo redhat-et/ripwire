@@ -1014,7 +1014,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 50;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 51;           // bump on any grammar/.scm/extraction change
+                                                      // 51 (r9 loss bucket 1): C++ `using ns::name;`
+                                                      //    re-export sites now mint a role="import" RawRef
+                                                      //    (new tags.scm @reference.import pattern +
+                                                      //    usingDeclarationIsDirective guard) — a NEW ref
+                                                      //    kind on the per-file record → old caches lack
+                                                      //    the rows and must be rejected. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
                                                       // 48 (macro-edges): function-like #define → t="macro"
                                                       //    symbols (C++ gains the capture; C/Rust re-kind
                                                       //    Function→Macro), replacement-text call scan, and
@@ -4776,6 +4783,35 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
 }
 
+// First DIRECT child of `n` whose node type is `type`, or a null node when none exists — the one
+// child-scan shape shared by the using-declaration keyword guard below and the phantom-`::` probe
+// (hasPhantomScopeSeparator), so the two cannot drift into near-clones of each other.
+inline TSNode firstChildOfType( TSNode n, const char* type ) noexcept
+{
+    const std::uint32_t childCount = ts_node_child_count( n );
+    for( std::uint32_t i = 0; i < childCount; ++i )
+    {
+        const TSNode child = ts_node_child( n, i );
+        if( std::strcmp( ts_node_type( child ), type ) == 0 )
+        {
+            return child;
+        }
+    }
+    return TSNode {};
+}
+
+// using-declaration re-exports (r9 loss bucket 1): TRUE when a C++ `using_declaration` node is a grammar
+// KEYWORD form rather than a single-symbol re-export — `using namespace ns;` (its qualified spelling
+// `using namespace lib::nested;` carries a qualified_identifier and so matches the tags pattern) or
+// `using enum E;` (C++20; re-exports the ENUMERATORS, not the named type, so an import row for the type
+// would over-claim). Both are VALID INPUT, skipped at capture time exactly like the cast keywords above:
+// the grammar puts the keyword in an anonymous child with no field name, which a tags-query pattern
+// cannot negate (passesPredicates is wired into --match/--lint only, never the tags pass).
+inline bool usingDeclarationIsDirective( TSNode n ) noexcept
+{
+    return !ts_node_is_null( firstChildOfType( n, "namespace" ) ) || !ts_node_is_null( firstChildOfType( n, "enum" ) );
+}
+
 // Start index of `text`'s trailing C++ OPERATOR NAME (`operator>`, `operator<<`, `operator()`, `operator bool`),
 // or npos when the name is a plain identifier. This must be consulted BEFORE any angle-depth scanning.
 //
@@ -4887,16 +4923,8 @@ inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
 // this guard is inert on every well-formed parse.
 inline bool hasPhantomScopeSeparator( TSNode qualified ) noexcept
 {
-    const std::uint32_t childCount = ts_node_child_count( qualified );
-    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
-    {
-        const TSNode child = ts_node_child( qualified, childIndex );
-        if( std::strcmp( ts_node_type( child ), "::" ) == 0 )
-        {
-            return ts_node_is_missing( child );
-        }
-    }
-    return false;   // no separator child at all → leave the pre-existing behaviour untouched
+    const TSNode sep = firstChildOfType( qualified, "::" );
+    return !ts_node_is_null( sep ) && ts_node_is_missing( sep );   // no separator child at all → pre-existing behaviour untouched (false)
 }
 inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 {
@@ -6812,6 +6840,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             bool             isDef    = false;
             bool             isRef    = false;
             std::string_view defCapSv;   // the @definition capture's name — dropGatedCapture keys the constant/cjsexport/protomethod gates on it
+            std::string_view refCapSv;   // the @reference capture's name — "reference.import" routes the using-declaration role (r9 loss bucket 1)
             TSNode           roleNode {};
             bool             haveRole = false;
             std::string_view nameTxt;
@@ -6844,6 +6873,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     case CapRole::Ref:
                     {
                         isRef    = true;
+                        refCapSv = capSv;
                         roleNode = cap.node;
                         haveRole = true;
                     }
@@ -7093,12 +7123,23 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     continue;
                 }
 
+                // using-declaration re-exports (r9 loss bucket 1): @reference.import marks the C++
+                // `using ns::name;` tags pattern. The site becomes a role="import" use-site of the target
+                // (never a call edge — graph.h admits Call+Macro only), and the grammar KEYWORD forms
+                // (`using namespace ns;` / `using enum E;`) are dropped here at capture time, where the
+                // query predicate a tags pattern cannot express IS enforceable (see the helper's note).
+                const bool isImportRef = ( refCapSv == "reference.import" );
+                if( isImportRef && usingDeclarationIsDirective( roleNode ) )
+                {
+                    continue;
+                }
+
                 RawRef r;
                 r.fileId    = fileId;
                 r.startByte = ts_node_start_byte( roleNode );
                 r.line      = ts_node_start_point( roleNode ).row + 1;   // ABS-3: 1-based use-site line for --uses
                 r.lang      = le.lang;
-                r.role      = RefRole::Call;   // ABS-3: @reference.call from the tags query is a call use-site
+                r.role      = isImportRef ? RefRole::Import : RefRole::Call;   // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export
                 r.name      = finalSegment( nameTxt );
                 if( le.lang == Lang::Cpp )
                 {
@@ -7143,10 +7184,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     }
                 }
 
-                auto [ rk, rv ] = receiverOf( nameNode, le.lang, src );                  // P2-D: `this`/`self`/`x` receiver shape
-                r.recv = rk;  r.recvVar = std::move( rv );                               //   → one-hop narrowing in resolve.h
-                auto [ ac, ak ] = callArity( nameNode, le.lang, src );                    // B2.2: call-site positional arg count
-                r.argCount = ac;  r.argCountKnown = ak;                                   //   → arity filter in graph.h
+                if( !isImportRef )                                                       // an import site has no receiver and no argument list —
+                {                                                                        //   the defaults (RecvKind::None, argCountKnown=false) are the truth
+                    auto [ rk, rv ] = receiverOf( nameNode, le.lang, src );              // P2-D: `this`/`self`/`x` receiver shape
+                    r.recv = rk;  r.recvVar = std::move( rv );                           //   → one-hop narrowing in resolve.h
+                    auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
+                    r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
+                }
                 refs.push_back( std::move( r ) );
             }
         }
