@@ -109,6 +109,37 @@ void innerBlock() {
 }
 EOF
 
+cat >"$FIX/ctrlinit.cpp" <<'EOF'
+// A5 iteration-3 arms: control-statement HEADER declarations scope to the STATEMENT, not the enclosing block.
+#include "funcs.h"
+int  getVal();
+void forInit() {
+    for (int run = 0; run < 3; ++run) { (void)run; }   // header decl + body use — all suppressed
+    run();                                             // (m) TWO genuine calls after the loop — both survive
+    run();
+}
+void ifInit() {
+    if (int run = getVal()) { (void)run; }             // (n) if-init variant
+    run();
+}
+void whileCond() {
+    while (int run = getVal()) { (void)run; }          // (o) while-condition variant
+    run();
+}
+EOF
+
+cat >"$FIX/catchparam.cpp" <<'EOF'
+#include "funcs.h"
+struct Error { };
+void catcher() {
+    try { throw Error(); }
+    catch (const Error& process) {                     // (p) catch param shadows process()
+        (void)process;
+    }
+    run();
+}
+EOF
+
 cat >"$FIX/plain.cpp" <<'EOF'
 // no-collision control: `total` names NO indexed symbol anywhere — its local sites must STAY listed
 // (--uses on a plain local name is the external-answer feature writetargetcheck pins).
@@ -194,6 +225,36 @@ for fn in lamParam lamInit lamCap; do
         && { no "--uses=key lists sites from $fn() — lambda-scope shadow evidence missing"; printf '%s\n' "$UK" | grep "in_id=\"$fn\""; } \
         || ok "--uses=key has ZERO sites from $fn() (lambda param/init-capture/captured-local suppressed)"
 done
+
+# ── (m)-(o) A5 iteration 3: header declarations scope to their control STATEMENT, never past it ───────
+CTRL="$( uses run | grep 'ctrlinit.cpp' )"
+forcalls="$( printf '%s\n' "$CTRL" | grep -c 'role="call".*in_id="forInit"' )"
+[ "$forcalls" = "2" ] \
+    && ok "--uses=run keeps BOTH genuine calls after forInit()'s loop (for-init scope stops at the loop)" \
+    || { no "--uses=run has $forcalls of 2 genuine calls after forInit()'s loop — for-init scope leaked past the statement"; }
+printf '%s\n' "$CTRL" | grep 'in_id="forInit"' | grep -Eq 'role="(read|write)"' \
+    && { no "--uses=run lists read/write sites from inside forInit()'s loop"; printf '%s\n' "$CTRL" | grep 'in_id="forInit"'; } \
+    || ok "--uses=run has no read/write sites from forInit()'s loop header/body"
+printf '%s\n' "$CTRL" | grep 'in_id="ifInit"' | grep -q 'role="call"' \
+    && ok "--uses=run keeps the genuine call after ifInit()'s if-init statement" \
+    || no "--uses=run LOST the genuine call after ifInit() — if-init scope leaked past the statement"
+printf '%s\n' "$CTRL" | grep 'in_id="whileCond"' | grep -q 'role="call"' \
+    && ok "--uses=run keeps the genuine call after whileCond()'s loop" \
+    || no "--uses=run LOST the genuine call after whileCond() — while-condition scope leaked past the statement"
+for fn in ifInit whileCond; do
+    printf '%s\n' "$CTRL" | grep "in_id=\"$fn\"" | grep -Eq 'role="(read|write)"' \
+        && no "--uses=run lists read/write sites from inside $fn()'s statement" \
+        || ok "--uses=run has no read/write sites from $fn()'s header/body"
+done
+
+# ── (p) A5 iteration 3: a catch parameter scopes to its handler block ─────────────────────────────────
+UPC="$( uses process )"
+printf '%s\n' "$UPC" | grep -q 'catchparam.cpp' \
+    && { no "--uses=process lists sites from catcher()'s handler — catch param produced no evidence"; printf '%s\n' "$UPC" | grep 'catchparam.cpp'; } \
+    || ok "--uses=process has ZERO sites from catcher()'s handler (catch param captured)"
+uses run | grep 'catchparam.cpp' | grep -q 'role="call"' \
+    && ok "--uses=run keeps catcher()'s genuine call after the handler" \
+    || no "--uses=run LOST catcher()'s genuine call — catch-param scope leaked past the handler"
 
 # ── (e) determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --uses=run --no-cache 2>/dev/null )"
