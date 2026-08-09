@@ -1016,7 +1016,15 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 56;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 57;           // bump on any grammar/.scm/extraction change
+                                                      // 57 (r9 A5 iteration 5): the L3 assignment arm gets
+                                                      //    the value-assignment NOISE GATE — a bare-
+                                                      //    identifier `x = y;` mints a fn-pointer binding
+                                                      //    only when the file's own declarations do not
+                                                      //    prove x a value variable (`std::string line;
+                                                      //    line = zzz;` no longer vetoes shadow
+                                                      //    suppression, nor tombstones a same-named
+                                                      //    file-scope binding corpus-wide).
                                                       // 56: three declarator shapes isNonValueContext
                                                       //    could not see stop leaking their DECLARED name
                                                       //    out as a read of the symbol they shadow — a
@@ -5499,40 +5507,45 @@ inline std::string fnBindTargetOf( TSNode value, std::string_view src, bool& was
     return std::string( src.substr( a, b - a ) );
 }
 
-// the variable name of a possibly fn-pointer declarator chain (`(*fn)()` → "fn"), descending through
-// function/parenthesized/pointer/reference declarators. Sets `sawFnDeclarator` when the chain crosses a
-// function_declarator — the explicit fn-pointer syntax that licenses a bare-identifier initializer even
-// under a primitive written type (`void (*fn)() = handler;`) — and `sawRefDeclarator` when it crosses a
-// reference_declarator (`H& r = fn;`): a reference ALIASES its initializer, so the caller must treat the
-// bound-to variable as ESCAPED (clobbered), never emit a positive for the alias. declaratorVarName (Rule 2)
-// is NOT reused: parenthesized_declarator and reference_declarator carry their inner declarator as an
-// UNNAMED child, which a field-only unwrap cannot reach. An array_declarator bails — an ARRAY of fn
+// the shape a possibly fn-pointer declarator chain (`(*fn)()` → "fn") presents, descending through
+// function/parenthesized/pointer/reference declarators. `sawFn` reports crossing a function_declarator —
+// the explicit fn-pointer syntax that licenses a bare-identifier initializer even under a primitive written
+// type (`void (*fn)() = handler;`); `sawRef` a reference_declarator (`H& r = fn;`), where the reference
+// ALIASES its initializer, so the caller must treat the bound-to variable as ESCAPED (clobbered) and never
+// emit a positive for the alias; `sawPtr` a pointer_declarator, which is what separates the two shapes the
+// type node alone cannot tell apart — `void (*fp)()` (a fn-pointer VARIABLE: sawFn AND sawPtr) from
+// `void fp()` (a function DECLARATION: sawFn alone), which declares no variable at all. declaratorVarName
+// (Rule 2) is NOT reused: parenthesized_declarator and reference_declarator carry their inner declarator as
+// an UNNAMED child, which a field-only unwrap cannot reach. An array_declarator bails — an ARRAY of fn
 // pointers is table territory, never a single-var binding (its indexed call must stay unresolved).
-inline std::string_view fnDeclaratorVarName( TSNode decl, std::string_view src, bool& sawFnDeclarator, bool& sawRefDeclarator )
+struct FnBindDeclShape
 {
-    sawFnDeclarator  = false;
-    sawRefDeclarator = false;
+    std::string_view name;
+    bool             sawFn  = false;
+    bool             sawPtr = false;
+    bool             sawRef = false;
+};
+
+inline FnBindDeclShape fnDeclaratorShape( TSNode decl, std::string_view src )
+{
+    FnBindDeclShape shape;
     for( int guard = 0; guard < 10 && !ts_node_is_null( decl ); ++guard )
     {
         const char* dt = ts_node_type( decl );
         if( std::strcmp( dt, "identifier" ) == 0 )
         {
             const std::uint32_t a = ts_node_start_byte( decl ), b = ts_node_end_byte( decl );
-            return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
+            shape.name = ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
+            return shape;
         }
         if( std::strcmp( dt, "array_declarator" ) == 0 )
         {
-            return {};
-        }
-        if( std::strcmp( dt, "function_declarator" ) == 0 )
-        {
-            sawFnDeclarator = true;
+            return shape;
         }
         const bool isRef = ( std::strcmp( dt, "reference_declarator" ) == 0 );
-        if( isRef )
-        {
-            sawRefDeclarator = true;
-        }
+        shape.sawFn  = shape.sawFn  || std::strcmp( dt, "function_declarator" ) == 0;
+        shape.sawPtr = shape.sawPtr || std::strcmp( dt, "pointer_declarator" ) == 0;
+        shape.sawRef = shape.sawRef || isRef;
         TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
         if( ts_node_is_null( inner ) && ( isRef || std::strcmp( dt, "parenthesized_declarator" ) == 0 ) )
         {
@@ -5544,11 +5557,11 @@ inline std::string_view fnDeclaratorVarName( TSNode decl, std::string_view src, 
         }
         if( ts_node_is_null( inner ) )
         {
-            return {};
+            return shape;
         }
         decl = inner;
     }
-    return {};
+    return shape;
 }
 
 // tree-sitter-cpp MIS-PARSES a raw fn-pointer declaration inside a function body —
@@ -5606,6 +5619,251 @@ struct FnBindClobber
     std::string   var;
     std::uint32_t startByte = 0;
 };
+
+// ── L3 VALUE-ASSIGNMENT NOISE GATE (r9 fix round) ────────────────────────────────────────────────────
+// The DECLARATION arm gates its bare-identifier initializer on the written type (`int a = b;` is a copy,
+// not a function). The ASSIGNMENT arm carries no type node at all, so before this gate EVERY `x = y;` with
+// a bare-identifier RHS minted an FnAssign — `std::string line; line = zzz;` included. Two measured harms,
+// both from a binding that names no function anybody could call: shadowSuppressedSite VETOES local-shadow
+// suppression for any name carrying an L3 binding (calls THROUGH a bound variable must keep resolving), so
+// the local handed its every read/write back to the function it shadows; and buildFnPtrBindTables' file-
+// scope sweep keys FnAssign records by VAR NAME ALONE across the whole corpus, so one bogus record
+// TOMBSTONED a genuine, never-clobbered file-scope binding of the same name in an unrelated file.
+// The gate asks the file's own declarations of that name what the variable IS:
+//   * PROVEN VALUE — declared with a concrete written type that is no function-pointer alias → the
+//     assignment is a copy: no positive, a CLOBBER instead (exactly what `fn = getHandler()` records),
+//     inert unless the name holds a real binding here and correctly tombstoning it when it does;
+//   * FN-CAPABLE — a fn-pointer declarator (`void (*fp)()`) or a fn-pointer alias type (`H fp;`) → mint,
+//     and this wins over any value evidence for the same name (recall-safe when a file reuses a name);
+//   * NEITHER — `auto`, `decltype`, a template type, or a name this file never declares (a global, a
+//     member, an extern): UNKNOWN, and unknown MINTS, exactly as before. When in doubt, don't gate.
+// File-scoped and name-based, like every other L3 table: evidence from one function's declarations reaches
+// another's assignment of the same name. That over-approximation runs toward NOT minting a binding, which
+// is the side that can only cost a disclosed edge, never invent one. Address-of (`fn = &beta`) and lambda
+// RHS forms are self-evidencing and never reach the gate.
+// Each fact carries the DEFINITION it was declared inside, so one file declaring `std::string run;` in one
+// function and `void (*run)();` in another gets both answers right; a file-scope declaration carries {0,0}
+// and applies everywhere. This is a function-granular scope, deliberately coarser than the shadow spans in
+// model.h — it decides what a NAME can hold, not which sites a declaration claims.
+struct FnBindVarTypeFact
+{
+    std::string   var;
+    std::string   typeName;              // final segment of a WRITTEN type name; "" for the unnamed kinds
+    std::uint32_t scopeStart   = 0;      // the enclosing definition's byte span; {0,0} = file scope
+    std::uint32_t scopeEnd     = 0;
+    bool        concreteType  = false;   // the type node's spelling FIXES the type (never auto/decltype/template)
+    bool        fnPtrVariable = false;   // the declarator chain is a function POINTER, not a plain value
+};
+
+// a bare-identifier assignment held back until the walk ends, when the file's full declaration evidence —
+// including declarations the DFS has not reached yet — decides whether it mints a binding or a clobber.
+// Deferring is what keeps the verdict independent of walk order, and so of the AST's shape.
+struct PendingFnBindAssign
+{
+    std::string   var;
+    std::string   target;
+    std::uint32_t startByte = 0;
+};
+
+// the gate's whole per-file state: the declared-variable type facts, the file's function-pointer type
+// aliases, and the assignments held back until both of those are complete. One object because the three
+// have no independent life — they are filled by one walk and spent together the moment it ends.
+struct FnBindGateState
+{
+    std::vector<FnBindVarTypeFact>   facts;
+    std::vector<PendingFnBindAssign> pending;
+    HashMap<std::string, char>       aliases;
+};
+
+// true when a `type:` field node is a CONCRETE written type — one whose spelling alone fixes what the
+// variable is. `name` receives the final segment for the NAMED kinds (the only ones a typedef can make a
+// function pointer); the built-in and class/enum-body kinds can never be one and leave it empty. Everything
+// else — `auto`, `decltype`, and any type carrying TEMPLATE ARGUMENTS — is dependent, not concrete: the
+// spelling of `std::function<void()>` says nothing about callability the way `std::string` does.
+inline bool concreteWrittenType( TSNode typeNode, std::string_view src, std::string& name )
+{
+    name.clear();
+    if( ts_node_is_null( typeNode ) )
+    {
+        return false;
+    }
+    const char* tt = ts_node_type( typeNode );
+    if( std::strcmp( tt, "primitive_type" ) == 0 || std::strcmp( tt, "sized_type_specifier" ) == 0
+        || std::strcmp( tt, "struct_specifier" ) == 0 || std::strcmp( tt, "class_specifier" ) == 0
+        || std::strcmp( tt, "union_specifier" ) == 0 || std::strcmp( tt, "enum_specifier" ) == 0 )
+    {
+        return true;
+    }
+    if( std::strcmp( tt, "type_identifier" ) != 0 && std::strcmp( tt, "qualified_identifier" ) != 0
+        && std::strcmp( tt, "scoped_type_identifier" ) != 0 )
+    {
+        return false;
+    }
+    const std::string_view text = nodeTextOf( typeNode, src );
+    if( text.empty() || text.find( '<' ) != std::string_view::npos )
+    {
+        return false;
+    }
+    name = finalSegment( text );
+    return true;
+}
+
+// the TYPE-ALIAS name a node declares for a FUNCTION-POINTER type — `typedef void (*H)();` and
+// `using H = void(*)();` both yield "H"; every other typedef/alias yields "". This is the one piece of
+// evidence that separates a callable alias from an ordinary class name, both of which reach a declaration
+// as a bare `type_identifier`. Same-file only, which is the disclosed limit: an alias declared in a header
+// is invisible to a per-file parse, so a variable of that type stays UNKNOWN — and unknown still mints.
+inline std::string_view fnPtrAliasName( TSNode n, const char* t, std::string_view src )
+{
+    if( std::strcmp( t, "alias_declaration" ) == 0 )
+    {
+        const TSNode desc = ts_node_child_by_field_name( n, "type", 4 );
+        if( ts_node_is_null( desc ) )
+        {
+            return {};
+        }
+        const TSNode abst = ts_node_child_by_field_name( desc, "declarator", 10 );
+        if( ts_node_is_null( abst ) || std::strcmp( ts_node_type( abst ), "abstract_function_declarator" ) != 0 )
+        {
+            return {};
+        }
+        const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );
+        return ts_node_is_null( nm ) ? std::string_view{} : nodeTextOf( nm, src );
+    }
+    if( std::strcmp( t, "type_definition" ) != 0 )
+    {
+        return {};
+    }
+    const std::uint32_t cc = ts_node_child_count( n );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const char* fname = ts_node_field_name_for_child( n, i );
+        if( fname == nullptr || std::strcmp( fname, "declarator" ) != 0 )
+        {
+            continue;
+        }
+        TSNode d       = ts_node_child( n, i );
+        bool   crossed = false;
+        for( int guard = 0; guard < 10 && !ts_node_is_null( d ); ++guard )
+        {
+            const char* dt = ts_node_type( d );
+            if( std::strcmp( dt, "type_identifier" ) == 0 )
+            {
+                return crossed ? nodeTextOf( d, src ) : std::string_view{};
+            }
+            if( std::strcmp( dt, "function_declarator" ) == 0 )
+            {
+                crossed = true;
+            }
+            TSNode inner = ts_node_child_by_field_name( d, "declarator", 10 );
+            if( ts_node_is_null( inner ) && ts_node_named_child_count( d ) > 0 )
+            {
+                inner = ts_node_named_child( d, 0 );
+            }
+            d = inner;
+        }
+    }
+    return {};
+}
+
+// the byte span of the DEFINITION a node sits inside — a function body or a lambda, whichever encloses it
+// first. {0,0} at file/namespace/class scope, which the gate reads as "applies everywhere": a file-scope
+// variable IS in scope in every function below it.
+inline std::pair<std::uint32_t, std::uint32_t> enclosingDefSpan( TSNode n )
+{
+    TSNode p = ts_node_parent( n );
+    for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
+    {
+        const char* pt = ts_node_type( p );
+        if( std::strcmp( pt, "function_definition" ) == 0 || std::strcmp( pt, "lambda_expression" ) == 0 )
+        {
+            return { ts_node_start_byte( p ), ts_node_end_byte( p ) };
+        }
+        p = ts_node_parent( p );
+    }
+    return { 0u, 0u };
+}
+
+// record one declaration node's type facts — one per DECLARED VARIABLE. Covers the three shapes that
+// declare a name a later `x = y;` can target: a block/file `declaration`, a function `parameter_declaration`
+// (a value parameter reassigned from another parameter is the same copy), and a `field_declaration`.
+inline void collectFnBindTypeFacts( TSNode n, const char* t, std::string_view src, std::vector<FnBindVarTypeFact>& facts )
+{
+    if( std::strcmp( t, "declaration" ) != 0 && std::strcmp( t, "parameter_declaration" ) != 0
+        && std::strcmp( t, "optional_parameter_declaration" ) != 0 && std::strcmp( t, "field_declaration" ) != 0 )
+    {
+        return;
+    }
+    std::string typeName;
+    const bool  concrete           = concreteWrittenType( ts_node_child_by_field_name( n, "type", 4 ), src, typeName );
+    const auto [ scopeStart, scopeEnd ] = enclosingDefSpan( n );
+    const std::uint32_t cc = ts_node_child_count( n );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const char* fname = ts_node_field_name_for_child( n, i );
+        if( fname == nullptr || std::strcmp( fname, "declarator" ) != 0 )
+        {
+            continue;
+        }
+        TSNode d = ts_node_child( n, i );
+        if( std::strcmp( ts_node_type( d ), "init_declarator" ) == 0 )
+        {
+            d = ts_node_child_by_field_name( d, "declarator", 10 );
+        }
+        const FnBindDeclShape shape = fnDeclaratorShape( d, src );
+        if( shape.name.empty() || ( shape.sawFn && !shape.sawPtr ) )
+        {
+            continue;   // nameless, an array of pointers, or a plain function DECLARATION — no variable here
+        }
+        facts.push_back( { std::string( shape.name ), typeName, scopeStart, scopeEnd, concrete, shape.sawFn && shape.sawPtr } );
+    }
+}
+
+// the gate's whole per-node collection: a declaration's variable type facts AND, from the same node, any
+// function-pointer type alias it declares. `cFamily` is taken rather than checked at the call site so the
+// walk carries ONE unconditional line for the evidence — a `declaration` node feeds both the L3 capture
+// arms and the type facts here, and a typedef/alias node reaches neither of those arms.
+inline void collectFnBindGateEvidence( TSNode n, const char* t, std::string_view src, bool cFamily, FnBindGateState& gate )
+{
+    if( !cFamily )
+    {
+        return;
+    }
+    collectFnBindTypeFacts( n, t, src, gate.facts );
+    if( const std::string_view alias = fnPtrAliasName( n, t, src ); !alias.empty() )
+    {
+        gate.aliases.try_emplace( std::string( alias ), 1 );
+    }
+}
+
+// the gate's verdict for one assignment: true ⇒ the file PROVED this name is a value variable where the
+// assignment sits, so it is a copy and mints no binding. Only facts whose definition span CONTAINS the
+// assignment count (plus file-scope ones, which contain everything); among those, fn-pointer evidence wins
+// outright, and with no fact at all the name is unknown and the answer is false (mint, exactly as before).
+inline bool fnBindProvenValueVar( std::string_view var, std::uint32_t startByte,
+                                  const std::vector<FnBindVarTypeFact>& facts,
+                                  const HashMap<std::string, char>& fnAliases )
+{
+    bool proven = false;
+    for( const FnBindVarTypeFact& f : facts )
+    {
+        if( f.var != var )
+        {
+            continue;
+        }
+        if( f.scopeEnd != 0u && ( startByte < f.scopeStart || startByte >= f.scopeEnd ) )
+        {
+            continue;   // declared inside a definition this assignment is not in — a different variable
+        }
+        const bool aliasTyped = !f.typeName.empty() && fnAliases.find( f.typeName ) != fnAliases.end();
+        if( f.fnPtrVariable || aliasTyped )
+        {
+            return false;
+        }
+        proven = proven || ( f.concreteType && !aliasTyped );
+    }
+    return proven;
+}
 
 // where a bind-record SITS: its own position (for enclosing-def attribution) plus, on VarDecl records,
 // the declaring BLOCK's byte range — the shadow scope model.h's suppressShadowedReferences tests sites
@@ -5957,8 +6215,7 @@ inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::s
         {
             continue;   // no initializer → no binding fact here (a later assignment carries its own)
         }
-        bool sawFnDecl = false, sawRef = false;
-        const std::string_view var = fnDeclaratorVarName( ts_node_child_by_field_name( c, "declarator", 10 ), src, sawFnDecl, sawRef );
+        const auto [ var, sawFnDecl, sawPtrDecl, sawRef ] = fnDeclaratorShape( ts_node_child_by_field_name( c, "declarator", 10 ), src );
         const TSNode valueNode = ts_node_child_by_field_name( c, "value", 5 );
         if( sawRef )
         {
@@ -6014,11 +6271,15 @@ inline void captureFnBindEscape( TSNode n, std::string_view src, std::vector<FnB
 // L3 capture over one C-family `assignment_expression`: a recognizable RHS emits an FnAssign record; any
 // other RHS on a bare-identifier LHS (`fn = getHandler()`, `fn = nullptr`, `n += 1`) records a CLOBBER
 // candidate, emitted as a tombstone at the end of the walk IF the var has a fn binding in the same file.
+// A BARE-IDENTIFIER RHS (`fn = beta;`) is neither yet: it is the one shape a plain value copy shares with a
+// genuine fn-pointer rebind, and the assignment node carries no type to tell them apart — so it is held in
+// `pending` for the end-of-walk value-assignment noise gate above, which asks the file's own declarations.
 // The second branch decodes the C++-grammar MIS-PARSE of a raw fn-pointer declaration (`void (*fn)() =
 // &alpha;` — see misparsedFnPtrDeclVar): the shape itself proves a fn-pointer declarator, so a
-// bare-identifier RHS is captured too (no primitive-type noise gate — the "type" IS the evidence).
+// bare-identifier RHS is captured immediately there — the "type" IS the evidence, no gate needed.
 inline void captureFnBindAssign( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src,
-                                 std::vector<RawBind>& fnPos, std::vector<FnBindClobber>& fnUnk )
+                                 std::vector<RawBind>& fnPos, std::vector<FnBindClobber>& fnUnk,
+                                 std::vector<PendingFnBindAssign>& pending )
 {
     const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
     const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
@@ -6030,13 +6291,17 @@ inline void captureFnBindAssign( TSNode n, std::uint32_t fileId, Lang lang, std:
             const std::string_view var = src.substr( a, b - a );
             bool bareIdent = false;
             std::string target = fnBindTargetOf( rhs, src, bareIdent );
-            if( !target.empty() )
+            if( target.empty() )
             {
-                emitFnBind( fileId, lang, var, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnAssign, fnPos );
+                fnUnk.push_back( { std::string( var ), ts_node_start_byte( n ) } );
+            }
+            else if( bareIdent )
+            {
+                pending.push_back( { std::string( var ), std::move( target ), ts_node_start_byte( n ) } );
             }
             else
             {
-                fnUnk.push_back( { std::string( var ), ts_node_start_byte( n ) } );
+                emitFnBind( fileId, lang, var, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnAssign, fnPos );
             }
         }
     }
@@ -6051,6 +6316,24 @@ inline void captureFnBindAssign( TSNode n, std::uint32_t fileId, Lang lang, std:
         else
         {
             fnUnk.push_back( { std::string( dvar ), ts_node_start_byte( n ) } );
+        }
+    }
+}
+
+// decide every bare-identifier assignment the walk held back, against the file's COMPLETE declaration
+// evidence. A name the file proved to be a VALUE variable where the assignment sits records NOTHING — not a
+// positive, and deliberately not a clobber either: a clobber is a statement ABOUT a function pointer ("this
+// one is no longer trustworthy"), and the end-of-walk sweep promotes it to a real FnAssign tombstone as
+// soon as any same-named var in the file holds a binding. That tombstone reads as a binding to every
+// consumer — it re-vetoed the very shadow suppression this gate exists to restore. A copy into a string is
+// evidence in NEITHER direction. Everything else mints its FnAssign exactly as it did before the gate.
+inline void resolvePendingFnBindAssigns( std::uint32_t fileId, Lang lang, FnBindGateState& gate, std::vector<RawBind>& fnPos )
+{
+    for( PendingFnBindAssign& p : gate.pending )
+    {
+        if( !fnBindProvenValueVar( p.var, p.startByte, gate.facts, gate.aliases ) )
+        {
+            emitFnBind( fileId, lang, p.var, std::move( p.target ), p.startByte, LocalBindKind::FnAssign, fnPos );
         }
     }
 }
@@ -6075,6 +6358,7 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     std::vector<RawBind>       fnPos;
     std::vector<FnBindClobber> fnUnk;
     const bool cFamilyFn = ( lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC );
+    FnBindGateState fnGate;   // value-assignment noise-gate evidence — filled by this walk, spent when it ends
 
     while( !stack.empty() )
     {
@@ -6217,12 +6501,13 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     }
     else if( cFamilyFn && std::strcmp( t, "assignment_expression" ) == 0 )
     {
-        captureFnBindAssign( n, fileId, lang, src, fnPos, fnUnk );
+        captureFnBindAssign( n, fileId, lang, src, fnPos, fnUnk, fnGate.pending );
     }
     else if( cFamilyFn && std::strcmp( t, "pointer_expression" ) == 0 )
     {
         captureFnBindEscape( n, src, fnUnk );   // A5: `&fn` anywhere clobbers the variable (escape guard)
     }
+    collectFnBindGateEvidence( n, t, src, cFamilyFn, fnGate );   // never an `else if` — see the helper's note
 
     collectChildren( n, cursor.cur, kids );
     for( std::size_t i = kids.size(); i > 0; --i )
@@ -6230,6 +6515,8 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
         stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
     }
     }
+
+    resolvePendingFnBindAssigns( fileId, lang, fnGate, fnPos );   // the noise gate — BEFORE the sweep, which needs fnPos final
 
     // ── L3 clobber sweep + merge. A clobbering assignment forces the tombstone (kFnBindClobberTarget) so a
     // stale earlier binding can never win (`void (*fn)() = &alpha; fn = getHandler(); fn();` → NO edge) —

@@ -225,6 +225,23 @@ void siblingBlocks() {
 }
 EOF
 
+cat >"$FIX/valueassign.cpp" <<'EOF'
+// (aa)-(ae) r9 fix round: an L3 fn binding VETOES shadow suppression for its whole scope ("calls through
+// the variable keep resolving via the binding"). A bare-identifier ASSIGNMENT from a VALUE-typed variable
+// (`std::string line; line = zzz;`) is a copy, not a fn-pointer rebind — before the noise gate it minted an
+// FnAssign anyway, and that bogus binding handed the local's every site back to the shadowed function.
+#include "funcs.h"
+#include <string>
+#include <string_view>
+typedef void (*Hs)();
+void handler() {}
+std::string fmtRun( std::string_view zzz )  { std::string run; run = zzz; return run; }   // (aa) class-typed local
+int         tallyRun( int zz )              { int run = 0;   run = zz;  return run; }     // (ab) primitive-typed local
+std::string paramRun( std::string run, std::string other ) { run = other; return run; }   // (ac) value PARAMETER
+void rebindRaw()   { void (*run)(); run = handler; run(); }    // (ad) genuine raw fn-ptr rebind — binding SURVIVES
+void rebindAlias() { Hs run = nullptr; run = handler; run(); } // (ae) genuine alias rebind    — binding SURVIVES
+EOF
+
 cat >"$FIX/plain.cpp" <<'EOF'
 // no-collision control: `total` names NO indexed symbol anywhere — its local sites must STAY listed
 // (--uses on a plain local name is the external-answer feature writetargetcheck pins).
@@ -406,6 +423,22 @@ emitcalls="$( printf '%s\n' "$UEM" | grep -c 'role="call".*in_id="catchPre"' )"
 printf '%s\n' "$UEM" | grep 'in_id="catchPre"' | grep -Eq 'role="(read|write)"' \
     && { no "--uses=emit lists read/write sites from inside catchPre()'s handler"; printf '%s\n' "$UEM" | grep 'in_id="catchPre"'; } \
     || ok "--uses=emit has no read/write sites from inside catchPre()'s handler"
+
+# ── (aa)-(ae) the value-assignment noise gate: a copy mints no binding, a genuine rebind still does ────
+VAL="$( uses run | grep 'valueassign.cpp' )"
+for fn in fmtRun tallyRun paramRun; do
+    printf '%s\n' "$VAL" | grep -q "in_id=\"$fn\"" \
+        && { no "--uses=run lists sites from $fn() — a value-typed \`run = other;\` still minted an L3 binding, vetoing the shadow"; printf '%s\n' "$VAL" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=run has ZERO sites from $fn() (a bare-identifier copy into a value variable is not a fn-pointer rebind)"
+done
+for fn in rebindRaw rebindAlias; do
+    printf '%s\n' "$VAL" | grep "in_id=\"$fn\"" | grep -q 'role="call"' \
+        && ok "--uses=run keeps $fn()'s call site (a genuine fn-binding var is never shadow-suppressed)" \
+        || { no "--uses=run LOST $fn()'s call site — the noise gate ate a GENUINE fn-pointer rebind"; printf '%s\n' "$VAL" | grep "in_id=\"$fn\""; }
+    rows --callees=$fn | grep -q 'n="handler"' \
+        && ok "--callees=$fn resolves run() to handler (the genuine rebind's edge survives)" \
+        || no "--callees=$fn lost its handler edge — the noise gate ate a genuine fn-pointer rebind"
+done
 
 # ── (e) determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --uses=run --no-cache 2>/dev/null )"
