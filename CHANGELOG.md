@@ -15,6 +15,49 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-08-09
+
+### Fixed — a local variable that shadows a function name no longer steals that function's use-sites
+
+`--uses` attributed a local's read/write sites to a same-named function (13 false sites on one
+measured query). A local binding now claims its own scope, and a `using ns::name;` re-export emits
+the `role="import"` row it never produced. Measured against a `scip-clang` oracle on this
+repository, site-level precision/recall moved 0.9046/0.9285 → 0.9136/0.9412, with the worst
+motivating query going 0.6579 → 0.9615 and three others reaching 1.0000. The suppression took three
+refutation rounds to get right, and the third found a **recall loss the first cut introduced**: a
+genuine call appearing ABOVE the shadowing local vanished entirely, because the suppression span
+started at the enclosing block rather than at the declaration point. It now begins at the end of the
+complete declarator, C++ [basic.scope.pdecl]. Fixture corpora, per-round verdicts and the verifier
+history: `bench/fixround/RESULTS.md`.
+
+### Fixed — five more shapes that invented or destroyed references
+
+A declared name no longer leaks as a read of the symbol it shadows under a defaulted parameter, a
+parameter pack, or an attributed declarator. A bare-identifier assignment (`x = y;`) mints a
+function-pointer binding only when the file's own declarations allow it, and a class-typed copy no
+longer does — closing a bug that was **losing real call edges**, not merely adding false rows: a
+bogus binding tombstoned a genuine same-named file-scope binding corpus-wide. Zero call-edge loss
+verified on two corpora (10,742 edges here, 39,741 on a 2,376-file ObjC++ tree, byte-identical
+before and after); 59 false `--uses` sites removed with zero sites gained. One deliberate behaviour
+change is disclosed in the count-floor legend: a variable whose function-pointer typedef lives in a
+HEADER is now missed, because same-file alias evidence cannot distinguish it from a value copy.
+
+### Changed — `--uses` states that a bare type mention is not a use-site
+
+The role list is the whole vocabulary. Naming a symbol as a type in a signature, a declaration or a
+template argument contributes no row, so a caller that only names it as a type is absent from the
+count. Previously true and unstated; now stated in the legend. A `role="type"` reference class
+remains the fix rather than the disclosure, and is recorded as such.
+
+### Added — the oracle-scored reference-precision receipt
+
+`bench/headtohead/r9-2026-08-09/` publishes the round behind the README's silent-miss claim: 68
+answers scored against a `scip-clang` index, six imperfect, four self-flagged, and the two unflagged
+traced to files the oracle could not see. It reports the comparison in both directions — an
+LSP-backed tool is more precise, by ~1.5 points after these fixes, with recall now equal — along
+with the protocol asymmetry that inflates one of our own rows and four limits that travel with the
+numbers, including that the corpus is this repository.
+
 ### Changed — the held-out recall lane now scores a frozen doc corpus
 
 `bench/recalleval/`'s recall lane no longer measures the live repository's docs: it unpacks
