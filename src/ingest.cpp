@@ -1016,7 +1016,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 55;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 56;           // bump on any grammar/.scm/extraction change
+                                                      // 56: three declarator shapes isNonValueContext
+                                                      //    could not see stop leaking their DECLARED name
+                                                      //    out as a read of the symbol they shadow — a
+                                                      //    DEFAULTED parameter (`int key = 0`, parent
+                                                      //    optional_parameter_declaration), a pack
+                                                      //    (`Ts... key`) and an attributed declarator
+                                                      //    (`int key [[maybe_unused]]`).
                                                       // 55 (r9 A5 iteration 4): an ordinary BLOCK
                                                       //    declaration's shadow span starts at its
                                                       //    DECLARATION POINT (end of the complete
@@ -6956,6 +6963,13 @@ inline bool isCallCallee( TSNode id ) noexcept
 // identifier directly under a reference_declarator or a structured_binding_declarator is ALWAYS a declared
 // name (value expressions live under other node types); a range-for's is its `declarator` field; an
 // init-capture's is its FIRST named child (the value side of `[a = b]` stays a genuine read of b).
+// `variadic_declarator` (`Ts... key`) and `attributed_declarator` (`int key [[maybe_unused]]`) join the
+// unconditional arm for the same grammar reason: each holds its inner declarator as an UNNAMED child, so
+// arm 2's `declarator`-field probe returns null and sees nothing. Their only bare-identifier child is the
+// declared name — a pack's attributes are `attribute_declaration` nodes, never loose identifiers.
+// NOT fixable here, and deliberately left listed: `int (key);` — the most-vexing parse, which tree-sitter
+// resolves to an `argument_list`, the same node every genuine call ARGUMENT lives under. Suppressing that
+// parent would delete real reads corpus-wide to chase a shape that is vanishingly rare in real source.
 // Iteration 4 adds the shape arm 2 looks straight at and still misses: a `declaration` carries one
 // `declarator` FIELD PER DECLARED NAME, so ts_node_child_by_field_name — which returns the FIRST — sees
 // `a` in `int a, key;` and never `key`; a bare `int key;` it misses outright, the parent type not being in
@@ -6963,7 +6977,8 @@ inline bool isCallCallee( TSNode id ) noexcept
 // declaration line along with the rest of the block; declaration-point spans stop covering it.
 inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
 {
-    if( std::strcmp( pt, "reference_declarator" ) == 0 || std::strcmp( pt, "structured_binding_declarator" ) == 0 )
+    if( std::strcmp( pt, "reference_declarator" ) == 0 || std::strcmp( pt, "structured_binding_declarator" ) == 0
+        || std::strcmp( pt, "variadic_declarator" ) == 0 || std::strcmp( pt, "attributed_declarator" ) == 0 )
     {
         return true;
     }
@@ -7014,9 +7029,13 @@ inline bool isNonValueContext( TSNode id ) noexcept
     }
 
     // (2) a declarator's NAME (a DEF/declaration, not a use): `int x;`, `void f()`, `Foo* p`, parameters.
+    // `optional_parameter_declaration` is `parameter_declaration`'s DEFAULTED sibling (`int x = 0`) and
+    // carries the same `declarator` field — probing the field, not the node type, is what keeps a default
+    // VALUE that names a symbol (`int v = probe()`, a different field) a genuine use.
     if(    std::strcmp( pt, "function_declarator" ) == 0 || std::strcmp( pt, "init_declarator" ) == 0
         || std::strcmp( pt, "parameter_declaration" ) == 0 || std::strcmp( pt, "pointer_declarator" ) == 0
-        || std::strcmp( pt, "reference_declarator" ) == 0  || std::strcmp( pt, "array_declarator" ) == 0 )
+        || std::strcmp( pt, "reference_declarator" ) == 0  || std::strcmp( pt, "array_declarator" ) == 0
+        || std::strcmp( pt, "optional_parameter_declaration" ) == 0 )
     {
         const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
         if( !ts_node_is_null( decl ) && sameSpan( decl, id ) )
