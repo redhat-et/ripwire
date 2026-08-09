@@ -104,7 +104,9 @@ inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true"
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
     "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends; "
-    "p=file:line) — a floor, see counts_floor below. role=\"macro\" is the call-shaped invocation of a name "
+    "p=file:line) — a floor, see counts_floor below. That role list is the whole vocabulary: a bare TYPE mention — "
+    "SYM named as a type in a signature, a declaration or a template argument — is NOT a use-site and contributes "
+    "no row, so a caller that only names SYM as a type is absent from this count. role=\"macro\" is the call-shaped invocation of a name "
     "that uniquely names an indexed function-like #define — never labelled role=\"call\", because an expansion "
     "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. ";
 
