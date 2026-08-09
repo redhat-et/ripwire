@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-derive src/blanktext.h's kBlankRanges table — the code points that CANNOT carry a definition.
+"""Re-derive src/infra/blanktext.h's kBlankRanges table — the code points that CANNOT carry a definition.
 
 WHY THIS SCRIPT EXISTS (capture-audit-4, finding F2). The first version of hasVisibleContent() carried a
 hand-picked "closed, sorted 23-entry table" of invisible code points. It was not closed: an adversarial
@@ -9,7 +9,7 @@ and 2060) and every C1 control, because the ASCII group stopped at 0x7F. A hand-
 failed, so the table is now DERIVED from Unicode properties, and this script is how the next round re-derives
 it instead of trusting the C++ literal.
 
-THE RULE (see THE RULING at the top of src/blanktext.h, and the ITEM A block in src/mcp.h it grew out of). A payload carries a definition iff it
+THE RULE (see THE RULING at the top of src/infra/blanktext.h, and the ITEM A block in src/mcp.h it grew out of). A payload carries a definition iff it
 contains at least one code point OUTSIDE the union of:
 
   1. Cc                             — every C0 and C1 control (U+0000-001F, U+007F-009F).
@@ -36,7 +36,7 @@ of spaces. Every real Arabic/Kaithi text these marks prefix contains letters, wh
 
 USAGE
   python3 test/derive_blankcodepoints.py              # print the C++ table + the audit report
-  python3 test/derive_blankcodepoints.py --check      # compare against src/blanktext.h and exit 1 on drift
+  python3 test/derive_blankcodepoints.py --check      # compare against src/infra/blanktext.h and exit 1 on drift
 """
 
 import os
@@ -136,7 +136,7 @@ def cpp_table(ranges):
 
 
 def parse_header_table(path):
-    """The kBlankRanges rows as they stand in src/blanktext.h (read as bytes: the file may hold odd bytes)."""
+    """The kBlankRanges rows as they stand in src/infra/blanktext.h (read as bytes: the file may hold odd bytes)."""
     src = open(path, "rb").read().decode("utf-8", "replace")
     start = src.find("kBlankRanges[]")
     if start < 0:
@@ -201,13 +201,13 @@ def main():
         #   1 = the versions MATCH and the tables differ  → genuine drift, somebody hand-edited a row
         #   2 = the versions DIFFER and the tables differ → this python's UCD is not the header's; report it,
         #       do not fail the build on it, and do not pretend the table was checked
-        header = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "blanktext.h")
+        header = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "infra", "blanktext.h")
         rows, version = parse_header_table(header)
         if rows is None:
             print("CHECK FAIL: no kBlankRanges table found in %s" % header)
             return 1
         if rows == ranges:
-            print("CHECK OK: src/blanktext.h kBlankRanges == derivation (%d ranges, Unicode %s)"
+            print("CHECK OK: src/infra/blanktext.h kBlankRanges == derivation (%d ranges, Unicode %s)"
                   % (len(rows), unicodedata.unidata_version))
             return 0
         print("CHECK DRIFT: header table has %d rows, derivation has %d" % (len(rows), len(ranges)))

@@ -479,7 +479,7 @@ order with a rotating lead, median of 9 rounds, `prof::BenchTimer` + `prof::esca
 - **(a) scalar byte loop** — the shipping loop, lifted verbatim, so the baseline is the real thing.
 - **(b) libc `memchr` in a loop** — the "use others' efforts, even libc's" control. Not a straw man:
   Apple's arm64 `memchr` is hand-tuned NEON.
-- **(c) `rw::findByte`** — a hand-rolled NEON/SSE2 kernel added to `src/fixedStr.h` beside that
+- **(c) `rw::findByte`** — a hand-rolled NEON/SSE2 kernel added to `src/infra/fixedStr.h` beside that
   header's existing branchless compare/hash, as a **free function**: it scans arbitrary byte spans,
   so it is not a `FixedStr` member. arm64 has no `movemask`, so the NEON arm folds the compare with
   `vshrn_n_u16(..., 4)` into a 64-bit word carrying 4 mask bits per byte and takes `ctz`; SSE2 uses

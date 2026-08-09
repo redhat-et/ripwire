@@ -279,7 +279,7 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
 // this paragraph is measured in-tree. Either way it trades a large false-positive rate for an unquantified
 // false-NEGATIVE rate on the one signal that must not lie, so the honest move is the legend's, not a
 // filter's. (The same three selectors are the gate's anchors: `src/ingest.cpp:find`
-// 151/169, `src/notes.h:find` 41/171, `src/svector.h:end` 5/265 — spelled `file:name`, which folds by file
+// 151/169, `src/notes.h:find` 41/171, `src/infra/svector.h:end` 5/265 — spelled `file:name`, which folds by file
 // and so draws a WIDER caller set than the canonical-id form the sweep used.)
 //
 // Joining any of that into the headline would have moved a percent of an untouched tree to

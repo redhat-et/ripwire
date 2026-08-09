@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # duprowcheck.sh — gate for §P6.3 (dup-row half): the default map must not emit two rows for one
-# canonical id. const/non-const overloads (src/svector.h's buf()/buf() const, begin()/begin() const,
+# canonical id. const/non-const overloads (src/infra/svector.h's buf()/buf() const, begin()/begin() const,
 # end()/end() const) canonicalize to the SAME id="...svector::buf" — canonicalId() is path::scope::name,
 # it has no notion of signature or const-qualification — so before the fix the map printed the identical
 # <s t="method" n="buf" id="...svector::buf" k="..."> row twice, byte-for-byte, telling a reader nothing

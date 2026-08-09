@@ -1,6 +1,6 @@
 // Three-arm race for buildNewlineOffsets' byte scan (src/ingest.cpp): the byte-at-a-time loop that
 // ships today, libc memchr in a loop, and rw::findByte — the hand-rolled NEON/SSE2 kernel that lives
-// beside FixedStr's compare/hash in src/fixedStr.h.
+// beside FixedStr's compare/hash in src/infra/fixedStr.h.
 //
 // Build: c++ -O3 -march=native -std=c++23 bench/bench_newline_ab.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_newline_ab
 // Run:   /tmp/ripwire_newline_ab [repoRoot] [targetMiB]

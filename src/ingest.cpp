@@ -9773,7 +9773,7 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
 // Replaces the per-capture "scan [0,startByte) counting '\n'" (byte-0 rescan, O(startByte) EACH match)
 // with one O(fileBytes) pass + a binary search per capture. Byte-identical result:
 //   line(b) = 1 + (# of '\n' at offset < b) = 1 + lower_bound(offsets, b) position.
-// The pass itself rides rw::findByte (src/fixedStr.h) — a NEON/SSE2 find-'\n' kernel that is EXACT, so the
+// The pass itself rides rw::findByte (src/infra/fixedStr.h) — a NEON/SSE2 find-'\n' kernel that is EXACT, so the
 // offsets are bit-identical to the byte-at-a-time loop this replaced and determinism is untouched. '\r' is
 // not a line break here and never was. bench/bench_newline_ab.cpp races the two against libc memchr and
 // asserts all three agree byte-for-byte before it reports a number; the kernel won at ~1.4x over memchr.

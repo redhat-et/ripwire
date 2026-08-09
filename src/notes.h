@@ -149,7 +149,7 @@ inline std::string sanitizeField( std::string_view s )
 // BLANK, a bidi RLO, and a raw VT (0x0B) written verbatim into a text file this tool tells users to commit
 // and merge. Same equivalence class the MCP edit verbs' §H2/ITEM A ruling already closed, one file over.
 //
-// So the verdict comes from `rw::hasVisibleContent` — the ONE derived predicate (src/blanktext.h), which
+// So the verdict comes from `rw::hasVisibleContent` — the ONE derived predicate (src/infra/blanktext.h), which
 // mcp.h's edit payloads read too — and it is returned TOGETHER with the sanitized text rather than left for
 // the caller to ask separately. A caller cannot sanitize a note field without being handed the answer to
 // "is there anything in it", which is exactly the step the old two-call shape let a call site skip.

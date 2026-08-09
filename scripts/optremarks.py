@@ -45,7 +45,7 @@ HOT_FILES = (
     "src/infra/sparseCsr.h",      # the CSR triple itself
     "src/infra/platform.h",       # fastmath:: — isFiniteFast and friends, inlined everywhere
     "src/infra/dynamic_map.hpp",
-    "src/sortutil.h",
+    "src/infra/sortutil.h",
     "src/clones.h",               # token-shingle scan over every file
     "src/lexical.h",              # tokenizer
     "src/ingest.cpp",             # crawl + parse + symbol extraction
