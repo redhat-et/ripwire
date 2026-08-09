@@ -47,7 +47,11 @@ echo "fillordercheck: BIN=$BIN"
 order_of(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'order="?[a-zA-Z_:().-]+"?' | head -1 | sed -E 's/order="?//; s/"?$//'; }
 est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
 
-# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=619) stays important-first, no auto-flip ─────────────
+# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=647) stays important-first, no auto-flip ─────────────
+# RE-PINNED 619 → 647 (macro-edges round): the v1 legend comment grew its t= vocabulary
+# (|macro(#define;...)), +71 emitted bytes (1541 → 1612 = wc -c test/golden.xml, re-pinned in the same
+# commit) at the same language-weighted rate; the fixture itself contains no macro, so no row moved and
+# `important-first` is unchanged. The prior re-pin's reasoning below still stands verbatim.
 # RE-PINNED 489 → 619 (§H7). REASON: est_tokens is no longer the byte MODEL's
 # output — serialize() now measures the bytes the document actually emits and converts them at the model's
 # language-weighted rate, because the model priced neither --metrics decoration nor an appended payload and
@@ -62,7 +66,7 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # expectation is unchanged. The threshold (16000) is >25x this number either way.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "619" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "647" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 

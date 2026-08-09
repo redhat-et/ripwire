@@ -49,8 +49,8 @@
 //     variables and parameters produce read/write sites and therefore dominate ext= on real code, so
 //     ext= is NOT a count of external dependencies and is excluded from both ratios. Saying that plainly
 //     is cheaper than letting a reader infer it wrongly.
-//   * ents=/files= are FLOORS. A name-based static scan cannot see dynamic dispatch, macro-generated
-//     calls, or reflection, so a zero means "none found", never "none exists".
+//   * ents=/files= are FLOORS. A name-based static scan cannot see dynamic dispatch, reflection, or a
+//     macro invocation whose #define is not indexed, so a zero means "none found", never "none exists".
 //
 // READER WEIGHT. tokensForEmittedBytes( the whole definition span, kBytesPerTokenBody ) — serialize.h's
 // ONE body-text conversion, at the rate measured for def bodies (3.80 B/tok), never a second estimator.
@@ -466,8 +466,8 @@ inline constexpr const char* kContextRatioLegend =
     "reference roles carry no resolution at all. defs_per_name_cap=the most definitions ONE name may "
     "contribute (the first that many in symbol id order); a corpus-ubiquitous name would otherwise swamp "
     "every row it appears in. body_bytes_per_token=the rate rtok= is converted at. "
-    "ents= and files= are FLOORS: a name-based static scan cannot see dynamic dispatch, macro-generated "
-    "calls or reflection, so a zero means none FOUND, never none exists. "
+    "ents= and files= are FLOORS: a name-based static scan cannot see dynamic dispatch, reflection, or a "
+    "macro invocation whose #define is not indexed, so a zero means none FOUND, never none exists. "
     "units=symbols measured file_units=files measured. Rows come out most-outside-reading-first (rtok_out "
     "descending, then ents_out, then rtok, then id) — an ORDERING, never a grade, and never a threshold. "
     "shown_syms=symbol rows printed syms_capped=1 when symbol rows were dropped shown_files=file rows "

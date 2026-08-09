@@ -5256,6 +5256,15 @@ std::optional<int> runEvalViews( const MainDispatch& d )
 // SAME order the chain evaluated them. That order is observable (passing two verb flags picks exactly one
 // answer) and nothing pinned it before — test/dispatchordercheck.sh does now.
 
+// macro-edges round: the role attribute a callers/callees XML row carries iff the neighbour is an indexed
+// function-like #define — the edge crosses a macro expansion, not a plain call (rows carry no role=
+// otherwise, and NEVER role="call"). Kind-derived, so the columnar/JSON dialects disclose the same fact
+// through their t="macro"; kept out of runCallHierarchy's row loop as a call, not another branch.
+inline const char* macroRoleAttr( rw::SymKind k ) noexcept
+{
+    return k == rw::SymKind::Macro ? " role=\"macro\"" : "";
+}
+
 std::optional<int> runCallHierarchy( const MainDispatch& d )
 {
     using namespace rw;
@@ -5378,7 +5387,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
             const Symbol& s = ing.symbols[ result[i] ];
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line,
+                         macroRoleAttr( s.kind ) );
         }
         std::printf( "</%s>", tag );
         return 0;

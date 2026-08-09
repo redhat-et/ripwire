@@ -359,6 +359,12 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         m.rootPaths.push_back( r.arg );
         m.rootReals.push_back( r.real );
     }
+
+    // macro-edges round: re-run the role="macro" retag over the MERGED corpus (model.h). Each part was
+    // retagged at its own ingest() exit, but a #define defined in one root and invoked from another is
+    // only visible here. Idempotent — already-Macro refs are skipped by the role==Call guard.
+    retagMacroCallReferences( m );
+
     return m;
 }
 

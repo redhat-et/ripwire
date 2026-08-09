@@ -11,7 +11,7 @@
 //   EXPR    := SOURCE | FILTER | CLOSURE | JOIN
 //   SOURCE  := name( "STR" )            symbols whose name == STR (unions same-name defs, like --callers)
 //            | all                       every symbol  (parens optional: `all` or `all()`)
-//   FILTER  := kind( EXPR , KIND )       keep nodes of KIND  (fn|method|cls|struct|iface|var|sec)
+//   FILTER  := kind( EXPR , KIND )       keep nodes of KIND  (fn|method|cls|struct|iface|var|sec|macro)
 //            | cx(   EXPR , INT )         keep nodes with cyclomatic complexity >= INT
 //            | fanin(EXPR , INT )         keep nodes with in-degree (caller count) >= INT
 //            | file( EXPR , "RE" )        keep nodes whose file PATH matches the ECMAScript regex RE
@@ -56,6 +56,7 @@ inline bool kindOfWord( std::string_view w, SymKind& out ) noexcept
     if( w == "iface"  ) { out = SymKind::Interface; return true; }
     if( w == "var"    ) { out = SymKind::Var;       return true; }
     if( w == "sec"    ) { out = SymKind::Section;   return true; }
+    if( w == "macro"  ) { out = SymKind::Macro;     return true; }   // macro-edges round: t="macro" is queryable like every other kind
     return false;
 }
 
@@ -355,7 +356,7 @@ struct Eval
                     SymKind           k  = SymKind::Other;
                     if( !kindOfWord( kw, k ) )
                     {
-                        fail( "unknown kind '" + kw + "' (use fn|method|cls|struct|iface|var|sec)" );
+                        fail( "unknown kind '" + kw + "' (use fn|method|cls|struct|iface|var|sec|macro)" );
                     }
                     result = filterKind( std::move( set ), k );
                 }
