@@ -112,6 +112,19 @@ monotonic_check()
         skip "monotonicity: extraction differs between binaries (symbols=$so vs $sn — uncommitted parser change); ambiguous= incomparable, fixture arms above are the gate"
         return
     fi
+    # PRECONDITION 2 (shadow fix round): symbols= can AGREE while the REFERENCE population changed — a
+    # reference-class extraction change (a new suppression scope, a decl-site read reclassified) mints or
+    # erases call sites without adding a symbol, and `ambiguous=` moves with the calls the resolver sees,
+    # not with a lost narrow. kParserVer is the extraction identity the header cannot show, so read it
+    # straight from the two source trees the binaries were built from. Self-healing the same way: once the
+    # bump is COMMITTED, HEAD's constant equals the working tree's and the comparison arms again.
+    local pvo pvn
+    pvo="$( grep -oE 'kParserVer *= *[0-9]+' "$WT/src/ingest.cpp"   | head -1 | grep -oE '[0-9]+$' )"
+    pvn="$( grep -oE 'kParserVer *= *[0-9]+' "$ROOT/src/ingest.cpp" | head -1 | grep -oE '[0-9]+$' )"
+    if [ -n "$pvo" ] && [ -n "$pvn" ] && [ "$pvo" != "$pvn" ]; then
+        skip "monotonicity: extraction differs between binaries (kParserVer=$pvo vs $pvn — uncommitted parser change); ambiguous= incomparable, fixture arms above are the gate"
+        return
+    fi
     if [ -n "$ao" ] && [ -n "$an" ] && [ "$an" -le "$ao" ]; then
         ok "monotonicity on src/: ambiguous NEW=$an <= pre-change OLD=$ao (narrow only removes candidates)"
     else
