@@ -21,8 +21,8 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **31 repositories** and **54 papers** are folded, and
-a labelled survey of **220 tools** contributed nothing and says so. **The two sets are disjoint by
+**The counts, derived from the tables below:** **34 repositories** and **54 papers** are folded, and
+a labelled survey of **221 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
 is never repeated in §3b, which makes the field study 28 folded *plus* 220 surveyed — not 28 picked
 out of 220. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
@@ -174,6 +174,9 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 | [doctest](https://github.com/doctest/doctest) | A single-header test framework keeps the test build inside a zero-dependency contract. | Vendored. The C++ unit harnesses under `test/`, built only with `-DRIPWIRE_TESTS=ON` |
 | [Namesake](https://github.com/nalmadi/Namesake) | The identifier confusions that actually bite a reader are between names visible at the same time — so compare co-visible names, not the whole corpus. | `naming-confusable` in `--lint`, scanned within one (file, scope) group: edit distance ≤2 between names of five characters or more, the same tokens reordered, or a bare/digit-suffixed twin. A scan too large to run in full is reported saturated, so its count is disclosed as a floor (`src/naminglens.h`) |
 | [Spiral / Ronin](https://github.com/casics/spiral) | The conservative heuristic split — case transitions, digit boundaries, separators, ACRONYMWord handling — is fully described in prose, so it can be reimplemented from the description; and it has to be, because the source is GPLv3 while first-party code here is Apache-2.0. | `splitIdentifier()` in `src/naminglens.h`, written from the description and not ported. No Spiral code is in this tree and nothing was added to [`THIRD_PARTY.md`](../THIRD_PARTY.md) — the one row here where the lesson taken is *how to take a lesson without taking the code* |
+| [CHA](https://link.springer.com/chapter/10.1007/3-540-49538-X_5) — Dean, Grove & Chambers, *Optimization of Object-Oriented Programs Using Static Class Hierarchy Analysis*, ECOOP 1995 | A still-ambiguous receiver-typed call narrows by static type alone: intersect the candidate set with the receiver class's transitive subtype cone, no whole-program build. Ripwire's delta: name-based over the extracted symbol graph, not a compiled type hierarchy, and a SOUND prune of an already-ambiguous tier — a receiver type the cone can't resolve stays ambiguous and degrades rather than guessing a candidate. Citation debt: this landed as B2.1 well before this row existed. | B2.1 CHA-lite receiver-type-cone narrowing, in the resolver's ambiguous-tier prune (`src/graph.h`) |
+| [golang.org/x/tools deadcode](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) | Frame "dead" as NOT-REACHABLE-FROM-a-declared-entry-point: build a call graph via RTA from every `main` and report what it never reaches, so a chain of any length can be dead. Ripwire's delta: `--dead-code` is not this — it is in-degree/linkage-evidence based (zero in-edges plus internal `static` linkage on a free function), no entry-point traversal and no whole-program closure. The reachability framing this row names is planned separately as `--unreachable-from` and is not shipped. | `--dead-code`'s in-degree + `static`-linkage check (`src/main.cpp`) |
+| [vulture](https://github.com/jendrikseipp/vulture) | Attach a CONFIDENCE tier (60-100%) to each dead-code finding instead of one undifferentiated list, so the near-certain findings can be triaged separately from the merely-plausible ones. Ripwire's delta: `--dead-code`'s `confidence="high"` is currently a FIXED literal on every finding, not tiers — tiering by ripwire's own evidence (linkage + in-degree + amb on incoming edges), explicitly NOT vulture's self-described-rough 60/90/100 numbers, is planned and not yet shipped. | the fixed `confidence="high"` literal on every `--dead-code` finding (`src/main.cpp`) |
 
 **Read and not folded, and worth naming because they are the near misses.** A scoped-snippet view
 with scope breadcrumbs — the one rung of the detail ladder that is still missing here — was designed
@@ -222,12 +225,18 @@ fails if any name appears twice *within* this table.
 | Version control and release | gh CLI, Graphite, Sapling, jujutsu, git-branchless, semantic-release, changesets | 7 |
 | Code search engines | grep.app, OpenGrok, livegrep | 3 |
 | Code intelligence and index formats | LSP, Kythe, LSIF, clangd | 4 |
-| Repo-map and context-for-agents | CodeGraph, GitNexus, tree-sitter-analyzer, graphify, repowise, grepai, Repomix, gitingest, kit, claude-context, codanna, grep-ast | 12 |
+| Repo-map and context-for-agents | CodeGraph (npm), Code-Graph-RAG (vitali87), GitNexus, tree-sitter-analyzer, graphify, repowise, grepai, Repomix, gitingest, kit, claude-context, codanna, grep-ast | 13 |
 | Debugging and time travel | gdb, lldb, rr, Pernosco, Replay.io, WinDbg-TTD, Sentry Autofix, Rollbar | 8 |
 | Profilers | perf, py-spy, pprof, Coz, hyperfine, criterion | 6 |
 | Agent memory and context compression | Mem0, Letta, Zep, cognee, headroom, LLMLingua | 6 |
 | Evaluation and observability | LangSmith, Langfuse, Braintrust, Galileo, Arize, AgentOps, Promptfoo, Ragas, DeepEval, OpenTelemetry | 10 |
 | Documentation and diagrams | Doxygen, Sphinx, Mintlify, Swimm, Mermaid, CodeSee | 6 |
+
+**CodeGraph is not Code-Graph-RAG.** The r7 head-to-head round's opponent was `@colbymchenry/codegraph`
+(npm), listed above as "CodeGraph (npm)" — an unrelated project from `vitali87/code-graph-rag`
+(Python, Memgraph-backed), listed separately as "Code-Graph-RAG (vitali87)" despite the
+near-identical name. Both names are recorded so neither the r7 result nor a future head-to-head
+against the other can be misread as being about the same tool.
 
 ---
 
