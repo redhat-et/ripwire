@@ -365,6 +365,12 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
     // only visible here. Idempotent — already-Macro refs are skipped by the role==Call guard.
     retagMacroCallReferences( m );
 
+    // r9 shadow suppression: same posture as the retag above — the collision gate ("some indexed symbol
+    // carries the name") can only open here for a def that lives in ANOTHER root, so the merged corpus
+    // must re-judge. Idempotent (a suppressed reference is simply gone). AFTER the retag, so a site the
+    // retag just relabelled role="macro" is out of the erase's role set.
+    suppressShadowedReferences( m );
+
     return m;
 }
 

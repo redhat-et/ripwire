@@ -1014,7 +1014,14 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 51;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 52;           // bump on any grammar/.scm/extraction change
+                                                      // 52 (r9 loss bucket 2): local-shadow suppression —
+                                                      //    captureBindings gains kind=VarDecl records (every
+                                                      //    declared C++/ObjC variable NAME incl. primitives,
+                                                      //    definition parameters, range-for vars) — a NEW
+                                                      //    bind kind on the per-file record → old caches
+                                                      //    lack the rows and must be rejected. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
                                                       // 51 (r9 loss bucket 1): C++ `using ns::name;`
                                                       //    re-export sites now mint a role="import" RawRef
                                                       //    (new tags.scm @reference.import pattern +
@@ -5333,7 +5340,12 @@ inline std::pair<RecvKind, std::string> receiverOf( TSNode nameNode, Lang lang, 
 
 // the innermost bare `(identifier)` reached by unwrapping pointer/reference/parenthesized declarators —
 // the actual variable name of a C++ declarator. "" if the declarator isn't a single named variable.
-inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
+// ONE unwrap loop for both name extractors below. refuseFnDeclarator=false is Rule 2's original read (any
+// declarator chain down to its identifier); true is the shadow-evidence read, which additionally refuses a
+// plain function declarator — `void helper();` declared inside a body, and the most-vexing-parse `Foo x();`,
+// both declare a FUNCTION, whose calls must never be shadow-suppressed — while a function_declarator whose
+// inner declarator is PARENTHESIZED is a fn-POINTER variable (`void (*cb)()`) and stays a variable.
+inline std::string_view declaratorVarNameImpl( TSNode decl, std::string_view src, bool refuseFnDeclarator )
 {
     for( int guard = 0; guard < 8 && !ts_node_is_null( decl ); ++guard )
     {
@@ -5349,9 +5361,26 @@ inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
         {
             return {};
         }
+        if( refuseFnDeclarator && std::strcmp( dt, "function_declarator" ) == 0 && std::strcmp( ts_node_type( inner ), "parenthesized_declarator" ) != 0 )
+        {
+            return {};   // a FUNCTION's name, not a variable's
+        }
         decl = inner;
     }
     return {};
+}
+
+inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
+{
+    return declaratorVarNameImpl( decl, src, false );
+}
+
+// r9 shadow suppression: the declared-VARIABLE name of a declarator — declaratorVarNameImpl's unwrap with
+// the fn-declarator refusal armed. Conservative by construction: an unrecognized shape captures nothing,
+// and a missed capture only UNDER-suppresses (the pre-round behavior).
+inline std::string_view shadowDeclaratorVarName( TSNode decl, std::string_view src )
+{
+    return declaratorVarNameImpl( decl, src, true );
 }
 
 // the type NAME of a constructor-style RHS value node: `Foo()` (call_expression) or `new Foo()`
@@ -5564,12 +5593,14 @@ struct FnBindClobber
     std::uint32_t startByte = 0;
 };
 
-// emit a binding from one declared variable: prefer the WRITTEN type; else infer from a constructor-style
-// initializer (`auto x = Foo()`). Records nothing when neither is decidable (degrade to §2a).
-inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
-                      std::uint32_t startByte, std::vector<RawBind>& binds )
+// the ONE bind-record emitter. A nameless declarator records nothing. kind=VarDecl is the r9 shadow-
+// evidence record: typeName stays EMPTY on it (shadow evidence, not narrowing fuel — nothing downstream
+// ever reads a type off it), so the empty-typeName refusal applies to every OTHER kind, where it is
+// load-bearing for Rule 2 (an undecidable type must degrade to §2a, not mint a half-record).
+inline void pushRawBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
+                         std::uint32_t startByte, LocalBindKind kind, std::vector<RawBind>& binds )
 {
-    if( var.empty() || typeName.empty() )
+    if( var.empty() || ( typeName.empty() && kind != LocalBindKind::VarDecl ) )
     {
         return;
     }
@@ -5577,9 +5608,82 @@ inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std
     b.fileId    = fileId;
     b.startByte = startByte;
     b.lang      = lang;
+    b.kind      = kind;
     b.var.assign( var );
     b.typeName  = std::move( typeName );
     binds.push_back( std::move( b ) );
+}
+
+// emit a Rule-2 binding from one declared variable: prefer the WRITTEN type; else infer from a
+// constructor-style initializer (`auto x = Foo()`). Records nothing when neither is decidable.
+inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std::string typeName,
+                      std::uint32_t startByte, std::vector<RawBind>& binds )
+{
+    pushRawBind( fileId, lang, var, std::move( typeName ), startByte, LocalBindKind::Type, binds );
+}
+
+// one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record. The two
+// name reads stay separate on purpose — declaratorVarName descends into a function declarator (harmless
+// for narrowing), shadowDeclaratorVarName refuses it (load-bearing for suppression).
+inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, std::string type,
+                           std::uint32_t startByte, std::vector<RawBind>& binds )
+{
+    emitBind( fileId, lang, declaratorVarName( declNode, src ), std::move( type ), startByte, binds );
+    pushRawBind( fileId, lang, shadowDeclaratorVarName( declNode, src ), std::string{}, startByte, LocalBindKind::VarDecl, binds );
+}
+
+// r9 shadow suppression: the two local-declaring shapes that live OUTSIDE `declaration` nodes (the Rule-2
+// branch never sees them), dispatched on the caller's already-read node type `t`:
+//   * a range-for's loop variable (`for( auto& s : v )`) — the node carries its own declarator field;
+//   * a C++/ObjC function DEFINITION's named parameters — one VarDecl each. Walking only the definition
+//     node's own declarator chain (never bare parameter_declaration nodes) is what keeps two non-scopes
+//     out: a PROTOTYPE's parameters (`void f(int run);` binds nothing anywhere) and a fn-pointer type's
+//     parameter list (`void (*cb)(int run)` — those names are part of a TYPE, in no scope at all).
+// startByte sits inside the definition's span, so the ordinary byte-span attribution lands the records
+// on the defined function.
+// Dispatches on the caller's already-read node type `t` (and gates the language ITSELF), so captureBindings
+// calls it unconditionally — the shapes are disjoint from every branch of the Rule-2 chain there.
+inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( lang != Lang::Cpp && lang != Lang::ObjC )
+    {
+        return;
+    }
+    if( std::strcmp( t, "for_range_loop" ) == 0 )
+    {
+        pushRawBind( fileId, lang, shadowDeclaratorVarName( ts_node_child_by_field_name( n, "declarator", 10 ), src ), std::string{}, ts_node_start_byte( n ), LocalBindKind::VarDecl, binds );
+        return;
+    }
+    if( std::strcmp( t, "function_definition" ) != 0 )
+    {
+        return;   // every other node type declares nothing this capture owns
+    }
+    const TSNode fnDef = n;
+    TSNode decl = ts_node_child_by_field_name( fnDef, "declarator", 10 );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0; ++guard )
+    {
+        decl = ts_node_child_by_field_name( decl, "declarator", 10 );   // unwrap `char* f(...)` / `T& f(...)`
+    }
+    if( ts_node_is_null( decl ) || std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0 )
+    {
+        return;
+    }
+    const TSNode params = ts_node_child_by_field_name( decl, "parameters", 10 );
+    if( ts_node_is_null( params ) )
+    {
+        return;
+    }
+    const std::uint32_t cc = ts_node_child_count( params );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const TSNode p  = ts_node_child( params, i );
+        const char*  pt = ts_node_type( p );
+        if( std::strcmp( pt, "parameter_declaration" ) != 0 && std::strcmp( pt, "optional_parameter_declaration" ) != 0 )
+        {
+            continue;   // commas, `...`, attribute nodes — nothing declared
+        }
+        pushRawBind( fileId, lang, shadowDeclaratorVarName( ts_node_child_by_field_name( p, "declarator", 10 ), src ), std::string{}, ts_node_start_byte( p ), LocalBindKind::VarDecl, binds );
+    }
 }
 
 // emit one L3 var→function RawBind (kind FnDecl/FnAssign) — emitBind's record shape with the kind stamped
@@ -5768,16 +5872,18 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
                 continue;
             }
             const char* ct = ts_node_type( c );
-            // `init_declarator`: name lives in its `declarator`, the RHS in its `value` (for auto inference)
+            // `init_declarator`: name lives in its `declarator`, the RHS in its `value` (for auto inference).
+            // emitDeclBinds also records the r9 VarDecl shadow fact for the declared NAME regardless of type
+            // resolvability (`int run = 0;` binds no type — writtenTypeOf refuses primitives — yet the local
+            // exists and shadows).
             if( std::strcmp( ct, "init_declarator" ) == 0 )
             {
-                const std::string_view var  = declaratorVarName( ts_node_child_by_field_name( c, "declarator", 10 ), src );
-                std::string            type = written.empty() ? ctorTypeOf( ts_node_child_by_field_name( c, "value", 5 ), src ) : written;
-                emitBind( fileId, lang, var, std::move( type ), ts_node_start_byte( n ), binds );
+                std::string type = written.empty() ? ctorTypeOf( ts_node_child_by_field_name( c, "value", 5 ), src ) : written;
+                emitDeclBinds( fileId, lang, ts_node_child_by_field_name( c, "declarator", 10 ), src, std::move( type ), ts_node_start_byte( n ), binds );
             }
             else   // plain declarator (identifier / pointer_declarator / reference_declarator), no initializer
             {
-                emitBind( fileId, lang, declaratorVarName( c, src ), std::string( written ), ts_node_start_byte( n ), binds );
+                emitDeclBinds( fileId, lang, c, src, std::string( written ), ts_node_start_byte( n ), binds );
             }
         }
     }
@@ -5854,6 +5960,11 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
             }
         }
     }
+
+    // r9 shadow suppression: the local-declaring shapes OUTSIDE `declaration` nodes — a function
+    // DEFINITION's named parameters and a range-for's loop variable. Unconditional (the helper gates
+    // language and node type itself); disjoint from every branch of the Rule-2 chain above.
+    captureShadowScopeDecls( n, t, fileId, lang, src, binds );
 
     // ── L3 fn-pointer/callback capture (C/C++/ObjC) — a SEPARATE if (not part of the Rule-2 chain above):
     // the same `declaration` node can carry BOTH a Rule-2 var→type fact and a var→function fact
@@ -8899,6 +9010,15 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // AFTER saveCache (which stores the per-file truth, role=Call) — a #define added in one file must
     // re-judge every OTHER file's cached call sites on the next run, so the retag can never be persisted.
     retagMacroCallReferences( result );
+
+    // r9 shadow suppression (model.h): a reference inside a function whose LOCAL declarations bind the same
+    // name as a variable belongs to the local, not to any same-named indexed symbol — erase it here, the one
+    // choke point BOTH consumers sit downstream of (--uses reads result.references; buildGraph resolves call
+    // edges from them), so the false --uses rows and the false call edge die in the same pass. AFTER the
+    // macro retag (role="macro" is preprocessor evidence and stays) and AFTER saveCache (per-file truth is
+    // persisted unsuppressed; the collision gate depends on the whole corpus' symbols, so the judgment can
+    // never be cached per-file — same reasoning as the retag above).
+    suppressShadowedReferences( result );
 
     return result;
 }
