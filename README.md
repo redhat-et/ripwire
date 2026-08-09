@@ -41,6 +41,10 @@ the tests that reach them.
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
 | pays for every line it read, right or wrong | measured at **7.3%** of what that grep-and-read pass spends |
 
+**Nothing it is unsure about reaches your agent unlabelled.** Every guess is marked in the output,
+and every mark has a next step — up to handing it a compiler-grade index.
+[What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
+
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
 Ten everyday moments, re-measured on this repository, 2026-08-08. Figures are ~tokens (≈ bytes/4);
@@ -1111,6 +1115,62 @@ by `test/readmedriftcheck.sh`, which fails if this sentence and those tables dis
 
 The differentiator is not a number, it is a discipline: **a measurement you cannot check is a claim,
 and this tool ships the check.**
+
+### What it misses, and what to run next
+
+A name-based call graph cannot see dynamic dispatch, a callback routed through a table, or a symbol
+that exists only after macro expansion. Every static tool has that horizon; the one that costs you a
+bug is the one that hides it. So the contract is not *it sees everything* — it is **nothing it is
+unsure about reaches your agent unlabelled.**
+
+**Measured against a compiler-grade oracle, its silent-miss count is zero.** Of 68 answers scored
+against a `scip-clang` index, six were imperfect and four flagged themselves; the other two were
+right, and the oracle was the one that could not see the files. No imperfect answer arrived unmarked.
+
+When a mark says the cheap answer is not enough, escalate on purpose — never by guessing:
+
+1. **`--expand=SYM`** — read the body it ranked, still a fraction of a whole-file read.
+2. **`--uses=SYM` / `--impact=SYM`** — every read, write and import site, and the transitive blast
+   radius. `--callers` alone under-counts, and says so.
+3. **`--scip=index.scip`** — hand it a compiler-grade index and precise edges *replace* the
+   name-based guesses, tagged `prov="scip"`. Missing or corrupt index degrades; it never fails.
+
+<details>
+<summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
+
+The map for this repository's own `src/` grades itself in the header before a single answer
+(2026-08-09): `files=106 symbols=3137 edges=8907 ambiguous=3045 unresolved=1091`.
+
+| the output says | read it as |
+| --- | --- |
+| `amb="K"` | K of this symbol's calls hit an overloaded name — one target was chosen; read the source if which one matters |
+| `ambiguous=N` | the map's completeness gauge, one number, in the header |
+| `counts_floor="1"` | a floor, not a total — a zero means *none found*, never *none exists* |
+| `unresolved=N` | call sites recognized and deliberately not resolved — counted, never dropped in silence |
+| `external="1"` | no definition anywhere in the indexed tree — stdlib or third-party, not a miss |
+| `--skipped` | the files the crawl dropped for size, itemized, so `files=` + oversize = everything it considered |
+
+</details>
+
+<details>
+<summary>How the zero was measured — the sweep, the two unflagged answers, and the 22.6% it over-hedges</summary>
+
+A 34-query sweep of this repository, 68 answers across `--uses` and `--callers`, scored against a
+`scip-clang` index (2026-08-09, the shipping binary). Six answers were imperfect; four carried a
+discriminating self-flag (`amb=`, `defs>1`, `external="1"`). The two unflagged were **not misses**:
+the oracle could not see those files — a Python file under `bench/`, an uncompiled file under
+`test/` — and ripwire's answer was the correct one.
+
+It errs the other way instead. **14 of 62 correct answers carried a caution flag they did not
+need — 22.6% over-hedging**, up from 18.6% before this round's resolver fixes, because closing loss
+buckets added marks faster than it removed them. That bias is deliberate: a flag you did not need
+costs you one source read; a miss you were never told about costs you a bug.
+
+One corpus, 34 queries, and the oracle has blind spots of its own — the limits that travel with the
+number are listed with it. Receipt, per-query scores and reproduction:
+[`bench/headtohead/r9-2026-08-09/`](bench/headtohead/r9-2026-08-09/).
+
+</details>
 
 ### In the output
 
