@@ -156,7 +156,8 @@ int callerVexing()
 
 int callerFnPtr()
 {
-    // 18. EXTRACTS (as `fp`), never RESOLVES — a call through a function-pointer variable.
+    // 18. EXTRACTS (as `fp`) and — since the L3 fn-pointer binding round — RESOLVES to the ONE bound
+    //     function (ptrTargetFn): the var→function binding below is unambiguous in this scope.
     int (*fp)() = &ptrTargetFn;
     return fp();
 }

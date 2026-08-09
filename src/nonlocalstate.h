@@ -43,8 +43,8 @@
 //
 // SOUNDNESS — THE PART THAT MUST NOT BE OVERSOLD. This analysis is UNSOUND in general and the output
 // says so in every count. In C++ especially, a pointer or reference can alias a global with no textual
-// mention of its name; an indirect call through a function pointer, a virtual, a callback or a macro
-// contributes no call edge, so the closure stops early; a macro can name a global that never appears as
+// mention of its name; an indirect call through a virtual, an unbound/reassigned function pointer or
+// callback, or an unindexed macro contributes no call edge, so the closure stops early; a macro can name a global that never appears as
 // an identifier in the tree; a local variable that shadows a global name is charged to the global unless
 // ingest happened to record a type binding for it. Every one of those failures makes the count TOO LOW
 // or (for shadowing) too high in a way this pass cannot see. Hence: every count is a FLOOR
@@ -889,8 +889,8 @@ inline constexpr const char* kNonLocalStateLegend =
     "undecided_decls=declarations whose specifiers ran past the text window, so mutability could not be decided; dropped, never guessed "
     "cells_capped=1 on the ROOT when the cell universe hit its ceiling decls_capped=1 when a declaration query hit its match budget. "
     "counts_floor=1 because this analysis is UNSOUND BY CONSTRUCTION and every count here is a FLOOR. It cannot "
-    "see: an indirect call (function pointer, virtual, callback, or a macro invocation whose #define is not "
-    "indexed), so the callee "
+    "see: an indirect call (a virtual, an unbound or reassigned function pointer or callback, or a macro "
+    "invocation whose #define is not indexed), so the callee "
     "closure stops early; a write through a pointer or reference that ALIASES a cell without naming it; a "
     "cell named only inside a macro; reflection-like or duck-typed dispatch. It can also OVER-count in one "
     "way: a local that SHADOWS a cell's name is charged to the cell unless ingest recorded a type binding "

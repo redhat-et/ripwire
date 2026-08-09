@@ -235,9 +235,13 @@ done
 # 17. most-vexing-parse. No call_expression exists on that line at all — unfixable by any widening.
 fixtureHasLit cpp/main.cpp 'Guard vexed( q1::vexFn() );' "17. the most-vexing-parse declaration is still WRITTEN"
 uses cpp vexFn 0 "17. ABSENT, UNFIXABLE: most-vexing-parse declaration, pinned at literal 0"
-# 18. function-pointer variable: EXTRACTS as `fp`, never RESOLVES.
+# 18. function-pointer variable: EXTRACTS as `fp`, and — since the L3 fn-pointer binding round — RESOLVES
+#     to the ONE function bound to the variable in scope (`int (*fp)() = &ptrTargetFn;`). This arm pinned
+#     "resolves to nothing" until that round closed the disclosed gap; it now pins the resolution's TARGET,
+#     so a wrong narrow (any other same-count callee) still reds it.
 probeSees cpp callerFnPtr fp "18. call through a fn-pointer variable EXTRACTS (as the variable name)"
-callees   cpp callerFnPtr 0  "18. …and RESOLVES to nothing — extracted-but-unresolved, not never-extracted"
+callees   cpp callerFnPtr 1  "18. …and RESOLVES via the unambiguous var→function binding (one callee)"
+calleeRow cpp callerFnPtr ptrTargetFn "18. …to ptrTargetFn — the bound function, not a name-spray guess"
 # 19. destructor spellings. `d.~Dotted()` mints a reference named for the TYPE, never a call edge.
 fixtureHasLit cpp/main.cpp 'd.~Dotted();'  "19. the dot destructor spelling is still WRITTEN"
 fixtureHasLit cpp/main.cpp 'p->~Dotted();' "19. the arrow destructor spelling is still WRITTEN"
@@ -441,7 +445,8 @@ uses c C_MAC   1 "4. macro call — the macro def is itself a callable symbol"
 probeSees c callerC dotFp   "2. struct field call (value) EXTRACTS as the field name"
 probeSees c callerC arrowFp "3. struct field call (pointer) EXTRACTS as the field name"
 probeSees c callerCFnPtr fp "5. fn-pointer variable call EXTRACTS as the variable name"
-callees   c callerCFnPtr 0  "5. …and RESOLVES to nothing — the disclosed caveat, measured"
+callees   c callerCFnPtr 1  "5. …and RESOLVES via the unambiguous var→function binding (L3 round; was the disclosed caveat)"
+calleeRow c callerCFnPtr cPtrTargetFn "5. …to cPtrTargetFn — the bound function"
 
 echo
 echo "=== Bash — test/callformfix/bash/main.sh (no qualified form exists) ==="

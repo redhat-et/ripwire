@@ -34,8 +34,10 @@ namespace rw
 inline constexpr const char* kGraphCountFloorLegend =
     "counts_floor=\"1\" means every count on this element is a FLOOR, never a total. Call edges are extracted "
     "from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface "
-    "or duck-typed receiver), a callback or function pointer, or a declaration "
+    "or duck-typed receiver), or a declaration "
     "that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. "
+    "A call through a function pointer or callback resolves only when ONE function is bound to that variable in "
+    "scope (C-family; a reassigned, table-indexed or lambda-bound pointer still contributes no edge). "
     "A macro-generated call site contributes a role=\"macro\" edge when the macro's function-like #define is "
     "indexed (C-family, t=\"macro\"); otherwise it too contributes no edge. "
     "Read a zero as \"none found\", never as \"none exists\". ";
