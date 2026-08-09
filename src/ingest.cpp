@@ -1016,7 +1016,17 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 57;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 58;           // bump on any grammar/.scm/extraction change
+                                                      // 58 (r9 A5 iteration 6): the L3 DECLARATION arm gets
+                                                      //    the matching value-INITIALIZATION noise gate — a
+                                                      //    bare-identifier initializer mints a fn-pointer
+                                                      //    binding only when the declarator spells one, the
+                                                      //    written type is a same-file fn-pointer alias, or
+                                                      //    the type is UNKNOWN (`auto`, template, decltype).
+                                                      //    A CLASS type used to sail through the primitive-
+                                                      //    only gate, so `std::string tag = zzz;` minted a
+                                                      //    binding that vetoed shadow suppression for the
+                                                      //    local's whole scope.
                                                       // 57 (r9 A5 iteration 5): the L3 assignment arm gets
                                                       //    the value-assignment NOISE GATE — a bare-
                                                       //    identifier `x = y;` mints a fn-pointer binding
@@ -5665,13 +5675,28 @@ struct PendingFnBindAssign
     std::uint32_t startByte = 0;
 };
 
+// a bare-identifier DECLARATION initializer held back the same way, and for one reason only: the fn-pointer
+// ALIAS table is not complete until the walk ends, and a `typedef void (*H)();` written BELOW `H fp = beta;`
+// is the difference between a binding and a copy. Unlike its assignment sibling this record carries its own
+// verdict material — the declaration's WRITTEN TYPE, read straight off the node — because a declaration IS
+// the variable and needs no file-wide fact lookup to say what it holds.
+struct PendingFnBindDecl
+{
+    std::string   var;
+    std::string   target;
+    std::string   typeName;              // final segment of the written type; "" for the unnamed concrete kinds
+    std::uint32_t startByte    = 0;
+    bool          concreteType = false;  // the spelling FIXES the type (never auto/decltype/template)
+};
+
 // the gate's whole per-file state: the declared-variable type facts, the file's function-pointer type
-// aliases, and the assignments held back until both of those are complete. One object because the three
-// have no independent life — they are filled by one walk and spent together the moment it ends.
+// aliases, and the assignments AND declarations held back until both of those are complete. One object
+// because they have no independent life — filled by one walk and spent together the moment it ends.
 struct FnBindGateState
 {
     std::vector<FnBindVarTypeFact>   facts;
     std::vector<PendingFnBindAssign> pending;
+    std::vector<PendingFnBindDecl>   pendingDecl;
     HashMap<std::string, char>       aliases;
 };
 
@@ -6192,16 +6217,18 @@ inline void emitFnBind( std::uint32_t fileId, Lang lang, std::string_view var, s
 }
 
 // L3 capture over one C-family `declaration` node: one FnDecl record per init_declarator whose RHS names a
-// function (`&alpha` / `beta` / a lambda). Noise gate: a bare-identifier initializer under a PRIMITIVE
-// written type (`int a = b;`) is almost never a function copy — kept only when the declarator itself spells
-// a fn pointer; typedef'd (`H h = beta;`) and auto types stay captured, `&name` and lambdas always do.
+// function (`&alpha` / `beta` / a lambda). `&name` and lambdas are self-evidencing and emit at once;
+// a BARE-IDENTIFIER initializer is the one shape a fn-pointer bind shares with a plain value copy, so it
+// goes to the VALUE-INITIALIZATION NOISE GATE below (`pending`) unless the declarator itself spells a fn
+// pointer, which settles it on the spot.
 // A reference declarator (`H& r = fn;`) emits NO positive and clobbers the bound-to var (A5 escape guard).
 inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src,
-                               std::vector<RawBind>& fnPos, std::vector<FnBindClobber>& fnUnk )
+                               std::vector<RawBind>& fnPos, std::vector<FnBindClobber>& fnUnk,
+                               std::vector<PendingFnBindDecl>& pending )
 {
     const TSNode typeNode = ts_node_child_by_field_name( n, "type", 4 );
-    const char*  tt       = ts_node_is_null( typeNode ) ? "" : ts_node_type( typeNode );
-    const bool   primType = std::strcmp( tt, "primitive_type" ) == 0 || std::strcmp( tt, "sized_type_specifier" ) == 0;
+    std::string  writtenType;
+    const bool   concrete = concreteWrittenType( typeNode, src, writtenType );
     const std::uint32_t cc = ts_node_child_count( n );
     for( std::uint32_t i = 0; i < cc; ++i )
     {
@@ -6234,9 +6261,12 @@ inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::s
         }
         bool bareIdent = false;
         std::string target = fnBindTargetOf( valueNode, src, bareIdent );
-        if( bareIdent && primType && !sawFnDecl )
+        if( bareIdent && !target.empty() && !( sawFnDecl && sawPtrDecl ) )
         {
-            target.clear();
+            // the declarator does not itself spell a fn pointer, so only the WRITTEN TYPE can tell a bind
+            // from a copy — and that answer needs the file's complete alias table. Hold it.
+            pending.push_back( { std::string( var ), std::move( target ), writtenType, ts_node_start_byte( n ), concrete } );
+            continue;
         }
         emitFnBind( fileId, lang, var, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnDecl, fnPos );
     }
@@ -6334,6 +6364,40 @@ inline void resolvePendingFnBindAssigns( std::uint32_t fileId, Lang lang, FnBind
         if( !fnBindProvenValueVar( p.var, p.startByte, gate.facts, gate.aliases ) )
         {
             emitFnBind( fileId, lang, p.var, std::move( p.target ), p.startByte, LocalBindKind::FnAssign, fnPos );
+        }
+    }
+}
+
+// ── L3 VALUE-INITIALIZATION NOISE GATE (r9 fix round, DECLARATION arm) ───────────────────────────────
+// The sibling gate above answers "what is this VARIABLE?" from the file's declarations because an
+// assignment node carries no type. A declaration carries one, so this arm asks the stronger question
+// directly of the node in front of it: does the WRITTEN TYPE prove a value?
+//   * a CONCRETE type that is no fn-pointer alias — `std::string tag = zzz;`, `Box b = other;`,
+//     `int a = b;` — is a copy. No binding. Before this gate only the PRIMITIVE half of that was caught,
+//     so a CLASS-typed copy minted an FnDecl, and shadowSuppressedSite (model.h) VETOES local-shadow
+//     suppression for any name carrying an L3 binding — the local handed its every read/write site back to
+//     the function it shadows. That is the same harm, and the same mechanism, as the assignment arm's.
+//   * a fn-pointer DECLARATOR (`void (*fp)() = handler;`) never reaches here at all: the shape is its own
+//     evidence and captureFnBindDecl emits it on the spot.
+//   * a same-file fn-pointer ALIAS (`typedef void (*H)(); H fp = beta;`) mints — the alias table is why
+//     these records are deferred to the end of the walk rather than judged where they are written.
+//   * everything else is UNKNOWN and unknown MINTS: `auto fp = f;` (the idiomatic form), `decltype(...)`,
+//     and any template/dependent type. Refusing to guess is what keeps this gate from costing recall.
+// DISCLOSED BLIND SPOT, pinned by test/fnptrcheck.sh arm (t): the alias evidence is SAME-FILE, so a
+// `typedef void (*H)();` living in a HEADER leaves `H fp = beta;` indistinguishable from a value copy and
+// its edge is gated away. It cost ZERO edges on the two corpora this round measured (this repo, 1093 files
+// / 10771 edges, full map byte-identical; a 2376-file ObjC++ tree, 39741 edges, every callee row identical
+// and only `unresolved=` moving 2577 → 2509) — but that is a measurement, not a proof. Widening the alias
+// evidence corpus-wide is the fix if a corpus ever pays for it.
+inline void resolvePendingFnBindDecls( std::uint32_t fileId, Lang lang, FnBindGateState& gate, std::vector<RawBind>& fnPos )
+{
+    for( PendingFnBindDecl& p : gate.pendingDecl )
+    {
+        const bool aliasTyped  = !p.typeName.empty() && gate.aliases.find( p.typeName ) != gate.aliases.end();
+        const bool provenValue = p.concreteType && !aliasTyped;
+        if( !provenValue )
+        {
+            emitFnBind( fileId, lang, p.var, std::move( p.target ), p.startByte, LocalBindKind::FnDecl, fnPos );
         }
     }
 }
@@ -6497,7 +6561,7 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     // (`H fnPtr = beta;` emits fnPtr:H for receiver narrowing AND fnPtr→beta for call resolution). ──
     if( cFamilyFn && std::strcmp( t, "declaration" ) == 0 )
     {
-        captureFnBindDecl( n, fileId, lang, src, fnPos, fnUnk );
+        captureFnBindDecl( n, fileId, lang, src, fnPos, fnUnk, fnGate.pendingDecl );
     }
     else if( cFamilyFn && std::strcmp( t, "assignment_expression" ) == 0 )
     {
@@ -6516,7 +6580,9 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     }
     }
 
-    resolvePendingFnBindAssigns( fileId, lang, fnGate, fnPos );   // the noise gate — BEFORE the sweep, which needs fnPos final
+    resolvePendingFnBindDecls  ( fileId, lang, fnGate, fnPos );   // both noise gates — BEFORE the sweep, which needs
+    resolvePendingFnBindAssigns( fileId, lang, fnGate, fnPos );   // fnPos final (its var scan is a membership test,
+                                                                  // so the deferral cannot change a clobber verdict)
 
     // ── L3 clobber sweep + merge. A clobbering assignment forces the tombstone (kFnBindClobberTarget) so a
     // stale earlier binding can never win (`void (*fn)() = &alpha; fn = getHandler(); fn();` → NO edge) —
