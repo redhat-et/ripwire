@@ -1016,7 +1016,18 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 54;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 55;           // bump on any grammar/.scm/extraction change
+                                                      // 55 (r9 A5 iteration 4): an ordinary BLOCK
+                                                      //    declaration's shadow span starts at its
+                                                      //    DECLARATION POINT (end of the complete
+                                                      //    declarator, [basic.scope.pdecl]) instead of the
+                                                      //    block's brace, so a genuine call written above
+                                                      //    the local survives; whole-scope shapes keep
+                                                      //    their spans, and isDeclSiteName gains the
+                                                      //    `declaration` arm the narrowed span un-masks.
+                                                      //    Span VALUES + reference population change →
+                                                      //    old caches must be rejected; mirror bumped in
+                                                      //    the SAME commit.
                                                       // 54 (r9 A5 iteration 3): shadow spans stop at the
                                                       //    owning CONTROL STATEMENT — a for/if/while/switch
                                                       //    header declaration scopes to that statement's
@@ -5630,6 +5641,16 @@ inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std
     pushRawBind( fileId, lang, var, std::move( typeName ), BindSite{ startByte, 0u, 0u }, LocalBindKind::Type, binds );
 }
 
+// the scope a `declaration` node's names shadow within: the byte span, plus whether that span came from a
+// PLAIN BLOCK (the only kind the declaration-point narrowing below applies to). {0,0} when nothing encloses
+// (file/namespace/class scope): such a record can contain no site and is inert by construction.
+struct ShadowScope
+{
+    std::uint32_t start      = 0;
+    std::uint32_t end        = 0;
+    bool          plainBlock = false;
+};
+
 // r9 shadow fix round (A5, iteration 3): the byte span a declaration's names are scoped to. A declaration
 // in a control statement's HEADER — for-init (`for (int run = 0; ...)`), if/while/switch condition
 // (`if (int run = f())`) — scopes to THAT STATEMENT's full span (C++: the variable lives for the whole
@@ -5638,24 +5659,54 @@ inline void emitBind( std::uint32_t fileId, Lang lang, std::string_view var, std
 // ate every genuine call after it. A header declaration reaches its control statement BEFORE any
 // compound_statement (bodies ARE compound_statements, and C++ forbids a declaration as a braceless body),
 // so "first ancestor of either kind wins" needs no field tracking — a body declaration hits the body block
-// first, a header declaration the statement first. {0,0} when nothing encloses (file/namespace/class
-// scope): such a record can contain no site and is inert by construction.
-inline std::pair<std::uint32_t, std::uint32_t> enclosingBlockSpan( TSNode n )
+// first, a header declaration the statement first. That same discrimination is what plainBlock reports.
+inline ShadowScope enclosingShadowScope( TSNode n )
 {
     TSNode p = ts_node_parent( n );
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
         const char* pt = ts_node_type( p );
-        if(    std::strcmp( pt, "compound_statement" ) == 0
-            || std::strcmp( pt, "for_statement" ) == 0 || std::strcmp( pt, "for_range_loop" ) == 0
+        if( std::strcmp( pt, "compound_statement" ) == 0 )
+        {
+            return { ts_node_start_byte( p ), ts_node_end_byte( p ), true };
+        }
+        if(    std::strcmp( pt, "for_statement" ) == 0 || std::strcmp( pt, "for_range_loop" ) == 0
             || std::strcmp( pt, "if_statement" ) == 0  || std::strcmp( pt, "while_statement" ) == 0
             || std::strcmp( pt, "switch_statement" ) == 0 )
         {
-            return { ts_node_start_byte( p ), ts_node_end_byte( p ) };
+            return { ts_node_start_byte( p ), ts_node_end_byte( p ), false };
         }
         p = ts_node_parent( p );
     }
-    return { 0u, 0u };
+    return { 0u, 0u, false };
+}
+
+// r9 shadow fix round (A5, iteration 4): where an ordinary block declaration's names START shadowing.
+// Iteration 2 started every span at the BLOCK's opening brace, which silently ate a genuine call written
+// ABOVE the shadowing local (`key(); int key = 0;` lost the call — verifier attack4, a recall loss, not the
+// disclosed over-suppression). THE DECLARATION POINT SHIPPED HERE IS THE END BYTE OF THE COMPLETE
+// DECLARATOR, which is C++ [basic.scope.pdecl] exactly: the locus of a declarator is immediately after the
+// complete declarator and before its initializer, and a structured binding's is immediately after its
+// identifier-list — the outermost declarator's end byte is both. So `int a = probe(), probe = 0, b = probe;`
+// keeps the call in a's initializer and suppresses b's read, and `int probe = probe;` suppresses its own
+// initializer (which IS the new local, indeterminate value and all). The point itself is exact — a byte
+// offset the grammar hands us, not an approximation — so what remains is the floor that was always there
+// and is now simply visible ABOVE the point too: a pre-declaration site is only KEPT, never resolved, so if
+// the name there denotes an OUTER local rather than the indexed symbol, --uses still name-matches it (the
+// header's own "reference-name-based" disclosure). The one declaration this cannot narrow is a declarator
+// tree emitShadowVarDecls refuses (`std::string key( tok );`, the most-vexing parse), which records no
+// evidence at all and is the disclosed floor already.
+// Applies ONLY to a plain block: a control-statement header declaration, and every whole-scope shape
+// (definition/lambda/catch parameters, captures, range-for variables), is in scope from the START of its
+// scope, so narrowing those would re-mint the false positives iterations 1-3 removed.
+inline std::uint32_t shadowSpanStart( const ShadowScope& scope, TSNode completeDeclarator )
+{
+    if( !scope.plainBlock || ts_node_is_null( completeDeclarator ) )
+    {
+        return scope.start;
+    }
+    const std::uint32_t point = ts_node_end_byte( completeDeclarator );
+    return point > scope.start ? point : scope.start;
 }
 
 // r9 shadow fix round (A5): every VARIABLE name a declarator declares → one VarDecl record each, carrying
@@ -5809,7 +5860,7 @@ inline TSNode fnDefParameterList( TSNode fnDef )
 // r9 shadow suppression (A5 fix round): the local-declaring shapes that live OUTSIDE `declaration` nodes
 // (the Rule-2 branch never sees them), dispatched on the caller's already-read node type `t`:
 //   * a range-for's loop variable (`for( auto& s : v )`, incl. structured bindings) — scoped to the WHOLE
-//     loop statement (iteration 3, unified with enclosingBlockSpan's control-statement rule);
+//     loop statement (iteration 3, unified with enclosingShadowScope's control-statement rule);
 //   * a C++/ObjC function DEFINITION's named parameters — scoped to the definition BODY's span. Walking
 //     only the definition node's own declarator chain (never bare parameter_declaration nodes) is what
 //     keeps two non-scopes out: a PROTOTYPE's parameters (`void f(int run);` binds nothing anywhere) and a
@@ -5841,7 +5892,7 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
     const BindSite bodySite{ ts_node_start_byte( n ), ts_node_start_byte( body ), ts_node_end_byte( body ) };
     if( isRangeFor )
     {
-        // iteration 3, unified with enclosingBlockSpan's control-statement rule: the loop variable scopes
+        // iteration 3, unified with enclosingShadowScope's control-statement rule: the loop variable scopes
         // to the WHOLE for_range_loop statement (its own span), not merely the body.
         const BindSite loopSite{ ts_node_start_byte( n ), ts_node_start_byte( n ), ts_node_end_byte( n ) };
         emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( n, "declarator", 10 ), src, loopSite, binds );
@@ -6034,9 +6085,11 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     {
         const TSNode typeNode = ts_node_child_by_field_name( n, "type", 4 );
         std::string  written  = writtenTypeOf( typeNode, src );
-        // A5 fix round: the declared names shadow within their enclosing BLOCK — one parent walk per
-        // declaration node, shared by every declarator child below.
-        const auto [ blockStart, blockEnd ] = enclosingBlockSpan( n );
+        // A5 fix round: the declared names shadow within their enclosing block (or, for a control-statement
+        // header declaration, that whole statement) — one parent walk per declaration node, shared by every
+        // declarator child below; each declarator then contributes its own declaration POINT as the span's
+        // start (shadowSpanStart).
+        const ShadowScope scope = enclosingShadowScope( n );
         // a `declaration` can declare several variables (`Foo a, b;`) → one binding per declarator child.
         const std::uint32_t cc = ts_node_child_count( n );
         for( std::uint32_t i = 0; i < cc; ++i )
@@ -6057,12 +6110,15 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
             // exists and shadows).
             if( std::strcmp( ct, "init_declarator" ) == 0 )
             {
-                std::string type = written.empty() ? ctorTypeOf( ts_node_child_by_field_name( c, "value", 5 ), src ) : written;
-                emitDeclBinds( fileId, lang, ts_node_child_by_field_name( c, "declarator", 10 ), src, std::move( type ), BindSite{ ts_node_start_byte( n ), blockStart, blockEnd }, binds );
+                const TSNode declarator = ts_node_child_by_field_name( c, "declarator", 10 );
+                std::string  type       = written.empty() ? ctorTypeOf( ts_node_child_by_field_name( c, "value", 5 ), src ) : written;
+                emitDeclBinds( fileId, lang, declarator, src, std::move( type ),
+                               BindSite{ ts_node_start_byte( n ), shadowSpanStart( scope, declarator ), scope.end }, binds );
             }
             else   // plain declarator (identifier / pointer_declarator / reference_declarator), no initializer
             {
-                emitDeclBinds( fileId, lang, c, src, std::string( written ), BindSite{ ts_node_start_byte( n ), blockStart, blockEnd }, binds );
+                emitDeclBinds( fileId, lang, c, src, std::string( written ),
+                               BindSite{ ts_node_start_byte( n ), shadowSpanStart( scope, c ), scope.end }, binds );
             }
         }
     }
@@ -6894,18 +6950,35 @@ inline bool isCallCallee( TSNode id ) noexcept
     return false;
 }
 
-// A5 shadow fix round: is `id` a DECLARATION-SITE name held by a parent whose name child carries no
-// `declarator` field — so isNonValueContext's field probe (arm 2) cannot see it? Pre-fix each of these
-// leaked the DECLARED name out as a role="read" site of its own declaration (`int& key` param/local,
-// `auto& [key, w]`, `for (int key : arr)`, `[key = expr]`). An identifier directly under a
-// reference_declarator or a structured_binding_declarator is ALWAYS a declared name (value expressions
-// live under other node types); a range-for's is its `declarator` field; an init-capture's is its FIRST
-// named child (the value side of `[a = b]` stays a genuine read of b).
+// A5 shadow fix round: is `id` a DECLARATION-SITE name isNonValueContext's single-`declarator`-field probe
+// (arm 2) cannot see? Pre-fix each of these leaked the DECLARED name out as a role="read" site of its own
+// declaration (`int& key` param/local, `auto& [key, w]`, `for (int key : arr)`, `[key = expr]`). An
+// identifier directly under a reference_declarator or a structured_binding_declarator is ALWAYS a declared
+// name (value expressions live under other node types); a range-for's is its `declarator` field; an
+// init-capture's is its FIRST named child (the value side of `[a = b]` stays a genuine read of b).
+// Iteration 4 adds the shape arm 2 looks straight at and still misses: a `declaration` carries one
+// `declarator` FIELD PER DECLARED NAME, so ts_node_child_by_field_name — which returns the FIRST — sees
+// `a` in `int a, key;` and never `key`; a bare `int key;` it misses outright, the parent type not being in
+// arm 2's list at all. Iterations 1-3 could not observe either, because the block-start span suppressed the
+// declaration line along with the rest of the block; declaration-point spans stop covering it.
 inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
 {
     if( std::strcmp( pt, "reference_declarator" ) == 0 || std::strcmp( pt, "structured_binding_declarator" ) == 0 )
     {
         return true;
+    }
+    if( std::strcmp( pt, "declaration" ) == 0 )
+    {
+        const std::uint32_t cc = ts_node_child_count( parent );
+        for( std::uint32_t i = 0; i < cc; ++i )
+        {
+            const char* fieldName = ts_node_field_name_for_child( parent, i );
+            if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 && sameSpan( ts_node_child( parent, i ), id ) )
+            {
+                return true;
+            }
+        }
+        return false;
     }
     if( std::strcmp( pt, "for_range_loop" ) == 0 )
     {

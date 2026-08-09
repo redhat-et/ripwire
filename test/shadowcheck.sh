@@ -11,7 +11,12 @@
 #   * the L3 fn-pointer discipline is untouched: `void (*cb)() = &run; cb();` still resolves its edge (a
 #     fn-binding var's references are calls THROUGH the variable, never suppressed);
 #   * the no-collision feature survives: --uses on a plain local name with NO same-named indexed symbol
-#     (writetargetcheck's whole contract) still lists its sites — suppression needs a collision.
+#     (writetargetcheck's whole contract) still lists its sites — suppression needs a collision;
+#   * iteration 4 — an ordinary block declaration shadows from its DECLARATION POINT (the end of its
+#     complete declarator, C++ [basic.scope.pdecl]), NOT from the block's opening brace, so a genuine call
+#     written ABOVE the shadowing local survives; the shapes whose names are in scope from the start of
+#     their scope (definition/lambda/catch parameters, captures, range-for variables, control-statement
+#     header declarations) keep their whole-body/whole-statement spans and must not regain false positives.
 #
 # The fixture is GENERATED here (self-contained; nothing committed under test/).
 #
@@ -140,6 +145,73 @@ void catcher() {
 }
 EOF
 
+cat >"$FIX/predecl.cpp" <<'EOF'
+// A5 iteration-4 arms: an ordinary block declaration shadows from its DECLARATION POINT — the end of the
+// complete declarator (C++ [basic.scope.pdecl]) — never from the enclosing block's opening brace.
+#include "funcs.h"
+struct Pr2 { int one; int two; };
+int  probe() { return 0; }
+void slot()  { }
+Pr2  mkPr2() { return Pr2{}; }
+void preDecl() {
+    run();                                   // (q) a GENUINE call written BEFORE the local exists — survives
+    int run = 0;                             // ... the declaration point ...
+    run += 1;                                // ... and the LOCAL's own sites, which stay suppressed
+    (void)run;
+}
+void multiDecl() {
+    int a = probe(), probe = 0, b = probe;   // (r) the call in a's initializer is BEFORE probe's declarator;
+    (void)a; (void)b; (void)probe;           //     b's read is AFTER it, so it is the local's
+}
+void selfInit() {
+    int probe = probe;                       // (s) [basic.scope.pdecl]: the initializer's probe IS the local
+    (void)probe;
+}
+void sbDecl() {
+    slot();                                  // (u) genuine call before a structured-binding declaration,
+    auto [slot, w] = mkPr2();                //     whose locus is after the identifier-list
+    (void)slot; (void)w;
+}
+// (q4)/(q5) a BARE declarator's own name is not a read of the function it shadows — nor is the SECOND
+// declarator's, since one `declaration` node carries one `declarator` FIELD per declared name.
+void bareDecl()  { int run; run = 0; (void)run; }
+void bareDecl2() { int one, run; (void)one; (void)run; }
+EOF
+
+cat >"$FIX/scopeguards.cpp" <<'EOF'
+// A5 iteration-4 guards: the shapes whose names are in scope from the START of their scope KEEP their
+// whole-body/whole-statement spans — narrowing THESE to a declaration point re-mints the false positives
+// iterations 1-3 removed.
+#include "funcs.h"
+struct Err2 { };
+int arr3[3] = { 1, 2, 3 };
+void emit(int v) { (void)v; }
+int  paramFirst(int run) { int x = run; return x; }   // (v) a param covers the FIRST body statement
+void rangeForPre() {
+    run();                                            // (w) genuine call BEFORE the loop ...
+    for (int run : arr3) { (void)run; }               //     the loop var scopes to the WHOLE loop ...
+    run();                                            // (w) ... and the genuine call AFTER it survives
+}
+void catchPre() {
+    emit(1);                                          // (x) genuine call BEFORE the try ...
+    try { throw Err2(); }
+    catch (const Err2& emit) { (void)emit; }          //     the handler param covers the WHOLE handler ...
+    emit(2);                                          // (x) ... and the genuine call AFTER it survives
+}
+void lamInitPre() {
+    run();                                            // (y) genuine call BEFORE the lambda ...
+    auto g = [run = 3]() { return run; };             //     the init-capture covers the WHOLE lambda body ...
+    (void)g;
+    run();                                            // (y) ... and the genuine call AFTER it survives
+}
+void siblingBlocks() {
+    { int run = 1; (void)run; }                       // (z) two sibling shadowing blocks ...
+    run();
+    { int run = 2; (void)run; }
+    run();                                            //     ... each claims only its own
+}
+EOF
+
 cat >"$FIX/plain.cpp" <<'EOF'
 // no-collision control: `total` names NO indexed symbol anywhere — its local sites must STAY listed
 // (--uses on a plain local name is the external-answer feature writetargetcheck pins).
@@ -255,6 +327,63 @@ printf '%s\n' "$UPC" | grep -q 'catchparam.cpp' \
 uses run | grep 'catchparam.cpp' | grep -q 'role="call"' \
     && ok "--uses=run keeps catcher()'s genuine call after the handler" \
     || no "--uses=run LOST catcher()'s genuine call — catch-param scope leaked past the handler"
+
+# ── (q)-(u) A5 iteration 4: an ordinary block declaration shadows from its DECLARATION POINT ───────────
+PRE="$( uses run | grep 'predecl.cpp' )"
+printf '%s\n' "$PRE" | grep 'in_id="preDecl"' | grep -q 'role="call"' \
+    && ok "--uses=run keeps preDecl()'s genuine call written ABOVE the shadowing local (declaration point)" \
+    || no "--uses=run LOST preDecl()'s pre-declaration call — the span still starts at the block brace"
+printf '%s\n' "$PRE" | grep 'in_id="preDecl"' | grep -Eq 'role="(read|write)"' \
+    && { no "--uses=run lists read/write sites from preDecl() AFTER the declaration point"; printf '%s\n' "$PRE" | grep 'in_id="preDecl"'; } \
+    || ok "--uses=run has no read/write sites from preDecl() after its declaration point"
+rows --callers=run | grep -q 'n="preDecl"' \
+    && ok "--callers=run lists preDecl (the pre-declaration call minted its genuine edge)" \
+    || no "--callers=run lost preDecl — the recovered pre-declaration call minted no edge"
+UPR="$( uses probe )"
+printf '%s\n' "$UPR" | grep 'in_id="multiDecl"' | grep -q 'role="call"' \
+    && ok "--uses=probe keeps multiDecl()'s call in the initializer BEFORE probe's own declarator" \
+    || no "--uses=probe LOST multiDecl()'s pre-declarator call — same-statement ordering is not modelled"
+printf '%s\n' "$UPR" | grep 'in_id="multiDecl"' | grep -Eq 'role="(read|write)"' \
+    && { no "--uses=probe lists a read from multiDecl() AFTER probe's declarator — the point is the STATEMENT end, not the declarator's"; printf '%s\n' "$UPR" | grep 'in_id="multiDecl"'; } \
+    || ok "--uses=probe has no read from multiDecl()'s later initializer (point = end of the complete declarator)"
+printf '%s\n' "$UPR" | grep -q 'in_id="selfInit"' \
+    && { no "--uses=probe lists a site from selfInit() — \`int probe = probe;\` initializer must be the LOCAL"; printf '%s\n' "$UPR" | grep 'in_id="selfInit"'; } \
+    || ok "--uses=probe has ZERO sites from selfInit() (the initializer is inside the new name's scope)"
+for fn in bareDecl bareDecl2; do
+    printf '%s\n' "$PRE" | grep -q "in_id=\"$fn\"" \
+        && { no "--uses=run lists a site from $fn() — a plain declarator's own NAME leaked out as a read"; printf '%s\n' "$PRE" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=run has ZERO sites from $fn() (a declaration's every declarator field is a DECLARED name)"
+done
+USL="$( uses slot )"
+printf '%s\n' "$USL" | grep 'in_id="sbDecl"' | grep -q 'role="call"' \
+    && ok "--uses=slot keeps sbDecl()'s genuine call above the structured-binding declaration" \
+    || no "--uses=slot LOST sbDecl()'s pre-declaration call — the binding's locus is not its identifier-list"
+printf '%s\n' "$USL" | grep 'in_id="sbDecl"' | grep -Eq 'role="(read|write)"' \
+    && { no "--uses=slot lists a read from sbDecl() after the structured binding"; printf '%s\n' "$USL" | grep 'in_id="sbDecl"'; } \
+    || ok "--uses=slot has no read from sbDecl() after the structured binding"
+
+# ── (v)-(z) A5 iteration 4 guards: whole-scope shapes keep their spans (no re-minted false positives) ──
+GRD="$( uses run | grep 'scopeguards.cpp' )"
+printf '%s\n' "$GRD" | grep -q 'in_id="paramFirst"' \
+    && { no "--uses=run lists a site from paramFirst() — a definition parameter no longer covers the first body statement"; printf '%s\n' "$GRD" | grep 'in_id="paramFirst"'; } \
+    || ok "--uses=run has ZERO sites from paramFirst() (a definition parameter keeps the whole-body span)"
+for fn in rangeForPre lamInitPre siblingBlocks; do
+    calls="$( printf '%s\n' "$GRD" | grep -c "role=\"call\".*in_id=\"$fn\"" )"
+    [ "$calls" = "2" ] \
+        && ok "--uses=run keeps BOTH genuine calls around $fn()'s shadowing scope" \
+        || no "--uses=run has $calls of 2 genuine calls around $fn()'s shadowing scope"
+    printf '%s\n' "$GRD" | grep "in_id=\"$fn\"" | grep -Eq 'role="(read|write)"' \
+        && { no "--uses=run lists read/write sites from inside $fn()'s shadowing scope"; printf '%s\n' "$GRD" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=run has no read/write sites from inside $fn()'s shadowing scope"
+done
+UEM="$( uses emit )"
+emitcalls="$( printf '%s\n' "$UEM" | grep -c 'role="call".*in_id="catchPre"' )"
+[ "$emitcalls" = "2" ] \
+    && ok "--uses=emit keeps BOTH genuine calls around catchPre()'s handler (catch param keeps its span)" \
+    || no "--uses=emit has $emitcalls of 2 genuine calls around catchPre()'s handler"
+printf '%s\n' "$UEM" | grep 'in_id="catchPre"' | grep -Eq 'role="(read|write)"' \
+    && { no "--uses=emit lists read/write sites from inside catchPre()'s handler"; printf '%s\n' "$UEM" | grep 'in_id="catchPre"'; } \
+    || ok "--uses=emit has no read/write sites from inside catchPre()'s handler"
 
 # ── (e) determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --uses=run --no-cache 2>/dev/null )"
