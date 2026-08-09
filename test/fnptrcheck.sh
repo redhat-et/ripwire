@@ -50,6 +50,14 @@ void dispatch(int i) { handlers[i](); }                    // (d) dynamic table 
 void useLambda() { auto cb = [](){ helperFn(); }; cb(); }  // (e) lambda-bound → no false edge; helperFn stays
 static H gPtr = &alpha;
 void useFileScope() { gPtr(); }                            // (f) file-scope binding, never clobbered → alpha
+
+// A5 escape-guard arms (adversarial-verifier refutation, 2026-08-09): a binding variable that ESCAPES —
+// address taken, or bound to a reference — can be retargeted behind the resolver's back, so it clobbers.
+void indirect_mutate( H* pfn ) { *pfn = &beta; }
+void takes_fn( H p ) { p(); }
+void escaped()  { void (*fn)() = &alpha; indirect_mutate(&fn); fn(); }  // (k) &fn escapes → NO edge at all
+void byval()    { void (*fn)() = &alpha; takes_fn(fn); fn(); }          // (l) by-value copy → alpha SURVIVES
+void refbound() { H fn2 = &alpha; H& r = fn2; fn2(); }                  // (m) reference-bound → NO edge
 EOF
 
 cat >"$FIX/cfile.c" <<'EOF'
@@ -119,6 +127,32 @@ rows --callees=useFileScope | grep -q 'n="alpha"' \
 rows --callees=cUse | grep -q 'n="gamma"' \
     && ok "cUse() (.c file) has a callee row for gamma (Lang::C binding capture live)" \
     || no "cUse() (.c file) has NO gamma edge — the C-grammar binding capture is missing"
+
+# ── (k) ESCAPE clobber — `indirect_mutate(&fn)` can retarget fn through the pointer, so the binding is no
+#        longer trustworthy: fn() resolves to NOTHING (not alpha, not beta, not the same-named global fn). ──
+ES="$( rows --callees=escaped )"
+for bogus in alpha beta fn; do
+    printf '%s\n' "$ES" | grep -q "n=\"$bogus\"" \
+        && no "escaped() shows an edge to $bogus — an address-taken binding var must be clobbered" \
+        || ok "escaped() has no $bogus edge (address-of escape clobbers the binding)"
+done
+printf '%s\n' "$ES" | grep -q 'n="indirect_mutate"' \
+    && ok "escaped() keeps its direct indirect_mutate call edge (the guard clobbers only the binding)" \
+    || no "escaped() lost its indirect_mutate edge — the escape guard over-suppressed a direct call"
+
+# ── (l) by-value control — `takes_fn(fn)` copies the pointer; a copy cannot mutate the variable, so the
+#        binding stays live and fn() must STILL resolve to alpha (the guard must not over-suppress). ──
+BV="$( rows --callees=byval )"
+printf '%s\n' "$BV" | grep -q 'n="alpha"' \
+    && ok "byval() still resolves fn() to alpha (a by-value use is not an escape)" \
+    || no "byval() lost its alpha edge — the escape guard over-suppressed a by-value use"
+
+# ── (m) reference-bind clobber — `H& r = fn2;` aliases the variable; a write through r is invisible, so
+#        fn2() resolves to NOTHING. ──
+RB="$( rows --callees=refbound )"
+printf '%s\n' "$RB" | grep -q 'n="alpha"' \
+    && no "refbound() shows an alpha edge — a reference-bound binding var must be clobbered" \
+    || ok "refbound() has no alpha edge (reference binding clobbers)"
 
 # ── (h) edge honesty: the resolved rows are plain calls — no role= relabel (a binding is not a macro). ──
 printf '%s\n' "$UD" | grep 'n="alpha"' | grep -q 'role=' \

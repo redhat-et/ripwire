@@ -536,11 +536,20 @@ inline void rtaIntersectCone( const IngestResult& ing, const std::vector<std::st
 //              assigned two different functions resolves to NOTHING. The kFnBindClobberTarget sentinel maps
 //              to "" (tombstone from the start) and its conflict clears a live entry.
 //   varFnFile  "<fileId>#var" → file-scope binding — built from FILE-SCOPE DECLARATION records only
-//              (`static H gPtr = &alpha;`), then CLOBBERED by any in-function ASSIGNMENT to the same NAME
+//              (`static H gPtr = &alpha;`), then CLOBBERED by any ASSIGNMENT record for the same NAME
 //              anywhere in the corpus with a different target (`gPtr = &beta;` in b.cpp must kill a.cpp's
 //              entry — a non-static global is reassignable from any file; the sweep over-approximates
 //              toward the tombstone, never toward a resolve). A local DECL of the same name is a genuine
 //              shadow (a different variable) and does NOT clobber the file entry.
+// A5 ESCAPE GUARD (adversarial-verifier refutation, 2026-08-09): a binding variable that ESCAPES is no
+// longer trustworthy — `indirect_mutate(&fn)` can retarget it through the pointer, invisible to the
+// textual capture, so ingest records a clobber for ANY `&var` address-of occurrence and for any
+// reference-binding (`H& r = fn;`), local or file-scope; a by-value use (`takes_fn(fn)`) copies the
+// pointer and does NOT clobber. Escape records ride the same FnAssign clobber channel, so they tombstone
+// the local entry at their own scope and (via the corpus-wide sweep below) the file-scope entry.
+// DISCLOSED RESIDUAL: ingest emits clobbers only for vars that hold a fn binding in the SAME file (the
+// volume filter), so a NON-STATIC global whose address is taken in a file holding no binding for it keeps
+// its declaring file's entry — file-scope statics (the common case) cannot escape that way.
 // Both tables empty on a fn-binding-free corpus → the resolve loop's L3 block never fires → byte-identical
 // output there. Deterministic: ing.bindings is totally ordered, and every conflict outcome is
 // order-independent (any two distinct targets → "", identical targets → unchanged).
@@ -592,7 +601,10 @@ inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
         HashMap<std::string, std::string> assignByName;   // var name → the ONE assigned target; "" on any conflict
         for( const Binding& b : ing.bindings )
         {
-            if( b.kind != LocalBindKind::FnAssign || b.fromSymbol == kNoNode )
+            // ALL FnAssign records participate — including file-scope ones (fromSymbol == kNoNode), which
+            // only the A5 escape guard emits (`static H* gp = &gPtr;` at file scope): an ordinary
+            // assignment cannot occur outside a function, but an address-of escape can.
+            if( b.kind != LocalBindKind::FnAssign )
             {
                 continue;
             }
@@ -1129,7 +1141,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
         // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
         // the binding alone (Narrower::fnPtrBindingTarget) and NEVER falls back to the bare-name ladder —
-        // a same-named global function would be a FALSE edge. A tombstoned/lambda-bound/clobbered var, or a
+        // a same-named global function would be a FALSE edge. A tombstoned/lambda-bound/clobbered/ESCAPED
+        // var (address taken or reference-bound — A5 guard, see buildFnPtrBindTables above), or a
         // target with no in-corpus FUNCTION def (`fn = &someGlobalVar` must never mint a call edge),
         // resolves to NOTHING (counted into unresolvedOut — the call is KNOWN-indirect). The resulting edge
         // keeps role="call": it IS a real call; only the RESOLUTION came from the binding — the same trust

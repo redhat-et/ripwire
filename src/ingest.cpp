@@ -1014,7 +1014,7 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 49;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 50;           // bump on any grammar/.scm/extraction change
                                                       // 48 (macro-edges): function-like #define → t="macro"
                                                       //    symbols (C++ gains the capture; C/Rust re-kind
                                                       //    Function→Macro), replacement-text call scan, and
@@ -5429,15 +5429,18 @@ inline std::string fnBindTargetOf( TSNode value, std::string_view src, bool& was
 }
 
 // the variable name of a possibly fn-pointer declarator chain (`(*fn)()` → "fn"), descending through
-// function/parenthesized/pointer declarators. Sets `sawFnDeclarator` when the chain crosses a
+// function/parenthesized/pointer/reference declarators. Sets `sawFnDeclarator` when the chain crosses a
 // function_declarator — the explicit fn-pointer syntax that licenses a bare-identifier initializer even
-// under a primitive written type (`void (*fn)() = handler;`). declaratorVarName (Rule 2) is NOT reused:
-// parenthesized_declarator carries its inner declarator as an UNNAMED child, which a field-only unwrap
-// cannot reach. An array_declarator bails — an ARRAY of fn pointers is table territory, never a single-var
-// binding (its indexed call must stay unresolved).
-inline std::string_view fnDeclaratorVarName( TSNode decl, std::string_view src, bool& sawFnDeclarator )
+// under a primitive written type (`void (*fn)() = handler;`) — and `sawRefDeclarator` when it crosses a
+// reference_declarator (`H& r = fn;`): a reference ALIASES its initializer, so the caller must treat the
+// bound-to variable as ESCAPED (clobbered), never emit a positive for the alias. declaratorVarName (Rule 2)
+// is NOT reused: parenthesized_declarator and reference_declarator carry their inner declarator as an
+// UNNAMED child, which a field-only unwrap cannot reach. An array_declarator bails — an ARRAY of fn
+// pointers is table territory, never a single-var binding (its indexed call must stay unresolved).
+inline std::string_view fnDeclaratorVarName( TSNode decl, std::string_view src, bool& sawFnDeclarator, bool& sawRefDeclarator )
 {
-    sawFnDeclarator = false;
+    sawFnDeclarator  = false;
+    sawRefDeclarator = false;
     for( int guard = 0; guard < 10 && !ts_node_is_null( decl ); ++guard )
     {
         const char* dt = ts_node_type( decl );
@@ -5454,10 +5457,15 @@ inline std::string_view fnDeclaratorVarName( TSNode decl, std::string_view src, 
         {
             sawFnDeclarator = true;
         }
-        TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
-        if( ts_node_is_null( inner ) && std::strcmp( dt, "parenthesized_declarator" ) == 0 )
+        const bool isRef = ( std::strcmp( dt, "reference_declarator" ) == 0 );
+        if( isRef )
         {
-            // the parenthesized inner declarator is an UNNAMED child — take the first named one
+            sawRefDeclarator = true;
+        }
+        TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
+        if( ts_node_is_null( inner ) && ( isRef || std::strcmp( dt, "parenthesized_declarator" ) == 0 ) )
+        {
+            // the parenthesized/reference inner declarator is an UNNAMED child — take the first named one
             if( ts_node_named_child_count( decl ) > 0 )
             {
                 inner = ts_node_named_child( decl, 0 );
@@ -5563,8 +5571,9 @@ inline void emitFnBind( std::uint32_t fileId, Lang lang, std::string_view var, s
 // function (`&alpha` / `beta` / a lambda). Noise gate: a bare-identifier initializer under a PRIMITIVE
 // written type (`int a = b;`) is almost never a function copy — kept only when the declarator itself spells
 // a fn pointer; typedef'd (`H h = beta;`) and auto types stay captured, `&name` and lambdas always do.
+// A reference declarator (`H& r = fn;`) emits NO positive and clobbers the bound-to var (A5 escape guard).
 inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src,
-                               std::vector<RawBind>& fnPos )
+                               std::vector<RawBind>& fnPos, std::vector<FnBindClobber>& fnUnk )
 {
     const TSNode typeNode = ts_node_child_by_field_name( n, "type", 4 );
     const char*  tt       = ts_node_is_null( typeNode ) ? "" : ts_node_type( typeNode );
@@ -5582,15 +5591,57 @@ inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::s
         {
             continue;   // no initializer → no binding fact here (a later assignment carries its own)
         }
-        bool sawFnDecl = false;
-        const std::string_view var = fnDeclaratorVarName( ts_node_child_by_field_name( c, "declarator", 10 ), src, sawFnDecl );
+        bool sawFnDecl = false, sawRef = false;
+        const std::string_view var = fnDeclaratorVarName( ts_node_child_by_field_name( c, "declarator", 10 ), src, sawFnDecl, sawRef );
+        const TSNode valueNode = ts_node_child_by_field_name( c, "value", 5 );
+        if( sawRef )
+        {
+            // A5 escape guard: `H& r = fn;` / `auto& r = fn;` ALIASES fn — a write through r retargets fn
+            // invisibly, so the bound-to variable is clobbered (toward tombstone, never toward resolve) and
+            // the alias itself gets NO positive (its target can change under it the same way).
+            if( !ts_node_is_null( valueNode ) && std::strcmp( ts_node_type( valueNode ), "identifier" ) == 0 )
+            {
+                const std::string_view aliased = nodeTextOf( valueNode, src );
+                if( !aliased.empty() )
+                {
+                    fnUnk.push_back( { std::string( aliased ), ts_node_start_byte( n ) } );
+                }
+            }
+            continue;
+        }
         bool bareIdent = false;
-        std::string target = fnBindTargetOf( ts_node_child_by_field_name( c, "value", 5 ), src, bareIdent );
+        std::string target = fnBindTargetOf( valueNode, src, bareIdent );
         if( bareIdent && primType && !sawFnDecl )
         {
             target.clear();
         }
         emitFnBind( fileId, lang, var, std::move( target ), ts_node_start_byte( n ), LocalBindKind::FnDecl, fnPos );
+    }
+}
+
+// A5 escape guard over one `pointer_expression`: `&fn` ANYWHERE makes the variable mutable through the
+// pointer (`indirect_mutate(&fn)` retargets it behind the resolver's back), so any address-of over a bare
+// identifier records a CLOBBER for that identifier — toward tombstone, never toward resolve. A by-value use
+// (`takes_fn(fn)`, `other = fn`) copies the pointer and cannot mutate the variable, so it does NOT clobber.
+// The `&alpha` inside a positive binding RHS also lands here (clobbering the FUNCTION's name as a "var") —
+// harmless-conservative: it only matters if a same-named variable holds a binding in this file, and then
+// refusing to resolve it is the safe side. Dereferences (`*p`) are excluded by the operator check.
+inline void captureFnBindEscape( TSNode n, std::string_view src, std::vector<FnBindClobber>& fnUnk )
+{
+    const TSNode op = ts_node_child( n, 0 );
+    if( ts_node_is_null( op ) || std::strcmp( ts_node_type( op ), "&" ) != 0 )
+    {
+        return;
+    }
+    const TSNode idn = ts_node_child_by_field_name( n, "argument", 8 );
+    if( ts_node_is_null( idn ) || std::strcmp( ts_node_type( idn ), "identifier" ) != 0 )
+    {
+        return;
+    }
+    const std::string_view var = nodeTextOf( idn, src );
+    if( !var.empty() )
+    {
+        fnUnk.push_back( { std::string( var ), ts_node_start_byte( n ) } );
     }
 }
 
@@ -5781,11 +5832,15 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     // (`H fnPtr = beta;` emits fnPtr:H for receiver narrowing AND fnPtr→beta for call resolution). ──
     if( cFamilyFn && std::strcmp( t, "declaration" ) == 0 )
     {
-        captureFnBindDecl( n, fileId, lang, src, fnPos );
+        captureFnBindDecl( n, fileId, lang, src, fnPos, fnUnk );
     }
     else if( cFamilyFn && std::strcmp( t, "assignment_expression" ) == 0 )
     {
         captureFnBindAssign( n, fileId, lang, src, fnPos, fnUnk );
+    }
+    else if( cFamilyFn && std::strcmp( t, "pointer_expression" ) == 0 )
+    {
+        captureFnBindEscape( n, src, fnUnk );   // A5: `&fn` anywhere clobbers the variable (escape guard)
     }
 
     collectChildren( n, cursor.cur, kids );
