@@ -27,7 +27,7 @@
 #include "model.h"
 #include "graph.h"       // for Communities / communities() — module (community) grouping
 #include "serialize.h"   // for escapeXml (not reused here; we write jsonEscape instead)
-#include "jsonesc.h"     // A4-F27: canonical escape core; jsonEscape below is a thin wrapper
+#include "infra/jsonesc.h"     // A4-F27: canonical escape core; jsonEscape below is a thin wrapper
 
 #include <algorithm>
 #include <cstdio>

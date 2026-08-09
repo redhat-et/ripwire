@@ -8,7 +8,7 @@
 
 #include "model.h"
 #include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on the Type-3 pair-cap guard (never throw)
-#include "hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>
 #include <array>

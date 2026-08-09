@@ -69,7 +69,7 @@
 #include "quality.h"      // gitHeadSha / gitRepoHasHistory / cacheDirLadder / shaKeyedCachePath / exclConfigHex
 #include "docparse.h"     // lowerExtOf — the SHARED extension step (no third copy of the lowercase loop)
 #include "arch.h"         // fnv1a64 — the cache trailer checksum and the repo key
-#include "jsonesc.h"      // shSingleQuote
+#include "infra/jsonesc.h"      // shSingleQuote
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include <algorithm>

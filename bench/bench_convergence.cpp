@@ -22,8 +22,8 @@
 //        -Isrc -Isrc/infra -Ithird_party -lc++
 
 #define PROFILE_AUTO_REPORT 0          // we call prof::report() explicitly, in order
-#include "fixedStr.h"
-#include "svector.h"                    // rw::svector (src/, -Isrc first) — the branch-free-size() hot-read variant
+#include "infra/fixedStr.h"
+#include "infra/svector.h"                    // rw::svector (src/infra/) — the branch-free-size() hot-read variant
 #include "profileScope.h"               // prof::* (src/infra/)
 #include "unordered_dense.h"
 

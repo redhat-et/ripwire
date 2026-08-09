@@ -13,7 +13,7 @@
 // on the identical dl[]/tf[] integers the scan would produce → identical doubles → identical bytes.
 
 #include "model.h"
-#include "hashutil.h"   // fnv1aMultiply — the same sanitizer-clean modulo-2^64 FNV family as the cache hashes
+#include "infra/hashutil.h"   // fnv1aMultiply — the same sanitizer-clean modulo-2^64 FNV family as the cache hashes
 
 #include <algorithm>
 #include <cstdint>

@@ -29,7 +29,7 @@
 
 #include "model.h"
 #include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on a malformed path-regex (never throw at match time)
-#include "hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>
 #include <array>

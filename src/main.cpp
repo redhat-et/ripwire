@@ -3,7 +3,7 @@
 // ingest() comes from ingest.cpp (real, tree-sitter) or stub_ingest.cpp (test).
 
 #include "model.h"
-#include "stdinline.h"      // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
+#include "infra/stdinline.h"      // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
 #include "ingest.h"
 #include "workspace.h"      // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
@@ -78,8 +78,8 @@
 #include "ccjson.h"
 #include "cli.h"
 #include "embedded_queries.h"   // configure-generated tags.scm table shared with ingest and --doctor
-#include "hashutil.h"           // sanitizer-clean modulo-2^64 FNV multiplication
-#include "charconvcompat.h"     // rw::parseFloating — FP from_chars is `= delete` on older libc++ (macos-14 CI)
+#include "infra/hashutil.h"           // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/charconvcompat.h"     // rw::parseFloating — FP from_chars is `= delete` on older libc++ (macos-14 CI)
 
 #include <algorithm>
 #include <array>

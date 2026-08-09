@@ -1,4 +1,4 @@
-// bench_svector3.cpp — the evidence for why src/svector.h (rw::svector) earns a place ALONGSIDE the
+// bench_svector3.cpp — the evidence for why src/infra/svector.h (rw::svector) earns a place ALONGSIDE the
 // vendored martinus/svector. A controlled 3-way: same partition-by-hash machinery, same FixedStr keys,
 // 64 shards — ONLY the Map<FixedStr, V> value type V differs. So any timing delta is the value type.
 //
@@ -17,8 +17,8 @@
 //        -Isrc -Isrc/infra -Ithird_party -lc++
 
 #define PROFILE_AUTO_REPORT 0
-#include "fixedStr.h"
-#include "svector.h"                          // rw::svector — src/, picked up via -Isrc (first)
+#include "infra/fixedStr.h"
+#include "infra/svector.h"                          // rw::svector — src/infra/, named by its layer prefix
 #include "../third_party/svector.h"     // martinus/svector → ankerl::svector — explicit path (dodges the basename clash)
 #include "profileScope.h"
 #include "unordered_dense.h"

@@ -17,7 +17,7 @@
 #include "graph.h"
 #include "gitmine.h"
 #include "lexical.h"   // subtokens()
-#include "jsonesc.h"   // W2-M0: rw::jsonStringEnd — the canonical escape-aware JSON string walk
+#include "infra/jsonesc.h"   // W2-M0: rw::jsonStringEnd — the canonical escape-aware JSON string walk
 
 #include <algorithm>
 #include <cmath>

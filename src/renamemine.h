@@ -74,7 +74,7 @@
 #include "naminglens.h"
 #include "gitoracle.h"    // walkGitPatch — the shared `git log -p -U0` streaming reader; identByte
 #include "docparse.h"     // detail::readWholeFile — the canonical whole-file byte read
-#include "jsonesc.h"      // shSingleQuote
+#include "infra/jsonesc.h"      // shSingleQuote
 #include "quality.h"      // gitRepoHasHistory
 #include "serialize.h"    // escapeXml
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT

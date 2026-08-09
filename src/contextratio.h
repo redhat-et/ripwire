@@ -65,7 +65,7 @@
 #include "graph.h"       // langCompatible — the SAME language gate the resolver uses; never a second one
 #include "serialize.h"   // escapeXml, tokensForEmittedBytes, kBytesPerTokenBody — the one body-token rate
 #include "pageview.h"    // pageWindow + effectiveRowCap + pagingDisclosure — THE TRUNCATION VOCABULARY
-#include "svector.h"     // rw::svector — the small-vector the byName id-lists use in graph.h too
+#include "infra/svector.h"     // rw::svector — the small-vector the byName id-lists use in graph.h too
 
 #include <algorithm>
 #include <cstdint>

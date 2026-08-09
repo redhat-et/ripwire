@@ -21,7 +21,7 @@
 // fixture is what proves they do. Since the kernel is exact, shipping it cannot perturb any output and
 // ripwire's determinism contract is untouched by construction (see the note on rw::findByte itself).
 
-#include "fixedStr.h"
+#include "infra/fixedStr.h"
 #include "profileScope.h"
 
 #include <algorithm>

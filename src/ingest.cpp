@@ -12,9 +12,9 @@
 #include "arch.h"                // T5: relForHash — root-relative path key, reused for cache portability
 #include "quality.h"             // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
 #include "embedded_queries.h"    // configure-generated constexpr tags.scm table; no runtime source-tree dependency
-#include "hashutil.h"            // sanitizer-clean modulo-2^64 FNV multiplication
-#include "namesplit.h"           // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
-#include "fixedStr.h"            // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
+#include "infra/hashutil.h"            // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/namesplit.h"           // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
+#include "infra/fixedStr.h"            // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
 #include "lexindex.h"            // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 
 #include "Diagnostics.h"

@@ -23,7 +23,7 @@
 
 #include "model.h"
 #include "graph.h"
-#include "jsonesc.h"     // A4-F27: canonical escape core; ccJsonEscape below is a thin wrapper
+#include "infra/jsonesc.h"     // A4-F27: canonical escape core; ccJsonEscape below is a thin wrapper
 
 #include <algorithm>
 #include <cstdint>

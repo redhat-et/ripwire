@@ -9,8 +9,8 @@
 #include "lintrules.h"      // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
 #include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "Diagnostics.h"    // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
-#include "stdinline.h"      // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
-#include "jsonesc.h"        // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
+#include "infra/stdinline.h"      // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
+#include "infra/jsonesc.h"        // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
                              // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
 
 #include <algorithm>
@@ -1759,7 +1759,7 @@ inline const FileOwnership* ownershipForFile( const std::vector<FileOwnership>& 
 // complete as resolveIncludeAdj, which cannot resolve a cross-directory `-I` include: the path-precise
 // resolver walks includer-relative and root-relative candidates only, and a `-I` needs the build system's
 // flags, which we deliberately do not read. So one false positive survived — and a repo-wide sweep found
-// it was the ONLY one: `bench/bench_convergence.cpp:26` is literally `#include "svector.h"`, resolved
+// it was the ONLY one: `bench/bench_convergence.cpp:26` is literally `#include "infra/svector.h"`, resolved
 // through `-Isrc`, and the pair shipped as `surprising="1"` on a plain `#include`.
 //
 // The rule: if either file's raw #include list names the OTHER's BASENAME, call the pair statically

@@ -20,7 +20,7 @@
 
 #include "dynamic_map.hpp"
 
-#include "../src/fixedStr.h"
+#include "../src/infra/fixedStr.h"
 
 #include <algorithm>
 #include <cstdarg>
