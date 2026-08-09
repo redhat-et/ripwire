@@ -459,77 +459,6 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<
 // (from,to) out-edge(s) are stamped prov="scip". Name-based call-sites elsewhere are untouched. Passing
 // nullptr (the default) yields byte-identical output to the pre-overlay build. Deterministic: the overlay
 // is sorted, so candidate order and thus edge order are unchanged.
-// ── B2.1b RTA-lite INSTANTIATED set (Bacon/Sweeney refinement of the B2.1 CHA cone; consumed beside it in
-// buildGraph's resolve loop). A class NAME is "instantiated" when the reference stream holds constructor
-// evidence for it: a Call-role reference whose callee names a class-like definition (`T()` temporaries /
-// copy-inits everywhere; `new T(…)` in JS/TS/Java/C#, whose tags queries capture object creation as
-// @reference.call), or a value-member compose ref (composeRel "creates" — a `T m_x;` member constructs a
-// T along with its owner). DISCLOSED EVIDENCE GAP: C++ `new T` / `T{}` produce NO reference at extraction
-// (no tags pattern), so a class constructed ONLY those ways is invisible here — the empty-intersection
-// degrade at the use-site is what keeps that gap shrink-never-drop. Name-keyed exactly like byName/chaUp,
-// so a same-name collision only ever ENLARGES the set (the filter fires less, never drops more). Built
-// once in ing.references order, sorted + deduped → binary_search membership: deterministic by construction.
-inline std::vector<std::string> rtaInstantiatedSet( const IngestResult& ing, const HashMap<std::string, rw::svector<NodeId, 2>>& byName )
-{
-    const auto isClassLikeK = []( SymKind k ) noexcept
-    { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
-    std::vector<std::string> instantiated;
-    for( const Reference& ir : ing.references )
-    {
-        const bool ctorCall    = !ir.isInherit && !ir.isDocLink && !ir.isCompose && ir.role == RefRole::Call;
-        const bool valueMember = ir.isCompose && ir.composeRel == "creates";
-        if( ( !ctorCall && !valueMember ) || ir.calleeName.empty() )
-        {
-            continue;
-        }
-        const auto bit = byName.find( ir.calleeName );
-        if( bit == byName.end() )
-        {
-            continue;
-        }
-        for( NodeId d : bit->second )
-        {
-            if( isClassLikeK( ing.symbols[ d ].kind ) )
-            {
-                instantiated.push_back( ir.calleeName );
-                break;
-            }
-        }
-    }
-    std::sort( instantiated.begin(), instantiated.end() );
-    instantiated.erase( std::unique( instantiated.begin(), instantiated.end() ), instantiated.end() );
-    return instantiated;
-}
-
-// B2.1b RTA-lite intersect: shrink the CHA-cone SURVIVORS to those whose enclosing class is in the
-// instantiated set — a virtual call dispatches on the receiver's DYNAMIC type, and only a class the corpus
-// holds constructor evidence for can be one. NON-EMPTY intersection → adopted in place; EMPTY → degrade to
-// the plain cone, untouched (shrink-never-drop: this filter only ever REMOVES candidates, never empties a
-// tier, never drops an edge CHA-lite kept). Honesty note: unlike the cone (a PROOF over declared
-// inheritance), this prune is EVIDENCE-based — a class constructed only through forms extraction does not
-// capture (C++ `new T` / `T{}`, see rtaInstantiatedSet above) is invisible, and its method can be pruned
-// when a sibling holds visible evidence; the degrade-on-empty is what bounds that gap. `scratch` is the
-// caller's reused buffer (no per-call allocation once warm).
-inline void rtaIntersectCone( const IngestResult& ing, const std::vector<std::string>& instantiated, std::vector<NodeId>& survivors, std::vector<NodeId>& scratch )
-{
-    if( survivors.empty() || instantiated.empty() )
-    {
-        return;
-    }
-    scratch.clear();
-    for( NodeId c : survivors )
-    {
-        if( std::binary_search( instantiated.begin(), instantiated.end(), ing.symbols[ c ].scope ) )
-        {
-            scratch.push_back( c );
-        }
-    }
-    if( !scratch.empty() && scratch.size() < survivors.size() )
-    {
-        survivors.swap( scratch );
-    }
-}
-
 // ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline). Two scopes:
 //   varFn      "<fromSymbol>#var" → bound function name — LOCAL bindings (decls AND assignments inside one
 //              function). First binding wins; a DIFFERENT later target tombstones (value ""), so a var
@@ -1019,14 +948,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( auto& [ k, v ] : chaUp )   { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
         for( auto& [ k, v ] : chaDown ) { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
     }
-    // B2.1b: the RTA-lite instantiated set, built once beside the CHA graph (see rtaInstantiatedSet above).
-    const std::vector<std::string> rtaInstantiated = rtaInstantiatedSet( ing, byName );
-
     std::vector<std::string> chaAllowed;   // reused per-call cone (allowed class-name set) buffer
     std::vector<std::string> chaDesc;      // reused per-call descendants-closure scratch (kept separate from the
                                            //   ancestors walk so following one direction can never leak siblings)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
-    std::vector<NodeId>      rtaScratch;   // reused per-call survivor buffer for the B2.1b instantiated filter
 
     for( const Reference& r : ing.references )
     {
@@ -1445,9 +1370,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                             filtScratch.push_back( c );
                         }
                     }
-                    // B2.1b RTA-lite: cone survivors ∩ instantiated set; empty intersection degrades to the
-                    // plain cone (contract + honesty note on rtaIntersectCone above).
-                    rtaIntersectCone( ing, rtaInstantiated, filtScratch, rtaScratch );
                     if( !filtScratch.empty() && filtScratch.size() < tier.size() )
                     {
                         tier.swap( filtScratch );
