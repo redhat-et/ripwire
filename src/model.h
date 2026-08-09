@@ -632,8 +632,9 @@ inline const std::string& diskPath( const IngestResult& ing, std::uint32_t fileI
 }
 
 // The macro-edges round's honesty post-pass: a call-SHAPED reference (bare name, no receiver, no explicit
-// qualifier) whose name is defined by an indexed C-family `#define` is re-tagged RefRole::Macro, so no
-// surface can ever label an expansion role="call". Runs over the ASSEMBLED corpus — a per-file parse (and
+// qualifier) whose name UNIQUELY names an indexed C-family `#define` (see the uniqueness guard in the
+// function body) is re-tagged RefRole::Macro, so no surface labels such an expansion role="call". Runs
+// over the ASSEMBLED corpus — a per-file parse (and
 // therefore the per-file cache record, which stores role=Call) cannot know another file's #defines — at
 // BOTH ingest exits: the end of ingest() and the end of mergeWorkspaceIngests (a macro defined in one root,
 // invoked from another). Idempotent and deterministic (one ordered pass, membership in a name set built
@@ -656,17 +657,41 @@ inline bool macroRefLang( Lang lang ) noexcept
     }
 }
 
-inline void retagMacroCallReferences( IngestResult& ing )
+// The UNIQUENESS GUARD's evidence (verifier collision refutation, round A5 fix): per C-family symbol
+// name, bit 1 = an indexed macro def carries it, bit 2 = a NON-macro def (a real function, method, class
+// ctor, or a callable var) carries it too. Only a name whose flags are EXACTLY 1 is "uniquely a macro".
+struct MacroNameScan
 {
-    HashMap<std::string, char> macroNames;
+    HashMap<std::string, char> flags;
+    bool                       anyMacro = false;
+};
+
+inline MacroNameScan scanMacroNames( const IngestResult& ing )
+{
+    MacroNameScan scan;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.kind == SymKind::Macro && macroRefLang( s.lang ) )
+        if( macroRefLang( s.lang ) )
         {
-            macroNames.emplace( s.name, 1 );
+            const char bit = ( s.kind == SymKind::Macro ) ? char( 1 ) : char( 2 );
+            scan.flags[ s.name ] = char( scan.flags[ s.name ] | bit );
+            scan.anyMacro = scan.anyMacro || bit == 1;
         }
     }
-    if( macroNames.empty() )
+    return scan;
+}
+
+inline void retagMacroCallReferences( IngestResult& ing )
+{
+    // UNIQUENESS GUARD (verifier collision refutation, round A5 fix): the retag has NO visibility model —
+    // it cannot know whether the #define is in scope at a given call site — so it may only fire when the
+    // name is UNIQUELY a macro in the corpus (scanMacroNames above). A name ALSO carried by any non-macro
+    // C-family definition is left role="call" and takes the ordinary resolution ladder: a real `check()`
+    // in a translation unit with no macro in scope must never be re-labelled because an unrelated
+    // `#define check(x)` exists somewhere else. Degrade, never guess — suppression can only under-tag
+    // (a plain call is the disclosed floor), never mislabel.
+    const MacroNameScan scan = scanMacroNames( ing );
+    if( !scan.anyMacro )
     {
         return;   // macro-free corpus: byte-identical output, zero cost beyond the symbol scan
     }
@@ -680,7 +705,8 @@ inline void retagMacroCallReferences( IngestResult& ing )
         {
             continue;   // a receiver-qualified or scope-qualified call cannot be a macro invocation
         }
-        if( macroNames.contains( r.calleeName ) )
+        const auto it = scan.flags.find( r.calleeName );
+        if( it != scan.flags.end() && it->second == 1 )   // uniquely a macro — never a shared name
         {
             r.role = RefRole::Macro;
         }

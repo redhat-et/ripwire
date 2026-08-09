@@ -38,8 +38,9 @@ inline constexpr const char* kGraphCountFloorLegend =
     "that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. "
     "A call through a function pointer or callback resolves only when ONE function is bound to that variable in "
     "scope (C-family; a reassigned, table-indexed or lambda-bound pointer still contributes no edge). "
-    "A macro-generated call site contributes a role=\"macro\" edge when the macro's function-like #define is "
-    "indexed (C-family, t=\"macro\"); otherwise it too contributes no edge. "
+    "A macro-generated call site contributes a role=\"macro\" edge when its name uniquely names an indexed "
+    "function-like #define (C-family, t=\"macro\"); a name shared with any non-macro definition stays a plain "
+    "call for the resolver, and an unindexed macro's call site contributes no edge. "
     "Read a zero as \"none found\", never as \"none exists\". ";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
@@ -102,8 +103,9 @@ inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true"
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
     "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends; "
-    "p=file:line) — a floor, see counts_floor below. role=\"macro\" is the call-shaped invocation of an "
-    "indexed function-like #define — never labelled role=\"call\", because an expansion is not a plain call. ";
+    "p=file:line) — a floor, see counts_floor below. role=\"macro\" is the call-shaped invocation of a name "
+    "that uniquely names an indexed function-like #define — never labelled role=\"call\", because an expansion "
+    "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. ";
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
