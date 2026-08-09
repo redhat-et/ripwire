@@ -130,6 +130,45 @@ else
         || no "log.h contributed no LOG_ERR symbol — the macro-only-header hole is still open"
 fi
 
+# ── 6b) VERIFIER COLLISION (round A5 fix): a real function called in a translation unit with NO macro in
+#        scope must NOT be re-tagged just because an unrelated same-named #define exists elsewhere in the
+#        corpus. The retag fires only when the name is UNIQUELY a macro; a name shared with any non-macro
+#        definition stays role="call" and takes the ordinary resolution ladder. Two shapes in one corpus:
+#        `check` (real function WITH a body — resolves same-file, no macro row anywhere) and `check2`
+#        (the verifier's exact shape: a bodiless PROTOTYPE beside the call — the site role is the claim). ──
+COL="$TMP/collisionfix"
+mkdir -p "$COL"
+cat >"$COL/b_macro.c" <<'EOF'
+#define check(x) do_something(x)
+#define check2(y) something_else(y)
+EOF
+cat >"$COL/c_realcall.c" <<'EOF'
+void check(int x) { }
+void other(void) { check(10); }
+EOF
+cat >"$COL/d_protocall.c" <<'EOF'
+void check2(int x);
+void caller2(void) { check2(10); }
+EOF
+CU="$( "$BIN" "$COL" --uses=check --no-cache 2>/dev/null )"
+printf '%s' "$CU" | grep -q '<u role="call" p="[^"]*c_realcall\.c:2"' \
+    && ok "collision: the real call site keeps role=\"call\" (name is not uniquely a macro)" \
+    || no "collision: the real call site lost role=\"call\": $( printf '%s' "$CU" | grep -oE '<u [^/]*/' | head -2 )"
+printf '%s' "$CU" | grep -q '<u role="macro"' \
+    && no "collision: a role=\"macro\" site appeared for a name shared with a real function" \
+    || ok "collision: no role=\"macro\" site for the shared name"
+OC="$( "$BIN" "$COL" --callees=other --no-cache 2>/dev/null | tr '>' '\n' )"
+printf '%s\n' "$OC" | grep 'n="check"' | grep -q 'role="macro"' \
+    && no "collision: --callees=other shows a role=\"macro\" check row (should resolve to the real fn)" \
+    || ok "collision: --callees=other carries no role=\"macro\" check row"
+printf '%s\n' "$OC" | grep 'n="check"' | grep -q 't="fn"' \
+    && ok "collision: other() resolves check to the REAL function (t=\"fn\")" \
+    || no "collision: other() did not resolve check to the real function"
+C2="$( "$BIN" "$COL" --uses=check2 --no-cache 2>/dev/null )"
+printf '%s' "$C2" | grep -q '<u role="call" p="[^"]*d_protocall\.c:2"' \
+    && ok "collision (prototype shape): the call beside a bodiless decl keeps role=\"call\"" \
+    || no "collision (prototype shape): the call site was re-tagged: $( printf '%s' "$C2" | grep -oE '<u [^/]*/' | head -2 )"
+
 # ── 7) determinism — macro symbols/edges must be byte-stable run-to-run. ──
 "$BIN" "$FIX" --no-cache >"$TMP/m1" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/m2" 2>/dev/null
