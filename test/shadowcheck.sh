@@ -242,6 +242,29 @@ void rebindRaw()   { void (*run)(); run = handler; run(); }    // (ad) genuine r
 void rebindAlias() { Hs run = nullptr; run = handler; run(); } // (ae) genuine alias rebind    — binding SURVIVES
 EOF
 
+cat >"$FIX/valuedecl.cpp" <<'EOF'
+// (af)-(al) r9 fix round, DECLARATION arm: the same defect one node type over. The decl arm DOES carry a
+// written type, but its noise gate only rejected a bare-identifier initializer under a PRIMITIVE type — a
+// CLASS type sailed through, so `std::string run = zzz;` minted an FnDecl, and that bogus binding vetoed
+// shadow suppression for the local's whole scope exactly as the assignment arm's did. The three shapes that
+// must still MINT are what makes this a gate and not a blanket: a raw fn-pointer declarator, a same-file
+// fn-pointer TYPE ALIAS, and `auto` (deliberately UNKNOWN — unknown mints, so idiomatic `auto fp = f;` lives).
+#include "funcs.h"
+#include <string>
+#include <string_view>
+#include <functional>
+typedef void (*Hd)();
+struct Box { int k; };
+void handler2() {}
+std::string declStr( std::string_view zzz ) { std::string run = zzz; return run; }   // (af) class-typed init
+Box         declBox( Box zzz )              { Box run = zzz; return run; }           // (ag) struct-typed init
+int         declInt( int zz )               { int run = zz;  return run; }           // (ah) primitive (pre-gated)
+void declRaw()   { void (*run)() = handler2; run(); }          // (ai) raw fn-ptr declarator — binding SURVIVES
+void declAlias() { Hd run = handler2; run(); }                 // (aj) same-file alias   — binding SURVIVES
+void declAuto()  { auto run = handler2; run(); }               // (ak) auto is UNKNOWN   — binding SURVIVES
+void declTmpl()  { std::function<void()> run = handler2; run(); }  // (al) template type is UNKNOWN — SURVIVES
+EOF
+
 cat >"$FIX/plain.cpp" <<'EOF'
 // no-collision control: `total` names NO indexed symbol anywhere — its local sites must STAY listed
 // (--uses on a plain local name is the external-answer feature writetargetcheck pins).
@@ -438,6 +461,23 @@ for fn in rebindRaw rebindAlias; do
     rows --callees=$fn | grep -q 'n="handler"' \
         && ok "--callees=$fn resolves run() to handler (the genuine rebind's edge survives)" \
         || no "--callees=$fn lost its handler edge — the noise gate ate a genuine fn-pointer rebind"
+done
+
+# ── (af)-(al) the DECLARATION arm's value-initialization noise gate: a copy mints no binding, and the
+#        three fn-capable shapes (raw declarator, same-file alias, unknown type) all still do ────────────
+VDC="$( uses run | grep 'valuedecl.cpp' )"
+for fn in declStr declBox declInt; do
+    printf '%s\n' "$VDC" | grep -q "in_id=\"$fn\"" \
+        && { no "--uses=run lists sites from $fn() — a value-typed \`T run = zzz;\` still minted an L3 binding, vetoing the shadow"; printf '%s\n' "$VDC" | grep "in_id=\"$fn\""; } \
+        || ok "--uses=run has ZERO sites from $fn() (a bare-identifier init of a value variable is not a fn-pointer binding)"
+done
+for fn in declRaw declAlias declAuto declTmpl; do
+    printf '%s\n' "$VDC" | grep "in_id=\"$fn\"" | grep -q 'role="call"' \
+        && ok "--uses=run keeps $fn()'s call site (a genuine fn-binding var is never shadow-suppressed)" \
+        || { no "--uses=run LOST $fn()'s call site — the decl-arm gate ate a GENUINE fn-pointer binding"; printf '%s\n' "$VDC" | grep "in_id=\"$fn\""; }
+    rows --callees=$fn | grep -q 'n="handler2"' \
+        && ok "--callees=$fn resolves run() to handler2 (the genuine binding's edge survives)" \
+        || no "--callees=$fn lost its handler2 edge — the decl-arm gate ate a genuine fn-pointer binding"
 done
 
 # ── (e) determinism + well-formedness ─────────────────────────────────────────────────────────────────
