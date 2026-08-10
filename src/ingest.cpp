@@ -7587,7 +7587,7 @@ struct TreeGuard
 
 // ── ONE pre-order stream for every whole-AST side-capture pass ────────────────────────────────────────
 // FFI, routes, Rust impls, bindings and value-uses each used to run their OWN iterative pre-order walk of
-// the same tree, back to back. Measured with a per-pass node-pop probe (canyonraid48, 1659 parsed files):
+// the same tree, back to back. Measured with a per-pass node-pop probe on a 1659-file ObjC++/C++ corpus:
 // 95.0% of files ran captureFfi AND captureBindings, 93.4% ran three passes, and every node was streamed
 // 2.01x on a default run / 3.01x with --uses armed. That re-streaming — not the per-node matching, which
 // is a strcmp or two — is why the `side captures` profile scope showed ~2x tree-sitter's L1D MPKI and ~2x
