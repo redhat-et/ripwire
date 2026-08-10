@@ -98,10 +98,12 @@ out = {}
 for path, body in files:
     name = path.split('/')[-1]
     syms = []
-    for sm in re.finditer(r'<s t="(\w+)" n="([^"]*)"[^>]*>|<s t="(\w+)" n="([^"]*)"[^>]*/>', body):
-        t = sm.group(1) if sm.group(1) is not None else sm.group(3)
-        n = sm.group(2) if sm.group(2) is not None else sm.group(4)
-        syms.append({"t": t, "n": n})
+    for sm in re.finditer(r'<s t="(\w+)" n="([^"]*)"([^>]*)', body):
+        t, n, rest = sm.group(1), sm.group(2), sm.group(3)
+        # same-name defs are MERGED into one row carrying overloads="N" (see the map legend), so the
+        # def count for a name is 1 unless the row says otherwise.
+        ov = re.search(r'overloads="(\d+)"', rest)
+        syms.append({"t": t, "n": n, "defs": int(ov.group(1)) if ov else 1})
     out[name] = syms
 print(json.dumps(out))
 PYEOF
@@ -140,7 +142,9 @@ print("KEYS_OTH_OK:%s" % keys_other.issubset(nset)); print("MISSING_KEYS_OTH:%s"
 # non-vacuous on purpose: the owning key must BE there for "its members are not" to mean anything
 print("INLINE_OK:%s"   % ("requests" in nset and not (inline_members & nset))); print("LEAKED_INLINE:%s" % (",".join(sorted(inline_members & nset)) or "none"))
 print("DOTTED_OK:%s"   % (dotted_full in nset and dotted_head not in nset))
-print("AOT_COUNT:%d"   % names.count("tool.mypy.overrides"))
+# [[aot]]: TWO headers of the same name are two DEFS. The default map merges same-name defs into one
+# ROW carrying overloads="2" — so the honest question is "how many defs", not "how many rows".
+print("AOT_DEFS:%d"    % sum(s["defs"] for s in syms if s["n"] == "tool.mypy.overrides"))
 PYEOF
 cat "$TMP/toml_check"
 
@@ -165,18 +169,35 @@ grep -q "INLINE_OK:True" "$TMP/toml_check" \
 grep -q "DOTTED_OK:True" "$TMP/toml_check" \
     && ok "dotted key is ONE symbol \`dottedkey.subpart\` (not split into \`dottedkey\`)" \
     || no "dotted key wrong: expected \`dottedkey.subpart\` present and \`dottedkey\` absent"
-grep -q "^AOT_COUNT:2$" "$TMP/toml_check" \
-    && ok "[[array-of-tables]]: one symbol per header (2 headers -> 2), elements not index-numbered" \
-    || no "[[aot]] symbol count wrong: $( grep '^AOT_COUNT:' "$TMP/toml_check" ) (expected 2)"
+grep -q "^AOT_DEFS:2$" "$TMP/toml_check" \
+    && ok "[[array-of-tables]]: one symbol per header (2 headers -> 2 defs), elements not index-numbered" \
+    || no "[[aot]] def count wrong: $( grep '^AOT_DEFS:' "$TMP/toml_check" ) (expected 2)"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
 echo "=== --grep lands on a dotted table header (the navigable unit) ==="
 # ═══════════════════════════════════════════════════════════════════════════
-GREP_OUT="$( $BIN "$FIX" --grep=tool.ruff.lint 2>/dev/null )"
+# A dotted header must survive as ONE name all the way to a verb's enclosing-symbol field: ingest's
+# generic def path runs every captured name through finalSegment(), which splits on "." and would report
+# this hit as in="lint" — a name that collides with every other `lint` in a repo.
+GREP_OUT="$( $BIN "$FIX" --grep=tool.ruff.lint --no-cache 2>/dev/null )"
 echo "$GREP_OUT" | grep -q 'in="tool.ruff.lint"' \
-    && ok "--grep=tool.ruff.lint: enclosing symbol in=\"tool.ruff.lint\" (config is navigable)" \
-    || no "--grep=tool.ruff.lint did not report in=\"tool.ruff.lint\": $GREP_OUT"
+    && ok "--grep=tool.ruff.lint (cold): enclosing symbol in=\"tool.ruff.lint\" (config is navigable)" \
+    || no "--grep=tool.ruff.lint (cold) did not report in=\"tool.ruff.lint\": $GREP_OUT"
+
+# ...and again WARM, through a cache round-trip, in a cache dir this gate owns. Worth its own arm: the
+# name is persisted and reloaded rather than recomputed, so a serialization that dropped or re-split it
+# would be invisible to every --no-cache arm above. The private TMPDIR (the warm cache is
+# $TMPDIR/ripwire — see --doctor's cache-dir check) is what makes the arm honest in both directions: it
+# cannot be satisfied by a developer's warm cache, and it cannot be POISONED by one either. This gate's
+# own iteration hit exactly that — an intermediate build wrote a blob at the SAME kParserVer with the old
+# truncated names, and the warm answer stayed `lint` long after the fix landed and every cold arm passed.
+CACHEDIR="$TMP/tmpdir"; mkdir -p "$CACHEDIR"
+TMPDIR="$CACHEDIR" $BIN "$FIX" >/dev/null 2>&1                               # cold: populate
+GREP_WARM="$( TMPDIR="$CACHEDIR" $BIN "$FIX" --grep=tool.ruff.lint 2>/dev/null )"
+echo "$GREP_WARM" | grep -q 'in="tool.ruff.lint"' \
+    && ok "--grep=tool.ruff.lint (warm): the dotted name survives the cache round-trip" \
+    || no "--grep=tool.ruff.lint (warm) did not report in=\"tool.ruff.lint\": $GREP_WARM"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
