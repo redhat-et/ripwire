@@ -232,7 +232,10 @@ FAILFAST = {
     "pmccheck.sh":              ( "compile-and-run PMC harness; every arm is `echo FAIL; exit 2`",       2 ),
     "codexplugincheck.sh":      ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "codexwrapcheck.sh":        ( "each setup-contract assertion is fail-fast with explicit exit 1",    1 ),
-    "deckclaimcheck.sh":        ( "each generated-claim assertion is fail-fast with explicit exit 1",   1 ),
+    # deckclaimcheck.sh was pinned here until 2026-08-10, when its new slide-count arm gained a real
+    # accumulator (`slideClaimFail`) so that EVERY drifted prose site is named in one run instead of
+    # only the first. Arm (B) now checks it by running its terminal region forced and clean, which is
+    # strictly stronger than this pin ever was — so the row is retired, not reworded.
     "docdriftcommentcheck.sh":  ( "shell/Python contract assertions fail fast and propagate rc 1",       1 ),
     "lintscopecheck.sh":        ( "fixture assertions fail fast and propagate their nonzero status",     1 ),
     "mcpcodexmetacheck.sh":     ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
