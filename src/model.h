@@ -8,10 +8,13 @@
 //        → rank:  personalized PageRank over the CSR
 //        → serialize: top-K symbols (by rank) → minified XML, grouped by file.
 
+#include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
+
 #include <algorithm>   // std::sort — symbolsByFile below
 #include <array>       // Symbol::evWhy — the fixed-size ev_why tag counters
 #include <cstdint>
 #include <string>
+#include <type_traits>   // std::is_trivially_copyable_v — the VarSpan layout pin below
 #include <vector>
 
 #if defined( CTX_USE_STD_MAP )
@@ -763,13 +766,35 @@ inline void retagMacroCallReferences( IngestResult& ing )
 // (preprocessor evidence, textually stronger than any local) is never touched.
 // the suppression pass's evidence tables and their "<fromSymbol>#<name>" key builder — see the contract
 // comment above suppressShadowedReferences below.
+// ONE declaring-block byte span. A 2-field POD and not `std::pair<uint32,uint32>`, because rw::svector
+// requires a TRIVIALLY-COPYABLE element and libc++'s std::pair is not one — its copy- and move-assignment
+// operators are user-provided, so `is_trivially_copyable_v<std::pair<uint32,uint32>>` is false there and
+// true nowhere portably. Keeping the pair would have pushed the tree's single largest small-vector target
+// onto ankerl for a language-library accident rather than a design reason. The POD is byte-identical to the
+// pair (8 B, same field order) and structured-binding reads at the use site are unchanged.
+struct VarSpan
+{
+    std::uint32_t startByte;
+    std::uint32_t endByte;
+};
+static_assert( sizeof( VarSpan ) == 8, "the span pair is two 32-bit byte offsets — a layout change here resizes every varSpans entry" );
+static_assert( std::is_trivially_copyable_v<VarSpan>, "the whole reason this is not std::pair — see the comment above" );
+
 struct ShadowEvidence
 {
     // (fromSymbol, var) → the declaring-block spans (VarDecl evidence) · the fn-binding veto set. The veto
     // stays UN-spanned on purpose: erring toward keeping a reference is the recall-safe side.
-    HashMap<std::string, std::vector<std::pair<std::uint32_t, std::uint32_t>>> varSpans;
-    HashMap<std::string, char>                                                 fnBindKeys;
-    HashMap<std::string, char>                                                 defNames;
+    //
+    // N=1, measured, not guessed. Every key has at least one span (a key is only created by recording one),
+    // and a SECOND span means the same variable name is declared twice in one function — 4.3% of keys on the
+    // 43K-symbol validation corpus, 6.0% here. At an 8-byte element rw::svector<VarSpan,1> is 16 B and
+    // <VarSpan,2> is 24 B, so N=1 is a THIRD smaller than the std::vector it replaces while still holding
+    // 94-96% of the lists inline; N=2 would cost exactly what std::vector costs to reach 98%. The
+    // free-N-is-2 rule that holds for 4-byte elements does NOT transfer here — see infra/svector.h's
+    // layout pins.
+    HashMap<std::string, rw::SmallVec<VarSpan, 1>> varSpans;
+    HashMap<std::string, char>                     fnBindKeys;
+    HashMap<std::string, char>                     defNames;
 };
 
 inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )
@@ -809,7 +834,7 @@ inline bool shadowSuppressedSite( const Reference& r, const ShadowEvidence& ev, 
     {
         return false;   // no declared local — or a fn-binding var, whose references must survive
     }
-    for( const auto& [ spanStart, spanEnd ] : it->second )
+    for( const auto& [ spanStart, spanEnd ] : it->second )   // VarSpan is an aggregate — the binding reads as before
     {
         if( r.startByte >= spanStart && r.startByte < spanEnd )
         {
