@@ -81,7 +81,7 @@
 #include <algorithm>
 #include <pthread.h>
 
-#include "platform.h"              // ALWAYS_INLINE, fastmath::min/max (integral), cache-line size
+#include "fastmath.h"              // ALWAYS_INLINE + cache-line size (via platform.h), fastmath::min/max (integral)
 #include "profilePmc.h"            // prof::pmc — optional Apple Silicon HW counters
 
 #if !( defined( __aarch64__ ) || defined( __arm64__ ) )
@@ -107,7 +107,7 @@ namespace prof
 inline constexpr std::memory_order rlx = std::memory_order_relaxed;
 
 // Apple Silicon L1d lines are 128 B; pad cross-thread hot storage to this
-inline constexpr std::size_t kCacheLine = fastmath::hardware_destructive_interference_size;
+inline constexpr std::size_t kCacheLine = infra::platform::hardware_destructive_interference_size;
 
 // ============================================================================
 // detail: clock + compile/print-time string helpers
