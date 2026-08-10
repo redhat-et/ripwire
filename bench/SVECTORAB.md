@@ -15,20 +15,33 @@ unioned, which reaches ankerl's 16 bytes while keeping the size in its own field
 
 ---
 
+## The denominator, first — because it decides whether any of this looks like a win
+
+Total runtime is **parse-dominated and mostly not ours**. Measured phase table on the large corpus
+(`-DRIPWIRE_PROFILE=ON`, `--no-cache`):
+
+| | wall ms | share of total |
+| --- | --- | --- |
+| `ingest: total (crawl + parse + model)` | 837.4 | **~96% — tree-sitter, not ours to optimize** |
+| `buildGraph: resolve refs + build CSR` | 23.5 | 2.7% |
+| `rankGraph: PageRank` | 7.3 | 0.8% |
+| `emit: serialize ranked map` | 0.6 | 0.1% |
+| **post-parse pipeline (the controllable part)** | **31.4** | **3.6%** |
+
+**Every timing delta below is reported against the 31.4 ms post-parse figure, not against the ~900 ms
+total.** Reporting against the total is how a real win gets written off as noise: the same 1.5 ms is
+0.17% of total runtime and **4.9% of the part we control**. `buildGraph` alone is 75% of post-parse
+time, so a win localized there is not diluted.
+
 ## The headline
 
-**On the real workload the four arms are indistinguishable end-to-end, and the committed "~25% faster
-than ankerl" figure does not reproduce in situ.** It is a microbenchmark artifact. See the correction
-now carried in `bench/bench_svector3.cpp` and `src/infra/svector.h`.
+**Measured against post-parse pipeline time, converting away from `std::vector` is worth ~4.9% and is
+easy. Choosing between the three small-vectors is worth ≤1.5% and is not.**
 
-The reason is not subtle once measured: **the affected phase is 0.2–0.3% of a run.**
-
-| corpus | `buildGraph` phase | full run | phase share |
-| --- | --- | --- | --- |
-| `src` (~9K symbols) | 3.6 ms | ~580 ms | 0.1–0.2% |
-| large corpus (2376 files, ~43K symbols) | 25.4 ms | ~1200 ms (instrumented) / ~900 ms (plain) | 0.2–0.3% |
-
-A 25% win on 0.2% of the run is 0.05% end-to-end — three orders of magnitude under the noise floor.
+And the committed "~25% faster than ankerl" figure **does not reproduce in situ** — it is a
+microbenchmark artifact, corrected now in both places that asserted it (`bench/bench_svector3.cpp`,
+`src/infra/svector.h`). In situ ankerl is 1.9% behind `rw` on `buildGraph`, which is 1.5% of post-parse
+and 0.17% of total.
 
 ---
 
@@ -63,13 +76,18 @@ split-half samples at the same cardinality; nothing below it is a result.
 | `rwx::svector16` | 3.62 ms (+0.2%) | 25.48 ms (+0.2%) |
 
 On `src` the floor is 6.1%, so **nothing on that corpus is a result**. On the large corpus the floor is
-0.3% and three things are:
+0.3% and three things are. Restated against the 31.4 ms post-parse denominator:
 
-- **`std::vector` → any small-vector is worth ~6%** of the phase. That is the conversion wave's real
-  payoff, and it is the same for all three small-vectors.
-- **ankerl is 1.9% behind `rw`**, not 25%. Real, reproducible, and worth ~0.5 ms per run.
-- **The union arm is indistinguishable from `rw` (+0.2%, inside the floor) at ankerl's 16 bytes.** The
-  hypothesis held: you can have the smaller struct and the branch-free `size()` at once.
+| arm | delta on `buildGraph` | in ms | **share of post-parse pipeline** | share of total runtime |
+| --- | --- | --- | --- | --- |
+| `std::vector` | +6.0% | +1.53 ms | **+4.9%** | +0.17% |
+| `ankerl::svector` | +1.9% | +0.48 ms | **+1.5%** | +0.05% |
+| `rwx::svector16` | +0.2% | +0.05 ms | +0.16% (inside floor) | — |
+
+- **`std::vector` → any small-vector is worth ~4.9% of the controllable pipeline.** That is the wave's
+  real payoff, it is the same for all three small-vectors, and it is the number to quote.
+- **ankerl is 1.9% behind `rw` on the phase — 1.5% of post-parse**, not 25% of anything.
+- **The union arm matches `rw` at ankerl's 16 bytes.** The hypothesis held; the margin does not matter.
 
 An earlier n=1 reading of this same table had the union arm 14% ahead. It was noise; 11 reps removed
 it. Recorded because it is exactly the trap the repetition discipline exists for.
@@ -92,7 +110,52 @@ Two things worth naming. **ankerl avoids the most allocations** — its inline c
 not 2, so more lists stay inline. And **the union arm has the lowest peak live bytes**, 6.8 MB under
 `std::vector`, which is the 8-bytes-per-instance saving showing up exactly where it should.
 
-## 4. Is the workload memory-bound?
+### What these numbers do and do not cover
+
+The alias currently spans the **14 pre-existing `rw::svector` type-mentions**, not the wave's ~101
+candidate structures. Split by when they are built, because a win a user feels on every call is a
+different thing from one behind a verb flag:
+
+| subset | sites | built | in the numbers above? |
+| --- | --- | --- | --- |
+| `byName`, `canonByName`, `defs`, `kept`, `fnBindTargetIds`, `pushCFamily`, and `resolve.h`'s rule 1/2/3 | 12 of 14 | **every invocation**, inside `buildGraph` | **yes** — a default run builds exactly these |
+| `docdrift.h::byBase` | 1 | `--doc-drift` only | no |
+| `contextratio.h::NameDefs` | 1 | `--context-ratio` only | no |
+
+So everything reported here is the **always-on subset**, which is the actionable one. The verb-gated
+pair and the wave's other structures (`varSpans`, `fileIncludes`, `symbolAdjacency`, the `byFile`
+family) are not behind the alias yet and are not measured. Treat the allocation figures as a **floor
+for the wave**, not a total.
+
+## 4. Allocator contention — why the thread-count sweep was not run
+
+The hypothesis: allocations on a parallel path are a shared-resource serialization point, so removing
+them is a *scaling* win rather than a constant-factor one, and the instrument is an A/B at 1 / mid /
+full thread counts.
+
+**It does not apply to anything currently behind the alias, and the reason is structural rather than
+experimental.** `buildGraph` — where all 12 always-on converted sites live — contains **no threading at
+all**: no `std::thread`, no `hardware_concurrency`, no async, across its whole span from `graph.h:613`.
+It is single-threaded start to finish. Allocator contention cannot be a mechanism for a structure that
+is only ever touched by one thread.
+
+The parallel paths in this tree are elsewhere — `ingest.cpp` (5 sites, the per-file tree-sitter parse
+pool), `docdrift.h` (2), `lexical.h`, `search.h`, `crossref.h`. Of those, the only one the alias reaches
+is `docdrift.h`, and that is verb-gated. There is also **no CLI or environment knob for thread count**
+(checked: no `--jobs`/`--threads` flag, no `RIPWIRE_*THREAD*` getenv), so a sweep would need a new knob
+added first.
+
+**This is a real result, not a skipped task**: the contention argument is sound and the owner's
+reasoning about libmalloc holds, but it becomes testable only when the wave converts a structure on the
+parallel ingest path. When it does, the sweep is the right instrument and the 1-thread-vs-N-thread
+delta is the contention measurement. Recorded here so the question is asked at the right time rather
+than answered against a single-threaded phase and wrongly retired.
+
+The two mechanisms stay separate in this report and should stay separate in the next one: **locality**
+(fewer dependent loads) and **contention** (fewer trips to a shared allocator) can each be present or
+absent on their own, and neither is evidence for the other.
+
+## 5. Is the workload memory-bound?
 
 **UNAVAILABLE by counter.** `prof::pmc` needs root on Apple (kperf) and this session had no
 passwordless `sudo`, so IPC and MPKI were never armed. A measure that could not be evaluated is
@@ -113,7 +176,7 @@ consistently *behind*, and the union arm stays within ~2% of `rw`. At these size
 at the `size()` branch mattering more than the 8 bytes, i.e. **not** memory-bound in the regime tested.
 That is a weaker claim than a counter reading and is labelled as such.
 
-## 5. The decision rule
+## 6. The decision rule
 
 Keyed on what the measurement actually showed, not on what was expected.
 
