@@ -190,8 +190,8 @@ inline bool isAnalyzedLang( Lang l ) noexcept
 
 // The indexed languages this lens does NOT analyse — the ones the root names, so their absence from the
 // report reads as "not measured" and never as "measured, found nothing". A declarative table, not a switch
-// chain. Markdown and JSON are deliberately absent: they hold no functions, so naming them would be noise
-// rather than a disclosure. The emission order is this table's order, which makes it deterministic.
+// chain. Markdown, JSON and TOML are deliberately absent: they hold no functions, so naming them would be
+// noise rather than a disclosure. The emission order is this table's order, which makes it deterministic.
 struct UnanalyzedLang { Lang lang; std::string_view name; };
 inline constexpr std::array<UnanalyzedLang, 10> kUnanalyzedLangs = { {
     { Lang::C, "c" }, { Lang::Go, "go" }, { Lang::Rust, "rust" },

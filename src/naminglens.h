@@ -430,7 +430,7 @@ inline constexpr std::size_t kConfusableWindow   = 24;    //   degrades to a sor
 // copies that can drift apart.
 inline bool namingEvaluableLang( Lang lang ) noexcept
 {
-    return lang != Lang::Json && lang != Lang::Markdown && lang != Lang::Unknown;
+    return lang != Lang::Json && lang != Lang::Toml && lang != Lang::Markdown && lang != Lang::Unknown;
 }
 
 // naming-uninformative thresholds (§9.0a candidate 1). Both are principled, not fitted:

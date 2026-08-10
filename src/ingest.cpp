@@ -141,6 +141,7 @@ extern "C"
     const TSLanguage* tree_sitter_java( void );
     const TSLanguage* tree_sitter_ruby( void );
     const TSLanguage* tree_sitter_json( void );
+    const TSLanguage* tree_sitter_toml( void );
     const TSLanguage* tree_sitter_c_sharp( void );
     const TSLanguage* tree_sitter_c( void );
     const TSLanguage* tree_sitter_cuda( void );
@@ -185,7 +186,10 @@ struct LangEntry
 };
 
 // Order does not matter (linear scan); kept grouped by language for readability.
-constexpr std::array<LangEntry, 32> kLangTable = {{
+// The extent is EXACT, not headroom: it was 32 with 32 rows, and .toml made it 33. Sizing it to the row
+// count is what makes `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set, below) exact
+// too, and it turns "added a row and forgot the extent" into a compile error rather than a silent drop.
+constexpr std::array<LangEntry, 33> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -257,6 +261,7 @@ constexpr std::array<LangEntry, 32> kLangTable = {{
     { ".java", Lang::Java,       &tree_sitter_java,       "java"       },   // Java — classes/interfaces/enums/methods/ctors + calls
     { ".rb",   Lang::Ruby,       &tree_sitter_ruby,       "ruby"       },   // Ruby — class/module/def + method calls + require
     { ".json", Lang::Json,       &tree_sitter_json,       "json"       },   // JSON — top-level + 2nd-level object keys as t="sec"; DATA, no call edges
+    { ".toml", Lang::Toml,       &tree_sitter_toml,       "toml"       },   // TOML — [table] headers + their keys as t="sec"; DATA, no call edges
     { ".cs",   Lang::CSharp,     &tree_sitter_c_sharp,    "csharp"     },   // C# — classes/structs/interfaces/records/enums/methods/props + calls
     { ".md",   Lang::Markdown,   nullptr,                 ""           },   // no tree-sitter grammar — ATX headings via extractMarkdown()
 }};
@@ -429,6 +434,33 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
         raw.remove_suffix( 1 );
     }
     return std::string( raw );
+}
+
+// ---- the DEF-name policy: which captured names get finalSegment's scope split, and which are whole ----
+// Every code language wants the split — `ns::f` / `pkg.F` must key on the bare `f` that byName resolves.
+// The DATA-CONFIG languages want the opposite, because there a `.` is part of the NAME and not a scope
+// separator: a TOML table header IS its dotted spelling, so `[tool.ruff.lint]` must be findable as
+// `tool.ruff.lint` rather than as `lint` — a name that collides with every other `lint` in a repo and makes
+// `--grep=tool.ruff` miss the very table it names.
+//
+// JSON belongs here for the SAME reason and was ALREADY wrong before TOML existed: a package.json
+// dependency `"lodash.merge"` was indexed as `merge` (measured; the TOML round's sibling sweep is what
+// surfaced it). Covering both is the sibling-completeness rule docs/METHODOLOGY.md §3 calls the dominant
+// defect class here — fixing the instance and leaving its sibling broken is the failure it names.
+//
+// Widening a name here cannot widen the CALL GRAPH: both languages emit zero @reference captures, and
+// graph.h's langCompatible already keeps each lang-isolated from every code language.
+//
+// This lives beside finalSegment rather than inside captureTagsFacts on purpose — the caller is a very
+// large function already over the complexity bar, and a policy branch buried in it is both invisible and
+// a measured regression (--quality-delta scored the inline ternary at +3 ccx).
+std::string defNameFromCapture( Lang lang, std::string_view raw )
+{
+    if( lang == Lang::Json || lang == Lang::Toml )
+    {
+        return std::string( raw );
+    }
+    return finalSegment( raw );
 }
 
 // ---- skip rules ----
@@ -1092,7 +1124,17 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 58;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 59;           // bump on any grammar/.scm/extraction change
+                                                      // 59 (TOML config-key tier): +TOML (.toml) — a NEW
+                                                      //    grammar and a new .scm, so the extracted SET
+                                                      //    changes on any tree holding a .toml. Table
+                                                      //    headers and their keys become t="sec" defs; no
+                                                      //    references, so edges are unchanged. Key depth is
+                                                      //    HEADER-relative, not root-relative — JSON's
+                                                      //    "top-level + 2nd-level" cut ported literally
+                                                      //    would capture 38.3% of keys and miss every key
+                                                      //    under a 2-dotted table. Known, disclosed cost:
+                                                      //    one cold re-parse everywhere.
                                                       // 58 (r9 A5 iteration 6): the L3 DECLARATION arm gets
                                                       //    the matching value-INITIALIZATION noise gate — a
                                                       //    bare-identifier initializer mints a fn-pointer
@@ -8088,7 +8130,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.evWhy     = fnOrMethod ? evWhyVal : std::array<std::uint8_t, kEvWhyTagCount>{};
             d.kind      = kind;
             d.lang      = le.lang;
-            d.name      = finalSegment( nameTxt );
+            d.name      = defNameFromCapture( le.lang, nameTxt );
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );
