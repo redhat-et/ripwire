@@ -20,11 +20,17 @@
 //   affected phase (buildGraph):  std::vector +6.0%   ankerl +1.9%   rw 0.0%   rwx-union +0.2%
 //   end-to-end:                   all four arms indistinguishable
 //
-// ankerl is 1.9% behind on the real workload, not 25%. Two reasons the microbenchmark inflates it:
-//   * its working set is small and cache-resident, so a container's SIZE costs almost nothing here and
-//     the size() BRANCH is the only thing left to measure — the exact bias that picks a wrong winner;
-//   * buildGraph is 0.2-0.3% of a full run (26 ms of ~9 s on that corpus), so even a real 25% on this
-//     shape is ~0.06% end-to-end, three orders of magnitude under the noise.
+// ankerl is 1.9% behind on the real workload, not 25%. Two reasons the microbenchmark inflates it, and
+// note that the FIRST one is the opposite of what an earlier revision of this comment claimed:
+//   * ITS CARDINALITY IS UNREAL. It builds 200 000 distinct names. ripwire's own tree indexes 3 220
+//     symbols and the largest corpus it has been pointed at 43 354, so this runs at 62x and 4.6x
+//     anything real. At 200 000 names the profile is memory-bound (counters: IPC 0.70, LLC-MPKI 84.9)
+//     and a 16-byte value beats a 24-byte one by ~11.7%; at 3 220 and 43 354 that same comparison is
+//     0.2-0.5%, at the noise floor. The microbenchmark therefore OVERSTATES the cost of instance SIZE.
+//     What does transfer is the size() cost (~6-7% inline, 42-55% once lists spill past ankerl's
+//     inline 3, because its spilled size() is a dependent load into the heap block).
+//   * buildGraph is 2.7% of a full run, so even a real 25% on this shape is ~0.7% end-to-end.
+//     Report against post-parse pipeline time (31.4 ms), not the ~900 ms total — see bench/SVECTORAB.md.
 // Keep this file: it is a good ISOLATION of the size() branch and the correctness harness's methodology
 // ancestor. Do not cite its ratio as the reason to choose a container. bench/SVECTORAB.md is that answer.
 //
