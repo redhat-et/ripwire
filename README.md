@@ -1141,6 +1141,15 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 The map for this repository's own `src/` grades itself in the header before a single answer
 (2026-08-09): `files=109 symbols=3220 edges=9663 ambiguous=4507 unresolved=1091`.
 
+**Read `ambiguous=` as a property of the indexed tree, not a score for the resolver.** It counts call
+names that hit more than one definition, so it moves when the *corpus* gains same-named symbols — and
+it just did, visibly. On 2026-08-09 this number rose from 2991 to 4507. The cause was attributed by
+swapping one file back and re-measuring: `src/infra/svector.h` alone accounts for 4507 → 2741. The
+small-vector there grew a full container interface, so the tree now defines its own `size`, `begin`,
+`end`, `push_back` and `data` — the most-called names in any C++ corpus. Adding a container is a name
+collision by construction. Expect the number to climb again as that container replaces `std::vector`
+across the tree; a rise there means the map is disclosing more overloading, not resolving worse.
+
 | the output says | read it as |
 | --- | --- |
 | `amb="K"` | K of this symbol's calls hit an overloaded name — one target was chosen; read the source if which one matters |
