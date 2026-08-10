@@ -15,9 +15,14 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
-**Want the pitch instead of the page?** The whole tool in 23 slides, with every figure's instrument
-named on the slide that carries it → [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf)
-(renders in the browser; [pptx](present/ripwire-showcase.pptx) beside it).
+<p align="center">
+  <a href="present/ripwire-showcase.pdf"><img src="docs/assets/showcase-preview.png" alt="Three slides from the ripwire showcase deck: the head-to-head table, the ten-moments token table, and the quality-panel calibration" width="880"></a>
+</p>
+
+<p align="center">
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 23 slides</b></a> — every figure names the instrument that pins it<br>
+  <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
+</p>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
 JavaScript · Java · Ruby · Bash · C# · JSON — [sixteen vendored grammars](#languages), and adding
