@@ -59,6 +59,9 @@ namespace fs = std::filesystem;
 //                    inspects every node it used to. If these move, a fact was dropped or double-counted.
 // Compiled out entirely unless -DRIPWIRE_FUSE_PROBE is on the command line, so the plain/asan/profile
 // builds are unaffected. Everything lands on STDERR — stdout is the XML map under a byte-identity gate.
+//
+//    cmake -S . -B build_probe -DCMAKE_CXX_FLAGS=-DRIPWIRE_FUSE_PROBE && cmake --build build_probe -j
+//    TMPDIR=$(mktemp -d) ./build_probe/ripwire <corpus> >/dev/null      # TMPDIR forces a cold parse
 namespace fuseprobe
 {
 enum PassId : int { kInc = 0, kFfi = 1, kRoutes = 2, kRustImpls = 3, kBinds = 4, kUses = 5, kPassCount = 6 };
@@ -7612,6 +7615,9 @@ struct TreeGuard
 // fused passes could share (Rust impls and value-uses), and they are disjoint by language (Rust vs
 // C++/ObjC/Python), so at most one is ever armed; sideArmsAreOrderSafe pins that invariant. Visitors are
 // still invoked in the ORIGINAL pass order at each node, so the reading order matches the old call order.
+// depth is 32-bit, not the 16-bit each pass used to carry: same 40 bytes after padding either way, and a
+// tree deeper than 65535 can no longer WRAP the counter back under a cap and re-enable a visitor that
+// should have stopped. Unreachable on a <= 1 MB file, but the old shape was the fragile one.
 struct SideFrame
 {
     TSNode        node;
