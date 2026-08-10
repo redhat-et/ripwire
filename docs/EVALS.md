@@ -567,6 +567,53 @@ verification fits in one sitting. It does not modify `regression.sh`.
 `test/manifestcheck.sh` fails if a committed top-level `*check.sh` is missing from `regression.sh`,
 so the list cannot rot.
 
+### The TOML config-key tier — shape coverage, and the ceiling that was declined
+
+**Instrument:** `test/tomllangcheck.sh` over `test/tomlfix/pyproject.toml`, plus the shape/size probe
+described below. **Corpora:** the 90-repo breadth corpus (`bench-assets/r4/repos`, 321 `.toml` files)
+for the design measurements; `test/tomlfix/` for the pinned per-shape assertions. **Binary:** the tier
+landed at `kParserVer 59`.
+
+The corpus is what chose the design, so it is recorded rather than summarized away:
+
+| Measurement | Value |
+| --- | --- |
+| `.toml` files / parse-clean | 321 / 270 — the real failure rate is **~0.3%**, because 50 of the 51 "failures" are cpython's `test_tomllib/data/invalid/` deliberately-malformed fixtures |
+| Size p50 / p90 / p99 / **max** | 277 B / 3 578 B / 21 449 B / **57 759 B** |
+| Shape counts | plain `key =` 6 594 · `[table]` 2 561 (258 files) · array value 1 270 · `[[aot]]` 300 (75 files) · inline table 213 · dotted key 197 |
+| `[table]` header dotted depth | 1:446 · **2:1421** · 3:415 · 4:191 · 5:87 · 6:1 |
+| Key depth measured from the document ROOT | d1 6.2% · **d2 38.3%** · d3 72.1% · d4 89.8% · d7 100% |
+
+That last row is the whole argument. JSON's rule — top-level plus second-level object keys — is a
+**root-relative** cut, and applied to TOML it would capture **38.3%** of keys and miss every key under
+a 2-dotted table, which is the shape 1421 of 2561 real headers have. So the TOML lane cuts at the
+**table header** instead: a header is one symbol under its full dotted name, and its keys sit one
+level below *it* at any header depth. `tomllangcheck`'s "keys under a depth-3 header" arm is red
+against any literal port of JSON's rule, which is why that arm exists.
+
+**Floors pinned by the gate** (each an arm, all non-vacuous behind presence guards): every emitted
+symbol is `t="sec"` · `edges=0` · headers carry their full dotted spelling · keys under
+`[tool.ruff.lint]` are present · inline tables are not descended *while their owning key is* · a
+dotted key is one symbol, never split · two `[[aot]]` headers are two defs · `--grep` reports the
+dotted header as the enclosing symbol both cold and through a cache round-trip · determinism.
+
+**Verified at corpus scale:** all 321 files index clean under the G1 sanitizer stack — `files=321
+symbols=9641 edges=0`, zero stderr, zero ASan/UBSan reports — and the 90-repo map is byte-identical
+across two cold runs and a warm run. On this repository, which contains no `.toml`, the default map is
+**byte-identical** before and after the tier.
+
+**No TOML-specific ceiling, and the absence is the finding.** JSON needed `kMaxJsonConfigBytes` (256 KB)
+and `kMaxJsonNestDepth` (512) because a large `.json` is usually *data* wearing a config extension, and
+because its error recovery goes superlinear — 43 s on 100 KB of unclosed `[`. Neither holds for TOML.
+The observed maximum is 57 759 B, so a ceiling could not be placed both above it and below the generic
+4 MB skip without being unreachable; and every adversarial probe is **linear**: `[`×100 000 = 17.4 ms,
+dotted key ×50 000 = 7.0 ms, 50 000 `[[aot]]` = 58.7 ms, a 2 MB unterminated string = 21.7 ms — TOML is
+line-oriented, so a malformed line resynchronizes at the newline instead of nesting. The vendored
+external scanner is stateless (`create()` returns `NULL`, `serialize()` returns 0, never allocates), so
+it adds no hazard to weigh either. A ceiling here would fire only on a file no corpus contains. The
+gate pins the *decision* from outside by indexing a 216 KB `.toml` — 3.7× the corpus max, and past
+where the JSON ceiling would sit — so one cannot be added later without the gate saying so out loud.
+
 ### The differential argv harness
 
 `test/argvdiffcheck.sh` proves a refactor changed nothing observable: it runs a reference binary and
