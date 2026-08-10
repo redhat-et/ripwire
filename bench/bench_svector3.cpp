@@ -10,8 +10,29 @@
 //   build:   C≈D ~7ms  ≪  B ~22ms      (both svectors kill the per-name malloc)
 //   resolve: B≈D ~11ms  <  C ~18ms      (B & D branch-free size(); C's SVO size() branch costs ~6ms/4M)
 //   total:   D ~18ms  <  C ~24ms  <  B ~33ms   → rw::svector ~25% over martinus, ~45% over std::vector.
-// D wins by spending 8 bytes (24 vs 16) on an explicit size field. Prefer martinus when compactness wins
-// or the value is iterated more than size()'d (begin()/end() branch in BOTH).
+// D wins by spending 8 bytes (24 vs 16) on an explicit size field.
+//
+// ── THAT 25% DOES NOT SURVIVE CONTACT WITH THE PIPELINE. Read this before quoting it. ────────────────
+// The numbers above are correct FOR THIS MICROBENCHMARK and they do not transfer. Measured in situ
+// (bench/svectorab.py, four-way alias flip, --no-cache both sides, fresh build per arm, 11 interleaved
+// reps against a 0.3% A/A noise floor) on a 2376-file C++/ObjC++ corpus:
+//
+//   affected phase (buildGraph):  std::vector +6.0%   ankerl +1.9%   rw 0.0%   rwx-union +0.2%
+//   end-to-end:                   all four arms indistinguishable
+//
+// ankerl is 1.9% behind on the real workload, not 25%. Two reasons the microbenchmark inflates it, and
+// note that the FIRST one is the opposite of what an earlier revision of this comment claimed:
+//   * ITS CARDINALITY IS UNREAL. It builds 200 000 distinct names. ripwire's own tree indexes 3 220
+//     symbols and the largest corpus it has been pointed at 43 354, so this runs at 62x and 4.6x
+//     anything real. At 200 000 names the profile is memory-bound (counters: IPC 0.70, LLC-MPKI 84.9)
+//     and a 16-byte value beats a 24-byte one by ~11.7%; at 3 220 and 43 354 that same comparison is
+//     0.2-0.5%, at the noise floor. The microbenchmark therefore OVERSTATES the cost of instance SIZE.
+//     What does transfer is the size() cost (~6-7% inline, 42-55% once lists spill past ankerl's
+//     inline 3, because its spilled size() is a dependent load into the heap block).
+//   * buildGraph is 2.7% of a full run, so even a real 25% on this shape is ~0.7% end-to-end.
+//     Report against post-parse pipeline time (31.4 ms), not the ~900 ms total — see bench/SVECTORAB.md.
+// Keep this file: it is a good ISOLATION of the size() branch and the correctness harness's methodology
+// ancestor. Do not cite its ratio as the reason to choose a container. bench/SVECTORAB.md is that answer.
 //
 // Build: cc -O3 -march=native -std=c++23 bench/bench_svector3.cpp src/infra/diagnostics.cpp \
 //        -Isrc -Isrc/infra -Ithird_party -lc++
