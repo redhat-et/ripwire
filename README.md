@@ -760,8 +760,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9588"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9692"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9595"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9699"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -1139,7 +1139,7 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
-(2026-08-09): `files=109 symbols=3220 edges=9663 ambiguous=4507 unresolved=1091`.
+(2026-08-09): `files=109 symbols=3219 edges=10116 ambiguous=4773 unresolved=1091`.
 
 | the output says | read it as |
 | --- | --- |
