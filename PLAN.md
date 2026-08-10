@@ -926,11 +926,15 @@ believed until a probe (vendor the grammar, crawl two real repos, count what ext
   and a real discount because Java's resolver conventions and test-path patterns mostly transfer.
   Community grammar is mature. Gate: a `kotlincheck.sh` in the per-language gate family
   (`metalcheck`/`cudacheck` pattern) plus shape-recall floors recorded in `docs/EVALS.md`.
-* **YAML + TOML as config-key documents** — deliberately *not* full languages. The JSON config-key
-  tier is the precedent, so this is close to free and may be the highest utility-per-effort item
-  on the whole plan: CI workflows, `pyproject.toml`, `Cargo.toml`, and k8s manifests become
-  indexable keys, improving every repo regardless of its code language. Gate: config-key recall
-  arms over committed fixtures; the JSON tier's gate is the template.
+* **YAML + TOML as config-key documents** — deliberately *not* full languages. **PROBED
+  2026-08-10; the "close to free" estimate below was REFUTED and the round was split.** TOML is
+  cheap and shipped; YAML is a full round of its own behind a mandatory pre-parse guard. The
+  original text is kept for the record: *"The JSON config-key tier is the precedent, so this is
+  close to free and may be the highest utility-per-effort item on the whole plan: CI workflows,
+  `pyproject.toml`, `Cargo.toml`, and k8s manifests become indexable keys, improving every repo
+  regardless of its code language."* What the probe actually measured — including a memory-safety
+  defect in the YAML grammar and the fact that JSON's depth rule is wrong for **both** formats — is
+  in the 2026-08-10 section at the end of this file. Read that before starting the YAML round.
 
 ### Round L2 — PHP
 
@@ -957,3 +961,157 @@ genuinely hard — implicits, symbolic operators — budget a full round, not a 
 Every round ends the way the TS→JS→Python→Swift series ended: floors in `docs/EVALS.md` naming the
 instrument and corpora, a per-language gate in `test/regression.sh` in the same commit, and the
 README language line updated only when the gate is green.
+
+---
+
+## 2026-08-10 — two probes, and the rounds they schedule
+
+Two lanes were probed concurrently (crawl+extract vs resolve). **Both probes refuted the central
+premise of their own brief**, which is the fourth consecutive round where that has happened. The
+Swift lesson at the head of the language section is not a formality; treat any effort estimate in
+this file that has not been probed as unbelieved.
+
+### TOML config-key tier — SHIPPING (Round L1, first half)
+
+Measured on 90 real public repos (`bench-assets/r4/repos`), plus this repo and canyonraid48
+separately. 321 TOML files; of 51 apparent parse failures, **50 are cpython's deliberate
+`test_tomllib/data/invalid/` fixtures** — real failure rate ~0.3%. Sizes p50 **277 B**, p99 21 449,
+**max 57 759 B**. No adversarial pathology anywhere: `[`×100 000 → 17.4 ms, 50 000 `[[aot]]` →
+58.7 ms, 2 MB unterminated string → 21.7 ms, all linear, and the grammar has no external-scanner
+serialization hazard.
+
+**The one design change from the JSON precedent, and it is not optional.** JSON's rule is
+"top-level + 2nd-level object keys". Applied literally to TOML it captures **38.3%** of keys and
+misses everything under a two-dotted table — `[tool.ruff.lint]` puts its keys at mdepth 4. **In TOML
+the navigable unit is the table header, and key depth must be measured relative to the header, not
+from the document root.** Shapes measured: `[table]` 2 561 (258 files) · `[[array-of-tables]]` 300 ·
+inline table 213 · dotted key `a.b.c =` only **197** (so it stays one symbol under its full dotted
+spelling; splitting it would triple noise on the rarest form).
+
+No TOML-specific size ceiling: the largest real TOML in 90 repos is 57 KB, so a ceiling would be
+theatre. The generic `--max-file-size` path already applies. The measurement justifying the absence
+belongs in the source comment and in `docs/EVALS.md` — an absent ceiling that is *explained* is
+honest; an absent ceiling that is merely undocumented is the drift this project gates against.
+
+### YAML config-key tier — SCHEDULED AS ITS OWN ROUND, blocked on a guard
+
+Real value confirmed — 570 GitHub-workflow files and 34 209 keys in the breadth corpus, plus
+ansible and k8s manifests. But it is a full round, not a row on the TOML one, for three measured
+reasons.
+
+**1. tree-sitter-yaml has an out-of-bounds write, and Release hides it.** Its `serialize()` loop
+guards `size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE` (1024) and then writes **4** bytes per
+iteration. The header is 10 bytes, so `size = 10 + 4n`; at n=253 that is 1022, which passes the
+guard and then writes bytes 1022–1025 — two past the end of `char debug_buffer[1024]`
+(`third_party/deps/tree_sitter/lib/src/lexer.h:37`). Bisected and independently reproduced:
+**253 nesting levels rc=0, 254 rc=-6 (SIGABRT)**. `ts_assert` is `((void)(e))` under `NDEBUG`
+(`third_party/deps/tree_sitter/lib/src/ts_assert.h:5`), so a Release build compiles the assertion
+out and performs the corrupting write **silently**. This is categorically worse than the JSON
+ceiling's 43 s, which was slow rather than fatal. **ripwire has no exposure today** — we do not
+parse YAML — so this is a cost of entry, not a live defect.
+
+The trigger is purely lexical (count of block indent levels), so it is fully guard-preventable by
+an O(n) quote-aware byte prescan in the shape of `jsonNestsTooDeep` (`src/ingest.cpp:477`), before
+any parse, with no wall-clock timeout and no determinism cost. `kMaxYamlNestDepth = 64` — 4× under
+the cliff and comfortably above the deepest real file observed (AST depth 76).
+
+Three separable pieces of work, in order:
+* **The prescan guard** — needed regardless, and the gate is unusually strong: the pre-fix binary
+  does not merely fail the assertion, it dies with SIGABRT, and under ASan `-fno-sanitize-recover=all`
+  turns the OOB write into a hard failure.
+* **A one-line patch to the vendored scanner** (`size + 4 <= BUFFER`). `ripwire_use_vendored_source`
+  (`CMakeLists.txt:227`) points FetchContent at the committed in-tree copy and hard-errors if it is
+  missing, so **we own the source outright** — the pinned URL/SHA is provenance, not the build
+  input. The edit is free; the real cost is establishing a local-patch convention (nothing in
+  `third_party/deps` is patched today) plus a drift gate so a future grammar bump cannot silently
+  revert it.
+* **A family gate over every vendored scanner's `serialize()`** — *does the loop guard leave room
+  for the widest write in its body?* python/bash/ruby pass because they write 1 byte per iteration;
+  yaml writes 4 behind a guard that only proves 1 fits. This is the METHODOLOGY §3 move: it fails
+  for the next grammar too, including one not yet vendored. Highest-value of the three.
+
+Filing upstream at `tree-sitter-grammars/tree-sitter-yaml` is free and strictly additive, but its
+latency cannot be depended on. **Owner's call — not yet filed.**
+
+**2. JSON's depth rule is wrong for YAML too, in a different way.** It captures **27.1%** of real
+YAML keys. **25.3% of all YAML keys sit directly inside a sequence element** (the `steps:` /
+`containers:` / `tasks:` shape) and JSON's rule drops 100% of it. The fix is to make sequence levels
+**transparent**: mdepth ≤ 2 with sequences not counted, which yields 44.0%.
+
+**3. Both required corpora are negative.** canyonraid48 has 208 YAML files — **197 `.dSYM`
+relocations + 11 `CMakeFiles` logs, and 0 real config**. A YAML tier ships it 369 pure-noise symbols
+and zero useful ones, and `.dSYM` is **not** in `kCrawlSkipDirs` (`src/ingest.h`) — pruning it is a
+prerequisite of the YAML round. This repo has 11 YAML files, 8 of them test fixtures. The value is
+concentrated entirely in the breadth corpus, which is a real finding about who this feature serves.
+
+Semantics already decided from measured frequency, so the next session does not rediscover them:
+anchors (1.73% of files) are part of the path, not symbols; aliases (1.55%, and **alias-as-key
+measured 0 times in 4 449 files**) are dropped and disclosed, never expanded; merge keys `<<:`
+(0.22%) dropped rather than minting a symbol named `<<`; multi-document streams (0.11%, max 5 docs)
+re-enter each root at depth 1; block scalars (20.5% of files) are values and are never descended —
+**this is the strongest argument for tree-sitter over a lexical scanner**, since 384 block scalars
+contain key-like text that a regex would happily mint symbols from; duplicate keys (0.16%) both
+minted; non-string keys (1.70%) take their literal source text, which is *correct* — GH Actions
+`on:` resolves to `bool` under YAML 1.1 and the literal `on` is what a user greps for.
+Size ceiling **512 KB**, not JSON's 256 KB, which would drop NeMo's real 293 KB `cicd-main.yml`.
+
+### Item 12, field-typed member narrowing — SHELVED, with a re-entry condition
+
+Not dead: fixable, and the conditions are known. Probed on both corpora with env-gated
+instrumentation whose output was verified **byte-identical** to the unmodified binary.
+
+**The deciding number: addressable currently-ambiguous call sites — this repo 4 (0.08% of
+`ambiguous=4885`), canyonraid48 492 (5.4% of `ambiguous=9187`).** On this repo that is inert by
+exactly the standard RTA-lite was rejected under (deltas of 0 against a band of [1,300]). The 65×
+spread between corpora is itself the finding: the value tracks OO-with-member-objects style, and
+this project's own DOD/POD house style is the adverse case.
+
+**Three refuted premises worth keeping**, because each would otherwise be rediscovered:
+* **The survey names the wrong shape.** `this->handler->onEvent()` measures **12 sites here, 44 on
+  canyonraid48**, of which 0 and 2 are addressable — `receiverOf` (`src/ingest.cpp:5423`) classifies
+  any chained receiver as `None` by design. **97% of the value (999 of 1030) is the implicit-`this`
+  `field->m()` form, which the survey never mentions.**
+* **No `kParserVer` bump is needed.** `captureFields` (`src/ingest.cpp:4127`) already emits
+  `(class, field, declaredType)` triples — 1626 here, 4704 on canyonraid48 — consumed today only by
+  `<compose>`. Consuming them in `buildGraph` is a pure resolve-stage change.
+* **The tombstone premise is wrong twice.** Item 12 reads the *declared* type, so a constructor
+  assigning a derived instance does not conflict with it; and the operative conflict (one
+  `(class,field)` declared with two type texts) measures 0.69% / 1.26%. Cheap insurance, not the
+  design's centre. The real limiter is neither `auto` nor typedefs: **the receiver is usually not a
+  field at all** — 97% here, 68% on canyonraid48.
+
+**Why it does not clear the bar as scoped:** on its *better* corpus it would re-point **1690 edges
+that already resolve uniquely** against 1030 wins — **1.64 : 1 more silent changes than fixes** —
+and **19.4% of firing sites have a base-class declared type with in-corpus descendants**, which is
+RTA-lite's silent-devirtualization mode. It also inherits RTA-lite's bare-name keying defect
+verbatim (`X::Impl` armed by `Y::Impl` evidence), which makes qualified-name keying a prerequisite
+rather than optional hardening.
+
+**Re-entry condition — all four, or do not restart it:**
+1. Re-scope to the implicit-`this` `field->m()` form; drop the `this->f->m()` shape the survey names.
+2. Qualified-name keying from day one.
+3. Route through the CHA cone with an explicit disclosure attribute, never a bare pin.
+4. A prereg with bands ≥2 wide sealed before implementation, stating up front that a ~0 delta on
+   this repo is **expected and not a failure**, with accept/reject decided on an OO-shaped corpus.
+
+**Two measurement gaps must close first** — the probe did *not* establish how many current edges of
+the target shape are actually wrong (needs hand-built ground truth), and did *not* hand-check a
+sample of the addressable sites to confirm they are real rather than probe artifacts.
+
+### Incidental findings — small, real, unowned
+
+* **`docs/EVALS.md` states its gate count three times and two were stale**: lines 24 and 562 said
+  "371 gate scripts" while line 891 correctly said the loop names 373. `test/manifestcheck.sh`
+  enforces **only** the line-891 sentence, which is exactly why the other two drifted unnoticed.
+  The TOML round takes all three to 374. **A gate that checks one instance of a fact and not its
+  siblings is the METHODOLOGY §3 defect applied to the gate itself** — worth widening.
+* **JSON's own documented ceiling rationale did not reproduce.** `docs/ARCHITECTURE.md:51` and
+  `src/ingest.cpp:471` cite "43 s measured on a 100 KB `[[[[…` file"; the same harness on the
+  repo's own vendored tree-sitter 0.26.9 + tree-sitter-json v0.24.8 measured **13.3 ms**, and
+  `test/jsonlangcheck.sh`'s 5 000-bracket file parses in 0.59 ms. Two honest readings: the pinned
+  versions moved, or the original number was whole-ingest rather than parse. **Not disambiguated —
+  treat `kMaxJsonNestDepth`'s stated rationale as unverified, not disproven.** The constant is
+  harmless either way, but a documented measurement that no longer reproduces should be
+  re-measured, not silently edited.
+* **`.dSYM` is not in `kCrawlSkipDirs`** (`src/ingest.h`). Harmless today; a prerequisite of the
+  YAML round.
