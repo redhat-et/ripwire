@@ -43,7 +43,7 @@ HOT_FILES = (
     "src/infra/radixSort.inl",    # the counting/scatter kernels, incl. the SSE ones
     "src/infra/fastSort.h",
     "src/infra/sparseCsr.h",      # the CSR triple itself
-    "src/infra/platform.h",       # fastmath:: — isFiniteFast and friends, inlined everywhere
+    "src/infra/fastmath.h",       # fastmath:: — isFiniteFast and friends, inlined everywhere
     "src/infra/dynamic_map.hpp",
     "src/infra/sortutil.h",
     "src/clones.h",               # token-shingle scan over every file
