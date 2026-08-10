@@ -935,6 +935,24 @@ proof, and the map must say so) with legend coverage and a red-first gate for ea
 
 Listed because the reason is more useful than the silence.
 
+- **Any claim that ripwire changes whether an agent SOLVES a task.** This is the north-star metric
+  and it has never been measured: `--evaluator swebench` has never executed, and every record in the
+  one pilot on file carries `resolved: null`. Everything published here scores *retrieval quality*,
+  whose correlation with task success is assumed, not demonstrated.
+
+  As of 2026-08-10 there is a second, sharper reason to withhold it: **the eval as designed cannot
+  detect a plausible effect.** `bench/agentloop/analyze.py` bootstraps clustered by repository, and
+  with equal rows per repo that is algebraically a resample of the **6 repo-level means** — so
+  effective N is the cluster count, not the 24 instances. Minimum detectable effect at the planned
+  configuration is **18–32pp** on resolution rate, and at 6 clusters a 5pp or 10pp effect is not
+  reachable *at any instance count* once between-repo heterogeneity is non-zero (simulated out to
+  49,152 instances; `bench/agentloop/power_sim.py`). Adding repos buys roughly 4× the power of adding
+  instances inside the existing six.
+
+  The consequence for honesty is specific and worth stating plainly: **a null result from this design
+  would not be evidence of no effect**, and must not be reported as one. Until the repo universe is
+  widened or a scored pilot measures the intra-cluster correlation, no outcome number — positive,
+  negative, or null — is publishable from this instrument.
 - **"~76% of an agent's token cost is file reads."** This figure appeared in a skill description in
   this repository, with **no citation** while every neighbouring claim in the same paragraph carried
   one, and it has since been removed — it has no in-tree provenance today. The research note it
@@ -945,7 +963,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 374. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 375. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
