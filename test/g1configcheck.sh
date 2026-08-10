@@ -102,7 +102,7 @@ grep -q 'check_cxx_source_compiles' "$CMAKE" && grep -q 'LLVMFuzzerTestOneInput'
     && ok "libFuzzer availability uses a real link probe with remediation" || no "libFuzzer link probe/remediation missing"
 
 fuzzTargetCount="$( grep -c '^  add_ripwire_fuzzer(' "$CMAKE" )"
-[ "$fuzzTargetCount" = 15 ] && ok "15 grammar fuzz targets declared" || no "expected 15 grammar fuzz targets, found $fuzzTargetCount"
+[ "$fuzzTargetCount" = 16 ] && ok "16 grammar fuzz targets declared" || no "expected 16 grammar fuzz targets, found $fuzzTargetCount"
 grep -q 'EXCLUDE_FROM_ALL' "$CMAKE" && ok "fuzz targets excluded from normal builds" || no "fuzz targets can enter normal builds"
 
 grep -q 'LLVMFuzzerTestOneInput' "$HARNESS" && grep -q 'ts_parser_parse_string' "$HARNESS" \
@@ -113,7 +113,7 @@ grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 
 seedCount="$( find "$ROOT/test/fuzz/seeds" -mindepth 2 -maxdepth 2 -name valid | wc -l | tr -d ' ' )"
-[ "$seedCount" = 15 ] && ok "all 15 grammars have valid seeds" || no "expected 15 grammar seeds, found $seedCount"
+[ "$seedCount" = 16 ] && ok "all 16 grammars have valid seeds" || no "expected 16 grammar seeds, found $seedCount"
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

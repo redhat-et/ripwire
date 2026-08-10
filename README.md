@@ -508,7 +508,7 @@ cmake -S . -B build && cmake --build build -j
 ```
 
 Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
-Swift, C#** — plus JSON config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+Swift, C#** — plus JSON and TOML config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
@@ -765,8 +765,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9595"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9699"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9613"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9717"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -1372,8 +1372,9 @@ C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols re
 GPU and CPU halves), **CUDA** (`.cu`/`.cuh` — indexed with the vendored `tree-sitter-cuda` grammar,
 so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--callers` of a kernel names
 its host-side launchers; dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
-JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON (config keys). Sixteen tree-sitter
-grammars, all vendored.
+JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON + TOML (config keys — a `[tool.ruff.lint]`
+table is one symbol under its full dotted name, and `pyproject.toml`/`Cargo.toml` become greppable).
+Seventeen tree-sitter grammars, all vendored.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
 vendored tree-sitter grammar, its query file, and one row in the declarative

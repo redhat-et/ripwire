@@ -1,0 +1,44 @@
+# tomllangcheck fixture — shaped like the real pyproject.toml files in the breadth corpus
+# (90 public repos, 321 .toml files). Every construct below is here because the corpus says
+# it is load-bearing; the counts in the comments are that corpus's measurements.
+#
+# The names are deliberately UNIQUE (toplevelkey / selectrule / inlinegit / ...) so an
+# assertion about "is this key a symbol?" can never be satisfied by a same-spelled key
+# somewhere else in the fixture.
+
+# ---- plain top-level keys: the dominant form (6594 of the corpus's keys) ----
+toplevelkey = "present"
+tomlversion = "0.1.0"
+
+# ---- a 1-deep table header (446 of 2561 headers) ----
+[project]
+requires-python = ">=3.11"
+
+# ---- a 2-deep table header: the MODE of the corpus (1421 of 2561 headers) ----
+[tool.ruff]
+line-length = 120
+
+# ---- a 3-deep table header (415 of 2561). THE CENTRAL CASE: a literal copy of JSON's
+#      "top-level + second-level keys" rule puts these keys at root-relative depth 4 and
+#      captures NONE of them. Key depth is measured RELATIVE TO THE HEADER, not the root.
+[tool.ruff.lint]
+selectrule = ["E", "F"]
+ignorerule = ["E501"]
+
+# ---- array-of-tables (300 in the corpus, 75 files); one symbol per header ----
+[[tool.mypy.overrides]]
+modulepat = "legacy.*"
+
+[[tool.mypy.overrides]]
+modulepat2 = "vendor.*"
+
+# ---- inline table (213): NOT descended — the owning key is the symbol ----
+[tool.poetry.dependencies]
+requests = { inlinegit = "https://example.invalid/r.git", inlinerev = "abc123" }
+
+# ---- dotted key (197, the rarest form): ONE symbol, full dotted spelling ----
+[tool.black]
+dottedkey.subpart = "py311"
+
+[build-system]
+buildrequires = ["setuptools>=61"]

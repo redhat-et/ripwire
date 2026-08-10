@@ -52,6 +52,15 @@ skipped:
   large or degenerately nested `.json` file is data or a test corpus. The former explodes the symbol
   table; the latter drives tree-sitter's error recovery superlinear — 43 s measured on a 100 KB
   `[[[[…` file. Both cases were found live by benchmarking against real upstream repositories.
+
+**TOML has no lane-specific ceiling, and that is a measured decision rather than a missing sibling.**
+Over 90 real public repositories (321 `.toml` files) the largest is 57 759 B — a quarter of the JSON
+ceiling and 1.4% of the generic 4 MB skip — so a TOML ceiling could not sit both above the observed
+maximum and below the generic one without being unreachable by construction. The substantive
+difference from JSON is pathology, not size: TOML is line-oriented, so a malformed line resynchronizes
+at the newline instead of nesting, and every adversarial probe stays linear (`[`×100 000 = 17.4 ms,
+50 000 `[[aot]]` = 58.7 ms, a 2 MB unterminated string = 21.7 ms). `.toml` therefore rides the generic
+`--max-file-size` path only, whose drops are already disclosed through `skipped_oversize=`.
 - **generated artifacts by filename:** `package-lock.json`, `npm-shrinkwrap.json`, `*.min.js`,
   `*_pb2.py`, `*.pb.go`.
 
@@ -79,7 +88,18 @@ dispatched as work items.
 
 Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), CUDA (parsed
 with the vendored tree-sitter-cuda grammar, a generated superset of tree-sitter-cpp), Python,
-TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, plus JSON configuration keys.
+TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, plus JSON and TOML configuration
+keys.
+
+The two config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
+`langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in
+where the navigable unit sits. JSON cuts at document depth — top-level and second-level object
+keys. TOML cuts at the **table header**: `[tool.ruff.lint]` is one symbol under its full dotted
+name, and its keys are one level below *it*, whatever the header's dotted depth. Applying JSON's
+root-relative rule to TOML would capture 38.3% of keys in the 90-repo breadth corpus and miss every
+key under a 2-dotted table, which is the shape 1421 of 2561 observed headers actually have. A dotted
+key in either language keeps its dots — a `"lodash.merge"` dependency and a `tool.ruff.lint` table
+are names, not scope paths.
 
 ### graph — resolve references into edges
 

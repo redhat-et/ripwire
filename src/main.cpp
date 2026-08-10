@@ -898,6 +898,10 @@ extern "C"
     const TSLanguage* tree_sitter_java( void );
     const TSLanguage* tree_sitter_ruby( void );
     const TSLanguage* tree_sitter_json( void );
+    const TSLanguage* tree_sitter_toml( void );
+    const TSLanguage* tree_sitter_c_sharp( void );
+    const TSLanguage* tree_sitter_c( void );
+    const TSLanguage* tree_sitter_cuda( void );
 }
 
 // This process's own executable path, realpath'd. macOS uses _NSGetExecutablePath and Linux uses
@@ -1027,6 +1031,17 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         { "java",       &tree_sitter_java,       "java"       },
         { "ruby",       &tree_sitter_ruby,       "ruby"       },
         { "json",       &tree_sitter_json,       "json"       },
+        // The four below were MISSING while the binary linked them, so --doctor reported "13 of 13
+        // grammars ok" on a build carrying 17 probeable entries: a csharp/c/cuda/toml query that failed
+        // to compile was invisible to the one check whose whole job is to say so. Found by the TOML
+        // round's sibling sweep (docs/METHODOLOGY.md §3). `cuda` deliberately shares the "cpp" querySub
+        // — it is a generated superset of tree-sitter-cpp and rides cpp's tags.scm, exactly as `tsx`
+        // shares "typescript" above — so what is probed for it is cpp's query against the CUDA grammar,
+        // which is precisely the pairing ingest uses.
+        { "toml",       &tree_sitter_toml,       "toml"       },
+        { "csharp",     &tree_sitter_c_sharp,    "csharp"     },
+        { "c",          &tree_sitter_c,          "c"          },
+        { "cpp",        &tree_sitter_cuda,       "cuda"       },
     };
     DoctorGrammarProbe out;
     out.expected = int( sizeof( kTable ) / sizeof( kTable[0] ) );
@@ -1221,8 +1236,11 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
 
     // ---- check 2: grammar availability — probe each compiled-in grammar's tags.scm actually
     // compiles (ts_query_new), the same operation ingest()'s prewarm performs; count vs expected ----
+    // gp OUTLIVES this block on purpose: check 5 reports the same grammar count and used to carry it as a
+    // hardcoded "13" with a comment promising it matched this table. It did not — the table reached 17
+    // while the literal stayed 13. Reading the one probe twice is what makes that promise structural.
+    const DoctorGrammarProbe gp = doctorProbeGrammars();
     {
-        const DoctorGrammarProbe gp = doctorProbeGrammars();
         std::string grammarAttrs = "loaded=\"" + std::to_string( gp.loaded ) + "\" expected=\"" + std::to_string( gp.expected ) + "\"";
         grammarAttrs += doctorGrammarsHint( gp.loaded, gp.expected, gp.failedLabels, esc );
         row( "grammars", gp.loaded == gp.expected, grammarAttrs );
@@ -1285,7 +1303,7 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         const std::uint32_t cppAbi = ts_language_abi_version( tree_sitter_cpp() );
         std::string attrs = "core_abi=\"" + std::to_string( TREE_SITTER_LANGUAGE_VERSION ) + "\"";
         attrs += " cpp_grammar_abi=\"" + std::to_string( cppAbi ) + "\"";
-        attrs += " languages=\"13\"";   // distinct compiled-in grammar entries — matches check 2's kTable
+        attrs += " languages=\"" + std::to_string( gp.expected ) + "\"";   // distinct compiled-in grammar entries — DERIVED from check 2's kTable, not restated
         row( "tree-sitter", true, attrs );
     }
 
