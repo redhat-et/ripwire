@@ -5,6 +5,7 @@
 [![Licence](https://img.shields.io/badge/licence-Apache%202.0-blue.svg)](LICENSE)
 [![Standard](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](CONTRIBUTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
+[![Slides](https://img.shields.io/badge/slides-the%20showcase%20deck-56d6e8.svg)](present/ripwire-showcase.pdf)
 
 # Rip'n Fast. Less Tokens. Better Code.
 
@@ -13,6 +14,10 @@
 **ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
+
+**Want the pitch instead of the page?** The whole tool in 23 slides, with every figure's instrument
+named on the slide that carries it → [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf)
+(renders in the browser; [pptx](present/ripwire-showcase.pptx) beside it).
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
 JavaScript · Java · Ruby · Bash · C# · JSON — [sixteen vendored grammars](#languages), and adding
@@ -1139,7 +1144,7 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
-(2026-08-10): `files=109 symbols=3231 edges=10129 ambiguous=4765 unresolved=1091`.
+(2026-08-10, at `4e245d7`): `files=109 symbols=3233 edges=10132 ambiguous=4768 unresolved=1097`.
 
 **Read `ambiguous=` as a property of the indexed tree, not a score for the resolver.** It counts call
 names that hit more than one definition, so it moves when the *corpus* gains same-named symbols — and
@@ -1395,7 +1400,7 @@ behind `--mentions`; Office and PDF join them through an optional bridge.
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 18 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 23 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 
