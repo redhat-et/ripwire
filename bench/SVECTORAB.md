@@ -68,15 +68,17 @@ Same binaries, `-DRIPWIRE_PROFILE=ON`, 11 interleaved reps, reading only the
 `buildGraph: resolve refs + build CSR` scope. The **A/A noise floor** is `rw` against its own
 split-half samples at the same cardinality; nothing below it is a result.
 
-| arm | `src` (floor **6.1%**) | large corpus (floor **0.3%**) |
-| --- | --- | --- |
-| `std::vector` | 3.73 ms (+3.2%) | 26.97 ms (**+6.0%**) |
-| `ankerl::svector` | 3.54 ms (−1.8%) | 25.91 ms (**+1.9%**) |
-| `rw::svector` | 3.61 ms (—) | 25.44 ms (—) |
-| `rwx::svector16` | 3.62 ms (+0.2%) | 25.48 ms (+0.2%) |
+`src` was re-run at 41 reps specifically to tighten its floor from 6.1% to 1.9%, because the
+corpus-size comparison below turns on it.
 
-On `src` the floor is 6.1%, so **nothing on that corpus is a result**. On the large corpus the floor is
-0.3% and three things are. Restated against the 31.4 ms post-parse denominator:
+| arm | `src`, 41 reps (floor **1.9%**) | large corpus, 11 reps (floor **0.3%**) |
+| --- | --- | --- |
+| `std::vector` | 3.68 ms (**+3.5%**) | 26.97 ms (**+6.0%**) |
+| `ankerl::svector` | 3.55 ms (−0.2%, inside floor) | 25.91 ms (**+1.9%**) |
+| `rw::svector` | 3.55 ms (—) | 25.44 ms (—) |
+| `rwx::svector16` | 3.61 ms (+1.5%, inside floor) | 25.48 ms (+0.2%, inside floor) |
+
+Restated against the 31.4 ms post-parse denominator (large corpus):
 
 | arm | delta on `buildGraph` | in ms | **share of post-parse pipeline** | share of total runtime |
 | --- | --- | --- | --- | --- |
@@ -155,9 +157,44 @@ The two mechanisms stay separate in this report and should stay separate in the 
 (fewer dependent loads) and **contention** (fewer trips to a shared allocator) can each be present or
 absent on their own, and neither is evidence for the other.
 
-## 5. Is the workload memory-bound?
+## 5. Which MECHANISM is operating — the corpus-size arbitration
 
-**UNAVAILABLE by counter.** `prof::pmc` needs root on Apple (kperf) and this session had no
+Three mechanisms could produce a small-vector win, and they are separable by how the win *behaves*
+rather than by its size:
+
+| mechanism | signature | verdict here |
+| --- | --- | --- |
+| (a) allocator contention | win grows with thread count | **inapplicable** — the phase is single-threaded (§4) |
+| (b) cache locality | win grows with corpus size; shows in miss counters | **not observed; the sign is wrong** |
+| (c) the `size()` branch | win flat in both; shows in branch/instruction counts | **the only mechanism consistent with the data** |
+
+The prediction for (b) was explicit: if cache residency decides, the 16-byte arms should rank
+*relatively better* on the larger corpus, because that is the only regime where 8 bytes per instance
+can bind. **The opposite happened.**
+
+| | `src` (~9K symbols) | large corpus (~43K symbols) | direction |
+| --- | --- | --- | --- |
+| ankerl (16 B, branching) vs rw (24 B, branch-free) | −0.2% (tied, inside floor) | **+1.9% (measurably worse)** | ankerl gets **worse** as the corpus grows |
+| union (16 B, branch-free) vs rw (24 B, branch-free) | +1.5% (inside floor) | +0.2% (inside floor) | tied everywhere |
+
+Being 16 bytes bought **nothing** that grew with working-set size. The union arm — 16 bytes *and*
+branch-free — is indistinguishable from the 24-byte `rw` on both corpora, which is the cleanest
+possible isolation: hold the branch constant, vary only the size, and the difference disappears. Vary
+only the branch (ankerl vs union, both 16 B) and a difference appears on the larger corpus.
+
+This matches the hardware note rather than contradicting it: on a large-cache, 128-byte-line Apple
+part, more of the working set stays resident, so the locality advantage of being smaller does not bind
+and the branch is what is left. **On this machine, size is not the axis; the branch is** — and the
+branch is worth 1.9% of a phase that is 2.7% of a run.
+
+Honest limits on that conclusion: it is inferred from how the deltas *behave* across corpus size, not
+confirmed by branch-miss counters (see §6 — no root). And "the branch is the axis" is a statement about
+this hardware tier and these two corpus sizes; a smaller-cache machine or a much larger corpus could
+still put (b) back in play.
+
+## 6. Is the workload memory-bound?
+
+**UNAVAILABLE by counter.** This is the arm that would have CONFIRMED §5 rather than inferred it. `prof::pmc` needs root on Apple (kperf) and this session had no
 passwordless `sudo`, so IPC and MPKI were never armed. A measure that could not be evaluated is
 UNAVAILABLE, never "no difference" — re-run `sudo bench/bench_svector_wave.cpp` to fill this in.
 
@@ -176,15 +213,15 @@ consistently *behind*, and the union arm stays within ~2% of `rw`. At these size
 at the `size()` branch mattering more than the 8 bytes, i.e. **not** memory-bound in the regime tested.
 That is a weaker claim than a counter reading and is labelled as such.
 
-## 6. The decision rule
+## 7. The decision rule
 
 Keyed on what the measurement actually showed, not on what was expected.
 
 | situation | choose | why |
 | --- | --- | --- |
-| **Any conversion from `std::vector`** | any small-vector | ~6% of the affected phase, ~8% fewer allocations, ~7 MB lower peak. This is the wave's real payoff and all three arms deliver it. |
-| **Default for the conversion wave** | **`ankerl::svector`** | Within 2% of everything else on the real workload, 8 bytes smaller, avoids the most allocations, complete (25 ops), vendored, maintained, and already in the tree. |
-| **A genuinely hot branch-free `size()` poll** | `rw::svector` | Worth 1.9% of the affected phase. The survey found exactly one such site (`search_perFileSites`). |
+| **Any conversion from `std::vector`** | any small-vector | **+4.9% of post-parse pipeline time**, ~8% fewer allocations, ~7 MB lower peak. This is the wave's real payoff and all three arms deliver it equally. |
+| **Default for the conversion wave** | **`ankerl::svector`** | Costs 1.5% of post-parse against the best arm, is 8 bytes smaller, avoids the most allocations, and is complete (25 ops), vendored, maintained and already in the tree. |
+| **A genuinely hot branch-free `size()` poll on a LARGE corpus** | `rw::svector` | The branch is the only mechanism that survived §5, and it is worth 1.5% of post-parse — but only at ~43K symbols; at ~9K the two are tied. The survey found exactly one such site (`search_perFileSites`). |
 | **Over-aligned `T`, or a `T` with a side-effecting destructor** | `ankerl::svector` | ankerl `static_assert`s against over-aligned `T`; `rw::svector` ties element lifetime to buffer lifetime. Neither is a general container. |
 | **The two biggest structures (`symbolAdjacency`, `fileIncludes`)** | **CSR, not a small-vector** | 2.5–3× smaller than either svector. Do not spend the small-vector budget here. |
 
