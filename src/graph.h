@@ -4,22 +4,23 @@
 // resolved out-edges for serialization. Ranking lives in pagerank.cpp.
 
 #include "model.h"
-#include "filter.h"             // isTestPath — for the Q2 tested= post-pass
-#include "lintrules.h"          // §P9.4: langOfPath / dependencyCapable — the file-language classification
-                                // restrictDependencyHealth() needs (owns the extension table, kept in sync
-                                // by hand with ingest.cpp's kLangTable per its own header comment)
-#include "sparseCsr.h"          // first-party infra math (src/infra/)
-#include "csrverify.h"          // structural gate, VERIFY'd after every production CSR build
-#include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
-#include "svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
-#include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
-#include "scipoverlay.h"        // SCIP precision overlay (data struct only; parser lives in scip.h)
-#include "sortutil.h"           // radix edge sorting for large integer-key graph edge lists
-#include "profileScope.h"       // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "filter.h"              // isTestPath — for the Q2 tested= post-pass
+#include "lintrules.h"           // §P9.4: langOfPath / dependencyCapable — the file-language classification
+                                 // restrictDependencyHealth() needs (owns the extension table, kept in sync
+                                 // by hand with ingest.cpp's kLangTable per its own header comment)
+#include "infra/sparseCsr.h"     // first-party infra math (src/infra/)
+#include "infra/csrverify.h"     // structural gate, VERIFY'd after every production CSR build
+#include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
+#include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
+#include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
+#include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
+#include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <span>          // std::span — transitiveCallers' seed seam takes any contiguous NodeId range
 #include <string>
 #include <string_view>
 #include <vector>
@@ -573,8 +574,8 @@ inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
 // tries the canonical scope::name map on its LAST TWO segments first (Symbol::scope is a final segment),
 // then degrades to the bare final segment against byName. `key` is the caller's reused buffer. The caller
 // applies its own lang/root/kind filters to the returned ids.
-inline const rw::svector<NodeId, 2>* fnBindTargetIds( const HashMap<std::string, rw::svector<NodeId, 2>>& canonByName,
-                                                      const HashMap<std::string, rw::svector<NodeId, 2>>& byName,
+inline const rw::SmallVec<NodeId, 2>* fnBindTargetIds( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName,
+                                                      const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
                                                       std::string_view target, std::string& key )
 {
     std::string_view nameSeg = target;
@@ -674,7 +675,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // inline (no per-name malloc) and size() is branch-free — the measured-best value type for this
     // write-once (here) / read-hot (resolve below) shape (see bench/bench_svector3.cpp). Iterates in
     // insertion order exactly like std::vector, so the resolved graph — and the output — is unchanged.
-    HashMap<std::string, rw::svector<NodeId, 2>> byName;
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
     byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
     for( const Symbol& s : ing.symbols )
     {
@@ -706,7 +707,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            rw::svector<NodeId, 2> defs;
+            rw::SmallVec<NodeId, 2> defs;
             for( NodeId id : ids )
             {
                 if( hasBody( id ) )
@@ -740,7 +741,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            rw::svector<NodeId, 2> kept;
+            rw::SmallVec<NodeId, 2> kept;
             for( NodeId id : ids )
             {
                 if( hasBody( id ) || !rootHasDef( ing.fileRoot[ing.symbols[id].fileId] ) )
@@ -756,7 +757,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph
     // ambiguity. Definitions only (body present); the obj.method()/unqualified halves stay bare-name (and
     // keep their honest `amb`). C++ only (scope is populated for Lang::Cpp).
-    HashMap<std::string, rw::svector<NodeId, 2>> canonByName;
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> canonByName;
     canonByName.reserve( N );
     std::string canonKey;
     for( const Symbol& s : ing.symbols )
@@ -832,14 +833,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // same-language local def ALWAYS wins (control-safe). All maps stay EMPTY on any binding-free corpus, so
     // the resolved graph — and the output — is byte-identical there. Targets are filtered to C-family defs
     // (the bound side is always C/C++). Deterministic: ing.bindingAliases is in a fixed total order.
-    HashMap<std::string, std::vector<NodeId>> pybindAlias;    // Python-visible name → C/C++ def ids
-    HashMap<std::string, std::vector<NodeId>> externCAlias;   // extern-C symbol name  → C/C++ def ids
-    HashMap<std::string, char>                ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
+    // N=2 is free (see byName above: rw::svector<NodeId,1> and <NodeId,2> are both 16 B) and covers every
+    // alias on both census corpora — measured max list length 1 and 2. An FFI alias naming three or more
+    // C-family defs would be a genuinely ambiguous binding, not the common case.
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> pybindAlias;    // Python-visible name → C/C++ def ids
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> externCAlias;   // extern-C symbol name  → C/C++ def ids
+    HashMap<std::string, char>                    ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
     if( !ing.bindingAliases.empty() )
     {
         std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
         std::vector<NodeId> tgt;
-        const auto pushCFamily = [ & ]( const rw::svector<NodeId, 2>& srcIds )
+        const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
         {
             for( NodeId c : srcIds )
             {
@@ -879,11 +883,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue; // target not an in-repo C/C++ def → no alias edge
             }
-            std::vector<NodeId>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
-                                                                        : externCAlias[ ba.aliasName ];
+            rw::SmallVec<NodeId, 2>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
+                                                                            : externCAlias[ ba.aliasName ];
             slot.insert( slot.end(), tgt.begin(), tgt.end() );
         }
-        const auto dedup = [ & ]( HashMap<std::string, std::vector<NodeId>>& m )
+        const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
         {
             for( auto& [ k, v ] : m ) { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
         };
@@ -2771,7 +2775,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // (includer → included). Shared by --deps, --arch, cycle detection, the Lakos health metrics, gitmine
 // and ccjson. PATH-PRECISE (not basename): each quote `#include "x.h"` is resolved LEXICALLY relative to
 // the includer (resolve.h::resolvePreciseInclude), so a cross-directory basename collision (this repo's
-// two svector.h: src/ vs third_party/) can no longer manufacture a WRONG file→file edge — it was
+// two svector.h: src/infra/ vs third_party/) can no longer manufacture a WRONG file→file edge — it was
 // the last silent-wrong-edge surface (the call-graph SameInclude tier already resolves precisely, see
 // buildGraph's fileIncludes). An angle `<x.h>` or any unresolvable/ambiguous include contributes NOTHING
 // (dropped, never basename-matched) — monotone: precise resolution can only REMOVE or REDIRECT a wrong
@@ -3027,7 +3031,9 @@ inline std::vector<NodeId> shortestPath( const Graph& g, NodeId src, NodeId dst 
 // ---- transitive reverse-reachability: every symbol that (transitively, via in-edges) reaches a seed — the
 //      blast radius. Deterministic (in-edges are id-sorted; result sorted). Excludes the seeds themselves.
 //      Powers --impact (one seed symbol) and --affected (all symbols in the changed files). -------------
-inline std::vector<NodeId> transitiveCallers( const Graph& g, const std::vector<NodeId>& seeds )
+// A SPAN at the seam (CONTRIBUTING §3): the seed list arrives as a std::vector from --impact/--affected and
+// as a per-file rw::SmallVec bucket from --pr-context. Both are contiguous; neither is copied.
+inline std::vector<NodeId> transitiveCallers( const Graph& g, std::span<const NodeId> seeds )
 {
     const std::size_t   N = g.wOutDeg.size();
     std::vector<char>   seen( N, 0 );

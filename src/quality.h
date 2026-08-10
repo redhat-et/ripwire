@@ -16,35 +16,35 @@
 // use-after-move / taint / type errors to the compiler. Thresholds are heuristics; the loop applies judgment.
 
 #include "model.h"
-#include "ingest.h"          // ingest() — the HEAD-tree snapshot re-ingests the archived commit (computeHeadSnapshot)
+#include "ingest.h"             // ingest() — the HEAD-tree snapshot re-ingests the archived commit (computeHeadSnapshot)
 #include "graph.h"
 #include "clones.h"
-#include "lintrules.h"       // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
-#include "arch.h"            // fnv1a64
-#include "gitmine.h"         // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
-#include "filter.h"          // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
-#include "Diagnostics.h"     // DEGRADED_PATH_ALERT — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
+#include "lintrules.h"          // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
+#include "arch.h"               // fnv1a64
+#include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
+#include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
 
-#include "btree.hpp"         // gtl btree_map — sorted like std::map, cache-friendly nodes (house rule: never std::map)
-#include "dynamic_map.hpp"   // S+tree scratch maps — bounded, no per-operation allocation in hot seen-set paths
+#include "btree.hpp"              // gtl btree_map — sorted like std::map, cache-friendly nodes (house rule: never std::map)
+#include "infra/dynamic_map.hpp"  // S+tree scratch maps — bounded, no per-operation allocation in hot seen-set paths
 
-#include <sys/stat.h>        // ::mkdir — the per-user cache-dir ladder (cacheDirLadder)
-#include <unistd.h>          // ::getpid — unique HEAD-snapshot temp-dir suffix
+#include <sys/stat.h>  // ::mkdir — the per-user cache-dir ladder (cacheDirLadder)
+#include <unistd.h>    // ::getpid — unique HEAD-snapshot temp-dir suffix
 
 #include <algorithm>
-#include <atomic>            // Phase-M: the qsnap tmp-name sequence counter (atomicWriteQSnap); also the A5 process-once cache-sweep guard
-#include <cctype>            // std::isxdigit/std::isdigit — B10.2d churn-blame porcelain parsing
-#include <chrono>            // A5: the 30-day cache-blob age cutoff (evictOldCacheFamily)
+#include <atomic>       // Phase-M: the qsnap tmp-name sequence counter (atomicWriteQSnap); also the A5 process-once cache-sweep guard
+#include <cctype>       // std::isxdigit/std::isdigit — B10.2d churn-blame porcelain parsing
+#include <chrono>       // A5: the 30-day cache-blob age cutoff (evictOldCacheFamily)
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>           // std::memcpy / std::memcmp — POD (de)serialization of the qsnap blob
+#include <cstring>      // std::memcpy / std::memcmp — POD (de)serialization of the qsnap blob
 #include <filesystem>
 #include <fstream>
-#include <limits>            // std::numeric_limits<std::size_t>::max() — "no count cap" sentinel (evictOldCacheFamily)
-#include <mutex>             // Phase-M: serialize concurrent ingest() (prefetch worker vs request thread)
+#include <limits>       // std::numeric_limits<std::size_t>::max() — "no count cap" sentinel (evictOldCacheFamily)
+#include <mutex>        // Phase-M: serialize concurrent ingest() (prefetch worker vs request thread)
 #include <sstream>
 #include <string>
-#include <type_traits>       // std::is_trivially_copyable_v — the qsnap POD put/get static_assert
+#include <type_traits>  // std::is_trivially_copyable_v — the qsnap POD put/get static_assert
 #include <utility>
 #include <vector>
 
@@ -305,16 +305,9 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
         return counts;
     }
 
-    // per-file symbol id list (only real-body defs can enclose a masking block).
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( NodeId i = 0; i < ing.symbols.size(); ++i )
-    {
-        const Symbol& s = ing.symbols[i];
-        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte )
-        {
-            byFile[s.fileId].push_back( i );
-        }
-    }
+    // per-file symbol id list (only real-body defs can enclose a masking block). `symbols[i].id == i`, so
+    // the shared bucket-and-sort's `s.id` is the same value the hand-written loop pushed as `i`.
+    const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
     for( const ErrorMaskHit& h : hits )
     {
         if( h.fileId >= byFile.size() )
@@ -357,16 +350,8 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
 inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root,
                                                                      bool pathQualified = false )
 {
-    // per-file def ids with a real body.
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( NodeId i = 0; i < ing.symbols.size(); ++i )
-    {
-        const Symbol& s = ing.symbols[i];
-        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte )
-        {
-            byFile[s.fileId].push_back( i );
-        }
-    }
+    // per-file def ids with a real body (see errorMaskCountsBySym above on `symbols[i].id == i`).
+    const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
     gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // canonId hash → its symbols' raw-body hashes
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )

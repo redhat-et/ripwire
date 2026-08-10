@@ -383,7 +383,7 @@ struct node_rank<double, B, void>
 #if defined(__SSE4_2__)
 
 // 64-bit-lane integer keys need _mm_cmpgt_epi64 (SSE4.2). Below x86-64-v2 these stay on the scalar
-// template -- build with -march=x86-64-v2 (or RIPWIRE_NATIVE=ON) to light them up; the production
+// template -- build with -march=x86-64-v2 (or your build's native-arch option) to light them up; the production
 // instantiation (quality.h ScratchMap, uint64_t keys) is the one that benefits. Only > exists, so
 // lt counts x > k and le counts B minus (k > x).
 #define DYNMAP_DEFINE_RANK_SSE_I64(KEY, BIAS)                                  \

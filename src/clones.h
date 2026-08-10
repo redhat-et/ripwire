@@ -7,8 +7,8 @@
 // it, don't reimplement" (and "if you fix this, fix its twins"). Type-3 (gapped) clones are a later upgrade.
 
 #include "model.h"
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on the Type-3 pair-cap guard (never throw)
-#include "hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade on the Type-3 pair-cap guard (never throw)
+#include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>
 #include <array>
@@ -318,17 +318,16 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     // most-vexing-parse phantoms — block-scope `Type name(args);` variable decls the grammar shapes like a
     // function declarator (they have no body, so sigEndByte==endByte). We compare the BODY, so
     // same-implementation / different-name still matches.
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size() && s.endByte > s.sigEndByte )
-        {
-            byFile[ s.fileId ].push_back( s.id );
-        }
-    }
+    const SymbolsByFile byFile = symbolsByFileInIdOrder(
+        ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
 
-    HashMap<std::string, std::vector<NodeId>> groups;   // normalized body → member symbol ids
-    HashMap<NodeId, std::uint32_t>            tok;       // symbol → token count (for ranking)
+    // normalized body → member symbol ids. N=2 is FREE: rw::svector<NodeId,1> and <NodeId,2> are both 16 B
+    // (the union's inline array can never be smaller than the heap pointer it shares storage with), so the
+    // second slot costs nothing and lifts inline coverage from 97.8%/94.9% to 99.5%/98.8% across the two
+    // census corpora. Almost every distinct body is unique — the whole point of the pass is that the rare
+    // key with ≥2 members is a clone — so this replaces ~2.4K/7.2K one-element heap blocks with none.
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> groups;
+    HashMap<NodeId, std::uint32_t>                tok;   // symbol → token count (for ranking)
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
@@ -379,7 +378,10 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     {
         if( members.size() >= 2 )
         {
-            out.push_back( { members, tok[members[0]] } );
+            // CloneGroup::members stays a std::vector — it is the RETURNED type, read by four verbs and by
+            // quality.h, and it is materialized only for the ≥2-member groups (2.2%/1.1% of keys), so the
+            // one allocation per emitted group is not what this conversion was about.
+            out.push_back( { std::vector<NodeId>( members.begin(), members.end() ), tok[members[0]] } );
         }
     }
     std::sort( out.begin(), out.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) { // biggest clones first; stable tiebreak by first member's file:line
@@ -601,14 +603,8 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     Type3Stats st;
 
     // per-file candidate ids: same body-region gate as findClones (real body, function/method).
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size() && s.endByte > s.sigEndByte )
-        {
-            byFile[ s.fileId ].push_back( s.id );
-        }
-    }
+    const SymbolsByFile byFile = symbolsByFileInIdOrder(
+        ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
 
     // Candidate = one representative per DISTINCT normalized stream (exact dups are Type-1/2, excluded here).
     // A4-P2: token streams are interned to u32 ids (one repo-wide HashMap) so the LCS DP and the k-gram
@@ -728,7 +724,19 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
 
     // Bucket candidates by fingerprint hash → candidate indices sharing a k-gram. Only intra-bucket pairs are
     // ever compared, so a pair with ZERO shared k-grams is never touched (the O(N²) escape hatch).
-    HashMap<std::uint64_t, std::vector<std::uint32_t>> buckets;
+    //
+    // N=4, and the census' N=8 OVERSHOOTS — this is the one place in the wave where more inline slots make
+    // total memory WORSE, because the payload is concentrated in a handful of huge buckets (max 1 423/2 986)
+    // while the COUNT is dominated by tiny ones. Coverage by N over the two census corpora:
+    //     N :   1     2     4     8    16          instance bytes: 16 16 24 40 72
+    //   here: 48.3  63.6  76.1  84.8  90.8
+    //   cr48: 39.9  55.0  68.1  78.6  86.6
+    // Marginal coverage per byte is 1.57/1.64 going 2→4 and 0.54/0.66 going 4→8 — a 2.6-2.9x cliff, the
+    // knee. Above it the header array grows faster than the heap blocks it saves: at 53 127 buckets, N=8
+    // adds 850 KB of inline slots to spare ~225 KB of heap, so total footprint is ~5.1 MB against N=4's
+    // ~4.5 MB (std::vector today: ~5.3 MB). N=4 is also exactly the 24 bytes a std::vector header already
+    // costs, so the array itself does not grow at all and two thirds of the heap blocks simply stop.
+    HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>> buckets;
     for( std::uint32_t ci = 0; ci < cands.size(); ++ci )
     {
         for( std::uint64_t g : cands[ci].fp )

@@ -43,10 +43,10 @@
 // (out-of-order lines from a hand edit or an older-revision merge, CRLF from a Windows checkout, blank/comment
 // lines) and self-heals to canonical order on the next write; a malformed line degrades+skips, never throws.
 
-#include "model.h"         // HashMap<> — the flat, cache-friendly lookup index (never std::unordered_map)
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — the degrade path for a malformed line / unwritable file
-#include "arch.h"          // D5: relForHash — the SAME lexical, no-I/O root-relative strip the baseline sidecars use
-#include "blanktext.h"     // §S3: rw::hasVisibleContent — the ONE "present but carries nothing" predicate
+#include "model.h"              // HashMap<> — the flat, cache-friendly lookup index (never std::unordered_map)
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the degrade path for a malformed line / unwritable file
+#include "arch.h"               // D5: relForHash — the SAME lexical, no-I/O root-relative strip the baseline sidecars use
+#include "infra/blanktext.h"    // §S3: rw::hasVisibleContent — the ONE "present but carries nothing" predicate
 
 #include <algorithm>
 #include <array>
@@ -149,7 +149,7 @@ inline std::string sanitizeField( std::string_view s )
 // BLANK, a bidi RLO, and a raw VT (0x0B) written verbatim into a text file this tool tells users to commit
 // and merge. Same equivalence class the MCP edit verbs' §H2/ITEM A ruling already closed, one file over.
 //
-// So the verdict comes from `rw::hasVisibleContent` — the ONE derived predicate (src/blanktext.h), which
+// So the verdict comes from `rw::hasVisibleContent` — the ONE derived predicate (src/infra/blanktext.h), which
 // mcp.h's edit payloads read too — and it is returned TOGETHER with the sanitized text rather than left for
 // the caller to ask separately. A caller cannot sanitize a note field without being handed the answer to
 // "is there anything in it", which is exactly the step the old two-call shape let a call site skip.

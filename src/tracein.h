@@ -23,7 +23,7 @@
 //   * NEVER FABRICATES — a line that does not match any shape yields no frame (empty input → zero frames →
 //     the handler refuses loudly rather than emitting an empty map).
 
-#include "Diagnostics.h"   // VERIFY — the frames-seen tally's own invariant (§B10)
+#include "infra/Diagnostics.h"   // VERIFY — the frames-seen tally's own invariant (§B10)
 
 #include <cstdint>
 #include <optional>

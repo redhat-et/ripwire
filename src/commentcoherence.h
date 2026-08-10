@@ -52,12 +52,12 @@
 // definition) and, after stopword-dropping and deduplication, "the comment's TERM SET" (cic's LHS).
 
 #include "model.h"
-#include "clones.h"        // scanCodeTokens, usesHashLineComments — the identifier scan over a definition's span
-#include "naminglens.h"    // splitIdentifier, editDistanceCapped, toLowerAscii — the shared name/word substrate
-#include "docparse.h"      // docparse::detail::readWholeFile — the canonical whole-file byte read
-#include "serialize.h"     // docCommentBefore (L2 extractor) + escapeXml
-#include "pageview.h"      // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — an unreadable file degrades the scan, never aborts it
+#include "clones.h"             // scanCodeTokens, usesHashLineComments — the identifier scan over a definition's span
+#include "naminglens.h"         // splitIdentifier, editDistanceCapped, toLowerAscii — the shared name/word substrate
+#include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read
+#include "serialize.h"          // docCommentBefore (L2 extractor) + escapeXml
+#include "pageview.h"           // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — an unreadable file degrades the scan, never aborts it
 
 #include <algorithm>
 #include <cstdint>

@@ -7,7 +7,7 @@
 //      all-sentinel, sentinel-padded prefixes, sign-boundary values (the unsigned-bias trick's failure
 //      site), and a fixed-seed random sweep (mt19937_64 raw output — standardized, so a failure report
 //      reproduces bit-identically on any platform).
-//   B  rw::FixedStr (src/fixedStr.h) — 32-byte branchless equality vs a bytewise len+data reference,
+//   B  rw::FixedStr (src/infra/fixedStr.h) — 32-byte branchless equality vs a bytewise len+data reference,
 //      the zero-pad construction invariant, len-byte participation, truncation semantics at CAP, and
 //      a==b => hash(a)==hash(b) over the full case-set cross product.
 //
@@ -18,9 +18,9 @@
 //
 // Exit 0 = all pass; nonzero = failure (per-arm PASS/FAIL lines on stdout, first mismatch detailed).
 
-#include "dynamic_map.hpp"
+#include "infra/dynamic_map.hpp"
 
-#include "../src/fixedStr.h"
+#include "../src/infra/fixedStr.h"
 
 #include <algorithm>
 #include <cstdarg>

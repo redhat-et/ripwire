@@ -1,6 +1,6 @@
 #pragma once
 
-#include "sparseCsr.h"
+#include "infra/sparseCsr.h"
 
 #include <cstdint>
 #include <span>

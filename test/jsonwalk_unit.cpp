@@ -21,7 +21,7 @@
 
 #include "mcpjson.h"     // rw::mcpdetail::stringEnd  — the live (forwarding) implementation
 #include "eval.h"        // rw::minedjson::skipString — the live (forwarding) implementation
-#include "jsonesc.h"     // rw::jsonStringEnd         — the shared core
+#include "infra/jsonesc.h"     // rw::jsonStringEnd         — the shared core
 
 #include <cstdio>
 #include <string>

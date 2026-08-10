@@ -17,8 +17,8 @@
 #include "mcpverbs.h"      // the read/flagship verb builders runMcp dispatches to (pulls mcpindex.h → mcpjson.h)
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
 
-#include "stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
-#include "blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
+#include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
+#include "infra/blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
 
 #include <cstdio>          // stdin / std::fputs — the stdio request loop
 #include <iostream>        // no longer used HERE (R4 retired the std::cin getline) — kept because downstream
@@ -244,17 +244,17 @@ inline bool mcpPathInsideRoot( const std::string& canonRoot, const std::string& 
 // payload of spaces, and a client that reached `U+0000` for a definition has the same unset-argument bug.
 // (A NUL *inside* real content is untouched — the rule is about payloads that are ENTIRELY invisible, never
 // about individual bytes. This comment SPELLS the character rather than containing one; see the F3 note in
-// src/blanktext.h for what the literal byte cost.)
+// src/infra/blanktext.h for what the literal byte cost.)
 //
 // An INVALID UTF-8 byte counts as CONTENT, and so does an unassigned (Cn) code point: garbage bytes are a
 // different problem with a different fix, and silently widening a write refusal to cover them would blame this
 // field. The asymmetry is deliberate and it has a direction — over-refusing costs a rejected write the caller
 // sees in a named refusal and can retry; under-refusing DELETES a definition and reports success.
 //
-// ── WAVE-1 VERIFIER (F2, MED) + (F3, MED) — MOVED to src/blanktext.h ─────────────────────────────────────
+// ── WAVE-1 VERIFIER (F2, MED) + (F3, MED) — MOVED to src/infra/blanktext.h ─────────────────────────────────────
 //
 // The derived blank-code-point TABLE, the two UTF-8 walks over it (hasVisibleContent / blankPayloadSpelling)
-// and the two verifier findings that shaped them now live in **src/blanktext.h**, included at the top of this
+// and the two verifier findings that shaped them now live in **src/infra/blanktext.h**, included at the top of this
 // file. §S3 (capture-audit-4) found `--note-add` answering the SAME "present but carries nothing" question
 // with a THIRD, weaker predicate, so the rule was hoisted out of this MCP server rather than copied again.
 // The ruling ABOVE and the SCOPE below are MCP's and stay here; the table is text machinery and is not.

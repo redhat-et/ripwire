@@ -106,11 +106,11 @@
 
 #include "model.h"
 #include "graph.h"
-#include "layout.h"       // the offset model + ModelCtx/modelDef/findDefBody — reused verbatim, not re-derived
-#include "serialize.h"    // escapeXml
-#include "mention.h"      // isIdentChar
-#include "accessshape.h"  // Phase A — access-shape classification, consumed report-only (see addendum above)
-#include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "layout.h"             // the offset model + ModelCtx/modelDef/findDefBody — reused verbatim, not re-derived
+#include "serialize.h"          // escapeXml
+#include "mention.h"            // isIdentChar
+#include "accessshape.h"        // Phase A — access-shape classification, consumed report-only (see addendum above)
+#include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

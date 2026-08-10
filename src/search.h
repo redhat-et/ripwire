@@ -19,9 +19,9 @@
 // The real agent-value over raw grep is unchanged and is not the index: it is CODE-AWARENESS — every hit
 // carries its enclosing symbol chain, its matched line, and optional context lines.
 
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade when regex matching throws mid-scan (never terminate)
-#include "docparse.h"      // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
-#include "filter.h"        // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade when regex matching throws mid-scan (never terminate)
+#include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
+#include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "model.h"
 
 #include <algorithm>
@@ -1488,21 +1488,12 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
     {
         fileHasHits[h.fileId] = 1;
     }
-    std::vector<std::vector<NodeId>> fileSyms( fileCount );                  // per file, sorted by sigStartByte
-    for( const Symbol& s : ing.symbols )
-    {
-        if( s.fileId < fileCount && fileHasHits[s.fileId] )
-        {
-            fileSyms[s.fileId].push_back( s.id );
-        }
-    }
-    for( std::uint32_t f = 0; f < fileCount; ++f )
-    {
-        if( fileHasHits[f] )
-        {
-            std::sort( fileSyms[f].begin(), fileSyms[f].end(), [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-        }
-    }
+    // model.h::symbolsByFile — same filter, same comparator. It sorts every bucket rather than only the
+    // hit files' buckets; the others are empty, so that is a no-op with the same result.
+    const SymbolsByFile fileSyms = symbolsByFile(                             // per file, sorted by sigStartByte
+        ing,
+        [ & ]( const Symbol& s ) { return s.fileId < fileCount && fileHasHits[s.fileId]; },
+        [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
     const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
     {
         const Symbol* best = nullptr;

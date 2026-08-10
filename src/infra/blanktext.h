@@ -8,7 +8,7 @@
 // question was being answered a THIRD time, differently, one file over: `--note-add` decided it with
 // notes::sanitizeField (which maps only \t \n \r to space and trims ASCII spaces) plus `.empty()`, so an
 // ASCII-blank note was refused while NBSP, ZWSP, BOM, U+2800 BRAILLE PATTERN BLANK, a bidi RLO and a raw
-// VT (0x0B) were all ACCEPTED and committed straight into `.ripwire_notes` — a text file the tool tells
+// VT (0x0B) were all ACCEPTED and committed straight into the notes file — a text file the tool tells
 // users to commit. Six of six blank classes through.
 //
 // The fix for a duplicated rule is not a third copy of it, so the table and the two walks moved HERE, where
@@ -16,7 +16,7 @@
 // now read the SAME table: the surface a fourth caller joins is this header, and the derivation script that
 // re-derives the table (test/derive_blankcodepoints.py) reads this file.
 //
-// It carries no ripwire index/graph dependency on purpose — jsonesc.h (utf8SeqLen) is the whole of it — so
+// It carries no index/graph dependency on purpose — jsonesc.h (utf8SeqLen) is the whole of it — so
 // it stays includable from any layer, which is the property that let it be duplicated in the first place.
 
 #include "jsonesc.h"       // utf8SeqLen — fully validating, the decoder both walks below are built on

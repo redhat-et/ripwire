@@ -593,7 +593,7 @@ echo "=== (J) ITEM A — a WHITESPACE-ONLY payload is the same unset argument as
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # The §H2 ruling ("an omitted payload and new_body:\"\" are the same refusal") was pinned as !empty(), so
 # anything of size >= 1 passed it and a whitespace-only payload still DELETED the definition and reported
-# {"applied":…}. The ruling's real class is "a payload that carries no definition" — see src/blanktext.h's
+# {"applied":…}. The ruling's real class is "a payload that carries no definition" — see src/infra/blanktext.h's
 # isMcpEditVerb header for the derived rule and why the read verbs' strings are NOT widened.
 #
 # Every case asserts THREE things at once: the verdict, the DEFINITION still being on disk, and the refusal
@@ -740,10 +740,10 @@ echo "=== (K) F2 — the DERIVED blank-code-point table, probed at every range B
 # WHY THIS ARM EXISTS. (J) above is a list a human wrote, and F2 is the finding that a human-written list of
 # this set is wrong by construction: the shipped 23-entry table carried U+200B/200C/200D and U+2060 and missed
 # their block siblings U+200E/200F, and stopped at 0x7F so every C1 control counted as a definition. So the
-# implementation is now a DERIVED range table (src/blanktext.h kBlankRanges, Unicode 16.0.0, re-derivable with
+# implementation is now a DERIVED range table (src/infra/blanktext.h kBlankRanges, Unicode 16.0.0, re-derivable with
 # test/derive_blankcodepoints.py) and this arm probes THAT TABLE rather than restating it:
 #
-#   the rows are PARSED OUT OF src/blanktext.h, and for every range { lo, hi } the four bytes that matter are
+#   the rows are PARSED OUT OF src/infra/blanktext.h, and for every range { lo, hi } the four bytes that matter are
 #   exercised — lo, hi (must REFUSE) and lo-1, hi+1 (must APPLY). A range table breaks at its edges: an
 #   off-by-one in a `lo` silently un-refuses one code point, and no class-based arm would ever notice.
 #
@@ -774,7 +774,7 @@ python3 "$ROOT/test/derive_blankcodepoints.py" --check >"$TMP/derive.log" 2>&1
 case $? in
     0) ok "(K0) $( tail -1 "$TMP/derive.log" )";;
     2) printf '  INFO  (K0) %s\n' "$( tail -2 "$TMP/derive.log" | tr '\n' ' ' )";;
-    *) no "(K0) src/blanktext.h kBlankRanges no longer matches test/derive_blankcodepoints.py: $( tail -4 "$TMP/derive.log" | tr '\n' ' ' )";;
+    *) no "(K0) src/infra/blanktext.h kBlankRanges no longer matches test/derive_blankcodepoints.py: $( tail -4 "$TMP/derive.log" | tr '\n' ' ' )";;
 esac
 
 python3 - "$BIN" "$ROOT" <<'PY'
@@ -803,8 +803,8 @@ def parseBlankRanges( headerPath ):
     return [ ( int( lo, 16 ), int( hi, 16 ) )
              for lo, hi in re.findall( r"\{\s*0x([0-9A-Fa-f]+)\s*,\s*0x([0-9A-Fa-f]+)\s*\}", body ) ]
 
-ranges = parseBlankRanges( os.path.join( ROOT, "src", "blanktext.h" ) )
-check( len( ranges ) > 0, "(K) kBlankRanges parsed out of src/blanktext.h (%d ranges)" % len( ranges ) )
+ranges = parseBlankRanges( os.path.join( ROOT, "src", "infra", "blanktext.h" ) )
+check( len( ranges ) > 0, "(K) kBlankRanges parsed out of src/infra/blanktext.h (%d ranges)" % len( ranges ) )
 if not ranges:
     print( "  FAIL  (K) cannot probe a table this gate cannot find — is hasVisibleContent still table-driven?" )
     sys.exit( 1 )

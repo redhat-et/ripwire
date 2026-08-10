@@ -83,7 +83,7 @@ corpus (937 files, cold, `-DRIPWIRE_PROFILE=ON`, aggregated across 19 threads):
 Two consequences, and both are load-bearing:
 
 1. **PageRank and the sort/rank layer are not hot.** PageRank is *one millisecond*. Every remark in
-   `src/pagerank.cpp`, `src/sortutil.h` and `src/infra/radixSort.inl` is therefore dismissed on
+   `src/pagerank.cpp`, `src/infra/sortutil.h` and `src/infra/radixSort.inl` is therefore dismissed on
    arithmetic before it is read: a 20% win on a 1 ms phase is 0.2 ms of a 160 ms run. This is exactly
    the finding `bench/PROFILE.md` has carried since 2026: *the ranking is the cheap part; parsing is
    the tax.*
@@ -239,7 +239,7 @@ absent. The `.profdata` is deliberately **not committed**: a stale committed pro
 
 Reported because a triage that only lists wins is not a triage.
 
-**D1 — every remark in `src/pagerank.cpp`, `src/sortutil.h`, `src/infra/radixSort.inl`.**
+**D1 — every remark in `src/pagerank.cpp`, `src/infra/sortutil.h`, `src/infra/radixSort.inl`.**
 `VectorizationNotBeneficial` on the CSR gather (`pagerank.cpp:96`), `LoadWithLoopInvariantAddress-
 Invalidated` on the teleport scale (`:92`, `:100`), `LoadClobbered … in favor of store` on the radix
 histogram increments (`radixSort.inl:411-413`). The histogram one is even *real* and has a textbook

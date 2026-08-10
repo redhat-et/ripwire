@@ -108,7 +108,7 @@ if command -v "$CXX" >/dev/null 2>&1; then
     cat > "$UTU" <<'EOF'
 #include "ccjson.h"
 #include "serialize.h"
-#include "jsonesc.h"
+#include "infra/jsonesc.h"
 #include <cassert>
 #include <cstdio>
 #include <string>

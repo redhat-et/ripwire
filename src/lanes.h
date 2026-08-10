@@ -80,15 +80,15 @@
 
 #include "model.h"
 #include "graph.h"
-#include "partition.h"    // planPartition / measureOverlap / groupKeyFor / kMinPartitions..kMaxPartitions
-#include "mergescout.h"   // Arm / ChangedSym / computeOverlaps / landingOrder — the conflict + order machinery
-#include "situ.h"         // computeTestGateForSymbols / testSeedForwardReach
-#include "notes.h"        // NoteIndex — the field-notes surfacing lookup
-#include "gitstamp.h"     // stampAt — the at="<sha>[+dirty]" root anchor
-#include "resolve.h"      // canonicalId
-#include "arch.h"         // relForHash / fnv1a64
-#include "serialize.h"    // jsonStr
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "partition.h"          // planPartition / measureOverlap / groupKeyFor / kMinPartitions..kMaxPartitions
+#include "mergescout.h"         // Arm / ChangedSym / computeOverlaps / landingOrder — the conflict + order machinery
+#include "situ.h"               // computeTestGateForSymbols / testSeedForwardReach
+#include "notes.h"              // NoteIndex — the field-notes surfacing lookup
+#include "gitstamp.h"           // stampAt — the at="<sha>[+dirty]" root anchor
+#include "resolve.h"            // canonicalId
+#include "arch.h"               // relForHash / fnv1a64
+#include "serialize.h"          // jsonStr
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

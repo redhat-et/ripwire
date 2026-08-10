@@ -47,10 +47,13 @@ else
   printf '%s\n' "$walkFiles" | sed 's/^/        /'
 fi
 
-if grep -q 'inline std::size_t jsonStringEnd' "$ROOT/src/jsonesc.h"; then
+JSONESC="$ROOT/src/infra/jsonesc.h"
+if [ ! -f "$JSONESC" ]; then
+  no "src/infra/jsonesc.h is missing — repoint this gate (it cannot assert where the walk is homed if it cannot read the file)"
+elif grep -q 'inline std::size_t jsonStringEnd' "$JSONESC"; then
   ok "rw::jsonStringEnd is homed in jsonesc.h"
 else
-  no "rw::jsonStringEnd missing from src/jsonesc.h"
+  no "rw::jsonStringEnd missing from src/infra/jsonesc.h"
 fi
 
 if grep -A3 'inline std::size_t stringEnd' "$ROOT/src/mcpjson.h" | grep -q 'return jsonStringEnd'; then

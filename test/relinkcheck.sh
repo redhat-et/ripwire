@@ -286,19 +286,32 @@ SRCCOPY="$TMP/srccopy"
 mkdir -p "$SRCCOPY"
 cp -R "$ROOT/src" "$SRCCOPY/src"
 
-# src-arm mutations operate on a stable, low-risk real file (src/hashutil.h is tiny + self-contained).
-srcmut_bodyedit()  { printf '\n// relinkcheck body-edit marker (comment only)\n' >> "$1/src/hashutil.h"; }
-srcmut_newdef()    { printf '\nnamespace hashutil { inline unsigned relinkProbe( unsigned x ) { return x * 2654435761u; } }\n' >> "$1/src/hashutil.h"; }
-srcmut_rename()    { # rename a real symbol in a small file, exercising a cross-file dissolve/reform
-    # csrverify.h is tiny; rename its guard-free helper by editing a copy safely via sed on the copy.
-    if [ -f "$1/src/fixedStr.h" ]; then
-        sed -i.bak 's/fixedStr/fixedStrRenamed/g' "$1/src/fixedStr.h" 2>/dev/null && rm -f "$1/src/fixedStr.h.bak"
-    fi
+# src-arm mutations operate on stable, low-risk real files (src/infra/hashutil.h is tiny + self-contained).
+#
+# PRESENCE GUARD (CONTRIBUTING.md §2 — "a gate that cannot observe what it asserts"). Every mutator below
+# names a real repo path, and every one of them fails SILENTLY if that path moves: `>>` to a missing path
+# CREATES an orphan file nobody includes (so the arm measures a file-addition, not a body-edit), and
+# `rm -f` of a missing path is a no-op (so warm-vs-cold is compared on an unchanged tree). Both go GREEN
+# WHILE INERT. These four paths moved once already — src/{hashutil,fixedStr,csrverify}.h → src/infra/ —
+# which is exactly how a gate rots. So assert the target exists first, and fail loudly when it does not.
+srcmut_require()   { # $1 = work tree, $2 = path relative to it
+    [ -f "$1/$2" ] && return 0
+    no "[src-arm] mutation target is missing: $2 — repoint the mutator in $0 (this arm would otherwise pass while measuring nothing)"
+    return 1
 }
-srcmut_delete()    { rm -f "$1/src/csrverify.h"; }
+srcmut_bodyedit()  { srcmut_require "$1" src/infra/hashutil.h || return 0
+    printf '\n// relinkcheck body-edit marker (comment only)\n' >> "$1/src/infra/hashutil.h"; }
+srcmut_newdef()    { srcmut_require "$1" src/infra/hashutil.h || return 0
+    printf '\nnamespace hashutil { inline unsigned relinkProbe( unsigned x ) { return x * 2654435761u; } }\n' >> "$1/src/infra/hashutil.h"; }
+srcmut_rename()    { # rename a real symbol in a small file, exercising a cross-file dissolve/reform
+    srcmut_require "$1" src/infra/fixedStr.h || return 0
+    sed -i.bak 's/fixedStr/fixedStrRenamed/g' "$1/src/infra/fixedStr.h" 2>/dev/null && rm -f "$1/src/infra/fixedStr.h.bak"; }
+srcmut_delete()    { srcmut_require "$1" src/infra/csrverify.h || return 0
+    rm -f "$1/src/infra/csrverify.h"; }
 srcmut_addfile()   { printf 'namespace zz { inline int addedFileFn( int x ) { return x + 1; } }\n' > "$1/src/zz_relink_added.h"; }
 srcmut_sigchange() { # change a signature in hashutil.h (add a param) — no caller in-tree, still re-links
-    printf '\nnamespace hashutil { inline unsigned relinkSig( unsigned a, unsigned b ) { return a ^ b; } }\n' >> "$1/src/hashutil.h"; }
+    srcmut_require "$1" src/infra/hashutil.h || return 0
+    printf '\nnamespace hashutil { inline unsigned relinkSig( unsigned a, unsigned b ) { return a ^ b; } }\n' >> "$1/src/infra/hashutil.h"; }
 
 run_case_src(){
     local label="$1" mutate_fn="$2"
