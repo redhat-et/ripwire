@@ -794,7 +794,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             // this file's defined symbols, in id order (== file/line order by the ingest sort).
             const FileSymbols& fileSyms = symsByFile[f];
 
-            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( ing.files[f] ).c_str(), fileSyms.size() );
+            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( ing.files[f] ).c_str(), std::size_t( fileSyms.size() ) );
 
             // (1) blast radius: transitive dependents of ALL this file's symbols. Reuse transitiveCallers.
             const std::vector<NodeId>  reach = transitiveCallers( g, fileSyms );
@@ -890,7 +890,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
             if( trim.emitSymbolRows )
             {
-                std::fprintf( o, "<changed-symbols count=\"%zu\"%s>", fileSyms.size(), sectionsAttr.c_str() );
+                std::fprintf( o, "<changed-symbols count=\"%zu\"%s>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
                 for( NodeId s : rowSyms )
                 {
                     const Symbol& sy = ing.symbols[s];
@@ -935,7 +935,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             }
             else
             {
-                std::fprintf( o, "<changed-symbols count=\"%zu\"%s/>", fileSyms.size(), sectionsAttr.c_str() );
+                std::fprintf( o, "<changed-symbols count=\"%zu\"%s/>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
             }
 
             // (6) co-change partners NOT in the diff (gitmine). Degrades to an empty list without git. A4-P10:

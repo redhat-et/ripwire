@@ -7776,7 +7776,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
         rw::SmallVec<NodeId, 2>& mem = members[c];
         std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         const std::size_t topN = std::min<std::size_t>( 5, mem.size() );
-        std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" shown=\"%zu\" capped=\"%u\">", c, mem.size(),
+        std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" shown=\"%zu\" capped=\"%u\">", c, std::size_t( mem.size() ),
                      ex( presentation.directory[c] ).c_str(), ex( presentation.label[c] ).c_str(),
                      topN, unsigned( topN < mem.size() ) );   // §B8.1: rules 2+3 — size= is the total, this pair is the cut
         for( std::size_t i = 0; i < topN; ++i )
@@ -7908,7 +7908,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
                  "and child agree. -->" );
     std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s>",
-                 want, mem.size(), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
+                 want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
                  pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true ) );
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
@@ -8052,7 +8052,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             for( std::size_t ti = 0; ti < maxTopShown; ++ti )
             {
                 const std::uint32_t t = topOrder[ti];
-                std::printf( "  subgraph sgL%zu_%u [\"%s<br/>%zu\"]\n", topL, t, ex( domDirOf( topL, t ) ).c_str(), members[topL][t].size() );
+                std::printf( "  subgraph sgL%zu_%u [\"%s<br/>%zu\"]\n", topL, t, ex( domDirOf( topL, t ) ).c_str(), std::size_t( members[topL][t].size() ) );
                 if( topL >= 1 )
                 {
                     std::vector<std::uint32_t> kids = children[topL][t];
@@ -8061,7 +8061,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                     const std::size_t maxKids = std::min<std::size_t>( 8, kids.size() );
                     for( std::size_t ki = 0; ki < maxKids; ++ki )
                     {
-                        std::printf( "    nL%zu_%u[\"%s<br/>%zu\"]\n", topL - 1, kids[ki], ex( domDirOf( topL - 1, kids[ki] ) ).c_str(), members[topL - 1][ kids[ki] ].size() );
+                        std::printf( "    nL%zu_%u[\"%s<br/>%zu\"]\n", topL - 1, kids[ki], ex( domDirOf( topL - 1, kids[ki] ) ).c_str(), std::size_t( members[topL - 1][ kids[ki] ].size() ) );
                     }
                 }
                 else   // single-level (no coarsening happened): show the module's top symbols as inner nodes
@@ -8139,7 +8139,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             // shown=, it emits no capped= either") it stays a bare size= row, and the legend says which is
             // which rather than leaving a reader to infer it from an absent attribute.
             const std::size_t leafShown = ( l == 0 ) ? std::min<std::size_t>( 5, members[0][gid].size() ) : 0;
-            std::printf( "<module level=\"%zu\" id=\"%u\" size=\"%zu\" dir=\"%s\"", l, gid, members[l][gid].size(), ex( domDirOf( l, gid ) ).c_str() );
+            std::printf( "<module level=\"%zu\" id=\"%u\" size=\"%zu\" dir=\"%s\"", l, gid, std::size_t( members[l][gid].size() ), ex( domDirOf( l, gid ) ).c_str() );
             if( l == 0 )
             {
                 std::printf( " shown=\"%zu\" capped=\"%u\"", leafShown, unsigned( leafShown < members[0][gid].size() ) );
@@ -8530,7 +8530,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
             {
                 break;
             }
-            std::printf( "- **%s** — %zu symbols\n", presentation.label[c].c_str(), members[c].size() );
+            std::printf( "- **%s** — %zu symbols\n", presentation.label[c].c_str(), std::size_t( members[c].size() ) );
         }
 
         std::vector<std::uint32_t> ford( F );
@@ -8673,7 +8673,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
             std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
             // path and symbol names may contain & < > " — escape them to keep XML well-formed.
             const auto ep = rw::escapeXml( ing.files[f], trEsc );
-            std::printf( "<file p=\"%.*s\" symbols=\"%zu\">", int( ep.size() ), ep.data(), syms.size() );
+            std::printf( "<file p=\"%.*s\" symbols=\"%zu\">", int( ep.size() ), ep.data(), std::size_t( syms.size() ) );
             const std::size_t topN = std::min<std::size_t>( 3, syms.size() );
             for( std::size_t i = 0; i < topN; ++i )
             {
