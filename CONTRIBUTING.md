@@ -210,7 +210,7 @@ Two failure modes this project has actually shipped, and now gates against:
 - **32-bit ids and handles** (`NodeId = uint32_t`) over 64-bit pointers; the smallest type that fits.
 - `static_assert( sizeof( X ) == N )` after each hot struct, so a layout regression fails loudly.
 - For a field written from more than one thread, align with
-  `alignas( fastmath::hardware_destructive_interference_size )` — **never hardcode `alignas( 64 )`**.
+  `alignas( infra::platform::hardware_destructive_interference_size )` — **never hardcode `alignas( 64 )`**.
   The Apple Silicon cache line is 128 bytes, and a hardcoded 64 quietly reintroduces false sharing.
 - **Declarative constexpr tables over scattered switch/if**: `extension → { ts_language, tags.scm }`,
   `node-kind → { isDef, isRef, tag }`, `SymKind → const char* tag`. One pass to read instead of a
