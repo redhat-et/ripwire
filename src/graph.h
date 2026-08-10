@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <span>          // std::span — transitiveCallers' seed seam takes any contiguous NodeId range
 #include <string>
 #include <string_view>
 #include <vector>
@@ -3027,7 +3028,9 @@ inline std::vector<NodeId> shortestPath( const Graph& g, NodeId src, NodeId dst 
 // ---- transitive reverse-reachability: every symbol that (transitively, via in-edges) reaches a seed — the
 //      blast radius. Deterministic (in-edges are id-sorted; result sorted). Excludes the seeds themselves.
 //      Powers --impact (one seed symbol) and --affected (all symbols in the changed files). -------------
-inline std::vector<NodeId> transitiveCallers( const Graph& g, const std::vector<NodeId>& seeds )
+// A SPAN at the seam (CONTRIBUTING §3): the seed list arrives as a std::vector from --impact/--affected and
+// as a per-file rw::SmallVec bucket from --pr-context. Both are contiguous; neither is copied.
+inline std::vector<NodeId> transitiveCallers( const Graph& g, std::span<const NodeId> seeds )
 {
     const std::size_t   N = g.wOutDeg.size();
     std::vector<char>   seen( N, 0 );

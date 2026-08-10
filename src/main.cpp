@@ -1841,18 +1841,10 @@ void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
 std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vector<LintOut> outs )
 {
     using namespace rw;
-    std::vector<std::vector<NodeId>> fileSyms( ing.files.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( s.fileId < fileSyms.size() )
-        {
-            fileSyms[s.fileId].push_back( s.id );
-        }
-    }
-    for( auto& v : fileSyms )
-    {
-        std::sort( v.begin(), v.end(), [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-    }
+    // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
+    const SymbolsByFile fileSyms = symbolsByFile( ing,
+                                                  []( const Symbol& ) { return true; },
+                                                  [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
     const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
     {
         const Symbol* best = nullptr;
@@ -8626,13 +8618,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
     if( cfg.tree )
     {
         const std::vector<float> rank = rankGraph( g );
-        const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
         const std::uint32_t      F    = std::uint32_t( ing.files.size() );
-        std::vector<std::vector<NodeId>> byFile( F );
-        for( NodeId i = 0; i < N; ++i )
-        {
-            byFile[ing.symbols[i].fileId].push_back( i );
-        }
+        SymbolsByFile              byFile = symbolsByFileInIdOrder( ing, []( const Symbol& ) { return true; } );
         std::vector<std::uint32_t> ford;  ford.reserve( F );   // ONLY non-empty files (the emitted set)
         for( std::uint32_t f = 0; f < F; ++f )
         {
@@ -8674,8 +8661,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         std::vector<char> trEsc;
         for( std::size_t fi = pw.begin; fi < pw.end; ++fi )
         {
-            const std::uint32_t  f    = ford[fi];
-            std::vector<NodeId>& syms = byFile[f];
+            const std::uint32_t f    = ford[fi];
+            FileSymbols&        syms = byFile[f];
             std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
             // path and symbol names may contain & < > " — escape them to keep XML well-formed.
             const auto ep = rw::escapeXml( ing.files[f], trEsc );
@@ -8850,18 +8837,10 @@ std::optional<int> runLint( const MainDispatch& d )
     // annotate each hit with its enclosing symbol — so they share this setup.
     if( !cfg.match.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
     {
-        std::vector<std::vector<NodeId>> fileSyms( ing.files.size() );
-        for( const Symbol& s : ing.symbols )
-        {
-            if( s.fileId < fileSyms.size() )
-            {
-                fileSyms[s.fileId].push_back( s.id );
-            }
-        }
-        for( auto& v : fileSyms )
-        {
-            std::sort( v.begin(), v.end(), [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-        }
+        // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
+        const SymbolsByFile fileSyms = symbolsByFile( ing,
+                                                      []( const Symbol& ) { return true; },
+                                                      [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
         const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
         {
             const Symbol* best = nullptr;

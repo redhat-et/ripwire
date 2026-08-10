@@ -170,23 +170,15 @@ inline bool isCFamilyPath( std::string_view path ) noexcept
 // it. Identical to the rule --lint's own `in=` attribute and its magic-number filter already use.
 struct OwnerIndex
 {
-    std::vector<std::vector<NodeId>> byFile;   // symbol ids per file, ordered by sigStartByte
+    SymbolsByFile byFile;   // symbol ids per file, ordered by sigStartByte
 
-    explicit OwnerIndex( const IngestResult& ing ) : byFile( ing.files.size() )
+    // model.h::symbolsByFile is the shared bucket-and-sort; this index keeps EVERY symbol and orders by
+    // sigStartByte, exactly as the hand-written loop it replaces did (same scan order, same comparator).
+    explicit OwnerIndex( const IngestResult& ing )
+        : byFile( symbolsByFile( ing,
+                                 []( const Symbol& ) { return true; },
+                                 [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } ) )
     {
-        for( std::size_t id = 0; id < ing.symbols.size(); ++id )
-        {
-            const std::uint32_t fileId = ing.symbols[id].fileId;
-            if( fileId < byFile.size() )
-            {
-                byFile[fileId].push_back( static_cast<NodeId>( id ) );
-            }
-        }
-        for( std::vector<NodeId>& ids : byFile )
-        {
-            std::sort( ids.begin(), ids.end(), [ & ]( NodeId a, NodeId b )
-                       { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-        }
     }
 
     const Symbol* ownerOf( const IngestResult& ing, std::uint32_t fileId, std::uint32_t offset ) const

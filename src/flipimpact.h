@@ -336,7 +336,7 @@ inline bool declaresConstant( std::string_view line, std::string_view name )
 // already carries: a def occupies [line, line + max(loc,1) - 1]. Built once per flip, not per lookup.
 struct SymbolLineIndex
 {
-    std::vector<std::vector<NodeId>> byFile;        // fileId → def ids, ascending start line
+    SymbolsByFile byFile;        // fileId → def ids, ascending start line
 };
 
 inline SymbolLineIndex buildSymbolLineIndex( const IngestResult& ing )
