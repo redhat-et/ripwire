@@ -28,11 +28,11 @@
 // iterate in name order; every site list is sorted by (path, line). No wall clock, no hashing of addresses.
 
 #include "model.h"
-#include "ingest.h"       // kCrawlSkipDirs / isSkippedCrawlDir — the SHARED crawl denylist
-#include "arch.h"         // relForHash
-#include "serialize.h"    // escapeXml
-#include "docparse.h"     // lowerExtOf / isDocExtension — which files are PROSE, not code
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
+#include "ingest.h"             // kCrawlSkipDirs / isSkippedCrawlDir — the SHARED crawl denylist
+#include "arch.h"               // relForHash
+#include "serialize.h"          // escapeXml
+#include "docparse.h"           // lowerExtOf / isDocExtension — which files are PROSE, not code
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

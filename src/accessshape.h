@@ -126,10 +126,10 @@
 // Determinism: loops are walked in (fileId, startByte) order, every rollup is a gtl::btree_map (sorted
 // iteration, house rule: never std::map/std::unordered_map), and no wall clock is read.
 
-#include "ingest.h"       // AstQuerySpec / AstMatch / astQuery
-#include "layout.h"       // isCFamilyPath
-#include "docdrift.h"     // hasWholeWord — the house whole-word predicate
-#include "infra/Diagnostics.h"   // VERIFY / DEGRADED_PATH_ALERT
+#include "ingest.h"             // AstQuerySpec / AstMatch / astQuery
+#include "layout.h"             // isCFamilyPath
+#include "docdrift.h"           // hasWholeWord — the house whole-word predicate
+#include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"       // gtl::btree_map — sorted iteration (house rule: never std::map)
 

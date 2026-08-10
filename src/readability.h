@@ -34,12 +34,12 @@
 // is total: ascending P, descending V, then NodeId (already assigned in file/line/name order).
 
 #include "model.h"
-#include "clones.h"      // scanCodeTokens — THE ONE code scanner (this lens is its keep-identity projection,
-                         //                  --clones is its erase-identity one) + usesHashLineComments
-#include "docparse.h"    // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
-#include "pageview.h"    // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
-#include "serialize.h"   // escapeXml
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — an unreadable file degrades the scan, never aborts it
+#include "clones.h"             // scanCodeTokens — THE ONE code scanner (this lens is its keep-identity projection,
+                                //                  --clones is its erase-identity one) + usesHashLineComments
+#include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
+#include "pageview.h"           // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
+#include "serialize.h"          // escapeXml
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — an unreadable file degrades the scan, never aborts it
 
 #include <algorithm>
 #include <cmath>

@@ -26,9 +26,9 @@
 #include <string_view>
 #include <vector>
 
-#include "model.h"          // Lang enum
-#include "ingest.h"         // AstQuerySpec, AstMatch, astQuery, IngestResult
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT (no-op in release; the fprintf below is the visible line)
+#include "model.h"              // Lang enum
+#include "ingest.h"             // AstQuerySpec, AstMatch, astQuery, IngestResult
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT (no-op in release; the fprintf below is the visible line)
 
 namespace rw
 {

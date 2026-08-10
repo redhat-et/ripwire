@@ -3,83 +3,83 @@
 // ingest() comes from ingest.cpp (real, tree-sitter) or stub_ingest.cpp (test).
 
 #include "model.h"
-#include "infra/stdinline.h"      // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
+#include "infra/stdinline.h"       // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
 #include "ingest.h"
-#include "workspace.h"      // multi-root workspaces: root hygiene + labels + the id-offset merge
+#include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
-#include "scip.h"           // SCIP precision overlay (--scip=index.scip)
+#include "scip.h"                  // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
-#include "pageview.h"       // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
-#include "graphlegend.h"    // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
-#include "columnar.h"       // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
-#include "redact.h"         // RedactCounts + reportRedactions for the emitted-body secret redaction
+#include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
+#include "graphlegend.h"           // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
+#include "columnar.h"              // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
+#include "redact.h"                // RedactCounts + reportRedactions for the emitted-body secret redaction
 #include "filter.h"
 #include "eval.h"
 #include "skilleval.h"
 #include "lexical.h"
 #include "recall.h"
 #include "situ.h"
-#include "handoff.h"     // --handoff: the continuation packet (verified + heuristic sections)
-#include "dmm.h"         // --dmm: the Delta Maintainability Model scalar — the trendable complement to --quality-delta
-#include "readability.h" // --readability: the Posnett (MSR 2011) per-function readability lens
-#include "commentcoherence.h" // --comment-coherence: Steidl c_coeff + Scalabrino CIC, per documented function/method
-#include "contextratio.h" // --context-ratio: the LOCAL-REASONING lens (outside-the-file share of a unit's context)
-#include "nonlocalstate.h" // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
-#include "renamemine.h"  // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
-#include "namingconsistency.h"  // --naming-consistency: §9.2 TIER A convention normalization (corpus-derived case-style vote)
-#include "ensemble.h"   // --ensemble: the family join over structural / lexical / confusion / historical evidence
-#include "qualitypanel.h" // --quality-panel: THE SINGLE COMMAND — the ensemble's four families plus colocation and state, under a preset
-#include "testmap.h"      // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
-#include "packtask.h"       // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
-#include "partition.h"      // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
-                            //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
-#include "tracelocus.h"     // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
-#include "editcheck.h"      // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
+#include "handoff.h"               // --handoff: the continuation packet (verified + heuristic sections)
+#include "dmm.h"                   // --dmm: the Delta Maintainability Model scalar — the trendable complement to --quality-delta
+#include "readability.h"           // --readability: the Posnett (MSR 2011) per-function readability lens
+#include "commentcoherence.h"      // --comment-coherence: Steidl c_coeff + Scalabrino CIC, per documented function/method
+#include "contextratio.h"          // --context-ratio: the LOCAL-REASONING lens (outside-the-file share of a unit's context)
+#include "nonlocalstate.h"         // --nonlocal-state: per function, the non-local MUTABLE state it reaches (reads vs writes)
+#include "renamemine.h"            // --naming-calibration: the naming-* rules scored against the repo's own rename history (§9.5)
+#include "namingconsistency.h"     // --naming-consistency: §9.2 TIER A convention normalization (corpus-derived case-style vote)
+#include "ensemble.h"              // --ensemble: the family join over structural / lexical / confusion / historical evidence
+#include "qualitypanel.h"          // --quality-panel: THE SINGLE COMMAND — the ensemble's four families plus colocation and state, under a preset
+#include "testmap.h"               // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
+#include "packtask.h"              // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
+#include "partition.h"             // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
+                                   //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
+#include "tracelocus.h"            // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
+#include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "mcp.h"
-#include "mcpserver.h"      // the optional remote MCP transport (--listen), picked below
+#include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "wrap.h"
-#include "infra/profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/profileScope.h"    // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
 #include "search.h"
 #include "query.h"
 #include "quality.h"
-#include "gitstamp.h"       // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
-                             // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
-#include "binstale.h"       // --doctor's tracked-binary-staleness check (git-order, not mtime)
-#include "crossref.h"       // --stray-content / --whereis — the cross-branch content index
-#include "darkflags.h"      // --flags — the dark-content (compile/cmake/env gate) dashboard
-#include "flipimpact.h"     // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
-#include "layout.h"         // --layout=STRUCT — computed field offsets + tripwires + mirror drift
-#include "fieldaffinity.h"  // --field-affinity — the cache-locality lens (co-access graph vs declared order)
-#include "abicheck.h"       // --stray-content --abi — the cross-branch ABI-BREAK gate (layout x stray-content)
-#include "docdrift.h"       // --doc-drift — the markdown doc-anchor verifier
-#include "gitoracle.h"      // --with-history: the shared "was this name ever here" git-history oracle
-#include "mergescout.h"     // L1: --merge-scout=REF[,REF...] — read-only cross-branch overlap + landing order
-#include "landingplan.h"    // --stray-content --plan — composes crossref's sweep with mergescout's overlap oracle
-#include "lanes.h"          // --plan-lanes=N --task / --plan-lanes --brief — the PRE-HOC lane plan (JSON on stdout)
-#include "exemplar.h"       // A3-F5: shared --exemplar selection (ccx ceiling + fixture penalty + task→kind confidence)
-#include "didyoumean.h"     // §P12.1 / §B6 M8: the ONE near-miss suggester, now shared with the MCP refusal table
-#include "selectorrefuse.h" // §B4.2: the ONE file:name selector not-found refusal — all six SYM-taking verbs
+#include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
+                                   // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
+#include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
+#include "crossref.h"              // --stray-content / --whereis — the cross-branch content index
+#include "darkflags.h"             // --flags — the dark-content (compile/cmake/env gate) dashboard
+#include "flipimpact.h"            // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
+#include "layout.h"                // --layout=STRUCT — computed field offsets + tripwires + mirror drift
+#include "fieldaffinity.h"         // --field-affinity — the cache-locality lens (co-access graph vs declared order)
+#include "abicheck.h"              // --stray-content --abi — the cross-branch ABI-BREAK gate (layout x stray-content)
+#include "docdrift.h"              // --doc-drift — the markdown doc-anchor verifier
+#include "gitoracle.h"             // --with-history: the shared "was this name ever here" git-history oracle
+#include "mergescout.h"            // L1: --merge-scout=REF[,REF...] — read-only cross-branch overlap + landing order
+#include "landingplan.h"           // --stray-content --plan — composes crossref's sweep with mergescout's overlap oracle
+#include "lanes.h"                 // --plan-lanes=N --task / --plan-lanes --brief — the PRE-HOC lane plan (JSON on stdout)
+#include "exemplar.h"              // A3-F5: shared --exemplar selection (ccx ceiling + fixture penalty + task→kind confidence)
+#include "didyoumean.h"            // §P12.1 / §B6 M8: the ONE near-miss suggester, now shared with the MCP refusal table
+#include "selectorrefuse.h"        // §B4.2: the ONE file:name selector not-found refusal — all six SYM-taking verbs
 #include "gitmine.h"
-#include "ownersview.h"      // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with mcpverbs.h's `owners` verb
-#include "mention.h"        // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
-#include "siblift.h"        // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
-#include "filepool.h"       // r5 EXPERIMENT: env-gated file-level evidence pooling (inert by default)
-#include "expand.h"         // r6 EXPERIMENT: env-gated structural expansion from top-ranked files (inert by default)
-#include "tracein.h"        // L2: --from-trace=FILE — table-driven stack-trace/sanitizer/compiler frame extraction
+#include "ownersview.h"            // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with mcpverbs.h's `owners` verb
+#include "mention.h"               // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
+#include "siblift.h"               // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
+#include "filepool.h"              // r5 EXPERIMENT: env-gated file-level evidence pooling (inert by default)
+#include "expand.h"                // r6 EXPERIMENT: env-gated structural expansion from top-ranked files (inert by default)
+#include "tracein.h"               // L2: --from-trace=FILE — table-driven stack-trace/sanitizer/compiler frame extraction
 #include "clones.h"
 #include "skillscan.h"
 #include "htmlexport.h"
 #include "lintrules.h"
-#include "atoms.h"          // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
-#include "cachelint.h"      // --lint: the cache-friendliness pack (access-pattern half; layout half is --field-affinity)
-#include "naminglens.h"     // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
+#include "atoms.h"                 // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
+#include "cachelint.h"             // --lint: the cache-friendliness pack (access-pattern half; layout half is --field-affinity)
+#include "naminglens.h"            // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
 #include "prcontext.h"
 #include "ccjson.h"
 #include "cli.h"
-#include "embedded_queries.h"   // configure-generated tags.scm table shared with ingest and --doctor
-#include "infra/hashutil.h"           // sanitizer-clean modulo-2^64 FNV multiplication
-#include "infra/charconvcompat.h"     // rw::parseFloating — FP from_chars is `= delete` on older libc++ (macos-14 CI)
+#include "embedded_queries.h"      // configure-generated tags.scm table shared with ingest and --doctor
+#include "infra/hashutil.h"        // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/charconvcompat.h"  // rw::parseFloating — FP from_chars is `= delete` on older libc++ (macos-14 CI)
 
 #include <algorithm>
 #include <array>
@@ -100,8 +100,8 @@
 #include <cstdint>
 #include <climits>
 #include <sys/stat.h>
-#include <unistd.h>         // getpid — unique temp-dir suffix for the HEAD-snapshot path (T0.1)
-#include <tree_sitter/api.h>   // --doctor's grammar-probe check (ts_query_new against each grammar's tags.scm)
+#include <unistd.h>           // getpid — unique temp-dir suffix for the HEAD-snapshot path (T0.1)
+#include <tree_sitter/api.h>  // --doctor's grammar-probe check (ts_query_new against each grammar's tags.scm)
 #if defined( __APPLE__ )
 #include <mach-o/dyld.h>       // --doctor's self-exe-path check (_NSGetExecutablePath)
 #endif

@@ -56,11 +56,11 @@
 // the lowest bin index, and the split picks the widest group with ties → lowest index. No float comparison
 // decides any assignment, so the plan cannot drift with a reordered floating-point sum.
 
-#include "packtask.h"      // packTaskBundleText / LensRanking / PackTaskInputs / kPackTask* constants
-#include "graph.h"         // communities() — the SAME deterministic Louvain --communities uses
-#include "clones.h"        // findClones — hoisted here so N+1 bundles share ONE clone pass
-#include "serialize.h"     // kMinBytesPerToken / jsonStr
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
+#include "packtask.h"           // packTaskBundleText / LensRanking / PackTaskInputs / kPackTask* constants
+#include "graph.h"              // communities() — the SAME deterministic Louvain --communities uses
+#include "clones.h"             // findClones — hoisted here so N+1 bundles share ONE clone pass
+#include "serialize.h"          // kMinBytesPerToken / jsonStr
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
 
 #include <algorithm>
 #include <cstdint>
