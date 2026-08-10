@@ -25,7 +25,7 @@ around and reading whole files.
 </p>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · Bash · C# · JSON — [sixteen vendored grammars](#languages), and adding
+JavaScript · Java · Ruby · Bash · C# · JSON · TOML — [seventeen vendored grammars](#languages), and adding
 another is a vendored tree-sitter grammar plus one row in a declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
