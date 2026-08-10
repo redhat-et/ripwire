@@ -36,7 +36,7 @@
 
 #pragma once
 
-#include "platform.h" // ALWAYS_INLINE / memorycopy / VERIFY_TEXT / fastmath::isFiniteFast + cache-line size
+#include "fastmath.h" // ALWAYS_INLINE / memorycopy / VERIFY_TEXT / cache-line size (via platform.h) / fastmath::isFiniteFast
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>

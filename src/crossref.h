@@ -83,29 +83,29 @@
 // dates come from git's committer clock) — a fixed repo state gives byte-identical output.
 
 #include "model.h"
-#include "quality.h"      // gitOneLine / gitHeadSha / gitRepoHasHistory / popenTrimmed
-#include "gitoracle.h"    // the SHARED name-history oracle — the deleted-from-every-tree lane for whereis
-#include "arch.h"         // fnv1a64
-#include "hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
-#include "jsonesc.h"      // shSingleQuote
-#include "serialize.h"    // escapeXml
-#include "pageview.h"     // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
-#include "workspace.h"    // wsdetail::segmentsOf
-#include "filter.h"       // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
-#include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "quality.h"            // gitOneLine / gitHeadSha / gitRepoHasHistory / popenTrimmed
+#include "gitoracle.h"          // the SHARED name-history oracle — the deleted-from-every-tree lane for whereis
+#include "arch.h"               // fnv1a64
+#include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
+#include "infra/jsonesc.h"      // shSingleQuote
+#include "serialize.h"          // escapeXml
+#include "pageview.h"           // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
+#include "workspace.h"          // wsdetail::segmentsOf
+#include "filter.h"             // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
+#include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 
 #include <algorithm>
-#include <atomic>         // the git-spawn pool's work index
+#include <atomic>       // the git-spawn pool's work index
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <string>
 #include <string_view>
-#include <thread>         // the git-spawn pool (fork/exec is the cost, not compute)
-#include <unistd.h>       // getpid / unlink — the blob-batch temp list
+#include <thread>       // the git-spawn pool (fork/exec is the cost, not compute)
+#include <unistd.h>     // getpid / unlink — the blob-batch temp list
 #include <utility>
 #include <vector>
 

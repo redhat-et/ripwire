@@ -61,12 +61,12 @@
 // list; every emitted list is sorted by an explicit total order. No wall clock, no address hashing.
 
 #include "model.h"
-#include "graph.h"        // transitiveCallers / forwardReach — the SAME primitives --impact and --test-gate use
-#include "filter.h"       // isTestPath — the shared test partition
-#include "arch.h"         // relForHash
-#include "darkflags.h"    // the gate harvest, reused whole
-#include "serialize.h"    // escapeXml
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "graph.h"              // transitiveCallers / forwardReach — the SAME primitives --impact and --test-gate use
+#include "filter.h"             // isTestPath — the shared test partition
+#include "arch.h"               // relForHash
+#include "darkflags.h"          // the gate harvest, reused whole
+#include "serialize.h"          // escapeXml
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 
@@ -336,7 +336,7 @@ inline bool declaresConstant( std::string_view line, std::string_view name )
 // already carries: a def occupies [line, line + max(loc,1) - 1]. Built once per flip, not per lookup.
 struct SymbolLineIndex
 {
-    std::vector<std::vector<NodeId>> byFile;        // fileId → def ids, ascending start line
+    SymbolsByFile byFile;        // fileId → def ids, ascending start line
 };
 
 inline SymbolLineIndex buildSymbolLineIndex( const IngestResult& ing )

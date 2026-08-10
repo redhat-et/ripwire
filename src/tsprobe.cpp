@@ -10,7 +10,7 @@
 #include "ingest.h"
 #include "model.h"
 
-#include "Diagnostics.h"   // VERIFY — the enum-index bounds check
+#include "infra/Diagnostics.h"   // VERIFY — the enum-index bounds check
 
 #include <array>
 #include <cstddef>

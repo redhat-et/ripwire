@@ -28,8 +28,8 @@
 //   --baseline-update merges current violations into the sidecar and exits 0 (accept new debt deliberately).
 
 #include "model.h"
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on a malformed path-regex (never throw at match time)
-#include "hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade on a malformed path-regex (never throw at match time)
+#include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>
 #include <array>
@@ -746,7 +746,10 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
     const std::uint32_t M = std::uint32_t( modPath.size() );
 
     // module → module forward edges (deduped, sorted). Folds the file→file graph up to the directory.
-    std::vector<std::vector<std::uint32_t>> mout( M );   // modules this one depends ON
+    // N=2 is free (rw::svector<uint32,1> and <uint32,2> are both 16 B, vs a std::vector's 24) and covers
+    // 100%/93.9% of modules across the two census corpora — 87-90% of modules depend on NO other module at
+    // all, so the dominant win here is that an all-empty array stops being an array of empty std::vectors.
+    std::vector<rw::SmallVec<std::uint32_t, 2>> mout( M );   // modules this one depends ON
     {
         std::vector<std::unordered_set<std::uint32_t>> seen( M );
         for( std::uint32_t f = 0; f < F; ++f )

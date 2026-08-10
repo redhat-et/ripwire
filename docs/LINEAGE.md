@@ -187,7 +187,7 @@ still in the surveyed table below, where a catalogued-and-not-borrowed-from tool
 And [pdqsort](https://github.com/orlp/pdqsort) is the near miss that is actually *in the tree*: it is
 vendored at `third_party/pdqsort.hpp`, licensed and attributed in [`THIRD_PARTY.md`](../THIRD_PARTY.md)
 like every other vendored library — and **currently unused by any shipped target**. The ranking sorts
-are a deterministic radix pass with a `std::sort` fallback below the radix threshold (`src/sortutil.h`),
+are a deterministic radix pass with a `std::sort` fallback below the radix threshold (`src/infra/sortutil.h`),
 chosen because a stable radix key is easier to make byte-identical across platforms than a
 pattern-defeating quicksort's pivot choices. The only consumer of the pdqsort wrapper
 (`src/infra/fastSort.h`) is a benchmark that no build target compiles. It stays vendored and stays

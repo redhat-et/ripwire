@@ -7,7 +7,7 @@
 //
 // Companion to matrixDyn<T> (dense). This is the SPARSE substrate that graph ranking runs
 // on: a CSR matrix, a matrix-free SpMV (apply), and a generic power-iteration
-// dominantEigenvector(). ripwire's mixed-precision PageRank kernel lives in src/pagerank.cpp.
+// dominantEigenvector(). A host's own mixed-precision PageRank kernel builds on this, above the layer.
 //
 // Discipline (same as matrixDyn):
 //   * DOD storage: three owning, contiguous, 128-B-aligned SoA arrays — rowOffsets[rows+1],
@@ -25,7 +25,7 @@
 // reduce (compute partials[block] in parallel, sum them in block order → identical
 // result). This header stays single-threaded so any dispatch mechanism can drive it.
 
-#include "platform.h"   // VERIFY / fastmath::hardware_constructive_interference_size
+#include "platform.h"   // VERIFY / infra::platform::hardware_constructive_interference_size
 
 #include <cstddef>
 #include <cstdint>
@@ -44,7 +44,7 @@
 
 namespace csrdetail
 {
-    inline constexpr std::align_val_t kAlign{ fastmath::hardware_constructive_interference_size };
+    inline constexpr std::align_val_t kAlign{ infra::platform::hardware_constructive_interference_size };
 
     template<class U> inline U*   anew( std::size_t n ) { return n ? static_cast<U*>( ::operator new( n * sizeof( U ), kAlign ) ) : nullptr; }
     template<class U>

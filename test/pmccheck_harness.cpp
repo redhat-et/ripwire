@@ -21,9 +21,9 @@
 //
 // Exit 0 = the observed state is internally honest; nonzero = a contract violation (PASS/FAIL lines on stdout).
 
-#include "profileScope.h"
+#include "infra/profileScope.h"
 
-#include "../src/hashutil.h"
+#include "../src/infra/hashutil.h"
 
 #include <cstdint>
 #include <cstdio>

@@ -24,7 +24,7 @@
 #include "serialize.h"     // packSignatures / packBodies / escapeXml / kForPayloadBudgetBytes
 #include "redact.h"
 #include "tracein.h"        // table-driven stack-trace/sanitizer/compiler frame extraction (pure string work)
-#include "namesplit.h"      // stripTrailingGroup/stripTemplateArgs — shared with ingest.cpp's H4 re-split
+#include "infra/namesplit.h"      // stripTrailingGroup/stripTemplateArgs — shared with ingest.cpp's H4 re-split
 #include "mention.h"        // mention_detail::pathSuffixMatches — the longest-suffix file match
 
 #include <algorithm>

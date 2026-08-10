@@ -50,12 +50,12 @@
 // the constant table is a sorted btree_map, and no wall clock is ever read.
 
 #include "model.h"
-#include "graph.h"        // splitQualifiedSpec — the ONE `file:name` disambiguation rule --around/--lego use
-#include "arch.h"         // fnv1a64
-#include "hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
-#include "serialize.h"    // escapeXml
-#include "darkflags.h"    // readWhole — the same 4 MB-capped whole-file read the sibling field-notes verb owns
-#include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "graph.h"              // splitQualifiedSpec — the ONE `file:name` disambiguation rule --around/--lego use
+#include "arch.h"               // fnv1a64
+#include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
+#include "serialize.h"          // escapeXml
+#include "darkflags.h"          // readWhole — the same 4 MB-capped whole-file read the sibling field-notes verb owns
+#include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

@@ -4,32 +4,32 @@
 // per-commit changed-file sets, and the co-change (logical-coupling) core. popen-based; no git library.
 
 #include "model.h"
-#include "graph.h"   // resolveIncludeAdj — for the "surprising" (changes together, no transitive static dep) flag
-#include "mention.h" // mention_detail::baseNameOf — the SAME "basename of a path" primitive binstale.h/docdrift.h reuse
-#include "lintrules.h"      // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
-#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
-#include "Diagnostics.h"    // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
-#include "stdinline.h"      // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
-#include "jsonesc.h"        // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
-                             // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
+#include "graph.h"               // resolveIncludeAdj — for the "surprising" (changes together, no transitive static dep) flag
+#include "mention.h"             // mention_detail::baseNameOf — the SAME "basename of a path" primitive binstale.h/docdrift.h reuse
+#include "lintrules.h"           // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
+#include "infra/stdinline.h"     // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
+#include "infra/jsonesc.h"       // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
+                                 // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
 
 #include <algorithm>
-#include <atomic>   // the join's once-per-process disclosure flags
-#include <bit>      // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
+#include <atomic>       // the join's once-per-process disclosure flags
+#include <bit>          // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <mutex>    // gitRepoToplevel's per-directory memo — one rev-parse probe per root, not per miner
+#include <mutex>        // gitRepoToplevel's per-directory memo — one rev-parse probe per root, not per miner
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-#include <limits.h>     // PATH_MAX (hasEnclosingGitRepo realpath buffer)
-#include <sys/stat.h>   // stat() — the zero-popen .git walk-up pre-check
+#include <limits.h>    // PATH_MAX (hasEnclosingGitRepo realpath buffer)
+#include <sys/stat.h>  // stat() — the zero-popen .git walk-up pre-check
 
 namespace rw
 {
@@ -1569,8 +1569,13 @@ inline std::vector<FileOwnership> gitFileAuthors(
 
     // Per-file accumulator: email → list of raw commit timestamps that touched that file. Filled in
     // one pass over the whole-repo log stream, then reduced to decay scores below.
-    HashMap<std::uint32_t, HashMap<std::string, std::vector<std::int64_t>>> perFile;
-    HashMap<std::uint32_t, std::int64_t>                                    newestTsByFile;
+    // N=2 on the inner timestamp list. An int64 is 8 bytes, so <int64,1> is 16 B and <int64,2> is 24 B —
+    // exactly what the std::vector header already cost, which makes N=2 the free-relative-to-baseline step
+    // rather than a growth. Coverage 84.9%/77.2% across the two census corpora against 73.0%/59.9% at N=1;
+    // marginal coverage per byte then falls 2.16 → 0.70 going 2→4, so 2 is the knee. Most (file, author)
+    // pairs are one commit — 1 613/3 002 inner lists on the two corpora, nearly all of them singletons.
+    HashMap<std::uint32_t, HashMap<std::string, rw::SmallVec<std::int64_t, 2>>> perFile;
+    HashMap<std::uint32_t, std::int64_t>                                        newestTsByFile;
     if( !singleFile )
     {
         perFile.reserve( fileCount );
@@ -1759,7 +1764,7 @@ inline const FileOwnership* ownershipForFile( const std::vector<FileOwnership>& 
 // complete as resolveIncludeAdj, which cannot resolve a cross-directory `-I` include: the path-precise
 // resolver walks includer-relative and root-relative candidates only, and a `-I` needs the build system's
 // flags, which we deliberately do not read. So one false positive survived — and a repo-wide sweep found
-// it was the ONLY one: `bench/bench_convergence.cpp:26` is literally `#include "svector.h"`, resolved
+// it was the ONLY one: `bench/bench_convergence.cpp:26` is literally `#include "infra/svector.h"`, resolved
 // through `-Isrc`, and the pair shipped as `surprising="1"` on a plain `#include`.
 //
 // The rule: if either file's raw #include list names the OTHER's BASENAME, call the pair statically

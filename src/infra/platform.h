@@ -5,23 +5,29 @@
 //  platform.h
 //
 //  The compiler/platform substrate every other infra header sits on: the attribute
-//  macros, the cache-line interference sizes, and the two scalar helpers that the
-//  sort and profiling paths actually call.
+//  macros and the cache-line interference sizes. Namespace is `infra::platform`.
 //
-//  This replaces the game-math header (fastmath.h/.inl) this tree was seeded from.
-//  Ripwire used five things out of ~1500 lines of vector trig, polynomial pow, easing
-//  curves and spline interpolation; the rest is gone. What survived is here, and every
-//  macro below has a call site elsewhere in src/ — nothing is kept "in case".
+//  Split out of this tree's own fastmath.h (2026-08-09) along the line "describes the
+//  MACHINE" vs "computes a NUMBER": ALWAYS_INLINE, memorycopy, and a cache-line width
+//  are facts about the compilation target, not math, and a header that needs only
+//  those should not have to pull in fastmath.h's number helpers to get them.
+//  fastmath.h #includes this header, so its own includers still see ALWAYS_INLINE,
+//  memorycopy, and the interference sizes exactly as before this split.
 //
-//  The NAMESPACE keeps its old name `fastmath` on purpose. CONTRIBUTING.md's layout
-//  rule is written as `alignas( fastmath::hardware_destructive_interference_size )`
-//  and ~20 call sites spell it that way; the file died, the namespace did not.
+//  PORTING NOTE — this file is hand-copied, file for file, to and from a companion
+//  C++ game-math tree that vendors the same infra set. Keep the sibling include below
+//  BARE (`#include "Diagnostics.h"`, never a directory-prefixed path) — the
+//  destination tree's layout differs and a hardcoded prefix breaks on arrival.
+//
+//  Every macro and constant below has a real call site above this layer; nothing is
+//  kept "in case". (The companion tree also carries a `memorycopyinline` macro
+//  immediately below `memorycopy` — there is no caller for it in this tree, so it is
+//  not mirrored here.)
 //
 
 #pragma once
 
 #include <cstddef>       // std::size_t for the hardware-interference-size constants
-#include <type_traits>   // std::is_integral_v for the integral min/max overloads
 
 // ==========================================================================
 // Compiler attributes
@@ -42,10 +48,10 @@
 #include "Diagnostics.h"
 
 // ==========================================================================
-// fastmath namespace — cache-line constants + the scalar helpers still in use
+// infra::platform — facts about the machine this tree compiles for
 // ==========================================================================
 
-namespace fastmath
+namespace infra::platform
 {
 
 // Cache-line size constants — follow the C++17 std::hardware_*_interference_size
@@ -73,41 +79,4 @@ namespace fastmath
     constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
 
-// ---- fast-math-safe finite check  ----------------------------------------
-// std::isfinite / __builtin_isfinite are folded to constant-true under
-// -ffinite-math-only (implied by -ffast-math). This tests the IEEE-754
-// exponent field directly through an opaque asm barrier so the optimiser
-// cannot assume finiteness. NaN and ±Inf both have exponent == 0xFF.
-[[nodiscard]] ALWAYS_INLINE bool isFiniteFast( float x ) noexcept
-{
-    unsigned u = __builtin_bit_cast(unsigned, x);
-    asm volatile("" : "+r"(u));                 // opaque: defeat -ffinite-math-only
-    return (u & 0x7F800000u) != 0x7F800000u;
-}
-
-// ---- integral min / max (branchless) -------------------------------------
-// std::min/std::max take references and return one, so a call on two atomically
-// loaded tick counts costs a spill; these take values and fold to a single CSEL
-// on ARM64. Constrained to integral T because that is all this tree passes them.
-// ALWAYS_INLINE makes the body visible at every call site, so the old
-// __attribute__((const)) hint bought nothing and is not carried over.
-template<class T> requires std::is_integral_v<T>
-[[nodiscard]] ALWAYS_INLINE constexpr T min( T a, T b ) noexcept { return b < a ? b : a; }
-
-template<class T> requires std::is_integral_v<T>
-[[nodiscard]] ALWAYS_INLINE constexpr T max( T a, T b ) noexcept { return a < b ? b : a; }
-
-// ---- type-mixing guard ---------------------------------------------------
-// The templates above deduce a single T and are constrained to INTEGRAL types, so this
-// catch-all deletes every 2-arg call that is not a matching integral pair: mixed types
-// ( min( uint64_t, int ), max( size_t, unsigned ) ) which would otherwise fall through
-// to whatever the surrounding namespaces offer — including a float path that rounds
-// BOTH operands (lossy past 2^24) — AND same-type float/double pairs, which this tree
-// does not make (the float overloads left with the game-math header). Cast to a
-// matching integral pair at the call site, where the truncation is visible, or use
-// std::min. Matching integral calls still bind above (the constrained template is
-// more specialized than this catch-all).
-template<class A, class B> auto min( A, B ) noexcept = delete;
-template<class A, class B> auto max( A, B ) noexcept = delete;
-
-} // namespace fastmath
+} // namespace infra::platform

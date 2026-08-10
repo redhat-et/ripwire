@@ -24,7 +24,7 @@
 //
 // Style: Allman braces; spaces inside parens; VERIFY/degrade; declarative pattern TABLE, not a switch.
 
-#include "Diagnostics.h"
+#include "infra/Diagnostics.h"
 
 #include <array>
 #include <cstddef>

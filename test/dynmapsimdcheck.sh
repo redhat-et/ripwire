@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dynmapsimdcheck.sh — SIMD-vs-scalar parity gate for the vendored vector kernels:
 #   stree::dyn::node_rank<Key,B>::lt/le   (src/infra/dynamic_map.hpp — NEON on arm64, SSE on x86_64)
-#   rw::FixedStr::operator==              (src/fixedStr.h        — same split)
+#   rw::FixedStr::operator==              (src/infra/fixedStr.h        — same split)
 #
 # Compiles test/dynmapsimd_harness.cpp under the FULL G1 sanitizer set and runs it. The harness restates
 # the rank/equality contracts as independent scalar oracles and sweeps adversarial patterns (sentinel

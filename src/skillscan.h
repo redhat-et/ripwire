@@ -34,7 +34,7 @@
 #include <utility>
 #include <vector>
 
-#include "Diagnostics.h"
+#include "infra/Diagnostics.h"
 
 namespace rw
 {

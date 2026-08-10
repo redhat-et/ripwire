@@ -29,10 +29,10 @@
 
 #include "model.h"
 #include "graph.h"
-#include "lexical.h"      // subtokens() / chooseForRanker / lexicalScores* — the shipping --for ranker
-#include "eval.h"         // maxPoolToFiles — the file-pooling convention shared with --eval-mined
-#include "search.h"       // normSet — sorted-unique for the query token set
-#include "Diagnostics.h"  // VERIFY
+#include "lexical.h"            // subtokens() / chooseForRanker / lexicalScores* — the shipping --for ranker
+#include "eval.h"               // maxPoolToFiles — the file-pooling convention shared with --eval-mined
+#include "search.h"             // normSet — sorted-unique for the query token set
+#include "infra/Diagnostics.h"  // VERIFY
 
 #include <algorithm>
 #include <cmath>

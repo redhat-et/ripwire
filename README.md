@@ -758,10 +758,10 @@ spot:
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:1970"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2306"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9609"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9713"/>
+<s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
+<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9595"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9699"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -784,10 +784,10 @@ and the element says so before you read a single row.
 $ ripwire . --top-k=3
 <!-- files=… symbols=… edges=… shown=3 est_tokens=… ambiguous=… unresolved=…
      precise=… skipped_oversize=… order=important-first -->
-<r est_tokens="393">
-<f p="./src/svector.h">
-<s t="method" n="size" id="./src/svector.h::svector::size" k="…"></s>
-<s t="method" n="push_back" id="./src/svector.h::svector::push_back" amb="2" k="…">
+<r est_tokens="435">
+<f p="./src/infra/svector.h" layer="infra">
+<s t="method" n="size" id="./src/infra/svector.h::svector::size" k="…"></s>
+<s t="method" n="push_back" id="./src/infra/svector.h::svector::push_back" amb="2" k="…">
 <c n="buf"/><c n="buf"/><c n="grow"/></s>
 </f>
 <f p="./src/scipoverlay.h">
@@ -1139,7 +1139,16 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
-(2026-08-09): `files=106 symbols=3150 edges=8936 ambiguous=3047 unresolved=1091`.
+(2026-08-10): `files=109 symbols=3231 edges=10129 ambiguous=4765 unresolved=1091`.
+
+**Read `ambiguous=` as a property of the indexed tree, not a score for the resolver.** It counts call
+names that hit more than one definition, so it moves when the *corpus* gains same-named symbols — and
+it just did, visibly. On 2026-08-09 this number rose from 2991 to 4507. The cause was attributed by
+swapping one file back and re-measuring: `src/infra/svector.h` alone accounts for 4507 → 2741. The
+small-vector there grew a full container interface, so the tree now defines its own `size`, `begin`,
+`end`, `push_back` and `data` — the most-called names in any C++ corpus. Adding a container is a name
+collision by construction. Expect the number to climb again as that container replaces `std::vector`
+across the tree; a rise there means the map is disclosing more overloading, not resolving worse.
 
 | the output says | read it as |
 | --- | --- |

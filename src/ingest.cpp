@@ -8,29 +8,30 @@
 // Single-threaded (v1). Never throws: every recoverable problem degrades + DEGRADED_PATH_ALERT.
 
 #include "ingest.h"
-#include "docparse.h"           // P1-B: non-code document ingest (notebooks/html/csv + markitdown bridge)
-#include "arch.h"                // T5: relForHash — root-relative path key, reused for cache portability
-#include "quality.h"             // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
-#include "embedded_queries.h"    // configure-generated constexpr tags.scm table; no runtime source-tree dependency
-#include "hashutil.h"            // sanitizer-clean modulo-2^64 FNV multiplication
-#include "namesplit.h"           // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
-#include "fixedStr.h"            // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
-#include "lexindex.h"            // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
+#include "docparse.h"          // P1-B: non-code document ingest (notebooks/html/csv + markitdown bridge)
+#include "arch.h"              // T5: relForHash — root-relative path key, reused for cache portability
+#include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
+#include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
+#include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
+#include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
+#include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 
-#include "Diagnostics.h"
-#include "profileScope.h"        // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/Diagnostics.h"
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <tree_sitter/api.h>
 
 #include <algorithm>
 #include <array>
+#include <bit>                 // std::bit_floor — the cold-path reserve rounds to a power of two
 #include <cctype>
-#include <chrono>       // A4-P7: wall-clock cache-write timestamp for the racy-git rule
+#include <chrono>              // A4-P7: wall-clock cache-write timestamp for the racy-git rule
 #include <cstdio>
-#include <cstdlib>      // std::getenv — RIPWIRE_CACHE_STATS drift observable
+#include <cstdlib>             // std::getenv — RIPWIRE_CACHE_STATS drift observable
 #include <cstring>
-#include <sys/stat.h>   // A4-P7: stat() for the (size,mtime) warm-run shortcut
-#include <unistd.h>     // getpid — unique per-process cache temp name
+#include <sys/stat.h>          // A4-P7: stat() for the (size,mtime) warm-run shortcut
+#include <unistd.h>            // getpid — unique per-process cache temp name
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -48,6 +49,81 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+#ifdef RIPWIRE_FUSE_PROBE
+// ── Side-capture walk probe (compile-time opt-in; absent from every shipped build) ────────────────────
+// The instrument behind the walk fusion in captureSideFacts. It separates the two things that "one more
+// pass" can mean, because only one of them is what the fusion removes:
+//   * STREAM POPS  — frames popped off a walk stack. One per node PER WALK, so N back-to-back walks over
+//                    the same tree cost N x. This is the tree-streaming cost the fusion attacks.
+//   * VISITOR CALLS — per-node matching work for one pass. Fusion does NOT reduce these; a pass still
+//                    inspects every node it used to. If these move, a fact was dropped or double-counted.
+// Compiled out entirely unless -DRIPWIRE_FUSE_PROBE is on the command line, so the plain/asan/profile
+// builds are unaffected. Everything lands on STDERR — stdout is the XML map under a byte-identity gate.
+//
+//    cmake -S . -B build_probe -DCMAKE_CXX_FLAGS=-DRIPWIRE_FUSE_PROBE && cmake --build build_probe -j
+//    TMPDIR=$(mktemp -d) ./build_probe/ripwire <corpus> >/dev/null      # TMPDIR forces a cold parse
+namespace fuseprobe
+{
+enum PassId : int { kInc = 0, kFfi = 1, kRoutes = 2, kRustImpls = 3, kBinds = 4, kUses = 5, kPassCount = 6 };
+inline const char* const kPassName[ kPassCount ] = { "captureIncludes", "captureFfi", "captureRoutes", "captureRustImpls", "captureBindings", "captureUses" };
+
+inline thread_local std::uint64_t tlNodes[ kPassCount ] = {};   // visitor calls, this thread, cumulative
+inline std::atomic<std::uint64_t> gNodes[ kPassCount ];         // visitor calls per pass, corpus-wide
+inline std::atomic<std::uint64_t> gFiles[ kPassCount ];         // files on which the pass saw >=1 node
+inline std::atomic<std::uint64_t> gHist[ kPassCount + 1 ];      // files by count of passes that saw a node
+inline std::atomic<std::uint64_t> gFilesTotal { 0 };
+inline std::atomic<std::uint64_t> gNodesMaxPass { 0 };          // sum of the per-file LARGEST pass = AST-size proxy
+inline std::atomic<std::uint64_t> gStreamPops { 0 };            // THE fusion metric: frames popped, all walks
+
+inline void bump( int pass ) noexcept { ++tlNodes[ pass ]; }
+inline void pop() noexcept { gStreamPops.fetch_add( 1, std::memory_order_relaxed ); }
+
+struct Dump
+{
+    ~Dump()
+    {
+        const std::uint64_t files = gFilesTotal.load();
+        std::uint64_t       calls = 0;
+        for( int p = 0; p < kPassCount; ++p )
+        {
+            calls += gNodes[ p ].load();
+        }
+        std::fprintf( stderr, "\n[fuseprobe] files_with_a_parsed_tree=%llu\n", (unsigned long long) files );
+        std::fprintf( stderr, "[fuseprobe] %-18s %13s %10s %8s\n", "pass", "visitor_calls", "files", "%files" );
+        for( int p = 0; p < kPassCount; ++p )
+        {
+            const std::uint64_t f = gFiles[ p ].load();
+            std::fprintf( stderr, "[fuseprobe] %-18s %13llu %10llu %7.1f%%\n", kPassName[ p ], (unsigned long long) gNodes[ p ].load(),
+                          (unsigned long long) f, files ? 100.0 * double( f ) / double( files ) : 0.0 );
+        }
+        const std::uint64_t astProxy = gNodesMaxPass.load();
+        const std::uint64_t pops     = gStreamPops.load();
+        std::fprintf( stderr, "[fuseprobe] visitor_calls=%llu  ast_size_proxy(sum of per-file max pass)=%llu\n",
+                      (unsigned long long) calls, (unsigned long long) astProxy );
+        std::fprintf( stderr, "[fuseprobe] STREAM_POPS=%llu  streams_per_node=%.2fx  <-- the number fusion moves\n",
+                      (unsigned long long) pops, astProxy ? double( pops ) / double( astProxy ) : 0.0 );
+        std::fprintf( stderr, "[fuseprobe] files by number of passes that SAW a node:\n" );
+        for( int k = 0; k <= kPassCount; ++k )
+        {
+            const std::uint64_t f = gHist[ k ].load();
+            if( f != 0 )
+            {
+                std::fprintf( stderr, "[fuseprobe]   %d pass%s : %10llu files (%5.1f%%)\n", k, k == 1 ? " " : "es", (unsigned long long) f,
+                              files ? 100.0 * double( f ) / double( files ) : 0.0 );
+            }
+        }
+        std::fflush( stderr );
+    }
+};
+inline Dump gDump;
+}   // namespace fuseprobe
+    #define FUSEPROBE_BUMP( p ) ::fuseprobe::bump( ::fuseprobe::p )
+    #define FUSEPROBE_POP()     ::fuseprobe::pop()
+#else
+    #define FUSEPROBE_BUMP( p ) ( (void) 0 )
+    #define FUSEPROBE_POP()     ( (void) 0 )
+#endif
 
 // ---- tree-sitter grammar entry points (each grammar's OBJECT lib exports one) ----
 extern "C"
@@ -1902,7 +1978,19 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t F = files.size();
-    std::vector<std::vector<std::uint32_t>> dIdx( F ), rIdx( F ), iIdx( F ), bIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
+    // The cache-write side's per-file record indexes. Split by MEASURED shape, not by symmetry:
+    //   dIdx  — one entry per DEFINITION; same distribution as model.h's SymbolsByFile (mean 8.4/18.2 per
+    //           file, p90 18/37), so it takes that index's measured N=8 knee.
+    //   iIdx/aIdx/rdIdx/ruIdx — includes, FFI aliases and the two route tables. N=2 is FREE (rw::svector's
+    //           inline array shares storage with the heap pointer, so <uint32,1> and <uint32,2> are both
+    //           16 B — a THIRD smaller than the std::vector header it replaces) and covers 85.4%/59.1%,
+    //           99.7%/100%, 99.9%/100% and 99.9%/100% of files across the two census corpora.
+    //   rIdx/bIdx — deliberately LEFT as std::vector. Means of 155/248 and 28/59 references and bindings per
+    //           file with 17%/40% of files empty and no early knee: an N that covered them would have to be
+    //           in the hundreds. They are CSR candidates, a separate wave, not small-vector material.
+    std::vector<rw::SmallVec<std::uint32_t, 8>> dIdx( F );
+    std::vector<std::vector<std::uint32_t>>     rIdx( F ), bIdx( F );
+    std::vector<rw::SmallVec<std::uint32_t, 2>> iIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
     for( std::uint32_t i = 0; i < defs.size(); ++i )
     {
         if( defs[i].fileId < F )
@@ -3986,49 +4074,46 @@ void captureBases( TSNode classNode, std::uint32_t fileId, Lang lang, std::strin
 // field (the implementor), then emit an inherit RawRef whose name = the trait's final segment and whose
 // DERIVED type name is stashed in `qualifier` — because the impl block lives OUTSIDE the struct's def
 // span, byte-span attribution cannot bind fromSymbol = T; buildGraph resolves `qualifier` by name instead.
-// `impl T { … }` (inherent, no trait) is skipped. Recurses so `impl`s nested in `mod {}` are still seen.
-void captureRustImpls( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+// `impl T { … }` (inherent, no trait) is skipped. Descends so `impl`s nested in `mod {}` are still seen.
+//
+// This pass no longer owns a walk: it is one visitor on the shared pre-order stream (see
+// streamSideCaptures below), which is why the body is a per-node step and not a loop. It had no depth cap
+// of its own, so its visitor arms at kSideDepthUnbounded and the shared stream reproduces that exactly.
+struct RustImplCtx
 {
-    // iterative pre-order DFS (reverse-push preserves the recursive version's left-to-right emission
-    // order) — the old recursion was both stack-overflow-prone on deep ASTs and O(children²) per node.
-    std::vector<TSNode> stack;
-    stack.reserve( 64 );
-    stack.push_back( root );
-    ChildCursor         cursor( root );
-    std::vector<TSNode> kids;
-    kids.reserve( 64 );
-    while( !stack.empty() )
+    std::uint32_t         fileId = 0;
+    std::string_view      src;
+    std::vector<RawRef>*  refs = nullptr;
+};
+
+void rustImplVisitNode( RustImplCtx& cx, TSNode node, const char* t )
+{
+    FUSEPROBE_BUMP( kRustImpls );
+    if( std::strcmp( t, "impl_item" ) != 0 )
     {
-    const TSNode node = stack.back();
-    stack.pop_back();
-    if( std::strcmp( ts_node_type( node ), "impl_item" ) == 0 )
-    {
-        const TSNode traitNode = ts_node_child_by_field_name( node, "trait", 5 );
-        const TSNode typeNode  = ts_node_child_by_field_name( node, "type",  4 );
-        if( !ts_node_is_null( traitNode ) && !ts_node_is_null( typeNode ) )
-        {
-            const uint32_t ta = ts_node_start_byte( traitNode ), tb = ts_node_end_byte( traitNode );
-            const uint32_t da = ts_node_start_byte( typeNode ),  db = ts_node_end_byte( typeNode );
-            if( ta < tb && tb <= src.size() && da < db && db <= src.size() )
-            {
-                RawRef r;
-                r.fileId    = fileId;
-                r.startByte = ta;                       // inside the impl header (file-scope; fromSymbol resolves via qualifier)
-                r.line      = ts_node_start_point( traitNode ).row + 1;
-                r.lang      = Lang::Rust;
-                r.isInherit = true;
-                r.role      = RefRole::Extends;
-                r.name      = finalSegment( src.substr( ta, tb - ta ) );   // the TRAIT (base) name
-                r.qualifier = finalSegment( src.substr( da, db - da ) );   // the DERIVED type name (Car/Bike) — resolved by name in buildGraph
-                refs.push_back( std::move( r ) );
-            }
-        }
+        return;
     }
-    collectChildren( node, cursor.cur, kids );
-    for( std::size_t i = kids.size(); i > 0; --i )
+    const TSNode traitNode = ts_node_child_by_field_name( node, "trait", 5 );
+    const TSNode typeNode  = ts_node_child_by_field_name( node, "type",  4 );
+    if( ts_node_is_null( traitNode ) || ts_node_is_null( typeNode ) )
     {
-        stack.push_back( kids[ i - 1 ] );
+        return;
     }
+    const std::string_view src = cx.src;
+    const uint32_t ta = ts_node_start_byte( traitNode ), tb = ts_node_end_byte( traitNode );
+    const uint32_t da = ts_node_start_byte( typeNode ),  db = ts_node_end_byte( typeNode );
+    if( ta < tb && tb <= src.size() && da < db && db <= src.size() )
+    {
+        RawRef r;
+        r.fileId    = cx.fileId;
+        r.startByte = ta;                       // inside the impl header (file-scope; fromSymbol resolves via qualifier)
+        r.line      = ts_node_start_point( traitNode ).row + 1;
+        r.lang      = Lang::Rust;
+        r.isInherit = true;
+        r.role      = RefRole::Extends;
+        r.name      = finalSegment( src.substr( ta, tb - ta ) );   // the TRAIT (base) name
+        r.qualifier = finalSegment( src.substr( da, db - da ) );   // the DERIVED type name (Car/Bike) — resolved by name in buildGraph
+        cx.refs->push_back( std::move( r ) );
     }
 }
 
@@ -4581,6 +4666,8 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
     {
         const IncFrame frame = stack.back();
         stack.pop_back();
+        FUSEPROBE_BUMP( kInc );
+        FUSEPROBE_POP();
         const TSNode n = frame.node;
         const char*  t = ts_node_type( n );
 
@@ -6402,18 +6489,16 @@ inline void resolvePendingFnBindDecls( std::uint32_t fileId, Lang lang, FnBindGa
     }
 }
 
-void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds, int startDepth )
+// P2-D Rule 2 local var→type bindings + the L3 fn-pointer capture. One visitor on the shared pre-order
+// stream (streamSideCaptures below) — the pass used to own an identical walk of its own, which is what the
+// fusion removed. Its state outlives a single node (the L3 clobber sweep needs the whole file's positives),
+// so it rides in a context the driver holds by reference; bindsFinalize spends it when the stream ends.
+struct BindCtx
 {
-    // iterative pre-order DFS (explicit frame stack) — this frame held several std::string locals, so the
-    // recursive form overflowed the 512 KB macOS worker-thread stack well inside the old depth guard.
-    // Children are pushed in reverse so pops preserve the original left-to-right visit order.
-    struct BindFrame { TSNode node; std::uint16_t depth; };
-    std::vector<BindFrame> stack;
-    stack.reserve( 64 );
-    stack.push_back( { root, static_cast<std::uint16_t>( startDepth ) } );
-    ChildCursor         cursor( root );
-    std::vector<TSNode> kids;
-    kids.reserve( 64 );
+    std::uint32_t              fileId = 0;
+    Lang                       lang {};
+    std::string_view           src;
+    std::vector<RawBind>*      binds = nullptr;
 
     // L3 fn-pointer buffers. Positives collect here (not straight into binds) so the end-of-walk clobber
     // sweep can ask "does this var have a fn binding in this file?" — a clobbering assignment
@@ -6421,19 +6506,23 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
     // records (the whole feature inert there).
     std::vector<RawBind>       fnPos;
     std::vector<FnBindClobber> fnUnk;
-    const bool cFamilyFn = ( lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC );
-    FnBindGateState fnGate;   // value-assignment noise-gate evidence — filled by this walk, spent when it ends
+    FnBindGateState            fnGate;      // value-assignment noise-gate evidence — filled by the stream, spent at the end
+    bool                       cFamilyFn = false;
+};
 
-    while( !stack.empty() )
-    {
-    const BindFrame frame = stack.back();
-    stack.pop_back();
-    if( frame.depth > 256 )
-    {
-        continue; // pathological-AST guard (file already ≤ 1 MB)
-    }
-    const TSNode n = frame.node;
-    const char* t = ts_node_type( n );
+void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
+{
+    // The body below is the pass's own node step, unchanged; these aliases keep it reading against the
+    // same names it always had rather than sprinkling `cx.` through 150 lines of grammar branches.
+    FUSEPROBE_BUMP( kBinds );
+    const std::uint32_t         fileId    = cx.fileId;
+    const Lang                  lang      = cx.lang;
+    const std::string_view      src       = cx.src;
+    std::vector<RawBind>&       binds     = *cx.binds;
+    std::vector<RawBind>&       fnPos     = cx.fnPos;
+    std::vector<FnBindClobber>& fnUnk     = cx.fnUnk;
+    FnBindGateState&            fnGate    = cx.fnGate;
+    const bool                  cFamilyFn = cx.cFamilyFn;
 
     // C++/ObjC: `Foo x;` · `Foo* x;` · `Foo x = Foo();` · `auto x = Foo();`
     if( ( lang == Lang::Cpp || lang == Lang::ObjC ) && std::strcmp( t, "declaration" ) == 0 )
@@ -6572,13 +6661,18 @@ void captureBindings( TSNode root, std::uint32_t fileId, Lang lang, std::string_
         captureFnBindEscape( n, src, fnUnk );   // A5: `&fn` anywhere clobbers the variable (escape guard)
     }
     collectFnBindGateEvidence( n, t, src, cFamilyFn, fnGate );   // never an `else if` — see the helper's note
+}
 
-    collectChildren( n, cursor.cur, kids );
-    for( std::size_t i = kids.size(); i > 0; --i )
-    {
-        stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
-    }
-    }
+// End-of-file step for the bindings pass: the two noise gates and the L3 clobber sweep. Split out of the
+// walk (it was the tail of captureBindings) so the shared stream can run it once the last node is visited.
+void bindsFinalize( BindCtx& cx )
+{
+    const std::uint32_t         fileId = cx.fileId;
+    const Lang                  lang   = cx.lang;
+    std::vector<RawBind>&       binds  = *cx.binds;
+    std::vector<RawBind>&       fnPos  = cx.fnPos;
+    std::vector<FnBindClobber>& fnUnk  = cx.fnUnk;
+    FnBindGateState&            fnGate = cx.fnGate;
 
     resolvePendingFnBindDecls  ( fileId, lang, fnGate, fnPos );   // both noise gates — BEFORE the sweep, which needs
     resolvePendingFnBindAssigns( fileId, lang, fnGate, fnPos );   // fnPos final (its var scan is a membership test,
@@ -6642,45 +6736,43 @@ inline std::pair<std::string, std::string> ffiSplitScopeName( std::string_view t
     return { finalSegment( text.substr( 0, sep ) ), finalSegment( text.substr( sep + 2 ) ) };
 }
 
-void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<BindingAlias>& ffis )
+// One visitor on the shared pre-order stream (streamSideCaptures below). The pass arms only on C++/ObjC/
+// Python; the pybind sub-detector stays gated on a cheap file-level signal so ordinary `.def(` calls in
+// non-pybind C++ never capture.
+struct FfiCtx
 {
-    const bool cish = ( lang == Lang::Cpp || lang == Lang::ObjC );
-    const bool py   = ( lang == Lang::Python );
-    if( !cish && !py )
-    {
-        return;
-    }
-    // pybind is gated on a cheap file-level signal so ordinary `.def(` calls in non-pybind C++ never capture.
-    const bool hasPybind = cish && ( src.find( "pybind11" ) != std::string_view::npos
-                                  || src.find( "PYBIND11" ) != std::string_view::npos );
+    std::uint32_t              fileId = 0;
+    std::string_view           src;
+    std::vector<BindingAlias>* ffis = nullptr;
+    bool                       cish      = false;
+    bool                       py        = false;
+    bool                       hasPybind = false;
+};
 
-    const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view
-    {
-        if( ts_node_is_null( nn ) )
-        {
-            return {};
-        }
-        const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
-        return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
-    };
+FfiCtx makeFfiCtx( std::uint32_t fileId, Lang lang, std::string_view src, std::vector<BindingAlias>& ffis )
+{
+    FfiCtx cx;
+    cx.fileId    = fileId;
+    cx.src       = src;
+    cx.ffis      = &ffis;
+    cx.cish      = ( lang == Lang::Cpp || lang == Lang::ObjC );
+    cx.py        = ( lang == Lang::Python );
+    cx.hasPybind = cx.cish && ( src.find( "pybind11" ) != std::string_view::npos
+                             || src.find( "PYBIND11" ) != std::string_view::npos );
+    return cx;
+}
 
-    struct FfiFrame { TSNode node; std::uint16_t depth; };
-    std::vector<FfiFrame> stack;
-    stack.reserve( 64 );
-    stack.push_back( { root, 0 } );
-    ChildCursor         cursor( root );
-    std::vector<TSNode> kids;
-    kids.reserve( 64 );
-    while( !stack.empty() )
-    {
-        const FfiFrame frame = stack.back();
-        stack.pop_back();
-        if( frame.depth > 256 )
-        {
-            continue;
-        }
-        const TSNode n = frame.node;
-        const char*  t = ts_node_type( n );
+void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
+{
+    FUSEPROBE_BUMP( kFfi );
+    const std::uint32_t        fileId    = cx.fileId;
+    const std::string_view     src       = cx.src;
+    std::vector<BindingAlias>& ffis      = *cx.ffis;
+    const bool                 cish      = cx.cish;
+    const bool                 py        = cx.py;
+    const bool                 hasPybind = cx.hasPybind;
+
+    const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
         // pybind11:  m.def("alias", &target)  /  cls.def("alias", &Scope::method)  /  .def_static(...)
         if( hasPybind && std::strcmp( t, "call_expression" ) == 0 )
@@ -6797,13 +6889,6 @@ void captureFfi( TSNode root, std::uint32_t fileId, Lang lang, std::string_view 
                 }
             }
         }
-
-        collectChildren( n, cursor.cur, kids );
-        for( std::size_t i = kids.size(); i > 0; --i )
-        {
-            stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
-        }
-    }
 }
 
 // ── B6.3 HTTP-route DEF/USE capture (Express/Fastify · FastAPI/Flask decorators · fetch/axios/requests) ──
@@ -6994,47 +7079,50 @@ inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
     return HttpMethod::Unknown;
 }
 
-void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_view src,
-                    std::vector<RouteDef>& routeDefs, std::vector<RawRouteUse>& routeUses )
+// One visitor on the shared pre-order stream (streamSideCaptures below). The pass arms only on Python/JS/TS;
+// the SERVER detectors stay gated on a file-level framework signal, so a framework-free file still captures
+// no route DEF and the whole feature stays byte-inert on a framework-free corpus.
+struct RouteCtx
 {
-    const bool py = ( lang == Lang::Python );
-    const bool js = ( lang == Lang::TypeScript || lang == Lang::JavaScript );
-    if( !py && !js )
-    {
-        return;
-    }
+    std::uint32_t              fileId = 0;
+    std::string_view           src;
+    std::vector<RouteDef>*     routeDefs = nullptr;
+    std::vector<RawRouteUse>*  routeUses = nullptr;
+    bool                       py = false;
+    bool                       js = false;
+    bool                       pyServerGated = false;
+    bool                       jsServerGated = false;
+};
 
-    const bool pyServerGated = py && ( src.find( "fastapi" ) != std::string_view::npos || src.find( "FastAPI" ) != std::string_view::npos
-                                     || src.find( "flask" )   != std::string_view::npos || src.find( "Flask" )   != std::string_view::npos );
-    const bool jsServerGated = js && ( src.find( "express" ) != std::string_view::npos || src.find( "fastify" ) != std::string_view::npos );
+RouteCtx makeRouteCtx( std::uint32_t fileId, Lang lang, std::string_view src,
+                       std::vector<RouteDef>& routeDefs, std::vector<RawRouteUse>& routeUses )
+{
+    RouteCtx cx;
+    cx.fileId        = fileId;
+    cx.src           = src;
+    cx.routeDefs     = &routeDefs;
+    cx.routeUses     = &routeUses;
+    cx.py            = ( lang == Lang::Python );
+    cx.js            = ( lang == Lang::TypeScript || lang == Lang::JavaScript );
+    cx.pyServerGated = cx.py && ( src.find( "fastapi" ) != std::string_view::npos || src.find( "FastAPI" ) != std::string_view::npos
+                                || src.find( "flask" )   != std::string_view::npos || src.find( "Flask" )   != std::string_view::npos );
+    cx.jsServerGated = cx.js && ( src.find( "express" ) != std::string_view::npos || src.find( "fastify" ) != std::string_view::npos );
+    return cx;
+}
 
-    const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view
-    {
-        if( ts_node_is_null( nn ) )
-        {
-            return {};
-        }
-        const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
-        return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
-    };
+void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
+{
+    FUSEPROBE_BUMP( kRoutes );
+    const std::uint32_t        fileId        = cx.fileId;
+    const std::string_view     src           = cx.src;
+    std::vector<RouteDef>&     routeDefs     = *cx.routeDefs;
+    std::vector<RawRouteUse>&  routeUses     = *cx.routeUses;
+    const bool                 py            = cx.py;
+    const bool                 js            = cx.js;
+    const bool                 pyServerGated = cx.pyServerGated;
+    const bool                 jsServerGated = cx.jsServerGated;
 
-    struct RouteFrame { TSNode node; std::uint16_t depth; };
-    std::vector<RouteFrame> stack;
-    stack.reserve( 64 );
-    stack.push_back( { root, 0 } );
-    ChildCursor         cursor( root );
-    std::vector<TSNode> kids;
-    kids.reserve( 64 );
-    while( !stack.empty() )
-    {
-        const RouteFrame frame = stack.back();
-        stack.pop_back();
-        if( frame.depth > 256 )
-        {
-            continue;
-        }
-        const TSNode n = frame.node;
-        const char*  t = ts_node_type( n );
+    const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
         // Python server: @app.get("/path") / @app.route("/path", methods=[...]) directly above a def.
         if( pyServerGated && std::strcmp( t, "decorated_definition" ) == 0 )
@@ -7182,13 +7270,6 @@ void captureRoutes( TSNode root, std::uint32_t fileId, Lang lang, std::string_vi
                 }
             }
         }
-
-        collectChildren( n, cursor.cur, kids );
-        for( std::size_t i = kids.size(); i > 0; --i )
-        {
-            stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
-        }
-    }
 }
 
 // ── ABS-3 READ / WRITE use-site capture ──────────────────────────────────────────────────────────────
@@ -7415,56 +7496,43 @@ inline bool isNonValueContext( TSNode id ) noexcept
     return false;
 }
 
-void captureUses( TSNode root, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs, int startDepth )
+// One visitor on the shared pre-order stream (streamSideCaptures below). It keeps its OWN 512-node depth
+// cap — twice the other passes' — which the shared stream honours per visitor: past 256 the FFI/route/bind
+// visitors stop being called while this one keeps receiving nodes, exactly as their separate walks behaved.
+struct UseCtx
 {
-    // iterative pre-order DFS (explicit frame stack) — see captureBindings: recursion overflows the 512 KB
-    // macOS worker-thread stack on deep ASTs. Reverse-push keeps the original left-to-right visit order.
-    struct UseFrame { TSNode node; std::uint16_t depth; };
-    std::vector<UseFrame> stack;
-    stack.reserve( 64 );
-    stack.push_back( { root, static_cast<std::uint16_t>( startDepth ) } );
-    ChildCursor         cursor( root );
-    std::vector<TSNode> kids;
-    kids.reserve( 64 );
+    std::uint32_t        fileId = 0;
+    Lang                 lang {};
+    std::string_view     src;
+    std::vector<RawRef>* refs = nullptr;
+};
 
-    while( !stack.empty() )
-    {
-    const UseFrame frame = stack.back();
-    stack.pop_back();
-    if( frame.depth > 512 )
-    {
-        continue; // pathological-AST guard (file already ≤ 1 MB)
-    }
-    const TSNode n = frame.node;
-    const char* t = ts_node_type( n );
-
+void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
+{
+    FUSEPROBE_BUMP( kUses );
     // capture only bare value identifiers (C++ `identifier`, Python `identifier`). field_identifier reads
     // (`obj.field` non-call) are intentionally out of scope — member-field use is a richer relation we keep
     // for a later pass; the gate exercises plain locals/globals, which are `identifier` nodes.
-    if( std::strcmp( t, "identifier" ) == 0 )
+    if( std::strcmp( t, "identifier" ) != 0 )
     {
-        if( !isCallCallee( n ) && !isNonValueContext( n ) )
-        {
-            const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
-            if( a < b && b <= src.size() )
-            {
-                RawRef r;
-                r.fileId    = fileId;
-                r.startByte = a;
-                r.line      = ts_node_start_point( n ).row + 1;
-                r.lang      = lang;
-                r.role      = isWriteTarget( n ) ? RefRole::Write : RefRole::Read;
-                r.name      = finalSegment( src.substr( a, b - a ) );   // bare identifier → already final segment
-                refs.push_back( std::move( r ) );
-            }
-        }
+        return;
     }
-
-    collectChildren( n, cursor.cur, kids );
-    for( std::size_t i = kids.size(); i > 0; --i )
+    if( isCallCallee( n ) || isNonValueContext( n ) )
     {
-        stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+        return;
     }
+    const std::string_view src = cx.src;
+    const std::uint32_t    a   = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+    if( a < b && b <= src.size() )
+    {
+        RawRef r;
+        r.fileId    = cx.fileId;
+        r.startByte = a;
+        r.line      = ts_node_start_point( n ).row + 1;
+        r.lang      = cx.lang;
+        r.role      = isWriteTarget( n ) ? RefRole::Write : RefRole::Read;
+        r.name      = finalSegment( src.substr( a, b - a ) );   // bare identifier → already final segment
+        cx.refs->push_back( std::move( r ) );
     }
 }
 
@@ -7533,6 +7601,117 @@ struct TreeGuard
     }
 };
 
+// ── ONE pre-order stream for every whole-AST side-capture pass ────────────────────────────────────────
+// FFI, routes, Rust impls, bindings and value-uses each used to run their OWN iterative pre-order walk of
+// the same tree, back to back. Measured with a per-pass node-pop probe on a 1659-file ObjC++/C++ corpus:
+// 95.0% of files ran captureFfi AND captureBindings, 93.4% ran three passes, and every node was streamed
+// 2.01x on a default run / 3.01x with --uses armed. That re-streaming — not the per-node matching, which
+// is a strcmp or two — is why the `side captures` profile scope showed ~2x tree-sitter's L1D MPKI and ~2x
+// its LLC misses on half the instructions. The passes now share one stream; the per-node work is unchanged.
+//
+// ENTRY RULES. This is the union of what the fused passes need, and it is exactly "every node", because
+// FFI / bindings / value-uses each already descended unconditionally. captureIncludes is deliberately NOT
+// fused: it enters only ALLOWLISTED import containers (isImportContainer) and cost 59 node pops per file
+// against ~7,800 for a full walk — 0.4% of all pops. Folding it in would either make it visit ~130x more
+// nodes or force a per-frame "still inside an allowlisted chain" bit, and its restricted entry set is what
+// DEFINES which directives it captures. It keeps its own walk.
+//
+// DEPTH. Each pass's own pathological-AST cap survives as a per-visitor `maxDepth`: past its cap a visitor
+// simply stops being called while the others keep descending — which is what that pass's own `continue`
+// did (it skipped the node AND its subtree, and depth only grows). The stream descends while ANY armed
+// visitor still wants nodes, so the heap stack's high-water mark is max(caps) — 512 with --uses armed,
+// exactly what captureUses' own walk already reached, and 256 otherwise. No frame got fatter either: the
+// fused frame is one TSNode + one depth, the same shape (and the same 40 bytes) as each pass's old frame.
+//
+// EMISSION ORDER. Every fused pass appends to its OWN output vector, so within a vector the order is that
+// pass's own node order — byte-identical to running the passes back to back. `refs` is the one vector two
+// fused passes could share (Rust impls and value-uses), and they are disjoint by language (Rust vs
+// C++/ObjC/Python), so at most one is ever armed; sideArmsAreOrderSafe pins that invariant. Visitors are
+// still invoked in the ORIGINAL pass order at each node, so the reading order matches the old call order.
+// depth is 32-bit, not the 16-bit each pass used to carry: same 40 bytes after padding either way, and a
+// tree deeper than 65535 can no longer WRAP the counter back under a cap and re-enable a visitor that
+// should have stopped. Unreachable on a <= 1 MB file, but the old shape was the fragile one.
+struct SideFrame
+{
+    TSNode        node;
+    std::uint32_t depth;
+};
+static_assert( sizeof( SideFrame ) == sizeof( TSNode ) + 8, "the fused frame must not outgrow one node + a depth" );
+
+constexpr std::uint32_t kSideDepthStd       = 256;           // FFI / routes / bindings — their own guard
+constexpr std::uint32_t kSideDepthUses      = 512;           // value-uses — twice the others, as it always was
+constexpr std::uint32_t kSideDepthUnbounded = 0xFFFFFFFFu;   // Rust impls — that pass never had a cap
+
+// The armed set for one file. A pass whose context pointer is null is not armed and costs one predictable
+// branch per node; that is what keeps a file-level gate from turning into an always-on walk.
+struct SideArms
+{
+    FfiCtx*      ffi   = nullptr;
+    RouteCtx*    route = nullptr;
+    RustImplCtx* rust  = nullptr;
+    BindCtx*     bind  = nullptr;
+    UseCtx*      uses  = nullptr;
+};
+
+// see EMISSION ORDER above: the two passes that write `refs` must never be armed together.
+inline bool sideArmsAreOrderSafe( const SideArms& arms ) noexcept
+{
+    return arms.rust == nullptr || arms.uses == nullptr;
+}
+
+void streamSideCaptures( TSNode root, const SideArms& arms )
+{
+    VERIFY( sideArmsAreOrderSafe( arms ) );
+
+    std::uint32_t deepest = 0;
+    if( arms.ffi   != nullptr ) { deepest = std::max( deepest, kSideDepthStd ); }
+    if( arms.route != nullptr ) { deepest = std::max( deepest, kSideDepthStd ); }
+    if( arms.bind  != nullptr ) { deepest = std::max( deepest, kSideDepthStd ); }
+    if( arms.uses  != nullptr ) { deepest = std::max( deepest, kSideDepthUses ); }
+    if( arms.rust  != nullptr ) { deepest = kSideDepthUnbounded; }
+    if( deepest == 0 )
+    {
+        return;   // nothing armed — do not touch the tree at all
+    }
+
+    // Iterative, never recursive: worker threads get 512 KB stacks on macOS and a deep AST overflows the
+    // call stack well inside any depth guard. Children are pushed in REVERSE so pops preserve left-to-right
+    // source order — the determinism contract is byte-identity, and an order that depended on the walk
+    // shape would break it.
+    std::vector<SideFrame> stack;
+    stack.reserve( 64 );
+    stack.push_back( { root, 0 } );
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
+
+    while( !stack.empty() )
+    {
+        const SideFrame frame = stack.back();
+        stack.pop_back();
+        FUSEPROBE_POP();
+        if( frame.depth > deepest )
+        {
+            continue;   // past every armed visitor's cap — this subtree is nobody's business
+        }
+        const TSNode n = frame.node;
+        const char*  t = ts_node_type( n );
+
+        // original pass order: FFI, routes, Rust impls, bindings, value-uses.
+        if( arms.ffi   != nullptr && frame.depth <= kSideDepthStd )  { ffiVisitNode   ( *arms.ffi,   n, t ); }
+        if( arms.route != nullptr && frame.depth <= kSideDepthStd )  { routesVisitNode( *arms.route, n, t ); }
+        if( arms.rust  != nullptr )                                  { rustImplVisitNode( *arms.rust, n, t ); }
+        if( arms.bind  != nullptr && frame.depth <= kSideDepthStd )  { bindsVisitNode ( *arms.bind,  n, t ); }
+        if( arms.uses  != nullptr && frame.depth <= kSideDepthUses ) { usesVisitNode  ( *arms.uses,  n, t ); }
+
+        collectChildren( n, cursor.cur, kids );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( { kids[i - 1], frame.depth + 1 } );
+        }
+    }
+}
+
 void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawRef>& refs, std::vector<Include>& incs, std::vector<RawBind>& binds,
                        std::vector<BindingAlias>& ffis, std::vector<RouteDef>& routeDefs,
@@ -7541,40 +7720,97 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: side captures" );
 
+#ifdef RIPWIRE_FUSE_PROBE
+        std::uint64_t probeBefore[ fuseprobe::kPassCount ];
+        for( int p = 0; p < fuseprobe::kPassCount; ++p )
+        {
+            probeBefore[ p ] = fuseprobe::tlNodes[ p ];
+        }
+#endif
+
         captureIncludes( root, le.lang, fileId, src, incs, refs );   // physical deps + ABS-3 import-role use-sites
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a
         // binding-free file (pybind gated on a file signal; extern-C/ctypes only fire on their exact shapes).
-        captureFfi( root, fileId, le.lang, src, ffis );
+        FfiCtx   ffiCtx   = makeFfiCtx( fileId, le.lang, src, ffis );
 
         // B6.3: HTTP-route DEF/USE facts (Express/Fastify · FastAPI/Flask · fetch/axios/requests). Server
         // detectors gated on a file-level framework signal; inert on a framework-free / non-JS/Python file.
-        captureRoutes( root, fileId, le.lang, src, routeDefs, routeUses );
+        RouteCtx routeCtx = makeRouteCtx( fileId, le.lang, src, routeDefs, routeUses );
 
         // Rust IS-A: `impl Trait for T` is a top-level impl_item (sibling of the struct), unreachable from the
-        // struct's def-walk — a separate root pass. Derived type name rides `qualifier` (name-resolved in buildGraph).
-        if( le.lang == Lang::Rust )
-        {
-            captureRustImpls( root, fileId, src, refs );
-        }
+        // struct's def-walk. Derived type name rides `qualifier` (name-resolved in buildGraph).
+        RustImplCtx rustCtx { fileId, src, &refs };
 
         // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-variable narrowing. C++/ObjC/Python/TS
         // (the languages whose receiver shape `receiverOf` captures as a recvVar) — others have no consumer yet.
         // L3 adds Lang::C for the fn-pointer/callback var→function capture only: the Rule-2 branches inside
         // gate themselves on Cpp/ObjC/Python/TS, so type narrowing is byte-identical on C files.
-        if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript
-            || le.lang == Lang::C )
-        {
-            captureBindings( root, fileId, le.lang, src, binds, 0 );
-        }
+        BindCtx bindCtx;
+        bindCtx.fileId    = fileId;
+        bindCtx.lang      = le.lang;
+        bindCtx.src       = src;
+        bindCtx.binds     = &binds;
+        bindCtx.cFamilyFn = ( le.lang == Lang::Cpp || le.lang == Lang::C || le.lang == Lang::ObjC );
 
         // ABS-3: read/write use-site capture (bare value identifiers + assignment targets). C++/ObjC/Python —
         // the languages whose assignment/update grammar shapes isWriteTarget knows. role=Read/Write refs NEVER
         // enter the call graph (buildGraph skips role != Call), so PageRank and the default map are unchanged.
+        UseCtx useCtx { fileId, le.lang, src, &refs };
+
+        SideArms arms;
+        if( ffiCtx.cish || ffiCtx.py )
+        {
+            arms.ffi = &ffiCtx;
+        }
+        if( routeCtx.py || routeCtx.js )
+        {
+            arms.route = &routeCtx;
+        }
+        if( le.lang == Lang::Rust )
+        {
+            arms.rust = &rustCtx;
+        }
+        if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript
+            || le.lang == Lang::C )
+        {
+            arms.bind = &bindCtx;
+        }
         if( captureValueUses && ( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python ) )
         {
-            captureUses( root, fileId, le.lang, src, refs, 0 );
+            arms.uses = &useCtx;
         }
+
+        streamSideCaptures( root, arms );
+
+        if( arms.bind != nullptr )
+        {
+            bindsFinalize( bindCtx );   // L3 noise gates + clobber sweep — the tail of the old captureBindings
+        }
+
+#ifdef RIPWIRE_FUSE_PROBE
+        {
+            int           sawNode = 0;
+            std::uint64_t maxPass = 0;
+            for( int p = 0; p < fuseprobe::kPassCount; ++p )
+            {
+                const std::uint64_t d = fuseprobe::tlNodes[ p ] - probeBefore[ p ];
+                if( d != 0 )
+                {
+                    ++sawNode;
+                    fuseprobe::gFiles[ p ].fetch_add( 1, std::memory_order_relaxed );
+                }
+                if( d > maxPass )
+                {
+                    maxPass = d;
+                }
+                fuseprobe::gNodes[ p ].fetch_add( d, std::memory_order_relaxed );
+            }
+            fuseprobe::gNodesMaxPass.fetch_add( maxPass, std::memory_order_relaxed );
+            fuseprobe::gHist[ sawNode ].fetch_add( 1, std::memory_order_relaxed );
+            fuseprobe::gFilesTotal.fetch_add( 1, std::memory_order_relaxed );
+        }
+#endif
     }
 }
 
@@ -8015,6 +8251,99 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
     return text;
 }
 
+// Per-worker capacity floor for the COLD parse pool, sized from the crawl's parseable byte count.
+//
+// WHY THIS EXISTS. The warm reserve sums cached FileFacts, so it only runs when a cache is loaded; a cold
+// run reserved nothing and every accumulator doubled up from zero — ~500 whole-vector reallocations per
+// run, on the one path where all workers hammer the allocator at once.
+//
+// WHAT IT IS WORTH, MEASURED, so nobody re-litigates it from the plausible-sounding story. Against pristine
+// HEAD on three cold corpora (this repo at ~1.1k files, plus a 2.4k-file and a 0.7k-file ObjC++/C++ tree),
+// --no-cache on both sides, 9 reps: heap allocations about -505 / -465 / -420, which is only -0.29% /
+// -0.06% / -0.12% of each run's total. Peak live bytes is a WASH — repeat measurements of the very same
+// binaries move it between -0.6 and +2.0 MB, i.e. the sign is not stable, so the "stranded buffers" story
+// does not survive contact with an allocator that reuses them. Parse-pool wall clock is a NULL RESULT: two
+// independent 15-pair interleaved runs disagreed in SIGN on two of the three corpora, so machine drift
+// exceeds the effect. This removes real work; it does not make the tool measurably faster, and it does not
+// measurably shrink it either. Not a speedup — do not cite it as one.
+//
+// BYTES, NOT FILE COUNT, IS THE PREDICTOR. Over ten corpora spanning C/C++, ObjC++, Rust, Swift, Python/TS
+// and generated C, refs-per-FILE spans 190x (10.6 … 2017.6) while refs-per-BYTE spans 11x; binds-per-file
+// spans 1325x against 432x per byte. A file count cannot size the two families that hold the memory. Each
+// divisor is the bytes-per-element of roughly the LEAST dense corpus measured, so the estimate is a floor,
+// not a forecast, and lands under the real total nearly everywhere.
+//
+// WHY THE CAP, which is the part that is easy to get wrong. Allocations saved grow like log2( reserve )
+// while the memory risked grows like the reserve itself, so the efficient point is small: measured, a
+// 256-element cap keeps 84-94% of the allocations an uncapped mean-sized reserve saves, bounded by
+// 256 * ( 168 + 144 + 32 + 72 ) B * nthreads ~= 1.9 MB in the worst case where every worker finishes under
+// it. Reserving each worker the corpus MEAN is worse than it looks: work is uneven (the busiest worker
+// holds 1.3-5.2x the mean, median ~1.9x), so a mean-sized reserve over-allocates the below-mean majority
+// to suit one worker — that variant measured 1-2.5 MB of extra peak live bytes for ~60 more allocations.
+//
+// ROUNDED DOWN TO A POWER OF TWO. An empty vector grows 1, 2, 4, 8, … so its final capacity for n elements
+// is exactly the next power of two; starting from 2^j the ladder is 2^j, 2^(j+1), … — a SUBSEQUENCE of the
+// same powers. Seeding with a power of two therefore lands on the identical final capacity for any worker
+// that reaches it, and can only remove growth steps. An arbitrary seed cannot say that: a vector reserved
+// to R that needs R+1 doubles to 2R and can finish above where it would have landed alone.
+//
+// FFI and route accumulators get nothing on purpose: across the same ten corpora they total 0-363 entries
+// and are non-empty on only 0-11 of 18 workers, so a reserve there would be pure waste.
+struct ColdParseReserve
+{
+    std::size_t defs;
+    std::size_t refs;
+    std::size_t incs;
+    std::size_t binds;
+};
+
+// fileLang and fileByteSize are the crawl's two parallel per-file arrays; a file counts toward the estimate
+// only when it has a grammar, which is the same predicate the divisors were calibrated under. Keeping the
+// predicate next to the constants is deliberate: change one and the other stops being calibrated.
+inline ColdParseReserve coldParseReserve( std::span<const LangEntry* const> fileLang,
+                                          std::span<const std::uintmax_t> fileByteSize,
+                                          unsigned nthreads ) noexcept
+{
+    VERIFY( nthreads >= 1 );   // caller derives it from min( hardware_concurrency, nfiles ) with nfiles >= 1
+    VERIFY( fileLang.size() == fileByteSize.size() );
+
+    std::size_t parseableBytes = 0;
+    for( std::size_t fileId = 0; fileId < fileLang.size(); ++fileId )
+    {
+        const LangEntry* le = fileLang[ fileId ];
+        if( le != nullptr && le->grammar != nullptr )
+        {
+            parseableBytes += static_cast<std::size_t>( fileByteSize[ fileId ] );
+        }
+    }
+
+    // bytes per element, calibrated 2026-08-10 against the ten-corpus census described above
+    constexpr std::size_t kBytesPerDef  =  2400;
+    constexpr std::size_t kBytesPerRef  =   800;
+    constexpr std::size_t kBytesPerInc  = 20000;
+    constexpr std::size_t kBytesPerBind =  4000;
+    constexpr std::size_t kCapPerThread =   256;
+
+    // Integer division throughout: no float, and no overflow — parseableBytes is a byte count, every divisor
+    // is a nonzero constant, and nthreads is at least 1. An all-documentation tree yields 0 for every family,
+    // and reserve( 0 ) is a no-op.
+    const auto perThread = [ parseableBytes, nthreads, cap = kCapPerThread ]( std::size_t bytesPerElem ) noexcept
+    {
+        return std::min( std::bit_floor( parseableBytes / bytesPerElem / nthreads ), cap );
+    };
+
+    const ColdParseReserve r{ perThread( kBytesPerDef ), perThread( kBytesPerRef ),
+                              perThread( kBytesPerInc ), perThread( kBytesPerBind ) };
+
+    // The two properties the whole argument above rests on: every value is a power of two (so the doubling
+    // ladder is unchanged) and none exceeds the cap (so the waste stays bounded).
+    VERIFY( r.defs  <= kCapPerThread && ( r.defs  == 0 || std::has_single_bit( r.defs  ) ) );
+    VERIFY( r.refs  <= kCapPerThread && ( r.refs  == 0 || std::has_single_bit( r.refs  ) ) );
+    VERIFY( r.incs  <= kCapPerThread && ( r.incs  == 0 || std::has_single_bit( r.incs  ) ) );
+    VERIFY( r.binds <= kCapPerThread && ( r.binds == 0 || std::has_single_bit( r.binds ) ) );
+    return r;
+}
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
                      std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel )
 {
@@ -8403,6 +8732,30 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         std::vector<std::vector<RawRouteUse>>  tRouteUses( nthreads );   // B6.3
         std::vector<FileFacts*>           cacheCandidateFacts( nfiles, nullptr );
         std::vector<FileFacts*>           cacheHitFacts( nfiles, nullptr );
+
+        // Per-file byte sizes are wanted in two places below — the cold-path reserve, and the
+        // longest-file-first work order. Fill at most once, on demand, so a warm run that also skips
+        // the work order still performs no stat pass at all (exactly as before this was hoisted).
+        std::vector<std::uintmax_t> fileByteSize;
+        const auto ensureFileByteSize = [ & ]()
+        {
+            if( !fileByteSize.empty() )
+            {
+                return;
+            }
+            fileByteSize.assign( nfiles, 0 );
+            std::error_code ec;
+            for( std::size_t fileId = 0; fileId < nfiles; ++fileId )
+            {
+                ec.clear();
+                fileByteSize[ fileId ] = fs::file_size( result.files[ fileId ], ec );
+                if( ec )
+                {
+                    fileByteSize[ fileId ] = 0;
+                }
+            }
+        };
+
         if( !cache.empty() )
         {
             PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: prepare cache-hit reuse" );
@@ -8443,6 +8796,22 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 tBinds[ t ].reserve( bindsPerThread );
             }
         }
+        else
+        {
+            // Cold: no cache to size from, so size the accumulators from the crawl's parseable byte
+            // count. coldParseReserve() carries the calibration and the reasoning behind the numbers.
+            PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: prepare cold reserve" );
+
+            ensureFileByteSize();
+            const ColdParseReserve cold = coldParseReserve( fileLang, fileByteSize, nthreads );
+            for( unsigned t = 0; t < nthreads; ++t )
+            {
+                tDefs[ t ].reserve( cold.defs );
+                tRefs[ t ].reserve( cold.refs );
+                tIncs[ t ].reserve( cold.incs );
+                tBinds[ t ].reserve( cold.binds );
+            }
+        }
         std::vector<std::thread>          pool;
         pool.reserve( nthreads );
         std::vector<std::size_t>          parseOrder;
@@ -8454,17 +8823,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 parseOrder.resize( nfiles );
                 std::iota( parseOrder.begin(), parseOrder.end(), std::size_t( 0 ) );
 
-                std::vector<std::uintmax_t> fileByteSize( nfiles, 0 );
-                std::error_code ec;
-                for( std::size_t fileId = 0; fileId < nfiles; ++fileId )
-                {
-                    ec.clear();
-                    fileByteSize[ fileId ] = fs::file_size( result.files[ fileId ], ec );
-                    if( ec )
-                    {
-                        fileByteSize[fileId] = 0;
-                    }
-                }
+                ensureFileByteSize();   // already filled by the cold-path reserve above; a no-op there
 
                 const auto parsePriority = [ & ]( std::size_t fileId ) noexcept
                 {
@@ -9773,7 +10132,7 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
 // Replaces the per-capture "scan [0,startByte) counting '\n'" (byte-0 rescan, O(startByte) EACH match)
 // with one O(fileBytes) pass + a binary search per capture. Byte-identical result:
 //   line(b) = 1 + (# of '\n' at offset < b) = 1 + lower_bound(offsets, b) position.
-// The pass itself rides rw::findByte (src/fixedStr.h) — a NEON/SSE2 find-'\n' kernel that is EXACT, so the
+// The pass itself rides rw::findByte (src/infra/fixedStr.h) — a NEON/SSE2 find-'\n' kernel that is EXACT, so the
 // offsets are bit-identical to the byte-at-a-time loop this replaced and determinism is untouched. '\r' is
 // not a line break here and never was. bench/bench_newline_ab.cpp races the two against libc memchr and
 // asserts all three agree byte-for-byte before it reports a number; the kernel won at ~1.4x over memchr.

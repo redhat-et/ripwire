@@ -87,11 +87,17 @@ if [ -z "$ripwire_cpp_files" ] || ! printf '%s\n' "$ripwire_cpp_files" | grep -q
     ripwire_cpp_files="$( cd "$ROOT" && printf '%s\n' src/*.cpp )"
 fi
 
-# Find the newest (most recent) mtime among: every src/*.h (shared), every src/*.inl (shared), and the
-# derived .cpp list (target-scoped — excludes probe/test-only .cpp files like src/tsprobe.cpp).
+# Find the newest (most recent) mtime among: every src/*.h and src/infra/*.{h,hpp,inl} (all shared), and
+# the derived .cpp list (target-scoped — excludes probe/test-only .cpp files like src/tsprobe.cpp).
+#
+# src/infra/ IS in the sweep, and has to be. The glob used to be src/*.h alone, which was already blind to
+# the infra layer (platform.h, Diagnostics.h, sparseCsr.h, radixSort.inl …) and went blinder the moment ten
+# leaf headers moved down into it — an edit to src/infra/hashutil.h would have left this gate reporting a
+# fresh binary that predates it. A staleness sweep that cannot see a compiled-in header is the "green while
+# inert" shape CONTRIBUTING.md §2 names.
 newest_src_mtime=0
 newest_src_file=""
-for f in "$SRC_DIR"/*.h "$SRC_DIR"/*.inl; do
+for f in "$SRC_DIR"/*.h "$SRC_DIR"/*.inl "$SRC_DIR"/infra/*.h "$SRC_DIR"/infra/*.hpp "$SRC_DIR"/infra/*.inl; do
     [ -f "$f" ] || continue
     f_mtime="$( mtime_of "$f" )"
     if [ "$f_mtime" -gt "$newest_src_mtime" ]; then newest_src_mtime="$f_mtime"; newest_src_file="$f"; fi

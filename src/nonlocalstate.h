@@ -57,20 +57,21 @@
 // before emission; nothing iterates a HashMap into output.
 
 #include "model.h"
-#include "graph.h"        // Graph (in/out CSR) + langCompatible — the same call graph every reach verb walks
-#include "ingest.h"       // AstQuerySpec / AstMatch / astQuery — the shared re-parse pass --lint already runs
-#include "flipimpact.h"   // buildSymbolLineIndex / innermostAtLine — the shared line -> innermost-def lookup
-#include "docdrift.h"     // hasWholeWord — THE house whole-word predicate (so `const_cast` never satisfies `const`)
-#include "pageview.h"     // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
-#include "serialize.h"    // escapeXml
-#include "graphlegend.h"  // kGraphCountFloorAttrXml — the shared floor marker
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT — a blind spot degrades the report, never aborts it
+#include "graph.h"              // Graph (in/out CSR) + langCompatible — the same call graph every reach verb walks
+#include "ingest.h"             // AstQuerySpec / AstMatch / astQuery — the shared re-parse pass --lint already runs
+#include "flipimpact.h"         // buildSymbolLineIndex / innermostAtLine — the shared line -> innermost-def lookup
+#include "docdrift.h"           // hasWholeWord — THE house whole-word predicate (so `const_cast` never satisfies `const`)
+#include "pageview.h"           // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
+#include "serialize.h"          // escapeXml
+#include "graphlegend.h"        // kGraphCountFloorAttrXml — the shared floor marker
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — a blind spot degrades the report, never aborts it
 
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
 #include <cstdio>
+#include <span>          // std::span — enclosingDecl reads whichever contiguous bucket the caller holds
 #include <string>
 #include <string_view>
 #include <utility>
@@ -274,7 +275,7 @@ struct Scan
 // The declaration row that ENCLOSES a name row. Declaration forms do not nest at the scopes the table
 // matches, so "the last declaration starting at or before the name, that also ends at or after it" is
 // exact, not a heuristic. Rows arrive sorted by (path, startByte, endByte), so the bucket is sorted too.
-inline const AstMatch* enclosingDecl( const std::vector<const AstMatch*>& bucket, const AstMatch& name ) noexcept
+inline const AstMatch* enclosingDecl( std::span<const AstMatch* const> bucket, const AstMatch& name ) noexcept
 {
     if( bucket.empty() )
     {
@@ -318,7 +319,13 @@ inline void discoverCells( const IngestResult& ing, Scan& scan )
 
     // Bucket the DECLARATION rows by (rule, file) for the join. A HashMap is a lookup structure only —
     // nothing here iterates it, so its order never reaches output.
-    HashMap<std::string, std::vector<const AstMatch*>> declBuckets;
+    // N=4. The element is a bare `const AstMatch*` — 8 bytes, trivially copyable, so rw::svector takes it
+    // and the free-N-is-2 rule for 4-byte elements does not apply: <ptr,1> is 16 B, <ptr,2> is 24 B (what a
+    // std::vector already costs), <ptr,4> is 40 B. Coverage runs 28.7/43.7/59.2/85.6% here and
+    // 36.0/50.3/68.7/82.2% on the validation corpus for N=1/2/4/8, and marginal coverage per byte falls
+    // 1.79 → 1.15 → 0.42 across 1→2→4→8 there, so the knee is N=4. Absolute cost is trivial either way —
+    // 174/600 buckets — and what this buys is that the (rule, file) join stops making a heap block per key.
+    HashMap<std::string, rw::SmallVec<const AstMatch*, 4>> declBuckets;
     std::vector<std::size_t>                          keptPerTag( kCellRules.size() * 2, 0 );
     for( const AstMatch& m : matches )
     {

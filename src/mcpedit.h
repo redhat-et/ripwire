@@ -8,7 +8,7 @@
 // included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
-#include "hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 
 namespace rw
 {

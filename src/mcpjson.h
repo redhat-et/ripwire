@@ -5,7 +5,7 @@
 // Extracted from mcp.h (the mcp.h/main.cpp concern-split): the pure protocol layer, no index
 // dependency. Included by mcpindex.h (and thus by mcpverbs.h / mcpedit.h / mcp.h).
 
-#include "jsonesc.h"        // A4-F27: canonical JSON escape core; mcpdetail::jsonEscape below is a thin wrapper
+#include "infra/jsonesc.h"        // A4-F27: canonical JSON escape core; mcpdetail::jsonEscape below is a thin wrapper
 
 #include <cctype>
 #include <cstdint>
