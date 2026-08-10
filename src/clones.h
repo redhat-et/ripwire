@@ -724,7 +724,19 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
 
     // Bucket candidates by fingerprint hash → candidate indices sharing a k-gram. Only intra-bucket pairs are
     // ever compared, so a pair with ZERO shared k-grams is never touched (the O(N²) escape hatch).
-    HashMap<std::uint64_t, std::vector<std::uint32_t>> buckets;
+    //
+    // N=4, and the census' N=8 OVERSHOOTS — this is the one place in the wave where more inline slots make
+    // total memory WORSE, because the payload is concentrated in a handful of huge buckets (max 1 423/2 986)
+    // while the COUNT is dominated by tiny ones. Coverage by N over the two census corpora:
+    //     N :   1     2     4     8    16          instance bytes: 16 16 24 40 72
+    //   here: 48.3  63.6  76.1  84.8  90.8
+    //   cr48: 39.9  55.0  68.1  78.6  86.6
+    // Marginal coverage per byte is 1.57/1.64 going 2→4 and 0.54/0.66 going 4→8 — a 2.6-2.9x cliff, the
+    // knee. Above it the header array grows faster than the heap blocks it saves: at 53 127 buckets, N=8
+    // adds 850 KB of inline slots to spare ~225 KB of heap, so total footprint is ~5.1 MB against N=4's
+    // ~4.5 MB (std::vector today: ~5.3 MB). N=4 is also exactly the 24 bytes a std::vector header already
+    // costs, so the array itself does not grow at all and two thirds of the heap blocks simply stop.
+    HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>> buckets;
     for( std::uint32_t ci = 0; ci < cands.size(); ++ci )
     {
         for( std::uint64_t g : cands[ci].fp )
