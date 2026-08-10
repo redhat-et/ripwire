@@ -1,0 +1,11 @@
+toplevel = "seed"
+
+[tool.ripwire]
+fuzz = true
+
+[tool.ripwire.lint]
+dotted.key = 13
+inline = { a = 1, b = 2 }
+
+[[tool.ripwire.matrix]]
+name = "one"
