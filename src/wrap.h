@@ -102,6 +102,7 @@ struct WrapBlurbTarget
 inline constexpr WrapBlurbTarget kWrapBlurbTargets[] = {
     { "claude",   "CLAUDE.md" },
     { "codex",    "AGENTS.md" },
+    { "opencode", "AGENTS.md" },   // read automatically: project root, and ~/.config/opencode/AGENTS.md
     { "cursor",   ".cursor/rules (a .mdc file)" },
     { "windsurf", ".windsurfrules" },
     { "gemini",   "GEMINI.md" },
@@ -166,6 +167,7 @@ inline void wrapList( std::FILE* out )
     std::fprintf( out,
         "ripwire wrap <agent> — print the recipe to wire ripwire into an agent's loop.\n"
         "  MCP agents:  claude  cursor  codex  windsurf  gemini\n"
+        "  CLI-first:   opencode\n"
         "  repo-map:    aider\n"
         "  example:     ripwire wrap claude\n"
         "  --all        detect every installed agent + emit each one's config\n" );
@@ -198,6 +200,24 @@ inline void wrapMcpJson( const char* configPath )
         "    \"ripwire\": { \"command\": \"ripwire\", \"args\": [\"--mcp\"] }\n"
         "  }\n"
         "}\n", configPath );
+}
+
+// opencode's config is a DIFFERENT shape, not a different path: the top-level key is `mcp` (not
+// `mcpServers`), the entry carries an explicit `type`, and `command` is a single string ARRAY
+// rather than a command/args pair. The two cannot share wrapMcpJson's literal — and emitting the
+// familiar shape here would be the worst possible failure, since opencode parses that config
+// happily and then ignores it. Callers print their own "add to <path>" guidance, so this emits the
+// object alone. Keys are held to McpLocalConfig's six (the published schema sets
+// additionalProperties:false); test/opencodewrapcheck.sh checks this against the pinned copy.
+inline void wrapMcpJsonOpencode()
+{
+    std::printf(
+        "{\n"
+        "  \"$schema\": \"https://opencode.ai/config.json\",\n"
+        "  \"mcp\": {\n"
+        "    \"ripwire\": { \"type\": \"local\", \"command\": [\"ripwire\", \"--mcp\"] }\n"
+        "  }\n"
+        "}\n" );
 }
 
 // Agent configuration: name, config directory path (using ~ for home), and a lambda to
@@ -249,12 +269,28 @@ inline std::vector<AgentConfig> getAgentConfigs() noexcept
         };
     };
 
+    // opencode resolves every path through xdg-basedir, so ~/.config/opencode is the DEFAULT, not
+    // the location — XDG_CONFIG_HOME relocates it. Accept ~/.opencode as the second candidate.
+    const auto opencodeInstalled = [ home ]() -> bool
+    {
+        std::error_code   ec;
+        const char*       xdg  = std::getenv( "XDG_CONFIG_HOME" );
+        const std::string base = ( xdg && *xdg ) ? std::string( xdg ) : std::string( home ) + "/.config";
+        if( fs::is_directory( base + "/opencode", ec ) && !ec )
+        {
+            return true;
+        }
+        ec.clear();
+        return fs::is_directory( std::string( home ) + "/.opencode", ec ) && !ec;
+    };
+
     return {
         { "claude",   "~/.claude",                         checkExists( "~/.claude" ) },
         { "cursor",   "~/.cursor",                         checkExists( "~/.cursor" ) },
         { "codex",    "~/.codex",                          checkExists( "~/.codex" ) },
         { "windsurf", "~/.codeium/windsurf",               checkExists( "~/.codeium/windsurf" ) },
         { "gemini",   "~/.gemini",                         checkExists( "~/.gemini" ) },
+        { "opencode", "~/.config/opencode",                opencodeInstalled },
         { "aider",    "",                                  []() { return true; } },   // aider is always available
     };
 }
@@ -347,6 +383,26 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
             "command = \"%s\"\n"
             "args = [\"--mcp\"]\n", command.c_str() );
     }
+    else if( agent == "opencode" )
+    {
+        // CLI FIRST, MCP second — the one recipe in this table that leads with the shell path.
+        // opencode ships a `bash` tool, so the CLI is available to it, and the CLI costs zero
+        // context until it is invoked; a registered MCP server's verb schemas are resident every
+        // turn whether any verb is called or not (measured in docs/EVALS.md §5). Where an agent can
+        // shell out, that standing cost is the whole difference, so the shell recipe goes first.
+        std::printf(
+            "# ripwire -> opencode (github.com/anomalyco/opencode)\n"
+            "# RECOMMENDED — opencode has a `bash` tool, so call the CLI directly. It costs nothing\n"
+            "# until you invoke it, and opencode reads AGENTS.md automatically (project root, plus\n"
+            "# ~/.config/opencode/AGENTS.md globally), so the paste block below IS the whole wiring:\n"
+            "ripwire . --for=\"<your task>\" --max-tokens=2000\n"
+            "#\n"
+            "# ALTERNATIVE — register the MCP server instead, for a warm index across calls. Add to\n"
+            "# opencode.json (project) or ~/.config/opencode/opencode.json (global; the two are\n"
+            "# merged per-key and the project file wins). The key is \"mcp\" — the \"mcpServers\" shape\n"
+            "# other clients use parses fine here and is then silently ignored:\n" );
+        wrapMcpJsonOpencode();
+    }
     else if( agent == "aider" )
     {
         std::printf(
@@ -359,7 +415,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     // every MCP agent recipe also gets the grouped verb list printed as a comment (cursor/windsurf/
     // gemini/codex use a plain JSON/TOML stanza with no verb comment of their own, so add it here
     // instead of duplicating the printf calls per-branch); aider has no MCP verbs to list.
-    if( agent == "cursor" || agent == "windsurf" || agent == "gemini" || agent == "codex" )
+    if( agent == "cursor" || agent == "windsurf" || agent == "gemini" || agent == "codex" || agent == "opencode" )
     {
         std::printf( "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
         for( const std::string& line : verbLines )
@@ -436,7 +492,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
     // ── Handle single agent request ───────────────────────────────────────────────────────────
     const std::string_view agent = arg;
     if( agent == "claude" || agent == "cursor" || agent == "windsurf" || agent == "gemini" ||
-        agent == "codex" || agent == "aider" )
+        agent == "codex" || agent == "aider" || agent == "opencode" )
     {
         wrapEmitAgent( agent, verbLines, executablePath );
         return 0;
