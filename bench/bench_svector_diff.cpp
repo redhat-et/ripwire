@@ -1,23 +1,28 @@
 // bench_svector_diff.cpp — the CORRECTNESS oracle for the small-vector arms. Not a benchmark; it is the
 // thing that has to be green before any number from bench_svector_wave.cpp means anything.
 //
-// A seeded, randomized operation stream is replayed against four containers in lockstep and their
+// A seeded, randomized operation stream is replayed against three containers in lockstep and their
 // contents are compared after EVERY operation:
 //
 //     std::vector<uint32_t>            the ORACLE — the semantics everything else claims to match
 //     ankerl::svector<uint32_t,N>      third_party/svector.h (MIT), the vendored complete implementation
-//     rw::svector<uint32_t,N>          src/infra/svector.h, the branch-free-size() specialist
-//     rwx::svector16<uint32_t,N>       bench/svector_union_arm.h, the 16-byte union experiment
+//     rw::svector<uint32_t,N>          src/infra/svector.h — 16 B, UNION storage, branch-free size()
+//
+// rw::svector IS the promoted union design, so this harness is now its primary correctness gate rather
+// than an experiment's second opinion. The union makes two failure modes live that a plain struct cannot
+// have: an inline/heap decision that tests `heap_` for null (those bytes hold ELEMENT DATA when the
+// inline arm is active), and a swap or shrink that overwrites the union before reading the pointer out
+// of it. The spill-boundary bias and the exhaustive swap sweep below exist for exactly those.
 //
 // ── WHAT IT ASSERTS, AND WHAT IT MUST NOT ────────────────────────────────────────────────────────────
 // ELEMENT SEQUENCE and size(). Nothing else. Three divergences between these types are DELIBERATE and
 // documented, and an assertion on any of them would make this harness wrong rather than the code:
-//   * size_type — rw/rwx use uint32_t, ankerl and std use size_t;
+//   * size_type — rw uses uint32_t, ankerl and std use size_t;
 //   * capacity() and the growth schedule — ankerl::svector<uint32,2> reports capacity 3, because it
-//     fills its padding; rw/rwx report 2; std::vector reports whatever it likes. So the four cross the
+//     fills its padding; rw reports 2; std::vector reports whatever it likes. So the three cross the
 //     spill boundary at DIFFERENT sizes, which is exactly why the stream below is biased to sweep the
 //     whole 0..N+3 band rather than to poke one number;
-//   * max_size() — 2^32-1 for rw/rwx.
+//   * max_size() — 2^32-1 for rw.
 // Iterator addresses and growth points are likewise never compared.
 //
 // ── THE BIAS ─────────────────────────────────────────────────────────────────────────────────────────
@@ -36,7 +41,6 @@
 // sequences. Gated by test/svectorcheck.sh.
 
 #include "infra/svector.h"
-#include "svector_union_arm.h"
 #include "../third_party/svector.h"
 
 #include <cstdint>
@@ -126,7 +130,7 @@ struct Step
 };
 
 // The band that matters. Uniform random would spend almost all its time far from N; this keeps the
-// working size hovering across the inline<->heap boundary of all four implementations at once (rw/rwx
+// working size hovering across the inline<->heap boundary of all three implementations at once (rw
 // spill past 2, ankerl past 3, std::vector immediately).
 std::uint32_t biasedSize( Rng& rng )
 {
@@ -155,7 +159,7 @@ std::vector<Step> makeStream( std::uint64_t seed, std::size_t stepCount )
 }
 
 // ── replay ───────────────────────────────────────────────────────────────────────────────────────────
-// One body, four instantiations. Every container below supports this surface with ANKERL'S SPELLING,
+// One body, three instantiations. Every container below supports this surface with ANKERL'S SPELLING,
 // which is the substitutability claim the one-alias conversion experiment rests on — if an arm stops
 // compiling here, the alias flip would have broken at a real call site instead.
 template <class V>
@@ -298,11 +302,10 @@ int main( int argc, char** argv )
     if( argc > 2 ) { steps = std::size_t( std::strtoull( argv[2], nullptr, 10 ) ); }
 
     std::printf( "bench_svector_diff: seed=%llu steps=%zu N=%u\n", (unsigned long long) seed, steps, kN );
-    std::printf( "  sizeof: std::vector=%zu  ankerl=%zu  rw=%zu  rwx(union)=%zu\n",
+    std::printf( "  sizeof: std::vector=%zu  ankerl=%zu  rw(union)=%zu\n",
                  sizeof( std::vector<std::uint32_t> ),
                  sizeof( ankerl::svector<std::uint32_t, kN> ),
-                 sizeof( rw::svector<std::uint32_t, kN> ),
-                 sizeof( rwx::svector16<std::uint32_t, kN> ) );
+                 sizeof( rw::svector<std::uint32_t, kN> ) );
 
     // a fixed feed for the range-taking operations, so every arm is handed identical input
     std::vector<std::uint32_t> feed;
@@ -313,25 +316,21 @@ int main( int argc, char** argv )
     Pair<std::vector<std::uint32_t>>            oracle;
     Pair<ankerl::svector<std::uint32_t, kN>>    ank;
     Pair<rw::svector<std::uint32_t, kN>>        rws;
-    Pair<rwx::svector16<std::uint32_t, kN>>     uni;
 
-    std::vector<std::uint32_t> wo, wa, wr, wu;
+    std::vector<std::uint32_t> wo, wa, wr;
     for( std::size_t i = 0; i < stream.size(); ++i )
     {
         const Step& s = stream[i];
         applyPair( oracle, s, feed );
         applyPair( ank,    s, feed );
         applyPair( rws,    s, feed );
-        applyPair( uni,    s, feed );
 
         snapshot( oracle, wo );
         snapshot( ank,    wa );
         snapshot( rws,    wr );
-        snapshot( uni,    wu );
 
         if( wa != wo ) { report( "ankerl", seed, i, s, wo, wa ); }
         if( wr != wo ) { report( "rw",     seed, i, s, wo, wr ); }
-        if( wu != wo ) { report( "rwx",    seed, i, s, wo, wu ); }
         if( g_failures >= 5 )
         {
             std::printf( "  (stopping after %d divergences)\n", g_failures );
@@ -340,13 +339,12 @@ int main( int argc, char** argv )
     }
     if( g_failures == 0 )
     {
-        std::printf( "  PASS  %zu operations, 4 arms in lockstep, element sequence + size() identical throughout\n", steps );
+        std::printf( "  PASS  %zu operations, 3 arms in lockstep, element sequence + size() identical throughout\n", steps );
     }
 
     const bool sa = swapSweep<ankerl::svector<std::uint32_t, kN>>( "ankerl" );
     const bool sr = swapSweep<rw::svector<std::uint32_t, kN>>( "rw" );
-    const bool su = swapSweep<rwx::svector16<std::uint32_t, kN>>( "rwx" );
-    if( sa && sr && su )
+    if( sa && sr )
     {
         std::printf( "  PASS  swap sweep (%u x %u size pairings per arm, every inline/heap combination)\n", kN + 4u, kN + 4u );
     }

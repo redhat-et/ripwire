@@ -3,12 +3,13 @@
 // The authoritative comparison is the in-situ one (bench/svectorab.py, whole pipeline, real corpora).
 // This binary answers the three questions that a whole-pipeline wall-clock cannot:
 //
-//   1. IS THE WORKLOAD MEMORY-BOUND? Read this FIRST; it decides how to read everything else. If the
-//      read phase is memory-latency-bound, a container's SIZE dominates and 16 B should beat 24 B even
-//      though it branches — a correctly-predicted branch is ~1 cycle against an L2/LLC miss two orders
-//      of magnitude larger. If it is compute-bound, size is nearly free and the size() branch is the
-//      only axis that matters. Answered with the tree's existing PMC backend (src/infra/profilePmc.h):
-//      IPC, and misses per thousand instructions at L1D and LLC.
+//   1. IS THE WORKLOAD MEMORY-BOUND? Read this FIRST; it decides how to read everything else. Answered
+//      with the tree's existing PMC backend (src/infra/profilePmc.h): IPC, and misses per thousand
+//      instructions at L1D and LLC. The answer at 200K names is YES, emphatically (IPC 0.70, LLC-MPKI
+//      84.9), and that measurement is what promoted the 16-byte union layout into rw::svector — under a
+//      memory-bound profile an instance-size difference is real, where a predicted branch is ~1 cycle.
+//      Note what this arm can no longer isolate: A is the only 24-byte arm left, so the 24-vs-16
+//      comparison that produced the promotion is preserved in bench/SVECTORAB.md, not re-run here.
 //   2. HOW MANY HEAP ALLOCATIONS does each arm perform, and how many bytes? Counted exactly, with a
 //      global operator new replacement (this is a standalone bench binary, so that costs nothing
 //      anywhere else).
@@ -16,16 +17,20 @@
 //      every rehash MOVES EVERY ELEMENT. That is the hottest operation on these types and nothing calls
 //      it explicitly. WaveShape below forces several rehashes and times only the movement.
 //
-// ARMS (the same four the alias flip selects, so the two halves of the rig are comparable):
+// ARMS (the same three the alias flip selects, so the two halves of the rig are comparable):
 //   A std::vector<uint32>          24 B, a malloc per non-empty list
 //   B ankerl::svector<uint32,2>    16 B, size() branches on the SVO tag; inline capacity is really 3
-//   C rw::svector<uint32,2>        24 B, size() branch-free
-//   D rwx::svector16<uint32,2>     16 B, size() branch-free (the union experiment)
+//   C rw::svector<uint32,2>        16 B AND size() branch-free (the promoted union design)
+//
+// There used to be a fourth arm, rwx::svector16 — the union experiment. It won and was promoted into
+// rw::svector, so arm C IS that design now and the separate copy is gone.
 //
 // THE KNOWN-NEGATIVE. A measurement rig that has never returned "no difference" is not trustworthy, so
 // arm E is arm C again — the SAME type, same code, same everything. Any spread the rig reports between C
-// and E is the rig's own noise floor, and no C-vs-D or B-vs-C difference smaller than that floor may be
-// read as a result. It is printed on every run, not kept for a rainy day.
+// and E is the rig's own noise floor, and no B-vs-C difference smaller than that floor may be read as a
+// result. It is printed on every run, PER COLUMN: a single global floor is the max across columns, and
+// taking the max lets the noisiest column set the bar for all of them — a 6.6% rehash floor once buried
+// a real 11.7% size-hot effect whose own column floor was 0.3%.
 //
 // Build (the standalone one-liner every bench here uses — no CMake target, deliberately):
 //   c++ -O2 -std=c++23 bench/bench_svector_wave.cpp -Isrc -Isrc/infra -Ithird_party -Ibench -o /tmp/rw_svwave
@@ -38,7 +43,6 @@
 
 #include "infra/fixedStr.h"
 #include "infra/svector.h"
-#include "svector_union_arm.h"
 #include "../third_party/svector.h"
 #include "unordered_dense.h"
 
@@ -304,8 +308,8 @@ void sweep()
     std::printf( "  extrapolation beyond anything this tool actually indexes.\n" );
     std::printf( "  Per-column A/A floors (arm E vs arm C) are printed per row; no delta below its OWN\n" );
     std::printf( "  column's floor is a result.\n\n" );
-    std::printf( "  %9s %8s | %17s %7s | %17s %7s\n",
-                 "names", "val KB", "size-hot B / D", "floor", "iterated B / D", "floor" );
+    std::printf( "  %9s %8s | %16s %7s | %16s %7s\n",
+                 "names", "val KB", "size-hot B vs C", "floor", "iterated B vs C", "floor" );
     kSamples = 5;
     const std::size_t fixedReads = 4'000'000;
     for( std::size_t n : points )
@@ -316,7 +320,6 @@ void sweep()
         regenerate();
         const Row b = runArm<ankerl::svector<std::uint32_t, 2>>( "B" );
         const Row c = runArm<rw::svector<std::uint32_t, 2>>( "C" );
-        const Row d = runArm<rwx::svector16<std::uint32_t, 2>>( "D" );
         const Row e = runArm<rw::svector<std::uint32_t, 2>>( "E" );
         const auto pct = []( double x, double base ) { return base == 0.0 ? 0.0 : ( x / base - 1.0 ) * 100.0; };
         // PER-COLUMN floors. A single global floor taken as the max across columns is conservative, but it
@@ -324,19 +327,18 @@ void sweep()
         // happened when a 6.6% rehash floor buried an 11.7% size-hot result.
         const double floorSize = std::abs( pct( e.sizeMs, c.sizeMs ) );
         const double floorIter = std::abs( pct( e.iterMs, c.iterMs ) );
-        const char*  markB     = std::abs( pct( b.sizeMs, c.sizeMs ) ) > floorSize ? "" : "~";
-        const char*  markD     = std::abs( pct( d.sizeMs, c.sizeMs ) ) > floorSize ? "" : "~";
-        std::printf( "  %8zu%c %8.0f | %+7.1f%%%s %+7.1f%%%s %6.1f%% | %+7.1f%% %+7.1f%% %6.1f%%\n",
-                     n, ( n == 3220 || n == 43354 ) ? '*' : ' ', double( 24 * n ) / 1024.0,
-                     pct( b.sizeMs, c.sizeMs ), markB, pct( d.sizeMs, c.sizeMs ), markD, floorSize,
-                     pct( b.iterMs, c.iterMs ), pct( d.iterMs, c.iterMs ), floorIter );
+        const char*  markBs    = std::abs( pct( b.sizeMs, c.sizeMs ) ) > floorSize ? "" : "~";
+        const char*  markBi    = std::abs( pct( b.iterMs, c.iterMs ) ) > floorIter ? "" : "~";
+        std::printf( "  %8zu%c %8.0f | %+7.1f%%%s %6.1f%% | %+7.1f%%%s %6.1f%%\n",
+                     n, ( n == 3220 || n == 43354 ) ? '*' : ' ', double( 16 * n ) / 1024.0,
+                     pct( b.sizeMs, c.sizeMs ), markBs, floorSize,
+                     pct( b.iterMs, c.iterMs ), markBi, floorIter );
     }
     std::printf( "\n  READ IT LIKE THIS: negative = faster than rw::svector (arm C). A `~` marks a delta INSIDE\n"
-                 "  its own column's A/A floor, i.e. not a result. D differs from C only in SIZE (16 vs 24 B,\n"
-                 "  both branch-free), so the D column isolates LOCALITY. B differs from D only in the size()\n"
-                 "  BRANCH (both 16 B), so B-minus-D isolates the BRANCH. If D's advantage shrinks toward zero as\n"
-                 "  the working set falls to the starred real sizes, then locality does not reach this workload\n"
-                 "  and only the branch does.\n" );
+                 "  its own column's A/A floor, i.e. not a result. B and C are now BOTH 16 bytes, so this table\n"
+                 "  isolates the size() COST alone — the instance-size variable is held constant. (The old\n"
+                 "  24-vs-16 locality comparison is gone from the rig because the 24-byte design no longer\n"
+                 "  exists; bench/SVECTORAB.md keeps its measured table.)\n" );
 }
 
 }   // namespace
@@ -370,7 +372,6 @@ int main( int argc, char** argv )
     rows.push_back( runArm<std::vector<std::uint32_t>>( "A std::vec" ) );
     rows.push_back( runArm<ankerl::svector<std::uint32_t, 2>>( "B ankerl" ) );
     rows.push_back( runArm<rw::svector<std::uint32_t, 2>>( "C rw" ) );
-    rows.push_back( runArm<rwx::svector16<std::uint32_t, 2>>( "D rwx-union" ) );
     rows.push_back( runArm<rw::svector<std::uint32_t, 2>>( "E rw (A/A)" ) );   // the known-negative
 
     std::printf( "\n  %-12s %6s %10s %10s %10s %10s %12s %14s\n",
@@ -392,7 +393,7 @@ int main( int argc, char** argv )
 
     // THE KNOWN-NEGATIVE, printed every run. C and E are the same type; their gap is the noise floor.
     const Row& c = rows[2];
-    const Row& e = rows[4];
+    const Row& e = rows[3];
     const auto pct = []( double a, double b ) { return b == 0.0 ? 0.0 : ( a / b - 1.0 ) * 100.0; };
     // PER-COLUMN floors, not one global bar. A global floor is the max across columns, and taking the
     // max means the noisiest column sets the bar for all of them: a 6.6% rehash floor (a 6 ms column,

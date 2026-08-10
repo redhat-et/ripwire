@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""svectorab.py — the IN-SITU four-way A/B for ripwire's small-vector choice.
+"""svectorab.py — the IN-SITU A/B for ripwire's small-vector choice.
 
 This is the AUTHORITATIVE measurement. bench/bench_svector3.cpp is a microbenchmark and its committed
 "rw::svector is ~25% faster than ankerl" figure is explicitly NOT transferable: its working set is small
@@ -9,16 +9,17 @@ alias (src/smallvec.h) between:
 
     arm 0  std::vector<T>            24 B, a malloc per non-empty list  (the pre-conversion baseline)
     arm 1  ankerl::svector<T,N>      16 B, size() branches on the SVO tag  (third_party, MIT)
-    arm 2  rw::svector<T,N>          24 B, size() branch-free              (the shipped default)
-    arm 3  rwx::svector16<T,N>       16 B, size() branch-free              (bench/, the union experiment)
+    arm 2  rw::svector<T,N>          16 B, size() branch-free              (the shipped default)
+
+Arm 3 was the union experiment. It won and was promoted into arm 2, so it no longer exists separately.
 
 WHAT IT ENFORCES SO THE NUMBERS MEAN SOMETHING
   * a FRESH build directory per arm — never an incremental rebuild. A stale object from a mid-edit build
     produces plausible, wrong results, and this project has lost hours to exactly that.
   * --no-cache on EVERY run, on every side of every comparison. A cached A/B manufactures fake deltas.
-  * NON-VACUITY: the four binaries must not be byte-identical, or the alias flip did nothing and every
+  * NON-VACUITY: the arm binaries must not be byte-identical, or the alias flip did nothing and every
     delta below is noise being read as signal.
-  * OUTPUT EQUIVALENCE: all four arms must emit a byte-identical map. If they do not, they are not doing
+  * OUTPUT EQUIVALENCE: all arms must emit a byte-identical map. If they do not, they are not doing
     the same work and no timing comparison between them is meaningful.
   * INTERLEAVED repetitions with the arm order rotated per rep, so thermal drift cannot be attributed to
     whichever arm happened to run first.
@@ -52,8 +53,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARMS = {
     0: ("std::vector", "24 B, malloc per list"),
     1: ("ankerl::svector", "16 B, branching size()"),
-    2: ("rw::svector", "24 B, branch-free size()"),
-    3: ("rwx::svector16", "16 B, branch-free size()"),
+    2: ("rw::svector", "16 B, branch-free size()"),
 }
 
 # The phase the conversion actually touches. End-to-end is dominated by tree-sitter parsing (~6.5 s cold
@@ -205,7 +205,7 @@ def main():
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--corpus", action="append", default=None)
-    ap.add_argument("--arms", default="0,1,2,3")
+    ap.add_argument("--arms", default="0,1,2")
     ap.add_argument("--instrumented", action="store_true")
     ap.add_argument("--keep", action="store_true", help="keep the build trees")
     args = ap.parse_args()
@@ -213,7 +213,7 @@ def main():
     corpora = args.corpus or ["src"]
     arms = [int(a) for a in args.arms.split(",")]
 
-    print("svectorab: the in-situ four-way small-vector A/B")
+    print("svectorab: the in-situ small-vector A/B")
     print(f"  corpora: {corpora}   reps: {args.reps}   arms: {arms}")
 
     print("\n== BUILD (a FRESH tree per arm — never incremental) ==")
