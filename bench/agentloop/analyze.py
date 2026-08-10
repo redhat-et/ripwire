@@ -24,7 +24,7 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
-SCHEMA = "ripwire-agentloop-results-v2"
+SCHEMA = "ripwire-agentloop-results-v3"   # v3: three arms, resolved_model + harness_version fields
 ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
 
 def mean( xs ): return sum( xs ) / len( xs ) if xs else 0.0
@@ -59,7 +59,22 @@ def clustered_bootstrap_lower( pairs, value_fn, n_boot, seed_str, alpha=0.025 ):
     """Repository-clustered paired bootstrap (see module docstring / bench/locbench/compare_runs.py
     for the source method): resample REPOS with replacement len(repos) times per bootstrap draw, pool
     every paired value belonging to the sampled repos, take the mean; repeat n_boot times; return the
-    alpha-quantile (default 2.5% => a 95% one-sided lower bound)."""
+    alpha-quantile.
+
+    THE DEFAULT IS 97.5%, NOT 95% — corrected 2026-08-10. The 2.5th percentile is the lower edge of a
+    TWO-sided 95% interval, which as a one-sided bound is 97.5%. A genuine 95% one-sided bound is the
+    5th percentile (alpha=0.05). The behaviour is unchanged and deliberately kept: erring conservative
+    is the right direction for an acceptance gate. Only the label was wrong, and a bound that claims
+    to be 95% while actually being 97.5% understates the effect this eval can detect by 1.5-4.6pp
+    (measured — see power_sim.py). README.md's acceptance criterion is worded in terms of this bound,
+    so read it as 97.5% one-sided.
+
+    ALSO WORTH KNOWING BEFORE TRUSTING A NUMBER FROM THIS: with equal paired-row counts per repo — the
+    case for every configuration this harness runs — pooling then averaging is algebraically identical
+    to resampling the G repo-level MEAN deltas themselves. The entire bootstrap distribution is a
+    resample of G numbers, and G is 6. That is the textbook few-clusters regime (reliable coverage
+    wants G >~ 20-40), and it is why adding instances inside the existing repos cannot buy power. See
+    power_sim.py."""
     repos = sorted( { repo for _, repo, *_ in pairs } )
     if not repos: return 0.0, []
     by_repo = {}

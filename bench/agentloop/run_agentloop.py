@@ -56,13 +56,22 @@
 #   python3 bench/agentloop/run_agentloop.py --live-one --limit 1 --arms baseline --seeds 1 \
 #       --work-dir /tmp/agentloop --evaluator none      # ONE real claude -p call — cheapest live proof
 #   python3 bench/agentloop/run_agentloop.py --live --work-dir /tmp/agentloop --evaluator swebench ...
-import argparse, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, pathlib, re, shlex, subprocess, sys, tempfile, time
 
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
 import select_tasks   # reuse fetch_rows()'s HF datasets-server fetch + cache — see load_gold_rows()
 
-SCHEMA = "ripwire-agentloop-results-v2"
-ARMS   = ( "baseline", "ripwire_cli" )
+SCHEMA = "ripwire-agentloop-results-v3"
+# THREE arms, because two could not tell ripwire's effect apart from the cost of shipping skills with
+# it. The 2026-08-04 Codex pilot measured +80% tokens for `ripwire_cli` and the loss was diagnosed as
+# skill-policy — full SKILL.md body reads re-billed every turn — not retrieval. That happened because
+# the old two-arm `ripwire_cli` ALSO symlinked the whole skills/ tree on the codex harness, so the arm
+# did not mean what its name said. It does now: `ripwire_cli` is the shipped wrap recipe (a CLI
+# contract plus the rules-file blurb) and nothing else; the skills tree is its own labelled arm, and
+# the ripwire_skills − ripwire_cli difference IS the skills tax, measured instead of assumed.
+ARMS   = ( "baseline", "ripwire_cli", "ripwire_skills" )
+RIPWIRE_ARMS = ( "ripwire_cli", "ripwire_skills" )   # arms that expose ripwire at all
+HARNESSES = ( "claude-code-p", "codex-exec", "opencode" )
 DEFAULT_SEEDS = ( 1, 2, 3 )
 COST_LOW_PER_INSTANCE, COST_HIGH_PER_INSTANCE = 0.30, 1.50   # arXiv 2412.21139, per R4
 DEFAULT_TIMEOUT_SECONDS = 900
@@ -78,6 +87,14 @@ RECORD_FIELDS = (
     "status", "resolved", "localization_hit", "tokens_in", "tokens_out",
     "wall_seconds", "cost_usd", "command_calls", "ripwire_calls", "ripwire_commands", "events_path",
     "error", "started_unix", "finished_unix",
+    # v3 additions, both of them honesty fields rather than measurements:
+    #   resolved_model  — the model the harness ACTUALLY used, read back from its own transcript.
+    #                     opencode does not fail closed when no credential is configured: it silently
+    #                     routes to its own free hosted model and completes the turn. A run whose
+    #                     resolved_model disagrees with --model is not the run you think you paid for,
+    #                     and without this field the substitution is invisible in the results.
+    #   harness_version — pinned agent version per run; opencode ships releases multiple times a day.
+    "resolved_model", "harness_version",
 )
 
 def load_tasks_lock( path ):
@@ -104,6 +121,7 @@ def make_record( task, arm, seed, harness, model, status="not_implemented", **ov
         tokens_in=None, tokens_out=None, wall_seconds=None, cost_usd=None,
         command_calls=None, ripwire_calls=None, ripwire_commands=None, events_path=None,
         error=None, started_unix=now, finished_unix=now,
+        resolved_model=None, harness_version=None,
     )
     rec.update( overrides )
     assert set( rec ) == set( RECORD_FIELDS ), f"record schema drift: {sorted(set(rec) ^ set(RECORD_FIELDS))}"
@@ -184,7 +202,7 @@ def patch_files( patch ):
     return sorted( set( re.findall( r'^\+\+\+ b/(.+)$', patch, re.M ) )
                  | set( re.findall( r'^--- a/(.+)$', patch, re.M ) ) )
 
-def build_prompt( gold_row, seed, arm, ripwire_bin ):
+def build_prompt( gold_row, seed, arm, ripwire_bin, rules_blurb="" ):
     stmt = ( gold_row.get( "problem_statement" ) or "" ).strip()
     prompt = (
         "You are working directly in a git checkout of this repository, at the commit the following "
@@ -199,14 +217,55 @@ def build_prompt( gold_row, seed, arm, ripwire_bin ):
     if arm == "baseline":
         return prompt + ( "\n\nRETRIEVAL ARM — BASELINE: Do not use ripwire or ctxpack. Use the agent's "
                           "ordinary repository search and file-reading tools." )
-    if arm == "ripwire_cli":
-        return prompt + ( "\n\nRETRIEVAL ARM — RIPWIRE CLI: Do not use a ripwire MCP server. Before "
-                          "grep/find or opening implementation files, use the shell to run this exact CLI "
-                          "binary at least once:\n"
-                          f"  {ripwire_bin} . --for=\"<short issue description>\" --max-tokens=4000\n"
-                          "Use its ranked output and any additional ripwire CLI verbs that help, then "
-                          "continue with ordinary editing and validation tools." )
+    # Both ripwire arms get the SAME prompt contract. They differ only in what the environment puts
+    # on disk (ripwire_skills adds the skills tree), so any prompt-level difference between them
+    # would confound exactly the comparison the third arm exists to make.
+    if arm in RIPWIRE_ARMS:
+        suffix = ( "\n\nRETRIEVAL ARM — RIPWIRE CLI: Do not use a ripwire MCP server. Before "
+                   "grep/find or opening implementation files, use the shell to run this exact CLI "
+                   "binary at least once:\n"
+                   f"  {ripwire_bin} . --for=\"<short issue description>\" --max-tokens=4000\n"
+                   "Use its ranked output and any additional ripwire CLI verbs that help, then "
+                   "continue with ordinary editing and validation tools." )
+        # The rules blurb is the SHIPPED wrap recipe's body, read straight out of `ripwire wrap`
+        # rather than restated here, so the eval cannot drift from what users are actually told.
+        if rules_blurb:
+            suffix += "\n\n" + rules_blurb.strip()
+        return prompt + suffix
     raise ValueError( f"unknown arm {arm!r}; expected one of {ARMS}" )
+
+def install_ripwire_shim( run_home, ripwire_bin ):
+    """Return a path to a logging wrapper around ripwire, and the log file it appends to.
+
+    Counting ripwire invocations by grepping an agent's transcript only works for agents that
+    self-log every shell command. Codex does; opencode does; `claude -p` does NOT, which is why every
+    claude-harness run in this file has recorded ripwire_calls=None since it was written. A shim is
+    harness-agnostic: the arm's prompt names THIS path, so the call is counted no matter which agent
+    ran it and no matter whether it was invoked via PATH or absolutely.
+
+    The shim execs the real binary, so it cannot change what ripwire returns — only observe that it
+    was asked. Cross-checking it against a transcript-derived count (where one exists) is a free
+    consistency check on both mechanisms."""
+    shim_dir = pathlib.Path( run_home ) / "shim"
+    shim_dir.mkdir( parents=True, exist_ok=True )
+    log = shim_dir / "ripwire-calls.log"
+    shim = shim_dir / "ripwire"
+    real = str( pathlib.Path( ripwire_bin ).resolve() ) if os.sep in str( ripwire_bin ) else str( ripwire_bin )
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "# generated by run_agentloop.py — logs argv, then execs the real binary unchanged.\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote( str( log ) )}\n"
+        f"exec {shlex.quote( real )} \"$@\"\n" )
+    shim.chmod( 0o755 )
+    return str( shim ), log
+
+def read_shim_log( log_path ):
+    """(call_count, commands) from the shim's log; ([],0) if it was never invoked."""
+    try:
+        lines = [ ln for ln in pathlib.Path( log_path ).read_text().splitlines() if ln.strip() ]
+    except OSError:
+        return 0, []
+    return len( lines ), lines
 
 def build_codex_command( prompt, model ):
     """Build an isolated Codex invocation; build_prompt() owns the arm-specific CLI contract."""
@@ -256,6 +315,151 @@ def parse_codex_jsonl_metrics( stdout, ripwire_bin ):
             ripwire_commands.append( command )
     return tokens_in, tokens_out, command_calls, ripwire_calls, ripwire_commands
 
+def build_opencode_command( prompt, model ):
+    """Build a non-interactive opencode invocation.
+
+    `--auto` approves permissions that are not explicitly denied — required for an unattended run and
+    the reason this harness must only ever be pointed at a throwaway checkout.
+
+    --model is NOT optional here, unlike the other two harnesses. opencode does not fail closed when
+    no credential is configured: with an empty auth store it silently selects its own free hosted
+    model and completes the turn (verified 2026-08-10, v1.18.16: providerID=opencode,
+    modelID=big-pickle, cost=0). Every token, latency and resolution number from such a run belongs to
+    a different model than the one under test, with no error anywhere. run_one() additionally reads
+    the model back out of the transcript and refuses the record if it disagrees — passing the flag is
+    not enough, because the flag is what gets silently overridden."""
+    cmd = [ "opencode", "run", "--format", "json", "--auto" ]
+    if model:
+        cmd += [ "--model", model ]
+    cmd.append( prompt )
+    return cmd
+
+def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
+    """Token/command accounting from opencode's `--format json` NDJSON event stream.
+
+    Every line is {"type":..,"timestamp":..,"sessionID":..,"part":{..}}. Tokens and cost arrive on
+    `step_finish` (part.tokens.{input,output,reasoning,cache{read,write}} and part.cost); every shell
+    command arrives as a `tool_use` whose part.tool == "bash", with the command in part.state.input.
+    Returns nulls rather than raising on schema drift — opencode ships releases daily and the
+    retained transcript is the evidence of record either way."""
+    tokens_in = tokens_out = cost = model_id = None
+    command_calls = ripwire_calls = 0
+    ripwire_commands = []
+    for line in ( stdout or "" ).splitlines():
+        try:
+            event = json.loads( line )
+        except ValueError:
+            continue
+        part = event.get( "part" ) or {}
+        etype = event.get( "type" )
+        if etype == "step_finish":
+            usage = part.get( "tokens" ) or {}
+            # last step wins: these are cumulative per-turn totals, same convention as the codex parser
+            tokens_in  = usage.get( "input", tokens_in )
+            tokens_out = usage.get( "output", tokens_out )
+            cost       = part.get( "cost", cost )
+        if etype in ( "step_start", "step_finish" ):
+            model_id = part.get( "modelID" ) or event.get( "modelID" ) or model_id
+        if etype == "tool_use" and part.get( "tool" ) == "bash":
+            command_calls += 1
+            state   = part.get( "state" ) or {}
+            payload = state.get( "input" ) or {}
+            command = payload.get( "command" ) if isinstance( payload, dict ) else payload
+            command = " ".join( map( str, command ) ) if isinstance( command, list ) else str( command or "" )
+            if ripwire_bin and ripwire_bin in command:
+                ripwire_calls += 1
+                ripwire_commands.append( command )
+    return tokens_in, tokens_out, cost, model_id, command_calls, ripwire_calls, ripwire_commands
+
+def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
+    """Create a fully isolated opencode environment for one run, and return (env, run_home, shim).
+
+    opencode has NO --ignore-user-config equivalent, and OPENCODE_CONFIG does not replace the global
+    config — it is merged ON TOP of it (config.ts loads the global file first). The only lever that
+    actually isolates is relocating the XDG dirs, because opencode derives every path from
+    xdg-basedir at module load. HOME must be redirected independently: ~/.opencode and, critically,
+    $HOME/.claude/CLAUDE.md are read off os.homedir(), and opencode loads that Claude rules file into
+    every run unless OPENCODE_DISABLE_CLAUDE_CODE is set.
+
+    That last one is not hypothetical here: this repository's own developers keep a ripwire usage
+    protocol in ~/.claude/CLAUDE.md. Without this isolation the BASELINE arm is briefed on ripwire and
+    the experiment measures nothing. test/opencodeisocheck.sh asserts the recipe still holds."""
+    env = os.environ.copy()
+    run_home = pathlib.Path( work_dir ) / "opencode-home" / arm / f"{instance_id}-{seed}"
+    for sub in ( "home", "config", "data", "state", "cache" ):
+        ( run_home / sub ).mkdir( parents=True, exist_ok=True )
+
+    # auth: symlink the real credential store into the isolated data dir rather than copying it, so a
+    # run can authenticate without the secret being duplicated into the work dir. Same posture as the
+    # codex path. If no credential exists, the run must fail loudly rather than fall back to the free
+    # hosted model — see build_opencode_command().
+    source_auth = pathlib.Path( env.get( "XDG_DATA_HOME", pathlib.Path.home() / ".local/share" ) ) / "opencode" / "auth.json"
+    if source_auth.exists():
+        dest_dir = run_home / "data" / "opencode"
+        dest_dir.mkdir( parents=True, exist_ok=True )
+        link = dest_dir / "auth.json"
+        if not link.exists():
+            link.symlink_to( source_auth )
+
+    # NOTE on the rules-file channel: opencode WOULD read an AGENTS.md from the project root, and that
+    # is how a real user installs the blurb. It is delivered through the prompt instead (build_prompt),
+    # because codex runs with --ignore-rules — needed to keep the developer's own rules out of the
+    # baseline — and would silently drop a rules file. One channel that every harness honours keeps
+    # the arms comparable ACROSS harnesses; the cost is that this measures the blurb's content, not
+    # opencode's rules-file discovery. That trade is deliberate and belongs in the write-up.
+
+    # the skills tree is the THIRD arm's only difference from the second
+    if arm == "ripwire_skills":
+        source_skills = pathlib.Path( __file__ ).resolve().parents[2] / "skills"
+        run_skills = run_home / "config" / "opencode" / "skills"
+        run_skills.mkdir( parents=True, exist_ok=True )
+        for skill_dir in sorted( source_skills.iterdir() ):
+            if skill_dir.is_dir() and ( skill_dir / "SKILL.md" ).is_file():
+                link = run_skills / skill_dir.name
+                if not link.exists():
+                    link.symlink_to( skill_dir, target_is_directory=True )
+
+    shim, _log = install_ripwire_shim( run_home, ripwire_bin )
+    env.update(
+        HOME                            = str( run_home / "home" ),
+        XDG_CONFIG_HOME                 = str( run_home / "config" ),
+        XDG_DATA_HOME                   = str( run_home / "data" ),
+        XDG_STATE_HOME                  = str( run_home / "state" ),
+        XDG_CACHE_HOME                  = str( run_home / "cache" ),
+        OPENCODE_DISABLE_PROJECT_CONFIG = "1",
+        OPENCODE_DISABLE_CLAUDE_CODE    = "1",
+        OPENCODE_DISABLE_AUTOUPDATE     = "1",
+    )
+    env["PATH"] = str( pathlib.Path( shim ).parent ) + os.pathsep + env.get( "PATH", "" )
+    return env, run_home, shim
+
+def extract_wrap_blurb( wrap_stdout ):
+    """Pull the pasteable rules body out of `ripwire wrap <agent>` output.
+
+    The recipe fences it with `# --- paste into <file> ---` / `# --- end paste ---`; everything
+    between the fences is the body a real user pastes, so that is exactly what the arm injects."""
+    body, inside = [], False
+    for line in ( wrap_stdout or "" ).splitlines():
+        if line.startswith( "# --- paste into " ):
+            inside = True
+            continue
+        if line.startswith( "# --- end paste ---" ):
+            break
+        if inside:
+            body.append( line )
+    return "\n".join( body ) + "\n" if body else ""
+
+def agent_version( harness ):
+    """Best-effort agent version string for the record; None if the binary will not say."""
+    binary = { "opencode": "opencode", "codex-exec": "codex", "claude-code-p": "claude" }.get( harness )
+    if not binary:
+        return None
+    try:
+        out = subprocess.run( [ binary, "--version" ], capture_output=True, text=True, timeout=30 )
+    except ( OSError, subprocess.SubprocessError ):
+        return None
+    return ( out.stdout or out.stderr or "" ).strip().splitlines()[ 0 ] if ( out.stdout or out.stderr ) else None
+
 def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
     """Create an auth-preserving but skill-isolated CODEX_HOME for one benchmark run.
 
@@ -270,7 +474,9 @@ def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
     if source_auth.exists() and not run_auth.exists():
         run_auth.symlink_to( source_auth )
 
-    if arm == "ripwire_cli":
+    # v3 CHANGE: the skills tree moved off `ripwire_cli` and onto its own arm. It used to ride along
+    # here, which is why the 2026-08-04 pilot's +80% token cost could not be attributed — see ARMS.
+    if arm == "ripwire_skills":
         source_skills = pathlib.Path( __file__ ).resolve().parents[2] / "skills"
         run_skills = run_home / "skills"
         run_skills.mkdir( parents=True, exist_ok=True )
@@ -284,9 +490,9 @@ def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
     agents_home.mkdir( parents=True, exist_ok=True )
     env["CODEX_HOME"] = str( run_home )
     env["AGENTS_HOME"] = str( agents_home )
-    ripwire_dir = str( pathlib.Path( ripwire_bin ).resolve().parent )
-    env["PATH"] = ripwire_dir + os.pathsep + env.get( "PATH", "" )
-    return env, run_home
+    shim, _log = install_ripwire_shim( run_home, ripwire_bin )
+    env["PATH"] = str( pathlib.Path( shim ).parent ) + os.pathsep + env.get( "PATH", "" )
+    return env, run_home, shim
 
 # ── evaluation (--evaluator swebench|none) ─────────────────────────────────────────────────────────────
 def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
@@ -330,24 +536,41 @@ def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
             "--run_id", run_id,
             "--dataset_name", "princeton-nlp/SWE-bench_Lite",
             "--instance_ids", task["instance_id"],
+            "--report_dir", str( work ),      # else the report lands in the CALLER's cwd — 144 runs, 144 strays
             "--max_workers", "1" ]
-    proc = sh( cmd, timeout=3600 )
+    proc = sh( cmd, timeout=3600, cwd=str( work ) )
     if proc.returncode != 0:
-        print( f"# swebench harness run failed for {task['instance_id']}: {(proc.stderr or '')[-2000:]}",
-               file=sys.stderr )
-        return False
+        blob = ( ( proc.stderr or "" ) + ( proc.stdout or "" ) ).lower()
+        # An infrastructure failure is NOT an unresolved patch, and conflating them silently poisons
+        # the headline metric: every Docker/disk failure would read as "ripwire did not help". These
+        # signatures are fatal for a batch (they do not fix themselves between instances), so they
+        # stop the run instead of scoring it.
+        for signature, hint in ( ( "no space left on device", "the SWE-bench images need ~120GB free" ),
+                                 ( "cannot connect to the docker daemon", "start Docker/colima first" ),
+                                 ( "docker: error", "the Docker daemon rejected the run" ),
+                                 ( "error pulling image", "image pull failed — check network/registry" ) ):
+            if signature in blob:
+                raise SystemExit( f"swebench harness infrastructure failure ({signature}): {hint}. "
+                                  f"Refusing to score — an infra failure is not an unresolved patch." )
+        print( f"# swebench harness run failed for {task['instance_id']} (recording UNSCORED, not "
+               f"unresolved): {(proc.stderr or '')[-2000:]}", file=sys.stderr )
+        return None
 
-    report_path = pathlib.Path( f"{run_id_prefix}.{run_id}.json" )   # TODO-verify: exact name/location
+    # Verified 2026-08-10 against SWE-bench/SWE-bench@main (run_evaluation.py, harness/reporting.py):
+    # the report is "<model_name_or_path>.<run_id>.json" and resolved instances are under the
+    # top-level "resolved_ids" key. model_name_or_path is set to run_id_prefix above, which contains
+    # no "/" and so never takes reporting.py's "/"->"__" substitution path. The glob is a hedge for
+    # a future rename, not a substitute for that check.
+    report_path = work / f"{run_id_prefix}.{run_id}.json"
     if not report_path.exists():
-        candidates = list( pathlib.Path( "." ).glob( f"*{run_id}*.json" ) )
+        candidates = sorted( work.glob( f"*{run_id}*.json" ) )
         report_path = candidates[0] if candidates else None
     if not report_path or not report_path.exists():
-        print( f"# swebench harness produced no report for {task['instance_id']}; treating as unresolved",
+        print( f"# swebench harness produced no report for {task['instance_id']}; recording UNSCORED",
                file=sys.stderr )
-        return False
+        return None
     report = json.loads( report_path.read_text() )
-    resolved_ids = set( report.get( "resolved_ids", report.get( "resolved", [] ) ) )   # TODO-verify key
-    return task["instance_id"] in resolved_ids
+    return task["instance_id"] in set( report.get( "resolved_ids", report.get( "resolved", [] ) ) )
 
 def evaluate_patch( task, gold_row, patch, evaluator ):
     """Return (resolved: bool|None, localization_hit: bool|None) for one candidate patch.
@@ -371,7 +594,7 @@ def evaluate_patch( task, gold_row, patch, evaluator ):
     raise SystemExit( f"unknown --evaluator {evaluator!r}; expected 'swebench' or 'none'" )
 
 # ── the one seam a real harness fills in ──────────────────────────────────────────────────────────
-def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin ):
+def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=None ):
     """Retain raw Codex JSONL under events/ and parse its token/command accounting into record fields.
 
     Accepts str, bytes (TimeoutExpired hands over undecoded partial output), or None; anything
@@ -385,11 +608,44 @@ def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin ):
     events_file.write_text( stdout )
     ( tokens_in, tokens_out, command_calls,
       ripwire_calls, ripwire_commands ) = parse_codex_jsonl_metrics( stdout, ripwire_bin )
+    if shim_log is not None:
+        shim_calls, shim_commands = read_shim_log( shim_log )
+        if shim_calls != ripwire_calls:
+            ripwire_commands = shim_commands
+        ripwire_calls = shim_calls
     return dict( tokens_in=tokens_in, tokens_out=tokens_out, command_calls=command_calls,
                  ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands,
                  events_path=str( events_file ) )
 
-def _claude_metrics( stdout ):
+def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=None ):
+    """Retain opencode's NDJSON transcript and parse it into record fields.
+
+    Two independent counts of ripwire invocations are available here — the shim log (authoritative,
+    harness-agnostic) and opencode's own `tool_use` events. The shim wins when they disagree, but the
+    disagreement itself is recorded in `error`, because a silent divergence means one of the two
+    instruments is broken and neither number should be trusted until it is understood."""
+    if isinstance( stdout, bytes ):
+        stdout = stdout.decode( "utf-8", errors="replace" )
+    stdout = stdout or ""
+    events_dir = pathlib.Path( work_dir ) / "events"
+    events_dir.mkdir( parents=True, exist_ok=True )
+    events_file = events_dir / f"{task['instance_id']}-{arm}-{seed}.jsonl"
+    events_file.write_text( stdout )
+
+    ( tokens_in, tokens_out, cost, model_id,
+      command_calls, ripwire_calls, ripwire_commands ) = parse_opencode_ndjson_metrics( stdout, ripwire_bin )
+
+    if shim_log is not None:
+        shim_calls, shim_commands = read_shim_log( shim_log )
+        if shim_calls != ripwire_calls:
+            ripwire_commands = shim_commands
+        ripwire_calls = shim_calls
+    return dict( tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
+                 command_calls=command_calls, ripwire_calls=ripwire_calls,
+                 ripwire_commands=ripwire_commands, events_path=str( events_file ),
+                 resolved_model=model_id )
+
+def _claude_metrics( stdout, shim_log=None ):
     """Parse the `claude -p --output-format json` single-result trailer into record fields.
 
     TODO-verify: field names match the documented schema (top-level total_cost_usd;
@@ -401,11 +657,28 @@ def _claude_metrics( stdout ):
     except ValueError:
         return {}
     usage = payload.get( "usage" ) or {}
-    return dict( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
-                 cost_usd=payload.get( "total_cost_usd" ) )
+    out = dict( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
+                cost_usd=payload.get( "total_cost_usd" ) )
+    # `claude -p` does not log individual shell commands, so before the shim there was no
+    # ripwire-invocation evidence for this harness at all — every claude run recorded
+    # ripwire_calls=None. The shim closes that gap without depending on the agent's transcript.
+    if shim_log is not None:
+        calls, commands = read_shim_log( shim_log )
+        out.update( ripwire_calls=calls, ripwire_commands=commands )
+    return out
+
+def _harness_metrics( harness, stdout, work_dir, task, arm, seed, ripwire_bin, shim_log ):
+    """Route stdout to the right parser. Explicit per-harness dispatch, never a binary fallthrough:
+    the two-branch ternaries this replaces silently gave any third harness claude's parser."""
+    if harness == "codex-exec":
+        return _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
+    if harness == "opencode":
+        return _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
+    return _claude_metrics( stdout if isinstance( stdout, str ) else ( stdout or b"" ).decode( "utf-8", "replace" ),
+                            shim_log )
 
 def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
-             timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None ):
+             timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None, lane="" ):
     """Execute ONE (task, arm, seed) run through the selected harness and return a filled record.
 
     Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
@@ -418,8 +691,8 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
         return make_record( task, arm, seed, harness, model, status=status, error=error,
                              started_unix=started, finished_unix=time.time(), **overrides )
 
-    if harness not in ( "claude-code-p", "codex-exec" ):
-        return _fail( "error", f"unsupported harness {harness!r}; expected 'claude-code-p' or 'codex-exec'" )
+    if harness not in HARNESSES:
+        return _fail( "error", f"unsupported harness {harness!r}; expected one of {HARNESSES}" )
     if arm not in ARMS:
         return _fail( "error", f"unknown arm {arm!r}; expected one of {ARMS}" )
 
@@ -428,13 +701,34 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
         return _fail( "error", f"no cached SWE-bench row for {task['instance_id']!r} — pass a --work-dir "
                                 f"whose datasets cache load_gold_rows()/select_tasks.fetch_rows() can reach" )
 
-    repos_dir = pathlib.Path( work_dir ) / "repos"
+    # Per-worker checkout root. checkout_repo() keeps ONE clone per repo and hard-resets it for every
+    # run, so two concurrent runs touching the same repo would clobber each other's working tree
+    # mid-agent. Sharding the root by worker is what makes --concurrency safe; the default lane
+    # ("") is byte-identical to the old single-threaded path.
+    repos_dir = pathlib.Path( work_dir ) / ( f"repos{lane}" if lane else "repos" )
     repo_dir = checkout_repo( task["repo"], task["base_commit"], repos_dir )
     if repo_dir is None:
         return _fail( "error", f"checkout failed for {task['repo']}@{task['base_commit']}" )
 
-    prompt = build_prompt( gold_row, seed, arm, ripwire_bin )
-    child_env = None
+    # The environment is prepared BEFORE the prompt, because it installs the ripwire shim and the
+    # prompt must name that shim rather than the bare binary — otherwise an agent invoking ripwire by
+    # absolute path walks straight past the counter.
+    child_env, run_home, shim_bin, shim_log = None, None, ripwire_bin, None
+    if harness == "codex-exec":
+        child_env, run_home, shim_bin = prepare_codex_environment( work_dir, task["instance_id"], arm, seed, ripwire_bin )
+    elif harness == "opencode":
+        child_env, run_home, shim_bin = prepare_opencode_environment( work_dir, task["instance_id"], arm, seed, ripwire_bin )
+    if run_home is not None:
+        shim_log = pathlib.Path( run_home ) / "shim" / "ripwire-calls.log"
+
+    rules_blurb = ""
+    if arm in RIPWIRE_ARMS:
+        wrap_agent = { "opencode": "opencode", "codex-exec": "codex" }.get( harness, "claude" )
+        wrapped = subprocess.run( [ str( ripwire_bin ), "wrap", wrap_agent, "--force" ],
+                                  capture_output=True, text=True )
+        rules_blurb = extract_wrap_blurb( wrapped.stdout )
+
+    prompt = build_prompt( gold_row, seed, arm, shim_bin, rules_blurb )
     if harness == "claude-code-p":
         cmd = [ "claude", "-p", prompt,
                 "--permission-mode", "acceptEdits",
@@ -442,9 +736,10 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
                 "--strict-mcp-config", "--allowedTools", ALLOWED_TOOLS_BASELINE ]
         if model:
             cmd += [ "--model", model ]
-    else:
+    elif harness == "codex-exec":
         cmd = build_codex_command( prompt, model )
-        child_env, _ = prepare_codex_environment( work_dir, task["instance_id"], arm, seed, ripwire_bin )
+    else:
+        cmd = build_opencode_command( prompt, model )
 
     t0 = time.perf_counter()
     try:
@@ -452,10 +747,10 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     except subprocess.TimeoutExpired as exc:
         diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout
         resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
-        metrics = ( _codex_metrics( exc.stdout, work_dir, task, arm, seed, ripwire_bin )
-                    if harness == "codex-exec" else {} )
+        metrics = _harness_metrics( harness, exc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
         return _fail( "timeout", f"{harness} exceeded {timeout_s}s", resolved=resolved,
-                      localization_hit=localization_hit, wall_seconds=float( timeout_s ), **metrics )
+                      localization_hit=localization_hit, wall_seconds=float( timeout_s ),
+                      harness_version=agent_version( harness ), **metrics )
     wall = time.perf_counter() - t0
 
     diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout   # candidate patch: working tree vs base_commit
@@ -464,21 +759,42 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
         return _fail( "error", f"{harness} exit {proc.returncode}: {(proc.stderr or '')[:2000]}",
                        wall_seconds=wall )
 
-    metrics = ( _codex_metrics( proc.stdout, work_dir, task, arm, seed, ripwire_bin )
-                if harness == "codex-exec" else _claude_metrics( proc.stdout ) )
+    metrics = _harness_metrics( harness, proc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
+
+    # The model-substitution guard. opencode silently falls back to its own free hosted model when no
+    # credential resolves, so a run can succeed against a model nobody asked for. A record whose
+    # resolved_model contradicts --model is not a usable datapoint and is marked as an error rather
+    # than averaged into an arm.
+    used = metrics.get( "resolved_model" )
+    if model and used and used not in model:
+        return _fail( "error",
+                      f"model substitution: asked for {model!r}, harness actually used {used!r} — "
+                      f"check credentials; opencode routes to its own free model when auth is absent",
+                      wall_seconds=wall, harness_version=agent_version( harness ), **metrics )
+
     resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
     return make_record( task, arm, seed, harness, model, status="ok",
                          resolved=resolved, localization_hit=localization_hit, wall_seconds=wall,
-                         started_unix=started, finished_unix=time.time(), **metrics )
+                         started_unix=started, finished_unix=time.time(),
+                         harness_version=agent_version( harness ), **metrics )
 
 def main():
     ap = argparse.ArgumentParser( description="Phase B4 agent-in-the-loop eval runner (scaffolding)" )
     ap.add_argument( "--tasks-lock", default=str( pathlib.Path( __file__ ).parent / "tasks.lock" ) )
     ap.add_argument( "--arms", default=",".join( ARMS ) )
     ap.add_argument( "--seeds", default=",".join( str( s ) for s in DEFAULT_SEEDS ) )
-    ap.add_argument( "--harness", default="claude-code-p",
-                     choices=( "claude-code-p", "codex-exec" ),
-                     help="agent harness: Claude Code print mode or OpenAI Codex non-interactive mode" )
+    ap.add_argument( "--harness", default="claude-code-p", choices=HARNESSES,
+                     help="agent harness: Claude Code print mode, OpenAI Codex non-interactive mode, "
+                          "or opencode `run --format json` (the only one of the three that is open "
+                          "source and scriptable enough for an unattended matrix)" )
+    ap.add_argument( "--concurrency", type=int, default=1, metavar="N",
+                     help="run N cells at once, each in its own checkout lane (default 1 = sequential). "
+                          "The matrix is otherwise a strictly serial walk: 216 runs at up to 900s each "
+                          "is a multi-hour commitment." )
+    ap.add_argument( "--resume", default="", metavar="RESULTS_JSON",
+                     help="skip (instance,arm,seed) tuples already completed in this results file and "
+                          "merge the new records into it. Without this, re-invoking --live after an "
+                          "interruption restarts at run 1 and re-spends money on finished runs." )
     ap.add_argument( "--model", default="",
                      help="model id; omitted uses the selected harness's current default" )
     ap.add_argument( "--limit", type=int, default=0, help="cap tasks used to build the matrix (0=all); "
@@ -567,19 +883,70 @@ def main():
     outp = pathlib.Path( a.results_out ) if a.results_out else None
     if outp:
         outp.parent.mkdir( parents=True, exist_ok=True )
-    for run_index, ( t, arm, seed ) in enumerate( matrix, 1 ):
-        records.append( run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir,
-                                 ripwire_bin=a.ripwire_bin, timeout_s=a.timeout_seconds,
-                                 evaluator=a.evaluator, gold_rows=gold_rows ) )
-        print( f"# completed {run_index}/{len(matrix)}: {t['instance_id']} {arm} "
-               f"status={records[-1]['status']}", file=sys.stderr )
+
+    # ── resume ──────────────────────────────────────────────────────────────────────────────────
+    # Only records that actually completed are carried forward. A `timeout` or `error` record is NOT
+    # a completed run — resuming past one would silently bake a transient failure into the results,
+    # so those tuples are re-run.
+    done = set()
+    if a.resume:
+        prior = json.loads( pathlib.Path( a.resume ).read_text() )
+        if prior.get( "schema" ) != SCHEMA:
+            raise SystemExit( f"{a.resume}: schema {prior.get('schema')!r} != {SCHEMA!r}; refusing to merge" )
+        if prior.get( "tasks_lock_content_sha256" ) != lock["content_sha256"]:
+            raise SystemExit( f"{a.resume}: was produced against a DIFFERENT tasks.lock; refusing to merge" )
+        for rec in prior.get( "records", [] ):
+            if rec.get( "status" ) == "ok":
+                records.append( rec )
+                done.add( ( rec["instance_id"], rec["arm"], rec["seed"] ) )
+        print( f"# resume: {len(done)} completed runs carried forward from {a.resume}", file=sys.stderr )
+
+    pending = [ cell for cell in matrix if ( cell[0]["instance_id"], cell[1], cell[2] ) not in done ]
+    if a.resume:
+        print( f"# resume: {len(pending)} of {len(matrix)} runs still to do", file=sys.stderr )
+
+    # ── execution ───────────────────────────────────────────────────────────────────────────────
+    # Sequential by default. --concurrency N runs N cells at once, each in its own checkout lane and
+    # its own ephemeral agent home; the runs are subprocess-bound, so threads are the right tool.
+    # Records are appended under a lock and checkpointed after each completion exactly as before, so
+    # an interrupted concurrent run resumes identically to a sequential one.
+    def _execute( cell, lane ):
+        t, arm, seed = cell
+        return run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir,
+                        ripwire_bin=a.ripwire_bin, timeout_s=a.timeout_seconds,
+                        evaluator=a.evaluator, gold_rows=gold_rows, lane=lane )
+
+    def _emit( run_index, cell, rec ):
+        t, arm, _seed = cell
+        records.append( rec )
+        print( f"# completed {run_index}/{len(pending)}: {t['instance_id']} {arm} "
+               f"status={rec['status']}", file=sys.stderr )
         if outp:
             checkpoint = dict( schema=SCHEMA, tasks_lock_content_sha256=lock["content_sha256"],
                                arms=arms, seeds=seeds, harness=a.harness, model=a.model,
+                               concurrency=a.concurrency,
                                n_runs=len( matrix ), completed_runs=len( records ),
-                               complete=( run_index == len( matrix ) ), dry_run=False, records=records )
+                               complete=( run_index == len( pending ) ), dry_run=False, records=records )
             outp.write_text( json.dumps( checkpoint, indent=2 ) )
             print( f"# checkpoint: {outp} ({len(records)}/{len(matrix)} records)", file=sys.stderr )
+
+    if a.concurrency > 1:
+        import concurrent.futures, itertools, threading
+        print( f"# concurrency: {a.concurrency} lanes, each with its own checkout root and agent home",
+               file=sys.stderr )
+        lanes = itertools.cycle( f"-w{i}" for i in range( a.concurrency ) )
+        guard, done_n = threading.Lock(), 0
+        with concurrent.futures.ThreadPoolExecutor( max_workers=a.concurrency ) as pool:
+            futures = { pool.submit( _execute, cell, lane ): cell for cell, lane in zip( pending, lanes ) }
+            for fut in concurrent.futures.as_completed( futures ):
+                rec = fut.result()
+                with guard:                      # records + checkpoint file are shared state
+                    done_n += 1
+                    _emit( done_n, futures[ fut ], rec )
+    else:
+        for run_index, cell in enumerate( pending, 1 ):
+            _emit( run_index, cell, _execute( cell, "" ) )
+
     n_ok = sum( 1 for r in records if r["status"] == "ok" )
     print( f"LIVE RUN done: {n_ok}/{len(records)} status=ok", file=sys.stderr )
     return 0

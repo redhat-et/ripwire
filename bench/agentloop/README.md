@@ -7,12 +7,27 @@ solves the task.** This directory is that harness.
 
 Design source: the Phase B4 research and R4 eval-methodology notes ("Minimal agent-in-the-loop eval design").
 
-**Status: CODEX CLI PILOT RUN; RESOLUTION SCORING STILL UNEXERCISED.** `run_agentloop.py` supports
-`codex exec` and `claude -p`. Both arms disable MCP; the treatment uses ripwire through the ordinary CLI.
-Codex runs get isolated homes, baseline gets no skills, treatment gets only this checkout's ripwire skills,
-and raw JSONL proves which ripwire commands actually ran. One locked Astropy pair plus one post-skill-fix
-treatment rerun completed on 2026-08-04; see [`PLAN.md`](../../PLAN.md). The official SWE-bench Docker
-evaluator remains unavailable here, so these runs measure localization/tokens/wall time, not solve rate.
+**Status: HARNESS READY FOR AN UNATTENDED MATRIX; RESOLUTION SCORING STILL UNEXERCISED.**
+`run_agentloop.py` supports `claude -p`, `codex exec`, and `opencode run`. Every arm disables MCP; the
+ripwire arms use the CLI through a logging shim. Codex and opencode runs get fully isolated homes,
+`--resume` skips already-completed cells so an interruption cannot re-spend money, and `--concurrency`
+runs N cells at once in separate checkout lanes. One locked Astropy pair plus one post-skill-fix
+treatment rerun completed on 2026-08-04; see [`PLAN.md`](../../PLAN.md).
+
+**The headline metric has still never been produced.** `--evaluator swebench` remains unexercised:
+scoring needs the `swebench` package (not installed) plus ~120GB of free disk *inside the Docker VM*.
+Measured 2026-08-10: Docker is up and usable, the **host** has ~531GB free, but the active colima
+`amd64` profile is provisioned with a 40GiB virtual disk (~31GB free). That is an allocation, not a
+hardware limit — `colima stop amd64 && colima start amd64 --disk 250 --cpu 8 --memory 16` grows it
+(colima grows disks but never shrinks them). Note also that this profile's VM arch is `aarch64`, so
+SWE-bench's official `linux/amd64` images run emulated; budget wall-clock accordingly, or track
+upstream's experimental native-arm64 support. Until that runs, these arms measure
+localization / tokens / wall time — **not solve rate** — and localization is already at ceiling
+(6/6 on both arms in the pilot), so it has no discriminating power left. Two defects in the scoring
+path were fixed on 2026-08-10 without being able to execute it: the report was being written to the
+*caller's* cwd, and an infrastructure failure (Docker down, disk full) was being recorded as
+`resolved=False` — indistinguishable from a patch that genuinely did not fix the bug, which would
+have read as "ripwire did not help". Infra failures now stop the run instead of scoring it.
 
 ## The protocol
 
@@ -22,10 +37,88 @@ https://arxiv.org/html/2601.11868v1):
 | arm | what the agent has |
 |---|---|
 | `baseline` | grep / read / glob only |
-| `ripwire_cli` | same agent + isolated ripwire skills driving the ripwire CLI; MCP disabled |
+| `ripwire_cli` | same agent + the shipped `ripwire wrap` rules blurb driving the ripwire CLI; **no skills tree**; MCP disabled |
+| `ripwire_skills` | `ripwire_cli` **plus** this checkout's `skills/` tree |
+
+**Why three arms and not two (changed 2026-08-10, schema v3).** The 2026-08-04 Codex pilot measured
++80% tokens for `ripwire_cli` and the loss was diagnosed as *skill-policy* — whole `SKILL.md` bodies
+re-read and re-billed every turn — not retrieval. That diagnosis was only possible after the fact,
+because the old two-arm `ripwire_cli` **also symlinked the entire skills tree** on the codex harness:
+the arm did not mean what its name said, so ripwire's cost and the skills' cost were one number. They
+are now two. `ripwire_skills − ripwire_cli` **is** the skills tax, measured rather than argued about,
+and `ripwire_cli` is exactly what `ripwire wrap <agent>` tells a real user to install — the eval tests
+the shipped recipe. Both ripwire arms share a byte-identical prompt; they differ only on disk.
+
+**Harnesses.** `claude-code-p`, `codex-exec`, and `opencode` (`opencode run --format json`). opencode
+is the only one of the three that is open source and scriptable enough for an unattended matrix.
+
+Two things about the opencode harness are load-bearing and easy to get wrong:
+
+- **It reads `$HOME/.claude/CLAUDE.md`** into every run unless `OPENCODE_DISABLE_CLAUDE_CODE=1`, and
+  it has **no `--ignore-user-config` equivalent** — `OPENCODE_CONFIG` *merges on top of* the global
+  config rather than replacing it. Isolation is therefore done by relocating `HOME` and every `XDG_*`
+  dir into an ephemeral per-run home. This matters here specifically: this project's developers keep a
+  ripwire usage protocol in `~/.claude/CLAUDE.md`, so an unguarded baseline arm is briefed on the tool
+  it is a control for, and every run still reports `status=ok`. `test/agentloopopencodecheck.sh`
+  asserts the recipe, and confirms it live against `opencode debug paths` when opencode is installed.
+- **It does not fail closed without credentials.** With an empty auth store, `opencode run` silently
+  routes to opencode's own free hosted model and completes the turn (verified v1.18.16:
+  `providerID=opencode`, `modelID=big-pickle`, `cost=0`). Every record now carries `resolved_model`
+  read back from the transcript, and a run whose model contradicts `--model` is recorded as an error
+  rather than averaged into an arm.
+
+**Counting ripwire invocations** is done by a **PATH shim** the arm's prompt points at, not by
+grepping the agent's transcript. Codex and opencode both self-log shell commands; `claude -p` does
+not, which is why every claude-harness run recorded `ripwire_calls=None` until this change. The shim
+`exec`s the real binary, so it cannot alter what ripwire returns. Where a transcript count is also
+available it is cross-checked against the shim, and the shim wins.
 
 **Seeds:** K=3 per (task, arm). A single-seed SWE-bench number is an unreliable "lucky pass"
 (https://arxiv.org/pdf/2605.12925) — always report across seeds, never a single run.
+
+### READ THIS BEFORE FUNDING A RUN: the design is underpowered, and more instances will not fix it
+
+Computed 2026-08-10 (`power_sim.py`, `power_sim_results.json`), **before** spending anything.
+
+`analyze.py` bootstraps **clustered by repo**, and with equal paired-row counts per repo — always the
+case here — pooling then averaging is algebraically identical to resampling the **G repo-level mean
+deltas**. The whole bootstrap distribution is a resample of G numbers, and **G is 6**. Effective N is
+the cluster count, not the instance count. That is the few-clusters regime (reliable coverage wants
+G ≳ 20–40).
+
+Minimum detectable effect on resolution rate, 80% power, baseline 30%, across the plausible
+intra-cluster correlation range (ICC is **unmeasured** — no scored resolution data exists anywhere in
+this repo, which is exactly the gap):
+
+| config | instances | clusters | MDE (pp) @ ICC 0 / .05 / .15 / .30 |
+|---|---|---|---|
+| 24 / 6 / K=1 | 24 | 6 | 35.8 / 36.2 / 35.3 / 39.6 |
+| **24 / 6 / K=3 (the planned design)** | 24 | 6 | **19.4 / 21.6 / 23.1 / 28.3** |
+| 48 / 6 / K=3 | 48 | 6 | 13.5 / 16.1 / 20.3 / 25.3 |
+| 96 / 6 / K=3 | 96 | 6 | 9.4 / 12.9 / 18.8 / 24.4 |
+| *96 / 12 / K=3 (hypothetical: no disjointness rule)* | 96 | 12 | 9.6 / 11.5 / 14.2 / 16.9 |
+
+**The planned design detects an 18–32pp lift.** Adding one navigation CLI to an already-capable
+coding agent is a low-single-digits-to-~10pp intervention; a fifth-to-a-third of the whole scale is
+not a plausible effect. Worse, at **G=6 with any ICC above zero, a 5pp or 10pp effect is not
+detectable at any instance count** — the search ran to 49,152 instances and never crossed 80% power,
+because the heterogeneity floor does not shrink with more instances at fixed G. Holding G=6, MDE
+plateaus near 16pp by ~400 instances and never improves out to 3,072.
+
+**The lever is clusters, not instances.** For the same marginal instance budget, spending it on new
+repos delivers ~4× the power improvement of spending it inside the existing six (20.3 → 14.2pp vs
+20.3 → 18.8pp). 12 repos × 8 instances beats 6 repos at *any* instance count.
+
+So: **a null from this design would be uninformative, and must never be reported as "ripwire has no
+effect."** Before funding a full matrix, either (a) widen the repo universe — which means revisiting
+the LocBench repo-disjointness rule, or moving off SWE-bench-Lite's 12-repo universe to full
+SWE-bench / SWE-bench-Verified — or (b) run a small scored pilot whose only job is to **measure the
+ICC**, replacing the assumed 0–0.30 range with a number, and re-decide with it.
+
+Assumptions on record: baseline rate 20/30/40% (unmeasured, swept); ICC 0–0.30 (unmeasured, swept —
+the single biggest lever); the treatment effect modelled as repo-heterogeneous, which is what drives
+the "not reachable" rows; Monte-Carlo noise ±1–2pp. Every one of these is a modelling choice, not a
+measurement, and a real scored pilot replaces the first two.
 
 **Tasks:** SWE-bench-Lite instances (`princeton-nlp/SWE-bench_Lite`, test split), **repository-disjoint
 from the LocBench train split** — see "Task selection" below. The design targets
