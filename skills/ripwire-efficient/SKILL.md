@@ -3,8 +3,12 @@ name: ripwire-efficient
 description: >
   A token + accuracy DISCIPLINE for ANY read, not a moment: map before you open files. Reach for it the
   instant you catch yourself about to open more than ~2 files to figure something out — anywhere in a task.
-  File reads dominate an agent's token cost, and less context is measurably MORE accurate, not just
-  cheaper; a small ranked map beats a fan-out of whole-file reads on both. The reflex is one line: run the
+  Also the moment you catch yourself typing "let me search the codebase", "let me read that file", or
+  "let me look at a few files first": that sentence IS the trigger. File reads dominate an agent's token
+  cost, and less context is measurably MORE accurate, not just
+  cheaper; a small ranked map beats a fan-out of whole-file reads on both. Code-repair accuracy fell
+  29% → 3% as context grew 32K → 256K tokens (LongCodeBench), so "read a few more files to be safe" is
+  the instinct this replaces, not a safe default. The reflex is one line: run the
   cheapest verb that answers the question, then read only the 2-3 files it ranks highest. Fires ALONGSIDE
   the moment skills (orient, navigate, change-check…), never instead of them. Backed by ripwire
   (deterministic, on PATH).
@@ -39,6 +43,25 @@ This is the load-bearing fact, not a nice-to-have: **less context is more accura
 A small ranked map isn't a compromise for speed — it's *more likely to get the right answer* than pasting in
 everything that might be relevant. The "just `cat` three files to be safe" instinct is the one this evidence
 contradicts.
+
+## Defaults to break
+
+An affirmative catalog of verbs competes badly with a habit: an agent that already knows how to open a
+file does not weigh a list of alternatives against it. So the discipline is stated as prohibitions, and
+the table below is what you reach for *instead*.
+
+- **Do NOT open a file you have not located first.** Rank with `--for`/`--grep`, then read what it names.
+- **Do NOT read a whole file to understand one symbol.** `--expand=SYM` returns the body plus its callees'
+  signatures; the file it happens to live in is not the unit of an answer.
+- **Do NOT fan reads across several files to learn one thing.** `--pack-task="<task>"` answers in ONE
+  budgeted call.
+- **Do NOT hand-translate a stack trace into a search query.** `--from-trace=FILE` takes it verbatim.
+- **Do NOT infer structure by reading build files and imports.** `--deps`/`--report` derive it.
+
+The tell that you need this is linguistic, not architectural: if you just thought *"let me search the
+codebase"*, *"let me read that file"*, or *"let me look at a few files first"*, that sentence is the
+trigger. The same prohibitions ship in the always-loaded `ripwire wrap` primer (`src/wrap.h`), so an agent
+that never opens this file still meets them.
 
 ## The reflex
 Before you open more than ~2 files to answer a question, run the cheapest verb that answers it — THEN read
