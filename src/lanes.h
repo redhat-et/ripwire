@@ -88,7 +88,7 @@
 #include "resolve.h"      // canonicalId
 #include "arch.h"         // relForHash / fnv1a64
 #include "serialize.h"    // jsonStr
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

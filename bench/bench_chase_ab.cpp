@@ -36,7 +36,7 @@
 // a REAL measured number here still does not clear PLAN.md's required real-corpus, blind-reviewed
 // precision floor before Phase B may consume anything ranking-affecting.
 
-#include "profilePmc.h"
+#include "infra/profilePmc.h"
 
 #include <algorithm>
 #include <chrono>

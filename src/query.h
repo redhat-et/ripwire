@@ -32,7 +32,7 @@
 
 #include "model.h"
 #include "graph.h"
-#include "Diagnostics.h"
+#include "infra/Diagnostics.h"
 
 #include <algorithm>
 #include <cctype>

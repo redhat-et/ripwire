@@ -11,7 +11,7 @@
 // Run:
 //   /tmp/ripwire_bench_sort_large 4000000
 
-#include "fastSort.h"
+#include "infra/fastSort.h"
 #include "infra/sortutil.h"
 
 #include <algorithm>

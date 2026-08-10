@@ -64,7 +64,7 @@
 #include "pageview.h"     // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
 #include "serialize.h"    // escapeXml
 #include "graphlegend.h"  // kGraphCountFloorAttrXml — the shared floor marker
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT — a blind spot degrades the report, never aborts it
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — a blind spot degrades the report, never aborts it
 
 #include <algorithm>
 #include <array>

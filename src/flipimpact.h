@@ -66,7 +66,7 @@
 #include "arch.h"         // relForHash
 #include "darkflags.h"    // the gate harvest, reused whole
 #include "serialize.h"    // escapeXml
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

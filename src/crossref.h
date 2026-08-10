@@ -92,7 +92,7 @@
 #include "pageview.h"     // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "workspace.h"    // wsdetail::segmentsOf
 #include "filter.h"       // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
-#include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

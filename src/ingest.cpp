@@ -17,8 +17,8 @@
 #include "infra/fixedStr.h"            // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
 #include "lexindex.h"            // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 
-#include "Diagnostics.h"
-#include "profileScope.h"        // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/Diagnostics.h"
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <tree_sitter/api.h>
 
