@@ -395,7 +395,7 @@ void sortKeySmall( Item* items, Item* scratch, std::size_t count, KeyOf&& keyOf 
     VERIFY_TEXT( count <= std::size_t(UINT32_MAX), "sortKeySmall: count exceeds uint32 histogram range" );
 
     constexpr int kPasses = detail::Passes<Key>;
-    alignas( fastmath::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
+    alignas( infra::platform::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
     detail::clearHistograms( hist );
 
     std::size_t i = 0;
@@ -474,7 +474,7 @@ void sortKeyLarge( const Key* keys, uint32_t* indices, uint32_t* scratch, std::s
 }
 
     constexpr int kPasses = detail::Passes<Key>;
-    alignas( fastmath::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
+    alignas( infra::platform::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
     detail::clearHistograms( hist );
     detail::buildHistogramsContiguousKeys( keys, count, hist );
     detail::sortPreparedIndices( keys, indices, scratch, count, hist );
@@ -496,7 +496,7 @@ void sortKeyLargeIndexed( const Key* keys, uint32_t* indices, uint32_t* scratch,
     VERIFY_TEXT( count <= std::size_t(UINT32_MAX), "sortKeyLargeIndexed: count exceeds uint32 histogram range" );
 
     constexpr int kPasses = detail::Passes<Key>;
-    alignas( fastmath::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
+    alignas( infra::platform::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
     detail::clearHistograms( hist );
     detail::buildHistogramsIndexedKeys( keys, indices, count, hist );
     detail::sortPreparedIndices( keys, indices, scratch, count, hist );
@@ -531,7 +531,7 @@ void sortKeyLargePairs( const Key* keys, uint32_t* indices, WordIndex* scratch, 
     WordIndex* src = scratch;
     WordIndex* dst = scratch + count;
 
-    alignas( fastmath::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
+    alignas( infra::platform::hardware_destructive_interference_size ) detail::Count hist[kPasses][256];
     detail::clearHistograms( hist );
 
     for( std::size_t i = 0; i < count; ++i )
