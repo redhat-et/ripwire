@@ -19,7 +19,9 @@ install_hook()
 
     if ! command -v jq >/dev/null 2>&1; then
         echo "skills/install.sh --hook needs jq on PATH to safely merge $settings (not found)." >&2
-        echo "Add this by hand instead: hooks.PreToolUse += [{\"matcher\":\"Grep|Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript\"}]}]" >&2
+        echo "Add these by hand instead:" >&2
+        echo "  hooks.PreToolUse  += [{\"matcher\":\"Read|Glob|Grep|Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript\"}]}]" >&2
+        echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript --session-start\"}]}]" >&2
         exit 1
     fi
 
@@ -33,19 +35,26 @@ install_hook()
         return 0
     fi
 
-    echo "skills/install.sh --hook will add this OPT-IN, advisory-only entry to $settings:"
-    echo "  hooks.PreToolUse += [{ matcher: \"Grep|Bash\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
+    # Read and Glob are in the matcher deliberately: the whole-file read is the largest token sink in
+    # an agent loop and the one default a skill description cannot intercept (a skill fires only if the
+    # agent first recognizes a moment AND spends a call to load it; Read needs neither). SessionStart
+    # is the proactive half — the PreToolUse nudges only speak after a default has already been chosen.
+    echo "skills/install.sh --hook will add these OPT-IN, advisory-only entries to $settings:"
+    echo "  hooks.PreToolUse  += [{ matcher: \"Read|Glob|Grep|Bash\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
+    echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
     echo "  behavior: never blocks/denies/rewrites a tool call; at most one suggestion per session per pattern."
-    echo "  remove:   delete that PreToolUse entry from $settings (or re-run with the entry already absent)."
+    echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
 
     tmp="$( mktemp )"
-    jq --arg cmd "$hookScript" '
+    jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
-        .hooks.PreToolUse += [{ matcher: "Grep|Bash", hooks: [{ type: "command", command: $cmd }] }]
+        .hooks.PreToolUse += [{ matcher: "Read|Glob|Grep|Bash", hooks: [{ type: "command", command: $cmd }] }] |
+        .hooks.SessionStart //= [] |
+        .hooks.SessionStart += [{ matcher: "startup|resume|clear", hooks: [{ type: "command", command: $scmd }] }]
     ' "$settings" >"$tmp" && mv "$tmp" "$settings"
 
-    echo "done. Registered ripwire's PreToolUse nudge hook in $settings."
+    echo "done. Registered ripwire's PreToolUse nudge + SessionStart primer hooks in $settings."
 }
 
 case "${1:-}" in

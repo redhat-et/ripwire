@@ -145,6 +145,92 @@ OUT3C_DEDUP="$( run_hook "$GITDIFF_JSON" "$WITH_RIPWIRE" "$T3C" )"; RC3C_DEDUP=$
 [ "$RC3C_DEDUP" -eq 0 ] && [ -z "$OUT3C_DEDUP" ] && ok "git diff dedup: silent on 2nd call (no spam)" \
     || no "git diff dedup: 2nd call was not silent: $OUT3C_DEDUP"
 
+# ── (3f) Read case (2026-08-10 audit): fires, names --expand, allow-never-deny ─────────────────────
+# The read nudge is the load-bearing one: whole-file reads are the largest token sink in an agent loop
+# and the only default a skill description cannot intercept.
+T3F="$TMP/t3f"; mkdir -p "$T3F"
+READ_JSON='{"session_id":"readcase","cwd":"'"$REPO"'","tool_name":"Read","tool_input":{"file_path":"src/foo.cpp"}}'
+OUT3F="$( run_hook "$READ_JSON" "$WITH_RIPWIRE" "$T3F" )"; RC3F=$?
+echo "-- Read case output --"; echo "$OUT3F"; echo "(exit=$RC3F)"
+[ "$RC3F" -eq 0 ] && ok "Read case: exit 0" || no "Read case: exit was $RC3F"
+printf '%s' "$OUT3F" | is_valid_json && ok "Read case: valid JSON on stdout" \
+    || no "Read case: stdout is not valid JSON"
+printf '%s' "$OUT3F" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
+    && ok "Read case: permissionDecision allow" || no "Read case: missing/wrong permissionDecision"
+printf '%s' "$OUT3F" | grep -qi 'deny\|"ask"' \
+    && no "Read case: output mentions deny/ask (must never)" || ok "Read case: no deny/ask anywhere"
+printf '%s' "$OUT3F" | grep -q -- '--expand' \
+    && ok "Read case: suggestion names --expand" || no "Read case: suggestion missing --expand"
+
+# dedup within the read category
+OUT3F2="$( run_hook "$READ_JSON" "$WITH_RIPWIRE" "$T3F" )"; RC3F2=$?
+[ "$RC3F2" -eq 0 ] && [ -z "$OUT3F2" ] && ok "Read dedup: silent on 2nd call" \
+    || no "Read dedup: 2nd call was not silent: $OUT3F2"
+
+# a Grep in the SAME session still fires: read and grep are different habits, deduped separately
+GREP_SAME='{"session_id":"readcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x"}}'
+OUT3F3="$( run_hook "$GREP_SAME" "$WITH_RIPWIRE" "$T3F" )"; RC3F3=$?
+[ "$RC3F3" -eq 0 ] && [ -n "$OUT3F3" ] \
+    && ok "Read and Grep dedup independently (different habits, one nudge each)" \
+    || no "Read/Grep share a dedup marker: exit=$RC3F3 out=[$OUT3F3]"
+
+# ── (3g) Glob case: fires, names --for ─────────────────────────────────────────────────────────────
+T3G="$TMP/t3g"; mkdir -p "$T3G"
+GLOB_JSON='{"session_id":"globcase","cwd":"'"$REPO"'","tool_name":"Glob","tool_input":{"pattern":"**/*.cpp"}}'
+OUT3G="$( run_hook "$GLOB_JSON" "$WITH_RIPWIRE" "$T3G" )"; RC3G=$?
+echo "-- Glob case output --"; echo "$OUT3G"; echo "(exit=$RC3G)"
+[ "$RC3G" -eq 0 ] && ok "Glob case: exit 0" || no "Glob case: exit was $RC3G"
+printf '%s' "$OUT3G" | is_valid_json && ok "Glob case: valid JSON on stdout" \
+    || no "Glob case: stdout is not valid JSON"
+printf '%s' "$OUT3G" | grep -q -- '--for' \
+    && ok "Glob case: suggestion names --for" || no "Glob case: suggestion missing --for"
+
+# ── (3h) Read/Glob degrade to silence off their preconditions, same as every other category ────────
+T3H="$TMP/t3h"; mkdir -p "$T3H"
+READ_NONGIT='{"session_id":"readnongit","cwd":"'"$NONREPO"'","tool_name":"Read","tool_input":{"file_path":"x"}}'
+OUT3H="$( run_hook "$READ_NONGIT" "$WITH_RIPWIRE" "$T3H" )"; RC3H=$?
+[ "$RC3H" -eq 0 ] && [ -z "$OUT3H" ] && ok "Read in non-git dir: silent" \
+    || no "Read in non-git dir: exit=$RC3H out=[$OUT3H]"
+T3H2="$TMP/t3h2"; mkdir -p "$T3H2"
+OUT3H2="$( run_hook "$READ_JSON" "$NO_RIPWIRE" "$T3H2" )"; RC3H2=$?
+[ "$RC3H2" -eq 0 ] && [ -z "$OUT3H2" ] && ok "Read with ripwire off PATH: silent" \
+    || no "Read with ripwire off PATH: exit=$RC3H2 out=[$OUT3H2]"
+
+# ── (3i) SessionStart mode: emits the wrap blurb as additionalContext, once ────────────────────────
+# The blurb is EXTRACTED from `ripwire wrap claude`, so this also pins that the two cannot drift. Needs
+# the REAL binary (the stub cannot emit a wrap recipe), so it is skipped when one isn't available.
+REALBIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${REALBIN#/}" = "$REALBIN" ] && REALBIN="$ROOT/$REALBIN"
+if [ -x "$REALBIN" ]; then
+    RBIN="$TMP/realbin"; mkdir -p "$RBIN"; ln -sf "$REALBIN" "$RBIN/ripwire"
+    WITH_REAL="$RBIN:$PATH"
+    T3I="$TMP/t3i"; mkdir -p "$T3I"
+    SS_JSON='{"session_id":"sscase","cwd":"'"$REPO"'","source":"startup"}'
+    OUT3I="$( printf '%s' "$SS_JSON" | PATH="$WITH_REAL" TMPDIR="$T3I" bash "$HOOK" --session-start )"; RC3I=$?
+    echo "-- SessionStart case (first 3 lines) --"; printf '%s' "$OUT3I" | head -c 300; echo; echo "(exit=$RC3I)"
+    [ "$RC3I" -eq 0 ] && ok "SessionStart: exit 0" || no "SessionStart: exit was $RC3I"
+    printf '%s' "$OUT3I" | is_valid_json && ok "SessionStart: valid JSON on stdout" \
+        || no "SessionStart: stdout is not valid JSON"
+    printf '%s' "$OUT3I" | grep -q '"hookEventName"[[:space:]]*:[[:space:]]*"SessionStart"' \
+        && ok "SessionStart: hookEventName is SessionStart" || no "SessionStart: wrong/missing hookEventName"
+    printf '%s' "$OUT3I" | grep -qi 'deny\|"permissionDecision"' \
+        && no "SessionStart: must not carry a permission decision" || ok "SessionStart: no permission decision"
+    # the injected text is the wrap blurb: it must carry the prohibition block, which is the whole point
+    printf '%s' "$OUT3I" | grep -q 'Do NOT open a file you have not located first' \
+        && ok "SessionStart: injects the wrap blurb's prohibition block" \
+        || no "SessionStart: injected text is missing the prohibitions (drifted from src/wrap.h?)"
+    OUT3I2="$( printf '%s' "$SS_JSON" | PATH="$WITH_REAL" TMPDIR="$T3I" bash "$HOOK" --session-start )"; RC3I2=$?
+    [ "$RC3I2" -eq 0 ] && [ -z "$OUT3I2" ] && ok "SessionStart dedup: silent on 2nd call" \
+        || no "SessionStart dedup: 2nd call was not silent"
+    T3I3="$TMP/t3i3"; mkdir -p "$T3I3"
+    SS_NONGIT='{"session_id":"ssnongit","cwd":"'"$NONREPO"'","source":"startup"}'
+    OUT3I3="$( printf '%s' "$SS_NONGIT" | PATH="$WITH_REAL" TMPDIR="$T3I3" bash "$HOOK" --session-start )"; RC3I3=$?
+    [ "$RC3I3" -eq 0 ] && [ -z "$OUT3I3" ] && ok "SessionStart in non-git dir: silent" \
+        || no "SessionStart in non-git dir: exit=$RC3I3 out=[$OUT3I3]"
+else
+    echo "  SKIP  SessionStart checks (no real binary at $REALBIN)"
+fi
+
 # ── (4) Negative: Bash command that is NOT a recursive grep -> silent ──────────────────────────────
 T4="$TMP/t4"; mkdir -p "$T4"
 BASHOTHER_JSON='{"session_id":"othercase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"ls -la"}}'
@@ -226,9 +312,20 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     jq -e --arg cmd "$HOOK" 'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
         && ok "settings.json references hooks/ripwire-nudge.sh" \
         || no "settings.json does not reference the hook script"
-    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "Grep|Bash"' \
+    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "Read|Glob|Grep|Bash"' \
         "$SETTINGS" >/dev/null 2>&1 \
-        && ok "settings.json matcher is Grep|Bash" || no "settings.json matcher missing/wrong"
+        && ok "settings.json PreToolUse matcher is Read|Glob|Grep|Bash" || no "settings.json PreToolUse matcher missing/wrong"
+    # Read/Glob are load-bearing, not incidental: the whole-file read is the largest token sink in the
+    # loop and the one default no skill description can intercept. Assert them by NAME so a future
+    # matcher edit that quietly drops them fails here.
+    for m in Read Glob Grep Bash; do
+        jq -e --arg m "$m" '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher | test($m)' \
+            "$SETTINGS" >/dev/null 2>&1 \
+            && ok "PreToolUse matcher covers $m" || no "PreToolUse matcher lost $m"
+    done
+    jq -e '(.hooks.SessionStart // [])[] | select(.hooks[]?.command | test("ripwire-nudge.*--session-start"))' \
+        "$SETTINGS" >/dev/null 2>&1 \
+        && ok "settings.json registers the SessionStart primer hook" || no "SessionStart primer hook not registered"
 fi
 printf '%s' "$INSTOUT1" | grep -qi 'will add' && ok "install.sh --hook prints what it will change" \
     || no "install.sh --hook did not announce the change before writing it"
@@ -239,8 +336,11 @@ echo "-- install.sh --hook, 2nd run --"; echo "$INSTOUT2"
 [ "$INSTRC2" -eq 0 ] && ok "install.sh --hook (2nd run): exit 0" || no "install.sh --hook (2nd run): exit was $INSTRC2"
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     COUNT="$( jq '[(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge"))] | length' "$SETTINGS" )"
-    [ "$COUNT" = "1" ] && ok "install.sh --hook is idempotent (1 entry after 2 runs)" \
-        || no "install.sh --hook duplicated the entry ($COUNT entries after 2 runs)"
+    [ "$COUNT" = "1" ] && ok "install.sh --hook is idempotent (1 PreToolUse entry after 2 runs)" \
+        || no "install.sh --hook duplicated the PreToolUse entry ($COUNT entries after 2 runs)"
+    SCOUNT="$( jq '[(.hooks.SessionStart // [])[] | select(.hooks[]?.command | test("ripwire-nudge"))] | length' "$SETTINGS" )"
+    [ "$SCOUNT" = "1" ] && ok "install.sh --hook is idempotent (1 SessionStart entry after 2 runs)" \
+        || no "install.sh --hook duplicated the SessionStart entry ($SCOUNT entries after 2 runs)"
 fi
 
 # ── (10) installer never bundles --hook into default/--codex/--claude runs ─────────────────────────
