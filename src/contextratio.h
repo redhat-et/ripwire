@@ -65,7 +65,7 @@
 #include "graph.h"       // langCompatible — the SAME language gate the resolver uses; never a second one
 #include "serialize.h"   // escapeXml, tokensForEmittedBytes, kBytesPerTokenBody — the one body-token rate
 #include "pageview.h"    // pageWindow + effectiveRowCap + pagingDisclosure — THE TRUNCATION VOCABULARY
-#include "infra/svector.h"     // rw::svector — the small-vector the byName id-lists use in graph.h too
+#include "smallvec.h"          // rw::SmallVec — the small-vector the byName id-lists use in graph.h too
 
 #include <algorithm>
 #include <cstdint>
@@ -215,7 +215,7 @@ inline void foldNamePairs( const std::vector<std::uint64_t>& pairs, std::vector<
     }
 }
 
-using NameDefs = HashMap<std::string_view, svector<NodeId, 2>>;
+using NameDefs = HashMap<std::string_view, SmallVec<NodeId, 2>>;
 
 // name → definition ids, ascending (insertion follows symbol id order, which is already sorted crawl
 // order). The map is a LOOKUP only — it is never iterated, so its order cannot reach an output byte.
