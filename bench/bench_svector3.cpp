@@ -6,6 +6,12 @@
 //   C  ankerl::svector<uint32,2>    16 B — alloc-free build; size() branches on SVO is_direct()
 //   D  rw::svector<uint32,2>       24 B — alloc-free build; size() is `return sz_` (branch-free)
 //
+// !! THE "24 B" ON ROW D IS HISTORICAL. rw::svector is now SIXTEEN bytes: it unions its inline array
+// with its heap pointer, so it keeps the branch-free size() AND matches ankerl's footprint. Running this
+// file today prints sizeof(rw::svector<uint32,2>) = 16, which is not a contradiction — the comment
+// records what was measured, and what was measured is what motivated the change. Everything below the
+// next divider is the pre-promotion record; bench/SVECTORAB.md §8 has the post-promotion numbers.
+//
 // Measured (5 runs, contended box — repeat, n=1 is noise): for this WRITE-ONCE / READ-HOT map value,
 //   build:   C≈D ~7ms  ≪  B ~22ms      (both svectors kill the per-name malloc)
 //   resolve: B≈D ~11ms  <  C ~18ms      (B & D branch-free size(); C's SVO size() branch costs ~6ms/4M)
@@ -14,11 +20,11 @@
 //
 // ── THAT 25% DOES NOT SURVIVE CONTACT WITH THE PIPELINE. Read this before quoting it. ────────────────
 // The numbers above are correct FOR THIS MICROBENCHMARK and they do not transfer. Measured in situ
-// (bench/svectorab.py, four-way alias flip, --no-cache both sides, fresh build per arm, 11 interleaved
+// (bench/svectorab.py, alias flip, --no-cache both sides, fresh build per arm, 11 interleaved
 // reps against a 0.3% A/A noise floor) on a 2376-file C++/ObjC++ corpus:
 //
-//   affected phase (buildGraph):  std::vector +6.0%   ankerl +1.9%   rw 0.0%   rwx-union +0.2%
-//   end-to-end:                   all four arms indistinguishable
+//   affected phase (buildGraph):  std::vector +6.0%   ankerl +1.9%   rw 0.0%   union +0.2% (that union
+//   arm is now rw::svector itself — it was promoted; see bench/SVECTORAB.md §8)
 //
 // ankerl is 1.9% behind on the real workload, not 25%. Two reasons the microbenchmark inflates it, and
 // note that the FIRST one is the opposite of what an earlier revision of this comment claimed:

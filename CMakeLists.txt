@@ -482,11 +482,10 @@ target_include_directories(ripwire PRIVATE
 
 # ---- small-vector A/B knobs (bench/svectorab.py drives both; see bench/SVECTORAB.md) ----
 # RIPWIRE_SMALLVEC selects which container src/smallvec.h's `rw::SmallVec` alias resolves to:
-#   0 std::vector   1 ankerl::svector   2 rw::svector (default, the shipped one)   3 rwx::svector16
-# Arm 3 lives in bench/ and src/smallvec.h reaches it with a relative include, so no extra include path
-# is needed for any arm. Unset means unset: src/smallvec.h carries the default, so the ordinary build
+#   0 std::vector   1 ankerl::svector   2 rw::svector (default, the shipped one)
+# Unset means unset: src/smallvec.h carries the default, so the ordinary build
 # passes no -D at all and its preprocessor state is byte-identical to a tree without this option.
-set(RIPWIRE_SMALLVEC "" CACHE STRING "small-vector arm: 0=std::vector 1=ankerl 2=rw (default) 3=rwx union")
+set(RIPWIRE_SMALLVEC "" CACHE STRING "small-vector arm: 0=std::vector 1=ankerl 2=rw (default)")
 if(NOT RIPWIRE_SMALLVEC STREQUAL "")
   target_compile_definitions(ripwire PRIVATE RIPWIRE_SMALLVEC=${RIPWIRE_SMALLVEC})
   target_compile_definitions(ripwire_probe PRIVATE RIPWIRE_SMALLVEC=${RIPWIRE_SMALLVEC})

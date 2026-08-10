@@ -3,15 +3,21 @@
 Four implementations of the same shape, measured in situ over the real pipeline rather than argued
 about. Driven by `bench/svectorab.py` on top of the one-line alias in `src/smallvec.h`.
 
+> **OUTCOME: arm 3 won and was promoted.** `rw::svector` **is** the union design as of this branch —
+> 16 bytes *and* a branch-free `size()`. `bench/svector_union_arm.h` and `rwx::svector16` are deleted
+> rather than left alive as a second implementation of the same idea, and `src/smallvec.h` now has
+> three arms. The tables below are the evidence that produced that decision, kept as measured.
+
 | arm | type | bytes/instance | inline slots | `size()` |
 | --- | --- | --- | --- | --- |
 | 0 | `std::vector<T>` | 24 | 0 (always heap) | branch-free |
-| 1 | `ankerl::svector<T,2>` | **16** | **3** (fills its own padding) | branches on the SVO tag |
-| 2 | `rw::svector<T,2>` | 24 | 2 | branch-free |
-| 3 | `rwx::svector16<T,2>` | **16** | 2 | branch-free |
+| 1 | `ankerl::svector<T,2>` | **16** | **3** (fills its own padding) | branches on the SVO tag; a **dependent load** once spilled |
+| 2 | `rw::svector<T,2>` — **the default** | **16** | 2 | branch-free |
+| ~~3~~ | ~~`rwx::svector16<T,2>`~~ | — | — | promoted into arm 2 |
 
-Arm 3 is the experiment from `bench/svector_union_arm.h`: `rw::svector` with `inl_` and `heap_`
-unioned, which reaches ankerl's 16 bytes while keeping the size in its own field.
+The union is the whole trick: `inl_` and `heap_` are never both live, so they share storage and the
+struct reaches ankerl's 16 bytes while `sz_` keeps its own field and `size()` stays `return sz_`. The
+earlier 24-byte design treated "small" and "branch-free" as a trade; they were not.
 
 ---
 
@@ -223,12 +229,23 @@ validation corpus **43,354**.
 | 200,000 | 4,688 KB | **−6.4%** | 0.5% | +2.5% |
 | 400,000 | 9,375 KB | **−2.8%** | 0.5% | +6.2% |
 
-**Effect (i) — locality from instance size — does not exist below ~100,000 names.** At both real
-cardinalities D beats C by 0.2–0.5%, at or barely above the floor. It switches on only past a ~2.3 MB
-value array, which is 2.3× the largest corpus this tool has ever been pointed at and 31× its own tree.
+**Effect (i) — locality from instance size — does not appear below ~100,000 entries** in a single map.
+It switches on past a ~2.3 MB value array.
 
-**Effect (ii) — the branch — is present at every size, ~6–9%, and is flat.** It is the only mechanism
-that reaches the real workload.
+**Effect (ii) — the `size()` cost — is present at every size, ~6–9%, and is flat.**
+
+> **THE CENSUS CHANGES THE READING OF EFFECT (i), and this is the correction that mattered most.** The
+> rows above measure `byName` **alone**, which holds 3,220 / 43,354 entries — and on that basis an
+> earlier revision of this document concluded locality "does not reach this tree" and used it to argue
+> against the union arm. That was the wrong denominator. The conversion wave's census puts
+> **allocation-bearing entries at ≈113,000 on ripwire's own tree and ≈363,000 on the large corpus** —
+> 11× and 8× what `byName` contributes. At 363,000 entries the aggregate value footprint is **8.7 MB at
+> 24 B against 5.8 MB at 16 B**, which is well past the ~2.3 MB line where effect (i) switches on and
+> squarely in the regime where the sweep measured a 6.4% advantage for 16 bytes.
+>
+> So both effects reach the real workload once the wave lands; only one of them reached `byName` on its
+> own. Scoping a whole-tree decision to the one structure that happened to be measured first is the
+> mistake, and it is the reason the union arm was briefly dismissed.
 
 ### Why the owner's run showed ankerl losing 55% and the sweep shows 6%
 
@@ -277,42 +294,76 @@ Re-run when quiet; do not reason about deltas underneath it.
 
 Keyed on what the measurement actually showed, not on what was expected.
 
-The rule now keys on **whether the site polls `size()`**, because that is the only mechanism that
-reaches real cardinality.
+The promotion collapses this rule, because the trade it used to arbitrate is gone: `rw::svector` is now
+16 bytes *and* branch-free, so there is no longer a size-versus-`size()` choice to make.
 
 | situation | choose | why |
 | --- | --- | --- |
-| **Any conversion from `std::vector`** | any small-vector | **+4.9% of post-parse pipeline time**, ~8% fewer allocations, ~7 MB lower peak. The wave's real payoff; all three arms deliver it equally. |
-| **A site that ITERATES (range-for) and never polls `size()`** — the large majority of the ~138 | **`ankerl::svector`** | At real cardinality the iterated column is a wash (+0.6% / −0.6%, inside floor). ankerl is then 8 bytes smaller, avoids the most allocations, and is complete, vendored and maintained. |
-| **A site that polls `size()` in a hot loop** | **`rw::svector`** | ~6–7% on the size-hot loop at *both* real cardinalities, flat and reproducible — 1.9% of `buildGraph`, 1.5% of post-parse. `rw` now has full interface parity, so this no longer costs generality. |
-| **A site that polls `size()` on lists that SPILL past 3** | **`rw::svector`, emphatically** | ankerl's `size()` becomes a dependent load into the heap block; measured 42–55% on the size-hot loop. Rare in `byName` (~0.6% spill) but decisive wherever lists are long. |
-| **Over-aligned `T`, or a `T` with a side-effecting destructor** | `ankerl::svector` | ankerl `static_assert`s against over-aligned `T`; `rw::svector` ties element lifetime to buffer lifetime. |
+| **Default for the conversion wave — everything not listed below** | **`rw::svector`** | Same 16 bytes as ankerl, and 6–9% faster on the size-hot loop plus 0.9–4.1% on iteration at every real cardinality (§8). There is no longer a column where ankerl wins. |
+| **Any conversion from `std::vector`** | any small-vector | **+4.9% of post-parse pipeline time**, ~8% fewer allocations, ~7 MB lower peak. The wave's real payoff, and all arms deliver it. |
+| **Over-aligned `T`** | **`ankerl::svector`** | `rw::svector` requires trivially-copyable `T` (the union constraint); ankerl `static_assert`s against over-aligned `T` too, so check both before assuming either works. |
+| **`T` with a real constructor/destructor** | **`ankerl::svector`** | `rw::svector` refuses it at compile time; ankerl does real element lifetime management. |
 | **The two biggest structures (`symbolAdjacency`, `fileIncludes`)** | **CSR, not a small-vector** | 2.5–3× smaller than either. Do not spend the small-vector budget here. |
 
-**Revised bottom line.** The earlier flat "standardise on ankerl, retire `rw::svector`" does not
-survive the counter run and is withdrawn. `rw::svector` is measurably better wherever `size()` is
-polled, the margin is real at every cardinality tested, and now that it has full interface parity the
-maintenance argument that justified retiring it is much weaker. **Keep both, and pick by access
-pattern**: iterate → ankerl, poll `size()` → `rw`. The absolute stakes remain modest (1.5% of
-post-parse pipeline time, 0.05% of total runtime), so this is a tie-breaker rule, not a rewrite mandate.
+**Bottom line.** `rw::svector` is the default for the wave. ankerl stays vendored and stays the answer
+for element types the union design refuses — that is a real and permanent role, not a consolation.
 
-### On the union arm (arm 3) — dismissal upheld, reasoning replaced
+Two earlier bottom lines are withdrawn and left visible: "standardise on ankerl, retire `rw::svector`"
+(written when `rw` cost 8 extra bytes for its branch-free `size()`), and "keep both, pick by access
+pattern" (written when iteration was a wash). The promotion made both obsolete by removing the
+trade-off they were arbitrating. Absolute stakes are unchanged and still modest — ~1.5% of post-parse
+pipeline time on `byName` today — but the wave multiplies the per-instance saving by ~113,000 and
+~363,000 entries, which is where the 8 bytes actually earn their keep.
 
-The earlier dismissal cited "+0.2%, inside the noise floor". **That number was contention noise and is
-withdrawn.** On a quiet machine the union arm is genuinely the best arm at 200K names — best on all
-four columns, 11.6–11.7% ahead of `rw` on size-hot (39× that column's 0.3% floor), lowest allocated
-bytes and lowest footprint. The owner's reading of the shape-level table is correct.
+## 8. POST-PROMOTION VALIDATION — does the ranking hold at realistic cardinality?
 
-**It still should not be promoted, for a different and better-supported reason:** its advantage is
-effect (i), instance size, and §5 shows effect (i) **does not switch on below ~100,000 names**. At
-3,220 and 43,354 — ripwire's own tree and the largest corpus it has been pointed at — D beats C by
-0.2–0.5%, at or barely above the floor. The 11.7% win is real and lives entirely in a working-set
-regime this tool never enters.
+Re-run with the union design **as** `rw::svector`, so B and C are now both 16 bytes and the table
+isolates the `size()` cost with no instance-size confound. Work held constant (4M reads, ~1.5 ids per
+name); `~` = inside that column's own A/A floor.
 
-So: a successful experiment, a correct hypothesis, and **no reachable benefit** — which is a different
-verdict from "it didn't work", and worth the distinction. It stays in `bench/`, and the sweep table in
-§5 is the reason, so that if a corpus ever reaches ~100K distinct names the promotion case can be
-reopened on evidence.
+| names | value array | **ankerl vs rw, size-hot** | floor | **ankerl vs rw, iterated** | floor |
+| --- | --- | --- | --- | --- | --- |
+| **3,220*** | 50 KB | **+6.0%** | 0.5% | +1.1% | 0.5% |
+| 10,000 | 156 KB | **+7.6%** | 0.1% | +0.9% | 0.0% |
+| **43,354*** | 677 KB | **+8.9%** | 0.9% | +4.1% | 0.8% |
+| 100,000 | 1,562 KB | **+7.0%** | 2.2% | +3.3% | 0.0% |
+| 200,000 | 3,125 KB | +13.8% | 4.3% | +4.7% `~` | 6.0% |
+| 400,000 | 6,250 KB | −2.5% `~` | 9.9% | −7.7% `~` | 9.9% |
+
+**The ranking holds, and the promotion is validated.** `rw::svector` beats ankerl by 6–9% on the
+size-hot loop at every cardinality with a trustworthy floor, including both real ones. Nothing flipped.
+
+Two honest notes on this run. **The machine was heavily contended** — load average 15.6, against 2.5
+during the quiet run — so the last two rows carry 4.3% and 9.9% floors and are not evidence either way
+(per the rule in §6: a floor near 10% is a machine-state failure, not a wide error bar). The four rows
+above them have floors of 0.1–2.2% and are solid.
+
+**And one consequence worth acting on:** now that `rw::svector` is also 16 bytes, the iterated column
+went from a wash to a consistent +0.9% to +4.1% for ankerl, above its floor at every real size. The
+"iterate → prefer ankerl because it is smaller" branch of the old decision rule **no longer has a
+reason to exist** — ankerl is no longer smaller. §7 is rewritten accordingly.
+
+### On the union arm (arm 3) — the earlier dismissal was WRONG, and is withdrawn
+
+The arm was dismissed twice, on two different wrong grounds, and it is worth recording both because
+they failed in different ways.
+
+**First dismissal: "+0.2%, inside the noise floor."** That number was contention noise. A quiet re-run
+of the identical binary put the arm 11.6% *ahead* — matching the owner's independent `sudo` run at
+11.7%. The instrument was reporting a machine state, not a property of the code, and a global noise
+floor built from the noisiest column hid it.
+
+**Second dismissal: "its advantage does not reach real cardinality."** The measurement behind that was
+sound but the *denominator* was wrong. It scoped the working set to `byName` alone — 3,220 and 43,354
+entries — and concluded the ~2.3 MB threshold was out of reach. The wave's census says the tree
+actually carries ≈113,000 and ≈363,000 allocation-bearing entries, 11× and 8× that, which puts the
+aggregate footprint well past the threshold. A whole-tree decision was being made from the one
+structure that had been measured first.
+
+**Verdict: promoted.** It is `rw::svector` now. The two failures generalize past this arm — an
+instrument that has not been validated against a quiet machine is measuring the machine, and a
+component measurement is not a system measurement until you have checked what fraction of the system
+it covers.
 
 ---
 
