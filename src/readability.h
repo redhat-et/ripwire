@@ -39,7 +39,7 @@
 #include "docparse.h"    // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "pageview.h"    // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
 #include "serialize.h"   // escapeXml
-#include "Diagnostics.h" // DEGRADED_PATH_ALERT — an unreadable file degrades the scan, never aborts it
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — an unreadable file degrades the scan, never aborts it
 
 #include <algorithm>
 #include <cmath>

@@ -32,7 +32,7 @@
 #include "arch.h"         // relForHash
 #include "serialize.h"    // escapeXml
 #include "docparse.h"     // lowerExtOf / isDocExtension — which files are PROSE, not code
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 

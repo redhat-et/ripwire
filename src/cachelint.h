@@ -39,7 +39,7 @@
 // several node kinds here are spelled identically across grammars — findings are filtered to files
 // ingest routes through a C/C++/ObjC/CUDA grammar, exactly like the atoms pack.
 
-#include "Diagnostics.h"
+#include "infra/Diagnostics.h"
 #include "atoms.h"        // isCFamilyPath — the same file-language fence the atoms pack enforces
 #include "ingest.h"       // AstQuerySpec / AstMatch / astQuery — the SAME engine --lint and --match run
 #include "lintrules.h"    // lintdetail::Span + containment predicates; kLintMaxPerRule

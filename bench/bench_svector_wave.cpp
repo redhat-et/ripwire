@@ -34,7 +34,7 @@
 //                            #   perf_event_paranoid <= 2 — see src/infra/profilePmc.h)
 
 #define PROFILE_AUTO_REPORT 0
-#include "profilePmc.h"
+#include "infra/profilePmc.h"
 
 #include "infra/fixedStr.h"
 #include "infra/svector.h"

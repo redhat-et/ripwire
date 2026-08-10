@@ -41,7 +41,7 @@
 #include "infra/fixedStr.h"
 #include "infra/svector.h"                          // rw::svector — src/infra/, named by its layer prefix
 #include "../third_party/svector.h"     // martinus/svector → ankerl::svector — explicit path (dodges the basename clash)
-#include "profileScope.h"
+#include "infra/profileScope.h"
 #include "unordered_dense.h"
 #include <atomic>
 #include <chrono>

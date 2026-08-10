@@ -60,7 +60,7 @@
 #include "graph.h"         // communities() — the SAME deterministic Louvain --communities uses
 #include "clones.h"        // findClones — hoisted here so N+1 bundles share ONE clone pass
 #include "serialize.h"     // kMinBytesPerToken / jsonStr
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
 
 #include <algorithm>
 #include <cstdint>

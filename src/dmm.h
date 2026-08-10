@@ -58,7 +58,7 @@
 #include "quality.h"     // materializeCommitTree / TmpTreeGuard / gitResolveCommitSha / gitHeadSha / the HEAD ingest-cache keys
 #include "ingest.h"      // ingest — the second side is a real parse of a materialized tree
 #include "serialize.h"   // escapeXml
-#include "Diagnostics.h" // DEGRADED_PATH_ALERT — every failure here degrades to UNAVAILABLE, never aborts
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — every failure here degrades to UNAVAILABLE, never aborts
 
 #include <cstdint>
 #include <cstdio>

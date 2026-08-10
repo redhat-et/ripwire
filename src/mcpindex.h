@@ -21,7 +21,7 @@
 #include "situ.h"
 #include "workspace.h"     // multi-root `paths` array (A11): root hygiene + labels + merge
 #include "quality.h"        // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — no-op in release; the visible line on a watcher-degrade path
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — no-op in release; the visible line on a watcher-degrade path
 #include "infra/hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <sys/stat.h>

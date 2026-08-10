@@ -55,7 +55,7 @@
 #include "infra/jsonesc.h"      // shSingleQuote
 #include "serialize.h"    // escapeXml
 #include "workspace.h"    // wsdetail::segmentsOf — the shared delimiter-split primitive (also splits the CSV ref list)
-#include "Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration, cache-friendly (house rule: never std::map)
 

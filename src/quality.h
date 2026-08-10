@@ -23,10 +23,10 @@
 #include "arch.h"            // fnv1a64
 #include "gitmine.h"         // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
 #include "filter.h"          // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
-#include "Diagnostics.h"     // DEGRADED_PATH_ALERT — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
 
 #include "btree.hpp"         // gtl btree_map — sorted like std::map, cache-friendly nodes (house rule: never std::map)
-#include "dynamic_map.hpp"   // S+tree scratch maps — bounded, no per-operation allocation in hot seen-set paths
+#include "infra/dynamic_map.hpp"   // S+tree scratch maps — bounded, no per-operation allocation in hot seen-set paths
 
 #include <sys/stat.h>        // ::mkdir — the per-user cache-dir ladder (cacheDirLadder)
 #include <unistd.h>          // ::getpid — unique HEAD-snapshot temp-dir suffix

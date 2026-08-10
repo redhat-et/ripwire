@@ -18,7 +18,7 @@
 //
 // Exit 0 = all pass; nonzero = failure (per-arm PASS/FAIL lines on stdout, first mismatch detailed).
 
-#include "dynamic_map.hpp"
+#include "infra/dynamic_map.hpp"
 
 #include "../src/infra/fixedStr.h"
 

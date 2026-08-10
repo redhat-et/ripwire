@@ -6,12 +6,12 @@
 // S+tree `dynamic_map` for that exact uint64 -> tiny-value shape.
 //
 // Build:
-//   c++ -O3 -march=native -std=c++23 bench/bench_ordered_map.cpp -Isrc/infra -Ithird_party -o /tmp/ripwire_bench_ordered_map
+//   c++ -O3 -march=native -std=c++23 bench/bench_ordered_map.cpp -Isrc -Isrc/infra -Ithird_party -o /tmp/ripwire_bench_ordered_map
 // Run:
 //   /tmp/ripwire_bench_ordered_map 1000000
 
 #include "btree.hpp"
-#include "dynamic_map.hpp"
+#include "infra/dynamic_map.hpp"
 
 #include <algorithm>
 #include <chrono>

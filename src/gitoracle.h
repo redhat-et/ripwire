@@ -70,7 +70,7 @@
 #include "docparse.h"     // lowerExtOf — the SHARED extension step (no third copy of the lowercase loop)
 #include "arch.h"         // fnv1a64 — the cache trailer checksum and the repo key
 #include "infra/jsonesc.h"      // shSingleQuote
-#include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // VERIFY / DEGRADED_PATH_ALERT
 
 #include <algorithm>
 #include <cctype>

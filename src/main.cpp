@@ -38,7 +38,7 @@
 #include "mcp.h"
 #include "mcpserver.h"      // the optional remote MCP transport (--listen), picked below
 #include "wrap.h"
-#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
 #include "search.h"
 #include "query.h"

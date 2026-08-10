@@ -7,7 +7,7 @@
 // it, don't reimplement" (and "if you fix this, fix its twins"). Type-3 (gapped) clones are a later upgrade.
 
 #include "model.h"
-#include "Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on the Type-3 pair-cap guard (never throw)
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on the Type-3 pair-cap guard (never throw)
 #include "infra/hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>

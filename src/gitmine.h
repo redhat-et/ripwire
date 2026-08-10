@@ -7,8 +7,8 @@
 #include "graph.h"   // resolveIncludeAdj — for the "surprising" (changes together, no transitive static dep) flag
 #include "mention.h" // mention_detail::baseNameOf — the SAME "basename of a path" primitive binstale.h/docdrift.h reuse
 #include "lintrules.h"      // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
-#include "profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
-#include "Diagnostics.h"    // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
+#include "infra/profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
 #include "infra/stdinline.h"      // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
 #include "infra/jsonesc.h"        // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
                              // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale

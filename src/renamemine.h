@@ -77,7 +77,7 @@
 #include "infra/jsonesc.h"      // shSingleQuote
 #include "quality.h"      // gitRepoHasHistory
 #include "serialize.h"    // escapeXml
-#include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "infra/Diagnostics.h"   // VERIFY / DEGRADED_PATH_ALERT
 
 #include <algorithm>
 #include <cstdint>

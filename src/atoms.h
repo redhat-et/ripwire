@@ -32,7 +32,7 @@
 // whose IDIOMS are completely different (`for( const x of xs )`, Python's `a if c else b`). Findings
 // are therefore filtered to the extensions ingest routes through a C/C++/ObjC/CUDA grammar.
 
-#include "Diagnostics.h"
+#include "infra/Diagnostics.h"
 #include "ingest.h"       // AstQuerySpec / AstMatch / astQuery — the SAME engine --lint and --match run
 #include "lintrules.h"    // langOfPath — the house file-language predicate; kLintMaxPerRule
 #include "model.h"

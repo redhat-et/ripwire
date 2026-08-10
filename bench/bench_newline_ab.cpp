@@ -22,7 +22,7 @@
 // ripwire's determinism contract is untouched by construction (see the note on rw::findByte itself).
 
 #include "infra/fixedStr.h"
-#include "profileScope.h"
+#include "infra/profileScope.h"
 
 #include <algorithm>
 #include <cstdint>
