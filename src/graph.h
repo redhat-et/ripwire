@@ -833,9 +833,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // same-language local def ALWAYS wins (control-safe). All maps stay EMPTY on any binding-free corpus, so
     // the resolved graph — and the output — is byte-identical there. Targets are filtered to C-family defs
     // (the bound side is always C/C++). Deterministic: ing.bindingAliases is in a fixed total order.
-    HashMap<std::string, std::vector<NodeId>> pybindAlias;    // Python-visible name → C/C++ def ids
-    HashMap<std::string, std::vector<NodeId>> externCAlias;   // extern-C symbol name  → C/C++ def ids
-    HashMap<std::string, char>                ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
+    // N=2 is free (see byName above: rw::svector<NodeId,1> and <NodeId,2> are both 16 B) and covers every
+    // alias on both census corpora — measured max list length 1 and 2. An FFI alias naming three or more
+    // C-family defs would be a genuinely ambiguous binding, not the common case.
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> pybindAlias;    // Python-visible name → C/C++ def ids
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> externCAlias;   // extern-C symbol name  → C/C++ def ids
+    HashMap<std::string, char>                    ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
     if( !ing.bindingAliases.empty() )
     {
         std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
@@ -880,11 +883,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue; // target not an in-repo C/C++ def → no alias edge
             }
-            std::vector<NodeId>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
-                                                                        : externCAlias[ ba.aliasName ];
+            rw::SmallVec<NodeId, 2>& slot = ( ba.kind == BindKind::Pybind ) ? pybindAlias[ ba.aliasName ]
+                                                                            : externCAlias[ ba.aliasName ];
             slot.insert( slot.end(), tgt.begin(), tgt.end() );
         }
-        const auto dedup = [ & ]( HashMap<std::string, std::vector<NodeId>>& m )
+        const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
         {
             for( auto& [ k, v ] : m ) { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
         };
