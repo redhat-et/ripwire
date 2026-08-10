@@ -72,10 +72,28 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     namespace fs = std::filesystem;
     std::error_code ec;
 
+    // The `--hook` line rides along on the SAME resolved installer, claude-only (it registers Claude
+    // Code PreToolUse/SessionStart entries; Codex has no equivalent). It is printed as RECOMMENDED
+    // because it is the only lever here that intercepts a default at the moment it is chosen: a skill
+    // fires only if the agent recognizes a moment AND spends a call to load it, whereas reaching for
+    // Read costs nothing. Still a SEPARATE command, never folded into the line above — opt-in is the
+    // hook's design contract, and hookcheck.sh asserts a bare install never touches settings.json.
+    const auto hookLine = [ out, isCodex ]( const char* installer, const bool quoted )
+    {
+        if( isCodex )
+        {
+            return;
+        }
+        std::fprintf( out, quoted ? "bash \"%s\" --hook   # RECOMMENDED: advisory Read/Grep -> ripwire nudge + session primer (opt-in, never blocks)\n"
+                                  : "bash %s --hook   # RECOMMENDED: advisory Read/Grep -> ripwire nudge + session primer (opt-in, never blocks)\n",
+                      installer );
+    };
+
     // (a) checkout cwd — the repo's own installer is right here
     if( fs::is_regular_file( "skills/install.sh", ec ) && !ec )
     {
         std::fprintf( out, "bash skills/install.sh%s   # deploy to %s (drift-gated)\n", codexFlag, destComment );
+        hookLine( "skills/install.sh", false );
         return;
     }
 
@@ -85,6 +103,7 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     if( !executablePath.empty() && fs::is_regular_file( stagedInstaller, ec ) && !ec )
     {
         std::fprintf( out, "bash \"%s\"%s   # deploy to %s (drift-gated)\n", stagedInstaller.string().c_str(), codexFlag, destComment );
+        hookLine( stagedInstaller.string().c_str(), true );
         return;
     }
 
@@ -113,6 +132,16 @@ inline constexpr WrapBlurbTarget kWrapBlurbTargets[] = {
 // body across agents, so a per-agent fork of this text is a red gate, not a variant). A binary on
 // PATH is invisible to an agent until its context file says when to reach for it; this is the
 // distilled protocol, sized to paste whole.
+//
+// The closing "defaults to break" block is stated as PROHIBITIONS, and stated LAST, both on purpose.
+// An affirmative verb catalog competes badly with an existing habit — an agent that already knows how
+// to open a file does not weigh a list of alternatives; a prohibition interrupts the habit instead of
+// bidding against it. Last, because actionable content at the END of a long context measures up to
+// +30% stronger (the same finding behind `--order=important-last`). Keep it last if you extend this.
+//
+// The body sits at the CEILING of wrapverbscheck.sh's 10-20 line band. That is deliberate, not an
+// oversight: the next line added here has to displace one, which is the point of a size contract on a
+// block whose whole value is that a human will paste it whole.
 inline std::vector<std::string_view> wrapUseWhenBlurbLines()
 {
     return {
@@ -131,6 +160,11 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines()
         "- Before calling work done: `--quality-delta` (what you made worse), then `--test-gate`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none",
         "  found\", never \"none exists\".",
+        "Defaults to break (less context is measurably MORE accurate, not just cheaper — code-repair",
+        "accuracy fell 29% -> 3% as context grew 32K -> 256K tokens, LongCodeBench):",
+        "- Do NOT open a file you have not located first: rank with `--for`/`--grep`, then read what it names.",
+        "- Do NOT read a whole file to understand one symbol: `--expand=SYM` gives the body + callee sigs.",
+        "- Do NOT fan reads across several files to learn one thing: `--pack-task=\"<task>\"` is one call.",
     };
 }
 
