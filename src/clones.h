@@ -318,14 +318,8 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     // most-vexing-parse phantoms — block-scope `Type name(args);` variable decls the grammar shapes like a
     // function declarator (they have no body, so sigEndByte==endByte). We compare the BODY, so
     // same-implementation / different-name still matches.
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size() && s.endByte > s.sigEndByte )
-        {
-            byFile[ s.fileId ].push_back( s.id );
-        }
-    }
+    const SymbolsByFile byFile = symbolsByFileInIdOrder(
+        ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
 
     HashMap<std::string, std::vector<NodeId>> groups;   // normalized body → member symbol ids
     HashMap<NodeId, std::uint32_t>            tok;       // symbol → token count (for ranking)
@@ -601,14 +595,8 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     Type3Stats st;
 
     // per-file candidate ids: same body-region gate as findClones (real body, function/method).
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < byFile.size() && s.endByte > s.sigEndByte )
-        {
-            byFile[ s.fileId ].push_back( s.id );
-        }
-    }
+    const SymbolsByFile byFile = symbolsByFileInIdOrder(
+        ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
 
     // Candidate = one representative per DISTINCT normalized stream (exact dups are Type-1/2, excluded here).
     // A4-P2: token streams are interned to u32 ids (one repo-wide HashMap) so the LCS DP and the k-gram

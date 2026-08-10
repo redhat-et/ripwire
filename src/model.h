@@ -880,6 +880,27 @@ inline void suppressShadowedReferences( IngestResult& ing )
     std::erase_if( ing.references, [ & ]( const Reference& r ) { return shadowSuppressedSite( r, ev, key ); } );
 }
 
+// ONE file's symbol-id bucket, and the whole index. Named so the ten independent reimplementations of this
+// shape share ONE type rather than ten spellings of `std::vector<std::vector<NodeId>>`.
+//
+// N=8 IS A MEASURED KNEE, not p90. Per-bucket cardinality over the two census corpora (1 103 files here,
+// 2 376 on the 43K-symbol validation corpus), as coverage of all buckets against the instance size
+// rw::svector<NodeId,N> costs:
+//
+//     N :   1     2     4     6     8    12    16    24    32     bytes: 16 16 24 32 40 56 72 104 136
+//   here: 17.3  35.9  54.4  66.7  76.4  84.6  88.0  93.9  96.4
+//   cr48: 13.9  18.4  27.7  35.9  45.1  62.0  71.3  82.2  88.3
+//
+// Marginal coverage per byte of instance growth falls 2→4→6→8 as 2.31 / 1.54 / 1.21 here and 1.16 / 1.04 /
+// 1.15 there, then collapses to 0.51 and 0.58 at the next step — the same cliff shape the census found for
+// clones' type-3 buckets. N=8 is also the LARGEST N whose total footprint (this array + the heap blocks the
+// spilled buckets still take + allocator per-block overhead) does not exceed what the plain
+// std::vector<std::vector<NodeId>> costs today on EITHER corpus: ~75 KB vs ~80 KB here, ~276 KB vs ~265 KB
+// there, where N=16 is ~100 KB and ~323 KB. p90 (18 here, 37 there) would have bought 3-9 more points of
+// coverage for 2-3x the memory.
+using FileSymbols   = rw::SmallVec<NodeId, 8>;
+using SymbolsByFile = std::vector<FileSymbols>;
+
 // THE per-file symbol index every span- or line-based lookup starts from: bucket the symbol ids by file, then
 // sort each bucket. `keep` selects which symbols enter it and `less` orders each bucket, because those two are
 // the ONLY things that differ between callers — flipimpact.h wants every symbol in line order (the host of a
@@ -887,12 +908,19 @@ inline void suppressShadowedReferences( IngestResult& ing )
 // span). Both were written independently and a --quality-delta pass found them as a 159-token clone pair,
 // correctly: same shape, different filter and key. Parameterizing exactly those two is what makes this ONE
 // function rather than a family of near-copies, and it lives here because `IngestResult` does.
-// Deterministic by construction: the caller's `less` must be a total order (both current ones tie-break on a
-// unique per-symbol field), and file buckets are indexed, never hashed.
+// Deterministic by construction: file buckets are indexed, never hashed, and `symbols[i].id == i` so the
+// pre-sort sequence in every bucket is ascending id regardless of which caller built it.
+//
+// ON `less` AND TOTAL ORDERS. Four of the callers folded in here (atoms.h's OwnerIndex, search.h's grep
+// index, and main.cpp's --lint dedup and --match/--lint index) compare bare `sigStartByte` with no
+// tie-break, which is NOT a total order: two symbols sharing a start offset in one file may land either
+// way, and std::sort is not stable. That predates this consolidation and is deliberately NOT changed here —
+// giving them a tie-break would reorder ties and move emitted bytes, which a container change must not do.
+// Every such sort is still deterministic run-to-run: same input sequence, same comparator, same std::sort.
 template<typename Keep, typename Less>
-inline std::vector<std::vector<NodeId>> symbolsByFile( const IngestResult& ing, Keep keep, Less less )
+inline SymbolsByFile symbolsByFile( const IngestResult& ing, Keep keep, Less less )
 {
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
+    SymbolsByFile byFile( ing.files.size() );
     for( const Symbol& s : ing.symbols )
     {
         if( s.fileId < byFile.size() && keep( s ) )
@@ -900,9 +928,26 @@ inline std::vector<std::vector<NodeId>> symbolsByFile( const IngestResult& ing, 
             byFile[ s.fileId ].push_back( s.id );
         }
     }
-    for( std::vector<NodeId>& bucket : byFile )
+    for( FileSymbols& bucket : byFile )
     {
         std::sort( bucket.begin(), bucket.end(), less );
+    }
+    return byFile;
+}
+
+// The id-ordered form: every kept symbol, buckets left in ascending id order. `symbols[i].id == i` means the
+// scan above already produces that order, so this spells "no reordering wanted" without paying a sort — the
+// shape six of the ten folded-in call sites had written out by hand.
+template<typename Keep>
+inline SymbolsByFile symbolsByFileInIdOrder( const IngestResult& ing, Keep keep )
+{
+    SymbolsByFile byFile( ing.files.size() );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < byFile.size() && keep( s ) )
+        {
+            byFile[ s.fileId ].push_back( s.id );
+        }
     }
     return byFile;
 }
