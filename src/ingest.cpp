@@ -1902,7 +1902,19 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t F = files.size();
-    std::vector<std::vector<std::uint32_t>> dIdx( F ), rIdx( F ), iIdx( F ), bIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
+    // The cache-write side's per-file record indexes. Split by MEASURED shape, not by symmetry:
+    //   dIdx  — one entry per DEFINITION; same distribution as model.h's SymbolsByFile (mean 8.4/18.2 per
+    //           file, p90 18/37), so it takes that index's measured N=8 knee.
+    //   iIdx/aIdx/rdIdx/ruIdx — includes, FFI aliases and the two route tables. N=2 is FREE (rw::svector's
+    //           inline array shares storage with the heap pointer, so <uint32,1> and <uint32,2> are both
+    //           16 B — a THIRD smaller than the std::vector header it replaces) and covers 85.4%/59.1%,
+    //           99.7%/100%, 99.9%/100% and 99.9%/100% of files across the two census corpora.
+    //   rIdx/bIdx — deliberately LEFT as std::vector. Means of 155/248 and 28/59 references and bindings per
+    //           file with 17%/40% of files empty and no early knee: an N that covered them would have to be
+    //           in the hundreds. They are CSR candidates, a separate wave, not small-vector material.
+    std::vector<rw::SmallVec<std::uint32_t, 8>> dIdx( F );
+    std::vector<std::vector<std::uint32_t>>     rIdx( F ), bIdx( F );
+    std::vector<rw::SmallVec<std::uint32_t, 2>> iIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
     for( std::uint32_t i = 0; i < defs.size(); ++i )
     {
         if( defs[i].fileId < F )
