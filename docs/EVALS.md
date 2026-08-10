@@ -418,6 +418,63 @@ The benchmark states its own scope limit, and it is worth repeating verbatim in 
 baseline is *a model of a naive agent read* — a documented, auditable proxy, not a live agent trace —
 and these numbers prove **cheaper and faster, not better outcomes**.
 
+### The MCP server's standing schema cost (measured 2026-08-10)
+
+The CLI and the MCP server answer the same questions. The MCP path costs more, and **almost all of
+the difference is a term nobody counts**: the server advertises 30 verbs, and their names,
+descriptions and JSON schemas sit in the model's context *every turn, whether a verb is called or
+not*. The CLI costs nothing until it is invoked.
+
+**Instrument.** Drive `ripwire . --mcp` over stdio (`initialize` → `notifications/initialized` →
+`tools/list`), serialize the returned `tools` array compact, and convert bytes to tokens with this
+repository's own calibration table (`src/serialize.h:478-505`, measured against `o200k_base`).
+Raw bytes plus argv are the instrument; tokens are the user-facing unit.
+
+| | bytes | est. tokens |
+| --- | --- | --- |
+| `tools` array, compact (30 verbs) | 36,717 | **11,844 – 14,687** |
+| one `--for` answer on `src/` (CLI) | 7,428 | ~3,020 |
+
+The token figure is a **band, not a point**, because the payload is a mixture: **55.3% of those
+bytes are English prose** (the tool descriptions), and the rest is JSON structure. The low end
+applies this table's measured `Json` rate (3.10 B/tok, n=108 — but that corpus was
+structure-heavy `package.json`/`tsconfig.json`); the high end applies the prose rate (2.56) and the
+unknown-language mid-band (2.50). The composition argues for the upper end. **All of it is an
+estimate** (`docs/ARCHITECTURE.md` §4) — a crude bytes/4 rule reads 9,179 and is low by ~55%, which
+is why it is not used here.
+
+So the standing cost of registering the MCP server is roughly **4–5× a typical answer, paid every
+turn.** That is the finding.
+
+**Two things this measurement does *not* say, both of which would be easy to imply:**
+
+- **Per-response framing is nearly free.** The same `for` query costs 8,288 bytes as a complete
+  JSON-RPC frame against 7,428 bytes on stdout — **1.12×**. JSON-string escaping and round-trip
+  framing are real but negligible next to the standing cost.
+- **The two `for` paths are not the same bundle, so that 1.12× is not a content-parity ratio.**
+  On an identical corpus and query the MCP verb returned **13 ranked symbols to the CLI's 25**, with
+  no `churn=`/`amp=` quality lens and no `est_tokens` self-report. The MCP verb documents itself as a
+  signatures-only inventory, so this is by design — but it means the near-1:1 byte ratio is a
+  coincidence of two different products, and a per-response ratio is not a like-for-like comparison.
+  Only the standing cost above is quoted as a headline, and it needs no such caveat.
+
+**Where the MCP still wins,** and this is not a footnote: agents that cannot shell out at all, and a
+warm index held across calls where a cold CLI invocation might not have one. The conclusion is
+*prefer the CLI where the agent can shell out, and here is the number* — **not** "remove the MCP".
+This is why `ripwire wrap opencode` leads with the CLI recipe and offers MCP as the alternative:
+opencode ships a `bash` tool, so it can pay zero.
+
+**Reproduce:**
+
+```
+ripwire . --mcp                      # stdio; send initialize, notifications/initialized, tools/list
+ripwire src --for="how are call edges resolved"
+```
+
+Byte counts are stable across repeat runs and across separate server processes (verified; the
+determinism contract covers both paths). Count **bytes, not characters** — ripwire's verb
+descriptions use multi-byte punctuation, and the character count of the same payload is 36,564.
+
 ### README-grade rows, re-measured on this repository (2026-08-08)
 
 The row above carries a private-corpus caveat. These don't: every byte count below is `wc -c` on
@@ -925,6 +982,24 @@ proof, and the map must say so) with legend coverage and a red-first gate for ea
 
 Listed because the reason is more useful than the silence.
 
+- **Any claim that ripwire changes whether an agent SOLVES a task.** This is the north-star metric
+  and it has never been measured: `--evaluator swebench` has never executed, and every record in the
+  one pilot on file carries `resolved: null`. Everything published here scores *retrieval quality*,
+  whose correlation with task success is assumed, not demonstrated.
+
+  As of 2026-08-10 there is a second, sharper reason to withhold it: **the eval as designed cannot
+  detect a plausible effect.** `bench/agentloop/analyze.py` bootstraps clustered by repository, and
+  with equal rows per repo that is algebraically a resample of the **6 repo-level means** — so
+  effective N is the cluster count, not the 24 instances. Minimum detectable effect at the planned
+  configuration is **18–32pp** on resolution rate, and at 6 clusters a 5pp or 10pp effect is not
+  reachable *at any instance count* once between-repo heterogeneity is non-zero (simulated out to
+  49,152 instances; `bench/agentloop/power_sim.py`). Adding repos buys roughly 4× the power of adding
+  instances inside the existing six.
+
+  The consequence for honesty is specific and worth stating plainly: **a null result from this design
+  would not be evidence of no effect**, and must not be reported as one. Until the repo universe is
+  widened or a scored pilot measures the intra-cluster correlation, no outcome number — positive,
+  negative, or null — is publishable from this instrument.
 - **"~76% of an agent's token cost is file reads."** This figure appeared in a skill description in
   this repository, with **no citation** while every neighbouring claim in the same paragraph carried
   one, and it has since been removed — it has no in-tree provenance today. The research note it
@@ -935,7 +1010,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 374. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 376. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
