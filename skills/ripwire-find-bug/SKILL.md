@@ -4,7 +4,9 @@ description: >
   Locate the code behind a bug when you don't yet know where it lives. Use when you have a SYMPTOM (a crash,
   an exception, wrong output, a failing test, an error string) and need to find the responsible symbol —
   whether you have no idea where it is, suspect a subsystem, or just broke it with a change of your own
-  (even a deploy). Pick the path that fits what you know: pure symptom → rank candidates; a hunch → narrow
+  (even a deploy) — including "it worked yesterday and now it is broken". A stack trace's frames map
+  straight onto indexed symbols, innermost first. Pick the path that fits what you know: pure symptom →
+  rank candidates; a hunch → narrow
   to a subsystem; "I changed X and it broke" → --situ regression trace. One clear --for hit plus one focused
   source read that explains the symptom is enough — implement the fix; don't chain more verbs or open other
   skills first. Backed by ripwire's call graph + hotspots + co-change (deterministic, on PATH).

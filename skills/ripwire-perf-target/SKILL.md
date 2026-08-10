@@ -2,7 +2,8 @@
 name: ripwire-perf-target
 description: >
   Investigate a measured performance problem. Start from a representative benchmark, a flame graph, or a
-  profiler sample, then use ripwire to locate the measured symbols, map callers/callees, and inspect
+  profiler sample. Pin the workload first, then use ripwire to locate the hot symbol the profile names,
+  map callers/callees, and inspect
   structural hypotheses such as complexity, churn, coupling, nesting, and — when the counters implicate
   MEMORY rather than compute — cache-line data layout via `--field-affinity` (which fields are read together
   but declared far apart), including the boundary of what that lens cannot see. Static graph metrics are

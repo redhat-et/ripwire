@@ -3,7 +3,8 @@ name: ripwire-layers
 description: >
   Architecture HEALTH and ENFORCEMENT — "how healthy are the layers / is this a dependency mess / are there
   layering violations / how do I enforce module boundaries in CI?". Assesses dependency structure,
-  call-graph modules, propagation cost (the change-amplification tax of touching a file), and optional
+  call-graph modules, each dependency cycle and godfile, the debt a single violation represents,
+  propagation cost (the change-amplification tax of touching a file), and optional
   `--arch` layering rules with a baseline/CI gate — in one pass, and for every metric it reports, what to DO
   about a bad number: formalize a boundary, write a `deny` rule, gate it. This is the enforcement/gates lens
   on architecture; for the one-screen structure/overview lens (no gating) → ripwire-orient. One pass
