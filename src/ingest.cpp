@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>                 // std::bit_floor — the cold-path reserve rounds to a power of two
 #include <cctype>
 #include <chrono>              // A4-P7: wall-clock cache-write timestamp for the racy-git rule
 #include <cstdio>
@@ -8250,6 +8251,99 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
     return text;
 }
 
+// Per-worker capacity floor for the COLD parse pool, sized from the crawl's parseable byte count.
+//
+// WHY THIS EXISTS. The warm reserve sums cached FileFacts, so it only runs when a cache is loaded; a cold
+// run reserved nothing and every accumulator doubled up from zero — ~500 whole-vector reallocations per
+// run, on the one path where all workers hammer the allocator at once.
+//
+// WHAT IT IS WORTH, MEASURED, so nobody re-litigates it from the plausible-sounding story. Against pristine
+// HEAD on three cold corpora (this repo at ~1.1k files, plus a 2.4k-file and a 0.7k-file ObjC++/C++ tree),
+// --no-cache on both sides, 9 reps: heap allocations about -505 / -465 / -420, which is only -0.29% /
+// -0.06% / -0.12% of each run's total. Peak live bytes is a WASH — repeat measurements of the very same
+// binaries move it between -0.6 and +2.0 MB, i.e. the sign is not stable, so the "stranded buffers" story
+// does not survive contact with an allocator that reuses them. Parse-pool wall clock is a NULL RESULT: two
+// independent 15-pair interleaved runs disagreed in SIGN on two of the three corpora, so machine drift
+// exceeds the effect. This removes real work; it does not make the tool measurably faster, and it does not
+// measurably shrink it either. Not a speedup — do not cite it as one.
+//
+// BYTES, NOT FILE COUNT, IS THE PREDICTOR. Over ten corpora spanning C/C++, ObjC++, Rust, Swift, Python/TS
+// and generated C, refs-per-FILE spans 190x (10.6 … 2017.6) while refs-per-BYTE spans 11x; binds-per-file
+// spans 1325x against 432x per byte. A file count cannot size the two families that hold the memory. Each
+// divisor is the bytes-per-element of roughly the LEAST dense corpus measured, so the estimate is a floor,
+// not a forecast, and lands under the real total nearly everywhere.
+//
+// WHY THE CAP, which is the part that is easy to get wrong. Allocations saved grow like log2( reserve )
+// while the memory risked grows like the reserve itself, so the efficient point is small: measured, a
+// 256-element cap keeps 84-94% of the allocations an uncapped mean-sized reserve saves, bounded by
+// 256 * ( 168 + 144 + 32 + 72 ) B * nthreads ~= 1.9 MB in the worst case where every worker finishes under
+// it. Reserving each worker the corpus MEAN is worse than it looks: work is uneven (the busiest worker
+// holds 1.3-5.2x the mean, median ~1.9x), so a mean-sized reserve over-allocates the below-mean majority
+// to suit one worker — that variant measured 1-2.5 MB of extra peak live bytes for ~60 more allocations.
+//
+// ROUNDED DOWN TO A POWER OF TWO. An empty vector grows 1, 2, 4, 8, … so its final capacity for n elements
+// is exactly the next power of two; starting from 2^j the ladder is 2^j, 2^(j+1), … — a SUBSEQUENCE of the
+// same powers. Seeding with a power of two therefore lands on the identical final capacity for any worker
+// that reaches it, and can only remove growth steps. An arbitrary seed cannot say that: a vector reserved
+// to R that needs R+1 doubles to 2R and can finish above where it would have landed alone.
+//
+// FFI and route accumulators get nothing on purpose: across the same ten corpora they total 0-363 entries
+// and are non-empty on only 0-11 of 18 workers, so a reserve there would be pure waste.
+struct ColdParseReserve
+{
+    std::size_t defs;
+    std::size_t refs;
+    std::size_t incs;
+    std::size_t binds;
+};
+
+// fileLang and fileByteSize are the crawl's two parallel per-file arrays; a file counts toward the estimate
+// only when it has a grammar, which is the same predicate the divisors were calibrated under. Keeping the
+// predicate next to the constants is deliberate: change one and the other stops being calibrated.
+inline ColdParseReserve coldParseReserve( std::span<const LangEntry* const> fileLang,
+                                          std::span<const std::uintmax_t> fileByteSize,
+                                          unsigned nthreads ) noexcept
+{
+    VERIFY( nthreads >= 1 );   // caller derives it from min( hardware_concurrency, nfiles ) with nfiles >= 1
+    VERIFY( fileLang.size() == fileByteSize.size() );
+
+    std::size_t parseableBytes = 0;
+    for( std::size_t fileId = 0; fileId < fileLang.size(); ++fileId )
+    {
+        const LangEntry* le = fileLang[ fileId ];
+        if( le != nullptr && le->grammar != nullptr )
+        {
+            parseableBytes += static_cast<std::size_t>( fileByteSize[ fileId ] );
+        }
+    }
+
+    // bytes per element, calibrated 2026-08-10 against the ten-corpus census described above
+    constexpr std::size_t kBytesPerDef  =  2400;
+    constexpr std::size_t kBytesPerRef  =   800;
+    constexpr std::size_t kBytesPerInc  = 20000;
+    constexpr std::size_t kBytesPerBind =  4000;
+    constexpr std::size_t kCapPerThread =   256;
+
+    // Integer division throughout: no float, and no overflow — parseableBytes is a byte count, every divisor
+    // is a nonzero constant, and nthreads is at least 1. An all-documentation tree yields 0 for every family,
+    // and reserve( 0 ) is a no-op.
+    const auto perThread = [ parseableBytes, nthreads, cap = kCapPerThread ]( std::size_t bytesPerElem ) noexcept
+    {
+        return std::min( std::bit_floor( parseableBytes / bytesPerElem / nthreads ), cap );
+    };
+
+    const ColdParseReserve r{ perThread( kBytesPerDef ), perThread( kBytesPerRef ),
+                              perThread( kBytesPerInc ), perThread( kBytesPerBind ) };
+
+    // The two properties the whole argument above rests on: every value is a power of two (so the doubling
+    // ladder is unchanged) and none exceeds the cap (so the waste stays bounded).
+    VERIFY( r.defs  <= kCapPerThread && ( r.defs  == 0 || std::has_single_bit( r.defs  ) ) );
+    VERIFY( r.refs  <= kCapPerThread && ( r.refs  == 0 || std::has_single_bit( r.refs  ) ) );
+    VERIFY( r.incs  <= kCapPerThread && ( r.incs  == 0 || std::has_single_bit( r.incs  ) ) );
+    VERIFY( r.binds <= kCapPerThread && ( r.binds == 0 || std::has_single_bit( r.binds ) ) );
+    return r;
+}
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
                      std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel )
 {
@@ -8638,6 +8732,30 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         std::vector<std::vector<RawRouteUse>>  tRouteUses( nthreads );   // B6.3
         std::vector<FileFacts*>           cacheCandidateFacts( nfiles, nullptr );
         std::vector<FileFacts*>           cacheHitFacts( nfiles, nullptr );
+
+        // Per-file byte sizes are wanted in two places below — the cold-path reserve, and the
+        // longest-file-first work order. Fill at most once, on demand, so a warm run that also skips
+        // the work order still performs no stat pass at all (exactly as before this was hoisted).
+        std::vector<std::uintmax_t> fileByteSize;
+        const auto ensureFileByteSize = [ & ]()
+        {
+            if( !fileByteSize.empty() )
+            {
+                return;
+            }
+            fileByteSize.assign( nfiles, 0 );
+            std::error_code ec;
+            for( std::size_t fileId = 0; fileId < nfiles; ++fileId )
+            {
+                ec.clear();
+                fileByteSize[ fileId ] = fs::file_size( result.files[ fileId ], ec );
+                if( ec )
+                {
+                    fileByteSize[ fileId ] = 0;
+                }
+            }
+        };
+
         if( !cache.empty() )
         {
             PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: prepare cache-hit reuse" );
@@ -8678,6 +8796,22 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 tBinds[ t ].reserve( bindsPerThread );
             }
         }
+        else
+        {
+            // Cold: no cache to size from, so size the accumulators from the crawl's parseable byte
+            // count. coldParseReserve() carries the calibration and the reasoning behind the numbers.
+            PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: prepare cold reserve" );
+
+            ensureFileByteSize();
+            const ColdParseReserve cold = coldParseReserve( fileLang, fileByteSize, nthreads );
+            for( unsigned t = 0; t < nthreads; ++t )
+            {
+                tDefs[ t ].reserve( cold.defs );
+                tRefs[ t ].reserve( cold.refs );
+                tIncs[ t ].reserve( cold.incs );
+                tBinds[ t ].reserve( cold.binds );
+            }
+        }
         std::vector<std::thread>          pool;
         pool.reserve( nthreads );
         std::vector<std::size_t>          parseOrder;
@@ -8689,17 +8823,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 parseOrder.resize( nfiles );
                 std::iota( parseOrder.begin(), parseOrder.end(), std::size_t( 0 ) );
 
-                std::vector<std::uintmax_t> fileByteSize( nfiles, 0 );
-                std::error_code ec;
-                for( std::size_t fileId = 0; fileId < nfiles; ++fileId )
-                {
-                    ec.clear();
-                    fileByteSize[ fileId ] = fs::file_size( result.files[ fileId ], ec );
-                    if( ec )
-                    {
-                        fileByteSize[fileId] = 0;
-                    }
-                }
+                ensureFileByteSize();   // already filled by the cold-path reserve above; a no-op there
 
                 const auto parsePriority = [ & ]( std::size_t fileId ) noexcept
                 {
