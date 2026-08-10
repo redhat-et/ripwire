@@ -86,16 +86,17 @@ printf 'def ruby_fn\n  1\nend\n'                            >"$ALL/a.rb"
 printf 'class CsCls { int CsFn() { return 1; } }\n'         >"$ALL/a.cs"
 printf '# Heading\n\nsome text\n'                           >"$ALL/a.md"
 printf '{ "key": 1 }\n'                                     >"$ALL/a.json"
+printf '[tool.pkg]\nkey = 1\n'                              >"$ALL/a.toml"
 
 "$PROBE" "$ALL" >"$TMP/all.out" 2>"$TMP/all.err"; rc=$?
 [ "$rc" = 0 ] && ok "probe exits 0 on the all-languages corpus" || no "probe exited $rc on the all-languages corpus"
 
 ALINE="$( langline "$TMP/all.out" )"
 missing=""
-for _l in cpp py ts go rust swift objc md js sh java rb json cs c; do
+for _l in cpp py ts go rust swift objc md js sh java rb json cs c toml; do
     haspos "$_l" "$ALINE" || missing="$missing $_l"
 done
-[ -z "$missing" ] && ok "all 15 languages named with a positive def count" \
+[ -z "$missing" ] && ok "all 16 languages named with a positive def count" \
                   || no "languages missing from the probe's summary:$missing  [line:$ALINE ]"
 
 # 4) no symbol may be bucketed under the unknown label — every ingested file has a grammar, so a "?"

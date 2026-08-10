@@ -42,6 +42,28 @@ constexpr std::size_t kMaxJsonConfigBytes = 256u * 1024u;          // 256 KB
 // tree-sitter error recovery goes superlinear. 512 is orders of magnitude above any config observed.
 constexpr std::uint32_t kMaxJsonNestDepth = 512u;
 
+// THE TOML LANE HAS NO CEILING OF ITS OWN, AND THAT IS A MEASURED DECISION — not an omission, and not a
+// sibling the JSON pair above is still waiting for. The two constants exist because .json has a large,
+// common DATA class wearing a config extension; TOML has no such class, so a matching pair would be
+// theatre that only ever fires on a file no corpus contains. Measured over 90 real public repos
+// (bench-assets/r4/repos, 321 .toml files) before this lane was written:
+//   SIZE — p50 277 B, p90 3 578 B, p99 21 449 B, MAX 57 759 B. The largest real TOML in 90 repos is 57 KB,
+//     which is a quarter of what kMaxJsonConfigBytes would allow and 1.4% of kDefaultMaxFileBytes. A
+//     TOML-specific ceiling could not be set anywhere both above the observed max and below the generic
+//     4 MB skip without being unreachable by construction.
+//   PARSE — 270 of 321 parse clean; 50 of the 51 "failures" are cpython's test_tomllib/data/invalid/
+//     deliberately-malformed fixtures, so the real failure rate is ~0.3%.
+//   PATHOLOGY — none. `[` x100 000 = 17.4 ms · dotted key x50 000 = 7.0 ms · 50 000 `[[aot]]` = 58.7 ms ·
+//     a 2 MB unterminated string = 21.7 ms. All LINEAR. That is the substantive difference from JSON,
+//     whose error recovery goes superlinear (43 s for 100 KB of unclosed `[`) and forced jsonNestsTooDeep.
+//     TOML is line-oriented, so a malformed line resynchronizes at the newline instead of nesting.
+//   SCANNER — the vendored external scanner is stateless (create() returns NULL, serialize() returns 0,
+//     never allocates), so it adds no serialization or leak hazard to weigh against a guard either.
+// So .toml rides the GENERIC path only: the shared --max-file-size / kDefaultMaxFileBytes skip, which is
+// already disclosed through skipped_oversize=. test/tomllangcheck.sh pins this decision from the outside —
+// it indexes a 216 KB .toml (3.7x the corpus max, and past where the JSON ceiling would sit) and fails if
+// anything drops it, so a ceiling cannot be added later without the gate saying so out loud.
+
 // The crawl's default directory denylist (a .gitignore-lite): noise/vendor/build subtrees pruned entirely.
 // Shared, not private to ingest.cpp, because a second crawler now exists — darkflags.h walks for CMake files,
 // which ingest deliberately never collects (CMake is not one of the indexed grammars) — and a crawl that

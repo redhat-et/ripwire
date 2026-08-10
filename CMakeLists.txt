@@ -251,6 +251,7 @@ set(_ripwire_query_names
   ruby
   rust
   swift
+  toml
   typescript)
 set(_ripwire_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_ripwire_embedded_queries "${_ripwire_generated_dir}/embedded_queries.h")
@@ -378,6 +379,15 @@ add_ts_grammar(ruby   https://github.com/tree-sitter/tree-sitter-ruby.git       
 # scanner (pure parser.c). v0.24.8 → ABI 14, in [MIN_COMPATIBLE, LANGUAGE_VERSION] for core v0.26.9.
 # Data only: keys become def nodes (t="sec"), NO call edges (see queries/json/tags.scm).
 add_ts_grammar(json   https://github.com/tree-sitter/tree-sitter-json.git        ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24)  # v0.24.8
+# TOML (.toml): config-file visibility, JSON's sibling lane (pyproject.toml / Cargo.toml / rustfmt.toml).
+# tree-sitter-grammars/, not tree-sitter/ — there is no first-party TOML grammar. v0.7.0 → ABI 14, in
+# [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9 (SHA and ABI both re-verified against the
+# tag at vendoring time, not taken on faith). Ships a scanner.c (multiline basic/literal strings and the
+# line-ending-or-EOF token) which the macro picks up; that scanner is STATELESS — create() returns NULL,
+# serialize() returns 0, and it never allocates — so it carries none of the serialization or leak
+# hazard an external scanner usually implies.
+# Data only: table headers and keys become def nodes (t="sec"), NO call edges (see queries/toml/tags.scm).
+add_ts_grammar(toml   https://github.com/tree-sitter-grammars/tree-sitter-toml.git 64b56832c2cffe41758f28e05c756a3a98d16f41)  # v0.7.0
 # C# (.cs): the official tree-sitter org grammar (classes/structs/interfaces/records/enums/methods/
 # properties/ctors + invocation & object-creation calls). v0.23.5 → ABI 15, in [MIN_COMPATIBLE,
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (raw/interpolated string literals)
@@ -439,6 +449,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_java>
   $<TARGET_OBJECTS:ts_ruby>
   $<TARGET_OBJECTS:ts_json>
+  $<TARGET_OBJECTS:ts_toml>
   $<TARGET_OBJECTS:ts_csharp>
   $<TARGET_OBJECTS:ts_c>
   $<TARGET_OBJECTS:ts_cuda>
@@ -626,7 +637,7 @@ endif()
 # ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
-  ts_javascript ts_bash ts_java ts_ruby ts_json ts_csharp ts_c ts_cuda)
+  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_csharp ts_c ts_cuda)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -829,6 +840,7 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(java       tree_sitter_java       java)
   add_ripwire_fuzzer(ruby       tree_sitter_ruby       ruby)
   add_ripwire_fuzzer(json       tree_sitter_json       json)
+  add_ripwire_fuzzer(toml       tree_sitter_toml       toml)
   add_ripwire_fuzzer(csharp     tree_sitter_c_sharp    csharp)
   add_ripwire_fuzzer(c          tree_sitter_c          c)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
