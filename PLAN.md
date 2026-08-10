@@ -973,7 +973,7 @@ this file that has not been probed as unbelieved.
 
 ### TOML config-key tier — SHIPPING (Round L1, first half)
 
-Measured on 90 real public repos (`bench-assets/r4/repos`), plus this repo and canyonraid48
+Measured on 90 real public repos (`bench-assets/r4/repos`), plus this repo and a private corpus
 separately. 321 TOML files; of 51 apparent parse failures, **50 are cpython's deliberate
 `test_tomllib/data/invalid/` fixtures** — real failure rate ~0.3%. Sizes p50 **277 B**, p99 21 449,
 **max 57 759 B**. No adversarial pathology anywhere: `[`×100 000 → 17.4 ms, 50 000 `[[aot]]` →
@@ -1038,7 +1038,7 @@ YAML keys. **25.3% of all YAML keys sit directly inside a sequence element** (th
 `containers:` / `tasks:` shape) and JSON's rule drops 100% of it. The fix is to make sequence levels
 **transparent**: mdepth ≤ 2 with sequences not counted, which yields 44.0%.
 
-**3. Both required corpora are negative.** canyonraid48 has 208 YAML files — **197 `.dSYM`
+**3. Both required corpora are negative.** The private corpus has 208 YAML files — **197 `.dSYM`
 relocations + 11 `CMakeFiles` logs, and 0 real config**. A YAML tier ships it 369 pure-noise symbols
 and zero useful ones, and `.dSYM` is **not** in `kCrawlSkipDirs` (`src/ingest.h`) — pruning it is a
 prerequisite of the YAML round. This repo has 11 YAML files, 8 of them test fixtures. The value is
@@ -1061,24 +1061,24 @@ Not dead: fixable, and the conditions are known. Probed on both corpora with env
 instrumentation whose output was verified **byte-identical** to the unmodified binary.
 
 **The deciding number: addressable currently-ambiguous call sites — this repo 4 (0.08% of
-`ambiguous=4885`), canyonraid48 492 (5.4% of `ambiguous=9187`).** On this repo that is inert by
+`ambiguous=4885`), the private corpus 492 (5.4% of `ambiguous=9187`).** On this repo that is inert by
 exactly the standard RTA-lite was rejected under (deltas of 0 against a band of [1,300]). The 65×
 spread between corpora is itself the finding: the value tracks OO-with-member-objects style, and
 this project's own DOD/POD house style is the adverse case.
 
 **Three refuted premises worth keeping**, because each would otherwise be rediscovered:
 * **The survey names the wrong shape.** `this->handler->onEvent()` measures **12 sites here, 44 on
-  canyonraid48**, of which 0 and 2 are addressable — `receiverOf` (`src/ingest.cpp:5423`) classifies
+  the private corpus**, of which 0 and 2 are addressable — `receiverOf` (`src/ingest.cpp:5423`) classifies
   any chained receiver as `None` by design. **97% of the value (999 of 1030) is the implicit-`this`
   `field->m()` form, which the survey never mentions.**
 * **No `kParserVer` bump is needed.** `captureFields` (`src/ingest.cpp:4127`) already emits
-  `(class, field, declaredType)` triples — 1626 here, 4704 on canyonraid48 — consumed today only by
+  `(class, field, declaredType)` triples — 1626 here, 4704 on the private corpus — consumed today only by
   `<compose>`. Consuming them in `buildGraph` is a pure resolve-stage change.
 * **The tombstone premise is wrong twice.** Item 12 reads the *declared* type, so a constructor
   assigning a derived instance does not conflict with it; and the operative conflict (one
   `(class,field)` declared with two type texts) measures 0.69% / 1.26%. Cheap insurance, not the
   design's centre. The real limiter is neither `auto` nor typedefs: **the receiver is usually not a
-  field at all** — 97% here, 68% on canyonraid48.
+  field at all** — 97% here, 68% on the private corpus.
 
 **Why it does not clear the bar as scoped:** on its *better* corpus it would re-point **1690 edges
 that already resolve uniquely** against 1030 wins — **1.64 : 1 more silent changes than fixes** —
