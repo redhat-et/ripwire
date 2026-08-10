@@ -2,7 +2,8 @@
 name: ripwire-navigate
 description: >
   Trace how code connects and understand ONE symbol in depth — who calls a function, what it calls, how one
-  symbol reaches another, a full-body deep-dive of a named symbol with its callers/callees/design-docs, or
+  symbol reaches another, the flow from A to B or a bounded neighborhood around one definition, a full-body
+  deep-dive of a named symbol with its callers/callees/design-docs, or
   find a literal / regex / AST-shape with its enclosing symbol. Use when you know (or can name) the symbol
   and need the call graph, its contract, or to locate code precisely — instead of grepping and guessing.
   Also the answer to "is it safe to change X?" (blast radius, not just 1-hop callers). Run the ONE verb

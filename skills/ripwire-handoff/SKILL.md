@@ -3,7 +3,8 @@ name: ripwire-handoff
 description: >
   Summarize a subsystem for another agent or teammate — "hand this area off". Use when you're about to
   brief someone else (not understand it yourself — that's orient) on a subsystem's purpose, key symbols,
-  design rationale, and current maintenance risk — writing a summary of a repo area for the next agent (or
+  design rationale, and current maintenance risk — what the recipient needs and nothing stale, written as a
+  summary of a repo area for the next agent (or
   teammate) to pick up. Produces a compact, pasteable brief instead of a wall of source code — signatures +
   full bodies of the 2-3 entry points, the design docs that explain WHY, and hotspot/bus-factor risk scoped
   to just that subsystem. Backed by ripwire (deterministic, on PATH).
