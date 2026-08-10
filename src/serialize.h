@@ -501,6 +501,13 @@ inline constexpr TokenCalib kTokenCalib[] =
                                    // denser/sparser than the C++ one this rate was measured on), so C
                                    // borrows Cpp's exact rate rather than guessing a new one. Same headroom
                                    // clamp as CSharp above: `s.lang==C` never reaches contentBytesByLang[13].
+    { Lang::Toml,       3.10 },   // REASONED, not measured — TOML borrows Json's exact rate rather than
+                                   // guessing a new one: both lanes emit t="sec" symbols whose names ARE the
+                                   // config keys, so the emitted stream has the same shape (short dotted/
+                                   // snake-case key text inside dense markup) that made Json the sparse
+                                   // outlier at 3.10. Recalibrate together with Json when tokenbudgetcheck
+                                   // next gets a config-file corpus sample. Same headroom clamp as CSharp/C
+                                   // above: `s.lang==Toml` (16) never reaches contentBytesByLang[13].
 };
 inline constexpr double kBytesPerTokenDefault = 2.50;   // Unknown-language / empty-map fallback (mid-band)
 
