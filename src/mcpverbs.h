@@ -26,6 +26,7 @@
 #include "mcprefusal.h"    // §B6 M7/M8/M9: the shared verb+field refusal table both MCP arms speak
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
+#include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
 
 namespace rw
 {
@@ -1651,7 +1652,8 @@ namespace connectemit
     // Deterministic: adjacency sorted ascending by neighbour id; first-discovered prev[] wins.
     struct GroupUnion { std::vector<NodeId> nodes; std::vector<ConnectEdge> edges; };
 
-    inline GroupUnion rebuildFromLegs( const ConnectGroup& grp, const std::vector<char>& legRetained )
+    // legRetained arrives as a span: the caller's mask is an inline rw::SmallVec, and this seam only reads it.
+    inline GroupUnion rebuildFromLegs( const ConnectGroup& grp, std::span<const char> legRetained )
     {
         GroupUnion u;
         u.nodes = grp.terminals;                                   // terminals are ALWAYS present
@@ -1824,8 +1826,11 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
         payload.clear();
         nodeTotal = 0;  edgeTotal = 0;  connectedGroups = 0;
 
-        // retained-leg mask per group for this pass.
-        std::vector<std::vector<char>> retained( res.groups.size() );
+        // retained-leg mask per group for this pass. One byte per leg, so N=8 is free — rw::svector's inline
+        // array shares storage with the 8-byte heap pointer it unions with, and <char,8> is 16 B, the same
+        // as <char,1> and a third under a std::vector's 24. Rebuilt on every budget-trim pass, so the
+        // allocation it stops making is per-group-per-pass, not once.
+        std::vector<rw::SmallVec<char, 8>> retained( res.groups.size() );
         for( std::size_t gi = 0; gi < res.groups.size(); ++gi )
         {
             retained[gi].assign( res.groups[gi].paths.size(), 1 );

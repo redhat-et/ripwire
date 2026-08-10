@@ -321,8 +321,13 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     const SymbolsByFile byFile = symbolsByFileInIdOrder(
         ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
 
-    HashMap<std::string, std::vector<NodeId>> groups;   // normalized body → member symbol ids
-    HashMap<NodeId, std::uint32_t>            tok;       // symbol → token count (for ranking)
+    // normalized body → member symbol ids. N=2 is FREE: rw::svector<NodeId,1> and <NodeId,2> are both 16 B
+    // (the union's inline array can never be smaller than the heap pointer it shares storage with), so the
+    // second slot costs nothing and lifts inline coverage from 97.8%/94.9% to 99.5%/98.8% across the two
+    // census corpora. Almost every distinct body is unique — the whole point of the pass is that the rare
+    // key with ≥2 members is a clone — so this replaces ~2.4K/7.2K one-element heap blocks with none.
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> groups;
+    HashMap<NodeId, std::uint32_t>                tok;   // symbol → token count (for ranking)
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
@@ -373,7 +378,10 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     {
         if( members.size() >= 2 )
         {
-            out.push_back( { members, tok[members[0]] } );
+            // CloneGroup::members stays a std::vector — it is the RETURNED type, read by four verbs and by
+            // quality.h, and it is materialized only for the ≥2-member groups (2.2%/1.1% of keys), so the
+            // one allocation per emitted group is not what this conversion was about.
+            out.push_back( { std::vector<NodeId>( members.begin(), members.end() ), tok[members[0]] } );
         }
     }
     std::sort( out.begin(), out.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) { // biggest clones first; stable tiebreak by first member's file:line

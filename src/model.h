@@ -862,7 +862,10 @@ inline void suppressShadowedReferences( IngestResult& ing )
         buildShadowKey( key, b.fromSymbol, b.var );
         if( isVar )
         {
-            ev.varSpans[ key ].emplace_back( b.spanStart, b.spanEnd );
+            // braced push_back, NOT emplace_back( a, b ): a PARENTHESIZED aggregate initialization needs
+            // P0960, which Clang gained in 20 — CI's Xcode 15.4 toolchain would reject it. Same reason
+            // ingest.cpp's LexPair rows are braced; see the note beside that push_back.
+            ev.varSpans[ key ].push_back( VarSpan{ b.spanStart, b.spanEnd } );
         }
         else
         {
