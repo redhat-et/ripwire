@@ -1139,7 +1139,7 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
-(2026-08-09): `files=109 symbols=3219 edges=10116 ambiguous=4773 unresolved=1091`.
+(2026-08-10): `files=109 symbols=3231 edges=10129 ambiguous=4765 unresolved=1091`.
 
 **Read `ambiguous=` as a property of the indexed tree, not a score for the resolver.** It counts call
 names that hit more than one definition, so it moves when the *corpus* gains same-named symbols — and
