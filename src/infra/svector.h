@@ -14,17 +14,32 @@
 //     instead: sizeof(svector<uint32,2>) = 24 B, 8 B more than martinus, spent to make the hot read
 //     branch-free.
 //
-// ── DO NOT TRUST THE OLD 25% NUMBER ──────────────────────────────────────────────────────────────────
-// A previous revision of this comment claimed "~25% over martinus, ~45% over std::vector", citing
-// bench/bench_svector3.cpp. That is a MICROBENCHMARK number and it is not transferable: its working set
-// is small and mostly cache-resident, so the 8-byte-per-instance size difference costs almost nothing
-// there and the size() branch is the only thing left to measure. In the real pipeline the symbol table,
-// reference list, file table and graph are all resident and contending, where 8 bytes x tens of thousands
-// of instances evicts other things — and a correctly-predicted branch is ~1 cycle against an L2/LLC miss
-// two orders of magnitude larger. The microbenchmark therefore understates the cost of SIZE and
-// overstates the cost of the BRANCH, which is exactly the bias that picks a wrong winner.
+// ── WHEN THIS TYPE IS THE RIGHT CHOICE, AND WHEN IT IS NOT ───────────────────────────────────────────
+// Measured, not argued — hardware counters plus a working-set sweep, both in bench/SVECTORAB.md. Three
+// effects separate, and they do NOT live in the same regime:
+//
+//   • the size() cost is REAL and REACHES this tree. ankerl's size() branches on is_direct(); worse, on
+//     a SPILLED list it is `indirect()->size()`, a dependent load into the heap block — a second cache
+//     miss under a memory-bound profile, not a predicted branch. Measured on the size-hot loop: ~6-7%
+//     for inline lists at both real cardinalities, and 42-55% once lists spill past ankerl's inline 3.
+//   • the 8-byte SIZE advantage of a 16-byte small-vector does NOT reach this tree. It is worth 11.7%
+//     at 200 000 distinct names and 0.2-0.5% — at or under the noise floor — at the 3 220 and 43 354
+//     this tool actually indexes. It switches on past a ~2.3 MB value array and not before.
+//   • ITERATION is a wash at real cardinality. If a site range-fors and never polls size(), prefer the
+//     vendored ankerl::svector: same speed, 8 bytes smaller, complete and maintained.
+//
+// So: poll size() in a hot loop -> this type. Iterate -> ankerl. The stakes are modest either way
+// (1.5% of post-parse pipeline time, 0.05% of total runtime), so this is a tie-breaker, not a mandate.
+//
+// TWO RETRACTIONS, kept visible because both were confidently wrong. (1) A previous revision claimed
+// "~25% over martinus, ~45% over std::vector" from bench/bench_svector3.cpp; that is a microbenchmark
+// ratio and does not transfer — in situ it is 1.9% of buildGraph. (2) A previous revision of this
+// comment then over-corrected, arguing the microbenchmark "understates the cost of SIZE and overstates
+// the cost of the BRANCH". That is backwards, and hardware counters said so: at 200K names the profile
+// is memory-bound (IPC 0.70, LLC-MPKI 84.9) and the microbenchmark OVERSTATES size, because 200K names
+// is a working set nothing real here reaches. Reasoning about which effect "should" dominate produced
+// the wrong answer twice; the counters produced it once.
 // The authoritative comparison is the in-situ four-way A/B: bench/svectorab.py (see bench/SVECTORAB.md).
-// Read that before choosing this type over the vendored one.
 //
 // ── INTERFACE CONTRACT: this type MIRRORS ankerl::svector ────────────────────────────────────────────
 // Every operation below carries ankerl's exact name and signature, so a call site can switch between

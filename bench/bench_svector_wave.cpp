@@ -290,32 +290,53 @@ void regenerate()
 // trend is smaller than its own noise is not a trend.
 void sweep()
 {
-    const std::size_t points[] = { 12'500, 25'000, 50'000, 100'000, 200'000, 400'000, 800'000 };
-    std::printf( "\n== WORKING-SET SWEEP (root-free memory-boundedness probe) ==\n" );
-    std::printf( "  each row: median ms for the size-hot and iterated read loops, and each arm's delta vs C (rw).\n" );
-    std::printf( "  'floor' is arm E (rw again) vs arm C at that same point — the noise below which nothing counts.\n\n" );
-    std::printf( "  %9s %8s | %26s | %26s | %7s\n", "names", "val MB", "size-hot: B / C / D", "iterated: B / C / D", "floor" );
-    kSamples = 3;
+    // CALIBRATED to the real thing. ripwire's own tree indexes 3220 symbols and the large validation
+    // corpus 43354, so `byName` holds at most that many distinct names — the rig's usual 200000 is 62x
+    // and 4.6x those. A sweep that only visits sizes nothing real reaches measures an extrapolation.
+    // The two REAL points are first-class rows here.
+    const std::size_t points[] = { 3'220, 10'000, 43'354, 100'000, 200'000, 400'000 };
+
+    std::printf( "\n== WORKING-SET SWEEP (does the ranking hold at REALISTIC cardinality?) ==\n" );
+    std::printf( "  WORK IS HELD CONSTANT: %zu reads and ~1.5 ids per name at every point, so the only variable\n", kReads );
+    std::printf( "  is the WORKING SET. (The earlier version scaled reads with cardinality, which changed the\n" );
+    std::printf( "  amount of work and the working set together and could not separate them.)\n" );
+    std::printf( "  *3220 = ripwire's own tree, *43354 = the large validation corpus. Everything else is\n" );
+    std::printf( "  extrapolation beyond anything this tool actually indexes.\n" );
+    std::printf( "  Per-column A/A floors (arm E vs arm C) are printed per row; no delta below its OWN\n" );
+    std::printf( "  column's floor is a result.\n\n" );
+    std::printf( "  %9s %8s | %17s %7s | %17s %7s\n",
+                 "names", "val KB", "size-hot B / D", "floor", "iterated B / D", "floor" );
+    kSamples = 5;
+    const std::size_t fixedReads = 4'000'000;
     for( std::size_t n : points )
     {
         kNames = n;
-        kPush  = n * 5;
-        kReads = n * 20;
+        kPush  = ( n * 3 ) / 2;      // ~1.5 ids per name: the real byName shape (most names define 1-2)
+        kReads = fixedReads;         // CONSTANT work
         regenerate();
         const Row b = runArm<ankerl::svector<std::uint32_t, 2>>( "B" );
         const Row c = runArm<rw::svector<std::uint32_t, 2>>( "C" );
         const Row d = runArm<rwx::svector16<std::uint32_t, 2>>( "D" );
         const Row e = runArm<rw::svector<std::uint32_t, 2>>( "E" );
         const auto pct = []( double x, double base ) { return base == 0.0 ? 0.0 : ( x / base - 1.0 ) * 100.0; };
-        const double floorPct = std::max( std::abs( pct( e.sizeMs, c.sizeMs ) ), std::abs( pct( e.iterMs, c.iterMs ) ) );
-        std::printf( "  %9zu %8.2f | %+7.1f%% %7s %+7.1f%% | %+7.1f%% %7s %+7.1f%% | %6.1f%%\n",
-                     n, double( 24 * n ) / ( 1024.0 * 1024.0 ),
-                     pct( b.sizeMs, c.sizeMs ), "0.0%", pct( d.sizeMs, c.sizeMs ),
-                     pct( b.iterMs, c.iterMs ), "0.0%", pct( d.iterMs, c.iterMs ), floorPct );
+        // PER-COLUMN floors. A single global floor taken as the max across columns is conservative, but it
+        // masks a real effect in a quiet column with the noise of a loud one — which is exactly what
+        // happened when a 6.6% rehash floor buried an 11.7% size-hot result.
+        const double floorSize = std::abs( pct( e.sizeMs, c.sizeMs ) );
+        const double floorIter = std::abs( pct( e.iterMs, c.iterMs ) );
+        const char*  markB     = std::abs( pct( b.sizeMs, c.sizeMs ) ) > floorSize ? "" : "~";
+        const char*  markD     = std::abs( pct( d.sizeMs, c.sizeMs ) ) > floorSize ? "" : "~";
+        std::printf( "  %8zu%c %8.0f | %+7.1f%%%s %+7.1f%%%s %6.1f%% | %+7.1f%% %+7.1f%% %6.1f%%\n",
+                     n, ( n == 3220 || n == 43354 ) ? '*' : ' ', double( 24 * n ) / 1024.0,
+                     pct( b.sizeMs, c.sizeMs ), markB, pct( d.sizeMs, c.sizeMs ), markD, floorSize,
+                     pct( b.iterMs, c.iterMs ), pct( d.iterMs, c.iterMs ), floorIter );
     }
-    std::printf( "\n  READ IT LIKE THIS: a NEGATIVE percentage is faster than rw::svector. If the B and D columns\n"
-                 "  trend more negative as `names` grows, the workload is memory-bound and SIZE is the axis. If they\n"
-                 "  stay flat (or stay inside the floor), it is not, and the size() branch is the only axis left.\n" );
+    std::printf( "\n  READ IT LIKE THIS: negative = faster than rw::svector (arm C). A `~` marks a delta INSIDE\n"
+                 "  its own column's A/A floor, i.e. not a result. D differs from C only in SIZE (16 vs 24 B,\n"
+                 "  both branch-free), so the D column isolates LOCALITY. B differs from D only in the size()\n"
+                 "  BRANCH (both 16 B), so B-minus-D isolates the BRANCH. If D's advantage shrinks toward zero as\n"
+                 "  the working set falls to the starred real sizes, then locality does not reach this workload\n"
+                 "  and only the branch does.\n" );
 }
 
 }   // namespace
@@ -373,13 +394,25 @@ int main( int argc, char** argv )
     const Row& c = rows[2];
     const Row& e = rows[4];
     const auto pct = []( double a, double b ) { return b == 0.0 ? 0.0 : ( a / b - 1.0 ) * 100.0; };
+    // PER-COLUMN floors, not one global bar. A global floor is the max across columns, and taking the
+    // max means the noisiest column sets the bar for all of them: a 6.6% rehash floor (a 6 ms column,
+    // where a 0.4 ms wobble is 6%) once buried a real 11.7% size-hot effect whose own column floor was
+    // 0.3%. Each column is now judged against its OWN A/A spread, with the global max kept alongside
+    // as the conservative reading rather than as the only one.
+    const double fBuild  = std::abs( pct( e.buildMs, c.buildMs ) );
+    const double fSize   = std::abs( pct( e.sizeMs, c.sizeMs ) );
+    const double fIter   = std::abs( pct( e.iterMs, c.iterMs ) );
+    const double fRehash = std::abs( pct( e.rehashMs, c.rehashMs ) );
     std::printf( "\n  KNOWN-NEGATIVE (arm C vs arm E — the SAME implementation twice):\n" );
-    std::printf( "    build %+5.1f%%   size %+5.1f%%   iter %+5.1f%%   rehash %+5.1f%%   allocs %s\n",
+    std::printf( "    %-10s %8s %8s %8s %8s\n", "", "build", "size", "iter", "rehash" );
+    std::printf( "    %-10s %+7.1f%% %+7.1f%% %+7.1f%% %+7.1f%%   allocs %s\n", "A/A delta",
                  pct( e.buildMs, c.buildMs ), pct( e.sizeMs, c.sizeMs ), pct( e.iterMs, c.iterMs ),
                  pct( e.rehashMs, c.rehashMs ), ( c.allocs == e.allocs ) ? "IDENTICAL" : "DIFFER (rig is broken)" );
-    const double floorPct = std::max( { std::abs( pct( e.buildMs, c.buildMs ) ), std::abs( pct( e.sizeMs, c.sizeMs ) ),
-                                        std::abs( pct( e.iterMs, c.iterMs ) ), std::abs( pct( e.rehashMs, c.rehashMs ) ) } );
-    std::printf( "    => NOISE FLOOR %.1f%%. No difference below this may be read as a result.\n", floorPct );
+    std::printf( "    %-10s %7.1f%% %7.1f%% %7.1f%% %7.1f%%   <- judge each column against ITS OWN floor\n",
+                 "floor", fBuild, fSize, fIter, fRehash );
+    const double floorPct = std::max( { fBuild, fSize, fIter, fRehash } );
+    std::printf( "    global (max) floor %.1f%% — the conservative bar; using it ALONE masks a real effect in a\n"
+                 "    quiet column, so it is reported beside the per-column floors and never instead of them.\n", floorPct );
     if( c.allocs != e.allocs )
     {
         std::printf( "    FAIL: the known-negative arms disagree on allocation count — do not trust any number above.\n" );

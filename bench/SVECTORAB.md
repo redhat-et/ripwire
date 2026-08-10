@@ -36,7 +36,17 @@ time, so a win localized there is not diluted.
 ## The headline
 
 **Measured against post-parse pipeline time, converting away from `std::vector` is worth ~4.9% and is
-easy. Choosing between the three small-vectors is worth ≤1.5% and is not.**
+easy. Choosing between the three small-vectors is worth ≤1.5%, and which one wins depends on whether
+the site polls `size()` or iterates.**
+
+Three mechanisms were separated with hardware counters and a working-set sweep (§5). Only one of them
+reaches the cardinalities this tool actually indexes:
+
+| effect | size at 200K names | **size at real cardinality (3K–43K)** |
+| --- | --- | --- |
+| instance size 16 vs 24 B (locality) | −11.7% | **−0.2% to −0.5% — does not switch on** |
+| ankerl's `size()` branch, inline lists | ~+6–9% | **~+6–7% — present everywhere** |
+| ankerl's `size()` dependent load, spilled lists | +42–55% | rare here (~0.6% of names spill) |
 
 And the committed "~25% faster than ankerl" figure **does not reproduce in situ** — it is a
 microbenchmark artifact, corrected now in both places that asserted it (`bench/bench_svector3.cpp`,
@@ -157,86 +167,152 @@ The two mechanisms stay separate in this report and should stay separate in the 
 (fewer dependent loads) and **contention** (fewer trips to a shared allocator) can each be present or
 absent on their own, and neither is evidence for the other.
 
-## 5. Which MECHANISM is operating — the corpus-size arbitration
+## 5. Which MECHANISM is operating — corrected by hardware counters
 
-Three mechanisms could produce a small-vector win, and they are separable by how the win *behaves*
-rather than by its size:
+> **This section previously concluded "it is the `size()` branch, not cache locality." That was wrong,
+> and it was wrong twice over.** It was inferred without counters, from a shape-level run taken on a
+> heavily contended machine whose own numbers did not reproduce. A counter run under `sudo`, plus a
+> re-run on a quiet machine, overturned it. Both corrections are kept visible rather than edited away.
 
-| mechanism | signature | verdict here |
-| --- | --- | --- |
-| (a) allocator contention | win grows with thread count | **inapplicable** — the phase is single-threaded (§4) |
-| (b) cache locality | win grows with corpus size; shows in miss counters | **not observed; the sign is wrong** |
-| (c) the `size()` branch | win flat in both; shows in branch/instruction counts | **the only mechanism consistent with the data** |
+### What the counters said
 
-The prediction for (b) was explicit: if cache residency decides, the 16-byte arms should rank
-*relatively better* on the larger corpus, because that is the only regime where 8 bytes per instance
-can bind. **The opposite happened.**
+At 200,000 names (`sudo bench_svector_wave`), the workload is **unambiguously memory-bound**:
 
-| | `src` (~9K symbols) | large corpus (~43K symbols) | direction |
+| loop | IPC | L1D-MPKI | LLC-MPKI | verdict |
+| --- | --- | --- | --- | --- |
+| size-hot | 0.70 | 225.5 | 84.9 | memory-bound |
+| iterated | 0.42 | 217.8 | 66.9 | memory-bound |
+
+An LLC miss rate of 85 per thousand instructions at IPC 0.70 is not a compute-bound profile by any
+reading. The earlier "compute/branch-bound" inference is retracted.
+
+### Three effects, not two — and they live in different regimes
+
+The union arm makes the variables genuinely separable, because D differs from C **only in size** (16
+vs 24 B, both branch-free) and from B **only in the size() implementation** (both 16 B).
+
+| # | effect | isolated by | where it bites |
 | --- | --- | --- | --- |
-| ankerl (16 B, branching) vs rw (24 B, branch-free) | −0.2% (tied, inside floor) | **+1.9% (measurably worse)** | ankerl gets **worse** as the corpus grows |
-| union (16 B, branch-free) vs rw (24 B, branch-free) | +1.5% (inside floor) | +0.2% (inside floor) | tied everywhere |
+| (i) | **instance size / value-array footprint** | D vs C | only past ~2.3 MB of value array |
+| (ii) | **ankerl's `size()` branch, INLINE regime** | B vs D, short lists | everywhere, ~6–7% |
+| (iii) | **ankerl's `size()` DEPENDENT LOAD, SPILLED regime** | B vs D, long lists | only when lists spill |
 
-Being 16 bytes bought **nothing** that grew with working-set size. The union arm — 16 bytes *and*
-branch-free — is indistinguishable from the 24-byte `rw` on both corpora, which is the cleanest
-possible isolation: hold the branch constant, vary only the size, and the difference disappears. Vary
-only the branch (ankerl vs union, both 16 B) and a difference appears on the larger corpus.
+Effect (iii) is the one nobody named, and it is the largest. ankerl's `size()` is not merely a branch:
 
-This matches the hardware note rather than contradicting it: on a large-cache, 128-byte-line Apple
-part, more of the working set stays resident, so the locality advantage of being smaller does not bind
-and the branch is what is left. **On this machine, size is not the axis; the branch is** — and the
-branch is worth 1.9% of a phase that is 2.7% of a run.
+```cpp
+auto size() const -> size_t { if (is_direct()) { return size<direction::direct>(); }
+                              return size<direction::indirect>(); }   // -> indirect()->size()
+```
 
-Honest limits on that conclusion: it is inferred from how the deltas *behave* across corpus size, not
-confirmed by branch-miss counters (see §6 — no root). And "the branch is the axis" is a statement about
-this hardware tier and these two corpus sizes; a smaller-cache machine or a much larger corpus could
-still put (b) back in play.
+`size<indirect>()` is `indirect()->size()` — read the pointer out of the SVO buffer, then **dereference
+into the heap block's header**. Under a memory-bound profile that is a second cache miss, not a
+predicted branch. `rw`/`rwx` read `sz_` out of the instance, which is already resident, in both regimes.
 
-## 6. Is the workload memory-bound?
+### The regime map, measured
+
+Work held constant (4M reads at every point); only the working set varies. `~` = inside that column's
+own A/A floor. Starred rows are real: ripwire's own tree indexes **3,220** symbols, the large
+validation corpus **43,354**.
+
+| names | value array | **D vs C** (isolates size) | floor | **B vs C** (size + `size()` cost) | 
+| --- | --- | --- | --- | --- |
+| **3,220*** | 75 KB | −0.2% `~` | 0.3% | +5.9% |
+| 10,000 | 234 KB | −0.1% | 0.0% | +7.6% |
+| **43,354*** | 1,016 KB | −0.5% | 0.2% | +7.0% |
+| 100,000 | 2,344 KB | +0.1% `~` | 0.7% | +8.9% |
+| 200,000 | 4,688 KB | **−6.4%** | 0.5% | +2.5% |
+| 400,000 | 9,375 KB | **−2.8%** | 0.5% | +6.2% |
+
+**Effect (i) — locality from instance size — does not exist below ~100,000 names.** At both real
+cardinalities D beats C by 0.2–0.5%, at or barely above the floor. It switches on only past a ~2.3 MB
+value array, which is 2.3× the largest corpus this tool has ever been pointed at and 31× its own tree.
+
+**Effect (ii) — the branch — is present at every size, ~6–9%, and is flat.** It is the only mechanism
+that reaches the real workload.
+
+### Why the owner's run showed ankerl losing 55% and the sweep shows 6%
+
+Both are correct; they are different regimes, and the difference is **ids per name**:
+
+- the single-point rig pushes 1,000,000 ids over 200,000 names — **5 per name**, so lists spill past
+  ankerl's inline capacity of 3 and every `size()` becomes effect (iii), the dependent load;
+- the sweep pushes ~1.5 per name, which is `byName`'s **real** shape (`graph.h` documents "most names
+  define 1-2 symbols", and only ~0.6% of names ever spill), so ankerl stays inline and pays only (ii).
+
+So the 42–55% figure is real but describes a spill rate ripwire does not have. **At the real spill rate
+the honest number for ankerl is ~6–7% on the size-hot loop**, which dilutes to the 1.9% measured on the
+whole `buildGraph` phase in §2 — the two measurements are consistent, not in conflict.
+
+### Contention
+
+Still inapplicable to anything behind the alias (§4): the phase is single-threaded. Unchanged.
+
+## 6. Is the workload memory-bound? — ANSWERED (superseded, kept for the method)
 
 **UNAVAILABLE by counter.** This is the arm that would have CONFIRMED §5 rather than inferred it. `prof::pmc` needs root on Apple (kperf) and this session had no
 passwordless `sudo`, so IPC and MPKI were never armed. A measure that could not be evaluated is
 UNAVAILABLE, never "no difference" — re-run `sudo bench/bench_svector_wave.cpp` to fill this in.
 
-The root-free proxy (`bench_svector_wave --sweep`, holding code fixed and growing the working set) is
-**inconclusive**. Usable rows only — the two largest cardinalities had A/A floors of 55% and 90% on a
-contended box and are discarded:
+**Yes, at 200K names — see §5 for the counters** (IPC 0.70, LLC-MPKI 84.9). The counter run settled
+what the root-free proxy could not.
 
-| names | value array | ankerl vs rw, size-hot | ankerl vs rw, iterated | floor |
-| --- | --- | --- | --- | --- |
-| 25,000 | 0.57 MB | +19.8% | +12.1% | 2.0% |
-| 50,000 | 1.14 MB | +22.2% | +15.1% | 0.6% |
-| 100,000 | 2.29 MB | +27.1% | +16.8% | 4.4% |
+The methodological lesson is worth keeping, because it cost two wrong conclusions:
 
-The 16-byte arms do **not** pull ahead as the working set grows across this range — ankerl stays
-consistently *behind*, and the union arm stays within ~2% of `rw`. At these sizes the evidence points
-at the `size()` branch mattering more than the 8 bytes, i.e. **not** memory-bound in the regime tested.
-That is a weaker claim than a counter reading and is labelled as such.
+- **The proxy was run on a contended machine and its numbers did not reproduce.** The original sweep
+  reported the union arm ~2% *behind* `rw` at 200K; a quiet re-run of the identical binary and config
+  put it **11.6% ahead**, matching the owner's independent `sudo` run (11.7%) almost exactly. Nothing
+  about the code changed. Load average during the first run was high enough that the two largest
+  cardinalities carried A/A floors of 55% and 90% — and a 55% floor should have been read as "this
+  machine cannot measure right now", not as "discard two rows and keep the rest".
+- **A single global noise floor masked a real effect.** The rig reported one floor, the max across
+  columns. The `rehash` column is ~6 ms, so a 0.4 ms wobble is 6.6% there, and that number became the
+  bar for the `size` column whose own floor was 0.3% — burying an 11.7% result 39× its actual noise.
+  Fixed: the rig now prints a floor **per column** and marks any delta inside its own column's floor,
+  with the global max kept alongside as the conservative reading rather than the only one.
+
+Rule adopted from this: an A/A floor above ~10% is a **machine-state failure, not a wide error bar**.
+Re-run when quiet; do not reason about deltas underneath it.
 
 ## 7. The decision rule
 
 Keyed on what the measurement actually showed, not on what was expected.
 
+The rule now keys on **whether the site polls `size()`**, because that is the only mechanism that
+reaches real cardinality.
+
 | situation | choose | why |
 | --- | --- | --- |
-| **Any conversion from `std::vector`** | any small-vector | **+4.9% of post-parse pipeline time**, ~8% fewer allocations, ~7 MB lower peak. This is the wave's real payoff and all three arms deliver it equally. |
-| **Default for the conversion wave** | **`ankerl::svector`** | Costs 1.5% of post-parse against the best arm, is 8 bytes smaller, avoids the most allocations, and is complete (25 ops), vendored, maintained and already in the tree. |
-| **A genuinely hot branch-free `size()` poll on a LARGE corpus** | `rw::svector` | The branch is the only mechanism that survived §5, and it is worth 1.5% of post-parse — but only at ~43K symbols; at ~9K the two are tied. The survey found exactly one such site (`search_perFileSites`). |
-| **Over-aligned `T`, or a `T` with a side-effecting destructor** | `ankerl::svector` | ankerl `static_assert`s against over-aligned `T`; `rw::svector` ties element lifetime to buffer lifetime. Neither is a general container. |
-| **The two biggest structures (`symbolAdjacency`, `fileIncludes`)** | **CSR, not a small-vector** | 2.5–3× smaller than either svector. Do not spend the small-vector budget here. |
+| **Any conversion from `std::vector`** | any small-vector | **+4.9% of post-parse pipeline time**, ~8% fewer allocations, ~7 MB lower peak. The wave's real payoff; all three arms deliver it equally. |
+| **A site that ITERATES (range-for) and never polls `size()`** — the large majority of the ~138 | **`ankerl::svector`** | At real cardinality the iterated column is a wash (+0.6% / −0.6%, inside floor). ankerl is then 8 bytes smaller, avoids the most allocations, and is complete, vendored and maintained. |
+| **A site that polls `size()` in a hot loop** | **`rw::svector`** | ~6–7% on the size-hot loop at *both* real cardinalities, flat and reproducible — 1.9% of `buildGraph`, 1.5% of post-parse. `rw` now has full interface parity, so this no longer costs generality. |
+| **A site that polls `size()` on lists that SPILL past 3** | **`rw::svector`, emphatically** | ankerl's `size()` becomes a dependent load into the heap block; measured 42–55% on the size-hot loop. Rare in `byName` (~0.6% spill) but decisive wherever lists are long. |
+| **Over-aligned `T`, or a `T` with a side-effecting destructor** | `ankerl::svector` | ankerl `static_assert`s against over-aligned `T`; `rw::svector` ties element lifetime to buffer lifetime. |
+| **The two biggest structures (`symbolAdjacency`, `fileIncludes`)** | **CSR, not a small-vector** | 2.5–3× smaller than either. Do not spend the small-vector budget here. |
 
-**The honest bottom line: use the vendored complete one.** On this workload the differences between the
-three small-vectors are at or under 2%, and `ankerl::svector` is free — no maintenance, no hand-rolled
-lifetime rules, no second type to keep correct. That conclusion would retire `rw::svector` rather than
-grow it, and the measurement supports it.
+**Revised bottom line.** The earlier flat "standardise on ankerl, retire `rw::svector`" does not
+survive the counter run and is withdrawn. `rw::svector` is measurably better wherever `size()` is
+polled, the margin is real at every cardinality tested, and now that it has full interface parity the
+maintenance argument that justified retiring it is much weaker. **Keep both, and pick by access
+pattern**: iterate → ankerl, poll `size()` → `rw`. The absolute stakes remain modest (1.5% of
+post-parse pipeline time, 0.05% of total runtime), so this is a tie-breaker rule, not a rewrite mandate.
 
-### On the union arm (arm 3)
+### On the union arm (arm 3) — dismissal upheld, reasoning replaced
 
-It worked: 16 bytes, branch-free `size()`, lowest peak memory, and correctness-clean under the
-differential harness including the union-specific hazards. But it buys **+0.2% (inside the noise
-floor)** over `rw::svector` and ~1.7% over ankerl on the affected phase, against the cost of a second
-hand-rolled small-vector with union lifetime rules. **Recommendation: do not promote it.** It stays in
-`bench/` as a measured, documented negative-value result so nobody rebuilds it on a hunch.
+The earlier dismissal cited "+0.2%, inside the noise floor". **That number was contention noise and is
+withdrawn.** On a quiet machine the union arm is genuinely the best arm at 200K names — best on all
+four columns, 11.6–11.7% ahead of `rw` on size-hot (39× that column's 0.3% floor), lowest allocated
+bytes and lowest footprint. The owner's reading of the shape-level table is correct.
+
+**It still should not be promoted, for a different and better-supported reason:** its advantage is
+effect (i), instance size, and §5 shows effect (i) **does not switch on below ~100,000 names**. At
+3,220 and 43,354 — ripwire's own tree and the largest corpus it has been pointed at — D beats C by
+0.2–0.5%, at or barely above the floor. The 11.7% win is real and lives entirely in a working-set
+regime this tool never enters.
+
+So: a successful experiment, a correct hypothesis, and **no reachable benefit** — which is a different
+verdict from "it didn't work", and worth the distinction. It stays in `bench/`, and the sweep table in
+§5 is the reason, so that if a corpus ever reaches ~100K distinct names the promotion case can be
+reopened on evidence.
 
 ---
 
