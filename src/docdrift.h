@@ -99,7 +99,7 @@
 #include "ingest.h"       // isSkippedCrawlDir — the SHARED crawl denylist, for the on-disk existence probe
 #include "mention.h"      // mention_detail::pathSuffixMatches — the whole-segment suffix match
 #include "workspace.h"    // wsdetail::segmentsOf
-#include "infra/svector.h"      // rw::svector — small basename→path lists
+#include "smallvec.h"           // rw::SmallVec — small basename→path lists
 #include "Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 #include "gitstamp.h"     // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
 #include "layout.h"       // layout::isCFamilyPath — shared C/C++/ObjC/CUDA extension classifier
@@ -1591,7 +1591,7 @@ struct RepoPaths
 {
     std::vector<std::string>                                 rel;      // root-relative, sorted
     std::vector<std::string>                                 auxFull;  // unparsed-but-textual files, absolute, sorted
-    HashMap<std::string, rw::svector<std::uint32_t, 2>>     byBase;   // basename → indices into `rel`
+    HashMap<std::string, rw::SmallVec<std::uint32_t, 2>>     byBase;   // basename → indices into `rel`
 };
 
 // The AUXILIARY presence corpus: text files the INDEX does not parse but a doc legitimately names symbols

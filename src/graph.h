@@ -11,7 +11,7 @@
 #include "sparseCsr.h"          // first-party infra math (src/infra/)
 #include "infra/csrverify.h"          // structural gate, VERIFY'd after every production CSR build
 #include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
-#include "infra/svector.h"            // rw::svector — branch-free-size() small-vector for the byName id-lists
+#include "smallvec.h"                 // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
 #include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"        // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "infra/sortutil.h"           // radix edge sorting for large integer-key graph edge lists
@@ -573,8 +573,8 @@ inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
 // tries the canonical scope::name map on its LAST TWO segments first (Symbol::scope is a final segment),
 // then degrades to the bare final segment against byName. `key` is the caller's reused buffer. The caller
 // applies its own lang/root/kind filters to the returned ids.
-inline const rw::svector<NodeId, 2>* fnBindTargetIds( const HashMap<std::string, rw::svector<NodeId, 2>>& canonByName,
-                                                      const HashMap<std::string, rw::svector<NodeId, 2>>& byName,
+inline const rw::SmallVec<NodeId, 2>* fnBindTargetIds( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName,
+                                                      const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName,
                                                       std::string_view target, std::string& key )
 {
     std::string_view nameSeg = target;
@@ -674,7 +674,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // inline (no per-name malloc) and size() is branch-free — the measured-best value type for this
     // write-once (here) / read-hot (resolve below) shape (see bench/bench_svector3.cpp). Iterates in
     // insertion order exactly like std::vector, so the resolved graph — and the output — is unchanged.
-    HashMap<std::string, rw::svector<NodeId, 2>> byName;
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
     byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
     for( const Symbol& s : ing.symbols )
     {
@@ -706,7 +706,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            rw::svector<NodeId, 2> defs;
+            rw::SmallVec<NodeId, 2> defs;
             for( NodeId id : ids )
             {
                 if( hasBody( id ) )
@@ -740,7 +740,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            rw::svector<NodeId, 2> kept;
+            rw::SmallVec<NodeId, 2> kept;
             for( NodeId id : ids )
             {
                 if( hasBody( id ) || !rootHasDef( ing.fileRoot[ing.symbols[id].fileId] ) )
@@ -756,7 +756,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // enclosing scope is `A`, BEFORE the bare-name spray — the deterministic [AST] cut to call-graph
     // ambiguity. Definitions only (body present); the obj.method()/unqualified halves stay bare-name (and
     // keep their honest `amb`). C++ only (scope is populated for Lang::Cpp).
-    HashMap<std::string, rw::svector<NodeId, 2>> canonByName;
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> canonByName;
     canonByName.reserve( N );
     std::string canonKey;
     for( const Symbol& s : ing.symbols )
@@ -839,7 +839,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
         std::vector<NodeId> tgt;
-        const auto pushCFamily = [ & ]( const rw::svector<NodeId, 2>& srcIds )
+        const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
         {
             for( NodeId c : srcIds )
             {

@@ -480,6 +480,29 @@ target_include_directories(ripwire PRIVATE
   third_party
   src)
 
+# ---- small-vector A/B knobs (bench/svectorab.py drives both; see bench/SVECTORAB.md) ----
+# RIPWIRE_SMALLVEC selects which container src/smallvec.h's `rw::SmallVec` alias resolves to:
+#   0 std::vector   1 ankerl::svector   2 rw::svector (default, the shipped one)   3 rwx::svector16
+# Arm 3 lives in bench/ and src/smallvec.h reaches it with a relative include, so no extra include path
+# is needed for any arm. Unset means unset: src/smallvec.h carries the default, so the ordinary build
+# passes no -D at all and its preprocessor state is byte-identical to a tree without this option.
+set(RIPWIRE_SMALLVEC "" CACHE STRING "small-vector arm: 0=std::vector 1=ankerl 2=rw (default) 3=rwx union")
+if(NOT RIPWIRE_SMALLVEC STREQUAL "")
+  target_compile_definitions(ripwire PRIVATE RIPWIRE_SMALLVEC=${RIPWIRE_SMALLVEC})
+  target_compile_definitions(ripwire_probe PRIVATE RIPWIRE_SMALLVEC=${RIPWIRE_SMALLVEC})
+  message(STATUS "small-vector arm: RIPWIRE_SMALLVEC=${RIPWIRE_SMALLVEC}")
+endif()
+
+# RIPWIRE_ALLOC_COUNT links src/alloccount.cpp, which replaces the global operator new/delete pair with a
+# counting one and prints ALLOC_REPORT to stderr at exit. OFF everywhere except the A/B: a shipped binary
+# must not carry it, and no gate sets it. See the honesty note at the top of src/alloccount.cpp — only the
+# DELTA between arms is attributable to the container.
+option(RIPWIRE_ALLOC_COUNT "count heap allocations (A/B instrument; never for a shipped build)" OFF)
+if(RIPWIRE_ALLOC_COUNT)
+  target_sources(ripwire PRIVATE src/alloccount.cpp)
+  message(STATUS "heap-allocation counting: ON (ALLOC_REPORT on stderr at exit)")
+endif()
+
 # ---- global install: `cmake --install build --prefix /opt/homebrew --component ripwire` (see install.sh) ----
 # COMPONENT ripwire + --component on install scopes this to just the binary: without it, `cmake --install`
 # also runs the vendored tree-sitter subproject's own install() rules (headers/pkgconfig/static lib into
