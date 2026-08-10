@@ -5,7 +5,8 @@ description: >
   repo (new to the team, about to pick up a ticket), need the lay of the land, main subsystems and entry
   points, are asked "how does X work / where is Y / what matters here", or need an architecture OVERVIEW
   (structure: what's here, how it's organized) or a nested module map — or a gotcha worth remembering for
-  the next session (--note-add). Runs ripwire (the deterministic
+  the next session (--note-add) — or resuming cold after a context compaction, when the task survived but
+  the reasoning did not. Runs ripwire (the deterministic
   "ripgrep of AI context", on PATH) to MAP the code — an escalation ladder from a one-screen report up to
   communities, nested zoom, and a rendered diagram — instead of blind grep + whole-file reads. Prefer this
   over reading many files when orienting. A NAMED symbol's deep-dive (its own contract/callers/callees, not

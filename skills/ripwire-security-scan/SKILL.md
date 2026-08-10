@@ -3,7 +3,8 @@ name: ripwire-security-scan
 description: >
   Security review — two different moments, one skill. (1) Vet an untrusted agent config BEFORE you install
   or activate it: a SKILL.md file (or a whole skills/ directory) → ripwire's built-in injection/exfiltration/
-  path-traversal scanner; an .mcp.json server config → ripwire retrieval plus a manual semantic checklist.
+  path-traversal scanner, whose findings carry a severity and whose CRITICAL verdict blocks the install;
+  an .mcp.json server config → ripwire retrieval plus a manual semantic checklist of its shell stanzas.
   (2) Reviewing security-sensitive CODE or an untrusted-input path (parsing, deserialization, auth,
   exec/eval, network-facing handlers) → assemble STRUCTURAL signal: unsafe-C-fn / c-style-cast lint hits,
   forward taint-reach via transitive callees, untested integration seams, sink use-sites. Use when you receive a

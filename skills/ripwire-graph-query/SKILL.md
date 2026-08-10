@@ -3,7 +3,8 @@ name: ripwire-graph-query
 description: >
   Compose a call-graph question the fixed ripwire verbs don't pre-answer — "which high-complexity
   functions can reach X?", "what in src/ has 10+ callers?". A small, closed expression language
-  (--graph-query) over the symbol graph: sources, kind/cx/fanin/file filters, bounded callers/callees
+  (--graph-query) over the symbol graph: filter by kind, complexity or fan-in, narrow to a file or cluster,
+  bounded callers/callees
   closure, and/or/not joins. Use when --callers/--callees/--impact alone can't phrase the question.
   Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
