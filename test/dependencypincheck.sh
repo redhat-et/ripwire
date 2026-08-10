@@ -62,7 +62,7 @@ else
 fi
 
 missing=""
-for dep in bash c cpp csharp go java javascript json objc python ruby rust swift; do
+for dep in bash c cpp csharp cuda go java javascript json objc python ruby rust swift toml; do
     [ -f "$DEPS/$dep/src/parser.c" ] || missing="$missing$dep/src/parser.c
 "
     [ -f "$DEPS/$dep/LICENSE" ]      || missing="$missing$dep/LICENSE
