@@ -20,14 +20,30 @@
 #                    `--help`. It is also the surface where a fabricated flag survives longest, since
 #                    a draft is re-read for argument rather than for syntax. Same rule as every other
 #                    prose family: every `--flag` it names must exist or be allowlisted with a reason.
+#   present/*.js   — THE SHOWCASE DECK GENERATOR, and the surface this gate was written for: the
+#                    fabricated `--doc-drift --dated` in the header above shipped into a DECK. The
+#                    generator is prose in every way that matters here — flag names typed into slide
+#                    strings by hand, re-read for argument rather than for syntax, and rendered into a
+#                    binary .pptx/.pdf nobody greps afterwards. The built artifacts are NOT scanned
+#                    (same rule as docs/COMMANDS.md: gate the generator, not its output) — and they
+#                    cannot be, being binary. Scanning the generator is what makes the deck checkable
+#                    at all.
 # NOT scanned: docs/captures/*.md is RECORDED OUTPUT, not prose — every flag in it was actually run,
 #                    and a capture of a refusal legitimately contains a deliberately-bogus flag.
+#              present/*.pptx, present/*.pdf — built artifacts, and binary. Gate the generator.
 # HISTORY, and why this list is spelled out rather than globbed loosely: it used to name present/*.py,
-# present/*.js, .claude/skills/*/SKILL.md and .agents/skills/*/SKILL.md. None of those paths exist in
-# this export. Three of the five globs matched nothing, README.md had not landed yet, and the gate was
-# quietly scanning ONE directory while its own header described five — the green-while-inert shape.
-# addSource() no-ops on a missing file, so a glob that matches nothing is silent: keep this list and
-# the tree in agreement by hand, and prefer a path that exists over a glob that might.
+# present/*.js, .claude/skills/*/SKILL.md and .agents/skills/*/SKILL.md. None of those paths existed in
+# this export WHEN THAT NOTE WAS WRITTEN. Three of the five globs matched nothing, README.md had not
+# landed yet, and the gate was quietly scanning ONE directory while its own header described five — the
+# green-while-inert shape. addSource() no-ops on a missing file, so a glob that matches nothing is
+# silent: keep this list and the tree in agreement by hand, and prefer a path that exists over a glob
+# that might.
+#   2026-08-10: present/deck5_ripwire_build.js LANDED, and this gate did not notice for as long as it
+#   took a human to ask. The path was removed from the scan list as dead and never restored when the
+#   file arrived, so the deck — the exact artifact of the fabrication in line 4 — sat unscanned while
+#   naming 44 distinct flags. That is the same green-while-inert shape this header warns about, in the
+#   opposite direction: not a glob that matches nothing, but a real file no glob covers. The `present`
+#   family below is asserted non-empty like every other, so its disappearance fails loudly instead.
 #
 # SOURCES is deduplicated by RESOLVED path, so a symlinked or repeated file is scanned — and reported
 # — once, not twice.
@@ -136,8 +152,8 @@ done <"$TMP/allow_rows.txt"
 # skills/*/*.md, prompts/*.md, paper/*.md) always claimed to check; now it actually does.
 SOURCES=()
 seenKeys=""
-rootCount=0; docsCount=0; skillsCount=0; promptsCount=0; paperCount=0
-addSource() {  # addSource <path> <family: root|docs|skills|prompts|paper>
+rootCount=0; docsCount=0; skillsCount=0; promptsCount=0; paperCount=0; presentCount=0
+addSource() {  # addSource <path> <family: root|docs|skills|prompts|paper|present>
     [ -f "$1" ] || return 0
     key="$( cd "$( dirname "$1" )" && pwd -P )/$( basename "$1" )"
     case "$seenKeys" in *"|$key|"*) return 0 ;; esac
@@ -149,6 +165,7 @@ addSource() {  # addSource <path> <family: root|docs|skills|prompts|paper>
         skills)  skillsCount=$((skillsCount + 1)) ;;
         prompts) promptsCount=$((promptsCount + 1)) ;;
         paper)   paperCount=$((paperCount + 1)) ;;
+        present) presentCount=$((presentCount + 1)) ;;
     esac
 }
 addSource "$ROOT/README.md" root      # arrives with the public-README lane; addSource no-ops until then
@@ -170,6 +187,7 @@ for f in "$ROOT"/skills/*/SKILL.md;         do addSource "$f" skills; done
 for f in "$ROOT"/skills/*/*.md;             do addSource "$f" skills; done
 for f in "$ROOT"/prompts/*.md;              do addSource "$f" prompts; done
 for f in "$ROOT"/paper/*.md;                do addSource "$f" paper;   done
+for f in "$ROOT"/present/*.js;              do addSource "$f" present; done
 
 # A scan of nothing is not a pass. The old refusal threshold was a single TOTAL count, which one
 # surviving family could satisfy while another vanished entirely — the failure that let this gate go
@@ -180,8 +198,9 @@ for f in "$ROOT"/paper/*.md;                do addSource "$f" paper;   done
 [ "$skillsCount"  -ge 1 ] || { echo "deckcheck: 0 skills/*/*.md prose source(s) found — refusing to run"; exit 2; }
 [ "$promptsCount" -ge 1 ] || { echo "deckcheck: 0 prompts/*.md prose source(s) found — refusing to run"; exit 2; }
 [ "$paperCount"   -ge 1 ] || { echo "deckcheck: 0 paper/*.md prose source(s) found — refusing to run"; exit 2; }
+[ "$presentCount" -ge 1 ] || { echo "deckcheck: 0 present/*.js deck-generator source(s) found — refusing to run"; exit 2; }
 [ "${#SOURCES[@]}" -ge 40 ] || {
-    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=40 (root docs, docs/*.md, skills/*/*.md, prompts/*.md, paper/*.md)."
+    echo "deckcheck: only ${#SOURCES[@]} prose source(s) found — expected >=40 (root docs, docs/*.md, skills/*/*.md, prompts/*.md, paper/*.md, present/*.js)."
     printf '        found: %s\n' "${SOURCES[@]#$ROOT/}"
     echo "        A near-empty scan reads as a PASS while checking nothing; refusing to run."
     exit 2; }
