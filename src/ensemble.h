@@ -281,7 +281,7 @@ inline bool eligibleForJoin( const Symbol& s ) noexcept
 // Per-file lists of eligible symbols, sorted by sigStartByte — the index the span→symbol binding walks.
 // model.h::symbolsByFile is the shared bucket-and-sort; only the filter and the key are ours. sigStartByte is
 // unique per symbol within a file, so this comparator is already a total order.
-inline std::vector<std::vector<NodeId>> eligibleByFile( const IngestResult& ing, const std::vector<char>& eligible )
+inline SymbolsByFile eligibleByFile( const IngestResult& ing, const std::vector<char>& eligible )
 {
     return symbolsByFile( ing,
                           [ & ]( const Symbol& s ) { return eligible[s.id] != 0; },
@@ -292,7 +292,7 @@ inline std::vector<std::vector<NodeId>> eligibleByFile( const IngestResult& ing,
 // definition that starts at or before the offset, so the first container found is the innermost one (a lambda
 // inside a function binds to the lambda). A finding outside every function body — a file-scope variable's name,
 // a macro — binds to nothing and is dropped, which the legend discloses.
-inline NodeId enclosingEligible( const IngestResult& ing, const std::vector<NodeId>& sorted, std::uint32_t offset ) noexcept
+inline NodeId enclosingEligible( const IngestResult& ing, const FileSymbols& sorted, std::uint32_t offset ) noexcept
 {
     std::size_t index = sorted.size();
     while( index > 0 )
@@ -312,7 +312,7 @@ inline NodeId enclosingEligible( const IngestResult& ing, const std::vector<Node
 }
 
 // Bind one pack's findings to functions and push them into `hits` under `family`.
-inline void bindFindings( const IngestResult& ing, const std::vector<std::vector<NodeId>>& byFile,
+inline void bindFindings( const IngestResult& ing, const SymbolsByFile& byFile,
                           const std::vector<AstMatch>& findings, std::uint8_t family, std::vector<FamilyHit>& hits )
 {
     for( const AstMatch& hit : findings )
@@ -559,7 +559,7 @@ inline std::string unavailWhyList( const EnsembleScan& scan )
 
 // STAGE: the two lint packs, called through their existing entry points, bound to functions and sorted into
 // the one total order the evidence strings are folded from.
-inline std::vector<FamilyHit> collectLintHits( const IngestResult& ing, const std::vector<std::vector<NodeId>>& byFile, EnsembleScan& scan )
+inline std::vector<FamilyHit> collectLintHits( const IngestResult& ing, const SymbolsByFile& byFile, EnsembleScan& scan )
 {
     std::vector<FamilyHit> hits;
 
@@ -693,7 +693,7 @@ inline EnsembleScan computeEnsemble( const IngestResult& ing, const std::vector<
     scopeByLanguage( ing, eligible, scan );
 
     // ── the two categorical signals: the lint packs, bound to the functions that contain their findings ─────
-    const std::vector<std::vector<NodeId>> byFile = eligibleByFile( ing, eligible );
+    const SymbolsByFile                    byFile = eligibleByFile( ing, eligible );
     const std::vector<FamilyHit>           hits   = collectLintHits( ing, byFile, scan );
 
     // ── ONE pass builds the rows: the evidence string per family IS the fire decision for that family, so a

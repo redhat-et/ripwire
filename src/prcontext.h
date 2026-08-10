@@ -64,6 +64,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <span>          // std::span — splitDocSections takes any contiguous NodeId range
 #include <string>
 #include <string_view>
 #include <vector>
@@ -628,7 +629,7 @@ inline void writeAnchorNote( std::FILE* out, const std::string& anchorAttr )
 // emitter at several trim levels to measure, so deciding there would let a --max-tokens value reorder the
 // bundle. The extra transitiveCallers pass is the deliberate price of that.
 inline void orderChangedFilesByImpact( std::vector<std::uint32_t>& changed, const IngestResult& ing, const Graph& g,
-                                       const std::vector<std::vector<NodeId>>& symsByFile )
+                                       const SymbolsByFile& symsByFile )
 {
     std::vector<std::size_t> dependentsByFile( ing.files.size(), 0 );
     for( std::uint32_t f : changed )
@@ -652,7 +653,7 @@ inline void orderChangedFilesByImpact( std::vector<std::uint32_t>& changed, cons
 // Returning the filtered list rather than leaving the caller to skip sections mid-loop is deliberate: that
 // skip would be an `if` four levels deep inside the per-file emitter lambda, and the split reads as what it
 // is — this file's symbols are two different kinds of thing.
-inline std::pair<std::string, std::vector<NodeId>> splitDocSections( const IngestResult& ing, const std::vector<NodeId>& fileSyms )
+inline std::pair<std::string, std::vector<NodeId>> splitDocSections( const IngestResult& ing, std::span<const NodeId> fileSyms )
 {
     std::size_t         sectionCount = 0;
     std::vector<NodeId> rowSyms;
@@ -778,11 +779,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
     // One-time file→defined-symbols index (in id order == file/line order), so each changed file reads its
     // symbols in O(1) instead of re-scanning all N symbols (A4-P10). Buckets fill in ascending id order.
-    std::vector<std::vector<NodeId>> symsByFile( F );
-    for( NodeId i = 0; i < N; ++i )
-    {
-        symsByFile[ing.symbols[i].fileId].push_back( i );
-    }
+    const SymbolsByFile symsByFile = symbolsByFileInIdOrder( ing, []( const Symbol& ) { return true; } );
 
     // §P11.7: files lead by BLAST RADIUS, not by path — see orderChangedFilesByImpact above.
     orderChangedFilesByImpact( changed, ing, g, symsByFile );
@@ -795,9 +792,9 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
         for( std::uint32_t f : changed )
         {
             // this file's defined symbols, in id order (== file/line order by the ingest sort).
-            const std::vector<NodeId>& fileSyms = symsByFile[f];
+            const FileSymbols& fileSyms = symsByFile[f];
 
-            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( ing.files[f] ).c_str(), fileSyms.size() );
+            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( ing.files[f] ).c_str(), std::size_t( fileSyms.size() ) );
 
             // (1) blast radius: transitive dependents of ALL this file's symbols. Reuse transitiveCallers.
             const std::vector<NodeId>  reach = transitiveCallers( g, fileSyms );
@@ -893,7 +890,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
             if( trim.emitSymbolRows )
             {
-                std::fprintf( o, "<changed-symbols count=\"%zu\"%s>", fileSyms.size(), sectionsAttr.c_str() );
+                std::fprintf( o, "<changed-symbols count=\"%zu\"%s>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
                 for( NodeId s : rowSyms )
                 {
                     const Symbol& sy = ing.symbols[s];
@@ -938,7 +935,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             }
             else
             {
-                std::fprintf( o, "<changed-symbols count=\"%zu\"%s/>", fileSyms.size(), sectionsAttr.c_str() );
+                std::fprintf( o, "<changed-symbols count=\"%zu\"%s/>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
             }
 
             // (6) co-change partners NOT in the diff (gitmine). Degrades to an empty list without git. A4-P10:

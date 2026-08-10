@@ -305,16 +305,9 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
         return counts;
     }
 
-    // per-file symbol id list (only real-body defs can enclose a masking block).
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( NodeId i = 0; i < ing.symbols.size(); ++i )
-    {
-        const Symbol& s = ing.symbols[i];
-        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte )
-        {
-            byFile[s.fileId].push_back( i );
-        }
-    }
+    // per-file symbol id list (only real-body defs can enclose a masking block). `symbols[i].id == i`, so
+    // the shared bucket-and-sort's `s.id` is the same value the hand-written loop pushed as `i`.
+    const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
     for( const ErrorMaskHit& h : hits )
     {
         if( h.fileId >= byFile.size() )
@@ -357,16 +350,8 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
 inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root,
                                                                      bool pathQualified = false )
 {
-    // per-file def ids with a real body.
-    std::vector<std::vector<NodeId>> byFile( ing.files.size() );
-    for( NodeId i = 0; i < ing.symbols.size(); ++i )
-    {
-        const Symbol& s = ing.symbols[i];
-        if( s.fileId < byFile.size() && s.endByte > s.sigStartByte )
-        {
-            byFile[s.fileId].push_back( i );
-        }
-    }
+    // per-file def ids with a real body (see errorMaskCountsBySym above on `symbols[i].id == i`).
+    const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
     gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // canonId hash → its symbols' raw-body hashes
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
