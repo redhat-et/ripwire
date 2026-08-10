@@ -14,7 +14,7 @@
 //      anywhere else).
 //   3. WHAT DOES THE REHASH PATH COST? ankerl::unordered_dense keeps values in ONE contiguous vector, so
 //      every rehash MOVES EVERY ELEMENT. That is the hottest operation on these types and nothing calls
-//      it explicitly. Shape R below forces several rehashes and times only the movement.
+//      it explicitly. WaveShape below forces several rehashes and times only the movement.
 //
 // ARMS (the same four the alias flip selects, so the two halves of the rig are comparable):
 //   A std::vector<uint32>          24 B, a malloc per non-empty list
@@ -143,7 +143,7 @@ std::vector<std::uint32_t> g_readOf;   // read i -> pool index
 
 // ── shape S: build byName, then read it size()-hot ───────────────────────────────────────────────────
 template <class V>
-struct Shape
+struct WaveShape
 {
     static void build( Map<V>& m )
     {
@@ -204,11 +204,11 @@ Row runArm( const char* name )
     for( int k = 0; k < kSamples; ++k )
     {
         Map<V> fresh;
-        b.push_back( measure( [ & ] { Shape<V>::build( fresh ); } ) );
+        b.push_back( measure( [ & ] { WaveShape<V>::build( fresh ); } ) );
         std::uint64_t sink = 0;
-        s.push_back(  measure( [ & ] { sink += Shape<V>::readSize( fresh ); } ) );
-        it.push_back( measure( [ & ] { sink += Shape<V>::readIterate( fresh ); } ) );
-        rh.push_back( measure( [ & ] { sink += Shape<V>::rehash(); } ) );
+        s.push_back(  measure( [ & ] { sink += WaveShape<V>::readSize( fresh ); } ) );
+        it.push_back( measure( [ & ] { sink += WaveShape<V>::readIterate( fresh ); } ) );
+        rh.push_back( measure( [ & ] { sink += WaveShape<V>::rehash(); } ) );
         if( sink == 0xDEADBEEF ) { std::fprintf( stderr, "impossible sink\n" ); }
         if( k == 0 ) { m = std::move( fresh ); }
     }
@@ -225,7 +225,7 @@ Row runArm( const char* name )
     g_count.store( 0 ); g_bytes.store( 0 ); g_arm.store( true );
     {
         Map<V> counted;
-        Shape<V>::build( counted );
+        WaveShape<V>::build( counted );
     }
     g_arm.store( false );
     r.allocs     = g_count.load();
