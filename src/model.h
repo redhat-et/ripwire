@@ -766,19 +766,37 @@ inline void retagMacroCallReferences( IngestResult& ing )
 // (preprocessor evidence, textually stronger than any local) is never touched.
 // the suppression pass's evidence tables and their "<fromSymbol>#<name>" key builder — see the contract
 // comment above suppressShadowedReferences below.
-// ONE declaring-block byte span. A 2-field POD and not `std::pair<uint32,uint32>`, because rw::svector
-// requires a TRIVIALLY-COPYABLE element and libc++'s std::pair is not one — its copy- and move-assignment
-// operators are user-provided, so `is_trivially_copyable_v<std::pair<uint32,uint32>>` is false there and
-// true nowhere portably. Keeping the pair would have pushed the tree's single largest small-vector target
-// onto ankerl for a language-library accident rather than a design reason. The POD is byte-identical to the
-// pair (8 B, same field order) and structured-binding reads at the use site are unchanged.
+// ONE declaring-block byte span. A 2-field POD and NOT `std::pair<uint32,uint32>`, because rw::svector
+// requires a trivially-copyable element and a std::pair is not reliably one.
+//
+// THE PRECISE CLAIM, because the loose version of it is wrong in both directions. The standard does not
+// REQUIRE std::pair to be trivially copyable, so the answer is implementation-defined: libc++ (this
+// toolchain, 210106) says no, libstdc++ defaults the operators and says yes. Measured here, only the two
+// ASSIGNMENT operators fail — both constructors and the destructor are trivial. Same portability class as
+// infra/charconvcompat.h: a thing that happens to work on one standard library is not a thing you can build
+// on.
+//
+// AND IT IS PERMANENT, so nobody should "fix" this back to a pair later expecting the library to have caught
+// up. `pair::operator=` has to be hand-written to support REFERENCE members — `std::tie( a, b ) = f()` must
+// assign THROUGH the references, and a defaulted operator would be deleted. More decisively, triviality is
+// part of the ABI: a trivially-copyable type can be passed in registers and a non-trivially-copyable one
+// goes by hidden reference, so making pair trivial would break every by-value pair parameter already
+// compiled. libc++ ships in the macOS SDK under a hard ABI-stability commitment. `std::tuple` is the same
+// story for the same reasons — treat it identically.
+//
+// The choice this drives, stated as a rule rather than a one-off: when a conversion candidate's element is a
+// std:: composite that fails the trait, replace the ELEMENT with a named POD. Routing the structure to
+// ankerl instead would forfeit the branch-free size() and the memcpy bulk moves over a library accident
+// rather than a design reason; ankerl is for elements that are genuinely non-trivial (a real std::string, or
+// a struct that owns something). The POD is byte-identical to the pair — 8 B, same field order — and
+// structured-binding reads at the use site are unchanged.
 struct VarSpan
 {
     std::uint32_t startByte;
     std::uint32_t endByte;
 };
 static_assert( sizeof( VarSpan ) == 8, "the span pair is two 32-bit byte offsets — a layout change here resizes every varSpans entry" );
-static_assert( std::is_trivially_copyable_v<VarSpan>, "the whole reason this is not std::pair — see the comment above" );
+static_assert( std::is_trivially_copyable_v<VarSpan>, "the whole reason this is not std::pair — see the comment above. This assert is what explains the one above it." );
 
 struct ShadowEvidence
 {

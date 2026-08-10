@@ -363,8 +363,15 @@ struct CommunityPresentation
     std::vector<std::string> label;
 };
 
+// community id → its member symbol ids. N=2 is FREE (rw::svector<NodeId,1> and <NodeId,2> are both 16 B,
+// against a std::vector's 24) and covers 92.9%/95.5% of communities across the two census corpora: a
+// Louvain partition of a call graph is mostly singletons — 88.1%/92.7% of communities hold exactly ONE
+// symbol — so nearly every list here was a one-element heap block. 5 990 of them on this tree, 31 369 on
+// the validation corpus, rebuilt by each of the four verbs below.
+using CommunityMembers = std::vector<rw::SmallVec<rw::NodeId, 2>>;
+
 CommunityPresentation communityPresentation( const rw::IngestResult& ing, const rw::Graph& g,
-                                             const std::vector<std::vector<rw::NodeId>>& members,
+                                             const CommunityMembers& members,
                                              const std::vector<float>& rank )
 {
     CommunityPresentation out;
@@ -375,7 +382,7 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
 
     for( std::size_t communityIndex = 0; communityIndex < members.size(); ++communityIndex )
     {
-        const std::vector<rw::NodeId>& communityMembers = members[ communityIndex ];
+        const rw::SmallVec<rw::NodeId, 2>& communityMembers = members[ communityIndex ];
         if( communityMembers.empty() )
         {
             continue;
@@ -442,12 +449,12 @@ struct IsolateStats
 };
 
 IsolateStats isolateStats( const rw::IngestResult& ing, const rw::Graph& graph,
-                           const std::vector<std::vector<rw::NodeId>>& members ) noexcept
+                           const CommunityMembers& members ) noexcept
 {
     IsolateStats stats;
     const auto*  inRowOffset = graph.inEdges.rowOffsets();
 
-    for( const std::vector<rw::NodeId>& communityMembers : members )
+    for( const rw::SmallVec<rw::NodeId, 2>& communityMembers : members )
     {
         if( communityMembers.size() != 1 )
         {
@@ -7652,10 +7659,10 @@ std::optional<int> runFieldAffinity( const MainDispatch& d )
 // §A8.6: "how many communities count as a real module" — size>=2, i.e. NOT an isolated singleton. Shared by
 // emitCommunitiesReport (below) and emitCommunityDrill's `modules=`, so the two verbs' modules= counts use
 // the identical predicate and cannot drift into two different numbers under one attribute name.
-std::uint32_t nonIsolatedModuleCount( const std::vector<std::vector<rw::NodeId>>& members )
+std::uint32_t nonIsolatedModuleCount( const CommunityMembers& members )
 {
     std::uint32_t modules = 0;
-    for( const std::vector<rw::NodeId>& mem : members )
+    for( const rw::SmallVec<rw::NodeId, 2>& mem : members )
     {
         if( mem.size() >= 2 )
         {
@@ -7676,7 +7683,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     const std::uint32_t      K    = cm.count;
     const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
 
-    std::vector<std::vector<NodeId>> members( K );
+    CommunityMembers members( K );
     for( NodeId i = 0; i < N; ++i )
     {
         members[cm.comm[i]].push_back( i );
@@ -7765,8 +7772,8 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
     {
-        const std::uint32_t  c   = moduleOrder[ moduleIndex ];
-        std::vector<NodeId>& mem = members[c];
+        const std::uint32_t      c   = moduleOrder[ moduleIndex ];
+        rw::SmallVec<NodeId, 2>& mem = members[c];
         std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         const std::size_t topN = std::min<std::size_t>( 5, mem.size() );
         std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" shown=\"%zu\" capped=\"%u\">", c, mem.size(),
@@ -7839,7 +7846,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
     }
     const std::uint32_t want = std::uint32_t( parsed );
 
-    std::vector<std::vector<NodeId>> members( K );
+    CommunityMembers members( K );
     for( NodeId i = 0; i < N; ++i )
     {
         members[cm.comm[i]].push_back( i );
@@ -7856,7 +7863,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
     const std::vector<float>    rank         = rankGraph( g );
     const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
 
-    std::vector<NodeId>& mem = members[ want ];
+    rw::SmallVec<NodeId, 2>& mem = members[ want ];
     std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
 
     // bridges: this module's cross-module edges only, counted per PEER module (both directions summed —
@@ -7957,7 +7964,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         const std::size_t        L    = h.levels.size();                // ≥1 always (level 0 present)
 
         // per-level, per-group: member symbol ids (for size, dominant dir, and leaf top-symbols). members[l][gid].
-        std::vector<std::vector<std::vector<NodeId>>> members( L );
+        std::vector<CommunityMembers> members( L );
         for( std::size_t l = 0; l < L; ++l )
         {
             members[l].assign( h.counts[l], {} );
@@ -8059,7 +8066,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                 }
                 else   // single-level (no coarsening happened): show the module's top symbols as inner nodes
                 {
-                    std::vector<NodeId> mem = members[topL][t];
+                    rw::SmallVec<NodeId, 2> mem = members[topL][t];
                     std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
                     const std::size_t maxS = std::min<std::size_t>( 5, mem.size() );
                     for( std::size_t si = 0; si < maxS; ++si )
@@ -8140,7 +8147,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             std::printf( ">" );
             if( l == 0 )   // finest community → list its top-ranked symbols
             {
-                std::vector<NodeId> mem = members[0][gid];
+                rw::SmallVec<NodeId, 2> mem = members[0][gid];
                 std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
                 const std::size_t topN = leafShown;
                 for( std::size_t i = 0; i < topN; ++i )
@@ -8455,7 +8462,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const rw::Communities   cm   = rw::communities( g );
         const std::vector<float> rank = rankGraph( g );
 
-        std::vector<std::vector<NodeId>> members( cm.count );
+        CommunityMembers members( cm.count );
         for( NodeId i = 0; i < N; ++i )
         {
             members[cm.comm[i]].push_back( i );
