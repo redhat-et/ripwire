@@ -784,10 +784,10 @@ and the element says so before you read a single row.
 $ ripwire . --top-k=3
 <!-- files=… symbols=… edges=… shown=3 est_tokens=… ambiguous=… unresolved=…
      precise=… skipped_oversize=… order=important-first -->
-<r est_tokens="393">
-<f p="./src/svector.h">
-<s t="method" n="size" id="./src/svector.h::svector::size" k="…"></s>
-<s t="method" n="push_back" id="./src/svector.h::svector::push_back" amb="2" k="…">
+<r est_tokens="435">
+<f p="./src/infra/svector.h" layer="infra">
+<s t="method" n="size" id="./src/infra/svector.h::svector::size" k="…"></s>
+<s t="method" n="push_back" id="./src/infra/svector.h::svector::push_back" amb="2" k="…">
 <c n="buf"/><c n="buf"/><c n="grow"/></s>
 </f>
 <f p="./src/scipoverlay.h">
@@ -1139,7 +1139,7 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
-(2026-08-09): `files=106 symbols=3150 edges=8936 ambiguous=3047 unresolved=1091`.
+(2026-08-09): `files=106 symbols=3150 edges=8858 ambiguous=2991 unresolved=1091`.
 
 | the output says | read it as |
 | --- | --- |
