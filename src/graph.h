@@ -4,18 +4,18 @@
 // resolved out-edges for serialization. Ranking lives in pagerank.cpp.
 
 #include "model.h"
-#include "filter.h"             // isTestPath — for the Q2 tested= post-pass
-#include "lintrules.h"          // §P9.4: langOfPath / dependencyCapable — the file-language classification
-                                // restrictDependencyHealth() needs (owns the extension table, kept in sync
-                                // by hand with ingest.cpp's kLangTable per its own header comment)
-#include "infra/sparseCsr.h"    // first-party infra math (src/infra/)
-#include "infra/csrverify.h"          // structural gate, VERIFY'd after every production CSR build
-#include "pagerank.h"           // double-precision PageRank kernel over float CSR storage
-#include "smallvec.h"                 // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
-#include "resolve.h"            // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
-#include "scipoverlay.h"        // SCIP precision overlay (data struct only; parser lives in scip.h)
-#include "infra/sortutil.h"           // radix edge sorting for large integer-key graph edge lists
-#include "infra/profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "filter.h"              // isTestPath — for the Q2 tested= post-pass
+#include "lintrules.h"           // §P9.4: langOfPath / dependencyCapable — the file-language classification
+                                 // restrictDependencyHealth() needs (owns the extension table, kept in sync
+                                 // by hand with ingest.cpp's kLangTable per its own header comment)
+#include "infra/sparseCsr.h"     // first-party infra math (src/infra/)
+#include "infra/csrverify.h"     // structural gate, VERIFY'd after every production CSR build
+#include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
+#include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
+#include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
+#include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
+#include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <algorithm>
 #include <cmath>

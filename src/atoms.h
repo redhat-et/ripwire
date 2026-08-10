@@ -33,8 +33,8 @@
 // are therefore filtered to the extensions ingest routes through a C/C++/ObjC/CUDA grammar.
 
 #include "infra/Diagnostics.h"
-#include "ingest.h"       // AstQuerySpec / AstMatch / astQuery — the SAME engine --lint and --match run
-#include "lintrules.h"    // langOfPath — the house file-language predicate; kLintMaxPerRule
+#include "ingest.h"             // AstQuerySpec / AstMatch / astQuery — the SAME engine --lint and --match run
+#include "lintrules.h"          // langOfPath — the house file-language predicate; kLintMaxPerRule
 #include "model.h"
 
 #include <algorithm>

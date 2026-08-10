@@ -19,16 +19,16 @@
 #include "lexical.h"
 #include "recall.h"
 #include "situ.h"
-#include "workspace.h"     // multi-root `paths` array (A11): root hygiene + labels + merge
-#include "quality.h"        // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — no-op in release; the visible line on a watcher-degrade path
-#include "infra/hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
+#include "workspace.h"          // multi-root `paths` array (A11): root hygiene + labels + merge
+#include "quality.h"            // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — no-op in release; the visible line on a watcher-degrade path
+#include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <sys/stat.h>
-#include <sys/time.h>      // struct timespec for a non-blocking kevent poll
-#include <fcntl.h>         // open() the watched dir fds + O_CREAT for the per-file edit lockfile
-#include <unistd.h>        // close()
-#include <sys/file.h>      // flock(LOCK_EX|LOCK_NB) — the ripwire-vs-ripwire edit serializer (F1); POSIX-wide, incl. glibc
+#include <sys/time.h>  // struct timespec for a non-blocking kevent poll
+#include <fcntl.h>     // open() the watched dir fds + O_CREAT for the per-file edit lockfile
+#include <unistd.h>    // close()
+#include <sys/file.h>  // flock(LOCK_EX|LOCK_NB) — the ripwire-vs-ripwire edit serializer (F1); POSIX-wide, incl. glibc
 
 // kqueue/kevent is a BSD interface: <sys/event.h> does not exist on Linux at all, which is where the first
 // public CI run stopped ("fatal error: sys/event.h: No such file or directory", both ubuntu legs). It powers
@@ -64,11 +64,11 @@
 #include <sys/event.h>     // kqueue / kevent — the FS-event freshness watcher (macOS/BSD; Feature-1 hot-reload)
 #endif
 
-#include <atomic>          // RIPWIRE_MCP_TIMINGS rebuild-count observable (env-gated stderr timing; off → untouched)
+#include <atomic>       // RIPWIRE_MCP_TIMINGS rebuild-count observable (env-gated stderr timing; off → untouched)
 #include <cctype>
-#include <cerrno>          // errno / EWOULDBLOCK — the edit-lock bounded-acquire loop (F1)
-#include <chrono>          // RIPWIRE_MCP_TIMINGS per-request steady_clock wall (env-gated)
-#include <ctime>           // nanosleep — the edit-lock bounded-acquire backoff (F1)
+#include <cerrno>       // errno / EWOULDBLOCK — the edit-lock bounded-acquire loop (F1)
+#include <chrono>       // RIPWIRE_MCP_TIMINGS per-request steady_clock wall (env-gated)
+#include <ctime>        // nanosleep — the edit-lock bounded-acquire backoff (F1)
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -76,7 +76,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
-#include <thread>          // Phase-M: the DETACHED qsnap-prefetch worker
+#include <thread>       // Phase-M: the DETACHED qsnap-prefetch worker
 #include <utility>
 #include <vector>
 

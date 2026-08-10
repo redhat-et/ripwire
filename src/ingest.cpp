@@ -8,14 +8,14 @@
 // Single-threaded (v1). Never throws: every recoverable problem degrades + DEGRADED_PATH_ALERT.
 
 #include "ingest.h"
-#include "docparse.h"           // P1-B: non-code document ingest (notebooks/html/csv + markitdown bridge)
-#include "arch.h"                // T5: relForHash — root-relative path key, reused for cache portability
-#include "quality.h"             // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
-#include "embedded_queries.h"    // configure-generated constexpr tags.scm table; no runtime source-tree dependency
-#include "infra/hashutil.h"            // sanitizer-clean modulo-2^64 FNV multiplication
-#include "infra/namesplit.h"           // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
-#include "infra/fixedStr.h"            // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
-#include "lexindex.h"            // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
+#include "docparse.h"          // P1-B: non-code document ingest (notebooks/html/csv + markitdown bridge)
+#include "arch.h"              // T5: relForHash — root-relative path key, reused for cache portability
+#include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
+#include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
+#include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
+#include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
+#include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -25,12 +25,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <chrono>       // A4-P7: wall-clock cache-write timestamp for the racy-git rule
+#include <chrono>              // A4-P7: wall-clock cache-write timestamp for the racy-git rule
 #include <cstdio>
-#include <cstdlib>      // std::getenv — RIPWIRE_CACHE_STATS drift observable
+#include <cstdlib>             // std::getenv — RIPWIRE_CACHE_STATS drift observable
 #include <cstring>
-#include <sys/stat.h>   // A4-P7: stat() for the (size,mtime) warm-run shortcut
-#include <unistd.h>     // getpid — unique per-process cache temp name
+#include <sys/stat.h>          // A4-P7: stat() for the (size,mtime) warm-run shortcut
+#include <unistd.h>            // getpid — unique per-process cache temp name
 #include <filesystem>
 #include <fstream>
 #include <limits>

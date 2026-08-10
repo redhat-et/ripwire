@@ -98,13 +98,13 @@
 // is re-sorted by an explicit key. No wall clock, no address hashing.
 
 #include "model.h"
-#include "layout.h"        // the offset model: modelDefFromSource / findDefBody / findTopLevelDef / diffDefs
-#include "crossref.h"       // the ref/blob sweep: enumerateRefs / diffRaw / streamBlobs / isBlobSha / isNullSha
-#include "quality.h"        // gitRepoHasHistory / gitHeadSha / gitOneLine
-#include "arch.h"           // relForHash — ing.files' root-prefixed path -> the git-relative spelling diffRaw reports
-#include "infra/jsonesc.h"        // shSingleQuote — the merge-base call
-#include "serialize.h"      // escapeXml
-#include "infra/Diagnostics.h"   // VERIFY / DEGRADED_PATH_ALERT
+#include "layout.h"             // the offset model: modelDefFromSource / findDefBody / findTopLevelDef / diffDefs
+#include "crossref.h"           // the ref/blob sweep: enumerateRefs / diffRaw / streamBlobs / isBlobSha / isNullSha
+#include "quality.h"            // gitRepoHasHistory / gitHeadSha / gitOneLine
+#include "arch.h"               // relForHash — ing.files' root-prefixed path -> the git-relative spelling diffRaw reports
+#include "infra/jsonesc.h"      // shSingleQuote — the merge-base call
+#include "serialize.h"          // escapeXml
+#include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
 #include "btree.hpp"        // gtl::btree_map — sorted iteration (house rule: never std::map)
 

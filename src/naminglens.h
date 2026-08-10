@@ -55,9 +55,9 @@
 #include <vector>
 
 #include "model.h"
-#include "ingest.h"     // AstMatch — naming findings ride the shared lint finding shape
-#include "lexindex.h"   // lexSubtokenHash — the SAME normalized-token hash the BM25 postings path uses
-#include "infra/profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
+#include "ingest.h"              // AstMatch — naming findings ride the shared lint finding shape
+#include "lexindex.h"            // lexSubtokenHash — the SAME normalized-token hash the BM25 postings path uses
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 namespace rw
 {

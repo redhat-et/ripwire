@@ -89,20 +89,20 @@
 // of addresses. Two runs on a fixed tree are byte-identical.
 
 #include "model.h"
-#include "arch.h"         // relForHash
-#include "serialize.h"    // escapeXml
-#include "pageview.h"     // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
-#include "tracelocus.h"   // traceMatchFile / traceEnclosingSymbol — the SHARED frame→corpus resolver
-#include "darkflags.h"    // readWhole / identByte / trimView — the shared lexical helpers (no second copy)
-#include "docparse.h"     // isDocExtension — which indexed files are DOCUMENTS, not code
-#include "gitoracle.h"    // the SHARED name-history oracle — "was this name ever here, and when did it leave?"
-#include "ingest.h"       // isSkippedCrawlDir — the SHARED crawl denylist, for the on-disk existence probe
-#include "mention.h"      // mention_detail::pathSuffixMatches — the whole-segment suffix match
-#include "workspace.h"    // wsdetail::segmentsOf
+#include "arch.h"               // relForHash
+#include "serialize.h"          // escapeXml
+#include "pageview.h"           // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
+#include "tracelocus.h"         // traceMatchFile / traceEnclosingSymbol — the SHARED frame→corpus resolver
+#include "darkflags.h"          // readWhole / identByte / trimView — the shared lexical helpers (no second copy)
+#include "docparse.h"           // isDocExtension — which indexed files are DOCUMENTS, not code
+#include "gitoracle.h"          // the SHARED name-history oracle — "was this name ever here, and when did it leave?"
+#include "ingest.h"             // isSkippedCrawlDir — the SHARED crawl denylist, for the on-disk existence probe
+#include "mention.h"            // mention_detail::pathSuffixMatches — the whole-segment suffix match
+#include "workspace.h"          // wsdetail::segmentsOf
 #include "smallvec.h"           // rw::SmallVec — small basename→path lists
-#include "infra/Diagnostics.h"   // VERIFY / DEGRADED_PATH_ALERT
-#include "gitstamp.h"     // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
-#include "layout.h"       // layout::isCFamilyPath — shared C/C++/ObjC/CUDA extension classifier
+#include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
+#include "gitstamp.h"           // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
+#include "layout.h"             // layout::isCFamilyPath — shared C/C++/ObjC/CUDA extension classifier
 
 #include <algorithm>
 #include <atomic>

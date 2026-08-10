@@ -50,14 +50,14 @@
 
 #include "model.h"
 #include "graph.h"
-#include "filter.h"      // isTestPath
-#include "gitmine.h"     // shSingleQuote, cochangePartners, gitFileAuthors, FileOwnership
-#include "quality.h"     // gitOneLine — the SAME one-line git primitive crossref/abicheck/mergescout resolve their merge-base with
-#include "serialize.h"   // escapeXml
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — the unrelated-history (no merge-base) degrade
-#include "gitstamp.h"    // gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
-#include "graphlegend.h" // §H4 §3.4 / V4 MED-3: the shared counts_floor= marker + graph-count legend clauses
-#include "testmap.h"     // §A9.5 / §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
+#include "filter.h"             // isTestPath
+#include "gitmine.h"            // shSingleQuote, cochangePartners, gitFileAuthors, FileOwnership
+#include "quality.h"            // gitOneLine — the SAME one-line git primitive crossref/abicheck/mergescout resolve their merge-base with
+#include "serialize.h"          // escapeXml
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the unrelated-history (no merge-base) degrade
+#include "gitstamp.h"           // gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
+#include "graphlegend.h"        // §H4 §3.4 / V4 MED-3: the shared counts_floor= marker + graph-count legend clauses
+#include "testmap.h"            // §A9.5 / §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
 
 #include <algorithm>
 #include <cmath>

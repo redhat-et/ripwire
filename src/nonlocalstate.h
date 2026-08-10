@@ -57,14 +57,14 @@
 // before emission; nothing iterates a HashMap into output.
 
 #include "model.h"
-#include "graph.h"        // Graph (in/out CSR) + langCompatible — the same call graph every reach verb walks
-#include "ingest.h"       // AstQuerySpec / AstMatch / astQuery — the shared re-parse pass --lint already runs
-#include "flipimpact.h"   // buildSymbolLineIndex / innermostAtLine — the shared line -> innermost-def lookup
-#include "docdrift.h"     // hasWholeWord — THE house whole-word predicate (so `const_cast` never satisfies `const`)
-#include "pageview.h"     // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
-#include "serialize.h"    // escapeXml
-#include "graphlegend.h"  // kGraphCountFloorAttrXml — the shared floor marker
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — a blind spot degrades the report, never aborts it
+#include "graph.h"              // Graph (in/out CSR) + langCompatible — the same call graph every reach verb walks
+#include "ingest.h"             // AstQuerySpec / AstMatch / astQuery — the shared re-parse pass --lint already runs
+#include "flipimpact.h"         // buildSymbolLineIndex / innermostAtLine — the shared line -> innermost-def lookup
+#include "docdrift.h"           // hasWholeWord — THE house whole-word predicate (so `const_cast` never satisfies `const`)
+#include "pageview.h"           // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
+#include "serialize.h"          // escapeXml
+#include "graphlegend.h"        // kGraphCountFloorAttrXml — the shared floor marker
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — a blind spot degrades the report, never aborts it
 
 #include <algorithm>
 #include <array>

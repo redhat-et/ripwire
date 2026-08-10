@@ -7,9 +7,9 @@
 // and BODY text, so a query matches code by what it DOES, not just what it's named. Deterministic.
 
 #include "model.h"
-#include "lexindex.h"           // B0: the ONE subtoken state machine + docCommentStart + persisted-stats types
-#include "infra/profileScope.h"   // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
-#include "infra/sortutil.h"           // deterministic sanitizer-clean score sorting for adaptive cuts
+#include "lexindex.h"            // B0: the ONE subtoken state machine + docCommentStart + persisted-stats types
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
 
 #include <algorithm>
 #include <atomic>

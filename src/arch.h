@@ -28,8 +28,8 @@
 //   --baseline-update merges current violations into the sidecar and exits 0 (accept new debt deliberately).
 
 #include "model.h"
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on a malformed path-regex (never throw at match time)
-#include "infra/hashutil.h"      // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade on a malformed path-regex (never throw at match time)
+#include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>
 #include <array>

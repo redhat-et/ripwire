@@ -43,9 +43,9 @@
 #include "model.h"
 #include "crossref.h"
 #include "mergescout.h"
-#include "serialize.h"    // escapeXml
-#include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
-#include "gitstamp.h"     // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
+#include "serialize.h"          // escapeXml
+#include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
+#include "gitstamp.h"           // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
 
 #include <cstdint>
 #include <cstdio>
