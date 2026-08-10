@@ -75,6 +75,10 @@ BINARY_EXTENSIONS = {
     ".tgz",    # bench/locbench/results/*/*.tgz — gzipped gate+fixture bundles
     ".pdf",    # present/ripwire-showcase.pdf — generated binary slide export
     ".pptx",   # present/ripwire-showcase.pptx — generated Office Open XML slide deck
+    ".png",    # docs/assets/showcase-preview.png — the README's clickable deck preview, three slides
+               # rendered from the committed present/ripwire-showcase.pdf. Added 2026-08-10, the round
+               # this gate's header anticipated: it failed once naming the file, and this is the row
+               # plus the reason. Regenerate it from the deck PDF; never draw or edit it by hand.
 }
 
 def scan(paths, label):
