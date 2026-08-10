@@ -61,16 +61,23 @@ with tempfile.TemporaryDirectory() as td:
     old_home = os.environ.get( "CODEX_HOME" )
     os.environ["CODEX_HOME"] = str( fake_home )
     try:
-        base_env, base_home = module.prepare_codex_environment( pathlib.Path( td ) / "runs", "task", "baseline", 1, ripwire )
-        ctx_env, ctx_home = module.prepare_codex_environment( pathlib.Path( td ) / "runs", "task", "ripwire_cli", 1, ripwire )
+        base_env, base_home, base_shim = module.prepare_codex_environment( pathlib.Path( td ) / "runs", "task", "baseline", 1, ripwire )
+        ctx_env, ctx_home, ctx_shim = module.prepare_codex_environment( pathlib.Path( td ) / "runs", "task", "ripwire_cli", 1, ripwire )
+        sk_env, sk_home, sk_shim = module.prepare_codex_environment( pathlib.Path( td ) / "runs", "task", "ripwire_skills", 1, ripwire )
     finally:
         if old_home is None: os.environ.pop( "CODEX_HOME", None )
         else: os.environ["CODEX_HOME"] = old_home
     assert pathlib.Path( base_env["CODEX_HOME"] ) == base_home
     assert ( base_home / "auth.json" ).is_symlink()
     assert not ( base_home / "skills" ).exists()
-    assert any( ( ctx_home / "skills" ).iterdir() )
-    assert ctx_env["PATH"].split( os.pathsep )[0] == str( pathlib.Path( ripwire ).parent )
+    # v3: the skills tree belongs to ripwire_skills ALONE. It used to ride along on ripwire_cli,
+    # which is why the 2026-08-04 pilot could not tell ripwire's cost from the skills tax.
+    assert not ( ctx_home / "skills" ).exists(), "ripwire_cli must not inject skills any more"
+    assert any( ( sk_home / "skills" ).iterdir() ), "ripwire_skills must inject skills"
+    # PATH now leads with the logging shim, not the raw binary dir: `claude -p` never logged shell
+    # commands, so a transcript grep could not count ripwire calls for that harness at all.
+    assert ctx_env["PATH"].split( os.pathsep )[0] == str( pathlib.Path( ctx_shim ).parent )
+    assert pathlib.Path( ctx_shim ).name == "ripwire" and os.access( ctx_shim, os.X_OK )
 
 # ── run_one's extracted accounting helpers: same events + trailer behavior the inline code had ─────────
 with tempfile.TemporaryDirectory() as td:
