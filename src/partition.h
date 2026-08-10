@@ -186,6 +186,14 @@ inline std::uint32_t splitGroupsUpTo( CommunityGroups& grp, std::uint32_t target
             break; // every group is a singleton — N is unreachable, caller reports it
         }
 
+        // ORDER IS LOAD-BEARING HERE, and it is the one place in the tree where it is. `src` is a reference
+        // INTO grp.members, and the push_back below can reallocate that outer vector — so `src` dangles from
+        // that line onward. It is correct today only because every read of `src` (the size, the iterator
+        // pair, the resize) happens BEFORE the push_back, and `tail` is an independent copy by then. Moving
+        // the push_back up, or adding any use of `src` after it, is a use-after-free that will not look like
+        // one. The small-vector conversion wave surveyed every nested container for exactly this hazard and
+        // this was the only site that had it; it was left alone rather than "fixed", because the fix is a
+        // restructure and the bug is not present.
         std::vector<NodeId>& src  = grp.members[ widest ];
         const std::size_t    half = ( src.size() + 1 ) / 2;
         std::vector<NodeId>  tail( src.begin() + std::ptrdiff_t( half ), src.end() );
