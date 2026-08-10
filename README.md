@@ -1139,7 +1139,7 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
-(2026-08-09): `files=106 symbols=3150 edges=8858 ambiguous=2991 unresolved=1091`.
+(2026-08-09): `files=109 symbols=3220 edges=9663 ambiguous=4507 unresolved=1091`.
 
 | the output says | read it as |
 | --- | --- |
