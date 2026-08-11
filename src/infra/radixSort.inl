@@ -191,8 +191,7 @@ void buildHistogramsScalarKeys( const Key* keys, std::size_t count,
     }
 }
 
-#if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && \
-    (!defined(__BYTE_ORDER__) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#if RADIXSORT_NEON
 template<int kPasses>
 ALWAYS_INLINE void addNeonU32Bytes( uint32x4_t v,
                                     Count (&hist)[kPasses][256] ) noexcept
@@ -239,19 +238,102 @@ ALWAYS_INLINE void addNeonF32Bytes( float32x4_t v,
 
     addNeonU32Bytes( veorq_u32(raw, flip), hist );
 }
+#elif RADIXSORT_SSE2
+// The SSE2 mirrors of the NEON kernels above: one 16-byte load, spill to a byte array,
+// scalar-increment the histograms. Unaligned loads throughout — the keys arrays carry no
+// alignment contract (matching NEON's vld1q posture); the spill store is aligned.
+template<int kPasses>
+ALWAYS_INLINE void addSseU32Bytes( __m128i v,
+                                   Count (&hist)[kPasses][256] ) noexcept
+{
+    static_assert( kPasses == 4 );
+    alignas(16) uint8_t bytes[16];
+    _mm_store_si128( reinterpret_cast<__m128i*>( bytes ), v );
+
+    ++hist[0][bytes[ 0]]; ++hist[1][bytes[ 1]]; ++hist[2][bytes[ 2]]; ++hist[3][bytes[ 3]];
+    ++hist[0][bytes[ 4]]; ++hist[1][bytes[ 5]]; ++hist[2][bytes[ 6]]; ++hist[3][bytes[ 7]];
+    ++hist[0][bytes[ 8]]; ++hist[1][bytes[ 9]]; ++hist[2][bytes[10]]; ++hist[3][bytes[11]];
+    ++hist[0][bytes[12]]; ++hist[1][bytes[13]]; ++hist[2][bytes[14]]; ++hist[3][bytes[15]];
+}
+
+template<int kPasses>
+ALWAYS_INLINE void addSseU64Bytes( __m128i v,
+                                   Count (&hist)[kPasses][256] ) noexcept
+{
+    static_assert( kPasses == 8 );
+    alignas(16) uint8_t bytes[16];
+    _mm_store_si128( reinterpret_cast<__m128i*>( bytes ), v );
+
+    ++hist[0][bytes[ 0]]; ++hist[1][bytes[ 1]]; ++hist[2][bytes[ 2]]; ++hist[3][bytes[ 3]];
+    ++hist[4][bytes[ 4]]; ++hist[5][bytes[ 5]]; ++hist[6][bytes[ 6]]; ++hist[7][bytes[ 7]];
+    ++hist[0][bytes[ 8]]; ++hist[1][bytes[ 9]]; ++hist[2][bytes[10]]; ++hist[3][bytes[11]];
+    ++hist[4][bytes[12]]; ++hist[5][bytes[13]]; ++hist[6][bytes[14]]; ++hist[7][bytes[15]];
+}
+
+template<int kPasses>
+ALWAYS_INLINE void addSseF32Bytes( __m128 v,
+                                   Count (&hist)[kPasses][256] ) noexcept
+{
+    static_assert( kPasses == 4 );
+
+    __m128i raw = _mm_castps_si128( v );
+    const __m128i absBits = _mm_and_si128( raw, _mm_set1_epi32( 0x7FFFFFFF ) );
+    const __m128i nonZero = _mm_cmpgt_epi32( absBits, _mm_setzero_si128() );    // absBits <= INT32_MAX, so the signed compare is exact
+    raw = _mm_and_si128( raw, nonZero );             // normalize -0.0 and +0.0
+
+    const __m128i signMask = _mm_srai_epi32( raw, 31 );
+    const __m128i flip = _mm_or_si128( signMask, _mm_set1_epi32( int(0x80000000u) ) );   // sign ? 0xFFFFFFFF : 0x80000000
+
+    addSseU32Bytes( _mm_xor_si128( raw, flip ), hist );
+}
+#endif
+
+#if RADIXSORT_NEON || RADIXSORT_SSE2
+// Backend-agnostic load+accumulate shims so the fast-path loops below exist once, not per backend.
+template<int kPasses>
+ALWAYS_INLINE void addVectorU32Bytes( const uint32_t* keys4,
+                                      Count (&hist)[kPasses][256] ) noexcept
+{
+#if RADIXSORT_NEON
+    addNeonU32Bytes( vld1q_u32( keys4 ), hist );
+#else
+    addSseU32Bytes( _mm_loadu_si128( reinterpret_cast<const __m128i*>( keys4 ) ), hist );
+#endif
+}
+
+template<int kPasses>
+ALWAYS_INLINE void addVectorU64Bytes( const uint64_t* keys2,
+                                      Count (&hist)[kPasses][256] ) noexcept
+{
+#if RADIXSORT_NEON
+    addNeonU64Bytes( vld1q_u64( keys2 ), hist );
+#else
+    addSseU64Bytes( _mm_loadu_si128( reinterpret_cast<const __m128i*>( keys2 ) ), hist );
+#endif
+}
+
+template<int kPasses>
+ALWAYS_INLINE void addVectorF32Bytes( const float* keys4,
+                                      Count (&hist)[kPasses][256] ) noexcept
+{
+#if RADIXSORT_NEON
+    addNeonF32Bytes( vld1q_f32( keys4 ), hist );
+#else
+    addSseF32Bytes( _mm_loadu_ps( keys4 ), hist );
+#endif
+}
 #endif
 
 template<class Key, int kPasses>
 void buildHistogramsContiguousKeys( const Key* keys, std::size_t count,
                                     Count (&hist)[kPasses][256] ) noexcept
 {
-#if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && \
-    (!defined(__BYTE_ORDER__) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#if RADIXSORT_NEON || RADIXSORT_SSE2
     if constexpr ( std::is_same_v<Key, uint32_t> )
     {
         std::size_t i = 0;
         for( ; i + 4 <= count; i += 4 ) {
-            addNeonU32Bytes( vld1q_u32( keys + i ), hist );
+            addVectorU32Bytes( keys + i, hist );
 }
         for( ; i < count; ++i )
         {
@@ -267,7 +349,7 @@ void buildHistogramsContiguousKeys( const Key* keys, std::size_t count,
     {
         std::size_t i = 0;
         for( ; i + 2 <= count; i += 2 ) {
-            addNeonU64Bytes( vld1q_u64( keys + i ), hist );
+            addVectorU64Bytes( keys + i, hist );
 }
         for( ; i < count; ++i )
         {
@@ -283,13 +365,12 @@ void buildHistogramsContiguousKeys( const Key* keys, std::size_t count,
         std::size_t i = 0;
         for( ; i + 4 <= count; i += 4 )
         {
-            const float32x4_t v = vld1q_f32( keys + i );
             VERIFY_TEXT( fastmath::isFiniteFast(keys[i + 0]) &&
                          fastmath::isFiniteFast(keys[i + 1]) &&
                          fastmath::isFiniteFast(keys[i + 2]) &&
                          fastmath::isFiniteFast(keys[i + 3]),
                          "radix float keys must be finite" );
-            addNeonF32Bytes( v, hist );
+            addVectorF32Bytes( keys + i, hist );
         }
         for( ; i < count; ++i )
         {

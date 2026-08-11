@@ -240,6 +240,7 @@ FAILFAST = {
     "lintscopecheck.sh":        ( "fixture assertions fail fast and propagate their nonzero status",     1 ),
     "mcpcodexmetacheck.sh":     ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "readmeexamplecheck.sh":    ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
+    "radixsimdcheck.sh":        ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────
