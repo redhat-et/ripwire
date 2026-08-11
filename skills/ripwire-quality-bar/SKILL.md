@@ -17,7 +17,10 @@ description: >
   the CONVERGENCE LOOP around it (re-reading the drill-down table, acking, chasing `--dmm`) — read this file
   only if the one-shot delta actually reports something. For
   merge-safety / blast-radius / tests-to-run →
-  **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Backed by
+  **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Boundary
+  with ripwire-fresh-eyes in one line: quality-bar NAMES THE FIX — which restructuring a measured shape
+  calls for and how risky applying it is — and judges what YOU just wrote; diagnosing the shape of
+  unfamiliar code in the first place is ripwire-fresh-eyes. Backed by
   ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
