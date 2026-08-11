@@ -21,7 +21,7 @@
 //
 // Exit 0 = all pass; nonzero = failure (per-arm PASS/FAIL lines on stdout, first mismatch detailed).
 
-#include "radixSort.h"
+#include "infra/radixSort.h"
 
 #include "harnesscommon.h"
 
