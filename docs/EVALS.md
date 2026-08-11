@@ -400,7 +400,23 @@ substitution meter (the per-call JSONL log, live on main), and a routing verdict
 hypothesis to cross-read against that log, never an agent-behavior claim. The `bench/agentloop`
 task-success eval stays unrun (underpowered as configured; see `ff928ee`'s power calculation).
 
-*Result: recorded below after the single held-out measurement.*
+**RESULT (2026-08-11, the single held-out measurement): REJECT.** Net flipped rows on the n=85
+held-out judged set: newly-correct **1**, newly-wrong **1**, **net 0** — below the [+2, +6] band.
+Judged-all bm25-desc moved 89→88/152; split=test hit@1 was unchanged at 68.5% (hit@2 80.0→83.8 and
+mrr 0.782→0.794 rose, but neither was the registered metric); sep-auc 0.953→0.951 (floor held).
+The description edit was reverted per the decision rule; the corpus growth and recalibrated floors
+stay (instrument improvements independent of the change); the term tables and derivation script
+remain committed (`test/skillevalfix/s1_terms_2026-08-11.txt`, `s1_deriveterms.py`) as the record.
+
+**What this negative result says** (METHODOLOGY §5): body-derived rare vocabulary (tf≥3 own-body,
+df≤4/17), added within a ≤12-word cap to already-long descriptions, does not move hard-paraphrase
+routing — the judged rows share no vocabulary with the skill by construction, and rare body terms
+are exactly the vocabulary a paraphrase does not use either. This is the third rejection of a
+"more of the skill's own rare words" mechanism (after the two LB-3 stemming/variant rounds on
+`--for`); the surviving hypothesis is that the desc-vs-body gap (+3 rows, stable across a 2.6×
+corpus growth) lives in the bodies' *common* connective phrasing that BM25 b=0.75 makes expensive
+to add — closing it likely needs a ranker-side change (e.g. scoring desc+body with a length-aware
+mix), which is out of scope for a description-content round and would need its own registration.
 
 ---
 
