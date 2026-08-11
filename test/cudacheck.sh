@@ -16,9 +16,11 @@
 # every C-family behaviour for no benefit. See kLangTable's comment in src/ingest.cpp.
 #
 # The fixture test/cudafix/ is the smallest thing that carries every construct that decision rests on:
-#   reduceKernels.cu  — `__global__`/`__device__`/`__forceinline__` qualifiers, a `__constant__` module
-#                       table, `__shared__` tile memory, `__launch_bounds__`, a templated kernel, and
-#                       host-side wrappers with `<<<>>>` launches (2-arg, 3-arg, and template-kernel).
+#   reduceKernels.cu  — `__global__`/`__device__`/`__forceinline__` qualifiers, an UNINITIALIZED
+#                       `__constant__` module table plus `__device__`/`__managed__` module globals (the
+#                       memory-space extraction policy §7b pins), `__shared__` tile memory,
+#                       `__launch_bounds__`, a templated kernel, and host-side wrappers with `<<<>>>`
+#                       launches (2-arg, 3-arg, and template-kernel).
 #   reduceShared.cuh  — the DUAL-COMPILE header: `#ifdef __CUDACC__` guard, a `__host__ __device__`
 #                       helper (rk_normalize), and the wrapper declarations both halves share.
 #   hostMain.cpp      — the pure-host half, calling the wrappers and the dual-compile helper.
@@ -60,7 +62,7 @@ done
 
 # ── 3) NO garbage symbols: a CUDA keyword must never become a symbol name ─────────────────────────────
 junk=0
-for kw in __global__ __device__ __host__ __constant__ __shared__ __forceinline__ __launch_bounds__ dim3; do
+for kw in __global__ __device__ __host__ __constant__ __managed__ __shared__ __forceinline__ __launch_bounds__ dim3; do
     printf '%s' "$MAP" | grep -q "n=\"$kw\"" && { no "keyword leaked in as a symbol name: $kw"; junk=1; }
 done
 [ $junk -eq 0 ] && ok "no CUDA keyword leaked in as a symbol name (__global__/__device__/__constant__/…)"
@@ -104,12 +106,55 @@ tr '<' '\n' < "$TMP/deps" | grep -A3 'reduceKernels\.cu"' | grep -q 'inc t="redu
 # ── 7b) the C-family behaviours .cu/.cuh inherit through Lang::Cpp actually engage ────────────────────
 #     constexpr SCREAMING_SNAKE module constants extract (the constcheck convention, in a .cuh), and a
 #     .cuh struct is layout-modelled (isCFamilyPath gained .cu/.cuh — a TypeScript class has no byte
-#     layout, a CUDA parameter block does). KNOWN LIMIT, stated not hidden: a `__constant__ float T[64];`
-#     module TABLE does not extract — the C++ tags.scm constant pattern keys on const/constexpr, not on
-#     the __constant__ type_qualifier. Measured 2026-08-04; tracked as follow-up capture work.
+#     layout, a CUDA parameter block does). The 2026-08-04 KNOWN LIMIT is now CLOSED and pinned positive:
+#     an UNINITIALIZED `__constant__ float T[64];` module table (the cudaMemcpyToSymbol idiom — the old
+#     pattern required an init_declarator, so it could never match) extracts REGARDLESS of case — the
+#     memory-space qualifier, not the name, is the evidence (the Rust const_item rationale). Mutable
+#     device globals (`__device__`/`__managed__`) stay behind the SCREAMING_SNAKE convention gate:
+#     a SCREAMING table indexes, a lower-case accumulator does not.
+#     BY-DESIGN NON-GOALS, pinned in the other direction so the close-out is not a silent widening: the
+#     lower-case mutable `__device__` global below must stay OUT (asserted); function-local `__shared__`
+#     tiles are unreachable by construction (their scope is a compound_statement, not translation_unit/
+#     declaration_list/preproc_*); kernel prototypes never match (function_declarator); and an
+#     uninitialized declaration carrying NO memory-space qualifier — the plain-C++ extern/static/alignas
+#     shapes the new structural patterns raw-match by the hundred — is dropped in ingest by
+#     cudaMemorySpaceQualifierOf, so non-CUDA C++ maps are byte-identical to the pre-port binary's.
 printf '%s' "$MAP" | grep -q 'n="RK_TILE_WIDTH"' \
     && ok "constexpr module constant extracts from the .cuh (RK_TILE_WIDTH)" \
     || no "constexpr module constant missing from the .cuh"
+printf '%s' "$MAP" | grep -q 'n="rk_scaleTable"' \
+    && ok "__constant__ module table extracts, case-blind (rk_scaleTable — the closed 2026-08-04 limit)" \
+    || no "__constant__ module table missing (rk_scaleTable) — the 7b limit has regressed to open"
+printf '%s' "$MAP" | grep -q 'n="rk_tileWeights"' \
+    && ok "2-D __constant__ table extracts (rk_tileWeights — the cuda-samples c_Table shape)" \
+    || no "2-D __constant__ table missing (rk_tileWeights)"
+printf '%s' "$MAP" | grep -q 'n="rk_biasTable"' \
+    && ok "INITIALIZED __constant__ extracts case-blind (rk_biasTable — the dxtc kColorMetric shape)" \
+    || no "initialized lower-case __constant__ missing (rk_biasTable) — init path still convention-gated"
+printf '%s' "$MAP" | grep -q 'n="rk_guardTable"' \
+    && ok "__constant__ inside a preprocessor conditional extracts (rk_guardTable — the header-guard idiom)" \
+    || no "preproc-wrapped __constant__ missing (rk_guardTable) — preproc wrappers absent"
+printf '%s' "$MAP" | grep -q 'n="RK_DEV_LUT"' \
+    && ok "SCREAMING __device__ module table extracts (RK_DEV_LUT)" \
+    || no "SCREAMING __device__ module table missing (RK_DEV_LUT)"
+printf '%s' "$MAP" | grep -q 'n="RK_MANAGED_SEED"' \
+    && ok "SCREAMING __managed__ module binding extracts (RK_MANAGED_SEED)" \
+    || no "SCREAMING __managed__ module binding missing (RK_MANAGED_SEED)"
+printf '%s' "$MAP" | grep -q 'n="rk_devAccum"' \
+    && no "lower-case mutable __device__ global leaked past the convention gate (rk_devAccum)" \
+    || ok "lower-case mutable __device__ global stays unindexed (rk_devAccum)"
+#     The --uses arm asserts defs>=1 AND external="0" on purpose: --uses is reference-name-based and
+#     already named this read site BEFORE the close-out, as an EXTERNAL name (`defs="0" external="1"` —
+#     measured against the pre-port binary 2026-08-10). A read-site-only assertion would therefore have
+#     passed red-first and pinned nothing; resolving to a real definition is the actual payoff of
+#     indexing the table. The test reads the attributes off the <uses> element rather than grepping the
+#     document for `external="1"`, because the schema LEGEND explains that attribute in prose — a naive
+#     whole-output grep matches the legend and fails on a correct run.
+"$BIN" "$FIX" --no-cache --uses=rk_scaleTable >"$TMP/u2" 2>/dev/null
+grep -q 'role="read" p="[^"]*reduceKernels\.cu:[0-9]' "$TMP/u2" \
+    && grep -q 'uses of="rk_scaleTable" defs="[1-9][0-9]*" external="0"' "$TMP/u2" \
+    && ok "--uses=rk_scaleTable resolves the device-side read to a real def (defs>=1, external=0)" \
+    || { no "--uses=rk_scaleTable did not resolve to an indexed def (still external, or read site missing)"; head -c 400 "$TMP/u2"; }
 "$BIN" "$FIX" --no-cache --layout=RkReduceParams >"$TMP/lay" 2>/dev/null
 grep -q 'RkReduceParams' "$TMP/lay" && grep -q 'scale' "$TMP/lay" \
     && ok "--layout models the .cuh parameter block (isCFamilyPath covers .cu/.cuh)" \
