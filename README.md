@@ -369,7 +369,8 @@ measurements in [`docs/EVALS.md`](docs/EVALS.md) — each with its instrument, i
 counterexamples, because the losses ship beside the wins. Zero runtime dependencies, C++23, builds
 with the network off.
 
-Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, aider**, and any agent that can call a CLI.
+Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, opencode, aider**, and any agent that can
+call a CLI.
 
 <details>
 <summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed</summary>
@@ -1268,6 +1269,7 @@ ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json 
 ripwire wrap codex       # MCP:      codex mcp add ripwire -- ripwire --mcp (+ TOML fallback)
 ripwire wrap windsurf    # MCP:      that client's stanza
 ripwire wrap gemini      # MCP:      that client's stanza
+ripwire wrap opencode    # CLI-1st:  the AGENTS.md wiring; its "mcp" stanza offered as the alternative
 ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
