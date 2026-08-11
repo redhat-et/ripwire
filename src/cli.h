@@ -98,6 +98,13 @@ struct Config
     std::string_view match;                                // --match=QUERY: tree-sitter structural query (shape search)
     bool             lint = false;                         // --lint: built-in AST checks (rides the same query pass)
     std::string_view lintRulesDir;                         // --lint-rules=DIR: load user YAML lint rules (ast-grep style) — runs alongside/instead of --lint
+    bool             sarif = false;                        // --sarif (with --lint / --lint-rules): SAME findings, SARIF 2.1.0 (src/sarif.h)
+                                                             // instead of the native XML <lint> block — the shape github/codeql-action/
+                                                             // upload-sarif consumes for the code-scanning UI. Pure re-serialization: no
+                                                             // new analysis, no re-ranking. Refused (loudly, in validateConfig) alone,
+                                                             // with --match (SARIF covers --lint findings only), with --with-profile
+                                                             // (the heat_* join has no SARIF field yet) and with paging (SARIF always
+                                                             // emits the FULL result set — GitHub's action wants one complete document).
     std::vector<std::string> expand;                       // --expand=NAME,...: emit full def bodies for these symbols; NAME:START-END slices to 1-based lines START..END of the def (octocode partial-fetch)
     std::vector<std::string> outline;                      // --outline=NAME,...: control-flow skeletons (L3 scoped snippet)
     std::string_view forTask;                              // --for=TASK: the task lens — ranked signatures inventory + metrics, framed for reuse
@@ -1050,6 +1057,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a\n"
         "                               high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule\n"
         "    --lint-rules=DIR           load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint\n"
+        "    --sarif                    (with --lint / --lint-rules) the SAME findings as SARIF 2.1.0 instead of the native XML\n"
+        "                               <lint> block — the shape github/codeql-action/upload-sarif consumes for code scanning.\n"
+        "                               Pure re-serialization (zero new analysis); results count == the native run's findings\n"
+        "                               count. Levels: user severity error/warn/info -> SARIF error/warning/note; a built-in\n"
+        "                               finding (a fact, never a gate) has no severity of its own and also maps to note. Fields\n"
+        "                               with no SARIF home (per-rule capped= floor, enclosing symbol, raw sev=) ride in\n"
+        "                               properties rather than being dropped; URIs are relative to the scanned root. Always the\n"
+        "                               FULL result set — refuses loudly alongside limit=/offset= paging, --match and --with-profile\n"
         "    --with-profile=FILE        (with --lint) join MEASURED heat onto findings: FILE is a RIPWIRE_PROFILE build's report\n"
         "                               (its #PROF_TSV block); a finding whose enclosing symbol contains a PROFILE_SCOPE site\n"
         "                               gains heat_* attributes (scope, calls, total_ms, and whichever counter columns the\n"
@@ -1712,6 +1727,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     // search
     { "--no-prefilter",       &Config::noPrefilter        },
     { "--lint",               &Config::lint               },
+    { "--sarif",              &Config::sarif              },   // (with --lint / --lint-rules) SARIF 2.1.0 instead of native XML
 
     // the --for lens modifiers (each refused alone by validateConfig)
     { "--anchor",             &Config::anchor             },
@@ -2000,7 +2016,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms       = 169;  // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm)
+inline constexpr std::size_t kTotalFlagArms       = 170;  // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2554,6 +2570,43 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
     }
 }
 
+// --sarif's four companion guards (src/sarif.h serializes --lint's findings as SARIF instead of the
+// native XML <lint> block). Split out of validateModifierGuards for the same reason the delegated
+// calls at its top are: one flag's own guard cluster stays one small function instead of growing the
+// caller's branch count.
+inline void validateSarifModifierGuards( Config& c ) noexcept
+{
+    // Modifies --lint / --lint-rules; alone it would silently no-op exactly like --with-profile above.
+    if( c.sarif && !c.lint && c.lintRulesDir.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --sarif modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --sarif)\n" );
+        c.ok = false;
+    }
+    // --match takes an entirely different branch of runLint (its own <match> element, no rule/severity
+    // shape at all) and returns before the --lint/--lint-rules findings are even assembled — --sarif
+    // would silently never take effect there. Refuse rather than let it look honored.
+    if( c.sarif && !c.match.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --sarif has no effect with --match — it serializes --lint/--lint-rules findings only\n" );
+        c.ok = false;
+    }
+    // --with-profile's heat_* join has no SARIF field defined yet (the honesty rule: represent it or
+    // refuse, never drop it silently) — refuse the pairing rather than silently omit the join.
+    if( c.sarif && !c.withProfile.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --sarif does not yet support --with-profile — the heat_* join has no SARIF field; run them separately\n" );
+        c.ok = false;
+    }
+    // SARIF is meant to be ONE complete document per run (that is what upload-sarif consumes) — a
+    // paginated slice would silently under-report to a consumer that has no paging concept. Refuse
+    // rather than emit a partial document that looks complete.
+    if( c.sarif && ( c.pageLimit > 0 || c.pageOffset > 0 ) )
+    {
+        std::fprintf( stderr, "ripwire: --sarif always emits the full result set — drop --limit=N/--offset=M\n" );
+        c.ok = false;
+    }
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -2595,6 +2648,9 @@ inline void validateModifierGuards( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --with-profile=FILE modifies --lint — pass it too (e.g. ripwire <dir> --lint --with-profile=report.txt)\n" );
         c.ok = false;
     }
+
+    validateSarifModifierGuards( c );   // --sarif's four companion guards, split out for the same reason
+                                         // the rows above it are (see its own header)
 
     // --with-history is the OPT-IN git-history name oracle for --doc-drift and --whereis (src/gitoracle.h) —
     // main.cpp's buildHistoryIndex() is only ever CALLED from those two verbs' dispatch, so the flag alone

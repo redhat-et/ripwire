@@ -74,6 +74,7 @@
 #include "atoms.h"                 // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
 #include "cachelint.h"             // --lint: the cache-friendliness pack (access-pattern half; layout half is --field-affinity)
 #include "naminglens.h"            // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
+#include "sarif.h"                 // --sarif: SARIF 2.1.0 re-serialization of --lint's findings (github code-scanning UI)
 #include "prcontext.h"
 #include "ccjson.h"
 #include "cli.h"
@@ -8836,6 +8837,55 @@ std::optional<int> runGrep( const MainDispatch& d )
     return emitGrepReport( d.cfg, d.ing );          // body: emitGrepReport() above
 }
 
+// --sarif: build the SARIF rule catalogue + finding list from the SAME `outs` / `allRuleNames` /
+// `userRules` / `saturatedRules` runLint's XML path already computed, and emit it (src/sarif.h).
+// Lifted out of runLint for the same reason lintSymbolLevelChecks / dedupeLintFindings /
+// buildHeatAnnotations above were — pure re-serialization, zero new analysis, and runLint was already
+// the file's largest verb. `capOf` is redefined locally (a small linear scan over `saturatedRules`,
+// mirroring runLint's own) rather than shared by reference, so this stays a self-contained call.
+template <class EnclosingFn>
+void emitRunLintSarif( const rw::IngestResult& ing, const std::string& root, bool builtinsActive,
+                       const std::vector<std::string>& allRuleNames, const std::vector<rw::LintRule>& userRules,
+                       const std::vector<RuleCap>& saturatedRules, const std::vector<LintOut>& outs,
+                       EnclosingFn&& enclosing )
+{
+    using namespace rw;
+    const auto capOf = [ & ]( const std::string& ruleName, bool isUserRule ) -> const RuleCap*
+    {
+        for( const RuleCap& rc : saturatedRules )
+        {
+            if( rc.rule == ruleName && rc.isUserRule == isUserRule )
+            {
+                return &rc;
+            }
+        }
+        return nullptr;
+    };
+
+    std::vector<rw::sarif::SarifRuleDecl> sarifRules;
+    sarifRules.reserve( allRuleNames.size() + userRules.size() );
+    if( builtinsActive )   // built-in rule catalogue only enters the tally under --lint (mirrors the XML arm)
+    {
+        for( const std::string& rn : allRuleNames )
+        {
+            sarifRules.push_back( { rn, false, capOf( rn, false ) != nullptr } );
+        }
+    }
+    for( const LintRule& r : userRules )
+    {
+        sarifRules.push_back( { r.id, true, capOf( r.id, true ) != nullptr } );
+    }
+
+    std::vector<rw::sarif::SarifFinding> sarifFindings;
+    sarifFindings.reserve( outs.size() );
+    for( const LintOut& m : outs )
+    {
+        const Symbol* e = enclosing( m.fileId, m.startByte );
+        sarifFindings.push_back( { m.rule, m.sev, ing.files[ m.fileId ], m.line, e ? e->name : std::string(), m.text } );
+    }
+    rw::sarif::emitLintSarif( stdout, sarifRules, sarifFindings, !saturatedRules.empty(), root );
+}
+
 std::optional<int> runLint( const MainDispatch& d )
 {
     using namespace rw;
@@ -9304,6 +9354,14 @@ std::optional<int> runLint( const MainDispatch& d )
             return nullptr;
         };
         const bool anyRuleCapped = !saturatedRules.empty();
+
+        // --sarif: `outs` re-serialized as SARIF instead of the native XML below (emitRunLintSarif above).
+        // validateConfig already refused this alongside --match / --with-profile / paging.
+        if( cfg.sarif )
+        {
+            emitRunLintSarif( ing, d.root, cfg.lint, allRuleNames, userRules, saturatedRules, outs, enclosing );
+            return 0;
+        }
 
         // --with-profile join, lifted into buildHeatAnnotations (runLint was already the file's largest
         // verb): per-finding heat_* attribute strings index-aligned with `outs`, + the root attribute.
