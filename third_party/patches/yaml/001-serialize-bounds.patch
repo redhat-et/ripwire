@@ -1,0 +1,19 @@
+diff --git a/third_party/deps/yaml/src/scanner.c b/third_party/deps/yaml/src/scanner.c
+index 7168d53..891e1cc 100644
+--- a/third_party/deps/yaml/src/scanner.c
++++ b/third_party/deps/yaml/src/scanner.c
+@@ -177,7 +177,13 @@ static unsigned serialize(Scanner *scanner, char *buffer) {
+     int16_t *typ_itr = scanner->ind_typ_stk.contents + 1;
+     int16_t *typ_end = scanner->ind_typ_stk.contents + scanner->ind_typ_stk.size;
+     int16_t *len_itr = scanner->ind_len_stk.contents + 1;
+-    for (; typ_itr != typ_end && size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE; ++typ_itr, ++len_itr) {
++    // RIPWIRE_VENDOR_PATCH(yaml/001-serialize-bounds): the loop writes 2 x int16 (4 bytes) per
++    // iteration, but the upstream guard `size < BUFFER` only proves 1 byte of headroom: with the
++    // 10-byte header, size reaches 1022 at 253 stack entries, passes the guard, and the two stores
++    // below write bytes 1022-1025 of the 1024-byte serialization buffer (lexer.h debug_buffer) —
++    // an out-of-bounds write that ts_assert catches only in non-NDEBUG builds. Require room for the
++    // full iteration instead; same truncation-on-overflow semantics upstream already accepts.
++    for (; typ_itr != typ_end && size + 2 * sizeof(int16_t) <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE; ++typ_itr, ++len_itr) {
+         *(int16_t *)&buffer[size] = *typ_itr;
+         size += sizeof(int16_t);
+         *(int16_t *)&buffer[size] = *len_itr;
