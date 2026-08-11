@@ -140,5 +140,32 @@ could not support.
 
 ---
 
+## 7. Audit the choice, not the trigger
+
+Many mechanisms here have two stages: a **trigger** selects candidates (a lift fires on a name
+match, a router picks a ranker, a hook decides to nudge, an anchor detects a mention), and a
+**choice** orders or places what fired. The stages fail independently, and a healthy trigger
+statistic says nothing about the choice — a trigger can reach the right symbol in two thirds of
+instances while the ordering buries it at median rank 33.
+
+The rule, earned the expensive way (the r5 nameboost round — see its REJECT in `docs/EVALS.md` §7):
+
+- **A pre-registration's gating statistic must be end-to-end** — "is the right answer inside the
+  top-K of what the mechanism would actually emit" — never a stage statistic like fire-rate,
+  candidate-pool recall, or trigger precision. Stage statistics are diagnostics for explaining a
+  result, not criteria for advancing one.
+- **Compute the end-to-end statistic on train before spending anything scarce** — a grid sweep, a
+  held-out set, a judged corpus. It is almost always free, and it is the cheapest kill available:
+  r5's was computable before its grid ran and read 0/97; the round instead audited its trigger
+  (60–69%, healthy), spent the grid, and learned nothing the free number had not already said.
+- **When a round dies, record which stage killed it.** "The trigger reaches gold; the choice buries
+  it" is a reusable finding that shapes the successor; "it didn't work" is not.
+
+The general failure this prevents: auditing the stage that is easy to instrument instead of the
+stage that carries the claim. A mechanism advances on the number a user would experience, or it
+does not advance.
+
+---
+
 *See `CONTRIBUTING.md` for how these rules land as concrete requirements on a change, and
 `docs/EVALS.md` for the instruments and the numbers.*
