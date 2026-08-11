@@ -146,9 +146,14 @@ grep -qi 'collapse\|bounded' "$TMP/err" && ok "refusal offers a workaround" \
 # that contains no bait at all — this is what makes the outcome identical on every machine and every tree.
 BENIGN="$TMP/benign"; mkdir -p "$BENIGN"; printf 'int quietFunction() { return 0; }\n' >"$BENIGN/quiet.cpp"
 rc="$( capRun 20 "$TMP/out" "$TMP/err" "$BENIGN" --regex='(a+)+b' --no-cache )"
-{ [ "$rc" = 1 ] && [ -s "$TMP/err" ]; } \
-    && ok "refused identically over a corpus with no bomb file (structural, not corpus-triggered)" \
-    || no "corpus without bait: exit $rc — the verdict depends on the corpus"
+# same TIMEOUT-vs-verdict distinction as safeCase() above: a kill is not a corpus-dependence finding either.
+if [ "$rc" = TIMEOUT ]; then
+    no "corpus without bait: TIMEOUT/KILLED after 20s — not a verdict, the scan never finished"
+else
+    { [ "$rc" = 1 ] && [ -s "$TMP/err" ]; } \
+        && ok "refused identically over a corpus with no bomb file (structural, not corpus-triggered)" \
+        || no "corpus without bait: exit $rc — the verdict depends on the corpus"
+fi
 
 # ── (3) PRECISION: the guard must catch the nested-unbounded class and nothing wider ─────────────────────
 # Over-refusal is the failure mode a structural guard invites. Each of these is quantifier-free inside its
@@ -165,6 +170,16 @@ rc="$( capRun 20 "$TMP/out" "$TMP/err" "$BENIGN" --regex='(a+)+b' --no-cache )"
 safeCase(){
     local label="$1" pat="$2"
     local rc; rc="$( capRun 20 "$TMP/out" "$TMP/err" "$CORPUS" --regex="$pat" --no-cache )"
+    # W1-V4 (2026-08-11): rc="TIMEOUT" is capRun's own sentinel for "still running after the cap, killed by
+    # this harness" -- it is NOT an engine exit code, and it is emphatically not exit 0. Before this check the
+    # fall-through below sent it straight to the else branch and printed "OVER-REFUSED: ... exit TIMEOUT",
+    # asserting a refusal VERDICT that was never reached: the process never returned, it was SIGKILLed. A
+    # killed/timed-out scan must report as TIMEOUT/KILLED and nothing else -- distinguish it before the verdict
+    # check runs, the same way bombCase() already does two screens up.
+    if [ "$rc" = TIMEOUT ]; then
+        no "$label: TIMEOUT/KILLED after 20s — not a refusal verdict, the scan never finished (raise the harness budget or investigate a real hang, don't read this as over-refusal)"
+        return
+    fi
     { [ "$rc" = 0 ] && grep -q 'hits=' "$TMP/out"; } \
         && ok "not over-refused: $label still scans at exit 0" \
         || no "OVER-REFUSED: $label exit $rc — $( head -c 200 "$TMP/err" )"
