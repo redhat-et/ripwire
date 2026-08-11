@@ -1,6 +1,6 @@
 # ripwire documentation
 
-Ten entries, each written for one reader. Start with the row that matches why you are here.
+Eleven entries, each written for one reader. Start with the row that matches why you are here.
 
 | File | Who it is for | What it answers |
 | --- | --- | --- |
@@ -11,6 +11,7 @@ Ten entries, each written for one reader. Start with the row that matches why yo
 | **[`OPTREMARKS.md`](OPTREMARKS.md)** | Anyone tempted to act on a compiler remark | The clang optimization-remarks build (`-DRIPWIRE_OPT_REMARKS=ON`), the triage that turns ~1.1 M remarks into a short list, and the findings — including the two that measured a win (`-DRIPWIRE_LTO=ON`, `-DRIPWIRE_PGO=use`) and every remark that was real, correctly fixed, and moved nothing. |
 | **[`FIELDAFFINITY.md`](FIELDAFFINITY.md)** | Anyone weighing `--field-affinity` | What the cache-locality lens is, what is 1999 prior art (nearly all of it — Chilimbi PLDI 1999, Hundt CGO 2006), why it advises and never transforms, and the one end-to-end measurement that took the static hypothesis to hardware — including the access regime in which the hypothesis was **refuted**. |
 | **[`CACHELINT.md`](CACHELINT.md)** | Anyone weighing the `cache-*` lint rules or `--with-profile` | The cache-friendliness check catalog: what shipped as the 8-rule `--lint` pack, what `--field-affinity` already covered, the wave-2 specs (loop interchange, reserve-absence, false sharing, AoS touch-ratio), the compiler-handled myths deliberately NOT checked, and the measured tier — `--lint --with-profile=FILE` joining `#PROF_TSV` scope heat onto findings (SYZYGY's advice mode reconstructed). |
+| **[`SUBSTITUTION_METER.md`](SUBSTITUTION_METER.md)** | Anyone asking whether agents actually reach for this tool | The per-tool-call meter inside `hooks/ripwire-nudge.sh`: why the unit is a call and not a task (the task-success eval is dead on power grounds), the JSONL row schema, the command-line classifier's rule table including the rtk unwrap, the A/B arm that ships built-but-dormant, and an explicit list of what the meter cannot see — starting with the MCP calls no hook is shown. |
 | **[`LINEAGE.md`](LINEAGE.md)** | Anyone asking what is actually new here | Every idea folded into the tool, row by row: the paper, specification or repository it came from, the one-line lesson taken, and the flag or source file where that lesson lives — plus the labelled survey of the wider field, kept explicitly separate from what was borrowed. |
 | **[`docs_commands_build.py`](docs_commands_build.py)** | Maintainers | The generator behind `COMMANDS.md`. Reads the binary's `--help` and a recorded showcase capture; `--check` is the drift comparison that `test/docscommandscheck.sh` runs. |
 | **[`assets/`](assets/)** | The front page | The README banner artwork (SVG, self-contained). |
