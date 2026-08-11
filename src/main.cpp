@@ -9654,10 +9654,25 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
 // makes stderr its ONLY disclosure — another reason for the note to live on this side of the return.
 struct ChurnRanking { std::vector<float> rank; std::string window; };
 
+// P0-4: the DEFAULT window label of each churn ranker, which is also the difference between them that a
+// reader has to see. Plain churn mines a bounded 18-month wall-clock window; churn-decay mines the whole
+// history and lets the half-life do the windowing, so its label says so AND names the half-life — the
+// constant is a choice, and a choice that is not in the output is not disclosed.
+inline std::string churnDecayWindowLabel( std::string_view minedSpan )
+{
+    std::string label{ minedSpan };
+    label += " half-life=";
+    label += std::to_string( int( rw::kChurnDecayHalfLifeDays ) );
+    label += "d";
+    return label;
+}
+
 inline ChurnRanking churnRankedGraph( const MainDispatch& d )
 {
     using namespace rw;
-    bool hasChurnEvidence = false;
+    const bool isDecay          = ( d.cfg.rankBy == RankBy::ChurnDecay );
+    const char* const verbLabel = isDecay ? "--rank-by=churn-decay" : "--rank-by=churn";
+    bool hasChurnEvidence       = false;
 
     const auto discloseEmptyChurn = [ & ]( const std::string& windowStamp )
     {
@@ -9665,8 +9680,8 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         {
             return;
         }
-        std::fprintf( stderr, "ripwire: --rank-by=churn found no commits in its window; using uniform (structural) ranking — this map is "
-                              "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", windowStamp.c_str() );
+        std::fprintf( stderr, "ripwire: %s found no commits in its window; using uniform (structural) ranking — this map is "
+                              "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", verbLabel, windowStamp.c_str() );
     };
 
     if( d.multiRoot )
@@ -9676,14 +9691,23 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         {
             rootDirs.push_back( r.arg );
         }
-        std::vector<float> rank   = rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
-        std::string        window = churnWindowStamp( "18mo", hasChurnEvidence );
+        std::vector<float> rank   = isDecay ? rankGraphTeleport( d.g, churnDecayTeleportWorkspace( rootDirs, d.ing, &hasChurnEvidence ) )
+                                            : rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
+        std::string        window = churnWindowStamp( isDecay ? churnDecayWindowLabel( "all-history" ) : std::string( "18mo" ), hasChurnEvidence );
         discloseEmptyChurn( window );
         return { std::move( rank ), std::move( window ) };
     }
 
     const SinceScope sinceScope = resolveSinceScope( d.root, d.cfg.since );
     const bool       isScoped   = !d.cfg.since.empty() && sinceScope.active;   // the §P9 N7 rule, one verb over
+    if( isDecay )
+    {
+        std::vector<float> rank   = rankGraphTeleport( d.g, churnDecayTeleport( d.root, d.ing, d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
+        std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
+                                                      hasChurnEvidence );
+        discloseEmptyChurn( window );
+        return { std::move( rank ), std::move( window ) };
+    }
     std::vector<float> rank   = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
     std::string        window = churnWindowStamp( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "18mo" ), hasChurnEvidence );
     discloseEmptyChurn( window );
@@ -9854,7 +9878,7 @@ int runDefaultMap( const MainDispatch& d )
             rank = rankGraph( g );
         }
     }
-    else if( cfg.rankBy == RankBy::Churn )
+    else if( cfg.rankBy == RankBy::Churn || cfg.rankBy == RankBy::ChurnDecay )
     {
         ChurnRanking cr = churnRankedGraph( d );        // §A9.6: the ranking and the window label it must disclose
         rank             = std::move( cr.rank );
@@ -9920,7 +9944,7 @@ int runDefaultMap( const MainDispatch& d )
     // at=) over the cap at N=3000/6000/12000, `--rank-by=churn` +118..204 B (rank_by=, window=, kChurnRankLegend)
     // over it at nearly every N up to 12000. `at=` is the one part that costs anything to compute, and its guard
     // is unchanged, so this hoist adds no git subprocess to any path that did not already run one.
-    const bool        isChurnRanked = ( cfg.rankBy == RankBy::Churn ) && !multiRoot;
+    const bool        isChurnRanked = ( cfg.rankBy == RankBy::Churn || cfg.rankBy == RankBy::ChurnDecay ) && !multiRoot;
     const std::string mapDiffAt     = ( mapDiffActive && !multiRoot ) || isChurnRanked ? gitstamp::stampAt( root ) : std::string();
     // §A4d: BOTH serializations take the same per-edge provenance vector — resolved once here rather than
     // spelled as the same empty-check ternary on each arm, so the two formats cannot drift on this input.
@@ -9941,6 +9965,7 @@ int runDefaultMap( const MainDispatch& d )
                                                                        : nullptr;
     const rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
                                       isChurnRanked ? &churnWindowLabel : nullptr,
+                                      cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
                                       cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
                                       rankByLabel };                                 // §B2.1
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than

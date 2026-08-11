@@ -1019,6 +1019,11 @@ struct MapAnnotations
     const std::string* churnWindow  = nullptr;   // §A9.6: --rank-by=churn's effective window label ("18mo", or the --since value
                                                  // when it resolved) → ` rank_by="churn" window="…"`, so a ranking mined entirely
                                                  // from git history is not byte-shaped like a PageRank map.
+    // P0-4: WHICH churn ranker filled churnWindow. Defaulted to "churn" so every pre-existing caller keeps
+    // its exact bytes; --rank-by=churn-decay passes "churn-decay". A separate field rather than reusing
+    // rankByLabel because the serializer's `else if` states an exclusivity the caller guarantees — a
+    // windowed ranker and a windowless one must never both stamp rank_by=.
+    const char*        churnRankLabel = "churn";
 
     // §B13.4: `--max-tokens=N` fits the map against a BYTE ceiling — N x kMinBytesPerToken x kBudgetHeadroom —
     // while the map REPORTS est_tokens in the language-weighted currency, so a caller who asked for 1500
@@ -1131,6 +1136,25 @@ inline std::string evWhyString( const Symbol& s )
 inline constexpr const char* kChurnRankLegend =
     "<!-- rank_by=churn: k= is a git CHANGE-FREQUENCY prior over window=, not call-graph importance; "
     "the same corpus ranked by pagerank orders differently -->";
+
+// P0-4 — the decayed sibling. It has MORE to disclose than plain churn, not less: the half-life is a chosen
+// constant (a conventional 90-day default, not a measurement on this corpus), and the age clock is HEAD's own
+// commit timestamp rather than the wall clock, which is the property that makes the default run reproducible
+// on a different day. Both facts change how a k= here should be read, so both are stated where k= is read.
+// G4: no "--" anywhere inside an XML comment ⇒ flag names written bare.
+inline constexpr const char* kChurnDecayRankLegend =
+    "<!-- rank_by=churn-decay: k= is a TIME-DECAYED git change-frequency prior, not call-graph importance. Each commit is "
+    "weighted 0.5^(age_days/half_life) with the half-life in window= (90d default, a conventional choice, not a measurement "
+    "on this corpus); age is measured from HEAD commit timestamp, never the system clock, so the same tree at the same HEAD "
+    "ranks identically on any day or machine. window= names the mined span (all-history by default: the decay is the window). "
+    "The same corpus ranked by pagerank, or by undecayed churn, orders differently -->";
+
+// Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
+// so a third churn variant adds a row and not a branch.
+inline const char* churnRankLegendFor( const char* label ) noexcept
+{
+    return ( label != nullptr && std::string_view( label ) == "churn-decay" ) ? kChurnDecayRankLegend : kChurnRankLegend;
+}
 
 // §B7.3 (CA4) — the --metrics row vocabulary, emitted ONLY on a map that carries it, for the same reason
 // kChurnRankLegend is. The flag decorates every <s> row with up to thirteen attributes and shipped with NO
@@ -1325,7 +1349,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->";
     if( churnWindow != nullptr )
     {
-        legend += kChurnRankLegend; // §A9.6, churn-only (see the constant)
+        legend += churnRankLegendFor( ann.churnRankLabel ); // §A9.6 / P0-4, churn-only (see the constants)
     }
     // §B2.1: the same treatment for authority/hub/rrf. Mutually exclusive with the churn arm by construction
     // (main.cpp fills exactly one of the two fields), and null on the default pagerank map ⇒ zero bytes there.
@@ -1472,7 +1496,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         h += "<r";
         if( mapAtStamp != nullptr && !mapAtStamp->empty() ) { h += " at=\"";  h += *mapAtStamp;  h += "\""; }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
-        if( churnWindow != nullptr ) { h += " rank_by=\"churn\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }
+        if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }
         // §B2.1: the windowless rankers stamp the same attribute in the same slot. `else if` states the
         // exclusivity the caller guarantees, so a future edit that fills both cannot emit rank_by= twice.
         else if( ann.rankByLabel != nullptr ) { h += " rank_by=\"";  h += ann.rankByLabel;  h += "\""; }
@@ -4892,7 +4916,9 @@ inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotat
     }
     if( ann->churnWindow != nullptr )
     {
-        w.write( ",\"rank_by\":\"churn\",\"window\":" );
+        w.write( ",\"rank_by\":" );                            // P0-4: which churn ranker — "churn" or "churn-decay"
+        writeJsonStr( w, ann->churnRankLabel, esc );
+        w.write( ",\"window\":" );
         writeJsonStr( w, *ann->churnWindow, esc );
     }
     // §B2.1: authority/hub/rrf carry no window, so they stamp rank_by alone — the JSON half of the XML arm
