@@ -192,3 +192,123 @@ Our deploy pipeline is slow and the whole team is annoyed about it - where do we
 This service feels sluggish under load - any general tips for speeding it up?	none	neg	dev
 My teammate left a bunch of code review remarks I still need to address before this merges.	none	neg	dev
 Can you optimize this paragraph so it reads faster for a non-technical audience?	none	neg	dev
+# -- 2026-08-11 growth pass (S1 round): judged rows grown to >=150; split assigned by sha256(prompt) parity
+#    at collection time (deterministic, collector-blind); provenance discipline unchanged (judged/neg only).
+New to this service as of today - what are the moving parts and where does execution start?	ripwire-orient	judged	test
+I got compacted mid-task and lost my reasoning - rebuild what I knew about the migration work.	ripwire-orient	judged	dev
+Jot this down for future sessions: the fixture loader silently caches across tests.	ripwire-orient	judged	test
+Track down every write to the retryBudget field before I change its type.	ripwire-navigate	judged	dev
+Show me the chain from handleUpload to the S3 client - the actual route the data takes.	ripwire-navigate	judged	dev
+If I rename applyPatch, what breaks downstream?	ripwire-navigate	judged	dev
+Read out flushQueue in full with whatever it calls - I need its contract before touching it.	ripwire-navigate	judged	dev
+The ticket names three structs - ledger, journal, snapshot - and I cannot see how they meet.	ripwire-navigate	judged	test
+Scope this for me: adding rate limiting across the gateway - how big does that change get?	ripwire-before-you-build	judged	dev
+I want a build order for the export feature before writing any code.	ripwire-before-you-build	judged	test
+Sketch the boundary for the new caching layer - what should its API expose?	ripwire-before-you-build	judged	dev
+Is streaming decode even viable here or am I fighting the architecture?	ripwire-before-you-build	judged	test
+My new backend must plug into StorageDriver - what has to exist and who implements it today?	ripwire-before-you-build	judged	test
+Before the sprint starts I want an implementation sequence for the notifications feature grounded in real code.	ripwire-before-you-build	judged	test
+About to add a tiny date-formatting util - two minutes tops.	ripwire-reuse-first	judged	test
+Need a function that slugifies titles - surely something like it exists here already?	ripwire-reuse-first	judged	dev
+Let me write a quick retry wrapper around the fetch call.	ripwire-reuse-first	judged	test
+Adding a dependency for CSV parsing - is that already vendored somewhere in here?	ripwire-reuse-first	judged	dev
+I am going to write a small helper that dedupes the config list.	ripwire-reuse-first	judged	test
+Give me the house pattern for a visitor class before I author mine.	ripwire-reuse-first	judged	dev
+One-liner to clamp values - just gonna type it out.	ripwire-reuse-first	judged	dev
+Let me skim a handful of files to get context on the session store first.	ripwire-efficient	judged	test
+I keep pasting whole files into context and the budget is bleeding - better way?	ripwire-efficient	judged	dev
+Hand me the whole task briefing at once, capped around six thousand tokens.	ripwire-efficient	judged	test
+Spinning up four subagents for this refactor - carve the repo so their briefs do not overlap.	ripwire-efficient	judged	test
+Before answering I will skim src end to end.	ripwire-efficient	judged	test
+My context window is filling with file dumps again - keep this cheap.	ripwire-efficient	judged	test
+Two worktrees touched the tokenizer - which lands first and where do they collide?	ripwire-change-check	judged	test
+A test named test_manifest_roundtrip failed on CI - I have its name and no clue what it exercises.	ripwire-change-check	judged	test
+I think the patch is finished - what did I just make worse?	ripwire-quality-bar	judged	test
+Wrapping up - run the last-mile debt check before I tell them it is done.	ripwire-quality-bar	judged	dev
+The function I measured has one deep tangle in the middle - which restructuring actually fits that shape?	ripwire-quality-bar	judged	dev
+My fix landed but prove the cleanup stuck and nothing regressed.	ripwire-quality-bar	judged	test
+Before opening the PR, check whether my new code added duplication or dead branches.	ripwire-quality-bar	judged	dev
+Inheriting the billing module from a departed teammate - how rotten is it really?	ripwire-fresh-eyes	judged	dev
+This class smells like it does everything - confirm it is a god object and show the seams.	ripwire-fresh-eyes	judged	dev
+Why is feature X invisible at runtime - is it compiled out behind a flag?	ripwire-fresh-eyes	judged	dev
+Planning to break up the parser package - what is entangled with what before I start?	ripwire-fresh-eyes	judged	test
+Users report the export silently produces an empty archive - zero leads on where it happens.	ripwire-find-bug	judged	dev
+Pasting the sanitizer output here - point me at the guilty frame.	ripwire-find-bug	judged	dev
+It worked on Friday and the demo just crashed - what changed underneath?	ripwire-find-bug	judged	dev
+I suspect the scheduler subsystem for these stuck jobs - narrow it down.	ripwire-find-bug	judged	test
+My last edit broke the pipeline somewhere - work backwards from my working diff.	ripwire-find-bug	judged	dev
+Exception says KeyError: locale but grepping locale gives 400 hits - find the real site.	ripwire-find-bug	judged	dev
+Throwing this compiler error at you - which of our symbols does it actually implicate?	ripwire-find-bug	judged	test
+Show me functions with complexity above twenty from which the allocator is reachable.	ripwire-graph-query	judged	test
+Which handlers in src/api have more than ten callers?	ripwire-graph-query	judged	dev
+Give me the two-hop callee closure of dispatch but only inside the network cluster.	ripwire-graph-query	judged	test
+Find the classes in the storage file with fan-in over five.	ripwire-graph-query	judged	dev
+Which untested symbols sit within one hop of main?	ripwire-graph-query	judged	dev
+I need functions matching: in the parser dir AND complexity over 15 AND called from outside it.	ripwire-graph-query	judged	dev
+Cross complexity with fan-in and show me symbols where both are high, scoped to core/.	ripwire-graph-query	judged	test
+Does anything in the UI reach directly into the database code? It should not.	ripwire-layers	judged	dev
+How tangled are our module boundaries - any cycles I should lose sleep over?	ripwire-layers	judged	dev
+Enforce that utils never imports from app - and make CI hold the line.	ripwire-layers	judged	dev
+If someone touches common.h, how far does the ripple spread through the build?	ripwire-layers	judged	dev
+Rate the health of our layering after the merge - worse or better?	ripwire-layers	judged	test
+Which file is the godfile gluing everything together and what would unpicking it cost?	ripwire-layers	judged	dev
+New architecture rule: adapters may not call services directly - wire up a violation gate.	ripwire-layers	judged	test
+Set this up inside Cursor so the model can query the index without shelling out.	ripwire-mcp	judged	dev
+Which server verbs should the agent lean on during a task instead of the CLI flags?	ripwire-mcp	judged	dev
+Hook the code map into Claude Code as a tool server for this repo.	ripwire-mcp	judged	test
+The index the agent sees feels stale after my rebase - how does the server refresh?	ripwire-mcp	judged	dev
+Windsurf integration: which config block do I add, and what safety do the editing verbs promise?	ripwire-mcp	judged	test
+Is calling fetch_body from the agent cheaper than pulling entire files into context?	ripwire-mcp	judged	test
+Getting my aider setup to use the graph tools - walk me through the wiring.	ripwire-mcp	judged	test
+Clang complains it could not vectorize the radix loop because no reduction was identified - worth chasing?	ripwire-opt-remarks	judged	test
+The build spewed will-not-inline: cost exceeds threshold on the hot comparator - do I care?	ripwire-opt-remarks	judged	dev
+Run the remarks harness and tell me which missed optimizations sit in hot code.	ripwire-opt-remarks	judged	dev
+-Rpass-missed is noisy on ingest.cpp - triage which remarks deserve a diff.	ripwire-opt-remarks	judged	dev
+I got a vectorization remark on the scoring kernel while editing - decide whether a diff pays.	ripwire-opt-remarks	judged	test
+The profiler pins 40 percent of samples in normalizeKeys - dig in from there.	ripwire-perf-target	judged	test
+Our p99 doubled and the flame profile points at JSON encode - investigate.	ripwire-perf-target	judged	dev
+Benchmark shows the cold path regressed 2x - I have the numbers, now what in the code?	ripwire-perf-target	judged	test
+Counters put the row scanner memory-bound - which fields fight over cache lines?	ripwire-perf-target	judged	dev
+Perf sample attached: most time under lockContention in the pool - map that call surface.	ripwire-perf-target	judged	dev
+Someone sent me a SKILL.md to install - screen it before it touches my agent.	ripwire-security-scan	judged	test
+Audit the deserializer path - it eats bytes arriving from the network unchecked.	ripwire-security-scan	judged	dev
+A new MCP server config landed in the repo - inspect its shell blocks before I enable it.	ripwire-security-scan	judged	dev
+Reviewing the auth handler for injection risk - assemble the evidence.	ripwire-security-scan	judged	test
+Periodic sweep: anything sketchy in the skills directory we installed last month?	ripwire-security-scan	judged	test
+This endpoint execs user-supplied templates - how exposed are we?	ripwire-security-scan	judged	dev
+The parser package has zero tests - give me a starting point so the effort counts.	ripwire-write-tests	judged	dev
+Which seams in this module does nothing exercise end to end?	ripwire-write-tests	judged	test
+Add a safety net around applyDiscount before we refactor it - what is its outside contract?	ripwire-write-tests	judged	dev
+Management wants the billing core covered - rank what deserves a test first.	ripwire-write-tests	judged	test
+I wrote a test for the queue - verify it actually reaches the code I meant.	ripwire-write-tests	judged	test
+Legacy util file, no tests, heavily called - close the gap.	ripwire-write-tests	judged	dev
+Nothing covers the ledger rollover path - write the missing test and prove it registers.	ripwire-write-tests	judged	test
+Brief the incoming agent on the ingest area - what it does, why, and where it bites.	ripwire-handoff	judged	dev
+I rotate off this codebase Friday - package what my successor needs about the sync engine.	ripwire-handoff	judged	dev
+Prepare a pasteable summary of the auth subsystem for the contractor starting Monday.	ripwire-handoff	judged	dev
+Another team inherits the exporter next sprint - produce the orientation doc.	ripwire-handoff	judged	dev
+Capture the state of the migration tooling so a fresh session continues without me.	ripwire-handoff	judged	dev
+Bump the package version and tag the release.	none	neg	dev
+Write a friendly README intro paragraph for the project.	none	neg	dev
+Convert this YAML config to JSON for me.	none	neg	dev
+Which HTTP verbs are idempotent according to the spec?	none	neg	test
+Add MIT license headers to the new files.	none	neg	dev
+Move the nightly cron to 3am UTC instead of midnight.	none	neg	test
+Translate these error strings into German for the locale file.	none	neg	test
+Center the logo on the landing page and darken the footer.	none	neg	test
+Draft the changelog entry for this week's release.	none	neg	test
+Rotate the staging API keys and update the secrets store.	none	neg	dev
+Squash my last four commits into one - the history is messy.	none	neg	test
+Set up prettier so the frontend formats on save.	none	neg	test
+Why does my Docker build keep missing the layer cache?	none	neg	dev
+Upgrade the CI runners to the larger instance size.	none	neg	dev
+Spell-check the documentation folder.	none	neg	dev
+Write a SQL query listing users who signed up this month.	none	neg	dev
+Regenerate the protobuf stubs with the new compiler version.	none	neg	test
+Mute the flaky Slack webhook alert until Monday.	none	neg	test
+What does HTTP status 451 mean?	none	neg	test
+Rename the default branch across our repositories.	none	neg	test
+Fill in the sprint retro doc with what shipped.	none	neg	test
+Convert the images in assets to WebP.	none	neg	dev
+Explain Python's walrus operator.	none	neg	test
+Pin the GitHub Action to a commit SHA instead of a tag.	none	neg	dev
