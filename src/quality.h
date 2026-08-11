@@ -718,7 +718,10 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 59;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 60;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 60 = Python shape round: 11 new tags.scm patterns,
+                                                          // .pyi routing and the gated enum-member kind change
+                                                          // the extracted SET on any Python-bearing tree.
                                                           // 59 = +TOML (.toml) config-key tier: a new grammar
                                                           // and a new .scm change the extracted SET.
                                                           // 47 (L3, 2026-08-08 audit) = `locals` counts
