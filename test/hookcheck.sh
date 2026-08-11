@@ -312,9 +312,9 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     jq -e --arg cmd "$HOOK" 'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
         && ok "settings.json references hooks/ripwire-nudge.sh" \
         || no "settings.json does not reference the hook script"
-    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "Read|Glob|Grep|Bash"' \
+    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "Read|Glob|Grep|Bash|mcp__ripwire__"' \
         "$SETTINGS" >/dev/null 2>&1 \
-        && ok "settings.json PreToolUse matcher is Read|Glob|Grep|Bash" || no "settings.json PreToolUse matcher missing/wrong"
+        && ok "settings.json PreToolUse matcher is Read|Glob|Grep|Bash|mcp__ripwire__" || no "settings.json PreToolUse matcher missing/wrong"
     # Read/Glob are load-bearing, not incidental: the whole-file read is the largest token sink in the
     # loop and the one default no skill description can intercept. Assert them by NAME so a future
     # matcher edit that quietly drops them fails here.
@@ -349,6 +349,274 @@ HOME="$DEFAULT_HOME" bash "$INSTALL" >/dev/null 2>&1
 [ -f "$DEFAULT_HOME/.claude/settings.json" ] \
     && no "default install.sh (no flag) touched settings.json — --hook must be opt-in only" \
     || ok "default install.sh (no flag) never touches settings.json"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (11) THE SUBSTITUTION METER (Track B §S2, 2026-08-11)
+#
+# The hook's second job: one JSONL row per observed tool call, appended to ONE GLOBAL log
+# (~/.ripwire/substitution.jsonl) so a session in any repo feeds the same denominator. The unit of
+# observation is a TOOL CALL, not a task — the task-success outcome eval is dead on power grounds
+# (8.5-26pp MDE floor), and substitution per call is the measurement that survives that arithmetic.
+#
+# What these arms pin, and why each one is here rather than left to inspection:
+#   - a row exists at all, at the DEFAULT global path, lazily created (M1-M3);
+#   - the counted call and the nudge are SEPARABLE: nudged/nudge/post_nudge are logged per row, so
+#     "the nudge caused the next ripwire call" stays a distinguishable hypothesis (M4-M7);
+#   - rtk's rewrite is UNWRAPPED (M8-M9). `rtk grep …` is what the Bash hook actually sees on this
+#     machine; a meter that scores it as "not a grep" would report a substitution rate that is pure
+#     artifact of another tool's hook;
+#   - ripwire's own calls are the NUMERATOR and are never nudged (M10-M12);
+#   - the truer denominator: native read/find/awk-search forms, not just Grep/Glob (M13-M15);
+#   - ambiguity is LOGGED, never dropped (M16), and out-of-scope calls are not rows (M17);
+#   - the A/B toggle exists and is logged NOW, dormant, so phase 2 costs an env var (M19-M20);
+#   - and the whole thing is subordinate to the tool call it observes: an unwritable log must cost
+#     the hooked command nothing (M21).
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+METERHOME="$TMP/meterhome"; mkdir -p "$METERHOME"
+DEFAULT_LOG="$METERHOME/.ripwire/substitution.jsonl"
+
+run_meter()
+{
+    # run_meter LOGFILE JSON TMPDIRVAL [VAR=VAL ...]  — LOGFILE "" means "use the ~/.ripwire default"
+    _l="$1"; _j="$2"; _t="$3"; shift 3
+    if [ -n "$_l" ]; then
+        printf '%s' "$_j" | env HOME="$METERHOME" RIPWIRE_METER_LOG="$_l" PATH="$WITH_RIPWIRE" TMPDIR="$_t" "$@" bash "$HOOK"
+    else
+        printf '%s' "$_j" | env HOME="$METERHOME" PATH="$WITH_RIPWIRE" TMPDIR="$_t" "$@" bash "$HOOK"
+    fi
+}
+
+meterrows()   { [ -f "$1" ] && grep -c . "$1" 2>/dev/null || echo 0; }
+meterrowget() {
+    # meterrowget FILE ROWINDEX KEY   (1-based; also validates that every row parses as JSON)
+    python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
+import json, sys
+path, idx, key = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+rows = [json.loads(l) for l in open(path) if l.strip()]
+print("" if len(rows) < idx else rows[idx - 1].get(key, "<missing>"))
+PY
+}
+bashjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$REPO" "$2"; }
+
+# ── M1-M3: a classified call writes one row, at the DEFAULT global path, with the full field set ────
+TM1="$TMP/tm1"; mkdir -p "$TM1"
+M1_JSON='{"session_id":"meter1","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}'
+run_meter "" "$M1_JSON" "$TM1" >/dev/null 2>&1; RCM1=$?
+echo "-- meter default-path row --"; [ -f "$DEFAULT_LOG" ] && cat "$DEFAULT_LOG"
+[ "$RCM1" -eq 0 ] && ok "M1 meter: hooked call still exits 0" || no "M1 meter: exit was $RCM1"
+[ "$( meterrows "$DEFAULT_LOG" )" = "1" ] \
+    && ok "M1 meter: one row lazily created at ~/.ripwire/substitution.jsonl" \
+    || no "M1 meter: expected 1 row at $DEFAULT_LOG, got $( meterrows "$DEFAULT_LOG" )"
+M2_MISSING=""
+for k in v ts seq session repo tag tool class family nudged nudge post_nudge arm detail; do
+    val="$( meterrowget "$DEFAULT_LOG" 1 "$k" )"
+    case "$val" in ""|"<missing>") M2_MISSING="$M2_MISSING $k" ;; esac
+done
+# `nudged`/`post_nudge` are legitimately 0 and `detail` legitimately empty — re-check those by presence
+for k in nudged post_nudge detail; do
+    python3 -c 'import json,sys; d=json.loads(open(sys.argv[1]).readline()); sys.exit(0 if sys.argv[2] in d else 1)' \
+        "$DEFAULT_LOG" "$k" 2>/dev/null && M2_MISSING="$( printf '%s' "$M2_MISSING" | sed "s/ $k//" )"
+done
+[ -z "$M2_MISSING" ] && ok "M2 meter: row carries the full documented field set" \
+    || no "M2 meter: row is missing field(s):$M2_MISSING"
+[ "$( meterrowget "$DEFAULT_LOG" 1 class )" = "grep" ] && [ "$( meterrowget "$DEFAULT_LOG" 1 family )" = "native" ] \
+    && ok "M3 meter: Grep tool classifies as grep/native" \
+    || no "M3 meter: Grep tool classified as [$( meterrowget "$DEFAULT_LOG" 1 class )/$( meterrowget "$DEFAULT_LOG" 1 family )]"
+
+# ── M4-M7: the nudge and the count are separable — nudged, dedup, seq, post_nudge ───────────────────
+TM4="$TMP/tm4"; mkdir -p "$TM4"; L4="$TMP/m4.jsonl"
+M4_JSON='{"session_id":"meter4","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"n"}}'
+OUTM4="$( run_meter "$L4" "$M4_JSON" "$TM4" )"
+[ "$( meterrowget "$L4" 1 nudged )" = "1" ] && [ "$( meterrowget "$L4" 1 nudge )" = "fired" ] && [ -n "$OUTM4" ] \
+    && ok "M4 meter: the call the nudge fired on is logged nudged=1 nudge=fired" \
+    || no "M4 meter: nudged=[$( meterrowget "$L4" 1 nudged )] nudge=[$( meterrowget "$L4" 1 nudge )] out=[${OUTM4:+set}]"
+OUTM5="$( run_meter "$L4" "$M4_JSON" "$TM4" )"
+[ "$( meterrows "$L4" )" = "2" ] && [ "$( meterrowget "$L4" 2 nudged )" = "0" ] && [ "$( meterrowget "$L4" 2 nudge )" = "dedup" ] && [ -z "$OUTM5" ] \
+    && ok "M5 meter: a deduped (silent) call is STILL counted, as nudged=0 nudge=dedup" \
+    || no "M5 meter: rows=$( meterrows "$L4" ) nudged=[$( meterrowget "$L4" 2 nudged )] nudge=[$( meterrowget "$L4" 2 nudge )] out=[$OUTM5]"
+[ "$( meterrowget "$L4" 1 seq )" = "1" ] && [ "$( meterrowget "$L4" 2 seq )" = "2" ] \
+    && ok "M6 meter: seq is monotonic within a session (1,2) — sequences are reconstructable" \
+    || no "M6 meter: seq was [$( meterrowget "$L4" 1 seq )] then [$( meterrowget "$L4" 2 seq )]"
+[ "$( meterrowget "$L4" 1 post_nudge )" = "0" ] && [ "$( meterrowget "$L4" 2 post_nudge )" = "1" ] \
+    && ok "M7 meter: post_nudge separates pre-nudge from post-nudge calls in a session" \
+    || no "M7 meter: post_nudge was [$( meterrowget "$L4" 1 post_nudge )] then [$( meterrowget "$L4" 2 post_nudge )]"
+
+# ── M8-M9: the rtk unwrap. `rtk grep …` / `rtk proxy rg …` are what the hook actually sees here ─────
+TM8="$TMP/tm8"; mkdir -p "$TM8"; L8="$TMP/m8.jsonl"
+run_meter "$L8" "$( bashjson meter8 'rtk grep -rn needle .' )" "$TM8" >/dev/null 2>&1
+[ "$( meterrowget "$L8" 1 class )" = "grep" ] \
+    && ok "M8 meter: rtk unwrap — 'rtk grep -rn …' classifies as grep" \
+    || no "M8 meter: 'rtk grep -rn …' classified as [$( meterrowget "$L8" 1 class )], expected grep"
+TM9="$TMP/tm9"; mkdir -p "$TM9"; L9="$TMP/m9.jsonl"
+run_meter "$L9" "$( bashjson meter9 'rtk proxy rg needle src/' )" "$TM9" >/dev/null 2>&1
+[ "$( meterrowget "$L9" 1 class )" = "grep" ] \
+    && ok "M9 meter: rtk unwrap — 'rtk proxy rg …' classifies as grep" \
+    || no "M9 meter: 'rtk proxy rg …' classified as [$( meterrowget "$L9" 1 class )], expected grep"
+
+# ── M10-M12: ripwire's own calls are the numerator, and are never nudged ────────────────────────────
+TM10="$TMP/tm10"; mkdir -p "$TM10"; L10="$TMP/m10.jsonl"
+OUTM10="$( run_meter "$L10" "$( bashjson meter10 'ripwire . --grep=needle' )" "$TM10" )"
+[ "$( meterrowget "$L10" 1 class )" = "ripwire-cli" ] && [ "$( meterrowget "$L10" 1 family )" = "ripwire" ] \
+    && ok "M10 meter: a ripwire CLI call classifies as ripwire-cli/ripwire (the numerator)" \
+    || no "M10 meter: ripwire CLI classified as [$( meterrowget "$L10" 1 class )/$( meterrowget "$L10" 1 family )]"
+[ -z "$OUTM10" ] && [ "$( meterrowget "$L10" 1 nudged )" = "0" ] \
+    && ok "M11 meter: a ripwire invocation is never nudged (no 'use ripwire' at a ripwire call)" \
+    || no "M11 meter: ripwire call was nudged: out=[$OUTM10] nudged=[$( meterrowget "$L10" 1 nudged )]"
+TM12="$TMP/tm12"; mkdir -p "$TM12"; L12="$TMP/m12.jsonl"
+MCP_JSON='{"session_id":"meter12","cwd":"'"$REPO"'","tool_name":"mcp__ripwire__for","tool_input":{"task":"x"}}'
+OUTM12="$( run_meter "$L12" "$MCP_JSON" "$TM12" )"
+[ "$( meterrowget "$L12" 1 class )" = "ripwire-mcp" ] && [ -z "$OUTM12" ] \
+    && ok "M12 meter: an MCP ripwire verb classifies as ripwire-mcp and is silent" \
+    || no "M12 meter: mcp verb classified as [$( meterrowget "$L12" 1 class )] out=[$OUTM12]"
+
+# ── M13-M15: the TRUER denominator — native read/search forms the old hook never looked at ──────────
+TM13="$TMP/tm13"; mkdir -p "$TM13"; L13="$TMP/m13.jsonl"
+M13BAD=""
+i=0
+for pair in "cat src/foo.cpp|read" "head -50 src/foo.cpp|read" "tail -n 20 log.txt|read" \
+            "find . -name '*.cpp'|find" "ls -R src|find" "awk '/needle/ {print}' f.txt|grep" \
+            "git grep needle|grep" "sed -n '1,80p' src/foo.cpp|read"; do
+    c="${pair%|*}"; want="${pair#*|}"; i=$(( i + 1 ))
+    run_meter "$L13" "$( bashjson "meter13_$i" "$( printf '%s' "$c" | sed 's/"/\\"/g' )" )" "$TM13" >/dev/null 2>&1
+    got="$( meterrowget "$L13" "$i" class )"
+    [ "$got" = "$want" ] || M13BAD="$M13BAD [$c -> $got, want $want]"
+done
+[ -z "$M13BAD" ] && ok "M13 meter: native read/search Bash forms classify (cat/head/tail/find/ls -R/awk/git grep/sed -n)" \
+    || no "M13 meter: misclassified:$M13BAD"
+TM14="$TMP/tm14"; mkdir -p "$TM14"; L14="$TMP/m14.jsonl"
+run_meter "$L14" '{"session_id":"meter14","cwd":"'"$REPO"'","tool_name":"Read","tool_input":{"file_path":"src/foo.cpp"}}' "$TM14" >/dev/null 2>&1
+run_meter "$L14" '{"session_id":"meter14","cwd":"'"$REPO"'","tool_name":"Glob","tool_input":{"pattern":"**/*.cpp"}}' "$TM14" >/dev/null 2>&1
+[ "$( meterrowget "$L14" 1 class )" = "read" ] && [ "$( meterrowget "$L14" 2 class )" = "glob" ] \
+    && ok "M14 meter: Read -> read, Glob -> glob" \
+    || no "M14 meter: Read/Glob classified as [$( meterrowget "$L14" 1 class )/$( meterrowget "$L14" 2 class )]"
+TM15="$TMP/tm15"; mkdir -p "$TM15"; L15="$TMP/m15.jsonl"
+run_meter "$L15" "$( bashjson meter15 'git diff HEAD' )" "$TM15" >/dev/null 2>&1
+[ "$( meterrowget "$L15" 1 class )" = "git-diff" ] && [ "$( meterrowget "$L15" 1 family )" = "git" ] && [ "$( meterrowget "$L15" 1 nudged )" = "1" ] \
+    && ok "M15 meter: git diff -> git-diff/git, and the nudge it fires is recorded on the row" \
+    || no "M15 meter: git diff row = [$( meterrowget "$L15" 1 class )/$( meterrowget "$L15" 1 family )/nudged=$( meterrowget "$L15" 1 nudged )]"
+
+# ── M16-M17: ambiguity is logged, out-of-scope is not a row ─────────────────────────────────────────
+TM16="$TMP/tm16"; mkdir -p "$TM16"; L16="$TMP/m16.jsonl"
+run_meter "$L16" "$( bashjson meter16 'for f in *.c; do grep needle $f; done' )" "$TM16" >/dev/null 2>&1
+[ "$( meterrowget "$L16" 1 class )" = "unclassified" ] \
+    && ok "M16 meter: an ambiguous search line is logged as unclassified, never silently dropped" \
+    || no "M16 meter: ambiguous line classified as [$( meterrowget "$L16" 1 class )], expected unclassified"
+TM17="$TMP/tm17"; mkdir -p "$TM17"; L17="$TMP/m17.jsonl"
+run_meter "$L17" "$( bashjson meter17 'cmake --build build -j 8' )" "$TM17" >/dev/null 2>&1
+run_meter "$L17" "$( bashjson meter17b 'git status' )" "$TM17" >/dev/null 2>&1
+[ "$( meterrows "$L17" )" = "0" ] \
+    && ok "M17 meter: out-of-scope Bash (cmake --build / git status) writes no row" \
+    || no "M17 meter: out-of-scope commands wrote $( meterrows "$L17" ) row(s): $( cat "$L17" 2>/dev/null )"
+
+# ── M18: ONE global log across repos, rows tagged by repo ───────────────────────────────────────────
+REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
+git -C "$REPO2" config user.email "dev@x.com"; git -C "$REPO2" config user.name "Dev"
+TM18="$TMP/tm18"; mkdir -p "$TM18"
+run_meter "" '{"session_id":"meter18","cwd":"'"$REPO2"'","tool_name":"Grep","tool_input":{"pattern":"n"}}' "$TM18" >/dev/null 2>&1
+LASTROW="$( meterrows "$DEFAULT_LOG" )"
+[ "$LASTROW" = "2" ] && [ "$( meterrowget "$DEFAULT_LOG" 2 tag )" = "repo2" ] && [ "$( meterrowget "$DEFAULT_LOG" 1 tag )" = "repo" ] \
+    && ok "M18 meter: two repos append to the ONE global log, each row tagged by repo" \
+    || no "M18 meter: global log has $LASTROW row(s), tags [$( meterrowget "$DEFAULT_LOG" 1 tag )/$( meterrowget "$DEFAULT_LOG" 2 tag )]"
+
+# ── M19-M20: the dormant A/B toggle. Ships built, ships OFF; the arm is on every row ────────────────
+TM19="$TMP/tm19"; mkdir -p "$TM19"; L19="$TMP/m19.jsonl"
+OUTM19="$( run_meter "$L19" "$( bashjson meter19 'grep -rn needle .' )" "$TM19" RIPWIRE_METER_ARM=control )"
+[ "$( meterrowget "$L19" 1 arm )" = "control" ] && [ "$( meterrowget "$L19" 1 nudged )" = "0" ] \
+    && [ "$( meterrowget "$L19" 1 nudge )" = "control" ] && [ -z "$OUTM19" ] \
+    && ok "M19 meter: control arm counts the call and suppresses the nudge, and says so on the row" \
+    || no "M19 meter: arm=[$( meterrowget "$L19" 1 arm )] nudged=[$( meterrowget "$L19" 1 nudged )] nudge=[$( meterrowget "$L19" 1 nudge )] out=[$OUTM19]"
+TM20="$TMP/tm20"; mkdir -p "$TM20"; L20="$TMP/m20.jsonl"
+OUTM20="$( run_meter "$L20" "$( bashjson meter20 'grep -rn needle .' )" "$TM20" )"
+[ "$( meterrowget "$L20" 1 arm )" = "treatment" ] && [ -n "$OUTM20" ] \
+    && ok "M20 meter: DEFAULT arm is treatment — observation is always on, alternation is not" \
+    || no "M20 meter: default arm=[$( meterrowget "$L20" 1 arm )] out=[${OUTM20:+set}]"
+
+# ── M21-M23: the meter is subordinate to the call it observes ───────────────────────────────────────
+TM21="$TMP/tm21"; mkdir -p "$TM21"
+UNWRITABLE="$TMP/unwritable"; mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
+OUTM21="$( printf '%s' "$( bashjson meter21 'grep -rn needle .' )" \
+    | env HOME="$UNWRITABLE" PATH="$WITH_RIPWIRE" TMPDIR="$TM21" bash "$HOOK" )"; RCM21=$?
+chmod 700 "$UNWRITABLE"
+[ "$RCM21" -eq 0 ] && [ -n "$OUTM21" ] && printf '%s' "$OUTM21" | is_valid_json \
+    && ok "M21 meter: an unwritable log costs the hooked command nothing (exit 0, nudge still emitted)" \
+    || no "M21 meter: unwritable log broke the hook: exit=$RCM21 out=[$OUTM21]"
+TM22="$TMP/tm22"; mkdir -p "$TM22"; L22="$TMP/m22.jsonl"
+OUTM22="$( run_meter "$L22" "$( bashjson meter22 'grep -rn needle .' )" "$TM22" RIPWIRE_METER=0 )"
+[ "$( meterrows "$L22" )" = "0" ] && [ -n "$OUTM22" ] \
+    && ok "M22 meter: RIPWIRE_METER=0 opts out of counting only — the nudge still works" \
+    || no "M22 meter: opt-out left $( meterrows "$L22" ) row(s), out=[${OUTM22:+set}]"
+TM23="$TMP/tm23"; mkdir -p "$TM23"; L23="$TMP/m23.jsonl"
+run_meter "$L23" '{"session_id":"meter23","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"grep -rn \"a\\nb\" ."}}' "$TM23" >/dev/null 2>&1
+[ "$( meterrows "$L23" )" = "1" ] && [ "$( wc -l <"$L23" | tr -d ' ' )" = "1" ] \
+    && ok "M23 meter: one row is exactly one line (JSONL holds for embedded newlines/quotes)" \
+    || no "M23 meter: multi-line command produced $( wc -l <"$L23" 2>/dev/null | tr -d ' ' ) line(s)"
+
+# ── M23b: a TMPDIR that does not exist — silent, and the sequence number survives ───────────────────
+# Found by hand, then gated: `cmd >>f 2>/dev/null` opens the redirect BEFORE applying 2>/dev/null, so a
+# missing directory printed two lines of shell error onto the hooked call's stderr and left seq=0. A
+# meter that narrates its own failures into the tool it observes is worse than no meter.
+L23B="$TMP/m23b.jsonl"
+ERR23B="$TMP/m23b.err"
+run_meter "$L23B" "$( bashjson meter23b 'grep -rn needle .' )" "$TMP/does/not/exist" >/dev/null 2>"$ERR23B"
+[ ! -s "$ERR23B" ] && ok "M23b meter: a non-existent TMPDIR writes nothing to the hooked call's stderr" \
+    || no "M23b meter: stderr leaked: $( cat "$ERR23B" )"
+[ "$( meterrowget "$L23B" 1 seq )" = "1" ] \
+    && ok "M23b meter: the per-session counter survives a non-existent TMPDIR (seq=1, not 0)" \
+    || no "M23b meter: seq was [$( meterrowget "$L23B" 1 seq )] under a missing TMPDIR"
+
+# ── M23c: a quote-bearing command line still yields exactly one valid JSON row ──────────────────────
+# jq builds the row when it is on PATH; without it the hook hand-escapes. Either way an embedded quote
+# or backslash is the one input that can corrupt a JSONL log, so it is gated directly.
+TM23C="$TMP/tm23c"; mkdir -p "$TM23C"; L23C="$TMP/m23c.jsonl"
+printf '%s' '{"session_id":"meter23c","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"rtk grep -rn \"a\\\\\"b\" ."}}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$L23C" PATH="$WITH_RIPWIRE" TMPDIR="$TM23C" bash "$HOOK" >/dev/null 2>&1
+[ "$( meterrows "$L23C" )" = "1" ] && [ "$( meterrowget "$L23C" 1 class )" = "grep" ] \
+    && ok "M23c meter: a quote-bearing command yields exactly one valid JSON row" \
+    || no "M23c meter: rows=$( meterrows "$L23C" ) class=[$( meterrowget "$L23C" 1 class )] — see $L23C"
+
+# ── M24: SessionStart is a countable session boundary ───────────────────────────────────────────────
+TM24="$TMP/tm24"; mkdir -p "$TM24"; L24="$TMP/m24.jsonl"
+printf '%s' '{"session_id":"meter24","cwd":"'"$REPO"'","source":"startup"}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$L24" PATH="$WITH_RIPWIRE" TMPDIR="$TM24" bash "$HOOK" --session-start >/dev/null 2>&1
+[ "$( meterrowget "$L24" 1 class )" = "session-start" ] && [ "$( meterrowget "$L24" 1 family )" = "meta" ] \
+    && ok "M24 meter: SessionStart writes a session-start/meta row (sessions are countable)" \
+    || no "M24 meter: session-start row = [$( meterrowget "$L24" 1 class )/$( meterrowget "$L24" 1 family )]"
+
+# ── M25: the installer's matcher makes MCP ripwire verbs visible to the hook ────────────────────────
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher | test("mcp__ripwire__")' \
+        "$SETTINGS" >/dev/null 2>&1 \
+        && ok "M25 meter: install.sh --hook matcher covers mcp__ripwire__ (the numerator is observable)" \
+        || no "M25 meter: PreToolUse matcher does not cover mcp__ripwire__ — MCP verbs invisible to the meter"
+fi
+
+# ── M26-M27: the schema doc and the analysis stub are part of the deliverable, not an afterthought ──
+SCHEMADOC="$ROOT/docs/SUBSTITUTION_METER.md"
+REPORT="$ROOT/bench/substitution_report.py"
+if [ -f "$SCHEMADOC" ]; then
+    M26MISS=""
+    for needle in 'substitution.jsonl' 'rtk' 'MCP' 'unclassified' 'RIPWIRE_METER_ARM' 'post_nudge'; do
+        grep -Fq "$needle" "$SCHEMADOC" || M26MISS="$M26MISS $needle"
+    done
+    [ -z "$M26MISS" ] && ok "M26 meter: docs/SUBSTITUTION_METER.md documents the schema, rtk unwrap and the MCP disclosure" \
+        || no "M26 meter: docs/SUBSTITUTION_METER.md is missing:$M26MISS"
+else
+    no "M26 meter: docs/SUBSTITUTION_METER.md does not exist"
+fi
+if [ -f "$REPORT" ]; then
+    python3 "$REPORT" "$DEFAULT_LOG" >"$TMP/report.out" 2>&1; RCR=$?
+    echo "-- substitution_report.py output --"; cat "$TMP/report.out"
+    [ "$RCR" -eq 0 ] && grep -qi 'substitution rate' "$TMP/report.out" \
+        && ok "M27 meter: bench/substitution_report.py reads the log and prints a substitution rate" \
+        || no "M27 meter: substitution_report.py exit=$RCR (see output above)"
+    grep -qiE 'bigram|n-gram|ngram' "$TMP/report.out" \
+        && ok "M27b meter: the report prints within-session command-class n-grams (scenario bundles)" \
+        || no "M27b meter: the report has no n-gram section"
+else
+    no "M26 meter: bench/substitution_report.py does not exist"
+    no "M27b meter: bench/substitution_report.py does not exist"
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi
