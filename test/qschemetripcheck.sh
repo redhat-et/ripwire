@@ -34,6 +34,18 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-11, W1-S2 CROSS-FILE CHURN FIX: kQSnapCacheScheme 5 -> 6 (and kQBodyCacheScheme 2 -> 3, the
+#   sidecar body-record tag body -> bodyq). bodyHashBySym's KEYS changed meaning — pathQualifiedKey
+#   (path\0scope\0name) replaces hash(canonicalId), whose bare-name degrade folded every scope-less
+#   same-named symbol ACROSS FILES into one churn-join identity (a new rows() in one file flagged
+#   short-horizon-churn against the rows() in an untouched file; gate: qualitysignalcheck.sh §1d).
+#   A Snapshot-SEMANTICS change (what the serialized body map's keys MEAN), so the scheme moved; and
+#   bodyHashesBySym joined the hashed manifest so the next keying change trips this gate by itself.
+# 2026-08-11, W1-S2 dead-code top-level fix: `isDeadCandidate` gained the top-level-invocation exemption
+#   (new manifest member `topLevelCalleeNameHashes` — a symbol invoked from a FILE-SCOPE call site, e.g. a
+#   bash top-level statement, is alive; buildGraph drops those refs from the CSR so zero in-edges alone was
+#   false evidence). A Snapshot-SEMANTICS change (the dead set narrows) → kQSnapCacheScheme 5 -> 6 in the
+#   same diff. NOT an extraction change (the refs were always captured), so kParserVer/mirrors unmoved.
 # 2026-08-10/11, LANGUAGE-PORT ROUND (three stranded branches hand-ported onto main): kParserVer
 #   59 -> 60 and the quality.h mirror with it. ONE shared bump covers all of it, because the four
 #   extraction changes land in the same wave and no released version ever keyed a cache on a subset:

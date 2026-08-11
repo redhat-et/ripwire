@@ -10,7 +10,7 @@
 // content-hash cache via a per-sha cache path (the SAME convention quality.h:1017-1021 uses for its own
 // HEAD/ref ingest cache: a resolved commit sha is immutable, so the cache can never go stale — own "qms"
 // blob family, see msCachePath below) — then diff per-symbol RAW-BODY hashes between them, keyed exactly
-// like quality::bodyHashesBySym (canonicalId(relForHash(path,root), scope, name)). That gives "what this
+// like quality::bodyHashesBySym (quality::pathQualifiedKey — relForHash(path,root) \0 scope \0 name). That gives "what this
 // arm actually changed since it diverged from HEAD" — added, modified, OR deleted symbols. The dirty
 // working tree participates as an implicit extra arm (base = HEAD; no merge-base call needed — a working
 // tree is never diverged by commits) when `git status --porcelain` is non-empty; it reuses the CALLER's
@@ -77,8 +77,8 @@ inline const char* kWorkingTreeRef = "working-tree";   // reserved arm name for 
 // One changed symbol as reported to the user.
 struct ChangedSym
 {
-    std::uint64_t key = 0;     // fnv1a64(canonicalId(relForHash(path,root), scope, name)) — the SAME keying
-                               // scheme quality::bodyHashesBySym uses, so a symbol changed on two arms'
+    std::uint64_t key = 0;     // quality::pathQualifiedKey(relForHash(path,root), scope, name) — the SAME
+                               // keying quality::bodyHashesBySym uses, so a symbol changed on two arms'
                                // independently-materialized temp trees compares key-for-key regardless of
                                // where each tree was archived to (S2 root-spelling independence — exploited
                                // here across genuinely DIFFERENT temp roots, not just different spellings).
@@ -114,7 +114,7 @@ struct SymTreeIndex
 inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view root )
 {
     SymTreeIndex out;
-    out.bodyHash = quality::bodyHashesBySym( ing, root, /*pathQualified=*/true );
+    out.bodyHash = quality::bodyHashesBySym( ing, root );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[i];
@@ -124,9 +124,7 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
         }
         const std::string    relFile( relForHash( ing.files[ s.fileId ], root ) );
         const std::string    canon = canonicalId( relFile, s.scope, s.name );          // DISPLAY id (may be a bare name)
-        std::string          idText;                                                   // COMPARISON key — always path-qualified
-        idText.append( relFile ).push_back( '\0' );  idText.append( s.scope ).push_back( '\0' );  idText.append( s.name );
-        const std::uint64_t  key   = fnv1a64( idText );
+        const std::uint64_t  key   = quality::pathQualifiedKey( relFile, s.scope, s.name );   // COMPARISON key — the one body-hash key space
         out.identity.try_emplace( key, ChangedSym{ key, relFile, canon } );   // first writer wins — overloads share one id
     }
     return out;

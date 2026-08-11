@@ -148,7 +148,7 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint32_t> paramsBySym; // Q1 erosion    — hash(canonId) → MAX parameter count
     gtl::btree_map<std::uint64_t, std::uint32_t> defsBySym;   // hash(canonId) → COUNT of definitions sharing the id (an overload set's CARDINALITY, deliberately NOT a MAX — see computeSnapshot)
     gtl::btree_map<std::uint64_t, std::uint32_t> maskBySym;   // §D#4 error-masking — hash(canonId) → COUNT of error-masking constructs in the symbol (SUM over overloads, see computeSnapshot)
-    gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — hash(canonId) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them)
+    gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
     std::vector<std::uint64_t>             cloneGroups; // sorted hash(sorted member canonIds)
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
     std::vector<std::uint64_t>             publicApi;   // Q1 contract drift — sorted hash(canonId) of PUBLIC/exported symbols (see isPublicApi)
@@ -230,10 +230,40 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
 }
 
-// A "dead deletion-candidate": has a body, no caller in the indexed tree, not header-exported, not a test
-// fixture. A SIMPLE, internally-consistent heuristic — the delta only needs baseline↔current consistency,
-// not parity with the fuller --dead-code verb.
-inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i ) noexcept
+// W1-S2 (2026-08-11) — TOP-LEVEL INVOCATION IS A USE: the fnv1a64 name-hash set of every callee invoked from
+// FILE SCOPE (fromSymbol == kNoNode). buildGraph deliberately drops file-scope references from the call-graph
+// CSR (no caller symbol → no edge — correct for PageRank and the ranked map), which starves the dead kind: a
+// bash function whose ONLY call site is a top-level script statement has zero in-edges and was false-flagged
+// dead (confirmed on hooks/ripwire-nudge.sh's helpers, while the fn→fn-called control was correctly silent —
+// the same hole applies to any script language's module-level statements). The dead kind therefore consults
+// these file-scope call sites as its second evidence source. The ref filter mirrors buildGraph's call-edge
+// admission EXACTLY (Call|Macro roles; no inherit/doc-link/compose — a README backtick-mention must never
+// mark a symbol live) with only the fromSymbol test inverted. NAME-level matching, not per-target resolution
+// — the same heuristic level as the resolver's bare-name spray, and a collision errs in the safe direction
+// (false-live, never false-dead). Sorted + deduped for binary_search; deterministic (reference order is).
+inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& ing )
+{
+    std::vector<std::uint64_t> hashes;
+    for( const Reference& r : ing.references )
+    {
+        if( r.fromSymbol != kNoNode || r.isInherit || r.isDocLink || r.isCompose
+            || ( r.role != RefRole::Call && r.role != RefRole::Macro ) )
+        {
+            continue;
+        }
+        hashes.push_back( fnv1a64( r.calleeName ) );
+    }
+    std::sort( hashes.begin(), hashes.end() );
+    hashes.erase( std::unique( hashes.begin(), hashes.end() ), hashes.end() );
+    return hashes;
+}
+
+// A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
+// header-exported, not a test fixture. A SIMPLE, internally-consistent heuristic — the delta only needs
+// baseline↔current consistency, not parity with the fuller --dead-code verb. `topLevelCallees` is the
+// sorted set topLevelCalleeNameHashes builds — both call sites build it ONCE outside their symbol loop.
+inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
+                             const std::vector<std::uint64_t>& topLevelCallees ) noexcept
 {
     const Symbol& s = ing.symbols[i];
     if( s.kind == SymKind::Section )
@@ -248,6 +278,10 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i )
     if( ro[i + 1] - ro[i] != 0 )
     {
         return false; // has at least one caller
+    }
+    if( std::binary_search( topLevelCallees.begin(), topLevelCallees.end(), fnv1a64( s.name ) ) )
+    {
+        return false; // W1-S2: invoked from file scope (a top-level script statement) — a use the CSR drops
     }
     const std::string& p = ing.files[ s.fileId ];
     const auto ends = [ & ]( std::string_view e )
@@ -335,24 +369,39 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
     return counts;
 }
 
-// §D#4 short-horizon-churn — a per-canonId hash of the symbols' RAW body bytes, for CHANGE detection that
+// The ONE body-hash identity rule: fnv1a64( path \0 scope \0 name ), path root-relative (relForHash).
+// PATH-QUALIFIED ALWAYS, including when scope is empty. canonicalId() DEGRADES to the bare name when a
+// symbol has no scope (resolve.h) — fine for display, catastrophic as a comparison key: every scope-less
+// `ok()` in a tree folds to ONE identity. --merge-scout hit it first (laneA adds a.sh::ok, laneB adds
+// b.sh::ok -> conflicts="1"), then --quality-delta's short-horizon-churn (W1-S2 repro, 2026-08-11: a NEW
+// shell fn rows() in one test script flagged churn against the same-named rows() in a file the change never
+// touched — gates 2+3 judged a cross-file FOLD, not a symbol). mergescout::buildTreeIndex and lanes.h claims
+// key byte-for-byte the same way — one key space, pinned by test/scoutkeycheck.sh, never a third scheme.
+inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_view scope, std::string_view name )
+{
+    std::string idText;
+    idText.reserve( relPath.size() + scope.size() + name.size() + 2 );
+    idText.append( relPath ).push_back( '\0' );
+    idText.append( scope ).push_back( '\0' );
+    idText.append( name );
+    return fnv1a64( idText );
+}
+
+// §D#4 short-horizon-churn — a per-identity hash of the symbols' RAW body bytes, for CHANGE detection that
 // metrics miss. `hot(){ return 2; }` → `hot(){ return 3; }` moves NO metric (same ccx/loc/nest/params), and
 // clones.h normalization erases the literal (`$N`), so neither can tell the body changed — only a raw-byte
 // hash can. We read each file ONCE (per-file, like findClones), hash each def's [sigStartByte,endByte) body,
-// and fold overloads sharing a canonId by hashing their SORTED per-symbol hashes (order-independent, stable).
-// Deterministic: pure function of file bytes + spans. A file that won't read contributes nothing (degrade).
-// pathQualified: key on path\0scope\0name instead of canonicalId(). canonicalId() DEGRADES to the bare
-// name when a symbol has no scope (resolve.h) — fine for display, catastrophic as a CROSS-BRANCH comparison
-// key: every scope-less `ok()` in a tree folds to ONE identity, so --merge-scout reported two branches that
-// touched DISJOINT files as a same-symbol conflict (repro: laneA adds a.sh::ok, laneB adds b.sh::ok ->
-// conflicts="1"). Off by default so --quality-delta's own keying, its committed sidecar and its qsnap blobs
-// are untouched; the cross-branch callers opt in and bump their own cache scheme.
-inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root,
-                                                                     bool pathQualified = false )
+// and fold overloads sharing an identity by hashing their SORTED per-symbol hashes (order-independent,
+// stable). Deterministic: pure function of file bytes + spans. A file that won't read contributes nothing
+// (degrade). Keys are pathQualifiedKey (above) on EVERY side — baseline, window-ref and working tree are
+// only ever compared to each other, and a one-sided qualification makes every symbol read as rewritten
+// (the trap the 1722-line comment used to pin). The churn loop in computeDelta derives its per-node lookup
+// key through the same helper, so the join's surfaces cannot drift independently.
+inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root )
 {
     // per-file def ids with a real body (see errorMaskCountsBySym above on `symbols[i].id == i`).
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
-    gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // canonId hash → its symbols' raw-body hashes
+    gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // pathQualifiedKey → its symbols' raw-body hashes
     std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
@@ -389,14 +438,7 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
             {
                 continue;
             }
-            const std::string_view relPath = relForHash( ing.files[ s.fileId ], root );
-            std::string            idText;
-            if( pathQualified ) { idText.append( relPath ).push_back( '\0' );  idText.append( s.scope ).push_back( '\0' );  idText.append( s.name ); }
-            else
-            {
-                idText = canonicalId( relPath, s.scope, s.name );
-            }
-            const std::uint64_t key = fnv1a64( idText );
+            const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
             perId[ key ].push_back( fnv1a64( std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) ) );
         }
     }
@@ -1152,9 +1194,13 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   isFixturePath              (quality.h) — a fixture-path exemption isDeadCandidate calls into
 //   isTestScriptPath           (quality.h) — the test-script exemption isDeadCandidate calls into (the exact
 //                                             helper B10.1a added without a bump — the finding this guards)
+//   topLevelCalleeNameHashes   (quality.h) — the file-scope (top-level script statement) call-site evidence
+//                                             isDeadCandidate consults (W1-S2)
 //   serializeSnapshot          (quality.h) — the on-disk blob shape
 //   deserializeSnapshot        (quality.h) — the on-disk blob shape, read side
 //   computeSnapshot            (quality.h) — the dead-set BUILDER (baseline side)
+//   bodyHashesBySym            (quality.h) — the bodyHashBySym KEY semantics (the v6 keying change landed
+//                                             without this line watching it — the exact drift this guards)
 // v4 (r27 P0.2) — the blob header gained the EXTRACTION IDENTITY (kIngestCacheVersionMirror +
 // kIngestParserVerMirror; see the long note at their declaration). Everything a Snapshot contains is a
 // function of tree-sitter extraction, so a parserVer bump must retire the blob — it did not, and 28c7d32's
@@ -1165,7 +1211,19 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // defs_was= which reads it). That is a BLOB SHAPE change AND a change to what a cached Snapshot contains, so
 // a v4 blob deserialized here would be short by one map and must never be served: bumped, which renames every
 // file through the excludes key as well.
-constexpr std::uint32_t kQSnapCacheScheme = 5;
+// v6 (W1-S2, 2026-08-11) — bodyHashBySym's KEYS changed meaning: pathQualifiedKey (path\0scope\0name)
+// instead of hash(canonicalId), which degrades to the bare name for scope-less symbols and folded every
+// same-named one ACROSS FILES into one churn-join identity (a new rows() in one file flagged churn against
+// the rows() in an untouched file). A v5 blob's body keys live in a different key space, so serving one to
+// a v6 binary would make every scope-less symbol read as absent-from-baseline (churn silently disarmed):
+// bumped, which renames every file through the excludes key as well.
+// v6 (W1-S2, 2026-08-11) — `isDeadCandidate` gained the top-level-invocation exemption (a symbol invoked
+// from FILE SCOPE — a bash/script top-level statement — is alive; see topLevelCalleeNameHashes above the
+// predicate): the SEMANTICS of a cached Snapshot's dead set narrowed, so a v5 blob's dead set (computed
+// without the exemption) served to this binary would resurrect the exact false positives the fix retires.
+// No extraction change (the file-scope references were always captured — buildGraph just never turned them
+// into edges), so kParserVer/the mirrors deliberately did NOT move.
+constexpr std::uint32_t kQSnapCacheScheme = 6;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -1197,7 +1255,10 @@ inline void evictOldQSnapCaches( const std::string& dir, const std::string& repo
 // read as full HEAD Snapshots or vice versa, and the two families evict independently.
 // v2 (r27 P0.2): the shared qsnap blob header gained the extraction identity — a body-hash blob is just as
 // extraction-derived as a full Snapshot, so this family retires with it.
-constexpr std::uint32_t kQBodyCacheScheme = 2;
+// v3 (W1-S2): bodyHashBySym keys became pathQualifiedKey (see kQSnapCacheScheme v6). The blob header's
+// scheme check would already reject a v2 blob — but as CORRUPT (alert + stderr), not a clean miss; bumping
+// the family renames every file so old blobs are simply never named again.
+constexpr std::uint32_t kQBodyCacheScheme = 3;
 
 inline std::string qbodyExclHex( const std::vector<std::string>& excludes, std::size_t maxFileBytes = kDefaultMaxFileBytes )
 {
@@ -1719,7 +1780,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     { DEGRADED_PATH_ALERT( "quality: churn-window ref tree ingested empty — churn evidence unavailable" ); return { {}, false }; }
 
     Snapshot bodyOnly;
-    bodyOnly.bodyHashBySym = bodyHashesBySym( refIng, tmpRoot );   // canonId keys — this is quality-delta's OWN churn lane, whose other side (snap.bodyHashBySym) is keyed the same way; path-qualifying ONE side made every symbol read as rewritten   // root = tmpRoot → root-relative keys (S2)
+    bodyOnly.bodyHashBySym = bodyHashesBySym( refIng, tmpRoot );   // pathQualifiedKey on EVERY side of the churn join (baseline, this ref, working tree, per-node lookup) — a one-sided keying change makes every symbol read as rewritten   // root = tmpRoot → root-relative keys (S2)
 
     atomicWriteQSnap( qbodyPath, serializeSnapshot( bodyOnly, refSha ) );
     evictOldCacheFamily( cacheDirLadder(), "ripwire-qbody-" + repoHex + "-" + qbExclHex + "-", qbodyPath, 2 );
@@ -1904,6 +1965,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root = {} )
 {
     Snapshot snap;
+    const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         if( i >= g.canonId.size() || g.canonId[i].empty() )
@@ -1926,7 +1988,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         // (editcheck.h). A COUNT is overload-collision-proof for the opposite reason a MAX is: it is the one
         // number a collision cannot hide. (maskBySym is the other non-MAX kind; it sums for its own reason.)
         { std::uint32_t& slot = snap.defsBySym[ key ];    slot += 1; }
-        if( isDeadCandidate( ing, g, i ) )
+        if( isDeadCandidate( ing, g, i, topLevelCallees ) )
         {
             snap.dead.push_back( key );
         }
@@ -1970,7 +2032,11 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     // empty; a v2 baseline read by an OLD binary likewise skips lines it doesn't know. Re-baseline after an
     // upgrade (a v1 baseline lacking the new lines makes every current public/large symbol a fresh "was 0"
     // regression by design — that is the intended re-baseline prompt, not a bug).
-    f << "# ripwire quality baseline v2 — regenerate with --quality-baseline; do not hand-edit\n";
+    // v3 (W1-S2): the body-hash record is `bodyq` — pathQualifiedKey keys, replacing the bare-canonId-keyed
+    // `body` record. The TAG is renamed with the keying so the two key spaces can never mix: an old
+    // baseline's `body` lines are skipped as unknown here (churn quietly reports nothing until the next
+    // re-baseline — precision-first, same degrade as no-git), and an old binary skips `bodyq` symmetrically.
+    f << "# ripwire quality baseline v3 — regenerate with --quality-baseline; do not hand-edit\n";
     // STALENESS STAMP: the HEAD commit the baseline was pinned at. --quality-delta compares this to the
     // current HEAD and, if they differ (a baseline left by an abandoned/parallel session, or from before a
     // commit), IGNORES the sidecar and falls back to the git-HEAD auto-baseline instead of reporting a wall
@@ -2008,7 +2074,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     }
     for( const auto& [h, v] : s.bodyHashBySym )
     {
-        f << "body " << std::hex << h << ' ' << v << std::dec << '\n'; // §D#4 short-horizon-churn raw-body hash (both hex)
+        f << "bodyq " << std::hex << h << ' ' << v << std::dec << '\n'; // §D#4 short-horizon-churn raw-body hash, pathQualifiedKey-keyed (both hex)
     }
     for( std::uint64_t h : s.cloneGroups )
     {
@@ -2094,9 +2160,9 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         {
             readValMap( out.defsBySym, "quality: malformed baseline defs line skipped" );
         }
-        else if( kind == "body" )
+        else if( kind == "bodyq" )   // v3 tag — a v2 `body` line is bare-canonId-keyed (a different key space) and falls through to the unknown-kind skip
         {
-            readHashMap( out.bodyHashBySym, "quality: malformed baseline body line skipped" );
+            readHashMap( out.bodyHashBySym, "quality: malformed baseline bodyq line skipped" );
         }
         else if( kind == "clone" )
         {
@@ -2484,7 +2550,8 @@ struct Regression
     std::string   sym;    // canonical id (or, for duplication, the space-joined member ids)
     std::uint32_t was = 0;
     std::uint32_t now = 0;
-    std::uint64_t key = 0;        // STABLE identity for the ack ratchet: the per-symbol baselineCanonId hash, or the clone-group hash (root-spelling-independent, never display text)
+    std::uint64_t key = 0;        // STABLE identity for the ack ratchet: the per-symbol baselineCanonId hash, or the clone-group hash (root-spelling-independent, never display text).
+                                  //   short-horizon-churn rows carry pathQualifiedKey instead (W1-S2): a bare canonId folds scope-less same-named symbols across files, so one ack would suppress — and one finding would name — the WRONG file's symbol
     bool          isMinor = false;// materiality tier: true = below the kind's minor-delta bar → reported sev="minor", does not gate exit 2
     std::string   facet;          // B10.2 — optional classification facet (attribute NAME chosen by the kind in main.cpp):
                                   //   short-horizon-churn: "self" | "ambient"; api-surface: "new-symbol" | "contract-change". Empty = no facet.
@@ -3019,9 +3086,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     reportNewClones( exactClones );
     reportNewClones( type3Clones );
 
+    const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i ) )
+        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i, topLevelCallees ) )
         {
             continue;
         }
@@ -3156,6 +3224,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     //      recently and the working tree is rewriting it AGAIN. Without this gate the current uncommitted edit
     //      alone counted as churn, flagging every touched symbol in any active file. Markdown Sections and
     //      test-fixture paths are exempt (docs and fixtures churn by design — the noise rules).
+    // All three gates join on pathQualifiedKey, never the bare canonId — see bodyHashesBySym's doc
+    // (W1-S2 cross-file misattribution; gate: test/qualitysignalcheck.sh §1d).
     // Git access uses computeDelta's own `root` (= cfg.rootPath on the CLI, the real repo root over MCP);
     // no git / no HEAD / no obtainable window ref → this kind simply reports nothing (degrade, precision-first).
     {
@@ -3217,10 +3287,13 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                     {
                         continue; // fixtures churn by design (exempt)
                     }
-                    const std::uint64_t key = keyByNode[i];
+                    // W1-S2: join on the path-qualified identity, NOT keyByNode — a scope-less symbol's
+                    // bare-canonId key folded every same-named symbol in the tree into one identity, so
+                    // gates 2+3 judged cross-file FOLDS (see bodyHashesBySym's doc; gate: §1d).
+                    const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
                     if( !insertScratchSeen( churnSeen, key, "quality: churn seen scratch capacity exceeded" ) )
                     {
-                        continue; // one report per canonId
+                        continue; // one report per (file, scope, name) identity — same-file overloads fold
                     }
                     const auto nb = nowBody.find( key );
                     if( nb == nowBody.end() )

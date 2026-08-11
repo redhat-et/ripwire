@@ -77,6 +77,34 @@ printf '%s' "$OMD" | grep -q 'kind="short-horizon-churn"' \
     || ok "churn evidence: thrashed markdown section silent (Section symbols exempt)"
 [ "$EMD" = 0 ] && ok "churn evidence: doc-only edit → exit 0" || no "churn evidence: doc-only edit should exit 0 (got $EMD)"
 
+# ── 1d) CROSS-FILE SAME-NAME: churn identity is (file, scope, name), never the bare name ────────────────
+#   W1-S2 repro (2026-08-11): adding a shell function rows() in one test script produced a churn finding
+#   against the same-named rows() in a file the change never touched. canonicalId() degrades to the bare
+#   name for a scope-less symbol, so every scope-less rows() in the tree folded to ONE key across the
+#   baseline / window-ref / working-tree body-hash maps, and gates 2+3 then judged a cross-file FOLD, not
+#   a symbol. The fixture pins the shape: cold.cpp's rows() is committed inside the window (bare-name
+#   gate-3 evidence), hot.cpp is a hot file (2 in-window commits) whose WORKING TREE gains a brand-new
+#   rows(). A first write is not a REwrite (§1b), and cold.cpp's rows() was never touched — no churn row
+#   may appear for rows in either file. alpha() (genuine thrash in the same repo) is the control proving
+#   the qualified join still fires.
+XF="$WORK/xf"; mkdir -p "$XF/src"
+( cd "$XF" && git init -q && git config user.email t@t && git config user.name t )
+printf 'int alpha(){ return 1; }\nint use(){ return alpha(); }\n' > "$XF/src/hot.cpp"
+printf 'int other(){ return 5; }\n'                               > "$XF/src/cold.cpp"
+( cd "$XF" && git add -A >/dev/null 2>&1 && git commit -qm c1 >/dev/null 2>&1 )
+printf 'int alpha(){ return 2; }\nint use(){ return alpha(); }\n'  > "$XF/src/hot.cpp"
+printf 'int other(){ return 5; }\nint rows(){ return 10; }\n'      > "$XF/src/cold.cpp"
+( cd "$XF" && git add -A >/dev/null 2>&1 && git commit -qm c2 >/dev/null 2>&1 )
+# working tree: hot.cpp gains a brand-new rows(); alpha() is rewritten AGAIN (the true-positive control).
+printf 'int alpha(){ return 3; }\nint use(){ return alpha(); }\nint rows(){ return 77; }\n' > "$XF/src/hot.cpp"
+OXF="$( cd "$XF" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+printf '%s' "$OXF" | grep -q 'kind="short-horizon-churn" sym="rows"' \
+    && { no "cross-file churn: brand-new rows() flagged via cold.cpp's same-named rows() (bare-name join)"; printf '%s\n' "$OXF" | tr '>' '\n' | grep '<r '; } \
+    || ok "cross-file churn: a same-named symbol in an untouched file never donates churn identity"
+printf '%s' "$OXF" | grep -q 'kind="short-horizon-churn" sym="alpha"' \
+    && ok "cross-file churn: genuine thrash (alpha) still flagged under the qualified join (control)" \
+    || { no "cross-file churn: alpha() lost — the qualified join broke the true positive"; printf '%s\n' "$OXF" | tr '>' '\n' | grep '<r '; }
+
 # ── 2) TEST-FIXTURE DIRS EXEMPT FROM DEAD-CODE ──────────────────────────────────────────────────────────
 #   The working tree adds three uncalled functions: one under src/ (a REAL dead-code regression), one under
 #   test/somefix/ and one under test/fixture/ (fixtures — dead by design). Only the src/ one flags.
@@ -105,6 +133,47 @@ printf '%s' "$OFX" | grep -q 'sym="fixture_dead_two"' \
 { [ "$EFX" = 0 ] && printf '%s' "$OFX" | tr '>' '\n' | grep '<r kind="dead-code" sym="orphan_one"' | grep -q 'origin="new-symbol"'; } \
     && ok "fixture exempt: the real (new) dead-code finding is reported, classified new-symbol, exit 0" \
     || { no "fixture exempt: expected orphan_one reported origin=new-symbol + exit 0 (got $EFX)"; printf '%s\n' "$OFX" | tr '>' '\n' | grep '<r '; }
+
+# ── 2b) SHELL TOP-LEVEL INVOCATION IS A USE (W1-S2 dead-code false positive) ────────────────────────────
+#   A bash function whose ONLY call site is a top-level script statement (not inside another function) is
+#   alive: buildGraph deliberately drops file-scope references from the call-graph CSR (no caller symbol →
+#   no edge), so the dead kind must consult top-level call sites itself. The script lives OUTSIDE test/
+#   (hooks/) on purpose — test scripts are already exempt wholesale via isTestScriptPath, which would mask
+#   exactly this hole. never_called() is the other direction's control: the fix must not kill the kind.
+TL="$WORK/tl"; mkdir -p "$TL/src" "$TL/hooks"
+( cd "$TL" && git init -q && git config user.email t@t && git config user.name t )
+printf 'int used(){ return 1; }\nint caller(){ return used(); }\n' > "$TL/src/lib.cpp"
+( cd "$TL" && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1 )
+cat > "$TL/hooks/nudge.sh" <<'SH'
+#!/usr/bin/env bash
+top_called() {
+    echo "top"
+}
+helper_called() {
+    echo "helper"
+}
+runner() {
+    helper_called
+}
+never_called() {
+    echo "never"
+}
+top_called
+runner
+SH
+OTL="$( cd "$TL" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+printf '%s' "$OTL" | grep -q 'kind="dead-code" sym="never_called"' \
+    && ok "shell toplevel: truly-uncalled never_called() still flagged (control — the kind survives the fix)" \
+    || { no "shell toplevel: never_called() lost (fix over-suppressed the dead kind)"; printf '%s\n' "$OTL" | tr '>' '\n' | grep '<r '; }
+printf '%s' "$OTL" | grep -q 'sym="top_called"' \
+    && { no "shell toplevel: top_called() wrongly flagged dead — its top-level invocation IS a use"; printf '%s\n' "$OTL" | tr '>' '\n' | grep '<r '; } \
+    || ok "shell toplevel: top_called() silent (called from a top-level script statement)"
+printf '%s' "$OTL" | grep -q 'sym="runner"' \
+    && { no "shell toplevel: runner() wrongly flagged dead — invoked at top level"; printf '%s\n' "$OTL" | tr '>' '\n' | grep '<r '; } \
+    || ok "shell toplevel: runner() silent (invoked at top level)"
+printf '%s' "$OTL" | grep -q 'sym="helper_called"' \
+    && { no "shell toplevel: helper_called() wrongly flagged dead (fn→fn edge — always worked)"; printf '%s\n' "$OTL" | tr '>' '\n' | grep '<r '; } \
+    || ok "shell toplevel: helper_called() silent (called from inside runner — control)"
 
 # ── 3) ACK RATCHET ──────────────────────────────────────────────────────────────────────────────────────
 #   A real complexity regression fires; --quality-ack records it with a reason; the re-run suppresses it
