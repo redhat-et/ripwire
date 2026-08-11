@@ -494,6 +494,18 @@ per METHODOLOGY §5. One fresh-rater measurement; a retry is a new round with a 
 ripwire calls for Read/Grep/Glob is S2's substitution meter; a verdict here is a hypothesis to
 cross-read against that log, never an agent-behavior claim.
 
+**RESULT (2026-08-11, measured once per the registration; orchestrator-executed, raters sealed).**
+Two fresh blind raters (same two-model protocol as the ceiling pass; saw only the 9 prompts + the
+post-edit descriptions, never this registration or the key): consensus-correct **9/9** against the
+band [8,9], baseline 7/9 — **ACCEPT**. Both previous rater-disagreement rows resolved; no
+previously-consensus row broke. Secondary: rows flagged unsupported-by-description by either rater
+fell **8/9 → 1/9** (the survivor asks refactor-*risk*, which no clause states; both raters still
+chose the label). Raters cited the new clauses verbatim in their notes (`--connect` "three or more
+symbols", `--skipped` "map comes back looking short", both boundary sentences). All bm25 floors
+held (readings in the accept-band paragraph above). Per the scope guard: this is a description
+CONTENT result under an LLM-reader instrument — the cross-read against the substitution log is
+still owed at the meter's first fortnight.
+
 ---
 
 ## 5. Token and output economy
