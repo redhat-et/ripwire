@@ -882,4 +882,178 @@ done:
     return out;
 }
 
+
+// ── P0-6: from PAIRS to GROUPS, and the corpus duplication percentage ────────────────────────────────
+//
+// WHY. The detector's output shape is a lie of omission at the reporting layer. findClones() returns real
+// groups, but findClonesType3() returns PAIRS by construction — three functions that are all near-copies of
+// each other come out as three rows of two, and a reader counting rows concludes there are three separate
+// duplication problems instead of one cluster of three. Union-find over the pair graph recovers the cluster
+// (every row gets the id of the component it belongs to), and once components exist the corpus can be
+// priced: how much of this codebase is redundant?
+//
+// THE DEFINITION, because a percentage without one is a number nobody can act on:
+//
+//   duplicated LOC  = Σ over components of ( Σ member loc − max member loc )
+//   total LOC       = Σ loc over every symbol the DETECTOR considered (function/method with a real body)
+//   dup_pct         = 100 × duplicated / total
+//
+// The per-component rule — "all members except the largest one" — is the deliberate choice the brief asks
+// to be disclosed. A 3-clone group counts its LOC TWICE, not once and not three times: one instance is the
+// code you would keep, the other two are the redundancy. Counting all three would say a corpus that is one
+// function copied twice is 100% duplicated, which is not a number anyone can reduce; counting one would
+// price a 3-way clone the same as a 2-way. The largest member is the representative (the most conservative
+// choice: it minimises the reported redundancy).
+//
+// A symbol reachable from several clone relations lands in ONE component by construction, so no LOC is
+// double-counted and duplicated ≤ total always holds.
+//
+// FLOOR, not total. The Type-3 pair list is capped upstream (kType3MaxPairs) and the per-file candidate
+// walk is prefiltered, so a dropped pair is a component that did not get merged and a percentage that is
+// too LOW. Every derived count here is a floor; the emitter labels it counts_floor="1".
+//
+// Deterministic: components are numbered by their smallest member id ascending, and members are collected
+// by an ascending id sweep — no hash-map iteration reaches the result.
+struct CloneGrouping
+{
+    std::vector<std::uint32_t> gidOfGroup;              // parallel to the caller's flat row stream (type-1/2 rows, then type-3 rows)
+    std::uint32_t              componentCount = 0;      // distinct clone clusters (a FLOOR — see above)
+    std::uint64_t              duplicatedLoc  = 0;      // redundant physical lines (a FLOOR)
+    std::uint64_t              totalLoc       = 0;      // physical lines in the detector's own universe
+};
+
+// dup_pct as the emitter prints it: 0.0 when there is nothing to divide (a real zero — "none found").
+inline double cloneDuplicationPercent( const CloneGrouping& gp ) noexcept
+{
+    return gp.totalLoc == 0 ? 0.0 : 100.0 * double( gp.duplicatedLoc ) / double( gp.totalLoc );
+}
+
+// `exact` = findClones() output, `gapped` = findClonesType3() output; gidOfGroup comes back in that same
+// concatenated order, which is the order --clones emits rows in.
+inline CloneGrouping groupClones( const IngestResult& ing, const std::vector<CloneGroup>& exact, const std::vector<CloneGroup>& gapped )
+{
+    CloneGrouping out;
+    out.gidOfGroup.assign( exact.size() + gapped.size(), 0u );
+
+    // The detector's own universe — the SAME predicate findClones/findClonesType3 filter candidates with, so
+    // the denominator can never include code the numerator was never allowed to look at.
+    for( const Symbol& s : ing.symbols )
+    {
+        if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte )
+        {
+            out.totalLoc += s.loc;
+        }
+    }
+
+    const std::uint32_t symbolCount = static_cast<std::uint32_t>( ing.symbols.size() );
+    if( symbolCount == 0 || out.gidOfGroup.empty() )
+    {
+        return out;
+    }
+
+    // union-find over symbol ids: flat u32 parent array, path-halving find, union-by-smaller-root so the
+    // representative of a component is always its smallest member (which is also the numbering key below).
+    std::vector<std::uint32_t> parent( symbolCount );
+    for( std::uint32_t i = 0; i < symbolCount; ++i )
+    {
+        parent[i] = i;
+    }
+    const auto find = [ & ]( std::uint32_t x )
+    {
+        while( parent[x] != x )
+        {
+            parent[x] = parent[ parent[x] ];
+            x         = parent[x];
+        }
+        return x;
+    };
+    const auto unite = [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        const std::uint32_t ra = find( a ), rb = find( b );
+        if( ra == rb )
+        {
+            return;
+        }
+        // smaller root wins ⇒ root == min member id
+        if( ra < rb ) { parent[rb] = ra; } else { parent[ra] = rb; }
+    };
+    const auto uniteGroup = [ & ]( const CloneGroup& gp )
+    {
+        for( std::size_t m = 1; m < gp.members.size(); ++m )
+        {
+            if( gp.members[m] < symbolCount && gp.members[0] < symbolCount )
+            {
+                unite( gp.members[0], gp.members[m] );
+            }
+        }
+    };
+    for( const CloneGroup& gp : exact )
+    {
+        uniteGroup( gp );
+    }
+    for( const CloneGroup& gp : gapped )
+    {
+        uniteGroup( gp );
+    }
+
+    // Number the components that a clone relation actually touched, by smallest member id ascending. An
+    // ascending sweep over ids means the numbering is a pure function of the graph, not of iteration order.
+    std::vector<std::uint32_t> denseIdOfRoot( symbolCount, UINT32_MAX );
+    std::vector<char>          inClone( symbolCount, 0 );
+    const auto markGroup = [ & ]( const CloneGroup& gp )
+    {
+        for( NodeId id : gp.members )
+        {
+            if( id < symbolCount )
+            {
+                inClone[id] = 1;
+            }
+        }
+    };
+    for( const CloneGroup& gp : exact )
+    {
+        markGroup( gp );
+    }
+    for( const CloneGroup& gp : gapped )
+    {
+        markGroup( gp );
+    }
+
+    std::vector<std::uint64_t> sumLocOfDense, maxLocOfDense;
+    for( std::uint32_t id = 0; id < symbolCount; ++id )
+    {
+        if( !inClone[id] )
+        {
+            continue;
+        }
+        const std::uint32_t root = find( id );
+        if( denseIdOfRoot[root] == UINT32_MAX )
+        {
+            denseIdOfRoot[root] = static_cast<std::uint32_t>( sumLocOfDense.size() );
+            sumLocOfDense.push_back( 0 );
+            maxLocOfDense.push_back( 0 );
+        }
+        const std::uint32_t dense = denseIdOfRoot[root];
+        const std::uint64_t loc   = ing.symbols[id].loc;
+        sumLocOfDense[dense] += loc;
+        maxLocOfDense[dense] = std::max( maxLocOfDense[dense], loc );
+    }
+    out.componentCount = static_cast<std::uint32_t>( sumLocOfDense.size() );
+    for( std::size_t d = 0; d < sumLocOfDense.size(); ++d )
+    {
+        out.duplicatedLoc += sumLocOfDense[d] - maxLocOfDense[d];   // every copy but the representative
+    }
+
+    // Finally, the per-ROW ids, in the emitter's own row order.
+    for( std::size_t i = 0; i < exact.size(); ++i )
+    {
+        out.gidOfGroup[i] = exact[i].members.empty() ? 0u : denseIdOfRoot[ find( exact[i].members[0] ) ];
+    }
+    for( std::size_t i = 0; i < gapped.size(); ++i )
+    {
+        out.gidOfGroup[ exact.size() + i ] = gapped[i].members.empty() ? 0u : denseIdOfRoot[ find( gapped[i].members[0] ) ];
+    }
+    return out;
+}
+
 }   // namespace rw

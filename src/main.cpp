@@ -3573,9 +3573,18 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // §A8.1: total= (new) is ALWAYS the true row total (groups+type3-group-count), unpaged included — see
     // cloneUnpagedTotalAttr() above for why it is skipped when paging is active (pageDisclosure already
     // owns total= there; two attributes of the same name would break XML well-formedness).
-    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. raise the default cap with limit=N (offset=M pages). -->" );
-    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\"%s>", cg.size(), cg3.size(),
+    // P0-6: the pair graph, resolved into components, and the corpus priced in LOC. Computed over the FULL
+    // detector output (cg + cg3), never the displayed window — a summary that shrank with --limit would be
+    // a paging artefact, not a measurement.
+    const CloneGrouping grouping = groupClones( ing, cg, cg3 );
+
+    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->" );
+    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s>",
+                 cg.size(), cg3.size(),
                  cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
+                 grouping.componentCount,
+                 static_cast<unsigned long long>( grouping.duplicatedLoc ), static_cast<unsigned long long>( grouping.totalLoc ),
+                 cloneDuplicationPercent( grouping ),
                  pageDisclosure( cpab, sizeof( cpab ), clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ) );
     std::vector<char> esc;
@@ -3591,13 +3600,14 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
         {
             std::snprintf( exemptAttr, sizeof( exemptAttr ), " exempt=\"%s\"", exemptKind );
         }
+        const unsigned gid = flat < grouping.gidOfGroup.size() ? grouping.gidOfGroup[ flat ] : 0u;
         if( isType3 )
         {
-            std::printf( "<group type=\"3\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s>", gp.tokens, gp.members.size(), gp.similarity, exemptAttr );
+            std::printf( "<group type=\"3\" gid=\"%u\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s>", gid, gp.tokens, gp.members.size(), gp.similarity, exemptAttr );
         }
         else
         {
-            std::printf( "<group type=\"%u\" tokens=\"%u\" n=\"%zu\"%s>", gp.type, gp.tokens, gp.members.size(), exemptAttr );
+            std::printf( "<group type=\"%u\" gid=\"%u\" tokens=\"%u\" n=\"%zu\"%s>", gp.type, gid, gp.tokens, gp.members.size(), exemptAttr );
         }
         for( NodeId id : gp.members )
         {
