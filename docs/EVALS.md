@@ -418,7 +418,7 @@ corpus growth) lives in the bodies' *common* connective phrasing that BM25 b=0.7
 to add — closing it likely needs a ranker-side change (e.g. scoring desc+body with a length-aware
 mix), which is out of scope for a description-content round and would need its own registration.
 
-### Skill-routing consensus content gaps — W1-2b round, PRE-REGISTERED 2026-08-11 (before any skill edit)
+### Skill-routing consensus content gaps — PRE-REGISTERED 2026-08-11 (before any skill edit)
 
 **Evidence base.** The S1 ceiling check (blind two-rater protocol, sealed key, raters saw only the
 63 miss-set prompts + the full descriptions): labels ~95% clean, raters route 90%+ top-1 from the

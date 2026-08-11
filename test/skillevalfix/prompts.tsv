@@ -28,7 +28,7 @@
 # ripwire-router itself is never a legal label: it is the fallback map, not a routing destination.
 # Keep this file ASCII; the harness truncates prompts at a byte boundary when reporting misses.
 #
-# RELABEL log (2026-08-11, W1-2b consensus content-gaps round): three rows relabeled on the S1
+# RELABEL log (2026-08-11, consensus content-gaps round): three rows relabeled on the S1
 # ceiling check's two-rater consensus (blind protocol, sealed key; both raters independently
 # contradicted the stored label — the only 3 such rows of 63 audited misses; record: EVALS.md
 # "consensus content gaps" registration). Labels changed; prompts, provenance, split untouched;
