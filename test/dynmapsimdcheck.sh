@@ -2,6 +2,8 @@
 # dynmapsimdcheck.sh — SIMD-vs-scalar parity gate for the vendored vector kernels:
 #   stree::dyn::node_rank<Key,B>::lt/le   (src/infra/dynamic_map.hpp — NEON on arm64, SSE on x86_64)
 #   rw::FixedStr::operator==              (src/infra/fixedStr.h        — same split)
+#   sparseCsr<T> math kernels             (src/infra/sparseCsr.h — same split: blockReduceDot /
+#                                          scaleVec / spmvRow / applyInto / dominantEigenvector)
 #
 # Compiles test/dynmapsimd_harness.cpp under the FULL G1 sanitizer set and runs it. The harness restates
 # the rank/equality contracts as independent scalar oracles and sweeps adversarial patterns (sentinel
@@ -50,7 +52,7 @@ run_pass()
     if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra "$@" \
             $SAN -fno-sanitize-recover=all \
             -I"$ROOT/src/infra" -I"$ROOT/src" -I"$ROOT/third_party" \
-            "$HARNESS" -o "$BIN" 2> "$WORK/cc_$LABEL.log"; then
+            "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$BIN" 2> "$WORK/cc_$LABEL.log"; then
         echo "  FAIL  [$LABEL] harness failed to compile"; sed 's/^/    /' "$WORK/cc_$LABEL.log"; exit 2
     fi
 
@@ -67,7 +69,7 @@ run_pass()
         x86_64|amd64)  WANT="SSE"  ;;
     esac
     if [ -n "$WANT" ]; then
-        if ! { grep -q "rank kernel: $WANT" "$WORK/out_$LABEL.log" && grep -q "fixedstr eq: $WANT" "$WORK/out_$LABEL.log"; }; then
+        if ! { grep -q "rank kernel: $WANT" "$WORK/out_$LABEL.log" && grep -q "fixedstr eq: $WANT" "$WORK/out_$LABEL.log" && grep -q "csr kernels: $WANT" "$WORK/out_$LABEL.log"; }; then
             echo "  FAIL  [$LABEL] non-vacuity ($ARCH should run $WANT kernels; banner disagrees — parity was vacuous)"
             grep 'kernel\|eq:' "$WORK/out_$LABEL.log" | sed 's/^/    /'
             exit 2

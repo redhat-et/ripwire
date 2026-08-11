@@ -12,9 +12,11 @@
 // Discipline (same as matrixDyn):
 //   * DOD storage: three owning, contiguous, 128-B-aligned SoA arrays — rowOffsets[rows+1],
 //     colIndices[nnz], values[nnz]. 32-bit indices (handles, not pointers). Move-only.
-//   * NEON on the SpMV: the gather x[col[k]] is scalarised (Apple Silicon has no cheap
-//     vector gather), but the multiply-accumulate is vectorised (vfmaq_f32) with a scalar
-//     tail. float fast-path via if constexpr; any other T takes the scalar path.
+//   * SIMD on the float kernels — NEON on arm64, SSE2 on x86_64, same shape: the gather
+//     x[col[k]] is scalarised (neither ISA has a cheap 128-bit gather), the
+//     multiply-accumulate is vectorised (vfmaq_f32 / mul+add — SSE2 has no FMA, so x86
+//     rounding differs from arm64; each platform is still bit-stable run-to-run) with a
+//     scalar tail. float fast-path via if constexpr; any other T takes the scalar path.
 //   * DETERMINISTIC block-reduce for every global sum (dangling mass, norms, residual):
 //     fixed-size blocks, partials summed in canonical block order. Bit-stable run-to-run —
 //     load-bearing because PageRank output is a sorted top-K with no tolerance band.
@@ -38,8 +40,14 @@
 #if defined( __ARM_NEON ) || defined( __ARM_NEON__ )
     #include <arm_neon.h>
     #define SPARSECSR_NEON 1
+    #define SPARSECSR_SSE2 0
+#elif defined( __SSE2__ ) || defined( _M_X64 )
+    #include <emmintrin.h>
+    #define SPARSECSR_NEON 0
+    #define SPARSECSR_SSE2 1
 #else
     #define SPARSECSR_NEON 0
+    #define SPARSECSR_SSE2 0
 #endif
 
 namespace csrdetail
@@ -47,6 +55,17 @@ namespace csrdetail
     inline constexpr std::align_val_t kAlign{ infra::platform::hardware_constructive_interference_size };
 
     template<class U> inline U*   anew( std::size_t n ) { return n ? static_cast<U*>( ::operator new( n * sizeof( U ), kAlign ) ) : nullptr; }
+
+#if SPARSECSR_SSE2
+    // horizontal sum of 4 float lanes (SSE2-only shuffles — the vaddvq_f32 of this path).
+    // Unaligned loads throughout the kernels below: x/y are caller-owned with no alignment
+    // contract (dominantEigenvector's x, the gather scratch), matching NEON's vld1q posture.
+    inline float hsumPs( __m128 v ) noexcept
+    {
+        const __m128 folded = _mm_add_ps( v, _mm_movehl_ps( v, v ) );                          // lanes (0+2, 1+3, -, -)
+        return _mm_cvtss_f32( _mm_add_ss( folded, _mm_shuffle_ps( folded, folded, 0x55 ) ) );
+    }
+#endif
     template<class U>
     inline void adel( U* p ) noexcept
     {
@@ -73,6 +92,17 @@ namespace csrdetail
                 v = vfmaq_f32( v, vld1q_f32( val + k ), vld1q_f32( g ) );
             }
             acc = vaddvq_f32( v );
+        }
+#elif SPARSECSR_SSE2
+        if constexpr ( std::is_same_v<T, float> )
+        {
+            __m128 v = _mm_setzero_ps();
+            for( ; k + 4 <= n; k += 4 )
+            {
+                const float g[4] = { x[col[k]], x[col[k + 1]], x[col[k + 2]], x[col[k + 3]] };  // gather
+                v = _mm_add_ps( v, _mm_mul_ps( _mm_loadu_ps( val + k ), _mm_loadu_ps( g ) ) );
+            }
+            acc = hsumPs( v );
         }
 #endif
         for( ; k < n; ++k )
@@ -107,6 +137,16 @@ namespace csrdetail
                 }
                 part = vaddvq_f32( v );
             }
+#elif SPARSECSR_SSE2
+            if constexpr ( std::is_same_v<T, float> )
+            {
+                __m128 v = _mm_setzero_ps();
+                for( ; i + 4 <= end; i += 4 )
+                {
+                    v = _mm_add_ps( v, _mm_mul_ps( _mm_loadu_ps( a + i ), _mm_loadu_ps( b + i ) ) );
+                }
+                part = hsumPs( v );
+            }
 #endif
             for( ; i < end; ++i )
             {
@@ -129,6 +169,15 @@ namespace csrdetail
             for( ; i + 4 <= n; i += 4 )
             {
                 vst1q_f32( x + i, vmulq_f32( vld1q_f32( x + i ), vs ) );
+            }
+        }
+#elif SPARSECSR_SSE2
+        if constexpr ( std::is_same_v<T, float> )
+        {
+            const __m128 vs = _mm_set1_ps( s );
+            for( ; i + 4 <= n; i += 4 )
+            {
+                _mm_storeu_ps( x + i, _mm_mul_ps( _mm_loadu_ps( x + i ), vs ) );
             }
         }
 #endif
