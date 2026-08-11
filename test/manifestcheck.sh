@@ -46,4 +46,31 @@ else
     fail=1
 fi
 
+# ── the SIBLINGS of that number, which the check above never saw ────────────────────────────────────
+# docs/EVALS.md states the gate count in more than one place, and until now exactly ONE of them was
+# enforced. Both unenforced siblings drifted twice: once to 371 while the loop was at 373, and again
+# to 374 while the loop reached 376 — the second time within one round of being corrected, because a
+# passing manifestcheck reported confidence about a number it had not actually checked. That is
+# METHODOLOGY §3 (a fix that lands on one family member and not its siblings) applied to a gate, and
+# the fix is the §3 fix: enumerate the family, assert over ALL of it. Every "<N> gate scripts" claim
+# in the file is now derived-vs-stated, so a new one added later is covered without editing this gate.
+gateCountClaims="$( grep -nE '[0-9]+ gate scripts' "$EVALS" || true )"
+if [ -z "$gateCountClaims" ]; then
+    printf 'FAIL: docs/EVALS.md has no "<N> gate scripts" claim — the presence guard for this arm found nothing to check\n'
+    fail=1
+else
+    while IFS= read -r claim; do
+        claimLine="${claim%%:*}"
+        claimNum="$( printf '%s' "$claim" | grep -oE '[0-9]+ gate scripts' | grep -oE '^[0-9]+' )"
+        if [ "$claimNum" = "$loopNames" ]; then
+            printf 'PASS: docs/EVALS.md:%s gate count (%s) matches the loop\n' "$claimLine" "$claimNum"
+        else
+            printf 'FAIL: docs/EVALS.md:%s says %s gate scripts, but the loop names %s\n' "$claimLine" "$claimNum" "$loopNames"
+            fail=1
+        fi
+    done <<EOF
+$gateCountClaims
+EOF
+fi
+
 exit "$fail"
