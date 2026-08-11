@@ -2,9 +2,10 @@
 build*/
 asan*/
 tsan*/
-# -DRIPWIRE_PROFILE=ON tree, same class as the three above. Comment on its OWN line: gitignore has no
-# trailing-comment syntax, so "profile*/ # why" is one literal pattern that matches nothing.
-profile*/
+# -DRIPWIRE_PROFILE=ON trees, same class as the three above — bench/PROFILE.md spells the dir both
+# "prof" and "build_prof", so cover the prof* stem, not just profile*. Comment on its OWN line:
+# gitignore has no trailing-comment syntax, so "prof*/ # why" is one literal pattern that matches nothing.
+prof*/
 /fuzz/
 /fuzz_llvm/
 /relbuild/
