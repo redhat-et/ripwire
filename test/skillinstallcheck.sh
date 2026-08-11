@@ -102,6 +102,7 @@ UNROUTED="
 --max-file-size  # infra size-limit knob
 --no-cache       # infra cache-control knob
 --version        # meta (version/build info, not an agent moment)
+--sarif          # CI code-scanning output format (--lint modifier, upload-sarif consumes it), not an agent moment
 "
 # L5: --anchor / --cochange-boost / --stable / --most-important-last / --no-auto-order dropped
 # from --help entirely (RIPWIRE_DEV=1-gated experiments, or hidden --order= aliases) — they no longer

@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
 
@@ -927,7 +927,7 @@ $ ./build/ripwire . --match='(if_statement)'
 ... [19 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--no-redact`, `--json`
+**Shaped by:** `--no-redact`, `--sarif`, `--json`
 
 ### `--query=TERMS`
 
@@ -1560,7 +1560,7 @@ $ ./build/ripwire . --lint
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--naming-locals`, `--lint-rules`, `--with-profile`, `--json`
+**Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--naming-locals`, `--lint-rules`, `--sarif`, `--with-profile`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -1588,6 +1588,20 @@ $ ./build/ripwire . --lint-rules=test/lintrulesfix/rules
 </lint>
 ```
 
+**Shaped by:** `--sarif`
+
+### `--sarif`
+
+**Answers:** (with --lint / --lint-rules) the SAME findings as SARIF 2.1.0 instead of the native XML <lint> block — the shape github/codeql-action/upload-sarif consumes for code scanning.
+
+Pure re-serialization (zero new analysis); results count == the native run's findings count. Levels: user severity error/warn/info -> SARIF error/warning/note; a built-in finding (a fact, never a gate) has no severity of its own and also maps to note. Fields with no SARIF home (per-rule capped= floor, enclosing symbol, raw sev=) ride in properties rather than being dropped; URIs are relative to the scanned root. Always the FULL result set — refuses loudly alongside limit=/offset= paging, --match and --with-profile
+
+**Caveats (stated by the binary):**
+
+- a built-in finding (a fact, never a gate) has no severity of its own and also maps to note.
+- Fields with no SARIF home (per-rule capped= floor, enclosing symbol, raw sev=) ride in properties rather than being dropped;
+- Always the FULL result set — refuses loudly alongside limit=/offset= paging, --match and --with-profile
+
 ### `--with-profile=FILE`
 
 **Answers:** (with --lint) join MEASURED heat onto findings: FILE is a RIPWIRE_PROFILE build's report (its #PROF_TSV block);
@@ -1605,6 +1619,8 @@ scope	file	line	calls	total_ms	l1d_mpki
 walk: chase pass	x.cpp	9	12	48.500	7.250
 #PROF_TSV_END
 ```
+
+**Shaped by:** `--sarif`
 
 **Caveats (stated by the binary):**
 
