@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 381 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 382 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -352,6 +352,72 @@ zero. Issue-style prose that names files and symbols is where it earns its keep.
 contract (it signals what anchored; it never displaces the top hit; byte-identical when nothing is
 mentioned; deterministic across three runs) is pinned by `test/mentioncheck.sh`.
 
+### Skill-routing calibration — S1 round, PRE-REGISTERED 2026-08-11 (before measurement)
+
+**Instrument:** `ripwire skills --eval-skills=test/skillevalfix/prompts.tsv` (`src/skilleval.h`),
+gated by `test/skillevalcheck.sh`, `test/skillevalsplitcheck.sh`, `test/skillroutingjudgedcheck.sh`.
+
+**Corpus growth (same round, sealed before this registration):** 148→266 rows, judged 58→152
+(≥9 labels per routable skill), append-only; split assigned by `sha256(prompt)` parity at
+collection; corpus sha256 sealed in the growth commit; every new row screened by a trigram-overlap
+filter against all descriptions and all pre-existing prompts (25 candidates reworded on a hit).
+
+**Recalibration finding (unchanged skills, grown corpus):** bm25-desc split=test hit@1 **68.5%**,
+sep-auc **0.953** — the previous 69.0% floor **did not reproduce** once the denominator grew; every
+floor was re-derived from the new measured values in the recalibration commit (60.0 / 0.89 test,
+46.0 / 0.75 dev, 50%/50% judged, test-judged rows ≥80, split pin 183, inversion band 0.02). Judged
+baseline (152 rows): bm25-desc **89**, bm25-full **92**, for-routed **91**. The desc-vs-body gap
+(bm25-full − bm25-desc = **+3 rows**) survived the growth unchanged — the raw SKILL.md still beats
+the description written to represent it, and that gap is the target.
+
+**Mechanism (registered before measurement).** For each of the 17 routable skills: per-skill tf×idf
+over the SKILL-body corpus (idf across the 17 bodies), minus every subtoken the skill's description
+already contains (`bm25Arm` is exact `tf.find` — no stemming, so literal surface forms). Candidate
+terms must pass the validated vocabulary rule: tf ≥ 3 in the skill's own body AND document
+frequency ≤ 4/17 across the other bodies. Top survivors, capped at ≤12 added words per skill, are
+ADDED to the description as natural trigger prose — never swapping or deleting existing text (the
+twice-measured SWAP trap), never every-skill phrasing (the df filter is its mechanical form). Term
+derivation reads skill bodies only — never eval prompts, never miss lists. The per-skill term table
+is committed with the edit for audit.
+
+**Metric and band.** Paired hit@1 on the held-out judged set (split=test, provenance=judged,
+n=85), bm25-desc arm, exactly one measurement. **ACCEPT iff net flipped rows (newly-correct −
+newly-wrong) land in [+2, +6]** (≈ +2.4pp…+7.1pp at n=85; band brackets the 3-row gap scaled to
+the grown denominator; one row = 1.2pp). **Simultaneous floors, all re-derived values above, all
+must hold:** test 60.0/0.89, dev 46.0/0.75, judged 50%/50%, plus `agentloopcodexcheck.sh`
+(frontmatter stop-rule markers untouched). sep-auc explicitly may not fall below its floor —
+added trigger vocabulary that makes negatives fire is the known failure mode of ADD edits.
+
+**Decision rule.** Inside the band with all floors green → accept and land. Below +2 → reject,
+revert the description edit, keep the corpus growth, record here per METHODOLOGY §5. **Above +6 →
+also reject** (a result better than the mechanism can explain is a leakage suspect, not a win —
+the LB-3 rounds are the precedent); revert, audit, record. One attempt against the held-out set;
+a retry is a new round with a fresh registration.
+
+**Scope guard.** This measures a routing PROXY (which skill wins a prompt), reported only as such.
+The behavior metric — does an agent actually stop defaulting to Read/Grep/Glob — is S2's
+substitution meter (the per-call JSONL log, live on main), and a routing verdict here is a
+hypothesis to cross-read against that log, never an agent-behavior claim. The `bench/agentloop`
+task-success eval stays unrun (underpowered as configured; see `ff928ee`'s power calculation).
+
+**RESULT (2026-08-11, the single held-out measurement): REJECT.** Net flipped rows on the n=85
+held-out judged set: newly-correct **1**, newly-wrong **1**, **net 0** — below the [+2, +6] band.
+Judged-all bm25-desc moved 89→88/152; split=test hit@1 was unchanged at 68.5% (hit@2 80.0→83.8 and
+mrr 0.782→0.794 rose, but neither was the registered metric); sep-auc 0.953→0.951 (floor held).
+The description edit was reverted per the decision rule; the corpus growth and recalibrated floors
+stay (instrument improvements independent of the change); the term tables and derivation script
+remain committed (`test/skillevalfix/s1_terms_2026-08-11.txt`, `s1_deriveterms.py`) as the record.
+
+**What this negative result says** (METHODOLOGY §5): body-derived rare vocabulary (tf≥3 own-body,
+df≤4/17), added within a ≤12-word cap to already-long descriptions, does not move hard-paraphrase
+routing — the judged rows share no vocabulary with the skill by construction, and rare body terms
+are exactly the vocabulary a paraphrase does not use either. This is the third rejection of a
+"more of the skill's own rare words" mechanism (after the two LB-3 stemming/variant rounds on
+`--for`); the surviving hypothesis is that the desc-vs-body gap (+3 rows, stable across a 2.6×
+corpus growth) lives in the bodies' *common* connective phrasing that BM25 b=0.75 makes expensive
+to add — closing it likely needs a ranker-side change (e.g. scoring desc+body with a length-aware
+mix), which is out of scope for a description-content round and would need its own registration.
+
 ---
 
 ## 5. Token and output economy
@@ -616,7 +682,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **381 gate scripts**, all of which exist on disk.
+naming **382 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -1143,7 +1209,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 381. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 382. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
