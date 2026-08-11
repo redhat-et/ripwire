@@ -24,14 +24,16 @@ routedHit="$( printf '%s' "$judged" | sed -n 's/.*for-routed \([0-9][0-9]*\)\/[0
 judgedN="$( printf '%s' "$judged" | sed -n 's/.*for-routed [0-9][0-9]*\/\([0-9][0-9]*\).*/\1/p' )"
 [ -n "$descHit" ] && [ -n "$routedHit" ] && [ -n "$judgedN" ] || { no "could not parse judged-only row: $judged"; exit "$fail"; }
 
-# Frozen held-out corpus: these floors sit below the measured 23/43 and 20/43 values, but prevent the
-# hard paraphrase set from regressing while easy description-copy rows keep the aggregate green.
+# Frozen held-out corpus: floors sit ~9-10pp below the measured values, preventing the hard paraphrase
+# set from regressing while easy description-copy rows keep the aggregate green. RECALIBRATED 2026-08-11
+# (S1 growth pass, judged 58→152): measured with unchanged skills bm25-desc 89/152 (58.6%), for-routed
+# 91/152 (59.9%); both floors re-derived at 50% — never inherited across a denominator change.
 [ $(( descHit * 100 )) -ge $(( judgedN * 50 )) ] \
     && ok "bm25-desc judged hit@1 stays at or above 50% ($descHit/$judgedN)" \
     || no "bm25-desc judged hit@1 fell below 50% ($descHit/$judgedN)"
-[ $(( routedHit * 100 )) -ge $(( judgedN * 45 )) ] \
-    && ok "for-routed judged hit@1 stays at or above 45% ($routedHit/$judgedN)" \
-    || no "for-routed judged hit@1 fell below 45% ($routedHit/$judgedN)"
+[ $(( routedHit * 100 )) -ge $(( judgedN * 50 )) ] \
+    && ok "for-routed judged hit@1 stays at or above 50% ($routedHit/$judgedN)" \
+    || no "for-routed judged hit@1 fell below 50% ($routedHit/$judgedN)"
 
 printf '%s\t%s\t%s\n' \
     'I just opened this unfamiliar repository. What are the main subsystems and entry points?' \
