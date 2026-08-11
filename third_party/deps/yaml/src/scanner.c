@@ -224,27 +224,34 @@ static void deserialize(Scanner *scanner, const char *buffer, unsigned length) {
     }
 }
 
+// RIPWIRE_VENDOR_PATCH(yaml/002-cursor-wrap-explicit): cur_col/cur_row are int16_t, and `++`
+// promotes to int then stores back — an IMPLICIT truncating conversion once a line exceeds 32767
+// characters (real trigger: 228 279-char lines in VCR-cassette test fixtures) or a file exceeds
+// 32767 lines. The wrapped value is what upstream production builds already compute; the explicit
+// cast keeps that exact value while exempting the site from the G1
+// -fsanitize=implicit-conversion stack, which otherwise aborts the whole run. Same class and same
+// remedy as swift/001.
 static inline void adv(Scanner *scanner, TSLexer *lexer) {
-    scanner->cur_col++;
+    scanner->cur_col = (int16_t)(scanner->cur_col + 1);  /* RIPWIRE_VENDOR_PATCH(yaml/002-cursor-wrap-explicit) */
     scanner->cur_chr = lexer->lookahead;
     lexer->advance(lexer, false);
 }
 
 static inline void adv_nwl(Scanner *scanner, TSLexer *lexer) {
-    scanner->cur_row++;
+    scanner->cur_row = (int16_t)(scanner->cur_row + 1);  /* RIPWIRE_VENDOR_PATCH(yaml/002-cursor-wrap-explicit) */
     scanner->cur_col = 0;
     scanner->cur_chr = lexer->lookahead;
     lexer->advance(lexer, false);
 }
 
 static inline void skp(Scanner *scanner, TSLexer *lexer) {
-    scanner->cur_col++;
+    scanner->cur_col = (int16_t)(scanner->cur_col + 1);  /* RIPWIRE_VENDOR_PATCH(yaml/002-cursor-wrap-explicit) */
     scanner->cur_chr = lexer->lookahead;
     lexer->advance(lexer, true);
 }
 
 static inline void skp_nwl(Scanner *scanner, TSLexer *lexer) {
-    scanner->cur_row++;
+    scanner->cur_row = (int16_t)(scanner->cur_row + 1);  /* RIPWIRE_VENDOR_PATCH(yaml/002-cursor-wrap-explicit) */
     scanner->cur_col = 0;
     scanner->cur_chr = lexer->lookahead;
     lexer->advance(lexer, true);
