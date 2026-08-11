@@ -671,6 +671,64 @@ it adds no hazard to weigh either. A ceiling here would fire only on a file no c
 gate pins the *decision* from outside by indexing a 216 KB `.toml` — 3.7× the corpus max, and past
 where the JSON ceiling would sit — so one cannot be added later without the gate saying so out loud.
 
+### The YAML config-key tier — sequence transparency, and the guard that is memory-safety load-bearing
+
+**Instrument:** `test/yamllangcheck.sh` over `test/yamlfix/{workflow.yml, multidoc.yml, tasks.yaml}`,
+plus the corpus-scale run described below. **Corpora:** the 90-repo breadth corpus
+(`bench-assets/r4/repos`) for the design measurements (the 2026-08-10 probe measured 4 449 YAML files /
+34 209 keys; this round's crawl of the same trees collected 4 428 `.yml`/`.yaml` files); `test/yamlfix/`
+for the pinned per-shape assertions. **Binary:** the tier landed at `kParserVer 61`.
+
+**The design number: JSON's root-relative depth rule captures 27.1% of real YAML keys, and the 25.3% of
+ALL keys that sit directly inside a sequence element — the `steps:` / `containers:` / `tasks:` shape — it
+drops 100%.** YAML's rule is mapping-depth ≤ 2 with sequence levels **transparent**, which captures
+44.0% on the same corpus. Block and flow mappings count alike (flow is a presentation style of the same
+mapping node). The remaining semantics were fixed from measured frequency before implementation (PLAN
+2026-08-10) and each is a gate arm: anchors (1.73% of files) are part of the value, never symbols;
+aliases (1.55%; alias-as-key measured **0** in the corpus) are dropped, never expanded; the `<<:` merge
+key (0.22%) is dropped rather than minting a symbol named `<<`; multi-document streams (0.11%, max 5
+docs) re-enter each document at depth 1; block scalars (20.5% of files) are single value tokens and are
+never descended — **384 corpus block scalars contain key-like text a line regex would mint symbols
+from**, which is the argument for a real parser; duplicate keys are both minted (`overloads=2`);
+non-string keys keep their literal source text (GH Actions' `on:` is a YAML-1.1 bool, and `on` is what a
+user greps for); quoted keys keep their quotes (the TOML posture, disclosed).
+
+**Verified at corpus scale under the G1 stack:** the breadth corpus's 4 428 YAML files index to
+`files=4424 symbols=118153 edges=0` with **zero stderr and zero sanitizer reports**, byte-identical
+across two cold runs and a warm run, `xmllint --noout` clean — and the accounting closes exactly:
+4 424 indexed + 3 over the 512 KB ceiling (counted in `skipped_oversize=`) + 1 under a crawl-pruned
+directory = 4 428.
+
+**The ceiling is 512 KB, deliberately not JSON's 256 KB.** `.yml` has JSON's hazard (a machine-written
+data class behind a config extension) so it gets a ceiling, but JSON's line would drop real
+hand-maintained config — NeMo's `cicd-main.yml` is 293 KB. The gate pins both sides: a ~300 KB file
+(over JSON's line) stays indexed, a ~600 KB file is skipped *and counted*.
+
+**The nesting guard is memory-safety load-bearing, and it was reproduced red-first.**
+tree-sitter-yaml v0.7.2's external scanner `serialize()` writes 4 bytes per open block indent level
+behind a guard that proves 1 byte of headroom; at the vendored tag, a 253-level deep-indent fixture
+parses (`10 + 4×253 = 1022` fits) and one more level aborts —
+`Assertion failed: (length <= 1024), function ts_parser__external_scanner_serialize` (SIGABRT) — while
+the same file under `NDEBUG` performs the corrupting write silently (observed SIGSEGV downstream). ASan
+alone cannot flag it: the write lands 2 bytes past `debug_buffer` *inside* the `TSLexer` struct, an
+intra-object overflow. Two independent layers now stand in front of it, plus a family gate behind:
+ingest's `yamlNestsTooDeep` prescan (`kMaxYamlNestDepth`, an over-approximation that can only
+over-count, so the failure direction is a disclosed skip) refuses such files before any parse; the
+vendored scanner carries the one-line bounds fix (`third_party/patches/yaml/001`, reverse-apply
+drift-gated); and `vendorpatchcheck` arm H audits the defect *class* — a per-iteration guard narrower
+than the widest write in its loop — across every vendored scanner, unclassified scanners failing loudly.
+
+**A second scanner defect surfaced only at corpus scale.** The first full-corpus G1 run aborted on
+`cur_col++` — an `int16_t` cursor implicitly truncating on real 228 279-character lines (VCR-cassette
+fixtures, legitimately under the ceiling). Patched as `yaml/002` (explicit casts, the `swift/001`
+remedy), with the map output verified **byte-identical on all 4 424 files** before vs after the patch.
+A probe over three hand-picked fixtures would not have found this; 90 repos did.
+
+**On repositories the tier does not serve, the change is visible but bounded:** this repository's own
+`.github/workflows/*.yml` and test fixtures now index (the `grepcheck` repro arm records the
+consequence and its resolution), and `.dSYM` debug-symbol bundles — 197 yaml-format relocation files
+and zero real config in the private validation corpus — are pruned by name suffix, pinned by a gate arm.
+
 ### Swift shape coverage + TS #private — hand-port of stranded commit bb78f97 (2026-08-10)
 
 **Instrument:** `test/swiftshapecheck.sh` over `test/swiftshapefix/{EnumsAndTypes,Members,ProtocolSurface}.swift`

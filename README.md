@@ -16,7 +16,7 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files.
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · Bash · C# · JSON · TOML — [seventeen vendored grammars](#languages), and adding
+JavaScript · Java · Ruby · Bash · C# · JSON · TOML · YAML — [eighteen vendored grammars](#languages), and adding
 another is a vendored tree-sitter grammar plus one row in a declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
@@ -513,7 +513,7 @@ cmake -S . -B build && cmake --build build -j
 ```
 
 Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
-Swift, C#** — plus JSON and TOML config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+Swift, C#** — plus JSON, TOML and YAML config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
@@ -770,8 +770,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9597"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9701"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9599"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9703"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -1380,9 +1380,11 @@ so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--call
 its host-side launchers; `__constant__` module tables index as symbols even uninitialized — the
 `cudaMemcpyToSymbol` idiom — and SCREAMING_SNAKE `__device__`/`__managed__` globals join them;
 dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
-JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON + TOML (config keys — a `[tool.ruff.lint]`
-table is one symbol under its full dotted name, and `pyproject.toml`/`Cargo.toml` become greppable).
-Seventeen tree-sitter grammars, all vendored.
+JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON + TOML + YAML (config keys — a
+`[tool.ruff.lint]` table is one symbol under its full dotted name, `pyproject.toml`/`Cargo.toml`
+become greppable, and a GitHub workflow's or k8s manifest's mapping keys index at depth ≤ 2 with
+sequence levels transparent, so a `steps:` entry's keys are still found).
+Eighteen tree-sitter grammars, all vendored.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
 vendored tree-sitter grammar, its query file, and one row in the declarative
