@@ -1,0 +1,16 @@
+# fuzz seed: exercises the shapes queries/yaml/tags.scm actually matches
+topkey: value
+mapping:
+  childkey: 1
+  "quoted.key": two
+anchored: &anch
+  timeout: 30
+merged:
+  <<: *anch
+  flow: {fa: 1, fb: 2}
+listy:
+  - itemkey: a
+  - block: |
+      not: a-key
+---
+seconddoc: true

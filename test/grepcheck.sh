@@ -177,10 +177,20 @@ tr '<' '\n' <"$TMP/repro.xml" | sed -n 's/^hit p="\([^"]*\)".*/\1/p' >"$TMP/repr
     && ok "capped first screen carries ZERO markdown rows (was 66 of 100)" \
     || no "capped first screen still carries $( grep -c '\.md:' "$TMP/repro.paths" ) markdown rows"
 
-case "$( sed -n 1p "$TMP/repro.paths" )" in
-    */src/*) ok "first row of the repro query is a src/ path" ;;
-    *)       no "first row of the repro query is '$( sed -n 1p "$TMP/repro.paths" )', not a src/ path" ;;
+# The YAML tier (2026-08-11) made this repo's own .github/workflows/*.yml part of the corpus, and two
+# ci.yml COMMENT lines mention the macro. Data-config files tier as Source (the json/toml precedent:
+# package.json / Cargo.toml already do), and `.github/…` sorts alphabetically before `src/…` within the
+# tier — so the finding's assertion is now spelled on the first CODE row: strip the data-config rows
+# (which the doc-swamp finding was never about) and the first remaining row must still be src/.
+grep -vE '\.(ya?ml|json|toml):' "$TMP/repro.paths" >"$TMP/repro.code.paths"
+case "$( sed -n 1p "$TMP/repro.code.paths" )" in
+    */src/*) ok "first CODE row of the repro query is a src/ path (data-config rows aside)" ;;
+    *)       no "first CODE row of the repro query is '$( sed -n 1p "$TMP/repro.code.paths" )', not a src/ path" ;;
 esac
+# …and config rows must never displace the definition site off the capped first screen entirely
+grep -q '/src/verify\.h:' "$TMP/repro.paths" || grep -q '/src/' "$TMP/repro.paths" \
+    && ok "capped first screen still reaches src/ rows alongside the config rows" \
+    || no "capped first screen lost every src/ row to config rows"
 
 # (4d) with the cap lifted, EVERY doc row still sorts after EVERY code row
 "$BIN" "$ROOT" --grep=DEGRADED_PATH_ALERT --limit=1000 >"$TMP/repro_all.xml" 2>/dev/null

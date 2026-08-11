@@ -354,7 +354,7 @@ tracked = set(paths)
 # instead of quietly shrinking the search.
 _deps = 'third_party/deps'
 _grammars = ('bash', 'c', 'cpp', 'csharp', 'cuda', 'go', 'java', 'javascript', 'json',
-             'objc', 'python', 'ruby', 'rust', 'swift', 'toml')
+             'objc', 'python', 'ruby', 'rust', 'swift', 'toml', 'yaml')
 roots = (['src', 'src/infra', 'third_party', '']                        # our targets
          + [f'{_deps}/tree_sitter/lib/include']                         # PUBLIC, given to every target
          + [f'{_deps}/tree_sitter/lib/src', f'{_deps}/tree_sitter/lib/src/wasm']   # tree-sitter PRIVATE
