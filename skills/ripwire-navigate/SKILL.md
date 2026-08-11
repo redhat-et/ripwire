@@ -9,7 +9,6 @@ description: >
   Also the answer to "is it safe to change X?" (blast radius, not just 1-hop callers). Run the ONE verb
   that matches the question; when its answer is unambiguous, stop — don't stack callers + callees +
   impact as a ritual. Backed by ripwire (deterministic, on PATH).
-  How do symbols relate — connect them along each precise, matched edge.
 allowed-tools: Bash, Read
 ---
 

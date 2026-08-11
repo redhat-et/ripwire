@@ -7,7 +7,6 @@ description: >
   -DRIPWIRE_OPT_REMARKS=ON, the opt-record YAML triage, which remark classes are signal versus restated
   algorithm, the build-level answers (RIPWIRE_LTO, RIPWIRE_PGO), and the A/B a remark-driven fix must
   survive. Contributor-facing: it is about compiling this tool, never about running its verbs.
-  Capture and profile: confirmed hot loops, vectorize misses, GVN, medians.
 allowed-tools: Bash, Read, Edit
 ---
 

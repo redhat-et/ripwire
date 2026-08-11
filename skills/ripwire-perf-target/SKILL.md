@@ -9,8 +9,7 @@ description: >
   but declared far apart), including the boundary of what that lens cannot see. Static graph metrics are
   maintenance/change-risk signals, not runtime heat or call frequency. Inspect only the symbols the
   profile names — no repo-wide hotspot sweeps for a localized measurement. Backed by ripwire
-  (deterministic, on PATH). Chase measured access patterns: packing geometry, pointer chasing, one
-  hypothesis.
+  (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

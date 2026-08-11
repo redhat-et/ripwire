@@ -8,7 +8,6 @@ description: >
   teammate) to pick up. Produces a compact, pasteable brief instead of a wall of source code — signatures +
   full bodies of the 2-3 entry points, the design docs that explain WHY, and hotspot/bus-factor risk scoped
   to just that subsystem. Backed by ripwire (deterministic, on PATH).
-  The handoff stamp: verified sha, dirty files noted.
 allowed-tools: Bash, Read
 ---
 

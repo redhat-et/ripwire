@@ -15,7 +15,6 @@ description: >
   area is identified; cold structure mapping belongs to ripwire-orient. For any DIFF — yours or an incoming
   PR — use ripwire-change-check; this skill is whole subsystems, not diffs. A single-lens question is a
   single call — run only the lenses the question names, not the whole battery.
-  Evidence families: historical pairs, dark flags, regions, readability.
 allowed-tools: Bash, Read
 ---
 

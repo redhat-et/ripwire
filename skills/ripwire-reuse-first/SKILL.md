@@ -10,7 +10,7 @@ description: >
   diff. For a whole multi-symbol FEATURE (plan/interface/sizing) → ripwire-before-you-build. One
   --exemplar (or --grep) call at most — and if the fix is a one-line edit to an existing symbol, or the
   ranked output already showed the building block, skip this skill (and this file) and just write it.
-  Backed by ripwire (deterministic, on PATH). Retrieval first: less code.
+  Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

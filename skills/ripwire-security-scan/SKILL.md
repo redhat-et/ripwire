@@ -11,8 +11,7 @@ description: >
   skill or MCP config from an external source, as a periodic check on already-installed ones, or when you're
   about to review/write code that touches untrusted input. One scan pass over the artifact in question is
   the verdict — a clean result doesn't need a second sweep with more verbs. Backed by ripwire
-  (deterministic, on PATH). Deserialize sinks, dataflow proof, env and command args, warn-level stanza
-  review.
+  (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 
