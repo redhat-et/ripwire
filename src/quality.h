@@ -760,7 +760,11 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 60;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 61;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 61 = 2026-08-11 YAML config-key tier: .yml/.yaml mapping
+                                                          // keys (mdepth<=2, sequences transparent) indexed as t="sec"
+                                                          // for the first time — changes the extracted SET on any
+                                                          // YAML-bearing tree.
                                                           // 60 = 2026-08-10 language-port round (one shared bump):
                                                           // Python shapes (11 new tags.scm patterns, .pyi routing, the
                                                           // gated enum-member kind), Swift shapes (hand port of bb78f97)
