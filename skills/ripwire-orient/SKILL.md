@@ -9,7 +9,9 @@ description: >
   the reasoning did not. Runs ripwire (the deterministic
   "ripgrep of AI context", on PATH) to MAP the code — an escalation ladder from a one-screen report up to
   communities, nested zoom, and a rendered diagram — instead of blind grep + whole-file reads. Prefer this
-  over reading many files when orienting. A NAMED symbol's deep-dive (its own contract/callers/callees, not
+  over reading many files when orienting. The map's own disclosure moments live here too: `--doctor`
+  checks the setup's health, and `--skipped` lists exactly which files the index dropped (e.g. too big to
+  index) when the map comes back looking short. A NAMED symbol's deep-dive (its own contract/callers/callees, not
   the whole subsystem) → ripwire-navigate instead. For architecture HEALTH/enforcement (propagation cost,
   layering violations, CI gates) → ripwire-layers instead. Stop at the first rung that answers — the
   one-screen report usually does; climb the ladder only while the question is still open.

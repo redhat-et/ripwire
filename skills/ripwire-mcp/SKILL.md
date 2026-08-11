@@ -6,7 +6,10 @@ description: >
   cross-branch pair whereis/stray_content + 3 edit verbs) and when each beats the CLI form or a native editor tool, the lazy-body handle posture, the edit
   verbs' safety contract, and the server's staleness/ rebuild behavior. Use when setting up ripwire for
   Claude Code / Cursor / Codex / Windsurf / Gemini / opencode / aider, when deciding which ripwire MCP verb to call
-  mid-task, or when wondering whether the server's index is stale. Backed by ripwire (deterministic, on
+  mid-task, or when wondering whether the server's index is stale. Also the tool-health moment: a symbol
+  you EXPECTED is missing from the ranked output, results look stale or wrong, "is my ripwire setup
+  broken?" — the index-staleness / server-health / rebuild surface answers whether the tool's answer is
+  trustworthy right now. Backed by ripwire (deterministic, on
   PATH).
 allowed-tools: Bash, Read
 ---
