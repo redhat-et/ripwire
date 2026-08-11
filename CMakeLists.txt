@@ -682,8 +682,19 @@ set(_ripwire_libstdcxx_ignorelist "${_ripwire_generated_dir}/libstdcxx_sanitizer
 # UTF-8 macros, so those two checks are disabled only for the core target. Subtree progress quantization and
 # generated external-scanner C function pointers remain exact-function exceptions. The lookahead sentinel
 # remains on upstream master as of 2026-07-12.
+# The two truncation exemptions are exact-function and both quantization-by-design in the pinned core:
+#   * ts_subtree_summarize_children stores a uint32 repeat depth into the uint16 repeat_depth field
+#     (subtree.c:469/471) — a >65535-deep repeat chain (a ~70K-element generated initializer, e.g.
+#     cpython's Modules/unicodename_db.h) wraps it by design and balancing still succeeds. Verified
+#     live 2026-08-11: without this entry the G1 stack aborts at subtree.c:469:34 ("value 65536 …
+#     changed the value to 0"); the historical balance_subtree entry alone never covered this site.
+#   * ts_parser__balance_subtree quantizes its compression counter into a uint8 operations budget
+#     (parser.c:1903, `i >> 4` into uint8_t) — live whenever i >= 4096, so that entry stays.
+# test/vendorpatchcheck.sh arms D/E/G pin this block: every fun: entry must name a function that
+# exists in the vendored tree, the summarize_children entry must be present, and a generated
+# 70001-element initializer must parse clean under the asan flavour.
 file(WRITE "${_ripwire_tree_sitter_ignorelist}"
-  "[implicit-unsigned-integer-truncation]\nfun:ts_parser__balance_subtree\n"
+  "[implicit-unsigned-integer-truncation]\nfun:ts_subtree_summarize_children\nfun:ts_parser__balance_subtree\n"
   "[function]\nfun:ts_parser__external_scanner_create\n")
 # Swift's scanner stores lexer->lookahead (-1 at EOF) in uint32 inside this exact whitespace helper.
 file(WRITE "${_ripwire_swift_ignorelist}"
