@@ -171,4 +171,49 @@ fi
 [ ! -e "$OLD2" ]    && ok "concurrency: stale blob swept without either process crashing"   || no "concurrency: stale blob survived both sweeps"
 [ ! -e "$FILLER2" ] && ok "concurrency: oversized filler swept without either process crashing" || no "concurrency: oversized filler survived both sweeps"
 
+# ── (g) W1-V4 (2026-08-11): the ".cache" arm and the locks/ invariant, neither previously gated ──────────
+# evictOldCacheFamily's `matches()` lambda (src/quality.h) accepts EITHER ".bin" OR ".cache" as a family
+# member suffix — every arm above only ever seeded ".bin", so the ".cache" half of that OR was never
+# exercised by any gate. Separately, advisory edit locks (src/mcpedit.h editLockPath) deliberately live
+# under `cacheDirLadder()/locks/` specifically so the sweep's shard walk — which only recurses into
+# EXACTLY-2-hex-char subdirectory names — never descends into them, and their ".lock" suffix would fail
+# `matches()` even if it did; the comment there says outright "cache eviction never scans or removes a
+# possibly-live advisory-lock inode." No prior gate asserted either fact — this section is the first to.
+#
+# A fresh, ISOLATED cache dir (own TMPDIR): the byte-budget arithmetic in the arms above only counts
+# "ripwire-*.bin" (see allblobs()/dirapparentbytes()), so a .cache file would silently fall outside their
+# accounting either way — cleaner to give this its own directory than reason about interference.
+TMP2="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2"' EXIT
+CACHEBASE2="$TMP2/cachebase"; CACHEDIR2="$CACHEBASE2/ripwire"; mkdir -p "$CACHEDIR2"
+REPO2="$TMP2/repo"; mkdir -p "$REPO2"
+printf 'int tiny3( void )\n{\n    return 3;\n}\n' > "$REPO2/f.cpp"
+
+OLDCACHE="$CACHEDIR2/ripwire-deadbeef0000f1f1-lean.cache"
+FRESHCACHE="$CACHEDIR2/ripwire-deadbeef0000f2f2-lean.cache"
+LOCKDIR="$CACHEDIR2/locks"; mkdir -p "$LOCKDIR"
+# real editLockPath() shape: "ripwire-edit-<16 hex>.lock" — same "ripwire-" prefix the family sweep
+# matches on everywhere else, so if the locks/ protection ever weakened this is exactly what would go.
+OLDLOCK="$LOCKDIR/ripwire-edit-00000000deadbeef.lock"
+
+printf 'stale-old-cache-blob-dotcache' > "$OLDCACHE"
+touch -t 202001010000 "$OLDCACHE"
+printf 'ancient-advisory-lock-should-never-be-touched' > "$OLDLOCK"
+touch -t 202001010000 "$OLDLOCK"
+sleep 1
+printf 'fresh-small-cache-blob-dotcache' > "$FRESHCACHE"
+
+env -u XDG_CACHE_HOME TMPDIR="$CACHEBASE2" "$BIN" "$REPO2" >"$TMP2/run.xml" 2>"$TMP2/run.err"
+rc3=$?
+[ "$rc3" -eq 0 ] && ok "Y5: run against the seeded .cache/locks dir exits 0" || { no "Y5: run exited $rc3"; cat "$TMP2/run.err"; }
+grep -q 'n="tiny3"' "$TMP2/run.xml" 2>/dev/null && ok "Y5: run output correct (tiny3 present)" || no "Y5: run output missing tiny3()"
+
+[ ! -e "$OLDCACHE" ]  && ok "(a) an old .cache file IS evicted by the family eviction (age pass reaches .cache too)" \
+                       || no "(a) old .cache blob survived — the .cache arm of matches() is not being swept"
+[ -e "$FRESHCACHE" ]  && ok "(b) a fresh .cache file is NOT evicted" \
+                       || no "(b) fresh .cache blob was wrongly swept"
+[ -e "$OLDLOCK" ]     && ok "(c) an ancient file under locks/ is NEVER removed by eviction (locks subtree unreached)" \
+                       || no "(c) ancient file under locks/ was REMOVED — eviction reached the advisory-lock subtree"
+# (d) .bin behavior unchanged: already covered above by the pre-existing OLD/FILLER/FRESH .bin arms (both
+# flat and sharded layouts), which this section's separate TMPDIR/CACHEDIR does not touch or interact with.
+
 [ "$fail" -eq 0 ] && echo "evictioncheck: ALL PASS" || { echo "evictioncheck: SOME CHECKS FAILED"; exit 1; }
