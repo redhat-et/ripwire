@@ -1,0 +1,210 @@
+skills: 17
+
+== ripwire-before-you-build
+   building                 tf=3   df_other=1  tfidf=6.4
+   exist                    tf=3   df_other=2  tfidf=5.2
+   amp                      tf=3   df_other=2  tfidf=5.2
+   adds                     tf=3   df_other=2  tfidf=5.2
+   integration              tf=3   df_other=4  tfidf=3.7
+   exemplar                 tf=3   df_other=4  tfidf=3.7
+   blocks                   tf=3   df_other=4  tfidf=3.7
+
+== ripwire-change-check
+   9b                       tf=6   df_other=0  tfidf=17.0
+   sha                      tf=4   df_other=2  tfidf=6.9
+   params                   tf=4   df_other=3  tfidf=5.8
+   removed                  tf=3   df_other=2  tfidf=5.2
+   dirty                    tf=3   df_other=2  tfidf=5.2
+   summary                  tf=3   df_other=3  tfidf=4.3
+   steps                    tf=3   df_other=3  tfidf=4.3
+   median                   tf=3   df_other=3  tfidf=4.3
+   verdict                  tf=3   df_other=4  tfidf=3.7
+   green                    tf=3   df_other=4  tfidf=3.7
+   findings                 tf=3   df_other=4  tfidf=3.7
+
+== ripwire-efficient
+   compress                 tf=6   df_other=0  tfidf=17.0
+   lanes                    tf=5   df_other=1  tfidf=10.7
+   lane                     tf=6   df_other=2  tfidf=10.4
+   flat                     tf=5   df_other=3  tfidf=7.2
+   batch                    tf=3   df_other=1  tfidf=6.4
+   adaptive                 tf=3   df_other=1  tfidf=6.4
+   xml                      tf=3   df_other=2  tfidf=5.2
+   ladder                   tf=3   df_other=2  tfidf=5.2
+   cold                     tf=4   df_other=4  tfidf=4.9
+   detail                   tf=3   df_other=3  tfidf=4.3
+   limit                    tf=3   df_other=4  tfidf=3.7
+   json                     tf=3   df_other=4  tfidf=3.7
+   agents                   tf=3   df_other=4  tfidf=3.7
+
+== ripwire-find-bug
+
+== ripwire-fresh-eyes
+   atom                     tf=9   df_other=0  tfidf=25.5
+   pairs                    tf=7   df_other=0  tfidf=19.8
+   state                    tf=8   df_other=1  tfidf=17.1
+   historical               tf=8   df_other=1  tfidf=17.1
+   families                 tf=8   df_other=1  tfidf=17.1
+   family                   tf=10  df_other=3  tfidf=14.5
+   ents                     tf=5   df_other=0  tfidf=14.2
+   constexpr                tf=5   df_other=0  tfidf=14.2
+   group                    tf=8   df_other=2  tfidf=13.9
+   ratio                    tf=6   df_other=1  tfidf=12.8
+   flip                     tf=6   df_other=1  tfidf=12.8
+   dark                     tf=6   df_other=1  tfidf=12.8
+   rows                     tf=10  df_other=4  tfidf=12.2
+   regions                  tf=7   df_other=2  tfidf=12.1
+   rtok                     tf=4   df_other=0  tfidf=11.3
+   readability              tf=4   df_other=0  tfidf=11.3
+   posnett                  tf=4   df_other=0  tfidf=11.3
+   ent                      tf=4   df_other=0  tfidf=11.3
+
+== ripwire-graph-query
+   expr                     tf=9   df_other=2  tfidf=15.6
+   hops                     tf=5   df_other=2  tfidf=8.7
+
+== ripwire-handoff
+   handoff                  tf=7   df_other=0  tfidf=19.8
+   sha                      tf=9   df_other=2  tfidf=15.6
+   dirty                    tf=7   df_other=2  tfidf=12.1
+   verified                 tf=5   df_other=3  tfidf=7.2
+   stamp                    tf=4   df_other=4  tfidf=4.9
+
+== ripwire-layers
+   layer                    tf=7   df_other=1  tfidf=15.0
+   txt                      tf=7   df_other=2  tfidf=12.1
+   action                   tf=6   df_other=3  tfidf=8.7
+   nccd                     tf=4   df_other=1  tfidf=8.6
+   bridge                   tf=4   df_other=1  tfidf=8.6
+   mermaid                  tf=4   df_other=2  tfidf=6.9
+   afferent                 tf=4   df_other=2  tfidf=6.9
+   clusters                 tf=4   df_other=3  tfidf=5.8
+   validated                tf=3   df_other=4  tfidf=3.7
+
+== ripwire-mcp
+   insert                   tf=6   df_other=0  tfidf=17.0
+   hash                     tf=6   df_other=0  tfidf=17.0
+   referencing              tf=7   df_other=1  tfidf=15.0
+   workspace                tf=4   df_other=0  tfidf=11.3
+   refusal                  tf=4   df_other=0  tfidf=11.3
+   optional                 tf=6   df_other=3  tfidf=8.7
+   reference                tf=7   df_other=4  tfidf=8.6
+   json                     tf=7   df_other=4  tfidf=8.6
+   span                     tf=4   df_other=1  tfidf=8.6
+   security                 tf=4   df_other=1  tfidf=8.6
+   remote                   tf=4   df_other=1  tfidf=8.6
+   config                   tf=4   df_other=1  tfidf=8.6
+   batch                    tf=4   df_other=1  tfidf=8.6
+   addressed                tf=4   df_other=1  tfidf=8.6
+   twin                     tf=3   df_other=0  tfidf=8.5
+   transport                tf=3   df_other=0  tfidf=8.5
+   startup                  tf=3   df_other=0  tfidf=8.5
+   rpc                      tf=3   df_other=0  tfidf=8.5
+
+== ripwire-navigate
+   scip                     tf=10  df_other=1  tfidf=21.4
+   prov                     tf=4   df_other=0  tfidf=11.3
+   connect                  tf=5   df_other=2  tfidf=8.7
+   matched                  tf=4   df_other=1  tfidf=8.6
+   relate                   tf=3   df_other=0  tfidf=8.5
+   precise                  tf=3   df_other=0  tfidf=8.5
+   modeled                  tf=3   df_other=1  tfidf=6.4
+   import                   tf=4   df_other=3  tfidf=5.8
+   rationale                tf=3   df_other=3  tfidf=4.3
+   edge                     tf=3   df_other=4  tfidf=3.7
+
+== ripwire-opt-remarks
+   capture                  tf=9   df_other=0  tfidf=25.5
+   cold                     tf=12  df_other=4  tfidf=14.7
+   confirmed                tf=5   df_other=0  tfidf=14.2
+   ms                       tf=11  df_other=4  tfidf=13.5
+   profile                  tf=8   df_other=3  tfidf=11.6
+   vectorize                tf=4   df_other=0  tfidf=11.3
+   ts                       tf=4   df_other=0  tfidf=11.3
+   scripts                  tf=4   df_other=0  tfidf=11.3
+   radix                    tf=4   df_other=0  tfidf=11.3
+   optremarks               tf=4   df_other=0  tfidf=11.3
+   gvn                      tf=4   df_other=0  tfidf=11.3
+   prof                     tf=4   df_other=1  tfidf=8.6
+   early                    tf=4   df_other=1  tfidf=8.6
+   uncountable              tf=3   df_other=0  tfidf=8.5
+   sorts                    tf=3   df_other=0  tfidf=8.5
+   medians                  tf=3   df_other=0  tfidf=8.5
+   interleaved              tf=3   df_other=0  tfidf=8.5
+   inl                      tf=3   df_other=0  tfidf=8.5
+
+== ripwire-orient
+   modules                  tf=7   df_other=4  tfidf=8.6
+   bridge                   tf=4   df_other=1  tfidf=8.6
+   sessions                 tf=3   df_other=0  tfidf=8.5
+   louvain                  tf=3   df_other=0  tfidf=8.5
+   gotchas                  tf=3   df_other=0  tfidf=8.5
+   mermaid                  tf=4   df_other=2  tfidf=6.9
+   agents                   tf=5   df_other=4  tfidf=6.1
+   slices                   tf=4   df_other=3  tfidf=5.8
+   partition                tf=4   df_other=3  tfidf=5.8
+   slice                    tf=3   df_other=2  tfidf=5.2
+   past                     tf=3   df_other=2  tfidf=5.2
+   core                     tf=4   df_other=4  tfidf=4.9
+   orient                   tf=3   df_other=3  tfidf=4.3
+   fewer                    tf=3   df_other=3  tfidf=4.3
+   bash                     tf=3   df_other=3  tfidf=4.3
+   anchors                  tf=3   df_other=3  tfidf=4.3
+   surfaces                 tf=3   df_other=4  tfidf=3.7
+   json                     tf=3   df_other=4  tfidf=3.7
+
+== ripwire-perf-target
+   access                   tf=5   df_other=1  tfidf=10.7
+   chase                    tf=4   df_other=1  tfidf=8.6
+   packing                  tf=3   df_other=0  tfidf=8.5
+   geometry                 tf=3   df_other=0  tfidf=8.5
+   advice                   tf=3   df_other=0  tfidf=8.5
+   pointer                  tf=4   df_other=2  tfidf=6.9
+   hypothesis               tf=3   df_other=1  tfidf=6.4
+   nest                     tf=4   df_other=3  tfidf=5.8
+   points                   tf=3   df_other=2  tfidf=5.2
+   structurally             tf=3   df_other=3  tfidf=4.3
+   bounded                  tf=3   df_other=3  tfidf=4.3
+   unknown                  tf=3   df_other=4  tfidf=3.7
+   findings                 tf=3   df_other=4  tfidf=3.7
+
+== ripwire-quality-bar
+   humps                    tf=14  df_other=2  tfidf=24.3
+   ack                      tf=10  df_other=2  tfidf=17.3
+   origin                   tf=8   df_other=1  tfidf=17.1
+   acked                    tf=6   df_other=0  tfidf=17.0
+   gating                   tf=9   df_other=2  tfidf=15.6
+   nest                     tf=10  df_other=3  tfidf=14.5
+   preexisting              tf=5   df_other=0  tfidf=14.2
+   hump                     tf=5   df_other=0  tfidf=14.2
+   region                   tf=6   df_other=1  tfidf=12.8
+   ev                       tf=6   df_other=1  tfidf=12.8
+   good                     tf=7   df_other=2  tfidf=12.1
+   bad                      tf=7   df_other=2  tfidf=12.1
+   measures                 tf=5   df_other=1  tfidf=10.7
+   historical               tf=5   df_other=1  tfidf=10.7
+   scores                   tf=6   df_other=2  tfidf=10.4
+   regions                  tf=6   df_other=2  tfidf=10.4
+   low                      tf=7   df_other=3  tfidf=10.1
+   extraction               tf=7   df_other=3  tfidf=10.1
+
+== ripwire-reuse-first
+   retrieval                tf=4   df_other=3  tfidf=5.8
+   less                     tf=3   df_other=3  tfidf=4.3
+
+== ripwire-security-scan
+   warn                     tf=3   df_other=0  tfidf=8.5
+   system                   tf=3   df_other=0  tfidf=8.5
+   ignore                   tf=3   df_other=0  tfidf=8.5
+   deserialize              tf=3   df_other=0  tfidf=8.5
+   dataflow                 tf=3   df_other=0  tfidf=8.5
+   stanza                   tf=3   df_other=1  tfidf=6.4
+   args                     tf=3   df_other=1  tfidf=6.4
+   command                  tf=4   df_other=3  tfidf=5.8
+   env                      tf=3   df_other=2  tfidf=5.2
+   tool                     tf=3   df_other=4  tfidf=3.7
+   proof                    tf=3   df_other=4  tfidf=3.7
+
+== ripwire-write-tests
+   harness                  tf=3   df_other=4  tfidf=3.7
+   cover                    tf=3   df_other=4  tfidf=3.7
