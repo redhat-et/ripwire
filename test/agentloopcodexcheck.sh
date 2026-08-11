@@ -37,12 +37,25 @@ assert "CLI" in ctx[-1], ctx[-1]
 events = "\n".join( (
     '{"type":"thread.started","thread_id":"fixture"}',
     '{"type":"item.completed","item":{"type":"command_execution","command":"/repo/build/ripwire . --for=issue"}}',
+    '{"type":"item.completed","item":{"type":"command_execution","command":"sed -n 1,200p src/foo.py"}}',
+    '{"type":"item.completed","item":{"type":"command_execution","command":"python -m pytest -q"}}',
     '{"type":"turn.completed","usage":{"input_tokens":1234,"cached_input_tokens":234,"output_tokens":56}}',
 ) )
 tokens_in, tokens_out = module.parse_codex_jsonl_usage( events )
 assert tokens_in == 1234 and tokens_out == 56, ( tokens_in, tokens_out )
 metrics = module.parse_codex_jsonl_metrics( events, "/repo/build/ripwire" )
-assert metrics[2:] == ( 1, 1, [ "/repo/build/ripwire . --for=issue" ] ), metrics
+# (command_calls, ripwire_calls, ripwire_commands, native_read_calls): 3 commands seen — one ripwire,
+# one `sed -n` read (the DEFAULT this whole surface exists to displace), one pytest run that is
+# neither. A test invocation must NOT inflate the native-read denominator.
+assert metrics[2:] == ( 3, 1, [ "/repo/build/ripwire . --for=issue" ], 1 ), metrics
+
+# a ripwire call PIPED through grep is still a ripwire call, never a native read — otherwise the
+# substitution rate would penalize the very usage the docs recommend.
+piped = "\n".join( (
+    '{"type":"item.completed","item":{"type":"command_execution","command":"/repo/build/ripwire . --grep=x | head -20"}}',
+) )
+pm = module.parse_codex_jsonl_metrics( piped, "/repo/build/ripwire" )
+assert pm[2:4] == ( 1, 1 ) and pm[5] == 0, pm
 
 tasks = [
     { "instance_id": "a1", "repo": "org/a" },
@@ -86,7 +99,8 @@ with tempfile.TemporaryDirectory() as td:
     events_file = pathlib.Path( td ) / "events" / "x1-baseline-1.jsonl"
     assert events_file.is_file() and events_file.read_text() == events, "raw Codex JSONL must be retained verbatim"
     assert ( m["tokens_in"], m["tokens_out"] ) == ( 1234, 56 ), m
-    assert ( m["command_calls"], m["ripwire_calls"] ) == ( 1, 1 ), m
+    assert ( m["command_calls"], m["ripwire_calls"] ) == ( 3, 1 ), m
+    assert m["native_read_calls"] == 1, m
     assert m["ripwire_commands"] == [ "/repo/build/ripwire . --for=issue" ], m
     assert m["events_path"] == str( events_file ), m
     # TimeoutExpired hands over bytes (possibly invalid UTF-8) or None — both must degrade, not crash

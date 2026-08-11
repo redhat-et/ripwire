@@ -83,13 +83,18 @@ events = [
                                                    "cache": { "read": 7, "write": 8 } } } },
 ]
 stream = "\n".join( json.dumps( e ) for e in events ) + "\n"
-ti, to, cost, model, ncmd, nrip, rips = R.parse_opencode_ndjson_metrics( stream, "/shim/ripwire" )
+ti, to, cost, model, ncmd, nrip, rips, nnative = R.parse_opencode_ndjson_metrics( stream, "/shim/ripwire" )
 checks = [ ( ti == 1234, "tokens_in from step_finish (%r)" % ti ),
            ( to == 56,   "tokens_out from step_finish (%r)" % to ),
            ( cost == 0.42, "cost from step_finish (%r)" % cost ),
            ( model == "claude-sonnet-4-5", "resolved model read back (%r)" % model ),
            ( ncmd == 2,  "counts only bash tool_use events, not every tool (%r)" % ncmd ),
-           ( nrip == 1,  "counts the ripwire invocation (%r)" % nrip ) ]
+           ( nrip == 1,  "counts the ripwire invocation (%r)" % nrip ),
+           # BOTH default channels count toward the substitution denominator: the shell `grep -r`
+           # AND opencode's native `read` tool, which spawns no subprocess and is therefore invisible
+           # to the PATH shim. Codex has no native-tool channel at all — the number is comparable
+           # within a harness, never across.
+           ( nnative == 2, "counts native reads from bash AND the native read tool (%r)" % nnative ) ]
 for good, msg in checks:
     ( ok if good else no )( msg )
 
