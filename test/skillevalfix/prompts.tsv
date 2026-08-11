@@ -28,6 +28,20 @@
 # ripwire-router itself is never a legal label: it is the fallback map, not a routing destination.
 # Keep this file ASCII; the harness truncates prompts at a byte boundary when reporting misses.
 #
+# RELABEL log (2026-08-11, W1-2b consensus content-gaps round): three rows relabeled on the S1
+# ceiling check's two-rater consensus (blind protocol, sealed key; both raters independently
+# contradicted the stored label — the only 3 such rows of 63 audited misses; record: EVALS.md
+# "consensus content gaps" registration). Labels changed; prompts, provenance, split untouched;
+# no rows added. Pre-relabel corpus lines (the sealed answer_key numbering — this comment block
+# shifts later lines by +14):
+#   line 180 (ceiling id M043) ripwire-orient       -> ripwire-mcp       (setup-health / "is my
+#            ripwire setup broken" is the mcp skill's staleness/health surface, per the owner's
+#            2026-08-11 tool-diagnostics fold-in decision)
+#   line 225 (ceiling id M062) ripwire-change-check -> ripwire-find-bug  (a named failing CI test
+#            with no known cause is a symptom-first localization moment, not a diff review)
+#   line 233 (ceiling id M040) ripwire-fresh-eyes   -> ripwire-find-bug  (feature invisible at
+#            runtime is a wrong-output symptom hunt, not a maintenance-risk pass)
+#
 # ── positives: router-map provenance ────────────────────────────────────────────────────────────────
 I just landed in an unfamiliar repo - what is this codebase and what actually matters here?	ripwire-orient	router	test
 How does the request pipeline work in this codebase and where is the retry logic?	ripwire-orient	router	test
@@ -177,7 +191,7 @@ I already have the humps and deep numbers for this function from a subsystem rev
 The profiler says we are memory-bound in this struct-heavy loop - which fields are actually read together versus how the struct is laid out?	ripwire-perf-target	judged	dev
 Before I reach for a heavier profiler pass, are there any obvious bad data-layout patterns a plain lint run would already catch?	ripwire-perf-target	judged	dev
 The map that came back looks short - did some files just get dropped for being too big to index?	ripwire-orient	judged	dev
-I expected this function to show up in the ranked output and it is just not there at all - is my ripwire setup broken?	ripwire-orient	judged	dev
+I expected this function to show up in the ranked output and it is just not there at all - is my ripwire setup broken?	ripwire-mcp	judged	dev
 I am wrapping up for the day and want to leave a clean summary of this subsystem for whoever picks it up tomorrow.	ripwire-handoff	judged	dev
 Write up the entry points and the design rationale here so a teammate does not have to re-read the whole module cold.	ripwire-handoff	judged	dev
 I have a dozen old feature branches and no idea which ones still hold work that never made it to main.	ripwire-change-check	judged	dev
@@ -222,7 +236,7 @@ Spinning up four subagents for this refactor - carve the repo so their briefs do
 Before answering I will skim src end to end.	ripwire-efficient	judged	test
 My context window is filling with file dumps again - keep this cheap.	ripwire-efficient	judged	test
 Two worktrees touched the tokenizer - which lands first and where do they collide?	ripwire-change-check	judged	test
-A test named test_manifest_roundtrip failed on CI - I have its name and no clue what it exercises.	ripwire-change-check	judged	test
+A test named test_manifest_roundtrip failed on CI - I have its name and no clue what it exercises.	ripwire-find-bug	judged	test
 I think the patch is finished - what did I just make worse?	ripwire-quality-bar	judged	test
 Wrapping up - run the last-mile debt check before I tell them it is done.	ripwire-quality-bar	judged	dev
 The function I measured has one deep tangle in the middle - which restructuring actually fits that shape?	ripwire-quality-bar	judged	dev
@@ -230,7 +244,7 @@ My fix landed but prove the cleanup stuck and nothing regressed.	ripwire-quality
 Before opening the PR, check whether my new code added duplication or dead branches.	ripwire-quality-bar	judged	dev
 Inheriting the billing module from a departed teammate - how rotten is it really?	ripwire-fresh-eyes	judged	dev
 This class smells like it does everything - confirm it is a god object and show the seams.	ripwire-fresh-eyes	judged	dev
-Why is feature X invisible at runtime - is it compiled out behind a flag?	ripwire-fresh-eyes	judged	dev
+Why is feature X invisible at runtime - is it compiled out behind a flag?	ripwire-find-bug	judged	dev
 Planning to break up the parser package - what is entangled with what before I start?	ripwire-fresh-eyes	judged	test
 Users report the export silently produces an empty archive - zero leads on where it happens.	ripwire-find-bug	judged	dev
 Pasting the sanitizer output here - point me at the guilty frame.	ripwire-find-bug	judged	dev
