@@ -13,7 +13,6 @@ description: >
   the whole subsystem) → ripwire-navigate instead. For architecture HEALTH/enforcement (propagation cost,
   layering violations, CI gates) → ripwire-layers instead. Stop at the first rung that answers — the
   one-screen report usually does; climb the ladder only while the question is still open.
-  Orient: Louvain modules, bridge files, mermaid map, gotchas from past sessions.
 allowed-tools: Bash, Read
 ---
 

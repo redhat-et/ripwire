@@ -11,7 +11,7 @@ description: >
   the instinct this replaces, not a safe default. The reflex is one line: run the
   cheapest verb that answers the question, then read only the 2-3 files it ranks highest. Fires ALONGSIDE
   the moment skills (orient, navigate, change-check…), never instead of them. Backed by ripwire
-  (deterministic, on PATH). Compress context: adaptive detail ladder, batch lanes, one flat XML bundle.
+  (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

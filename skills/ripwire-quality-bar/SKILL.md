@@ -18,8 +18,7 @@ description: >
   only if the one-shot delta actually reports something. For
   merge-safety / blast-radius / tests-to-run →
   **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Backed by
-  ripwire (deterministic, on PATH). Measures nest humps and regions, scores good versus bad, ack
-  preexisting debt.
+  ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 

@@ -10,7 +10,6 @@ description: >
   diff — that's ripwire-change-check. NOT for restructuring EXISTING code — that's ripwire-fresh-eyes; this
   skill is for NEW work. Run only the homework the task actually lacks — a small feature with an obvious
   home needs none of this: skip the skill and build. Backed by ripwire (deterministic, on PATH).
-  Ask first: do building blocks already exist, which exemplar, what integration adds.
 allowed-tools: Bash, Read
 ---
 

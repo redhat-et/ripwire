@@ -6,7 +6,7 @@ description: >
   (--graph-query) over the symbol graph: filter by kind, complexity or fan-in, narrow to a file or cluster,
   bounded callers/callees
   closure, and/or/not joins. Use when --callers/--callees/--impact alone can't phrase the question.
-  Backed by ripwire (deterministic, on PATH). One expr, bounded hops.
+  Backed by ripwire (deterministic, on PATH).
 allowed-tools: Bash, Read
 ---
 
