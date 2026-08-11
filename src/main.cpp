@@ -6619,30 +6619,14 @@ std::optional<int> runChangeViews( const MainDispatch& d )
     if( cfg.exportCcJson )
     {
         std::vector<rw::CcFileMetrics> ccm = rw::ccComputeMetrics( ing, g );
-        // churn: reuse the same git churn pass --hotspots uses (0 everywhere without git — clean degrade).
-        // Multi-root §5: per-root mining, accumulated per file.
+        // churn: THE shared per-file pass (mineChurnPerFile — also --hotspots'/--ensemble's, and the
+        // --html --color-by=churn lens below), multi-root §5 accumulation included. An empty `since`
+        // leaves the scope inactive, so this is the default 18-month window: byte-identical to the
+        // per-root loop this used to spell inline, and no longer a copy that can drift from the others.
+        // 0 everywhere without git — clean degrade, churn simply omitted from the metrics below.
         std::vector<std::uint32_t> churn( ing.files.size(), 0 );
-        bool ccChurnOk = false;
-        if( multiRoot )
-        {
-            for( std::uint32_t r = 0; r < ws.size(); ++r )
-            {
-                std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
-                if( !gitChurnCounts( ws[r].arg, ing, rootChurn, "18 months ago", nullptr, r ) )
-                {
-                    continue;
-                }
-                ccChurnOk = true;
-                for( std::size_t f = 0; f < churn.size(); ++f )
-                {
-                    churn[f] += rootChurn[f];
-                }
-            }
-        }
-        else
-        {
-            ccChurnOk = gitChurnCounts( root, ing, churn, "18 months ago" );
-        }
+        const rw::SinceScope       ccScope;   // inactive: --export=cc.json has no --since form
+        const bool ccChurnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), ccScope, "18 months ago", churn );
         if( ccChurnOk )
         {
             for( std::size_t f = 0; f < ccm.size() && f < churn.size(); ++f )
@@ -10052,6 +10036,24 @@ int runDefaultMap( const MainDispatch& d )
     // Purely additive: when absent the default path is completely unchanged.
     if( cfg.html )
     {
+        // churn for the --color-by=churn lens: THE shared per-file pass (mineChurnPerFile — also
+        // --export=cc.json's and --hotspots'). Costs one git subprocess per root, matching cc.json's
+        // posture; no evidence ⇒ the page's CHURN_OK legend note discloses instead of lying zeros.
+        std::vector<std::uint32_t> htmlChurn( ing.files.size(), 0 );
+        const rw::SinceScope       htmlScope;   // inactive: --html has no --since form
+        const bool htmlChurnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), htmlScope, "18 months ago", htmlChurn );
+
+        // tested for the --color-by=tested lens: QMetrics is computed upstream only under
+        // --metrics/--for/--exemplar, so on a bare --html run testedPtr is null and every node would
+        // read ts:0 — a "not computed" masquerading as "untested". Compute it here instead
+        // (computeQMetrics is pure graph work, no git subprocess) so ts= is always a measured fact.
+        QMetrics htmlQm;
+        if( !testedPtr )
+        {
+            htmlQm    = computeQMetrics( ing, g );
+            testedPtr = &htmlQm.tested;
+        }
+
         std::FILE* htmlOut = stdout;
         if( !cfg.htmlFile.empty() )
         {
@@ -10065,7 +10067,7 @@ int runDefaultMap( const MainDispatch& d )
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK );
+        writeHtml( htmlOut, ing, rank, g, mapTopK, HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy } );
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );

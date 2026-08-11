@@ -28,6 +28,7 @@
 #include "graph.h"       // for Communities / communities() — module (community) grouping
 #include "serialize.h"   // for escapeXml (not reused here; we write jsonEscape instead)
 #include "infra/jsonesc.h"     // A4-F27: canonical escape core; jsonEscape below is a thin wrapper
+#include "cli.h"         // for ColorBy — the --color-by=MODE enum baked into COLOR_MODE (no cycle: cli.h pulls ingest.h/version.h only)
 
 #include <algorithm>
 #include <cstdio>
@@ -79,6 +80,61 @@ static const char kScript[] = R"JS(
     cpp: '#4a90d9', py: '#f4c542', ts: '#2d79c7', go: '#00acd7',
     rs: '#dea584', swift: '#fa7343', objc: '#9b59b6', md: '#7f8c8d', '?': '#95a5a6'
   };
+
+  // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues (comm % 12).
+  // rampColor: shared 5-step green→red ramp for cx/churn over FIXED thresholds (fixed beats
+  // quantiles for legend honesty — the same bucket means the same thing in every repo).
+  // cx buckets:    0 | 1-4 | 5-9 | 10-19 | 20+   → boundaries [1,5,10,20]
+  // churn buckets: 0 | 1-2 | 3-9 | 10-29 | 30+   → boundaries [1,3,10,30]
+  var commColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542',
+                   '#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d'];
+  var rampColor = ['#2ecc71','#a3d977','#f4c542','#e67e22','#e74c3c'];
+  var CX_STEPS = [1,5,10,20], CHURN_STEPS = [1,3,10,30];
+  function rampStep(v, steps) {
+    var s = 0;
+    for (var i = 0; i < steps.length; i++) if (v >= steps[i]) { s = i + 1; }
+    return s;
+  }
+
+  // current colour mode — initialized from the baked COLOR_MODE, switched live by the #colorMode select
+  var mode = COLOR_MODE;
+  function colorForNode(n) {
+    if (mode === 'community') return n.comm < 0 ? '#666' : commColor[n.comm % 12];
+    if (mode === 'cx') return rampColor[rampStep(n.cx, CX_STEPS)];
+    if (mode === 'churn') return CHURN_OK ? rampColor[rampStep(FCHURN[n.file] || 0, CHURN_STEPS)] : '#666';
+    if (mode === 'tested') return n.ts ? '#2ecc71' : '#e74c3c';
+    return langColor[n.lang] || '#999';
+  }
+
+  // legend for the CURRENT mode, rendered into the #legend span (replaces the old static lang-only HTML)
+  function renderLegend() {
+    var el = document.getElementById('legend');
+    function sw(c) { return '<span style="background:' + c + '"></span>'; }
+    var html = '', i, lbl;
+    if (mode === 'community') {
+      var maxComm = -1;
+      for (i = 0; i < NODES.length; i++) if (NODES[i].comm > maxComm) { maxComm = NODES[i].comm; }
+      var shown = Math.min(maxComm + 1, 12);
+      for (i = 0; i < shown; i++) html += sw(commColor[i]) + 'm' + i + ' ';
+      html += sw('#666') + 'none';
+    } else if (mode === 'cx') {
+      lbl = ['0','1-4','5-9','10-19','20+'];
+      for (i = 0; i < 5; i++) html += sw(rampColor[i]) + lbl[i] + ' ';
+    } else if (mode === 'churn') {
+      if (!CHURN_OK) {
+        html = 'churn unavailable (no git history)';
+      } else {
+        lbl = ['0','1-2','3-9','10-29','30+'];
+        for (i = 0; i < 5; i++) html += sw(rampColor[i]) + lbl[i] + ' ';
+      }
+    } else if (mode === 'tested') {
+      html = sw('#2ecc71') + 'tested ' + sw('#e74c3c') + 'untested';
+    } else {
+      html = sw('#4a90d9') + 'cpp ' + sw('#f4c542') + 'py ' + sw('#2d79c7') + 'ts ' + sw('#00acd7') + 'go ' +
+             sw('#dea584') + 'rs ' + sw('#fa7343') + 'swift ' + sw('#9b59b6') + 'objc ' + sw('#7f8c8d') + 'md';
+    }
+    el.innerHTML = html;
+  }
 
   // ---- global adjacency over ALL selected nodes (NODES/LINKS indices), for BFS ego-graphs and
   // for the "entry points" / cross-link computations. Built once; every view is a FILTERED render
@@ -159,8 +215,10 @@ static const char kScript[] = R"JS(
   }
 
   // ---- sim state: rebuilt by each view's render() over a FILTERED node/edge subset. `local` nodes
-  // carry {gid, x, y, vx, vy, label, type, lang, rank}; `gid` maps back to the NODES index for lookups. ----
+  // carry {gid, x, y, vx, vy, label, type, lang, rank, comm, cx, ts, file}; `gid` maps back to the
+  // NODES index for lookups; the last four feed colorForNode. ----
   var nodes = [], links = [], N = 0, L = 0, nbr = [];
+  var labelSet = new Set();   // local indices that get a persistent text label (top-ranked per view)
   var ox = 0, oy = 0, scale = 1, autoFit = true;
   var dragging = -1, panStart = null, hovered = -1, selected = -1;
   var searchSet = null;
@@ -174,13 +232,25 @@ static const char kScript[] = R"JS(
     seed = 42;
     var gidToLocal = new Map();
     nodes = [];
+    // seed spread floored at 300 world units: a zero-sized viewport at boot (hidden tab/iframe — W=H=0)
+    // used to seed every node at the SAME point, and coincident nodes have dx=dy=0 so the repulsion
+    // force is zero forever — the cluster could never separate. autoFit reframes whatever spread we pick.
+    var SPREAD = Math.max(Math.min(W,H)*0.7, 300);
     for (var i = 0; i < ids.length; i++) {
       var gid = ids[i], src = NODES[gid];
       gidToLocal.set(gid, i);
       nodes.push({ gid: gid, label: src.label, type: src.type, lang: src.lang, rank: src.rank,
-                   x: W/2 + (rng()-0.5)*Math.min(W,H)*0.7, y: H/2 + (rng()-0.5)*Math.min(W,H)*0.7, vx: 0, vy: 0 });
+                   comm: src.comm, cx: src.cx, ts: src.ts, file: src.file,
+                   x: W/2 + (rng()-0.5)*SPREAD, y: H/2 + (rng()-0.5)*SPREAD, vx: 0, vy: 0 });
     }
     N = nodes.length;
+    // persistent labels: the view's top-24 by rank (bounded — labelling every node of a large module
+    // is unreadable soup; hover/selection/search label the rest on demand)
+    labelSet = new Set();
+    var byRank = [];
+    for (var i = 0; i < N; i++) byRank.push(i);
+    byRank.sort(function(a,b){ return nodes[b].rank - nodes[a].rank || a - b; });
+    for (var i = 0; i < Math.min(24, N); i++) labelSet.add(byRank[i]);
     links = [];
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
@@ -297,11 +367,27 @@ static const char kScript[] = R"JS(
       ctx.globalAlpha = dim ? 0.18 : 1.0;
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, 2*Math.PI);
-      ctx.fillStyle = langColor[n.lang] || '#999';
+      ctx.fillStyle = colorForNode(n);
       ctx.fill();
       if (i === selected || i === hovered || n.gid === centreGid) {
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2/scale; ctx.stroke();
       }
+    }
+
+    // labels: top-ranked nodes of the view, search matches (which REPLACE the rank set while a query
+    // is live — matches are what you are looking for), and the hovered/selected/centre node. Text is
+    // constant SCREEN size (fs/scale), so zooming changes label density, never label size; capped at
+    // 80 per frame, lowest local index first (≈ highest global rank first) to bound the clutter.
+    ctx.font = (11/scale) + 'px sans-serif';
+    var drawnLabels = 0;
+    for (var i = 0; i < N && drawnLabels < 80; i++) {
+      var wanted = (searchSet ? searchSet.has(i) : labelSet.has(i)) || i === hovered || i === selected || nodes[i].gid === centreGid;
+      if (!wanted) continue;
+      var n = nodes[i];
+      ctx.globalAlpha = (hl && !hl.has(i)) ? 0.25 : 0.9;
+      ctx.fillStyle = '#d6d9de';
+      ctx.fillText(n.label, n.x + Math.max(nodeRadius(n), 3.5/scale) + 3/scale, n.y + 4/scale);
+      drawnLabels++;
     }
     ctx.globalAlpha = 1.0;
     ctx.restore();
@@ -495,6 +581,12 @@ static const char kScript[] = R"JS(
   }
   window.addEventListener('hashchange', route);
 
+  // colour-mode selector: initial value from the baked COLOR_MODE; a change re-renders legend + canvas
+  var modeSel = document.getElementById('colorMode');
+  modeSel.value = COLOR_MODE;
+  modeSel.addEventListener('change', function() { mode = modeSel.value; renderLegend(); draw(); });
+  renderLegend();
+
   // boot
   if (GN === 0) { setChrome(false, true); ctx.fillStyle='#888'; ctx.font='18px sans-serif'; ctx.fillText('No nodes', 40, 40); return; }
   resize();
@@ -518,13 +610,62 @@ struct ModuleCard
     std::uint32_t         outCross = 0;
 };
 
+// The COLOR_MODE JS literal's value for each --color-by mode (the baked INITIAL mode; the in-page
+// selector switches live among all five). A NAME TABLE indexed by the enumerator, deliberately NOT
+// the switch-returning-a-tag idiom: model.h::refRoleTag, accessshape.h::shapeName and
+// namingconsistency.h::styleTag are already three copies of that shape, and --quality-delta reads a
+// fourth as a new clone of a reused helper rather than as a house pattern. Declaration ORDER is the
+// index, which is what the static_assert pins — add an enumerator without a name and it is a
+// compile error, not a silently wrong colour mode.
+inline constexpr const char* kColorByNames[] = { "lang", "community", "cx", "churn", "tested" };
+inline constexpr std::size_t kColorByNameCount = sizeof( kColorByNames ) / sizeof( kColorByNames[0] );
+static_assert( kColorByNameCount == std::size_t( ColorBy::Tested ) + 1,
+               "kColorByNames must carry one name per ColorBy enumerator, in declaration order" );
+
+inline const char* colorByLabel( ColorBy m ) noexcept
+{
+    const std::size_t idx = std::size_t( m );
+    return idx < kColorByNameCount ? kColorByNames[ idx ] : kColorByNames[0];
+}
+
+// Side data for the --color-by node-colour modes. Every export embeds ALL five modes' data; the
+// pointers may be null (the caller's pipeline may not have computed them), in which case the page
+// still renders — tested falls to 0, churn to 0 with churnEvidence=false disclosing "no git history".
+struct HtmlColorExtras
+{
+    const std::vector<std::uint8_t>*  tested        = nullptr;   // per-symbol tested flag (QMetrics.tested), may be null
+    const std::vector<std::uint32_t>* fileChurn     = nullptr;   // per-ORIGINAL-file commit counts (ing.files index), may be null
+    bool                              churnEvidence = false;     // false ⇒ no git history: churn mode discloses instead of lying zeros
+    ColorBy                           initialMode   = ColorBy::Lang;
+};
+
+// The three --color-by JS constants, emitted as ONE section because they are one payload: the
+// file-keyed churn array, the flag saying whether that array is evidence at all, and the baked
+// initial mode. Its own function so writeHtml — already a 360-line emitter — grows by a call.
+// `fileList` maps FILES index → ing.files index; churn is file-granularity, so it is keyed by the
+// former and looked up through the latter.
+inline void writeColorPayload( std::FILE* out, const std::vector<std::uint32_t>& fileList, const HtmlColorExtras& color )
+{
+    std::fprintf( out, "const FCHURN = [" );
+    for( std::size_t i = 0; i < fileList.size(); ++i )
+    {
+        const std::uint32_t fc = ( color.fileChurn && fileList[i] < color.fileChurn->size() ) ? ( *color.fileChurn )[ fileList[i] ] : 0u;
+        std::fprintf( out, "%s%u", i ? "," : "", fc );
+    }
+    std::fprintf( out, "];\n" );
+    // whether git evidence existed — 0 ⇒ churn mode discloses "unavailable" instead of lying zeros
+    std::fprintf( out, "const CHURN_OK = %d;\n", color.churnEvidence ? 1 : 0 );
+    // the baked initial colour mode (--color-by=MODE); the in-page selector switches live from here
+    std::fprintf( out, "const COLOR_MODE = \"%s\";\n", colorByLabel( color.initialMode ) );
+}
+
 // writeHtml — emit a self-contained HTML wiki document to `out`.
 //   top-min(topK, 5000) symbols selected by (rank desc, id asc) — same ordering rule as serialize.h.
 //   Links: call edges among selected nodes only, sorted (s asc, t asc). Deterministic.
 //   Modules: one Louvain community (graph.h communities()) per selected-node group that has ≥2
 //   members, sorted (member count desc, id asc) — mirrors --communities' "a lone symbol is not a
 //   module" rule so the wiki and the text verb agree.
-inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, const Graph& g, int topK )
+inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, const Graph& g, int topK, const HtmlColorExtras& color )
 {
     const std::vector<std::uint32_t>& outOff     = g.outOff;
     const std::vector<NodeId>&        outTargets = g.outTargets;
@@ -702,6 +843,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "#info { font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
         "#legend { font-size:11px; color:#999; white-space:nowrap; }\n"
         "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
+        "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
+        "             border-radius:4px; font-size:12px; }\n"
         "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
         "canvas { display:block; }\n"
         "#crumb { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.85);\n"
@@ -729,16 +872,9 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "  <input id=\"search\" type=\"text\" placeholder=\"search labels...\">\n"
         "  <span id=\"depth\">depth <input id=\"depthSlider\" type=\"range\" min=\"1\" max=\"3\" value=\"2\" style=\"width:60px\"><span id=\"depthVal\">2</span></span>\n"
         "  <span id=\"info\"></span>\n"
-        "  <span id=\"legend\">\n"
-        "    <span style=\"background:#4a90d9\"></span>cpp\n"
-        "    <span style=\"background:#f4c542\"></span>py\n"
-        "    <span style=\"background:#2d79c7\"></span>ts\n"
-        "    <span style=\"background:#00acd7\"></span>go\n"
-        "    <span style=\"background:#dea584\"></span>rs\n"
-        "    <span style=\"background:#fa7343\"></span>swift\n"
-        "    <span style=\"background:#9b59b6\"></span>objc\n"
-        "    <span style=\"background:#7f8c8d\"></span>md\n"
-        "  </span>\n"
+        "  <select id=\"colorMode\"><option value=\"lang\">lang</option><option value=\"community\">community</option>"
+            "<option value=\"cx\">cx</option><option value=\"churn\">churn</option><option value=\"tested\">tested</option></select>\n"
+        "  <span id=\"legend\"></span>\n"
         "</div>\n"
         "<div id=\"crumb\"></div>\n"
         "<div id=\"cards\"></div>\n"
@@ -749,6 +885,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // emit NODES array — one entry per selected symbol, deterministic (rank-desc, id-asc order
     // preserved). `file` indexes FILES; `comm` is the display module id (moduleRank), or -1 if this
     // node's community didn't survive the ≥2-member filter (a singleton — still shown, just moduleless).
+    // `cx` (cyclomatic) and `ts` (tested 0/1) feed the --color-by cx/tested modes; churn stays out of
+    // the per-node record because it is file-granularity — one FCHURN array keyed by `file` instead.
     std::fprintf( out, "const NODES = [\n" );
     for( NodeId k = 0; k < cap; ++k )
     {
@@ -758,18 +896,21 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         const char*    lang = langTag( sym.lang );
         const NodeId   slot = moduleOf[k];
         const long     comm = ( slot == kNoNode ) ? -1L : long( moduleRank[ slot ] );
+        const unsigned ts   = ( color.tested && order[k] < color.tested->size() && ( *color.tested )[ order[k] ] ) ? 1u : 0u;
 
         char rankBuf[ 24 ];
         std::snprintf( rankBuf, sizeof( rankBuf ), "%.4f", double( r ) );
 
-        std::fprintf( out, "  {\"id\":%u,\"label\":\"%s\",\"type\":\"%s\",\"lang\":\"%s\",\"rank\":%s,\"file\":%u,\"comm\":%ld}",
+        std::fprintf( out, "  {\"id\":%u,\"label\":\"%s\",\"type\":\"%s\",\"lang\":\"%s\",\"rank\":%s,\"file\":%u,\"comm\":%ld,\"cx\":%u,\"ts\":%u}",
                       unsigned( k ),
                       jsonEscape( sym.name ).c_str(),
                       jsonEscape( tag ).c_str(),
                       jsonEscape( lang ).c_str(),
                       rankBuf,
                       unsigned( fileIdOf[k] == kNoNode ? 0 : fileIdOf[k] ),
-                      comm );
+                      comm,
+                      unsigned( sym.cx ),
+                      ts );
         if( k + 1 < cap )
         {
             std::fprintf( out, "," );
@@ -790,6 +931,9 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         std::fprintf( out, "\n" );
     }
     std::fprintf( out, "];\n" );
+
+    // the --color-by payload: per-FILES-index churn, its evidence flag, and the baked initial mode
+    writeColorPayload( out, fileList, color );
 
     // emit LINKS array — sorted (s, t) pairs
     std::fprintf( out, "const LINKS = [\n" );

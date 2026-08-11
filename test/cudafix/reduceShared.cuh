@@ -4,6 +4,10 @@
 
 #ifdef __CUDACC__
 #define RK_HOSTDEV __host__ __device__
+// A module table INSIDE the preprocessor conditional — the NVIDIA cuda-samples header-guard/dual-compile
+// idiom (volumeRender's c_invViewMatrix, particles' cudaParams): the declaration's parent is
+// preproc_ifdef, not translation_unit, so the capture needs the preproc wrappers to see it.
+__constant__ float rk_guardTable[ 16 ];
 #else
 #define RK_HOSTDEV
 #endif
