@@ -768,8 +768,8 @@ spot:
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
+<s t="fn" n="rankGraph" p="./src/graph.h:2057"/>
+<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2393"/>
 <s t="fn" n="churnRankedGraph" p="./src/main.cpp:9597"/>
 <s t="fn" n="runDefaultMap" p="./src/main.cpp:9701"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
