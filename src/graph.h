@@ -570,6 +570,62 @@ inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
     return t;
 }
 
+// ── P2-D Rule 2b field-narrow tables (W1-P1-12) — built once per buildGraph, consumed via
+// Narrower::rule2bFieldRecvType in the resolve loop. Two tables, Rule 2's exact conservatism:
+//   fieldTypeByClass — "ClassName#fieldName" → the field's DECLARED type name, from the S5-E HAS-A field
+//     captures (isCompose refs: fromSymbol = the declaring class def, fieldName = the member, calleeName =
+//     the written type's name). Symbol scopes drop namespaces, so two same-NAMED classes collapse onto one
+//     key here — a same-named field bound to two DIFFERENT types is TOMBSTONED ("" value) and never
+//     narrows; a duplicate declaration of the SAME type (header re-parse, repeated patterns across roots)
+//     is harmless and keeps the entry. The type name is only ever USED as a canonByName scope, so an
+//     unindexed type simply never hits and degrades to the unchanged ladder.
+//   localNameSet — "<fromSymbol>#<var>" for EVERY binding kind (Type + the r9 VarDecl shadow records +
+//     FnDecl/FnAssign). Any local evidence means the name is a LOCAL in that scope — a parameter or
+//     declared variable shadows a same-named field in real C++ lookup, so Rule 2b must refuse.
+// Both tables empty on a field-capture-free corpus → the resolve loop's Rule 2b block never fires →
+// byte-identical output there. Deterministic: ing.references / ing.bindings are totally ordered; first
+// type wins, a later conflict tombstones, and set membership is order-independent.
+struct FieldNarrowTables
+{
+    HashMap<std::string, std::string> fieldTypeByClass;
+    HashMap<std::string, char>        localNameSet;
+};
+
+inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing )
+{
+    FieldNarrowTables t;
+    std::string       key;   // reused "Class#field" / "<fromSymbol>#var" key buffer
+    for( const Reference& cr : ing.references )
+    {
+        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName.empty() || cr.calleeName.empty() )
+        {
+            continue;
+        }
+        key.clear();
+        key.append( ing.symbols[ cr.fromSymbol ].name ).push_back( '#' );
+        key.append( cr.fieldName );
+        const auto [ it, inserted ] = t.fieldTypeByClass.try_emplace( key, cr.calleeName );
+        if( !inserted && !it->second.empty() && it->second != cr.calleeName )
+        {
+            it->second.clear();   // same class-name#field-name, different declared types → tombstone
+        }
+    }
+    t.localNameSet.reserve( ing.bindings.size() );
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.fromSymbol == kNoNode || b.var.empty() )
+        {
+            continue;
+        }
+        key.clear();
+        Narrower::appendUint( key, b.fromSymbol );
+        key.push_back( '#' );
+        key.append( b.var );
+        t.localNameSet.try_emplace( key, 1 );
+    }
+    return t;
+}
+
 // L3: the candidate DEF ids for a bound function name — a qualified target (`ns::alpha`, `Cls::alpha`)
 // tries the canonical scope::name map on its LAST TWO segments first (Symbol::scope is a final segment),
 // then degrades to the bare final segment against byName. `key` is the caller's reused buffer. The caller
@@ -803,6 +859,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     }
+
+    // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
+    // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
+    const FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing );
 
     // ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline) — built by
     // buildFnPtrBindTables above; consumed via Narrower::fnPtrBindingTarget in the resolve loop below.
@@ -1135,6 +1195,29 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !canonical && !narrowed )
         {
             if( const auto* hit = narrower.rule2RecvVarType( r ) )
+            {
+                for( NodeId c : *hit )
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    {
+                        cand.push_back( c );
+                    }
+                }
+                narrowed = !cand.empty();
+            }
+        }
+        // P2-D Rule 2b (receiver-FIELD type, W1-P1-12): a named-receiver call `f.m()` / `f->m()` whose receiver
+        // names a FIELD of the caller's enclosing class resolves to the method on the field's DECLARED type
+        // (walking direct bases when the type itself doesn't define it), BEFORE the bare-name spray — the
+        // bare-field member call is the idiomatic C++ shape Rule 2's local-binding table can never see. Fires
+        // only when NO local binding shadows the name, the class#field→type fact is unambiguous corpus-wide
+        // (tombstoned otherwise), and the type (or exactly one base) defines the method — every other shape
+        // degrades to the unchanged honest ladder. Skipped when already pinned canonically / by Rule 1 / Rule 2
+        // (Rule 2 first: a typed LOCAL beats a same-named field in real C++ lookup, and the veto inside 2b
+        // refuses any locally-declared name outright).
+        if( !scipPinned && !canonical && !narrowed )
+        {
+            if( const auto* hit = narrower.rule2bFieldRecvType( r, ing.symbols[ r.fromSymbol ].scope, fieldNarrow.fieldTypeByClass, fieldNarrow.localNameSet, chaUp ) )
             {
                 for( NodeId c : *hit )
                 {
