@@ -725,6 +725,11 @@ constexpr std::uint32_t kIngestParserVerMirror    = 60;   // MUST equal ingest.c
                                                           // and the TypeScript #private gap, plus the shared finalSegment
                                                           // leading-'<' carve-out. All change the extracted SET -- see
                                                           // ingest.cpp kParserVer's own note for the per-language detail.
+                                                          // The same 60 also carries the CUDA memory-space module
+                                                          // bindings (cudacheck 7b close-out) -- uninitialized
+                                                          // `__constant__`/`__device__`/`__managed__` tables now
+                                                          // extract. All four land in one wave, so one bump covers
+                                                          // them; a v59 blob misses rows on any of those trees.
                                                           // 59 = +TOML (.toml) config-key tier: a new grammar
                                                           // and a new .scm change the extracted SET.
                                                           // 47 (L3, 2026-08-08 audit) = `locals` counts
