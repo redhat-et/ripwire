@@ -108,6 +108,26 @@ def paired_ratio( pairs, field ):
     p95 = ratios[ max( 0, math.ceil( 0.95 * len( ratios ) ) - 1 ) ]
     return p50, p95
 
+def substitution_rate( rec ):
+    """ripwire_calls / (ripwire_calls + native_read_calls) for ONE run, or None if unmeasured.
+
+    This is the metric every skill/hook/primer change is trying to move, and the one the harness could
+    not previously express: `ripwire_calls` alone cannot tell a run that used the tool for everything
+    apart from one that used it once and then read twenty files.
+
+    None (never 0.0) when either count is missing — `claude -p` self-logs neither, and a missing
+    measurement rendered as 0.0 would read as "defaulted every time", inverting the conclusion. A run
+    that genuinely did neither (no reads AND no ripwire calls) is also None: no denominator, no rate."""
+    rw, native = rec.get( "ripwire_calls" ), rec.get( "native_read_calls" )
+    if rw is None or native is None:
+        return None
+    total = rw + native
+    return ( rw / total ) if total else None
+
+def mean_substitution( recs ):
+    vals = [ v for v in ( substitution_rate( r ) for r in recs ) if v is not None ]
+    return ( mean( vals ), len( vals ) ) if vals else ( None, 0 )
+
 def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstrap-v1" ):
     paired, incomplete = pair_by_task_seed( records )
     repos = sorted( { repo for _, repo, *_ in paired } )
@@ -125,6 +145,12 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
     tok_p50, tok_p95 = paired_ratio( paired, "tokens_out" )
     wall_p50, wall_p95 = paired_ratio( paired, "wall_seconds" )
     cost_p50, cost_p95 = paired_ratio( paired, "cost_usd" )
+    # Substitution rate is reported PER ARM, not as a paired delta: the baseline arm has no ripwire on
+    # PATH at all, so its rate is 0 by construction and a delta against it measures nothing. The number
+    # that matters is how close the ripwire arm gets to 1.0 — i.e. how often, when it needed to read or
+    # search, it actually reached for the tool instead of defaulting.
+    sub_base, n_sub_base = mean_substitution( [ b for *_, b, _ in paired ] )
+    sub_ctx,  n_sub_ctx  = mean_substitution( [ c for *_, _, c in paired ] )
     out.update(
         resolved_delta_mean=mean( rdeltas ) if scored else None,
         resolved_delta_bootstrap_95_lower=lower,
@@ -132,6 +158,8 @@ def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstr
         tokens_out_ratio_p50=tok_p50, tokens_out_ratio_p95=tok_p95,
         wall_seconds_ratio_p50=wall_p50, wall_seconds_ratio_p95=wall_p95,
         cost_usd_ratio_p50=cost_p50, cost_usd_ratio_p95=cost_p95,
+        substitution_rate_baseline=sub_base, n_substitution_baseline=n_sub_base,
+        substitution_rate_ripwire=sub_ctx,  n_substitution_ripwire=n_sub_ctx,
     )
     return out
 
@@ -149,6 +177,15 @@ def print_report( out ):
     print( f"  tokens_out ratio p50/p95 {rat(out['tokens_out_ratio_p50'])}/{rat(out['tokens_out_ratio_p95'])}" )
     print( f"  wall_seconds ratio p50/p95 {rat(out['wall_seconds_ratio_p50'])}/{rat(out['wall_seconds_ratio_p95'])}" )
     print( f"  cost_usd ratio p50/p95 {rat(out['cost_usd_ratio_p50'])}/{rat(out['cost_usd_ratio_p95'])}" )
+    def sub( x ): return f"{100*x:.1f}%" if x is not None else "n/a"
+    print( f"  substitution rate (ripwire_calls / read+search calls): "
+           f"ripwire arm {sub(out.get('substitution_rate_ripwire'))} "
+           f"(n={out.get('n_substitution_ripwire', 0)}), "
+           f"baseline {sub(out.get('substitution_rate_baseline'))} "
+           f"(n={out.get('n_substitution_baseline', 0)})" )
+    print(  "    ^ how often the agent reached for ripwire instead of defaulting to a read/grep/glob."
+            " Baseline is 0% by construction (no ripwire on PATH); n counts runs where BOTH counts were"
+            " measured — `claude -p` self-logs neither, so its runs are excluded rather than scored 0." )
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
 def _fixture_record( repo, instance_id, seed, arm, resolved, tokens_out, wall_seconds, cost_usd ):
@@ -157,8 +194,12 @@ def _fixture_record( repo, instance_id, seed, arm, resolved, tokens_out, wall_se
                  status="ok", resolved=resolved, localization_hit=resolved,
                  tokens_in=1000, tokens_out=tokens_out, wall_seconds=wall_seconds, cost_usd=cost_usd,
                  command_calls=1,
-                 ripwire_calls=0 if arm == ARM_BASELINE else 1,
+                 ripwire_calls=0 if arm == ARM_BASELINE else 3,
                  ripwire_commands=[] if arm == ARM_BASELINE else [ "ripwire . --for=fixture" ],
+                 # 0/4 baseline vs 3/4 treatment — a deterministic, checkable substitution rate. The
+                 # baseline reads 4 files and reaches for ripwire zero times (it has none); the
+                 # treatment reaches for it 3 of 4 times, i.e. still defaults once.
+                 native_read_calls=4 if arm == ARM_BASELINE else 1,
                  events_path=None,
                  error=None, started_unix=0, finished_unix=0 )
 
@@ -202,6 +243,21 @@ def self_test():
                           f"got {out['tokens_out_ratio_p50']}" )
     if out.get( "n_resolved_pairs" ) != 27:
         failures.append( f"expected all 27 pairs resolution-scored, got {out.get('n_resolved_pairs')}" )
+    # substitution rate: the fixture pins 0/4 baseline and 3/4 treatment, exactly.
+    if out.get( "substitution_rate_baseline" ) != 0.0:
+        failures.append( f"expected baseline substitution rate 0.0 (no ripwire on PATH), "
+                          f"got {out.get('substitution_rate_baseline')}" )
+    if out.get( "substitution_rate_ripwire" ) is None or abs( out["substitution_rate_ripwire"] - 0.75 ) > 1e-9:
+        failures.append( f"expected ripwire-arm substitution rate 0.75 exactly (fixture is 3 ripwire / "
+                          f"1 native per run), got {out.get('substitution_rate_ripwire')}" )
+    if out.get( "n_substitution_ripwire" ) != 27:
+        failures.append( f"expected 27 substitution-scored ripwire runs, got {out.get('n_substitution_ripwire')}" )
+    # an UNMEASURED run (claude -p: neither count logged) must be excluded, never scored 0.0 — a
+    # missing measurement rendered as "defaulted every time" would invert the conclusion.
+    blind = [ dict( r, ripwire_calls=None, native_read_calls=None ) for r in records ]
+    out3 = analyze( blind, n_boot=100 )
+    if out3.get( "substitution_rate_ripwire" ) is not None or out3.get( "n_substitution_ripwire" ) != 0:
+        failures.append( "unmeasured substitution counts must report n/a with n=0, not a fabricated rate" )
     # evaluator=none pilot mode: resolved is None in BOTH arms — pairs must still form so the
     # localization/token/wall claims that stage supports remain analyzable; resolved stats say n/a.
     unscored = [ dict( r, resolved=None ) for r in records ]
