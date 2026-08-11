@@ -415,8 +415,10 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
     // bare form (`Base`/`Wrapper`) is what byName keys on. The strip MUST precede the "::"/"." split,
     // or a `::` INSIDE the args (`Foo<A::B>`) would be mistaken for the segment separator. A name never
     // legitimately contains a bare '<' (only a type-argument list opens one), so truncating at the FIRST
-    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical).
-    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos )
+    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical). One carve-out:
+    // a type-argument list always FOLLOWS an identifier, so a name that STARTS with '<' is not a generic
+    // — it is a Swift operator function (`<`, `<=`, `<+>`), which the strip would erase to "".
+    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos && lt > 0 )
     {
         raw = raw.substr( 0, lt );
     }
@@ -1131,15 +1133,39 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 60;           // bump on any grammar/.scm/extraction change
-                                                      // 60 (Python shape round, ported): Python gains the
-                                                      //    shapes real repos taught us — annotated class
-                                                      //    attributes, gated enum-family members, class
-                                                      //    lambda attrs, one-guard-deep + tuple-unpack
-                                                      //    module bindings, and .pyi routing. RE-MEASURED
-                                                      //    at v59 on django@c334c1a8ff / pydantic@8898b8f:
-                                                      //    every one of those shapes read 0.0% EXCLUSIVE
-                                                      //    recall. A v59 blob on a Python-bearing tree is
-                                                      //    missing those rows → reject.
+                                                      // 60 (2026-08-10 language-port round): one shared bump covering
+                                                      //    THREE hand-ported language rounds, each stranded on a branch
+                                                      //    this tree never had. Listed separately because each changes
+                                                      //    the extracted SET on a different corpus.
+                                                      //    (a) PYTHON shapes: annotated class attributes, gated
+                                                      //        enum-family members, class lambda attrs, one-guard-deep
+                                                      //        + tuple-unpack module bindings, and .pyi routing.
+                                                      //        RE-MEASURED at v59 on django@c334c1a8ff /
+                                                      //        pydantic@8898b8f: every one of those shapes read 0.0%
+                                                      //        EXCLUSIVE recall. A v59 blob on a Python-bearing tree
+                                                      //        is missing those rows -> reject.
+                                                      //    (b) SWIFT shapes (hand port of stranded bb78f97, which
+                                                      //        originally landed at kParserVer 41): enum_entry /
+                                                      //        typealias_declaration / associatedtype_declaration /
+                                                      //        protocol_property_declaration / the builtin-operator-
+                                                      //        token alternation in function_declaration's name:
+                                                      //        field. RE-MEASURED at v59/v60 on Alamofire@0455bfb +
+                                                      //        swift-nio@72973283, the 2026-08-04 corpora pinned to
+                                                      //        the same SHAs.
+                                                      //    (c) TYPESCRIPT #private: tags.scm gains the #private
+                                                      //        method / field-arrow / call-ref coverage JS already
+                                                      //        had -- a sibling-completeness gap, not a new shape.
+                                                      //    Shared finalSegment() gains the leading-'<' carve-out (a
+                                                      //    Swift operator name like `<` or `<+>` is not a generic
+                                                      //    type-argument list, which the unconditional strip erased
+                                                      //    to ""). That touches the shared C++/TS/JS/Python path, so
+                                                      //    it changes the extracted SET only for a name legitimately
+                                                      //    starting with '<'; every other language's bare-identifier
+                                                      //    path is unaffected (tsshapecheck / jsshapecheck /
+                                                      //    pyshapecheck / constcheck / langcheck stay green).
+                                                      //    The vendored scanner.c UBSan fix that rode the same source
+                                                      //    commit was deliberately NOT ported -- see the header of
+                                                      //    test/swiftshapecheck.sh for the reason and its trigger.
                                                       // 59 (TOML config-key tier): +TOML (.toml) — a NEW
                                                       //    grammar and a new .scm, so the extracted SET
                                                       //    changes on any tree holding a .toml. Table
