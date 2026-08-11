@@ -439,7 +439,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 139 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 140 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 
 <details>
@@ -769,8 +769,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9613"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9717"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9597"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9701"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
