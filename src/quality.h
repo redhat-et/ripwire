@@ -721,7 +721,12 @@ constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.c
 constexpr std::uint32_t kIngestParserVerMirror    = 60;   // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 60 = Python shape round: 11 new tags.scm patterns,
                                                           // .pyi routing and the gated enum-member kind change
-                                                          // the extracted SET on any Python-bearing tree.
+                                                          // the extracted SET on any Python-bearing tree. The
+                                                          // same 60 also carries the CUDA memory-space module
+                                                          // bindings (cudacheck §7b close-out) — uninitialized
+                                                          // `__constant__`/`__device__`/`__managed__` tables now
+                                                          // extract; both land in one wave, so one bump covers
+                                                          // both. A v59 blob misses rows either way.
                                                           // 59 = +TOML (.toml) config-key tier: a new grammar
                                                           // and a new .scm change the extracted SET.
                                                           // 47 (L3, 2026-08-08 audit) = `locals` counts

@@ -4,7 +4,12 @@
 // C++ grammar produced NO call reference at all (--callers of a kernel returned count=0).
 #include "reduceShared.cuh"
 
-__constant__ float rk_scaleTable[ 64 ];
+__constant__ float rk_scaleTable[ 64 ];   // module table, NO initializer (cudaMemcpyToSymbol fills it) — must index regardless of case
+__constant__ float rk_tileWeights[ 4 ][ 4 ];                       // 2-D table (the quasirandomGenerator c_Table shape) — must index
+__constant__ float rk_biasTable[ 4 ] = { 0.5f, 1.5f, 2.5f, 3.5f }; // INITIALIZED __constant__ (the dxtc kColorMetric shape) — case-blind too
+__device__ float RK_DEV_LUT[ 8 ];         // mutable device table, SCREAMING — indexes under the convention gate
+__device__ float rk_devAccum;             // mutable device global, lower-case — must stay unindexed
+__managed__ float RK_MANAGED_SEED;        // __managed__ rides the same convention gate as __device__
 
 __device__ float rk_warpReduce( float v )
 {
