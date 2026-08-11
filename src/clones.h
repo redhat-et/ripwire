@@ -112,13 +112,15 @@ inline std::size_t multiByteOperatorLen( const std::string& src, std::size_t i, 
 // re-derived shape in the tree, and --quality-delta names each new copy of it. The mask is one shift and one
 // AND with no branch, so it is also the cheapest form for something called once per indexed symbol.
 inline constexpr std::uint32_t langBit( Lang lang ) noexcept { return std::uint32_t( 1 ) << std::uint32_t( lang ); }
-// Toml belongs here and Json/Markdown deliberately do not: `#` opens a real line comment in TOML, whereas
+// Toml and Yaml belong here and Json/Markdown deliberately do not: `#` opens a real line comment in TOML
+// and YAML alike, whereas
 // JSON has no comment syntax at all and markdown's `#` is a heading. The distinction is load-bearing rather
-// than cosmetic — the loop below runs over EVERY symbol in a file with no SymKind filter, so a TOML t="sec"
+// than cosmetic — the loop below runs over EVERY symbol in a file with no SymKind filter, so a TOML/YAML
+// t="sec"
 // body reaches normalizeSpan/scanCodeTokens exactly like a function body, and a `#`-blind scan would tokenize
 // a table's comments as content and let two unrelated tables clone-match on their prose.
-inline constexpr std::uint32_t kHashLineCommentLangMask = langBit( Lang::Python ) | langBit( Lang::Bash ) | langBit( Lang::Ruby ) | langBit( Lang::Toml );
-static_assert( std::uint32_t( Lang::Toml ) < 32, "Lang outgrew a 32-bit mask — widen kHashLineCommentLangMask" );
+inline constexpr std::uint32_t kHashLineCommentLangMask = langBit( Lang::Python ) | langBit( Lang::Bash ) | langBit( Lang::Ruby ) | langBit( Lang::Toml ) | langBit( Lang::Yaml );
+static_assert( std::uint32_t( Lang::Yaml ) < 32, "Lang outgrew a 32-bit mask — widen kHashLineCommentLangMask" );
 
 inline bool usesHashLineComments( Lang lang ) noexcept
 {

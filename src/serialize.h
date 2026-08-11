@@ -508,6 +508,11 @@ inline constexpr TokenCalib kTokenCalib[] =
                                    // outlier at 3.10. Recalibrate together with Json when tokenbudgetcheck
                                    // next gets a config-file corpus sample. Same headroom clamp as CSharp/C
                                    // above: `s.lang==Toml` (16) never reaches contentBytesByLang[13].
+    { Lang::Yaml,       3.10 },   // REASONED, not measured — the third data-config lane borrows the same
+                                   // Json rate for the same reason as Toml directly above: identical emitted
+                                   // shape (t="sec" rows whose names ARE the config keys). Recalibrate with
+                                   // Json/Toml together. Same headroom clamp: `s.lang==Yaml` (17) never
+                                   // reaches contentBytesByLang[13].
 };
 inline constexpr double kBytesPerTokenDefault = 2.50;   // Unknown-language / empty-map fallback (mid-band)
 

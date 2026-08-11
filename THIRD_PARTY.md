@@ -60,6 +60,7 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/csharp` | tree-sitter-c-sharp (v0.23.5) | Max Brunsfeld, Damien Guard, Amaan Qureshi and contributors | MIT | `cac6d5fb595f5811a076336682d5d595ac1c9e85` | https://github.com/tree-sitter/tree-sitter-c-sharp | 28 MB |
 | `deps/json` | tree-sitter-json (v0.24.8) | Max Brunsfeld | MIT | `ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24` | https://github.com/tree-sitter/tree-sitter-json | 56 KB |
 | `deps/toml` | tree-sitter-toml (v0.7.0) | Ika (ikatyang) | MIT | `64b56832c2cffe41758f28e05c756a3a98d16f41` | https://github.com/tree-sitter-grammars/tree-sitter-toml | 164 KB |
+| `deps/yaml` | tree-sitter-yaml (v0.7.2) | Ika (ikatyang) | MIT | `7708026449bed86239b1cd5bce6e3c34dbca6415` | https://github.com/tree-sitter-grammars/tree-sitter-yaml | 1.3 MB |
 | `deps/objc` | tree-sitter-objc (v3.0.2) | Amaan Qureshi | MIT | `18802acf31d0b5c1c1d50bdbc9eb0e1636cab9ed` | https://github.com/amaanq/tree-sitter-objc | 27 MB |
 | `deps/swift` | tree-sitter-swift | Alex Pinkus | MIT | `31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5` | https://github.com/alex-pinkus/tree-sitter-swift | 20 MB |
 | `deps/doctest` | doctest (v2.4.12) | Viktor Kirilov | MIT | `1da23a3e8119ec5cce4f9388e91b065e20bf06f5` | https://github.com/doctest/doctest | 0.7 MB |

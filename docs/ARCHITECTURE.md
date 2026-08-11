@@ -61,6 +61,18 @@ difference from JSON is pathology, not size: TOML is line-oriented, so a malform
 at the newline instead of nesting, and every adversarial probe stays linear (`[`×100 000 = 17.4 ms,
 50 000 `[[aot]]` = 58.7 ms, a 2 MB unterminated string = 21.7 ms). `.toml` therefore rides the generic
 `--max-file-size` path only, whose drops are already disclosed through `skipped_oversize=`.
+
+**YAML gets JSON's hazard pair at its own calibration — and its nesting guard is memory-safety
+load-bearing, not just a perf guard.** `.yml` wears JSON's problem (a machine-written data class
+behind a config extension), but JSON's 256 KB line would drop real hand-maintained config — NeMo's
+`cicd-main.yml` is 293 KB — so the YAML ceiling is **512 KB**, counted into `skipped_oversize=` like
+its siblings. The nesting guard exists for a different reason than JSON's: tree-sitter-yaml's
+external scanner `serialize()` writes 4 bytes per open block indent level behind a loop guard that
+only proves 1 byte fits, so at ~254 levels it writes past the end of the 1024-byte serialization
+buffer — SIGABRT in a plain build, a *silent* corrupting write under `NDEBUG`. ripwire refuses such
+files before any parse via an O(n) indent prescan (`kMaxYamlNestDepth`, an over-approximation that
+can only over-count), and the vendored scanner additionally carries the one-line bounds fix under
+`third_party/patches/yaml/`, drift-gated so a grammar bump cannot silently revert it.
 - **generated artifacts by filename:** `package-lock.json`, `npm-shrinkwrap.json`, `*.min.js`,
   `*_pb2.py`, `*.pb.go`.
 
@@ -88,18 +100,25 @@ dispatched as work items.
 
 Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), CUDA (parsed
 with the vendored tree-sitter-cuda grammar, a generated superset of tree-sitter-cpp), Python,
-TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, plus JSON and TOML configuration
-keys.
+TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, plus JSON, TOML and YAML
+configuration keys.
 
-The two config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
+The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in
 where the navigable unit sits. JSON cuts at document depth — top-level and second-level object
 keys. TOML cuts at the **table header**: `[tool.ruff.lint]` is one symbol under its full dotted
 name, and its keys are one level below *it*, whatever the header's dotted depth. Applying JSON's
 root-relative rule to TOML would capture 38.3% of keys in the 90-repo breadth corpus and miss every
-key under a 2-dotted table, which is the shape 1421 of 2561 observed headers actually have. A dotted
-key in either language keeps its dots — a `"lodash.merge"` dependency and a `tool.ruff.lint` table
-are names, not scope paths.
+key under a 2-dotted table, which is the shape 1421 of 2561 observed headers actually have. YAML
+cuts at **mapping depth ≤ 2 with sequence levels transparent**: 25.3% of all real YAML keys sit
+directly inside a sequence element (the `steps:` / `containers:` / `tasks:` shape) and JSON's rule
+drops every one of them — sequence transparency lifts capture from 27.1% to 44.0% on the same
+corpus. Block and flow mappings count alike; anchors are part of the value they annotate; aliases
+and the `<<:` merge key are dropped, never expanded; each document of a multi-doc stream re-enters
+at depth 1; and a block scalar is one value token, so the 384 corpus block scalars containing
+key-like text can never mint symbols — the strongest argument for a real parser over a line regex.
+A dotted key in any of the three keeps its dots — a `"lodash.merge"` dependency, a
+`tool.ruff.lint` table and a YAML `dotted.plain.key:` are names, not scope paths.
 
 ### graph — resolve references into edges
 

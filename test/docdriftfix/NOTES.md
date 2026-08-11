@@ -9,7 +9,7 @@ reach, so the gate proves TRUE POSITIVES and TRUE NEGATIVES from the same run.
 - DRIFTS (line-moved) — `stableHelper` doubles its argument (code.h:23), which is now someone else's body.
 - DRIFTS (past-eof) — the tail of `stableHelper` is at code.h:900.
 - DRIFTS (missing-file) — the old helper lived in deletedFile.h:12.
-- UNCHECKED (not-indexed) — the exercise mode is set in config.yaml:2.
+- UNCHECKED (not-indexed) — the exercise mode is set in exercise.cmake:2.
 - UNCHECKED (named-elsewhere) — `otherEntry` is called from code.h:18, a call site rather than its own body.
 
 ## symbol mentions

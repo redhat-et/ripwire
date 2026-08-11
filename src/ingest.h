@@ -64,6 +64,30 @@ constexpr std::uint32_t kMaxJsonNestDepth = 512u;
 // it indexes a 216 KB .toml (3.7x the corpus max, and past where the JSON ceiling would sit) and fails if
 // anything drops it, so a ceiling cannot be added later without the gate saying so out loud.
 
+// THE YAML LANE GETS JSON'S HAZARD PAIR AT ITS OWN CALIBRATION — measured, not inherited. .yml wears
+// JSON's problem (a large machine-written DATA class behind a config extension: dumped datasets, lockfile-
+// style manifests, .dSYM relocation files) so it gets a size ceiling — but JSON's 256 KB would drop REAL
+// config: NeMo's cicd-main.yml is a hand-maintained 293 KB workflow. 512 KB clears every real config file
+// observed in the 90-repo breadth corpus (4 449 .yml/.yaml files) while still amputating the data class.
+// Counted in skipped_oversize= exactly like the JSON drop (test/yamllangcheck.sh pins both sides).
+constexpr std::size_t kMaxYamlConfigBytes = 512u * 1024u;          // 512 KB — deliberately NOT kMaxJsonConfigBytes
+
+// YAML-lane nesting ceiling (companion to kMaxYamlConfigBytes; see yamlNestsTooDeep in ingest.cpp) — and
+// unlike JSON's, this one is MEMORY-SAFETY load-bearing, not merely a superlinear-parse guard.
+// tree-sitter-yaml's external scanner serialize() writes 4 bytes per open block indent level behind a loop
+// guard that only proves 1 byte fits (`size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE`, then two int16
+// stores): the 10-byte header + 4n hits 1022 at n=253, passes the guard, and writes bytes 1022-1025 of a
+// 1024-byte buffer. Measured on the vendored v0.7.2: 253 indent levels rc=0, 254 rc=SIGABRT — and under
+// NDEBUG the ts_assert is compiled out, so a Release build performs the corrupting write SILENTLY. The
+// vendored scanner carries the one-line bounds fix (third_party/patches/yaml/, drift-gated), and this
+// prescan refuses such files BEFORE any parse so the parser never runs on them at all.
+// The prescan counts an over-approximation of the scanner's indent stack (each open block level costs one
+// stack slot; a block mapping and a block sequence can open at the SAME column, so the estimate charges 2
+// per open indent column plus 1 per `- `/`? ` marker). 64 is 4x under the 253-slot cliff and comfortably
+// above real config: the deepest file in the breadth corpus reaches AST depth 76 ≈ ~19 block levels
+// (each block level wraps ~4 AST nodes: block_node → block_mapping → pair → flow_node).
+constexpr std::uint32_t kMaxYamlNestDepth = 64u;
+
 // The crawl's default directory denylist (a .gitignore-lite): noise/vendor/build subtrees pruned entirely.
 // Shared, not private to ingest.cpp, because a second crawler now exists — darkflags.h walks for CMake files,
 // which ingest deliberately never collects (CMake is not one of the indexed grammars) — and a crawl that
@@ -91,7 +115,15 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
             return true;
         }
     }
-    return dirName.size() > 12 && dirName.compare( 0, 12, "cmake-build-" ) == 0;
+    if( dirName.size() > 12 && dirName.compare( 0, 12, "cmake-build-" ) == 0 )
+    {
+        return true;
+    }
+    // "<Bundle>.dSYM" debug-symbol bundles (YAML-round prerequisite): a .dSYM carries yaml-format
+    // relocation files under Contents/Resources/ — the private validation corpus holds 197 of them and
+    // ZERO real .yml config — so an unpruned .dSYM ships hundreds of pure-noise t="sec" symbols. A
+    // suffix rule (not a table entry) because the bundle is named after its product, never literally ".dSYM".
+    return dirName.size() > 5 && dirName.compare( dirName.size() - 5, 5, ".dSYM" ) == 0;
 }
 
 // Crawl + parse rootDir into the symbol/reference model. Never throws: a bad file, missing
