@@ -86,6 +86,10 @@ RECORD_FIELDS = (
     "instance_id", "repo", "base_commit", "arm", "seed", "harness", "model",
     "status", "resolved", "localization_hit", "tokens_in", "tokens_out",
     "wall_seconds", "cost_usd", "command_calls", "ripwire_calls", "ripwire_commands", "events_path",
+    # native_read_calls — the DENOMINATOR for ripwire_calls: the agent's own read/search calls that
+    # went somewhere other than ripwire. Without it "ripwire_calls=3" cannot distinguish a run that
+    # used the tool for everything from one that used it once and then read twenty files.
+    "native_read_calls",
     "error", "started_unix", "finished_unix",
     # v3 additions, both of them honesty fields rather than measurements:
     #   resolved_model  — the model the harness ACTUALLY used, read back from its own transcript.
@@ -120,6 +124,7 @@ def make_record( task, arm, seed, harness, model, status="not_implemented", **ov
         status=status, resolved=None, localization_hit=None,
         tokens_in=None, tokens_out=None, wall_seconds=None, cost_usd=None,
         command_calls=None, ripwire_calls=None, ripwire_commands=None, events_path=None,
+        native_read_calls=None,
         error=None, started_unix=now, finished_unix=now,
         resolved_model=None, harness_version=None,
     )
@@ -292,10 +297,44 @@ def parse_codex_jsonl_usage( stdout ):
         tokens_out = usage.get( "output_tokens" )
     return tokens_in, tokens_out
 
+# ── native-read accounting (2026-08-10 skill-orientation audit) ──────────────────────────────────────
+# ripwire_calls answers "did it reach for the tool"; it cannot answer "how often did it default
+# INSTEAD", which is the question every skill/hook/primer change is actually trying to move. That needs
+# the denominator: the agent's own read+search calls.
+#
+# Two honest limits, both of which the reported metric must carry rather than hide:
+#   - Codex has NO native read tool — every read is a shell command — while opencode has both a native
+#     `read`/`grep`/`glob` and a `bash`. So this counts BOTH channels, and the number is comparable
+#     WITHIN a harness, never across harnesses.
+#   - `claude -p` self-logs neither, so its native_read_calls stays None (same known gap that has kept
+#     ripwire_calls None for that harness since this file was written). None, never 0 — a missing
+#     measurement that reads as "never defaulted" would invert the conclusion.
+NATIVE_READ_TOOLS = frozenset( { "read", "grep", "glob", "list", "ls", "search", "find" } )
+
+# Shell forms of the same habit. Anchored at a command boundary (start, pipe, ;, &&, ||) so that a
+# `--for="cat the file"` argument or a path containing "less" cannot count as a read.
+SHELL_READ_RE = re.compile(
+    r"(?:^|[|;&]|&&|\|\|)\s*(?:sudo\s+)?"
+    r"(cat|head|tail|less|more|nl|sed|awk|rg|ag|ack|grep|egrep|fgrep|find|ls|tree)\b" )
+
+def classify_native_read( tool_name=None, command=None ):
+    """True when this call is the agent reading/searching source by a NON-ripwire route.
+
+    A command that invokes ripwire is never a native read even if it also pipes through grep — the
+    ripwire call is the behavior under test, and the pipe is just how its output was consumed."""
+    if tool_name and tool_name.strip().lower() in NATIVE_READ_TOOLS:
+        return True
+    if not command:
+        return False
+    text = command if isinstance( command, str ) else " ".join( map( str, command ) )
+    if "ripwire" in text:
+        return False
+    return bool( SHELL_READ_RE.search( text ) )
+
 def parse_codex_jsonl_metrics( stdout, ripwire_bin ):
     """Return token usage plus explicit command/ripwire-CLI evidence from retained Codex JSONL."""
     tokens_in, tokens_out = parse_codex_jsonl_usage( stdout )
-    command_calls = ripwire_calls = 0
+    command_calls = ripwire_calls = native_read_calls = 0
     ripwire_commands = []
     for line in stdout.splitlines():
         try:
@@ -313,7 +352,9 @@ def parse_codex_jsonl_metrics( stdout, ripwire_bin ):
         if ripwire_bin and ripwire_bin in command:
             ripwire_calls += 1
             ripwire_commands.append( command )
-    return tokens_in, tokens_out, command_calls, ripwire_calls, ripwire_commands
+        elif classify_native_read( command=command ):
+            native_read_calls += 1
+    return tokens_in, tokens_out, command_calls, ripwire_calls, ripwire_commands, native_read_calls
 
 def build_opencode_command( prompt, model ):
     """Build a non-interactive opencode invocation.
@@ -343,7 +384,7 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
     Returns nulls rather than raising on schema drift — opencode ships releases daily and the
     retained transcript is the evidence of record either way."""
     tokens_in = tokens_out = cost = model_id = None
-    command_calls = ripwire_calls = 0
+    command_calls = ripwire_calls = native_read_calls = 0
     ripwire_commands = []
     for line in ( stdout or "" ).splitlines():
         try:
@@ -360,16 +401,24 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
             cost       = part.get( "cost", cost )
         if etype in ( "step_start", "step_finish" ):
             model_id = part.get( "modelID" ) or event.get( "modelID" ) or model_id
-        if etype == "tool_use" and part.get( "tool" ) == "bash":
-            command_calls += 1
-            state   = part.get( "state" ) or {}
-            payload = state.get( "input" ) or {}
-            command = payload.get( "command" ) if isinstance( payload, dict ) else payload
-            command = " ".join( map( str, command ) ) if isinstance( command, list ) else str( command or "" )
-            if ripwire_bin and ripwire_bin in command:
-                ripwire_calls += 1
-                ripwire_commands.append( command )
-    return tokens_in, tokens_out, cost, model_id, command_calls, ripwire_calls, ripwire_commands
+        if etype == "tool_use":
+            tool = str( part.get( "tool" ) or "" )
+            if tool == "bash":
+                command_calls += 1
+                state   = part.get( "state" ) or {}
+                payload = state.get( "input" ) or {}
+                command = payload.get( "command" ) if isinstance( payload, dict ) else payload
+                command = " ".join( map( str, command ) ) if isinstance( command, list ) else str( command or "" )
+                if ripwire_bin and ripwire_bin in command:
+                    ripwire_calls += 1
+                    ripwire_commands.append( command )
+                elif classify_native_read( command=command ):
+                    native_read_calls += 1
+            # opencode's NATIVE read/grep/glob tools — the channel codex does not have at all, and the
+            # one a shim on PATH can never see, since no subprocess is spawned.
+            elif classify_native_read( tool_name=tool ):
+                native_read_calls += 1
+    return tokens_in, tokens_out, cost, model_id, command_calls, ripwire_calls, ripwire_commands, native_read_calls
 
 def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
     """Create a fully isolated opencode environment for one run, and return (env, run_home, shim).
@@ -607,7 +656,7 @@ def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=Non
     events_file = events_dir / f"{task['instance_id']}-{arm}-{seed}.jsonl"
     events_file.write_text( stdout )
     ( tokens_in, tokens_out, command_calls,
-      ripwire_calls, ripwire_commands ) = parse_codex_jsonl_metrics( stdout, ripwire_bin )
+      ripwire_calls, ripwire_commands, native_read_calls ) = parse_codex_jsonl_metrics( stdout, ripwire_bin )
     if shim_log is not None:
         shim_calls, shim_commands = read_shim_log( shim_log )
         if shim_calls != ripwire_calls:
@@ -615,7 +664,7 @@ def _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=Non
         ripwire_calls = shim_calls
     return dict( tokens_in=tokens_in, tokens_out=tokens_out, command_calls=command_calls,
                  ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands,
-                 events_path=str( events_file ) )
+                 native_read_calls=native_read_calls, events_path=str( events_file ) )
 
 def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=None ):
     """Retain opencode's NDJSON transcript and parse it into record fields.
@@ -633,7 +682,8 @@ def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=
     events_file.write_text( stdout )
 
     ( tokens_in, tokens_out, cost, model_id,
-      command_calls, ripwire_calls, ripwire_commands ) = parse_opencode_ndjson_metrics( stdout, ripwire_bin )
+      command_calls, ripwire_calls, ripwire_commands,
+      native_read_calls ) = parse_opencode_ndjson_metrics( stdout, ripwire_bin )
 
     if shim_log is not None:
         shim_calls, shim_commands = read_shim_log( shim_log )
@@ -642,8 +692,8 @@ def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=
         ripwire_calls = shim_calls
     return dict( tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
                  command_calls=command_calls, ripwire_calls=ripwire_calls,
-                 ripwire_commands=ripwire_commands, events_path=str( events_file ),
-                 resolved_model=model_id )
+                 ripwire_commands=ripwire_commands, native_read_calls=native_read_calls,
+                 events_path=str( events_file ), resolved_model=model_id )
 
 def _claude_metrics( stdout, shim_log=None ):
     """Parse the `claude -p --output-format json` single-result trailer into record fields.
