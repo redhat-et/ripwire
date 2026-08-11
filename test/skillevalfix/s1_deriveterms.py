@@ -2,10 +2,10 @@
 # S1 term derivation — reads SKILL BODIES ONLY (never eval prompts, never miss lists).
 # Rule (pre-registered): per-skill tf x idf over the 17 bodies, minus subtokens already in the
 # description; candidates need tf >= 3 in own body AND df <= 4/17 across the OTHER bodies.
-import glob, math, re
+import glob, math, os, re
 from collections import Counter
 
-ROOT = '/Users/qgames/AppDevelopLocal/project2/wt-w1-s1'
+ROOT = os.path.normpath( os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), '..', '..' ) )
 
 def subtokens( text ):
     out = []; cur = ''
