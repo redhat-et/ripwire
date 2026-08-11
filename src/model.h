@@ -78,9 +78,11 @@ inline const char* symTag( SymKind k ) noexcept
 // Toml is appended AFTER C for the SAME reason a FOURTH time: index 16 clamps into the identical
 // Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..C. Like Json it is a pure-data
 // language — lang-incompatible with everything but itself, zero references, zero call edges.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml };
+// Yaml is appended AFTER Toml for the SAME reason a FIFTH time: index 17 clamps into the identical
+// Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..Toml. The third pure-data lane.
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml };
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
 inline const char* langTag( Lang l ) noexcept
@@ -103,6 +105,7 @@ inline const char* langTag( Lang l ) noexcept
         case Lang::CSharp:     return "cs";
         case Lang::C:          return "c";
         case Lang::Toml:       return "toml";
+        case Lang::Yaml:       return "yaml";
         default:               return "?";
     }
 }
@@ -331,10 +334,10 @@ inline bool localsCountedLang( Lang lang ) noexcept
     return lang == Lang::Cpp || lang == Lang::C;
 }
 
-// Essential-complexity coverage: 15 of 17 languages — every code language EXCEPT Bash
+// Essential-complexity coverage: 15 of 18 languages — every code language EXCEPT Bash
 // (the essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
 // `trap` are process-level, and function boundaries are weak — not worth a wrong number). Markdown/Json/Toml/
-// Unknown never carry a cx row, so listing them here would be vacuous either way. ANY consumer asking
+// Yaml/Unknown never carry a cx row, so listing them here would be vacuous either way. ANY consumer asking
 // whether Symbol::ev/evWhy can be trusted for a def — serialize.h's two emitters, ensemble.h's
 // annotation — MUST route through this ONE predicate, for localsCountedLang's reason: the covered set
 // must never drift between the emitter and any future consumer.

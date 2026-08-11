@@ -38,6 +38,12 @@
 #      for the scanner patch.
 #   G  deep-repeat parses — a generated 70 001-element C initializer (repeat_depth > 65 535)
 #      parses clean. Under the asan flavour this arm is the live tripwire for arm E's exemption.
+#   H  serialize() write-width family audit — every vendored scanner referencing
+#      TREE_SITTER_SERIALIZATION_BUFFER_SIZE is classified (upfront/static/loop1/loopwide) and its
+#      class's proof obligation checked; an unclassified scanner fails loudly. This is the yaml
+#      OOB write's whole DEFECT CLASS (a per-iteration guard narrower than the widest write in its
+#      loop), caught statically for the next grammar too. The live runtime tripwire for the yaml
+#      patch itself is yamllangcheck's deep-indent arm.
 #
 # Usage:
 #   test/vendorpatchcheck.sh
@@ -198,6 +204,74 @@ if "$BIN" "$TMP/deeprepeat" --no-cache > "$TMP/deep.xml" 2> "$TMP/deep.err"; the
 else
     no "G: ripwire ABORTED on a >65535-deep repeat chain (rc=$?) — the summarize_children exemption is not in effect"
     head -3 "$TMP/deep.err" | sed 's/^/        /'
+fi
+
+# ── H: serialize() write-width family audit — the yaml OOB's whole CLASS, next grammar included ──
+# tree-sitter-yaml's serialize() wrote 4 bytes per iteration behind a loop guard that only proved 1
+# byte of headroom (patch yaml/001-serialize-bounds; SIGABRT at ~254 block indent levels, silent
+# corruption under NDEBUG). That defect SHAPE — a per-iteration guard narrower than the widest write
+# in its loop body — is auditable statically for EVERY vendored scanner, including one not vendored
+# yet: each scanner.c that references TREE_SITTER_SERIALIZATION_BUFFER_SIZE must be CLASSIFIED below
+# (enumerated-not-globbed, the dependencypincheck posture: an unclassified scanner fails loudly and
+# the classification IS the review), and each class carries a checkable proof obligation:
+#   upfront  — whole-write bounds check before any write (bash, csharp, ruby)
+#   static   — compile-time static_assert against the buffer size (cpp, cuda)
+#   loop1    — per-iteration guard `size < BUFFER` writing exactly 1 byte/iteration (python):
+#              the bare guard proves exactly enough, so it must stay paired with 1-byte writes
+#   loopwide — per-iteration guard writing >1 byte/iteration (yaml): the bare `size < BUFFER` form
+#              is the defect; the guard MUST carry explicit headroom for the full iteration
+serializeClassOf(){
+    case "$1" in
+        bash|csharp|ruby) echo upfront ;;
+        cpp|cuda)         echo static ;;
+        python)           echo loop1 ;;
+        yaml)             echo loopwide ;;
+        *)                echo unknown ;;
+    esac
+}
+serCount=0
+while IFS= read -r scannerPath; do
+    dep="$( basename "$( dirname "$( dirname "$scannerPath" )" )" )"
+    serCount=$(( serCount + 1 ))
+    cls="$( serializeClassOf "$dep" )"
+    case "$cls" in
+        upfront)
+            if grep -E 'TREE_SITTER_SERIALIZATION_BUFFER_SIZE' "$scannerPath" | grep -vE '^\s*(for|while)\s*\(' | grep -q .; then
+                ok "H: $dep scanner classified upfront — whole-write bounds check present"
+            else
+                no "H: $dep scanner classified upfront but every BUFFER_SIZE reference sits in a loop header — reclassify"
+            fi ;;
+        static)
+            if grep -q 'static_assert.*TREE_SITTER_SERIALIZATION_BUFFER_SIZE' "$scannerPath"; then
+                ok "H: $dep scanner classified static — static_assert against the buffer size present"
+            else
+                no "H: $dep scanner classified static but has no static_assert against BUFFER_SIZE — reclassify"
+            fi ;;
+        loop1)
+            if grep -q 'size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE' "$scannerPath" && grep -q 'buffer\[size++\]' "$scannerPath"; then
+                ok "H: $dep scanner classified loop1 — bare guard paired with 1-byte writes (proves exactly enough)"
+            else
+                no "H: $dep scanner classified loop1 but the guard/write pairing changed — re-audit the write width"
+            fi ;;
+        loopwide)
+            if grep -q 'size + 2 \* sizeof(int16_t) <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE' "$scannerPath"; then
+                ok "H: $dep scanner classified loopwide — guard carries explicit headroom for the 4-byte iteration"
+            else
+                no "H: $dep scanner classified loopwide but the headroom guard is GONE — a bump resurrected the OOB write (re-apply third_party/patches/yaml/001-serialize-bounds.patch)"
+            fi
+            if grep -E 'TREE_SITTER_SERIALIZATION_BUFFER_SIZE' "$scannerPath" | grep -E '(for|while)[[:space:]]*\(' | grep -vE '\+.*<=' | grep -q .; then
+                no "H: $dep scanner still has a bare per-iteration BUFFER_SIZE guard — the defect form is back"
+            else
+                ok "H: $dep scanner has no bare per-iteration BUFFER_SIZE guard left"
+            fi ;;
+        unknown)
+            no "H: $dep scanner references TREE_SITTER_SERIALIZATION_BUFFER_SIZE but is UNCLASSIFIED — audit its serialize() write width and add it to serializeClassOf" ;;
+    esac
+done < <( grep -l 'TREE_SITTER_SERIALIZATION_BUFFER_SIZE' "$DEPS_DIR"/*/src/scanner.c 2>/dev/null | LC_ALL=C sort )
+if [ "$serCount" -ge 5 ]; then
+    ok "H: presence — $serCount vendored scanners reference the serialization buffer (sweep is not inert)"
+else
+    no "H: presence — only $serCount scanner(s) matched; the family sweep found too little to audit (extraction rot?)"
 fi
 
 # ── verdict ─────────────────────────────────────────────────────────────────────────────────────

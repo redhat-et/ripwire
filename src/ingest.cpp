@@ -142,6 +142,7 @@ extern "C"
     const TSLanguage* tree_sitter_ruby( void );
     const TSLanguage* tree_sitter_json( void );
     const TSLanguage* tree_sitter_toml( void );
+    const TSLanguage* tree_sitter_yaml( void );
     const TSLanguage* tree_sitter_c_sharp( void );
     const TSLanguage* tree_sitter_c( void );
     const TSLanguage* tree_sitter_cuda( void );
@@ -186,11 +187,12 @@ struct LangEntry
 };
 
 // Order does not matter (linear scan); kept grouped by language for readability.
-// The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33 and .pyi made it 34. Sizing
-// it to the row count is what makes `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
+// The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33, .pyi made it 34 and the
+// .yml/.yaml pair made it 36. Sizing it to the row count is what makes
+// `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
 // below) exact too, and it turns "added a row and forgot the extent" into a compile error rather than a
 // silent drop.
-constexpr std::array<LangEntry, 34> kLangTable = {{
+constexpr std::array<LangEntry, 36> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -269,6 +271,8 @@ constexpr std::array<LangEntry, 34> kLangTable = {{
     { ".rb",   Lang::Ruby,       &tree_sitter_ruby,       "ruby"       },   // Ruby — class/module/def + method calls + require
     { ".json", Lang::Json,       &tree_sitter_json,       "json"       },   // JSON — top-level + 2nd-level object keys as t="sec"; DATA, no call edges
     { ".toml", Lang::Toml,       &tree_sitter_toml,       "toml"       },   // TOML — [table] headers + their keys as t="sec"; DATA, no call edges
+    { ".yml",  Lang::Yaml,       &tree_sitter_yaml,       "yaml"       },   // YAML — mapping keys (mdepth<=2, seqs transparent) as t="sec"; DATA, no call edges
+    { ".yaml", Lang::Yaml,       &tree_sitter_yaml,       "yaml"       },   // YAML sibling extension (k8s manifests favour it)
     { ".cs",   Lang::CSharp,     &tree_sitter_c_sharp,    "csharp"     },   // C# — classes/structs/interfaces/records/enums/methods/props + calls
     { ".md",   Lang::Markdown,   nullptr,                 ""           },   // no tree-sitter grammar — ATX headings via extractMarkdown()
 }};
@@ -368,6 +372,10 @@ SymKind defKind( std::string_view tail ) noexcept
     {
         return SymKind::Section; // JSON object keys (t="sec"), same kind as markdown headings
     }
+    if( tail == "yamlkey" )        // YAML mapping keys — gated (yamlKeyCaptureDropped: depth cut + merge key)
+    {
+        return SymKind::Section;
+    }
     return SymKind::Other;
 }
 
@@ -458,18 +466,19 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
 //
 // JSON belongs here for the SAME reason and was ALREADY wrong before TOML existed: a package.json
 // dependency `"lodash.merge"` was indexed as `merge` (measured; the TOML round's sibling sweep is what
-// surfaced it). Covering both is the sibling-completeness rule docs/METHODOLOGY.md §3 calls the dominant
+// surfaced it). YAML is the third tenant: a `dotted.plain.key:` is one key whose name contains dots.
+// Covering all three is the sibling-completeness rule docs/METHODOLOGY.md §3 calls the dominant
 // defect class here — fixing the instance and leaving its sibling broken is the failure it names.
 //
-// Widening a name here cannot widen the CALL GRAPH: both languages emit zero @reference captures, and
-// graph.h's langCompatible already keeps each lang-isolated from every code language.
+// Widening a name here cannot widen the CALL GRAPH: the data-config languages emit zero @reference
+// captures, and graph.h's langCompatible already keeps each lang-isolated from every code language.
 //
 // This lives beside finalSegment rather than inside captureTagsFacts on purpose — the caller is a very
 // large function already over the complexity bar, and a policy branch buried in it is both invisible and
 // a measured regression (--quality-delta scored the inline ternary at +3 ccx).
 std::string defNameFromCapture( Lang lang, std::string_view raw )
 {
-    if( lang == Lang::Json || lang == Lang::Toml )
+    if( lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml )
     {
         return std::string( raw );
     }
@@ -556,6 +565,67 @@ bool jsonNestsTooDeep( std::string_view bytes ) noexcept
                 --depth;
             }
         }
+    }
+    return false;
+}
+
+// True when block indentation implies a scanner indent stack anywhere near tree-sitter-yaml's
+// serialize() cliff — see kMaxYamlNestDepth in ingest.h for the defect arithmetic. Like jsonNestsTooDeep,
+// one deterministic O(n) byte scan BEFORE any parse — never a wall-clock timeout, which would break the
+// byte-identical-output contract. It OVER-approximates the scanner's indent stack, and the direction is
+// the whole design: an over-count skips a degenerate file with a disclosed stderr note; an under-count
+// would hand the parser a file whose state serialization corrupts memory. Three over-approximations:
+//   - a stack of open indent COLUMNS, popped when a line dedents to or past them; every content line
+//     charges its own column (a wrapped plain-scalar continuation counts like a key line);
+//   - each leading `- ` / `? ` / `: ` block marker after the indent opens one more level on its line
+//     (`- - - x` builds three scanner levels on one unindented line);
+//   - the verdict charges 2 stack slots per open column, because a block mapping and a block sequence
+//     can open at the SAME column (`key:` over `- item` at indent 0 is two scanner pushes, one column).
+// Lines inside block scalars and multi-line quoted values are indistinguishable without a parse and
+// count like any other line — over-approximation again (a block scalar would need 30+ distinct
+// increasing indents to trigger). Flow nesting (`{`/`[`) is deliberately NOT counted: the scanner's
+// serialize stack grows only on BLOCK begins (verified against every push_ind site in the vendored
+// scanner.c), so a deep one-line flow document is bounded by the generic parse path, not this one.
+bool yamlNestsTooDeep( std::string_view bytes ) noexcept
+{
+    constexpr std::uint32_t kColCap = kMaxYamlNestDepth;   // more slots than can survive the 2x verdict below
+    std::uint32_t openCols[ kColCap ];
+    std::uint32_t openCount = 0;
+    std::size_t   i = 0;
+    const std::size_t byteCount = bytes.size();
+    while( i < byteCount )
+    {
+        // leading indent (tabs are invalid YAML block indentation; charging them anyway only over-counts)
+        std::uint32_t col = 0;
+        while( i < byteCount && ( bytes[ i ] == ' ' || bytes[ i ] == '\t' ) ) { ++col; ++i; }
+        // block markers: `- ` (sequence entry), `? ` (explicit key), `: ` (explicit value)
+        std::uint32_t markerLevels = 0;
+        while( i + 1 < byteCount && ( bytes[ i ] == '-' || bytes[ i ] == '?' || bytes[ i ] == ':' )
+               && ( bytes[ i + 1 ] == ' ' || bytes[ i + 1 ] == '\t' ) )
+        {
+            ++markerLevels; i += 2; col += 2;
+        }
+        const bool blankOrComment = ( i >= byteCount || bytes[ i ] == '\n' || bytes[ i ] == '\r' || bytes[ i ] == '#' );
+        if( !blankOrComment || markerLevels > 0 )
+        {
+            const std::uint32_t base = col - 2u * markerLevels;
+            while( openCount > 0 && openCols[ openCount - 1 ] >= base ) { --openCount; }   // dedent pops
+            for( std::uint32_t m = 0; m <= markerLevels; ++m )                             // this line's level + one per marker
+            {
+                if( openCount >= kColCap )
+                {
+                    return true;                        // proxy-stack overflow IS the too-deep verdict
+                }
+                openCols[ openCount ] = base + 2u * m;
+                ++openCount;
+            }
+            if( 2u * openCount > kMaxYamlNestDepth )
+            {
+                return true;
+            }
+        }
+        while( i < byteCount && bytes[ i ] != '\n' ) { ++i; }   // rest of line is content, not structure
+        if( i < byteCount ) { ++i; }
     }
     return false;
 }
@@ -727,6 +797,16 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         if( sz > kMaxJsonConfigBytes && ext == ".json" )
         {
             skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxJsonConfigBytes ) } );
+            continue;
+        }
+
+        // YAML-lane ceiling (see kMaxYamlConfigBytes): the same hazard class as .json — a machine-written
+        // DATA population behind a config extension — at YAML's own measured calibration: 512 KB, because
+        // JSON's 256 KB would drop real hand-maintained config (NeMo's 293 KB cicd-main.yml). Counted in
+        // skipped_oversize exactly like its two siblings above, for the same accounting invariant.
+        if( sz > kMaxYamlConfigBytes && ( ext == ".yml" || ext == ".yaml" ) )
+        {
+            skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxYamlConfigBytes ) } );
             continue;
         }
 
@@ -1137,7 +1217,13 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 60;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 61;           // bump on any grammar/.scm/extraction change
+                                                      // 61 (2026-08-11 YAML config-key tier): .yml/.yaml indexed for
+                                                      //    the first time — mapping keys at mdepth<=2 (sequences
+                                                      //    transparent) become t="sec" symbols via queries/yaml/
+                                                      //    tags.scm + the definition.yamlkey gate. A v60 blob on a
+                                                      //    YAML-bearing tree is missing every such row -> reject.
+                                                      //    Known, disclosed cost: one cold re-parse everywhere.
                                                       // 60 (2026-08-10 language-port round): one shared bump covering
                                                       //    THREE hand-ported language rounds, each stranded on a branch
                                                       //    this tree never had. Listed separately because each changes
@@ -5539,6 +5625,40 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
     return !( !memSpace.empty() && isScreamingSnakeName( name ) );        // uninitialized: __device__/__managed__ gated
 }
 
+// YAML's @definition.yamlkey gate — the yaml tier's one in-C++ predicate (see queries/yaml/tags.scm's
+// header for why the depth cut cannot live in the query: sequence nesting between a pair and its
+// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates never run).
+// A mapping key is a symbol iff its MAPPING depth is <= 2 — block and flow mappings counted alike
+// (flow is a presentation style of the same mapping node), sequences counted NOT AT ALL (sequence
+// transparency: 25.3% of real keys sit directly inside a sequence element — the steps:/containers:/
+// tasks: shape — and a root-depth rule drops every one of them; 44.0% captured vs JSON's-rule 27.1%,
+// measured on the 90-repo breadth corpus). Depth = the number of mapping nodes on the ancestor chain
+// from the pair to the root, the pair's own mapping included; multi-document streams need no special
+// case because documents never nest. The merge key `<<` (0.22% of files) is the one TEXTUAL drop —
+// it parses as an ordinary plain_scalar key and a symbol named `<<` helps nobody. Alias-as-key
+// (measured 0 in 4 449 files) and explicit block-node keys are dropped STRUCTURALLY by the query's
+// scalar-only alternation and never reach here.
+inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noexcept
+{
+    if( name == "<<" )
+    {
+        return true;
+    }
+    std::uint32_t mappingDepth = 0;
+    for( TSNode p = roleNode; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    {
+        const char* pt = ts_node_type( p );
+        if( std::strcmp( pt, "block_mapping" ) == 0 || std::strcmp( pt, "flow_mapping" ) == 0 )
+        {
+            if( ++mappingDepth > 2u )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // The whole drop decision for every GATED definition capture, kept out of captureTagsFacts (which is
 // already the file's densest dispatch point) behind ONE call, keyed on the @definition capture's own
 // name. @definition.constant delegates to dropConstantCapture above (r3 q10's SCREAMING_SNAKE gate plus
@@ -5565,6 +5685,10 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     if( defCapSv == "definition.enummember" )
     {
         return !isPyEnumMemberTarget( nameNode, src );
+    }
+    if( defCapSv == "definition.yamlkey" )
+    {
+        return yamlKeyCaptureDropped( name, roleNode );
     }
     if( defCapSv == "definition.macro" )
     {
@@ -9384,6 +9508,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                         {
                             std::fprintf( stderr, "[ripwire] %s: json nesting > %u levels — treated as data, not config (skipped)\n",
                                           path.c_str(), kMaxJsonNestDepth );
+                            continue;
+                        }
+
+                        // hostile/degenerate YAML guard — MEMORY-SAFETY load-bearing, not just a perf guard:
+                        // tree-sitter-yaml's scanner serialize() corrupts memory past ~253 block indent levels
+                        // (see kMaxYamlNestDepth in ingest.h; the vendored scanner also carries the bounds fix
+                        // under third_party/patches/yaml/, so this is the FIRST of two independent layers).
+                        // Same house skip style as the JSON guard above: refuse BEFORE the parse, one stderr line.
+                        if( le->lang == Lang::Yaml && yamlNestsTooDeep( bytes ) )
+                        {
+                            std::fprintf( stderr, "[ripwire] %s: yaml nesting > %u levels — treated as data, not config (skipped)\n",
+                                          path.c_str(), kMaxYamlNestDepth );
                             continue;
                         }
 
