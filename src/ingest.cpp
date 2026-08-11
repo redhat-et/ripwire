@@ -409,8 +409,10 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
     // bare form (`Base`/`Wrapper`) is what byName keys on. The strip MUST precede the "::"/"." split,
     // or a `::` INSIDE the args (`Foo<A::B>`) would be mistaken for the segment separator. A name never
     // legitimately contains a bare '<' (only a type-argument list opens one), so truncating at the FIRST
-    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical).
-    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos )
+    // '<' is safe; the C++/TS bare-identifier path has no '<' → no-op (byte-identical). One carve-out:
+    // a type-argument list always FOLLOWS an identifier, so a name that STARTS with '<' is not a generic
+    // — it is a Swift operator function (`<`, `<=`, `<+>`), which the strip would erase to "".
+    if( const std::size_t lt = raw.find( '<' ); lt != std::string_view::npos && lt > 0 )
     {
         raw = raw.substr( 0, lt );
     }
@@ -1124,7 +1126,34 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 59;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 60;           // bump on any grammar/.scm/extraction change
+                                                      // 60 (Swift shapes port + TS #private gap): Swift
+                                                      //    gains enum_entry / typealias_declaration /
+                                                      //    associatedtype_declaration /
+                                                      //    protocol_property_declaration / the
+                                                      //    builtin-operator-token alternation in
+                                                      //    function_declaration's name: field — a hand
+                                                      //    port of stranded commit bb78f97 onto this
+                                                      //    tree (originally landed at kParserVer 41, an
+                                                      //    ancestor this tree never had). Same port,
+                                                      //    TypeScript's tags.scm gains the #private
+                                                      //    method / field-arrow / call-ref coverage that
+                                                      //    JS already had — a real sibling-completeness
+                                                      //    gap, not a new shape. Shared finalSegment()
+                                                      //    gains the leading-'<' carve-out (a Swift
+                                                      //    operator function name like `<` or `<+>` is
+                                                      //    not a generic type-argument list, which the
+                                                      //    unconditional strip previously erased to "").
+                                                      //    That carve-out touches the shared C++/TS/JS/
+                                                      //    Python code path, so it changes the extracted
+                                                      //    SET only for a name that legitimately starts
+                                                      //    with '<' (Swift operators); every other
+                                                      //    language's bare-identifier path is unaffected
+                                                      //    (verified: tsshapecheck/jsshapecheck/
+                                                      //    pyshapecheck/constcheck/langcheck stay green).
+                                                      //    The vendored scanner.c UBSan fix that rode
+                                                      //    the same source commit was deliberately NOT
+                                                      //    ported (see test/swiftshapecheck.sh header).
                                                       // 59 (TOML config-key tier): +TOML (.toml) — a NEW
                                                       //    grammar and a new .scm, so the extracted SET
                                                       //    changes on any tree holding a .toml. Table
