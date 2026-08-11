@@ -740,6 +740,19 @@ the Codex CLI benchmark harness under `bench/agentloop/`.
   scalar path everywhere else. `test/dynmapsimdcheck.sh` proves SIMD-vs-scalar parity under the full
   sanitizer set and **fails a scalar-only build on a SIMD architecture**, so the gate cannot pass by
   measuring nothing.
+- **x86 radix byte-histogram kernels, output-identical.** The radix sort's contiguous-key histogram
+  fast paths (uint32/uint64/float, `src/infra/radixSort.inl`) now compile to SSE2 on x86_64 — the
+  same one-wide-load-then-byte-spill shape as the NEON kernels that already existed on aarch64, with
+  the IEEE sortable-word flip done in SIMD for float. Same histograms bin-for-bin, scalar path
+  everywhere else (including big-endian NEON). *Measured (min-of-15 ns/key, x86_64 via Rosetta 2 on
+  an M-series host — a translation proxy, not real x86 silicon — `-O2 -DNDEBUG`, 4K/64K/1M random
+  keys):* float 1.44–1.52× over scalar; uint32/uint64 within ±10% (a wash — kept for backend
+  uniformity, at no measured cost). An AVX2 variant (32-byte load, same spill) measured *slower*
+  than SSE2 under the same proxy (0.86–0.94×) and was not shipped; re-evaluate on real x86 hardware
+  before adding it. `test/radixsimdcheck.sh` proves SIMD-vs-scalar parity against an
+  independently-formulated histogram oracle under the full sanitizer set, **fails a scalar-only
+  build on a SIMD architecture**, and on Apple Silicon runs a second cross-compiled pass under
+  Rosetta so the SSE2 kernels are gated on the machines this repo is developed on.
 - **BREAKING (output): canonical symbol IDs corrected.** A parse-recovery artifact published a
   function's *return type* as its class scope. *(Measured on one repository: 80 wrong canonical IDs in
   ordinary C++ corrected, plus 5 newly-correct IDs where the real enclosing namespace took over.)*
