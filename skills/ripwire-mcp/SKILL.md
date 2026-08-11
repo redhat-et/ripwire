@@ -5,7 +5,7 @@ description: >
   read incl. fetch_body/flags + 12 flagship-reflex verbs incl. connect/explore/from_trace/edit_check and the
   cross-branch pair whereis/stray_content + 3 edit verbs) and when each beats the CLI form or a native editor tool, the lazy-body handle posture, the edit
   verbs' safety contract, and the server's staleness/ rebuild behavior. Use when setting up ripwire for
-  Claude Code / Cursor / Codex / Windsurf / Gemini / aider, when deciding which ripwire MCP verb to call
+  Claude Code / Cursor / Codex / Windsurf / Gemini / opencode / aider, when deciding which ripwire MCP verb to call
   mid-task, or when wondering whether the server's index is stale. Backed by ripwire (deterministic, on
   PATH).
 allowed-tools: Bash, Read
@@ -43,6 +43,7 @@ writes) detailed below and in full in [`mcp-reference.md`](mcp-reference.md).
 ripwire wrap claude      # → claude mcp add ripwire -- ripwire --mcp
 ripwire wrap cursor      # → JSON mcpServers stanza for .cursor/mcp.json (also: windsurf, gemini)
 ripwire wrap codex       # → TOML stanza for ~/.codex/config.toml
+ripwire wrap opencode    # → CLI first (AGENTS.md is read automatically); its config key is "mcp", NOT mcpServers
 ripwire wrap aider       # → no MCP: ripwire . --for="<task>" > .ripwire-map.txt; aider --read .ripwire-map.txt
 ripwire wrap --all       # → auto-detect installed agents, emit each one's config in one run
 ```
