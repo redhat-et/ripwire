@@ -252,7 +252,8 @@ set(_ripwire_query_names
   rust
   swift
   toml
-  typescript)
+  typescript
+  yaml)
 set(_ripwire_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_ripwire_embedded_queries "${_ripwire_generated_dir}/embedded_queries.h")
 file(MAKE_DIRECTORY "${_ripwire_generated_dir}")
@@ -388,6 +389,17 @@ add_ts_grammar(json   https://github.com/tree-sitter/tree-sitter-json.git       
 # hazard an external scanner usually implies.
 # Data only: table headers and keys become def nodes (t="sec"), NO call edges (see queries/toml/tags.scm).
 add_ts_grammar(toml   https://github.com/tree-sitter-grammars/tree-sitter-toml.git 64b56832c2cffe41758f28e05c756a3a98d16f41)  # v0.7.0
+# YAML (.yml/.yaml): config-file visibility, the third data lane (CI workflows / k8s manifests / ansible).
+# tree-sitter-grammars/, not tree-sitter/ — there is no first-party YAML grammar. v0.7.2 → ABI 14, in
+# [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9. Its scanner.c is STATEFUL (an indent-type/
+# indent-length stack serialized between runs) and #includes schema.core.c from its own src/ dir — the
+# macro's ${_src} include path covers that. UNLIKE toml, this scanner's serialize() had a real
+# out-of-bounds write (4-byte writes behind a guard that only proves 1 byte fits; SIGABRT at ~254 block
+# indent levels, SILENT corruption under NDEBUG) — the vendored tree carries the one-line bounds fix
+# under third_party/patches/yaml/ (drift-gated by test/vendorpatchcheck.sh), and ingest refuses
+# pathological indentation BEFORE any parse (ingest.h kMaxYamlNestDepth prescan).
+# Data only: mapping keys become def nodes (t="sec"), NO call edges (see queries/yaml/tags.scm).
+add_ts_grammar(yaml   https://github.com/tree-sitter-grammars/tree-sitter-yaml.git 7708026449bed86239b1cd5bce6e3c34dbca6415)  # v0.7.2
 # C# (.cs): the official tree-sitter org grammar (classes/structs/interfaces/records/enums/methods/
 # properties/ctors + invocation & object-creation calls). v0.23.5 → ABI 15, in [MIN_COMPATIBLE,
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (raw/interpolated string literals)
@@ -450,6 +462,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_ruby>
   $<TARGET_OBJECTS:ts_json>
   $<TARGET_OBJECTS:ts_toml>
+  $<TARGET_OBJECTS:ts_yaml>
   $<TARGET_OBJECTS:ts_csharp>
   $<TARGET_OBJECTS:ts_c>
   $<TARGET_OBJECTS:ts_cuda>
@@ -637,7 +650,7 @@ endif()
 # ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
-  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_csharp ts_c ts_cuda)
+  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -852,6 +865,7 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(ruby       tree_sitter_ruby       ruby)
   add_ripwire_fuzzer(json       tree_sitter_json       json)
   add_ripwire_fuzzer(toml       tree_sitter_toml       toml)
+  add_ripwire_fuzzer(yaml       tree_sitter_yaml       yaml)
   add_ripwire_fuzzer(csharp     tree_sitter_c_sharp    csharp)
   add_ripwire_fuzzer(c          tree_sitter_c          c)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})

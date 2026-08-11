@@ -156,7 +156,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // ingest.cpp's captureIncludes(): every language below has a node-type branch there (Cpp/C/ObjC's
 // preproc_include/#import, Python/TS/JS's import_statement(_from), Rust's use_declaration/mod_item,
 // Go/Swift/Java's import_declaration — Java shares that node-type SPELLING with Go/Swift so it is
-// captured too, even though only best-effort resolved — and C#'s using_directive). Bash/Ruby/Json/Toml/
+// captured too, even though only best-effort resolved — and C#'s using_directive). Bash/Ruby/Json/Toml/Yaml/
 // Markdown/Unknown have no branch there and never produce an Include record (confirmed empirically: a
 // require/source/JSON-only fixture emits `<deps files="0">`). TOML is worth a word because it LOOKS like a
 // counterexample: a Cargo.toml [dependencies] table names real dependencies. They are PACKAGE deps, not the
@@ -171,7 +171,7 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Rust: case Lang::Go: case Lang::Swift:
         case Lang::Java: case Lang::CSharp:
             return true;
-        case Lang::Bash: case Lang::Ruby: case Lang::Json: case Lang::Toml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Bash: case Lang::Ruby: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
         default:
             return false;
     }

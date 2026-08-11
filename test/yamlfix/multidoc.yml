@@ -1,0 +1,6 @@
+# multi-document stream — each document re-enters at depth 1
+---
+docone: first document top-level key
+---
+doctwo:
+  doctwochild: second document depth-2 key

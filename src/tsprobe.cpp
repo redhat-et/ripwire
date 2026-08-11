@@ -31,10 +31,10 @@ namespace
 // The "?" at index 12 is Lang::Unknown's own label, not a hole — the enum keeps Unknown mid-table so
 // serialize.h's calibration array can size on it (model.h documents why), and ingest never assigns it.
 inline constexpr const char* kLangName[] = {
-    "cpp", "py", "ts", "go", "rust", "swift", "objc", "md", "js", "sh", "java", "rb", "?", "json", "cs", "c", "toml",
+    "cpp", "py", "ts", "go", "rust", "swift", "objc", "md", "js", "sh", "java", "rb", "?", "json", "cs", "c", "toml", "yaml",
 };
 
-static_assert( std::size( kLangName ) == std::size_t( rw::Lang::Toml ) + 1,
+static_assert( std::size( kLangName ) == std::size_t( rw::Lang::Yaml ) + 1,
                "kLangName drifted from the Lang enum — update both together" );
 
 // SymKind has no table here: rw::symTag() already IS the declarative one. Only its count is needed,

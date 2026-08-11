@@ -1,0 +1,7 @@
+# ansible-tasks-shaped fixture (.yaml, the sibling extension) — the sequence-transparency shape:
+# 25.3% of real YAML keys sit directly inside a sequence element, and JSON's depth rule drops
+# 100% of them. Sequence levels are TRANSPARENT: these keys count as depth 1 and 2.
+- taskitemname: install editor
+  aptmodule:
+    pkgnamekey: vim
+- - nestedseqkey: a seq inside a seq is still depth one
