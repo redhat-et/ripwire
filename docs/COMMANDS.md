@@ -577,7 +577,7 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 
 **Answers:** composable node-set query over the call graph: sources name("X")/all;
 
-filters kind|cx|fanin|file; bounded closure callers|callees(SET[,depth]); joins and|or|not.  e.g. and(callers(name("foo"),2),kind(all,fn)) a name("X") literal matching NO indexed symbol refuses with a did-you-mean (a typo is not a count=0); a query whose names all resolve but that selects nothing still reports count="0" — that IS a measurement. Ranked result set is capped at --top-k (default 200); --limit overrides that cap (raise or lower it), --offset pages past it — see --limit=N --offset=M above
+filters kind|cx|fanin|file|layer; bounded closure callers|callees(SET[,depth]); joins and|or|not.  e.g. and(callers(name("foo"),2),kind(all,fn)) layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree. It does NOT read a --arch=FILE rules file: --arch is a verb and outranks --graph-query, so the two never run together. An unknown layer word, or ANY layer() against a tree where no path names a layer, is REFUSED (exit 1) rather than answered count="0" — 0 there would read as "no such code". a name("X") literal matching NO indexed symbol refuses with a did-you-mean (a typo is not a count=0); a query whose names all resolve but that selects nothing still reports count="0" — that IS a measurement (including a VALID layer with no members in a tree that does have layers). Ranked result set is capped at --top-k (default 200); --limit overrides that cap (raise or lower it), --offset pages past it — see --limit=N --offset=M above
 
 **Try it**
 
@@ -606,9 +606,9 @@ $ ./build/ripwire . --graph-query='and(callers(name("rankGraphTeleport"),2),kind
 
 **Caveats (stated by the binary):**
 
-- and(callers(name("foo"),2),kind(all,fn)) a name("X") literal matching NO indexed symbol refuses with a did-you-mean (a typo is not a count=0);
-- Ranked result set is capped at --top-k (default 200);
-- --limit overrides that cap (raise or lower it), --offset pages past it — see --limit=N --offset=M above
+- and(callers(name("foo"),2),kind(all,fn)) layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree.
+- It does NOT read a --arch=FILE rules file: --arch is a verb and outranks --graph-query, so the two never run together.
+- An unknown layer word, or ANY layer() against a tree where no path names a layer, is REFUSED (exit 1) rather than answered count="0" — 0 there would read as "no such code".
 
 ### `--external-surface`
 
@@ -1525,7 +1525,7 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 ... [19 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--deps`
+**Shaped by:** `--graph-query`, `--deps`
 
 **Caveats (stated by the binary):**
 
