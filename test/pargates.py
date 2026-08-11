@@ -84,24 +84,44 @@ gates.sort(key=lambda g: -prior_timings.get(g, float("inf")))
 # exclusive ownership after the parallel correctness wave.
 exclusive = {"editcheckcheck.sh"}
 
-# Six gates build a SECOND ripwire from git HEAD to diff today's resolver against it, sharing one sha-keyed
-# binary through test/lib/headbinlib.sh: one elected builder, the rest wait on its lock. A full build is ~50s
-# on the dev machine but several minutes on a 4-vCPU CI runner with -j 3 gates already competing for it, so
-# the flat 300 s ceiling below is not a budget for them -- it is shorter than the work. Measured: rc=124 at
-# 300.1 s on ALL FOUR Linux legs of CI run 31182301976, green on macOS where the same build fits in ~60 s.
-# Raising the ceiling for exactly these six keeps the flat 300 s tripwire meaningful for the other 355,
-# rather than blanket-raising it and losing the signal that a gate has silently become slow.
-# headbinlib.sh's own waiter budget must stay well under this number -- its comment explains the coupling.
-SLOW_TIMEOUT_SEC = 900
-slow = {"crossdirincludecheck.sh", "nestedimportcheck.sh", "preproccondcheck.sh",
-        "pyimportprecisecheck.sh", "rustimportprecisecheck.sh", "tsimportprecisecheck.sh"}
+# --- per-gate budget overrides (W1-V4, 2026-08-11) ---------------------------------------------
+# A flat cap is wrong for the minority of gates whose HONEST work exceeds it -- the fix is a per-gate
+# override, not a raised global ceiling that would blunt the tripwire for the other ~370 gates that
+# really do finish in seconds. This is a declared table (gate name -> budget seconds), not a marker
+# line grepped out of each gate file: the table is the single place a reviewer checks "is this gate's
+# timeout honest", and it can't drift out of sync with a comment buried in a script nobody re-reads.
+#
+# DEFAULT_TIMEOUT_SEC applies to every gate not named below.
+#
+# The six *importprecisecheck/*condcheck entries build a SECOND ripwire from git HEAD to diff today's
+# resolver against it, sharing one sha-keyed binary through test/lib/headbinlib.sh: one elected
+# builder, the rest wait on its lock. A full build is ~50s on the dev machine but several minutes on a
+# 4-vCPU CI runner with -j 3 gates already competing for it, so DEFAULT_TIMEOUT_SEC is not a budget
+# for them -- it is shorter than the work. Measured: rc=124 at 300.1 s on ALL FOUR Linux legs of CI run
+# 31182301976, green on macOS where the same build fits in ~60 s. headbinlib.sh's own waiter budget
+# must stay well under 900 -- its comment explains the coupling.
+#
+# cppbenchcheck / regexbombcheck: legitimate ASan-on-a-cold-cache work, not a hang -- ~856 s and ~804 s
+# measured respectively -- so the old flat 300 s cap read a healthy run as a timeout. 1200 s leaves
+# headroom above both measurements without being so loose it stops meaning anything.
+DEFAULT_TIMEOUT_SEC = 300
+GATE_BUDGET_SEC = {
+    "crossdirincludecheck.sh":    900,
+    "nestedimportcheck.sh":       900,
+    "preproccondcheck.sh":        900,
+    "pyimportprecisecheck.sh":    900,
+    "rustimportprecisecheck.sh":  900,
+    "tsimportprecisecheck.sh":    900,
+    "cppbenchcheck.sh":          1200,
+    "regexbombcheck.sh":         1200,
+}
 parallel_gates = [g for g in gates if g not in exclusive]
 exclusive_gates = [g for g in gates if g in exclusive]
 
 
 def run(g):
     env = dict(os.environ, RIPWIRE_BIN=binp)
-    limit = SLOW_TIMEOUT_SEC if g in slow else 300
+    limit = GATE_BUDGET_SEC.get(g, DEFAULT_TIMEOUT_SEC)
     t0 = time.time()
     try:
         p = subprocess.run(
@@ -110,7 +130,9 @@ def run(g):
         )
         rc, out = p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
-        rc, out = 124, f"TIMEOUT after {limit}s"
+        # the budget itself is part of the message -- a red names its own declared budget instead of
+        # making the reader go look it up in GATE_BUDGET_SEC.
+        rc, out = 124, f"TIMEOUT after {limit}s (declared budget={limit}s)"
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
