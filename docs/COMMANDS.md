@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
-**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn) · [`--format`](#format-candidates) · [`--json`](#json) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file)
+**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-candidates) · [`--json`](#json) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file)
 
 ---
 
@@ -1466,9 +1466,9 @@ A greedy cover, disclosed as greedy — set cover is NP-hard, so the group count
 
 ### `--since=REV|DATE`
 
-**Answers:** scope --hotspots/--cochange/--rank-by=churn to commits after this point: a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate ("2 weeks ago" — wall-clock-relative).
+**Answers:** scope --hotspots/--cochange/--rank-by=churn|churn-decay to commits after this point: a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate ("2 weeks ago" — wall-clock-relative).
 
-e.g. --hotspots --since="1 week ago" ranks by RECENT churn (the regression lens). Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months. All three STAMP the window they used (window="12mo"/"18mo", or the resolved --since value) — --cochange gained its window= in the same round that gave it sub_windows=, and this clause used to say it had none. An UNRESOLVABLE value is refused by --hotspots (exit 1 — its window is part of the measurement) and degrades to the verb's own default window elsewhere
+e.g. --hotspots --since="1 week ago" ranks by RECENT churn (the regression lens). Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is the ONE exception: its default IS all history, because the 90-day half-life makes a cut-off unnecessary — it stamps that too). All of them STAMP the window they used (window="12mo"/"18mo", or the resolved --since value) — --cochange gained its window= in the same round that gave it sub_windows=, and this clause used to say it had none. An UNRESOLVABLE value is refused by --hotspots (exit 1 — its window is part of the measurement) and degrades to the verb's own default window elsewhere
 
 **Try it**
 
@@ -1495,7 +1495,7 @@ $ ./build/ripwire . --hotspots --since="2 weeks ago"
 
 **Caveats (stated by the binary):**
 
-- Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months.
+- Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is the ONE exception: its default IS all history, because the 90-day half-life makes a cut-off unnecessary — it stamps that too).
 - An UNRESOLVABLE value is refused by --hotspots (exit 1 — its window is part of the measurement) and degrades to the verb's own default window elsewhere
 
 ### `--arch=FILE`
@@ -2529,11 +2529,11 @@ $ ./build/ripwire --scan-skills=skills
 
 ## knobs / modes
 
-### `--rank-by=pagerank|authority|hub|rrf|churn`
+### `--rank-by=pagerank|authority|hub|rrf|churn|churn-decay`
 
 **Answers:** ranking signal (churn = git change-frequency prior, and stamps its own map with rank_by/window/at so it cannot pass for the structural one;
 
-default pagerank) --format=xml|columnar|rows output shape for the FLAT list verbs (--callers/--callees/--uses/--impact): xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields= path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses — the emitted block's own legend states the zip/n=/&#44;-escape contract; ~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is unaffected.
+churn-decay = the same prior with each commit weighted 0.5^(age_days/90) instead of counted equally, so recent edits outweigh old ones. Its age clock is HEAD's OWN commit timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a fixed tree; the half-life is disclosed in window=. default pagerank) --format=xml|columnar|rows output shape for the FLAT list verbs (--callers/--callees/--uses/--impact): xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields= path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses — the emitted block's own legend states the zip/n=/&#44;-escape contract; ~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is unaffected.
 
 **Try it**
 
@@ -2563,6 +2563,7 @@ $ ./build/ripwire . --rank-by=churn --top-k=5
 **Caveats (stated by the binary):**
 
 - ranking signal (churn = git change-frequency prior, and stamps its own map with rank_by/window/at so it cannot pass for the structural one;
+- Its age clock is HEAD's OWN commit timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a fixed tree;
 - Any OTHER verb refuses (exit 1) — it has no row list to re-encode.
 
 ### `--format=candidates`
