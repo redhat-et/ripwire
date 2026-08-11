@@ -15,6 +15,7 @@
 //            | cx(   EXPR , INT )         keep nodes with cyclomatic complexity >= INT
 //            | fanin(EXPR , INT )         keep nodes with in-degree (caller count) >= INT
 //            | file( EXPR , "RE" )        keep nodes whose file PATH matches the ECMAScript regex RE
+//            | layer(EXPR , NAME )        keep nodes in architecture LAYER (game|infra|render|math|audio|ai|test)
 //   CLOSURE := callers( EXPR [, INT=1] )  nodes that transitively (<= INT hops) CALL any node in EXPR
 //            | callees( EXPR [, INT=1] )  nodes transitively (<= INT hops) CALLED BY any node in EXPR
 //   JOIN    := and( EXPR , EXPR )         set intersection
@@ -32,6 +33,7 @@
 
 #include "model.h"
 #include "graph.h"
+#include "arch.h"          // P0-5: builtinLayer() — THE layer taxonomy, the same one the map's layer= attribute carries
 #include "infra/Diagnostics.h"
 
 #include <algorithm>
@@ -57,6 +59,34 @@ inline bool kindOfWord( std::string_view w, SymKind& out ) noexcept
     if( w == "var"    ) { out = SymKind::Var;       return true; }
     if( w == "sec"    ) { out = SymKind::Section;   return true; }
     if( w == "macro"  ) { out = SymKind::Macro;     return true; }   // macro-edges round: t="macro" is queryable like every other kind
+    return false;
+}
+
+// ── P0-5: the layer() vocabulary ─────────────────────────────────────────────────────────────────────
+//
+// layer() reads arch.h's BUILT-IN directory-name taxonomy — deliberately the SAME function
+// (builtinLayer) that puts `layer="render"` on a file node in the default map, so the query language and
+// the map cannot disagree about what a layer is. A second definition here would be the drift that makes
+// `--graph-query 'layer(all,render)'` and the map's own layer= attribute answer differently on one tree.
+//
+// It does NOT read a --arch=FILE rules file: --arch is a VERB that outranks --graph-query in the dispatch
+// chain, so the two never run in the same invocation, and a taxonomy the user could pass but the query
+// could never see would be a worse lie than a documented limit. Stated in --help, not only here.
+//
+// The vocabulary is CLOSED and small, which is what makes the refusal posture below tractable.
+inline constexpr std::string_view kLayerVocabulary = "game|infra|render|math|audio|ai|test";
+
+// Is `w` one of the layer names the built-in table can ever produce? Derived from the table itself, so a
+// new row in kBuiltinLayers widens this automatically instead of drifting from it.
+inline bool isKnownLayerWord( std::string_view w ) noexcept
+{
+    for( const BuiltinLayer& bl : kBuiltinLayers )
+    {
+        if( w == std::string_view( bl.layer ) )
+        {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -112,7 +142,7 @@ struct Eval
         }
         ok = false;
         err = std::move( m );
-        err += "\n  grammar: and|or|not(...) sources name(\"X\")|all filters kind|cx|fanin|file closure "
+        err += "\n  grammar: and|or|not(...) sources name(\"X\")|all filters kind|cx|fanin|file|layer closure "
                "callers|callees(SET[,depth])\n"
                "  e.g. and(callers(name(\"foo\"),2),kind(all,fn))";
     }
@@ -231,6 +261,43 @@ struct Eval
         return set;
     }
 
+    // P0-5 — layer( SET, NAME ). TWO refusal arms, because the two causes are different facts and an agent
+    // acts on them differently:
+    //
+    //   • the word is not in the closed vocabulary at all ⇒ a typo. Refuse and name the vocabulary. This is
+    //     §P0.5b's rule for name() applied to the other literal in the grammar.
+    //   • the word is valid but NOTHING in the indexed tree carries any layer tag ⇒ the tree has no layer
+    //     taxonomy, so the question cannot be asked here. Refusing is the whole point: count="0" would read
+    //     as "there is no render code", and an agent that believes it goes looking somewhere else. A zero
+    //     must mean "none found", and this is not that.
+    //
+    // A valid word against a tree that IS layered but has no members in that layer is a MEASUREMENT and
+    // reports count="0" — the same line query.h already draws for a name() that resolves but selects nothing.
+    std::vector<NodeId> filterLayer( std::vector<NodeId> set, const std::string& name )
+    {
+        if( !isKnownLayerWord( name ) )
+        {
+            fail( "unknown layer '" + name + "' (use " + std::string( kLayerVocabulary ) + " — the built-in directory-name taxonomy "
+                  "the map's layer= attribute carries)" );
+            return {};
+        }
+        // Does ANY indexed file carry a layer at all? Asked over ing.files rather than over `set`, so a
+        // narrowed sub-expression cannot make an unlayered tree look layered or the reverse.
+        const bool treeHasLayers = std::any_of( ing.files.begin(), ing.files.end(),
+                                                []( const std::string& path ) { return *builtinLayer( path ) != '\0'; } );
+        if( !treeHasLayers )
+        {
+            DEGRADED_PATH_ALERT( "query: layer() on a tree with no layer taxonomy — refused, not answered 0" );
+            fail( "no layer taxonomy in this tree: no indexed path has a directory component naming a layer, so layer('" + name
+                  + "') cannot be answered. Refusing rather than reporting count=0, which would read as 'no such code'. "
+                    "Layers come from directory names (" + std::string( kLayerVocabulary ) + "); the map's layer= attribute shows which files have one" );
+            return {};
+        }
+        set.erase( std::remove_if( set.begin(), set.end(),
+                   [ & ]( NodeId id ) { return std::string_view( builtinLayer( ing.files[ ing.symbols[id].fileId ] ) ) != name; } ), set.end() );
+        return set;
+    }
+
     // ── bounded transitive closure ──────────────────────────────────────────────────────────────────────
     // <= depth hops over in-edges (callers) or out-edges (callees). Seeds are EXCLUDED from the result
     // (we report the reached callers/callees, not the seeds). `seen` caps each node at one visit ⇒ a cyclic
@@ -335,7 +402,7 @@ struct Eval
         {
             result = sourceName( quoted() );
         }
-        else if( op == "kind" || op == "cx" || op == "fanin" || op == "file" || op == "callers" || op == "callees" )
+        else if( op == "kind" || op == "cx" || op == "fanin" || op == "file" || op == "layer" || op == "callers" || op == "callees" )
         {
             std::vector<NodeId> set = expr();                         // first arg is always a SET
             if( op == "callers" || op == "callees" )
@@ -367,6 +434,10 @@ struct Eval
                 else if( op == "fanin" )
                 {
                     result = filterFanin( std::move( set ), integer() );
+                }
+                else if( op == "layer" )
+                {
+                    result = filterLayer( std::move( set ), ident() );   // P0-5: a bare word, like kind()'s
                 }
                 else
                 {
