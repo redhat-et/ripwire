@@ -440,7 +440,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 139 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 140 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 
 <details>
@@ -770,8 +770,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:1974"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2310"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9613"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:9717"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:9597"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:9701"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:913"/>
 </callers>
 ```
@@ -1377,7 +1377,9 @@ C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal`
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
 GPU and CPU halves), **CUDA** (`.cu`/`.cuh` — indexed with the vendored `tree-sitter-cuda` grammar,
 so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--callers` of a kernel names
-its host-side launchers; dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
+its host-side launchers; `__constant__` module tables index as symbols even uninitialized — the
+`cudaMemcpyToSymbol` idiom — and SCREAMING_SNAKE `__device__`/`__managed__` globals join them;
+dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
 JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON + TOML (config keys — a `[tool.ruff.lint]`
 table is one symbol under its full dotted name, and `pyproject.toml`/`Cargo.toml` become greppable).
 Seventeen tree-sitter grammars, all vendored.

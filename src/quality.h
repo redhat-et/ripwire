@@ -718,7 +718,18 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 59;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 60;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 60 = 2026-08-10 language-port round (one shared bump):
+                                                          // Python shapes (11 new tags.scm patterns, .pyi routing, the
+                                                          // gated enum-member kind), Swift shapes (hand port of bb78f97)
+                                                          // and the TypeScript #private gap, plus the shared finalSegment
+                                                          // leading-'<' carve-out. All change the extracted SET -- see
+                                                          // ingest.cpp kParserVer's own note for the per-language detail.
+                                                          // The same 60 also carries the CUDA memory-space module
+                                                          // bindings (cudacheck 7b close-out) -- uninitialized
+                                                          // `__constant__`/`__device__`/`__managed__` tables now
+                                                          // extract. All four land in one wave, so one bump covers
+                                                          // them; a v59 blob misses rows on any of those trees.
                                                           // 59 = +TOML (.toml) config-key tier: a new grammar
                                                           // and a new .scm change the extracted SET.
                                                           // 47 (L3, 2026-08-08 audit) = `locals` counts
