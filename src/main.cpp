@@ -5424,7 +5424,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
     const Graph&                      g            = d.g;
 
     // --graph-query=EXPR (ABS-5): composable node-set operators over the call graph — a FIXED, closed set
-    // (sources name()/all; filters kind/cx/fanin/file; bounded transitive-closure callers()/callees(); set
+    // (sources name()/all; filters kind/cx/fanin/file/layer; bounded transitive-closure callers()/callees(); set
     // joins and/or/not). NOT a Datalog engine. Evaluates to a deterministic sorted node-set, serialized like
     // --callers so the agent can compose questions the fixed verbs did not pre-anticipate.
     if( !cfg.graphQuery.empty() )
@@ -5472,7 +5472,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         // neither. That is the §B4 echo-site shape src/graphlegend.h's own header indicts, so the shared
         // constants land here too rather than a sixth wording.
         std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
-                     "name/all; filters kind/cx/fanin/file; bounded closure callers/callees; joins and/or/not), "
+                     "name/all; filters kind/cx/fanin/file/layer; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
                      "%s-->", rw::graphCountDisclosure().c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
