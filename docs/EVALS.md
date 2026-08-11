@@ -352,6 +352,56 @@ zero. Issue-style prose that names files and symbols is where it earns its keep.
 contract (it signals what anchored; it never displaces the top hit; byte-identical when nothing is
 mentioned; deterministic across three runs) is pinned by `test/mentioncheck.sh`.
 
+### Skill-routing calibration — S1 round, PRE-REGISTERED 2026-08-11 (before measurement)
+
+**Instrument:** `ripwire skills --eval-skills=test/skillevalfix/prompts.tsv` (`src/skilleval.h`),
+gated by `test/skillevalcheck.sh`, `test/skillevalsplitcheck.sh`, `test/skillroutingjudgedcheck.sh`.
+
+**Corpus growth (same round, sealed before this registration):** 148→266 rows, judged 58→152
+(≥9 labels per routable skill), append-only; split assigned by `sha256(prompt)` parity at
+collection; corpus sha256 sealed in the growth commit; every new row screened by a trigram-overlap
+filter against all descriptions and all pre-existing prompts (25 candidates reworded on a hit).
+
+**Recalibration finding (unchanged skills, grown corpus):** bm25-desc split=test hit@1 **68.5%**,
+sep-auc **0.953** — the previous 69.0% floor **did not reproduce** once the denominator grew; every
+floor was re-derived from the new measured values in the recalibration commit (60.0 / 0.89 test,
+46.0 / 0.75 dev, 50%/50% judged, test-judged rows ≥80, split pin 183, inversion band 0.02). Judged
+baseline (152 rows): bm25-desc **89**, bm25-full **92**, for-routed **91**. The desc-vs-body gap
+(bm25-full − bm25-desc = **+3 rows**) survived the growth unchanged — the raw SKILL.md still beats
+the description written to represent it, and that gap is the target.
+
+**Mechanism (registered before measurement).** For each of the 17 routable skills: per-skill tf×idf
+over the SKILL-body corpus (idf across the 17 bodies), minus every subtoken the skill's description
+already contains (`bm25Arm` is exact `tf.find` — no stemming, so literal surface forms). Candidate
+terms must pass the validated vocabulary rule: tf ≥ 3 in the skill's own body AND document
+frequency ≤ 4/17 across the other bodies. Top survivors, capped at ≤12 added words per skill, are
+ADDED to the description as natural trigger prose — never swapping or deleting existing text (the
+twice-measured SWAP trap), never every-skill phrasing (the df filter is its mechanical form). Term
+derivation reads skill bodies only — never eval prompts, never miss lists. The per-skill term table
+is committed with the edit for audit.
+
+**Metric and band.** Paired hit@1 on the held-out judged set (split=test, provenance=judged,
+n=85), bm25-desc arm, exactly one measurement. **ACCEPT iff net flipped rows (newly-correct −
+newly-wrong) land in [+2, +6]** (≈ +2.4pp…+7.1pp at n=85; band brackets the 3-row gap scaled to
+the grown denominator; one row = 1.2pp). **Simultaneous floors, all re-derived values above, all
+must hold:** test 60.0/0.89, dev 46.0/0.75, judged 50%/50%, plus `agentloopcodexcheck.sh`
+(frontmatter stop-rule markers untouched). sep-auc explicitly may not fall below its floor —
+added trigger vocabulary that makes negatives fire is the known failure mode of ADD edits.
+
+**Decision rule.** Inside the band with all floors green → accept and land. Below +2 → reject,
+revert the description edit, keep the corpus growth, record here per METHODOLOGY §5. **Above +6 →
+also reject** (a result better than the mechanism can explain is a leakage suspect, not a win —
+the LB-3 rounds are the precedent); revert, audit, record. One attempt against the held-out set;
+a retry is a new round with a fresh registration.
+
+**Scope guard.** This measures a routing PROXY (which skill wins a prompt), reported only as such.
+The behavior metric — does an agent actually stop defaulting to Read/Grep/Glob — is S2's
+substitution meter (the per-call JSONL log, live on main), and a routing verdict here is a
+hypothesis to cross-read against that log, never an agent-behavior claim. The `bench/agentloop`
+task-success eval stays unrun (underpowered as configured; see `ff928ee`'s power calculation).
+
+*Result: recorded below after the single held-out measurement.*
+
 ---
 
 ## 5. Token and output economy
