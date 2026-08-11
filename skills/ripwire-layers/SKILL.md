@@ -9,7 +9,8 @@ description: >
   about a bad number: formalize a boundary, write a `deny` rule, gate it. This is the enforcement/gates lens
   on architecture; for the one-screen structure/overview lens (no gating) → ripwire-orient. One pass
   answers the health question — re-run only after you change the rules or the code. Backed by
-  ripwire (deterministic, on PATH).
+  ripwire (deterministic, on PATH). Layer clusters, afferent coupling, bridge files, mermaid diagram,
+  validated action per finding.
 allowed-tools: Bash, Read
 ---
 

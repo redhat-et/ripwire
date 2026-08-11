@@ -7,7 +7,7 @@ description: >
   verbs' safety contract, and the server's staleness/ rebuild behavior. Use when setting up ripwire for
   Claude Code / Cursor / Codex / Windsurf / Gemini / opencode / aider, when deciding which ripwire MCP verb to call
   mid-task, or when wondering whether the server's index is stale. Backed by ripwire (deterministic, on
-  PATH).
+  PATH). JSON-RPC transport, workspace config, batch verbs, span-hash edit safety.
 allowed-tools: Bash, Read
 ---
 

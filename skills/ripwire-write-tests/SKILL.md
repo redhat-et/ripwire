@@ -9,6 +9,7 @@ description: >
   edges) and the `tested=1` coverage lens, gives you the symbol's outside contract via `--callers`, then verifies the
   new test actually registers with `--affected`. For one target one --seams or --callers pass suffices —
   don't audit repo-wide coverage to write a single test. Backed by ripwire (deterministic, on PATH).
+  Which harness should cover it?
 allowed-tools: Bash, Read
 ---
 
