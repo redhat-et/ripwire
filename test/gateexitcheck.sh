@@ -227,7 +227,11 @@ FAILFAST = {
     "isolateprovenancecheck.sh":( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "lintprecisioncheck.sh":    ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "mcpcontractcheck.sh":      ( "python3 heredoc's rc captured into `rc`, propagated by a brace group", 1 ),
-    "type3clonecheck.sh":       ( "cap_run helper; every assertion is `|| { echo FAIL; exit 2; }`",      2 ),
+    # type3clonecheck.sh was pinned here until 2026-08-11, when its PART 2 (clone grouping + duplication
+    # %) gained a real accumulator (`p2fail`) so every drifted attribute is named in one run instead of
+    # only the first. PART 1's cap_run arms are still fail-fast, but arm (B) now reaches the terminal
+    # region and checks it forced and clean, which is strictly stronger than this pin was — so the row is
+    # retired, not reworded (the deckclaimcheck precedent, one round earlier).
     "dynmapsimdcheck.sh":       ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
     "pmccheck.sh":              ( "compile-and-run PMC harness; every arm is `echo FAIL; exit 2`",       2 ),
     "codexplugincheck.sh":      ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),

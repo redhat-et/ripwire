@@ -3573,9 +3573,18 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // §A8.1: total= (new) is ALWAYS the true row total (groups+type3-group-count), unpaged included — see
     // cloneUnpagedTotalAttr() above for why it is skipped when paging is active (pageDisclosure already
     // owns total= there; two attributes of the same name would break XML well-formedness).
-    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. raise the default cap with limit=N (offset=M pages). -->" );
-    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\"%s>", cg.size(), cg3.size(),
+    // P0-6: the pair graph, resolved into components, and the corpus priced in LOC. Computed over the FULL
+    // detector output (cg + cg3), never the displayed window — a summary that shrank with --limit would be
+    // a paging artefact, not a measurement.
+    const CloneGrouping grouping = groupClones( ing, cg, cg3 );
+
+    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->" );
+    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s>",
+                 cg.size(), cg3.size(),
                  cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
+                 grouping.componentCount,
+                 static_cast<unsigned long long>( grouping.duplicatedLoc ), static_cast<unsigned long long>( grouping.totalLoc ),
+                 cloneDuplicationPercent( grouping ),
                  pageDisclosure( cpab, sizeof( cpab ), clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ) );
     std::vector<char> esc;
@@ -3591,13 +3600,14 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
         {
             std::snprintf( exemptAttr, sizeof( exemptAttr ), " exempt=\"%s\"", exemptKind );
         }
+        const unsigned gid = flat < grouping.gidOfGroup.size() ? grouping.gidOfGroup[ flat ] : 0u;
         if( isType3 )
         {
-            std::printf( "<group type=\"3\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s>", gp.tokens, gp.members.size(), gp.similarity, exemptAttr );
+            std::printf( "<group type=\"3\" gid=\"%u\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s>", gid, gp.tokens, gp.members.size(), gp.similarity, exemptAttr );
         }
         else
         {
-            std::printf( "<group type=\"%u\" tokens=\"%u\" n=\"%zu\"%s>", gp.type, gp.tokens, gp.members.size(), exemptAttr );
+            std::printf( "<group type=\"%u\" gid=\"%u\" tokens=\"%u\" n=\"%zu\"%s>", gp.type, gid, gp.tokens, gp.members.size(), exemptAttr );
         }
         for( NodeId id : gp.members )
         {
@@ -5424,7 +5434,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
     const Graph&                      g            = d.g;
 
     // --graph-query=EXPR (ABS-5): composable node-set operators over the call graph — a FIXED, closed set
-    // (sources name()/all; filters kind/cx/fanin/file; bounded transitive-closure callers()/callees(); set
+    // (sources name()/all; filters kind/cx/fanin/file/layer; bounded transitive-closure callers()/callees(); set
     // joins and/or/not). NOT a Datalog engine. Evaluates to a deterministic sorted node-set, serialized like
     // --callers so the agent can compose questions the fixed verbs did not pre-anticipate.
     if( !cfg.graphQuery.empty() )
@@ -5472,7 +5482,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         // neither. That is the §B4 echo-site shape src/graphlegend.h's own header indicts, so the shared
         // constants land here too rather than a sixth wording.
         std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
-                     "name/all; filters kind/cx/fanin/file; bounded closure callers/callees; joins and/or/not), "
+                     "name/all; filters kind/cx/fanin/file/layer; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
                      "%s-->", rw::graphCountDisclosure().c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
@@ -9654,10 +9664,25 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
 // makes stderr its ONLY disclosure — another reason for the note to live on this side of the return.
 struct ChurnRanking { std::vector<float> rank; std::string window; };
 
+// P0-4: the DEFAULT window label of each churn ranker, which is also the difference between them that a
+// reader has to see. Plain churn mines a bounded 18-month wall-clock window; churn-decay mines the whole
+// history and lets the half-life do the windowing, so its label says so AND names the half-life — the
+// constant is a choice, and a choice that is not in the output is not disclosed.
+inline std::string churnDecayWindowLabel( std::string_view minedSpan )
+{
+    std::string label{ minedSpan };
+    label += " half-life=";
+    label += std::to_string( int( rw::kChurnDecayHalfLifeDays ) );
+    label += "d";
+    return label;
+}
+
 inline ChurnRanking churnRankedGraph( const MainDispatch& d )
 {
     using namespace rw;
-    bool hasChurnEvidence = false;
+    const bool isDecay          = ( d.cfg.rankBy == RankBy::ChurnDecay );
+    const char* const verbLabel = isDecay ? "--rank-by=churn-decay" : "--rank-by=churn";
+    bool hasChurnEvidence       = false;
 
     const auto discloseEmptyChurn = [ & ]( const std::string& windowStamp )
     {
@@ -9665,8 +9690,8 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         {
             return;
         }
-        std::fprintf( stderr, "ripwire: --rank-by=churn found no commits in its window; using uniform (structural) ranking — this map is "
-                              "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", windowStamp.c_str() );
+        std::fprintf( stderr, "ripwire: %s found no commits in its window; using uniform (structural) ranking — this map is "
+                              "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", verbLabel, windowStamp.c_str() );
     };
 
     if( d.multiRoot )
@@ -9676,14 +9701,23 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         {
             rootDirs.push_back( r.arg );
         }
-        std::vector<float> rank   = rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
-        std::string        window = churnWindowStamp( "18mo", hasChurnEvidence );
+        std::vector<float> rank   = isDecay ? rankGraphTeleport( d.g, churnDecayTeleportWorkspace( rootDirs, d.ing, &hasChurnEvidence ) )
+                                            : rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
+        std::string        window = churnWindowStamp( isDecay ? churnDecayWindowLabel( "all-history" ) : std::string( "18mo" ), hasChurnEvidence );
         discloseEmptyChurn( window );
         return { std::move( rank ), std::move( window ) };
     }
 
     const SinceScope sinceScope = resolveSinceScope( d.root, d.cfg.since );
     const bool       isScoped   = !d.cfg.since.empty() && sinceScope.active;   // the §P9 N7 rule, one verb over
+    if( isDecay )
+    {
+        std::vector<float> rank   = rankGraphTeleport( d.g, churnDecayTeleport( d.root, d.ing, d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
+        std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
+                                                      hasChurnEvidence );
+        discloseEmptyChurn( window );
+        return { std::move( rank ), std::move( window ) };
+    }
     std::vector<float> rank   = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
     std::string        window = churnWindowStamp( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "18mo" ), hasChurnEvidence );
     discloseEmptyChurn( window );
@@ -9854,7 +9888,7 @@ int runDefaultMap( const MainDispatch& d )
             rank = rankGraph( g );
         }
     }
-    else if( cfg.rankBy == RankBy::Churn )
+    else if( cfg.rankBy == RankBy::Churn || cfg.rankBy == RankBy::ChurnDecay )
     {
         ChurnRanking cr = churnRankedGraph( d );        // §A9.6: the ranking and the window label it must disclose
         rank             = std::move( cr.rank );
@@ -9920,7 +9954,7 @@ int runDefaultMap( const MainDispatch& d )
     // at=) over the cap at N=3000/6000/12000, `--rank-by=churn` +118..204 B (rank_by=, window=, kChurnRankLegend)
     // over it at nearly every N up to 12000. `at=` is the one part that costs anything to compute, and its guard
     // is unchanged, so this hoist adds no git subprocess to any path that did not already run one.
-    const bool        isChurnRanked = ( cfg.rankBy == RankBy::Churn ) && !multiRoot;
+    const bool        isChurnRanked = ( cfg.rankBy == RankBy::Churn || cfg.rankBy == RankBy::ChurnDecay ) && !multiRoot;
     const std::string mapDiffAt     = ( mapDiffActive && !multiRoot ) || isChurnRanked ? gitstamp::stampAt( root ) : std::string();
     // §A4d: BOTH serializations take the same per-edge provenance vector — resolved once here rather than
     // spelled as the same empty-check ternary on each arm, so the two formats cannot drift on this input.
@@ -9941,6 +9975,7 @@ int runDefaultMap( const MainDispatch& d )
                                                                        : nullptr;
     const rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
                                       isChurnRanked ? &churnWindowLabel : nullptr,
+                                      cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
                                       cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
                                       rankByLabel };                                 // §B2.1
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than

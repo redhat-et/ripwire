@@ -1287,6 +1287,36 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurn(
 // Deterministic + degrade-don't-throw: no git / no HEAD / popen failure → an all-zero vector (caller treats
 // it as "no short-horizon signal", never a crash). `git log` file paths are resolved to fileIds by the same
 // basename-suffix matcher gitCommitFileSets uses, so a moved-into-tree path resolves identically.
+// HEAD's committer epoch — THE deterministic "now" every age-measuring miner here anchors on, in ONE place
+// so two of them cannot disagree about what "today" means. 0 ⇒ no git / no HEAD / an unparseable stamp;
+// every caller treats that as "no history signal" and degrades, never as epoch zero.
+//
+// Extracted (P0-4) from gitFileCommitCountsInDayWindow, whose behavior is unchanged — it was the only
+// anchor reader until the decayed-churn prior needed the same number, and a second copy of this is exactly
+// how one surface ends up measuring age from HEAD while its sibling measures it from the wall clock.
+inline std::int64_t gitHeadCommitEpoch( const std::string& root )
+{
+    // G3: the shared reader. `log -1 --format=%ct` prints exactly one line, so the first is the whole
+    // answer; gitCommandLines strips the CR/LF tail, and the trailing-space strip is kept for the value.
+    const std::string     cmd = "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log -1 --format=%ct HEAD 2>/dev/null";
+    const GitCommandLines res = gitCommandLines( cmd );
+    if( !res.isStarted || res.lines.empty() )
+    {
+        return 0;
+    }
+    std::string out = res.lines.front();
+    while( !out.empty() && out.back() == ' ' )
+    {
+        out.pop_back();
+    }
+    if( out.empty() )
+    {
+        return 0;
+    }
+    const std::int64_t epoch = std::strtoll( out.c_str(), nullptr, 10 );
+    return epoch > 0 ? epoch : 0;
+}
+
 inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::string& root, const IngestResult& ing, std::uint32_t days )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitFileCommitCountsInDayWindow (short-horizon churn)" );
@@ -1297,30 +1327,10 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
     }
 
     // HEAD's committer epoch — the window anchor (deterministic; system now() is never consulted).
-    std::int64_t headEpoch = 0;
+    const std::int64_t headEpoch = gitHeadCommitEpoch( root );
+    if( headEpoch <= 0 )
     {
-        // G3: the shared reader. `log -1 --format=%ct` prints exactly one line, so the first is the whole
-        // answer; gitCommandLines strips the CR/LF tail, and the trailing-space strip is kept for the value.
-        const std::string       cmd = "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log -1 --format=%ct HEAD 2>/dev/null";
-        const GitCommandLines   res = gitCommandLines( cmd );
-        if( !res.isStarted || res.lines.empty() )
-        {
-            return counts;
-        }
-        std::string out = res.lines.front();
-        while( !out.empty() && out.back() == ' ' )
-        {
-            out.pop_back();
-        }
-        if( out.empty() )
-        {
-            return counts;
-        }
-        headEpoch = std::strtoll( out.c_str(), nullptr, 10 );
-        if( headEpoch <= 0 )
-        {
-            return counts;
-        }
+        return counts;
     }
     const std::int64_t cutoff = headEpoch - std::int64_t( days ) * 86400;   // window floor (inclusive)
 
@@ -1476,6 +1486,195 @@ inline std::vector<float> churnTeleportWorkspace( const std::vector<std::string>
         *outHasChurnEvidence = anyHistory;
     }
     return churnPriorFromFreq( ing, freq, anyHistory );
+}
+
+// ── P0-4: TIME-DECAYED churn ─────────────────────────────────────────────────────────────────────────
+//
+// Raw churn counts every commit in its window EQUALLY, so a file rewritten fifteen times two years ago
+// outranks one rewritten twice last week. That is the opposite of the prior an agent wants, and widening or
+// narrowing the window only moves the cliff — a hard window is a step function over a quantity that decays
+// smoothly. Exponential decay prices recency instead of thresholding it: a commit `age` days before HEAD
+// contributes 0.5^(age / halfLife).
+//
+// HALF-LIFE = 90 days, the conventional default in the software-evolution literature's exponential-decay
+// weightings; it is a CHOICE, not a measurement, which is why it is disclosed in the map's window= stamp and
+// in the legend rather than buried here. At 90 days a commit from last week counts ~0.95, one from a year
+// ago ~0.06, one from three years ago ~0.001 — recent history dominates without any commit ever being
+// discarded, which is what lets the default mine the WHOLE history instead of a wall-clock window.
+//
+// DETERMINISM — the reason this is not just churnTeleport with weights. "Now" is HEAD's own committer epoch
+// (gitHeadCommitEpoch), never std::time(). A wall-clock anchor would make this the one verb whose output
+// changes overnight on an unchanged tree, which the determinism contract forbids; and because the decay
+// makes an explicit window unnecessary, the DEFAULT path passes no --since at all and is therefore a pure
+// function of (repo, HEAD). An explicit --since=DATE still scopes it, and that arm is wall-clock-relative by
+// the user's own choice, exactly as it already is for --rank-by=churn.
+//
+// A commit dated AFTER HEAD (possible on a merged branch, or with a skewed committer clock) would decay to a
+// weight above 1; the age is clamped at 0 so no commit can ever count for more than a commit made at HEAD.
+inline constexpr double kChurnDecayHalfLifeDays = 90.0;
+
+// Per-fileId decayed commit weight over `windowArgs` (the caller-built window clause, exactly as
+// gitLogFileSets takes it — pass "" for the whole history). Mirrors gitLogFileSets' parse, plus the epoch on
+// the marker line; a commit touching more than `maxFiles` files is skipped by the same merge-bomb rule.
+// Degrades to an all-zero vector on no git / no HEAD / popen failure, and reports that through `outAnyHistory`.
+inline std::vector<double> gitLogDecayedFileWeights( const std::string& root, const IngestResult& ing, const std::string& windowArgs,
+                                                     std::size_t maxFiles, bool* outAnyHistory, std::uint32_t onlyRoot = UINT32_MAX )
+{
+    PROFILE_SCOPE_DESCRIBE( "gitmine: gitLogDecayedFileWeights (rank-by=churn-decay)" );
+    std::vector<double> weights( ing.files.size(), 0.0 );
+    if( outAnyHistory )
+    {
+        *outAnyHistory = false;
+    }
+    if( ing.files.empty() )
+    {
+        return weights;
+    }
+
+    // The anchor first: without it there is no age to measure, so there is no answer to degrade FROM.
+    const std::int64_t headEpoch = gitHeadCommitEpoch( root );
+    if( headEpoch <= 0 )
+    {
+        DEGRADED_PATH_ALERT( "gitmine: no HEAD committer epoch — the decayed-churn prior is UNIFORM" );
+        return weights;
+    }
+
+    // built BEFORE the log pipe opens, for the reason gitLogFileSets states: it runs a git probe of its own.
+    const GitPathIndex byGitPath = gitPathIndexOfFiles( ing, onlyRoot );
+
+    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + kMergeDiffArgs + windowArgs
+                          + "--name-only --format=tformat:__C__%x20%ct 2>/dev/null";
+    std::FILE* pipe = popen( cmd.c_str(), "r" );
+    if( !pipe )
+    {
+        return weights;
+    }
+
+    bool                       anyCommit = false;
+    double                     curWeight = 0.0;   // this commit's decayed weight
+    std::vector<std::uint32_t> cur;               // this commit's resolved fileIds (dedup before tally)
+    const auto flush = [ & ]()
+    {
+        std::sort( cur.begin(), cur.end() );
+        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        if( cur.size() >= 1 && cur.size() <= maxFiles )
+        {
+            for( std::uint32_t f : cur )
+            {
+                weights[f] += curWeight;
+            }
+        }
+        cur.clear();
+    };
+    std::string s;
+    while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
+    {
+        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        {
+            s.pop_back();
+        }
+        if( s.rfind( "__C__", 0 ) == 0 )   // new commit marker: "__C__ <epoch>"
+        {
+            flush();
+            anyCommit                 = true;
+            const std::int64_t epoch  = ( s.size() > 6 ) ? std::strtoll( s.c_str() + 6, nullptr, 10 ) : 0;
+            const std::int64_t ageSec = ( epoch > 0 && headEpoch > epoch ) ? ( headEpoch - epoch ) : 0;   // clamped: never > 1
+            curWeight                 = std::pow( 0.5, ( double( ageSec ) / 86400.0 ) / kChurnDecayHalfLifeDays );
+            continue;
+        }
+        if( s.empty() )
+        {
+            continue;
+        }
+        const std::uint32_t f = resolveGitPath( byGitPath, s );
+        if( f != UINT32_MAX )
+        {
+            cur.push_back( f );
+        }
+    }
+    flush();
+    pclose( pipe );
+    if( outAnyHistory )
+    {
+        *outAnyHistory = anyCommit;
+    }
+    return weights;
+}
+
+// The decayed sibling of churnPriorFromFreq: same Laplace-smoothed (+1) shape, so every symbol keeps
+// positive mass and the "no history ⇒ uniform" degrade is spelled once per family, not once per caller.
+inline std::vector<float> churnPriorFromDecayed( const IngestResult& ing, const std::vector<double>& weights, bool anyHistory )
+{
+    const std::size_t  N = ing.symbols.size();
+    std::vector<float> p( N, N ? 1.0f / float( N ) : 0.f );
+    if( N == 0 || !anyHistory )
+    {
+        if( !anyHistory )
+        {
+            DEGRADED_PATH_ALERT( "gitmine: the decayed-churn walk mined no commits — the prior is UNIFORM, so the ranking is the structural one" );
+        }
+        return p;
+    }
+    double tot = 0.0;
+    for( const Symbol& s : ing.symbols )
+    {
+        tot += weights[s.fileId] + 1.0;
+    }
+    if( tot <= 0.0 )
+    {
+        return p;
+    }
+    for( const Symbol& s : ing.symbols )
+    {
+        p[s.id] = float( ( weights[s.fileId] + 1.0 ) / tot );
+    }
+    return p;
+}
+
+// --rank-by=churn-decay's teleport. `scope`: nullptr or inactive ⇒ the WHOLE history (no --since clause at
+// all — the decay is the window, and that keeps the default a pure function of the tree at HEAD); an ACTIVE
+// scope narrows the walk exactly as it does for --rank-by=churn.
+inline std::vector<float> churnDecayTeleport( const std::string& root, const IngestResult& ing, const SinceScope* scope = nullptr,
+                                              bool* outHasChurnEvidence = nullptr )
+{
+    PROFILE_SCOPE_DESCRIBE( "gitmine: churnDecayTeleport (rank-by=churn-decay)" );
+    const std::string windowArgs = ( scope && scope->active ) ? sinceLogArgs( *scope, "" ) : std::string{};
+    bool              anyHistory = false;
+    const std::vector<double> weights = gitLogDecayedFileWeights( root, ing, windowArgs, 100, &anyHistory );   // same merge-bomb cap as churnTeleport
+    if( outHasChurnEvidence )
+    {
+        *outHasChurnEvidence = anyHistory;
+    }
+    return churnPriorFromDecayed( ing, weights, anyHistory );
+}
+
+// Multi-root --rank-by=churn-decay: mine each root's history AGAINST ITS OWN files, accumulate ONE weight
+// table, apply the smoothing once — the churnTeleportWorkspace rule, with the same per-repo-scale caveat
+// (a commit in either repo decays on ITS OWN HEAD's clock, so the two histories are never mixed).
+inline std::vector<float> churnDecayTeleportWorkspace( const std::vector<std::string>& rootDirs, const IngestResult& ing,
+                                                       bool* outHasChurnEvidence = nullptr )
+{
+    PROFILE_SCOPE_DESCRIBE( "gitmine: churnDecayTeleportWorkspace (multi-root rank-by=churn-decay)" );
+    std::vector<double> weights( ing.files.size(), 0.0 );
+    bool                anyHistory = false;
+    for( std::uint32_t r = 0; r < rootDirs.size(); ++r )
+    {
+        bool                      rootHistory = false;
+        const std::vector<double> w           = gitLogDecayedFileWeights( rootDirs[r], ing, std::string{}, 100, &rootHistory, r );
+        if( rootHistory )
+        {
+            anyHistory = true;
+        }
+        for( std::size_t f = 0; f < weights.size(); ++f )
+        {
+            weights[f] += w[f];
+        }
+    }
+    if( outHasChurnEvidence )
+    {
+        *outHasChurnEvidence = anyHistory;
+    }
+    return churnPriorFromDecayed( ing, weights, anyHistory );
 }
 
 // The window STAMP for a churn-ranked map (§B2.2): the window that was mined, plus — when it mined NOTHING —
