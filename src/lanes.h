@@ -25,8 +25,9 @@
 // ── §KEY — what a lane claim is keyed on, and why not `id=` ───────────────────────────────────────────────
 // A claim keys on (p, scope, n) — root-relative path, captured enclosing scope, name — hashed as
 // fnv1a64(p \0 scope \0 n). PATH-QUALIFIED ALWAYS, including when scope is empty. This is byte-for-byte the
-// same key space mergescout::buildTreeIndex builds (quality::bodyHashesBySym's pathQualified mode, pinned by
-// test/scoutkeycheck.sh) — deliberately the SAME shape rather than a third keying scheme.
+// same key space mergescout::buildTreeIndex builds (quality::pathQualifiedKey — bodyHashesBySym's only
+// keying since the W1-S2 churn fix, pinned by test/scoutkeycheck.sh) — deliberately the SAME shape rather
+// than a third keying scheme.
 //
 // `id=` is NOT the join key and must never become one. resolve.h:927 returns the BARE NAME when no scope was
 // captured, so free functions, shell functions and top-level Python defs all degrade to an identity with no
@@ -86,6 +87,7 @@
 #include "notes.h"              // NoteIndex — the field-notes surfacing lookup
 #include "gitstamp.h"           // stampAt — the at="<sha>[+dirty]" root anchor
 #include "resolve.h"            // canonicalId
+#include "quality.h"            // pathQualifiedKey — the one body-hash/claim key space (§KEY)
 #include "arch.h"               // relForHash / fnv1a64
 #include "serialize.h"          // jsonStr
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
@@ -125,15 +127,6 @@ struct ClaimIdentity
     std::vector<std::uint32_t> idCollidesWith;   // how many OTHER symbols share this symbol's canonicalId
 };
 
-inline std::uint64_t claimKeyOf( const IngestResult& ing, std::string_view root, const Symbol& s )
-{
-    std::string keyText;
-    keyText.append( relForHash( ing.files[ s.fileId ], root ) ).push_back( '\0' );
-    keyText.append( s.scope ).push_back( '\0' );
-    keyText.append( s.name );
-    return fnv1a64( keyText );
-}
-
 inline ClaimIdentity buildClaimIdentity( const IngestResult& ing, const Graph& g, const std::string& root )
 {
     const std::size_t symbolCount = ing.symbols.size();
@@ -151,7 +144,8 @@ inline ClaimIdentity buildClaimIdentity( const IngestResult& ing, const Graph& g
         {
             continue; // degrade: an unfilable symbol keeps key 0
         }
-        out.key[i] = claimKeyOf( ing, root, ing.symbols[i] );
+        const Symbol& s = ing.symbols[i];
+        out.key[i] = quality::pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
         byKey[ out.key[i] ].push_back( i );
     }
     for( auto& [ k, members ] : byKey )
