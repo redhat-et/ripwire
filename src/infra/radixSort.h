@@ -57,16 +57,16 @@
 // either) takes the scalar path; x86 is always little-endian.
 #if ( defined( __ARM_NEON ) || defined( __ARM_NEON__ ) ) && \
     ( !defined( __BYTE_ORDER__ ) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ )
-    #include <arm_neon.h>
-    #define RADIXSORT_NEON 1
-    #define RADIXSORT_SSE2 0
+#include <arm_neon.h>
+#define RADIXSORT_NEON 1
+#define RADIXSORT_SSE2 0
 #elif defined( __SSE2__ ) || defined( _M_X64 )
-    #include <emmintrin.h>
-    #define RADIXSORT_NEON 0
-    #define RADIXSORT_SSE2 1
+#include <emmintrin.h>
+#define RADIXSORT_NEON 0
+#define RADIXSORT_SSE2 1
 #else
-    #define RADIXSORT_NEON 0
-    #define RADIXSORT_SSE2 0
+#define RADIXSORT_NEON 0
+#define RADIXSORT_SSE2 0
 #endif
 
 namespace radix
