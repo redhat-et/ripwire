@@ -1,0 +1,17 @@
+diff --git a/third_party/deps/swift/src/scanner.c b/third_party/deps/swift/src/scanner.c
+index bb2dcac..1e67de0 100644
+--- a/third_party/deps/swift/src/scanner.c
++++ b/third_party/deps/swift/src/scanner.c
+@@ -817,7 +817,11 @@ static bool eat_raw_str_part(
+         lexer->mark_end(lexer); // We always want to parse thru the start of the string so far
+         // Advance through anything that isn't a hash symbol, because we want to count those.
+         while (lexer->lookahead != '#' && lexer->lookahead != '\0') {
+-            last_char = lexer->lookahead;
++            // RIPWIRE_VENDOR_PATCH(swift/001-scanner-raw-str-lookahead-truncation): lookahead is a
++            // full int32 codepoint (an emoji here is > 0xFF); only the low byte is ever compared
++            // ('\\' and '"' below), so truncate explicitly instead of aborting the G1
++            // -fsanitize=implicit-integer-truncation stack. Same value as the implicit truncation.
++            last_char = (uint8_t)lexer->lookahead;
+             advance(lexer);
+             if (last_char != '\\' || lexer->lookahead == '\\') {
+                 // Mark a new end, but only if we didn't just advance past a `\` symbol, since we
