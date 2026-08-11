@@ -917,6 +917,72 @@ environment variable. One anchor-expansion candidate scored **+0.41pp** paired w
 of **+0.00pp** and was rejected outright by the acceptance gate. A negative result recorded is worth
 more than a feature shipped on a hunch.
 
+**Lifting symbols whose NAME carries a query noun reaches the right symbols and still ranks them
+wrong — rejected at calibration, before a held-out run was spent.** The r5 round (registered
+2026-08-03, decided 2026-08-04) built *nameboost*: an env-gated slot-ladder lift that, under the
+conceptual subtoken+body route, placed into the visible bundle any symbol whose name contains a
+query token of length ≥ `minTokLen` as a camel/snake name-subtoken (`match` → `ResolverMatch`,
+`is_valid` → `is_valid`) **and** that already carried positive body/doc evidence — forced placement
+below the mention band, never displacing #1, never touching the name-exact route. It was registered
+against two measured r3-headroom losses: a query saying "where the match object is produced" left
+`ResolverMatch` absent from the entire candidate pool at 5× budget, and "when I call
+form.is_valid()" ranked `BaseForm.is_valid` **112th** behind an unrelated same-file class.
+
+The pre-registered accept criterion, per that round's own amendments to the r3/r4 precedents: the
+PRIMARY is the **multi-file stratum** strict file@10 on train (aggregate reported, never switched
+to), over a frozen 2×2 grid (`minTokLen`, `maxLifted`) ∈ {4,5} × {2,4}, selection = highest train
+primary with any cell regressing train single-file strict@10 by more than 1pp disqualified; the
+held-out 243 run with repo-clustered bootstrap would be spent only if a cell advanced. It also
+carried a hard pre-grid stop: if the trigger's gold fire-rate on the currently-missed set came in
+under 20%, archive and stop.
+
+Measured on train (n=254), the primary **never moved off baseline in any cell**:
+
+| cell | strict@10 | single-file (n=205) | multi-file (n=49) — **PRIMARY** |
+| --- | ---: | ---: | ---: |
+| base | 61.81% | 70.73% | **24.49%** |
+| 4,2 | 61.42% | 70.24% | **24.49%** |
+| 4,4 | 61.42% | 70.24% | **24.49%** |
+| 5,2 | 61.42% | 70.24% | **24.49%** |
+| 5,4 | 61.81% | 70.73% | **24.49%** |
+
+The entire @10 movement across all four cells is two instances: every cell *loses* `yt-dlp-11827`
+(single-file gold displaced 9 → 10 by lifted non-gold rows), and only 5,4 *gains* `flet-4425`
+(10 → 5, a genuine q07-shaped rescue) which exactly cancels its own loss. No cell exceeds baseline
+on the primary, so under the frozen selection rule no candidate advanced. **REJECT at calibration;
+the default stayed off and nothing landed on this branch.**
+
+**The finding worth the round is that it died one stage LATER than the audit was built to catch.**
+The pre-grid targeting audit *passed*, twice — 69.1%/60.8% gold fire-rate on the missed set from an
+independent Python mirror, 66.0%/58.8% from the production predicate through its own audit tap, at
+`minTokLen` 4 and 5. The trigger reaches gold; detection is not the gap. What fails is the
+**choice**: on the 97-instance missed set the trigger fires on a symbol in the gold file in 64/97
+instances, but that symbol's median rank *within the fired order* is **33** — top-2 **0/97**, top-4
+**1/97**, and that single top-4 case is the `flet-4425` gain above. Ordering the fired set by the
+current lens score re-ranks it by exactly the diluted subtoken-BM25 signal whose failure the
+mechanism was registered to correct, so the 2–4 ladder slots go to generic high-scoring fired
+symbols sitting just below the band. The illustration is stark: on the pinned django checkout, the
+q07 query fires **1,588 symbols** — "path", "view", "handler", "chain", "match" are all common code
+nouns at `minTokLen`=4 — with `ResolverMatch` at fired rank ~192. Both pre-registered reproducer
+probes are null at every cell. **The methodological lesson, recorded for any successor: auditing a
+mechanism's TRIGGER fire-rate gates the wrong stage.** The statistic that had to be audited is the
+full one — "is gold inside the top-`maxLifted` of the candidate *ordering*" — which is computable on
+train for free before a single cell runs, and whose 0/97 would have killed this round before the
+grid.
+
+Two shaped directions survive, each recorded here with its measured obstacle rather than as a plan:
+ordering the fired set by name-match specificity (matched-token IDF or name coverage) — but q07
+shows full-coverage favors generic short names like `View`; and **file-level evidence pooling**,
+which sidesteps per-symbol choice entirely and is the strongest hypothesis anyone has for the
+multi-file stratum. It has now been flagged as the leading candidate by three consecutive rounds and
+**remains UNSPENT — it is recorded as open headroom, not as scheduled work**, and no measurement in
+this document should be read as evidence for or against it.
+
+Evidence is archived, not deleted: branch `claude/loving-fermat-6e9614` (tip `ed952ed`) retains the
+pre-registration, the verdict table, the flip ledger, the two targeting-audit dumps, the per-cell
+train scores, the candidate header, and its red-first gate under
+`bench/locbench/results/r5_nameboost/`. None of it is on `main` and no default was flipped.
+
 **Stripping question words out of prose queries does not fix prose-query recall.** The r7 loss-first
 round (2026-08-08, question sets committed in `bench/r7/`) measured natural-language queries at
 **4/22** on a webpack set where terse keyword rephrasings of the same targets recovered 7 of 12
