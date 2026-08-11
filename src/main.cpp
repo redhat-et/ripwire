@@ -899,6 +899,7 @@ extern "C"
     const TSLanguage* tree_sitter_ruby( void );
     const TSLanguage* tree_sitter_json( void );
     const TSLanguage* tree_sitter_toml( void );
+    const TSLanguage* tree_sitter_yaml( void );
     const TSLanguage* tree_sitter_c_sharp( void );
     const TSLanguage* tree_sitter_c( void );
     const TSLanguage* tree_sitter_cuda( void );
@@ -1039,6 +1040,7 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         // shares "typescript" above — so what is probed for it is cpp's query against the CUDA grammar,
         // which is precisely the pairing ingest uses.
         { "toml",       &tree_sitter_toml,       "toml"       },
+        { "yaml",       &tree_sitter_yaml,       "yaml"       },
         { "csharp",     &tree_sitter_c_sharp,    "csharp"     },
         { "c",          &tree_sitter_c,          "c"          },
         { "cpp",        &tree_sitter_cuda,       "cuda"       },
