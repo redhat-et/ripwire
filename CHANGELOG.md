@@ -682,6 +682,11 @@ the Codex CLI benchmark harness under `bench/agentloop/`.
   co-change coupling, AST lint with user-supplied rules, call-graph modules and their nested zoom,
   untested cross-module seams, ownership and bus-factor risk, and a self-contained force-directed
   HTML call graph with no CDN.
+- **`--color-by=MODE`** sets the initial node-colour lens of the `--html` page — `lang`
+  (default), `community` (Louvain module), `cx` (cyclomatic, fixed thresholds), `churn`
+  (per-file git commits, 18-month window), or `tested`. The page embeds all five lenses
+  and keeps a live selector; when no git history exists the churn legend says so instead
+  of painting zeros.
 - **`--arch=RULES`** with a committed baseline gates layering violations in CI.
 - **Multi-root workspaces**: `ripwire dir1 dir2 [dir3 …]` merges 2..16 checkouts into one labeled
   graph. Cross-root edges are created **only on explicit evidence** — a path-resolved include or

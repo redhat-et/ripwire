@@ -112,7 +112,8 @@ Trailing `<bridge …>` entries name the high-traffic integration seams *between
 
 **8. Render it** — `ripwire <dir> --zoom --mermaid` (or `--mermaid` for the flat module graph): a
 `flowchart TB`, paste at mermaid.live. For hand-exploring, `ripwire <dir> --html[=FILE]` writes a
-self-contained clickable wiki (module cards → subgraphs → Sourcetrail-style node recentering, no CDN).
+self-contained clickable wiki (module cards → subgraphs → Sourcetrail-style node recentering, no CDN);
+`--color-by=community|cx|churn|tested` sets its initial node-colour lens (a live selector covers the rest).
 Working inside a `--for`/`--pack-task` bundle instead of a whole-repo pass? Add `--with-graph` to that
 same call — it appends a tiny `<graph fmt="mermaid">` block (top-8 ranked anchors + their 1-hop call
 edges) right in the bundle, no second call.
