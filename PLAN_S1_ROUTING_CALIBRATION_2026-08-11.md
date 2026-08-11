@@ -252,3 +252,39 @@ instrument by changing the unit of observation from tasks to tool calls.
 ---
 
 *Lane W1-S1 stops here. Awaiting owner approval before any of §1–§2 executes.*
+
+---
+
+## 6. EXECUTION RECORD (same day — the owner lifted the hard stop mid-lane, band decides)
+
+The coordinator relayed the owner's authority change: execute the plan as written, one held-out
+measurement, the band decides, out-of-band in either direction is a REJECT. Executed in order:
+
+1. **Corpus grown 148→266 rows** (judged 58→152, every routable skill ≥9 labels; negatives 44→68).
+   All new rows contamination-screened (25 reworded on trigram hits — several were near-duplicates
+   of existing rows or description vocabulary, which is the screen working). Split by sha256
+   parity; corpus sha256 `eef8d73e…dcc6f2` sealed in the growth commit before any scoring run.
+2. **Recalibration on the grown corpus, skills unchanged**: test bm25-desc 68.5% / 0.953 — the old
+   69.0% floor DID NOT REPRODUCE (the coordinator's named contingency). All floors re-derived
+   (60.0/0.89 test, 46.0/0.75 dev, 50/50 judged, test-judged ≥80, split pin 183, inversion band
+   0.02) in one commit, before any description edit. Judged baseline 89/152; the desc-vs-body gap
+   was +3 rows at n=58 and is +3 rows at n=152 — real, stable, and now better measured.
+3. **Pre-registration written into docs/EVALS.md §4** (mechanism, [+2,+6] net-flip band on the
+   n=85 held-out judged set, simultaneous floors, reject-above-band).
+4. **The change**: 16 descriptions gained one ADD-only ≤12-word sentence composed from the
+   per-skill tf×idf survivor tables (committed as `test/skillevalfix/s1_terms_2026-08-11.txt` +
+   `s1_deriveterms.py`). ripwire-find-bug: zero survivors, untouched.
+5. **The measurement (once)**: newly-correct 1, newly-wrong 1, **NET 0** vs band [+2,+6] →
+   **REJECT by the pre-registered rule.** Skills reverted; corpus growth + recalibrated floors
+   kept; negative result recorded in EVALS with the METHODOLOGY §5 reading (third rejection of a
+   rare-own-vocabulary mechanism; the surviving hypothesis is ranker-side desc+body mixing, out of
+   scope here and needing its own registration).
+6. **Kept-state verification**: skillevalcheck, skillevalsplitcheck, skillroutingjudgedcheck,
+   agentloopcodexcheck, skilltruthcheck, skillscanreadcheck, manifestcheck — all rc=0; the kept
+   tree reproduces the recalibration baseline exactly (68.5/0.953 test, 89/152 judged).
+
+Honest limitations of this execution, stated for the record: single-operator — the row author,
+term deriver, and measurer were the same session, insulated by mechanism (hash split, body-only
+term derivation, aggregates-only baseline extraction) rather than by separate people; and the
+held-out "sealed" discipline is therefore procedural, not adversarial. The north-star guard held:
+nothing here is an agent-behavior claim; S2's substitution meter remains the behavior metric.
