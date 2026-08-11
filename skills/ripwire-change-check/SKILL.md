@@ -18,6 +18,7 @@ description: >
   edit touched a contract): a clean `unchanged` result is what actually earns the right to skip the rest of
   this skill (and this file). Sizing work not yet written → ripwire-before-you-build.
   Risk in a subsystem you did NOT write → ripwire-fresh-eyes.
+  Verdict on the dirty tree: changed params, removed symbols, findings, next steps.
 allowed-tools: Bash, Read
 ---
 
