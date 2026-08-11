@@ -1,0 +1,29 @@
+# GitHub-Actions-shaped fixture for test/yamllangcheck.sh — every construct the gate asserts,
+# with deliberately UNIQUE key spellings so a presence assertion can never be satisfied by a
+# same-spelled key elsewhere. `on` and `1234` are deliberately NOT unique-ified: they pin the
+# non-string-key rule (the literal source text is the symbol name — GH Actions' `on` resolves
+# to a bool under YAML 1.1, and the literal `on` is what a user greps for).
+pipelinename: yaml tier demo
+on:
+  pushtrigger:
+    branchfilter: [mainline]
+jobsblock:
+  buildjob:
+    runsondrop: ubuntu-latest
+    stepslist:
+      - usesaction: actions/checkout@v4
+      - stepname: build step
+        runcmd: make all
+defaultsblock: &anchordefaults
+  timeoutmins: 30
+prodtarget:
+  <<: *anchordefaults
+  scriptrun: |
+    fakekeyinscalar: 1
+    anotherfakekey: 2
+1234: numeric literal key
+dotted.plain.key: a dotted plain key stays ONE symbol
+"quoted.dotted": a quoted key keeps its quotes
+flowopts: {flowa: 1, flowb: 2}
+dupkey: first spelling
+dupkey: second spelling
