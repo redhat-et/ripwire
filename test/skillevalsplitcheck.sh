@@ -31,21 +31,24 @@ echo "skillevalsplitcheck: BIN=$BIN  CORPUS=$CORPUS"
 
 # ── 1) the FROZEN test split holds at exactly 128 rows (that count must never move — see prompts.tsv's
 #    own header), and test+dev accounts for every row in the corpus with none silently falling through.
+#    2026-08-11 (S1 growth pass): the one sanctioned kind of move — a deliberate, sealed growth EVENT —
+#    grew the frozen split 128→183 append-only (split assigned by sha256(prompt) parity at collection,
+#    corpus hash sealed in the growth commit); the pinned count above now reads 183 and stays frozen there.
 #    2026-08-08: the dev split gained its first n=20 tuning rows (audit H1 follow-up), so this gate no
 #    longer asserts dev is empty — it asserts the FROZEN half stays frozen and the accounting still closes.
 testRows=$( awk -F'\t' '!/^#/ && NF>=4 && $4=="test"{n++} END{print n+0}' "$CORPUS" )
 devRows=$(  awk -F'\t' '!/^#/ && NF>=4 && $4=="dev"{n++}  END{print n+0}' "$CORPUS" )
 dataRows=$( awk -F'\t' '!/^#/ && NF>=3 {n++} END{print n+0}' "$CORPUS" )
-{ [ "$testRows" = "128" ] && [ "$(( testRows + devRows ))" = "$dataRows" ]; } \
-    && ok "frozen test split holds at 128 rows; test+dev (${testRows}+${devRows}) accounts for all ${dataRows} corpus rows" \
-    || no "split accounting off: dataRows=$dataRows testRows=$testRows devRows=$devRows (test must stay exactly 128)"
+{ [ "$testRows" = "183" ] && [ "$(( testRows + devRows ))" = "$dataRows" ]; } \
+    && ok "frozen test split holds at 183 rows; test+dev (${testRows}+${devRows}) accounts for all ${dataRows} corpus rows" \
+    || no "split accounting off: dataRows=$dataRows testRows=$testRows devRows=$devRows (test must stay exactly 183)"
 
 # Scoped to split=test: the frozen hard set this round names lives there, and the 2026-08-08 dev split
 # also carries judged-provenance rows that must not be able to mask a shrink of the frozen ones.
 judgedRows=$( awk -F'\t' '!/^#/ && NF>=3 && $3=="judged" && ( NF<4 || $4=="test" ){n++} END{print n+0}' "$CORPUS" )
-awk -v j="$judgedRows" 'BEGIN{exit !(j+0 >= 40)}' \
-    && ok "judged rows (split=test) = ${judgedRows} (>= 40, the frozen hard set this round names)" \
-    || no "judged rows (split=test) = ${judgedRows} fell under 40 — the frozen set this gate protects shrank"
+awk -v j="$judgedRows" 'BEGIN{exit !(j+0 >= 80)}' \
+    && ok "judged rows (split=test) = ${judgedRows} (>= 80, the frozen hard set after the 2026-08-11 growth pass)" \
+    || no "judged rows (split=test) = ${judgedRows} fell under 80 — the frozen set this gate protects shrank"
 
 # ── 2) --eval-skills' own header reports split sizes, and they match the corpus exactly ─────────────
 grep -q "split test=${testRows} dev=${devRows}" "$TMP/a" \
