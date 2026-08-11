@@ -5,7 +5,7 @@
 // because nothing shipped includes it.
 #pragma once
 
-#include "../src/hashutil.h"
+#include "../src/infra/hashutil.h"
 
 #include <cstdarg>
 #include <cstdint>
