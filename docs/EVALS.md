@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 378 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 379 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -616,7 +616,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **378 gate scripts**, all of which exist on disk.
+naming **379 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -670,6 +670,73 @@ external scanner is stateless (`create()` returns `NULL`, `serialize()` returns 
 it adds no hazard to weigh either. A ceiling here would fire only on a file no corpus contains. The
 gate pins the *decision* from outside by indexing a 216 KB `.toml` — 3.7× the corpus max, and past
 where the JSON ceiling would sit — so one cannot be added later without the gate saying so out loud.
+
+### Swift shape coverage + TS #private — hand-port of stranded commit bb78f97 (2026-08-10)
+
+**Instrument:** `test/swiftshapecheck.sh` over `test/swiftshapefix/{EnumsAndTypes,Members,ProtocolSurface}.swift`
+(fixture-driven, 17 arms). **Corpora used for RE-MEASUREMENT (read-only, pinned to the exact SHAs
+the original 2026-08-04 round used):** Alamofire@0455bfb (98 .swift / 469 total files) and
+swift-nio@72973283 (554 .swift / 716 total files), at `bench-assets/swift/`.
+
+This work originally landed at kParserVer 41 on a branch that was never merged to main — the code
+was gone even though a `.ripwire_quality_acks` entry referencing this exact fix had already
+reached main via an unrelated integration merge (a real ledger/code drift, corrected as part of
+this port; see the commit for the updated ack). It is hand-ported here at kParserVer 60. Swift
+gains `enum_entry`, `typealias_declaration`, `associatedtype_declaration`,
+`protocol_property_declaration`, and a builtin-operator-token alternation in
+`function_declaration`'s `name:` field; TypeScript's `tags.scm` gains the `#private`
+method/field-arrow/call-ref coverage JS already had (0 sites on main before this port — a real
+sibling-completeness gap, not a new shape); the shared `finalSegment()` helper gains a leading-`'<'`
+carve-out so a Swift operator-function name (`<`, `<+>`) is not erased to `""` by the generic
+type-argument strip.
+
+**Re-measured, not carried forward.** AST-level ground truth via `--match` (single-capture
+queries, `hits_capped="0"`, i.e. exact, parsed from the `<match>` element rather than grepped)
+reproduced the original round's five figures EXACTLY on both pinned corpora:
+
+| shape | Alamofire | swift-nio |
+| --- | --- | --- |
+| enum case (`enum_entry`) | 247 | 1 209 |
+| typealias | 39 | 962 |
+| associatedtype | 7 | 35 |
+| protocol property requirement | 12 | 65 |
+| operator function (builtin tokens; `(custom_operator)` alone still measures 0) | 4 | 62 |
+
+Crawl-based before/after (pre-port binary = main@b598266/kParserVer 59, copied aside before any
+port edit; post-port = this commit/kParserVer 60): Alamofire 5120→5429 symbols (+309), 26891→26957
+edges (+66); swift-nio 16844→19177 symbols (+2 333), 36021→36515 edges (+494) — symbol deltas
+match the original round's recorded `+309`/`+2 333` exactly; the Alamofire edge delta matches
+exactly (+66); the swift-nio edge delta is +494 here vs +498 originally recorded, a 4-edge
+difference not investigated further (nothing in this port touches call-edge resolution; most
+likely unrelated resolver drift across the ~19 kParserVer versions between the two measurements).
+**Noise, verified by an actual (file,name) symbol-identity set-diff, not eyeballed:** zero rows
+removed on either corpus (Alamofire +220 distinct pairs, swift-nio +1 521), matching the original
+round's "ZERO removed rows" claim exactly.
+
+**The vendored `third_party/deps/swift/src/scanner.c` UBSan fix that rode the original commit was
+deliberately NOT ported** (see `test/swiftshapecheck.sh`'s header) — nothing else under
+`third_party/deps` carries a local patch today, and landing one bare would start a vendored-patch
+convention with no drift gate behind it. The underlying bug is real: an isolated one-line Swift
+fixture containing an emoji inside a raw `#"..."#` string reproduces the exact documented abort
+(`scanner.c:820`, implicit conversion of codepoint 127881 to `uint8_t`, SIGABRT). It does **not**,
+however, trigger on the actual pinned swift-nio@72973283 snapshot — a full ASan run over all 716
+files (`LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <dir>`) completed cleanly,
+as did Alamofire and this repository's own fixtures/self-scan. The stranded commit's claim that
+swift-nio's test files carry emoji in raw strings did not reproduce at this exact pinned SHA;
+whether that content exists at a different swift-nio revision was not investigated. Swift fixtures
+in this port (`test/swiftshapefix/`) contain no raw string literals at all, so they cannot
+exercise the deferred bug either way.
+
+The TypeScript `#private` half was also measured, not assumed: the wider 90-repo breadth corpus
+(`bench-assets/r4/repos`, ~2 900 `.ts` files) shows the real signal confined to one vendored
+dependency — ccxt's bundled ethers.js/noble-hashes port under
+`ccxt__ccxt/ts/src/static_dependencies/ethers/` — with 15 `#private` method definitions and 45
+`this.#x(...)` call sites (`--match`, exact, `hits_capped="0"`), 0 arrow-valued `#private` fields
+(added for JS parity only, same as the original round). Several `sktime__sktime` files matched a
+naive `#`-grep but are misleading: they carry a `.ts` extension while actually being ARFF-style
+time-series **data** files (comment lines literally start with `#`), not TypeScript source — a
+corpus-contamination trap of the same shape the original round's openclaw blanking-scan warning
+describes, caught here by reading the files before trusting the grep.
 
 ### The differential argv harness
 
@@ -1010,7 +1077,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 378. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 379. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
