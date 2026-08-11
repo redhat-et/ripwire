@@ -54,11 +54,11 @@ fi
 
 queryCount="$( find "$ROOT/queries" -mindepth 2 -maxdepth 2 -name tags.scm | wc -l | tr -d ' ' )"
 generatedHeader="$( dirname "$BIN" )/generated/embedded_queries.h"
-if [ "$queryCount" = 15 ] && [ -f "$generatedHeader" ] \
-    && grep -q 'kEmbeddedQueryCount = 15' "$generatedHeader"; then
-    ok "generated table accounts for all 15 committed query sources"
+if [ "$queryCount" = 16 ] && [ -f "$generatedHeader" ] \
+    && grep -q 'kEmbeddedQueryCount = 16' "$generatedHeader"; then
+    ok "generated table accounts for all 16 committed query sources"
 else
-    no "generated table does not prove coverage of all 15 query sources"
+    no "generated table does not prove coverage of all 16 query sources"
 fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'

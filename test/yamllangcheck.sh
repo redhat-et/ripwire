@@ -302,6 +302,25 @@ grep -q 'normalnest0' "$TMP/norm.xml" \
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
+echo "=== .dSYM bundles are pruned: debug-symbol relocations never become symbols ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# The round's prerequisite finding: a .dSYM bundle carries yaml-format relocation files, and the
+# private validation corpus holds 197 of them and ZERO real .yml config — an unpruned .dSYM ships
+# hundreds of pure-noise t="sec" symbols. The prune is a NAME-SUFFIX rule (bundles are named after
+# their product), so the arm uses a product-named bundle, not a literal ".dSYM" dir.
+DS="$TMP/dsymcorpus"; mkdir -p "$DS/MyApp.dSYM/Contents/Resources"
+printf 'dsymrelockey: should never be indexed\n' > "$DS/MyApp.dSYM/Contents/Resources/reloc.yml"
+printf 'realconfigkey: 1\n' > "$DS/app.yml"
+DS_OUT="$( $BIN "$DS" --no-cache 2>/dev/null )"
+printf '%s' "$DS_OUT" | grep -q 'realconfigkey' \
+    && ok ".dSYM prune: the sibling real .yml IS indexed (arm is not vacuous)" \
+    || no ".dSYM prune: the sibling real .yml vanished — the prune is too wide"
+printf '%s' "$DS_OUT" | grep -q 'dsymrelockey' \
+    && no ".dSYM prune: a .yml inside MyApp.dSYM was indexed — kCrawlSkipDirs' suffix rule is not firing" \
+    || ok ".dSYM prune: MyApp.dSYM contributes nothing"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
 echo "=== the 512 KB ceiling: YAML's own line, deliberately NOT JSON's 256 KB ==="
 # ═══════════════════════════════════════════════════════════════════════════
 # .yml wears the same hazard as .json (a large DATA class behind a config extension) so it gets
@@ -330,9 +349,9 @@ printf '%s' "$OBIG" | grep -q 'mid_config' \
 printf '%s' "$OBIG" | grep -q 'huge_data' \
     && no "ceiling: a ${HUGESZ}-byte .yml was indexed — the 512 KB YAML ceiling is missing" \
     || ok "ceiling: a ${HUGESZ}-byte .yml is not in the map"
-printf '%s' "$OBIG" | grep -q 'skipped_oversize="1"' \
-    && ok "ceiling: the skip is COUNTED (skipped_oversize=\"1\") — disclosure, not disappearance" \
-    || no "ceiling: skipped_oversize=\"1\" absent — the drop is undisclosed"
+printf '%s' "$OBIG" | grep -q 'skipped_oversize=1' \
+    && ok "ceiling: the skip is COUNTED (header skipped_oversize=1) — disclosure, not disappearance" \
+    || no "ceiling: skipped_oversize=1 absent from the header — the drop is undisclosed"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "yamllangcheck: ALL PASS"; else echo "yamllangcheck: FAILURES"; exit 1; fi
