@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-10, Swift shapes port (bb78f97 hand-ported onto main): kParserVer 59 -> 60 and the quality.h
+#   mirror with it. Swift gains enum_entry/typealias_declaration/associatedtype_declaration/
+#   protocol_property_declaration + the builtin-operator-token alternation; TypeScript gains the
+#   #private method/field-arrow/call-ref coverage JS already had; shared finalSegment() gains the
+#   leading-'<' carve-out (a Swift operator-function name is not a generic type-argument list). An
+#   EXTRACTION change (new definition SHAPES + a shared-path fix), not a Snapshot-SEMANTICS change,
+#   so kQSnapCacheScheme deliberately did NOT move.
 # 2026-08-08, L3 audit (locals= per-declarator counting): kParserVer 46 -> 47 and the quality.h mirror with
 #   it, because cc_countLocalDeclarators (ingest.cpp) now sums every `declarator`-fielded child of a
 #   countable `declaration` node instead of the fused DFS incrementing by one per statement — a
