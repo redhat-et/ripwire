@@ -26,6 +26,12 @@
 //            per-scope `(from,var) → type` map, TOMBSTONING any var bound to ≥2 distinct types (conservative —
 //            an ambiguous var degrades to §2a). The bound type's `Foo::m` is resolved against canonByName
 //            (defs only), so a narrow can never invent an edge the bare ladder couldn't reach.
+//   Rule 2b — receiver-FIELD type (IMPLEMENTED, W1-P1-12): `struct A { Foo f; void g() { f.m(); } }` →
+//            resolve `m` against the FIELD's declared type (`Foo`, from the S5-E HAS-A field capture),
+//            walking direct-base names when `Foo` itself doesn't define `m`. Fires only when no local
+//            binding of any kind shadows the field name and the class↔field↔type fact is unambiguous
+//            corpus-wide (same-named classes with conflicting same-named fields are tombstoned). C++
+//            evidence only; Python/TS field receivers are chained accesses (RecvKind::None) — unchanged.
 //   Rule 3 — import/include-based file narrowing (IMPLEMENTED): when a call's name is ambiguous (K same-name
 //            defs across the repo) but the CALLER's file `#include`s / imports EXACTLY ONE of the files that
 //            defines it, resolve to that one file's def(s) and DROP the rest — a sound narrowing that needs no
@@ -1350,6 +1356,7 @@ struct Narrower
     // map lookups — and the resolved graph — are byte-for-byte unchanged; only the per-ref malloc churn is gone.
     mutable std::string keyScope;   // "Scope::name" for canonByName lookups (Rule 1 + Rule 2's type::method)
     mutable std::string keyBind;    // "<fromSymbolId>#var" for the varType binding lookup (Rule 2 + L3)
+    mutable std::vector<std::string_view> fieldWalk;   // Rule 2b reused base-walk frontier (views into chaUp's stored strings)
 
     explicit Narrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon,
                        const HashMap<std::string, std::string>&             vt,
@@ -1459,6 +1466,137 @@ struct Narrower
             return nullptr;
         }
         return &it->second;   // real `Foo::m` definition(s) — overloads stay split 1/k, but only within the type
+    }
+
+    // Rule 2b — receiver-FIELD type narrow (W1-P1-12). For a member call `f.m()` / `f->m()` (recv==NamedVar,
+    // recvVar="f") inside a METHOD whose enclosing class declares a FIELD named `f` with a known type
+    // (the S5-E HAS-A capture): resolve `m` against that declared type's own method set, walking DIRECT-base
+    // names (chaUp) level by level when the type itself does not define `m` — the bare-field member call is
+    // the idiomatic C++ shape Rule 2's local-binding table can never see. nullptr ⇒ the unchanged §2a ladder.
+    //
+    // Airtight "no wrong narrow" (Rule 2's contract, extended): it narrows ONLY when ALL hold —
+    //   (1) named-receiver call, no explicit qualifier, from a known def in a known class scope, C-family
+    //       (the field table is built from C++ field captures; Python/TS field receivers are chained
+    //       accesses ingest classifies RecvKind::None, so they never even reach this rule — disclosed limit);
+    //   (2) NO local binding of ANY kind exists for (fromSymbol, recvVar) — a parameter or declared local
+    //       SHADOWS a same-named field in real C++ lookup, so any local evidence vetoes the narrow
+    //       (`localNames`, built from every binding kind incl. the r9 VarDecl shadow records);
+    //   (3) the enclosing class declares that field with EXACTLY ONE type corpus-wide — same-NAMED classes
+    //       collapse to one scope string here (namespaces are dropped from Symbol::scope), so a same-named
+    //       field bound to two DIFFERENT types is TOMBSTONED at build ("" value) and never narrows;
+    //   (4) the field's type — or exactly ONE base name at the shallowest hit level of a bounded, breadth-
+    //       first walk over chaUp — actually DEFINES `m` (canonByName, DEFS only). Two distinct bases
+    //       defining `m` at the same level is an honest ambiguity → refuse. So the returned ids are always
+    //       real `Type::m` definitions the bare ladder could also reach — Rule 2b just picks the
+    //       type-correct one earlier; any uncertainty degrades to §2a and the honest amb= split.
+    // Deterministic: chaUp lists are sorted+deduped, the frontier is expanded in stored order with a fixed
+    // visit cap, and canonByName insertion order = symbol-id order.
+    const rw::SmallVec<NodeId, 2>* rule2bFieldRecvType( const Reference& r, const std::string& callerScope,
+                                                        const HashMap<std::string, std::string>&              fieldTypes,
+                                                        const HashMap<std::string, char>&                     localNames,
+                                                        const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( r.recv != RecvKind::NamedVar || r.recvVar.empty() || !r.qualifier.empty() || r.fromSymbol == kNoNode )
+        {
+            return nullptr; // not a bare named-receiver call from a known def
+        }
+        if( r.lang != Lang::Cpp && r.lang != Lang::ObjC )
+        {
+            return nullptr; // (1) the field-type table is C++-evidence only — other languages stay on their unchanged ladder
+        }
+        if( callerScope.empty() || fieldTypes.empty() )
+        {
+            return nullptr; // free function (no enclosing class), or a field-capture-free corpus
+        }
+
+        // (2) local-shadow veto: ANY binding evidence for (fromSymbol, recvVar) means the name is a LOCAL.
+        keyBind.clear();
+        appendUint( keyBind, r.fromSymbol );
+        keyBind.push_back( '#' );
+        keyBind.append( r.recvVar );
+        if( localNames.find( keyBind ) != localNames.end() )
+        {
+            return nullptr;
+        }
+
+        // (3) the enclosing class's field entry — keyed by the scope's FINAL segment (Symbol::scope is the
+        // bare class name for methods; a nested scope's last segment is the innermost class), "" = tombstone.
+        std::string_view scopeFinal( callerScope );
+        if( const std::size_t cut = scopeFinal.rfind( "::" ); cut != std::string_view::npos )
+        {
+            scopeFinal.remove_prefix( cut + 2 );
+        }
+        keyBind.clear();
+        keyBind.append( scopeFinal );
+        keyBind.push_back( '#' );
+        keyBind.append( r.recvVar );
+        const auto fit = fieldTypes.find( keyBind );
+        if( fit == fieldTypes.end() || fit->second.empty() )
+        {
+            return nullptr;
+        }
+
+        // (4) the declared type's own method set first…
+        keyScope.clear();
+        keyScope.append( fit->second ).append( "::" ).append( r.calleeName );
+        if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
+        {
+            return &it->second;
+        }
+
+        // …then a bounded breadth-first DIRECT-base walk (frontier levels over chaUp). The SHALLOWEST level
+        // with a hit decides: exactly one hitting base name → narrow; two or more → honest refuse.
+        constexpr std::size_t kFieldWalkCap = 16;   // total visited names — bounds depth and width together
+        fieldWalk.clear();
+        fieldWalk.push_back( fit->second );
+        std::size_t lvlBegin = 0;
+        while( lvlBegin < fieldWalk.size() )
+        {
+            const std::size_t lvlEnd = fieldWalk.size();
+            // expand this level's bases into the next level (dedup against every visited name — cycles too)
+            for( std::size_t i = lvlBegin; i < lvlEnd; ++i )
+            {
+                const auto uit = chaUp.find( std::string( fieldWalk[ i ] ) );
+                if( uit == chaUp.end() )
+                {
+                    continue;
+                }
+                for( const std::string& base : uit->second )
+                {
+                    if( fieldWalk.size() >= kFieldWalkCap )
+                    {
+                        break;
+                    }
+                    if( std::find( fieldWalk.begin(), fieldWalk.end(), std::string_view( base ) ) == fieldWalk.end() )
+                    {
+                        fieldWalk.push_back( base );
+                    }
+                }
+            }
+            // probe the NEW level's names; the shallowest level with any hit decides
+            const rw::SmallVec<NodeId, 2>* found = nullptr;
+            bool                           multi = false;
+            for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
+            {
+                keyScope.clear();
+                keyScope.append( fieldWalk[ i ] ).append( "::" ).append( r.calleeName );
+                if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
+                {
+                    if( found != nullptr ) { multi = true; break; }
+                    found = &it->second;
+                }
+            }
+            if( multi )
+            {
+                return nullptr; // two distinct bases define the method at the same level → honest ambiguity
+            }
+            if( found != nullptr )
+            {
+                return found;
+            }
+            lvlBegin = lvlEnd;
+        }
+        return nullptr;
     }
 
     // L3 — the fn-pointer/callback binding visible at a bare call site `fn()`. The two tables are passed
