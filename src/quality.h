@@ -230,10 +230,40 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
 }
 
-// A "dead deletion-candidate": has a body, no caller in the indexed tree, not header-exported, not a test
-// fixture. A SIMPLE, internally-consistent heuristic — the delta only needs baseline↔current consistency,
-// not parity with the fuller --dead-code verb.
-inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i ) noexcept
+// W1-S2 (2026-08-11) — TOP-LEVEL INVOCATION IS A USE: the fnv1a64 name-hash set of every callee invoked from
+// FILE SCOPE (fromSymbol == kNoNode). buildGraph deliberately drops file-scope references from the call-graph
+// CSR (no caller symbol → no edge — correct for PageRank and the ranked map), which starves the dead kind: a
+// bash function whose ONLY call site is a top-level script statement has zero in-edges and was false-flagged
+// dead (confirmed on hooks/ripwire-nudge.sh's helpers, while the fn→fn-called control was correctly silent —
+// the same hole applies to any script language's module-level statements). The dead kind therefore consults
+// these file-scope call sites as its second evidence source. The ref filter mirrors buildGraph's call-edge
+// admission EXACTLY (Call|Macro roles; no inherit/doc-link/compose — a README backtick-mention must never
+// mark a symbol live) with only the fromSymbol test inverted. NAME-level matching, not per-target resolution
+// — the same heuristic level as the resolver's bare-name spray, and a collision errs in the safe direction
+// (false-live, never false-dead). Sorted + deduped for binary_search; deterministic (reference order is).
+inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& ing )
+{
+    std::vector<std::uint64_t> hashes;
+    for( const Reference& r : ing.references )
+    {
+        if( r.fromSymbol != kNoNode || r.isInherit || r.isDocLink || r.isCompose
+            || ( r.role != RefRole::Call && r.role != RefRole::Macro ) )
+        {
+            continue;
+        }
+        hashes.push_back( fnv1a64( r.calleeName ) );
+    }
+    std::sort( hashes.begin(), hashes.end() );
+    hashes.erase( std::unique( hashes.begin(), hashes.end() ), hashes.end() );
+    return hashes;
+}
+
+// A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
+// header-exported, not a test fixture. A SIMPLE, internally-consistent heuristic — the delta only needs
+// baseline↔current consistency, not parity with the fuller --dead-code verb. `topLevelCallees` is the
+// sorted set topLevelCalleeNameHashes builds — both call sites build it ONCE outside their symbol loop.
+inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
+                             const std::vector<std::uint64_t>& topLevelCallees ) noexcept
 {
     const Symbol& s = ing.symbols[i];
     if( s.kind == SymKind::Section )
@@ -248,6 +278,10 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i )
     if( ro[i + 1] - ro[i] != 0 )
     {
         return false; // has at least one caller
+    }
+    if( std::binary_search( topLevelCallees.begin(), topLevelCallees.end(), fnv1a64( s.name ) ) )
+    {
+        return false; // W1-S2: invoked from file scope (a top-level script statement) — a use the CSR drops
     }
     const std::string& p = ing.files[ s.fileId ];
     const auto ends = [ & ]( std::string_view e )
@@ -1152,6 +1186,8 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   isFixturePath              (quality.h) — a fixture-path exemption isDeadCandidate calls into
 //   isTestScriptPath           (quality.h) — the test-script exemption isDeadCandidate calls into (the exact
 //                                             helper B10.1a added without a bump — the finding this guards)
+//   topLevelCalleeNameHashes   (quality.h) — the file-scope (top-level script statement) call-site evidence
+//                                             isDeadCandidate consults (W1-S2)
 //   serializeSnapshot          (quality.h) — the on-disk blob shape
 //   deserializeSnapshot        (quality.h) — the on-disk blob shape, read side
 //   computeSnapshot            (quality.h) — the dead-set BUILDER (baseline side)
@@ -1165,7 +1201,13 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // defs_was= which reads it). That is a BLOB SHAPE change AND a change to what a cached Snapshot contains, so
 // a v4 blob deserialized here would be short by one map and must never be served: bumped, which renames every
 // file through the excludes key as well.
-constexpr std::uint32_t kQSnapCacheScheme = 5;
+// v6 (W1-S2, 2026-08-11) — `isDeadCandidate` gained the top-level-invocation exemption (a symbol invoked
+// from FILE SCOPE — a bash/script top-level statement — is alive; see topLevelCalleeNameHashes above the
+// predicate): the SEMANTICS of a cached Snapshot's dead set narrowed, so a v5 blob's dead set (computed
+// without the exemption) served to this binary would resurrect the exact false positives the fix retires.
+// No extraction change (the file-scope references were always captured — buildGraph just never turned them
+// into edges), so kParserVer/the mirrors deliberately did NOT move.
+constexpr std::uint32_t kQSnapCacheScheme = 6;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -1904,6 +1946,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root = {} )
 {
     Snapshot snap;
+    const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         if( i >= g.canonId.size() || g.canonId[i].empty() )
@@ -1926,7 +1969,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         // (editcheck.h). A COUNT is overload-collision-proof for the opposite reason a MAX is: it is the one
         // number a collision cannot hide. (maskBySym is the other non-MAX kind; it sums for its own reason.)
         { std::uint32_t& slot = snap.defsBySym[ key ];    slot += 1; }
-        if( isDeadCandidate( ing, g, i ) )
+        if( isDeadCandidate( ing, g, i, topLevelCallees ) )
         {
             snap.dead.push_back( key );
         }
@@ -3019,9 +3062,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     reportNewClones( exactClones );
     reportNewClones( type3Clones );
 
+    const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i ) )
+        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i, topLevelCallees ) )
         {
             continue;
         }
