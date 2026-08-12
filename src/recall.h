@@ -496,6 +496,115 @@ inline std::string formatRecallCappedNote( const RecallShape& shape, std::size_t
            + std::to_string( shape.matchedCount ) + " relevant document files omitted — " + why + ")\n";
 }
 
+// §G3 (the markdown section tier) — the SECTION-GRANULAR recall body. When a matched document has
+// heading sections of its own and at least one of them matched the query, serve those sections'
+// bodies instead of the whole doc: the residual this deletes is "find the section inside the doc".
+// Whole-doc remains the path for heading-less docs and extracted-text documents (notebooks/html via
+// docparse, which only ever carry a whole-file node) — DISCLOSED by the absence of the
+// `[sections: …]` note, and its presence names the cut: kept of total, plus the whole doc's byte
+// size so the reader knows what was not loaded.
+//
+// Which sections: every positive-scoring heading section, most specific first — score descending
+// (BM25's length normalization puts the tight matching section above its diluted parent, whose span
+// contains it), byte position as the deterministic tiebreak — dropping any candidate that OVERLAPS
+// an already-kept one (nested spans would emit the same text twice), then re-ordered to document
+// order for reading. Returns nullopt whenever the whole-doc path is the right answer; a file that
+// changed on disk since ingest (span past EOF) also returns nullopt rather than serving a wrong
+// slice — the whole-doc path re-reads it honestly.
+struct RecallSectionPick
+{
+    std::uint32_t symIndex = 0;
+    float         score    = 0.f;
+};
+
+inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBody(
+        const IngestResult& ing, const std::vector<float>& scores, std::uint32_t fileId, RedactCounts* redact )
+{
+    if( ing.docText.find( fileId ) != ing.docText.end() )
+    {
+        return std::nullopt;   // extracted-text docs have no markdown heading sections
+    }
+    std::vector<RecallSectionPick> picks;
+    std::size_t                    sectionCount = 0;
+    for( std::size_t i = 0; i < ing.symbols.size() && i < scores.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[ i ];
+        if( s.fileId != fileId || s.kind != SymKind::Section || s.lang != Lang::Markdown
+            || s.sigEndByte >= s.endByte )
+        {
+            continue;   // not a heading section WITH a body (the whole-file node has sigEnd == end)
+        }
+        ++sectionCount;
+        if( scores[ i ] > 0.f )
+        {
+            picks.push_back( { std::uint32_t( i ), scores[ i ] } );
+        }
+    }
+    if( picks.empty() )
+    {
+        return std::nullopt;
+    }
+    std::sort( picks.begin(), picks.end(), [ & ]( const RecallSectionPick& a, const RecallSectionPick& b ) noexcept
+    {
+        if( a.score != b.score )
+        {
+            return a.score > b.score;
+        }
+        return ing.symbols[ a.symIndex ].sigStartByte < ing.symbols[ b.symIndex ].sigStartByte;
+    } );
+    std::vector<std::uint32_t> kept;
+    for( const RecallSectionPick& p : picks )
+    {
+        const Symbol& s        = ing.symbols[ p.symIndex ];
+        bool          overlaps = false;
+        for( const std::uint32_t k : kept )
+        {
+            const Symbol& o = ing.symbols[ k ];
+            if( s.sigStartByte < o.endByte && o.sigStartByte < s.endByte )
+            {
+                overlaps = true;
+                break;
+            }
+        }
+        if( !overlaps )
+        {
+            kept.push_back( p.symIndex );
+        }
+    }
+    std::sort( kept.begin(), kept.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+    { return ing.symbols[ a ].sigStartByte < ing.symbols[ b ].sigStartByte; } );
+
+    std::ifstream in( diskPath( ing, fileId ), std::ios::binary );
+    if( !in )
+    {
+        return std::nullopt;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    const std::string raw = ss.str();
+
+    std::string body;
+    for( const std::uint32_t k : kept )
+    {
+        const Symbol& s = ing.symbols[ k ];
+        if( s.endByte > raw.size() || s.sigStartByte >= s.endByte )
+        {
+            return std::nullopt;   // the file moved under us — fall back to the honest whole-doc re-read
+        }
+        std::string slice = raw.substr( s.sigStartByte, s.endByte - s.sigStartByte );
+        redactInPlace( slice, redact );
+        if( !body.empty() && body.back() != '\n' )
+        {
+            body += '\n';
+        }
+        body += slice;
+    }
+    std::string note = "  [sections: " + std::to_string( kept.size() ) + " of "
+                       + std::to_string( sectionCount ) + ", section-granular; whole doc "
+                       + std::to_string( raw.size() ) + " B]";
+    return std::make_pair( std::move( body ), std::move( note ) );
+}
+
 // Build the recall bundle IN MEMORY: each top file's path + relevance + body, best-first. `maxBytes` (0 =
 // no cap) SHAPES it — bodies are dropped from the BOTTOM of the ranking and the last one may be truncated
 // within itself, both DISCLOSED (per-doc `[truncated: …]`, header `capped=1`/`truncated=N`, a closing
@@ -530,14 +639,24 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         // loadRecallBody's, not the separator's. It sat one call below, i.e. one dereference late: the
         // invariant was true and correctly a VERIFY, but the first read it protected had already happened.
         VERIFY( r.fileId < ing.files.size() );
-        std::optional<std::string> loaded = loadRecallBody( ing, r.fileId, redact );
+        std::string                sectionNote;   // "" = whole-doc (the disclosed default for heading-less docs)
+        std::optional<std::string> loaded;
+        if( auto granular = buildSectionGranularBody( ing, scores, r.fileId, redact ) )
+        {
+            loaded      = std::move( granular->first );
+            sectionNote = std::move( granular->second );
+        }
+        else
+        {
+            loaded = loadRecallBody( ing, r.fileId, redact );
+        }
         if( !loaded )
         {
             continue;
         }
         std::string body = std::move( *loaded );
 
-        const std::string demotedNote = formatDemotedNote( r.generated );
+        const std::string demotedNote = formatDemotedNote( r.generated ) + sectionNote;
         const std::string sep         = formatRecallSeparator( ing.files[ r.fileId ], r.score, demotedNote );
         const std::size_t sepBytes    = sep.size();
 

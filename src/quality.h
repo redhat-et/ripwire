@@ -760,7 +760,12 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 62;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 63;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 63 = 2026-08-12 markdown section tier: .md/.markdown parse
+                                                          // with the vendored block grammar — headings (ATX + setext)
+                                                          // become sections with REAL SPANS, parent-heading scopes and
+                                                          // link/mention edges; the extracted SET and the spans change
+                                                          // on any md-bearing tree, so v62 blobs must be rejected.
                                                           // 62 = 2026-08-12 module-constant round: C/C++ const-qualified
                                                           // module constants (and class-static constants) index
                                                           // case-blind — the extracted SET grows on any C/C++ tree,

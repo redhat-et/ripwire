@@ -1,0 +1,12 @@
+id	class	tier	g	arm	verdict	recall	prec	tau	halluc	cap	tok_in	tok_out	calls	wall_s
+F01	R1	B	F	baseline	PASS	1.00	1.00	n/a	0	0	1000	200	5	30.00
+F02	R5	A	S	ripwire_cli	PASS	0.50	1.00	n/a	0	0	1100	210	5	31.00
+F03	G9	A	E	baseline	FAIL	1.00	0.50	n/a	0	1	1200	220	25	32.00
+F04	R2	A	F	ripwire_cli	HALLUCINATED	0.00	0.00	n/a	1	0	1300	230	5	33.00
+F05	G4	B	V	baseline	PASS	1.00	n/a	n/a	0	0	1400	240	5	34.00
+F06	R2	A	F	ripwire_cli	REFUSED_CIRCULAR	n/a	n/a	n/a	0	0	1500	250	5	35.00
+F07	G3	B	O	baseline	FAIL	1.00	1.00	-1.00	0	0	1600	260	5	36.00
+F08	R2	A	F	ripwire_cli	NO_ANSWER	n/a	n/a	n/a	0	0	1700	270	5	37.00
+F09	R5	A	S	baseline	PARTIAL	0.50	1.00	n/a	0	0	1800	280	5	38.00
+F10	R2	A	F	ripwire_cli	GT_EMPTY	n/a	n/a	n/a	0	0	1900	290	5	39.00
+F11	R2	A	F	baseline	PASS	1.00	1.00	n/a	0	0	2000	300	5	40.00
