@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 392 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 393 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -606,6 +606,61 @@ runs *before* the command and cannot see that it found nothing, so that trigger 
 Shipping it alongside this one would also put two new triggers behind one readout and make the
 verdict unattributable. It gets its own round once this one resolves.
 
+### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
+
+**The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
+bundle includes the top-ranked symbols' FULL bodies inline (CDATA, the `--expand` shape — body plus
+inline callee signatures), assembled by the same `packBodies` machinery `--pack-task` already uses,
+rank-first, whole-body-or-not-at-all (a body that does not fit is dropped and disclosed, never cut
+mid-def). Disclosure rides the container: the `<ctx>` root carries `bundle="auto" bodies="N"`, and
+when no body fits the remaining budget, `bodies="0" reason="budget"` — the signatures are unchanged
+either way. The candidate cap is the `--pack-task` body-candidate cap, so the default `--for`
+converges on the pack-task shape as budget allows. An explicit `--token-budget=N` stays a hard
+ceiling: bodies take only the budget the signature bundle genuinely left over, and the signature
+bytes themselves are computed exactly as before. Without an explicit budget, the default bundle
+gains a fixed body allowance (a named constant beside `kForPayloadBudgetBytes`), and `est_tokens`
+charges the bodies at the body byte rate, so the per-call cost is disclosed in the output that
+incurs it. `--signatures-only` opts out and restores the previous signatures-only bundle
+byte-identically; `--detail=N` (the explicit body knob) supersedes the automatic selection.
+
+**Why.** The month-scale transcript mine measured the map-then-read chain as the single biggest
+non-terminal pattern: a `--for` map whose named top file the agent then opens whole, or sweeps past.
+The richer terminal verb (`--pack-task`) existed and was called zero times in the same month — the
+richer answer must be the DEFAULT, not a reachable option (the one-step-smart-defaults rule).
+
+**Primary metric, measured on TRANSCRIPTS by the next mining pass over post-deploy sessions,
+per the pass-2 method:** (a) the map-then-read rate on `--for` episodes — the fraction of `--for`
+calls followed within the episode window by a native read of a file the map itself named; (b) the
+post-map sweep rate, reported DIRECTIONALLY only — it carries the question-granularity confound
+that the T2 token-bridge lane owns, so it does not gate this round.
+
+**Band, pre-registered before any post-deploy row exists.** The baseline LEVELS are operator
+telemetry and live in the operator-local registration ledger (recorded there before this change
+shipped); the band is a multiple of the ledger's baseline B for metric (a):
+
+| Verdict | map-then-read rate on `--for` episodes |
+| --- | --- |
+| **KEEP** | **≤ 2/3 × B** (a drop of at least a third) |
+| **REJECT** | otherwise |
+
+The band measures exactly what inlining the body deletes: the read of the named file. A result out
+of band REVERTS the default (signatures-only returns as the default; the explicit `--detail=N`
+opt-in already exists and stays) and is recorded per `METHODOLOGY.md` §5, exactly like the LB-3 and
+nameboost rejections.
+
+**Guard.** Per-call token cost rises by construction (the body allowance) and is allowed to — ONLY
+if session-level post-map sweep/read tokens drop. The net is the claim; a per-call increase with no
+transcript-side drop is a REJECT even if metric (a) lands in band.
+
+**Readout.** The next history-mine pass once ≥ 30 post-deploy `--for` episodes exist. Below that
+the readout is declared underpowered — not null — and waits; the T0 terminality instrument
+(`substitution_report.py` §5) doubles as the running ledger for the same verbs.
+
+**Confounds, stated.** Observational, single-operator, biased toward this repository's own
+sessions. The pass-2 episode method inherits its window definition; changing the window after
+seeing post-deploy data would be tuning the instrument — the readout uses the same pass-2 method
+that produced the baseline. Metric (b) confounded as stated above.
+
 ---
 
 ## 5. Token and output economy
@@ -755,6 +810,14 @@ all ten measure the current build, not a pre-wave one.
 | Review this PR/diff | `ripwire . --pr-context=HEAD~6` | **7,437 B** | 19,298–204,294 B (`git diff HEAD~6` alone, or that diff + the 6 touched files read whole) | 2.6×–27.5× |
 | I have a stack trace | `ripwire . --from-trace=trace.txt` (7-frame trace, real symbols) | **5,718 B** | 497,104–1,192,992 B (grepping the 7 frame names — 5,150 B — plus the innermost file opened, or both files the trace touches) | 86.9×–208.6× |
 
+**Re-measured 2026-08-12, T3 terminal-by-default `--for` (pre-registered above, §4):** the "Where is
+X handled?" row's command now serves the top-ranked FULL bodies inline by default — 13,859 B at this
+binary (`bundle="auto" bodies="3"`), 1.4×–5.8× against the same naive read — and the bundle now
+already contains the follow-up the naive side still pays ("then read the file it points at").
+`--signatures-only` reproduces the signatures-only shape at 7,196 B (2.7×–11.1×). The README table
+states the new default; the 7,501 B figure in the row above is the pre-T3 measurement, kept as the
+2026-08-08 record.
+
 **Same-answer verification, one line per row:**
 - **Orient** — both surface the pipeline's own core files (`ingest.cpp`, `graph.h`, `serialize.h`) as
   central: ripwire ranks them into the first screen (positions 5, 7, 11 of the flagless map); the two
@@ -870,7 +933,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **392 gate scripts**, all of which exist on disk.
+naming **393 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -1504,7 +1567,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 392. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 393. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
