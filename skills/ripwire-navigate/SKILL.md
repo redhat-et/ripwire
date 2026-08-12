@@ -60,6 +60,13 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
 - **Neighborhood** (bounded k-hop ego graph) — `ripwire <dir> --around=SYM [--around-depth=2] [--around-fanout=32]`
 - **How does X reach Y** (shortest call-path) — `ripwire <dir> --path=SRC,DST`
 - **How do N symbols relate** (minimal connecting subgraph, shared-caller joins) — `ripwire <dir> --connect=A,B,C [--connect-radius=N]`
+- **Verify a CLAIM in one call** — "does X really call Y?", "is Z ever used?", "does this file contain/define A?" →
+  `ripwire <dir> --verify='calls(A,B)'` (also `uses(SYM)` / `unused(SYM)` / `contains(FILE, "LIT")` /
+  `defines(FILE, SYM)` / `reaches(SYM, "FILE")`): one three-valued verdict with the evidence inline —
+  `confirmed` (witness printed) · `refuted` (only with complete evidence; a clean literal-scan no carries
+  `complete="1"`) · `not-established` (`limit=` names the floor: dynamic dispatch and string-keyed references
+  are invisible to the index, so this verdict is honest "the index cannot prove it", never "false").
+  Replaces the grep-then-read chain you would otherwise run to check the claim yourself.
 - **Find a literal / regex / structural shape** —
   `ripwire <dir> --grep=STR` (literal + enclosing symbol) ·
   `ripwire <dir> --regex=PAT` ·

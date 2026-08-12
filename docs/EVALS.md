@@ -684,6 +684,40 @@ corpus doc) count — docparse-extracted notebooks/html keep their whole-doc pat
 scope. (2) The comparison uses the SAME episode classifier on both sides; if the classifier changes,
 re-run it over the pass-2 window first (the S2b instrument-correction discipline). (3) This is a
 tool-output-shape claim, not a task-success claim — §8's power argument stands.
+### `--verify` terminality — G4 verify-a-claim round, PRE-REGISTERED 2026-08-12 (before any post-deploy row)
+
+**What shipped.** `--verify="CLAIM"` — a closed claim language (`calls`/`uses`/`unused`/`contains`/
+`defines`/`reaches`) answered with a three-valued verdict (`confirmed` / `refuted` / `not-established`)
+plus inline evidence, gated by `test/verifycheck.sh`. It is built entirely from machinery that already
+existed (`--path`'s BFS, `--uses`' reference index, `--grep`'s exhaustive literal scan with its
+completeness bits, `--impact`'s transitive reach): the round's claim is not new data but a COLLAPSE —
+the residual it deletes is the manual verification grep-chain, the transcript mine's largest verb-less
+intent class.
+
+**Primary metric (transcript-observable, no meter accrual needed).** Verification-intent episode
+CHAIN LENGTH: the number of native-search calls (grep/read/glob families, rtk-unwrapped) an agent
+spends per verification-intent episode, measured by the next mining pass over post-deploy sessions
+with the same intent-classification the month-scale mine used. The baseline B is the same statistic
+computed over PRE-deploy sessions by the same pass — computed at readout, recorded in the
+operator-local registration ledger before the post-deploy half is read (levels stay in the ledger per
+the telemetry rule; this document carries the mechanism and the band shape only).
+
+**Band, pre-registered.** KEEP ⇔ post-deploy mean chain length ≤ 2/3×B on episodes where `--verify`
+fired (the T3 convention); inconclusive between 2/3×B and B extends the window once; ≥ B on
+verify-using episodes, or a false-verdict report of any kind, is a REVISIT with this section updated
+per METHODOLOGY §5. Minimum data: ≥ 30 post-deploy verification-intent episodes; below that the
+readout is declared underpowered, not null.
+
+**Adoption guard, stated up front.** A verb nobody calls collapses nothing: if the readout window
+shows near-zero organic `--verify` calls, that is a ROUTING failure in the adoption-loop's domain
+(nudge/skills — the `--run-trace` precedent, which also shipped verb-first and waited on routing),
+and it must not be reported as a verdict on the bundle's design. The chain-length band is only
+readable on episodes where the verb actually fired.
+
+**Honesty invariants carried by the verb itself, gate-pinned rather than registered:** `refuted`
+only ever rides complete evidence (a clean uncapped literal scan, or printed witness sites against an
+absence-claim); a graph or reference zero is `not-established` with `limit=` naming the floor;
+`complete=` and `counts_floor=` never co-occur on one root (`test/verifycheck.sh`, mutation arms).
 
 ---
 
