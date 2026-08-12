@@ -207,6 +207,94 @@ def patch_files( patch ):
     return sorted( set( re.findall( r'^\+\+\+ b/(.+)$', patch, re.M ) )
                  | set( re.findall( r'^--- a/(.+)$', patch, re.M ) ) )
 
+# ── the local/questions task source (E1 scenario bank) ──────────────────────────────────────────────
+# tasks.lock + load_gold_rows() assume SWE-bench-Lite: an instance is an ISSUE and the outcome is a
+# PATCH. The E1 bank is neither — it is a question at a pinned commit whose outcome is an ANSWER, and
+# 19 of its 28 rows live in private local trees that no clone URL can reach. This source bypasses
+# SWE-bench selection entirely and reuses grade_answers.py's fail-closed schema loader rather than
+# restating the column list, so the runner and the grader can never disagree about what a row is.
+import grade_answers
+
+TIER_BUDGET_USD = { "A": 0.60, "B": 1.50 }   # protocol §8, pre-registered per TIER, never per chain
+
+def load_questions( path ):
+    """[task] from the graded TSV. instance_id/repo/base_commit keep make_record()'s contract; the
+    question, tier and caps ride along for the prompt builder and the per-run budget."""
+    tasks = []
+    for row in grade_answers.load_instances( path ):
+        tasks.append( dict( instance_id=row[ "id" ], repo=row[ "repo" ], base_commit=row[ "pin_ref" ],
+                            pin_ref=row[ "pin_ref" ], question=row[ "question" ], tier=row[ "tier" ],
+                            scenario_class=row[ "scenario_class" ],
+                            cap_calls=row[ "cap_calls" ], cap_wall_s=row[ "cap_wall_s" ] ) )
+    return tasks
+
+def checkout_local_pin( task, dest_root, local_corpus ):
+    """Materialize a questions instance's pinned tree(s) from a LOCAL source repo, via git worktree.
+
+    Returns the PARENT directory holding one checkout per repo — never the repo dir itself — because
+    that is the shape every gt_command in the bank is written against (`ctxpack/src/x.h`), and the
+    multi-root row needs two sibling checkouts in one cwd. None on any failure (fail-closed)."""
+    dest = pathlib.Path( dest_root ) / task[ "instance_id" ]
+    for repo, sha in grade_answers.pin_pairs( dict( repo=task[ "repo" ], pin_ref=task[ "pin_ref" ] ) ):
+        source, tree = pathlib.Path( local_corpus ) / repo, dest / repo
+        if tree.exists():
+            continue
+        if not ( source / ".git" ).exists():
+            return None
+        dest.mkdir( parents=True, exist_ok=True )
+        if sh( [ "git", "-C", str( source ), "worktree", "add", "--detach", str( tree ), sha ] ).returncode != 0:
+            return None
+    return dest
+
+# The SCOPE FENCE, assembled from the protocol's own rules rather than invented here: §1 (one
+# self-contained question at one pinned commit), §10.10 (groundedness is scored on every instance,
+# so the agent is told the rule it is being scored against), §2 (no admitted row is an edit
+# instance), §8 (the tier cap, stated as a budget rather than discovered as a timeout). The last
+# paragraph is the grader's own contract: without the sentinels there is no answer to grade.
+SCOPE_FENCE = (
+    "SCOPE — read this before answering:\n"
+    "* Answer only about THIS repository as it exists at THIS commit. Do not reason from other "
+    "versions, other branches, or your own recollection of the project.\n"
+    "* Every file path and every symbol you name must exist here. A name that does not exist is "
+    "scored as a hallucination and fails the whole answer, however good the rest of it is.\n"
+    "* This is a READ-ONLY question. Do not modify, create or delete any file.\n"
+    "* Budget: at most {calls} tool calls and {wall}s. If you run out, answer with what you have — a "
+    "partial answer inside the fence is scored; an unfinished exploration is not.\n\n"
+    "Finish your final message with exactly this block, nothing else inside it, one item per line:\n"
+    "{open}\n<your answer>\n{close}" )
+
+def build_question_prompt( task, seed, arm, ripwire_bin, rules_blurb="" ):
+    """The question VERBATIM plus the scope fence — no 'make the minimal fix' framing.
+
+    The question text is never rewritten, paraphrased or prefixed with a hint: protocol §5 says the
+    observed chain must not define the question, and §10.8 says the text names no tool and no arm.
+    Anything arm-specific lives in the suffix, exactly as it does for the SWE-bench prompt."""
+    fence = SCOPE_FENCE.format( calls=task.get( "cap_calls" ) or "20",
+                                wall=task.get( "cap_wall_s" ) or "300",
+                                open=grade_answers.ANSWER_OPEN, close=grade_answers.ANSWER_CLOSE )
+    return ( f"{task['question'].strip()}\n\n{fence}\n\n[run-seed:{seed}]"
+             + arm_suffix( arm, ripwire_bin, rules_blurb ) )
+
+def arm_suffix( arm, ripwire_bin, rules_blurb="" ):
+    """The arm contract, shared by both prompt shapes so they cannot drift apart."""
+    if arm == "baseline":
+        return ( "\n\nRETRIEVAL ARM — BASELINE: Do not use ripwire or ctxpack. Use the agent's "
+                 "ordinary repository search and file-reading tools." )
+    # Both ripwire arms get the SAME contract. They differ only in what the environment puts on disk
+    # (ripwire_skills adds the skills tree), so any prompt-level difference between them would
+    # confound exactly the comparison the third arm exists to make.
+    if arm in RIPWIRE_ARMS:
+        suffix = ( "\n\nRETRIEVAL ARM — RIPWIRE CLI: Do not use a ripwire MCP server. Before "
+                   "grep/find or opening implementation files, use the shell to run this exact CLI "
+                   "binary at least once:\n"
+                   f"  {ripwire_bin} . --for=\"<short issue description>\" --max-tokens=4000\n"
+                   "Use its ranked output and any additional ripwire CLI verbs that help, then "
+                   "continue with ordinary editing and validation tools." )
+        # The rules blurb is the SHIPPED wrap recipe's body, read straight out of `ripwire wrap`
+        # rather than restated here, so the eval cannot drift from what users are actually told.
+        return suffix + ( "\n\n" + rules_blurb.strip() if rules_blurb else "" )
+    raise ValueError( f"unknown arm {arm!r}; expected one of {ARMS}" )
+
 def build_prompt( gold_row, seed, arm, ripwire_bin, rules_blurb="" ):
     stmt = ( gold_row.get( "problem_statement" ) or "" ).strip()
     prompt = (
@@ -219,25 +307,7 @@ def build_prompt( gold_row, seed, arm, ripwire_bin, rules_blurb="" ):
         # field regardless of whether this suffix measurably perturbs sampling.
         f"[run-seed:{seed}]"
     )
-    if arm == "baseline":
-        return prompt + ( "\n\nRETRIEVAL ARM — BASELINE: Do not use ripwire or ctxpack. Use the agent's "
-                          "ordinary repository search and file-reading tools." )
-    # Both ripwire arms get the SAME prompt contract. They differ only in what the environment puts
-    # on disk (ripwire_skills adds the skills tree), so any prompt-level difference between them
-    # would confound exactly the comparison the third arm exists to make.
-    if arm in RIPWIRE_ARMS:
-        suffix = ( "\n\nRETRIEVAL ARM — RIPWIRE CLI: Do not use a ripwire MCP server. Before "
-                   "grep/find or opening implementation files, use the shell to run this exact CLI "
-                   "binary at least once:\n"
-                   f"  {ripwire_bin} . --for=\"<short issue description>\" --max-tokens=4000\n"
-                   "Use its ranked output and any additional ripwire CLI verbs that help, then "
-                   "continue with ordinary editing and validation tools." )
-        # The rules blurb is the SHIPPED wrap recipe's body, read straight out of `ripwire wrap`
-        # rather than restated here, so the eval cannot drift from what users are actually told.
-        if rules_blurb:
-            suffix += "\n\n" + rules_blurb.strip()
-        return prompt + suffix
-    raise ValueError( f"unknown arm {arm!r}; expected one of {ARMS}" )
+    return prompt + arm_suffix( arm, ripwire_bin, rules_blurb )
 
 def install_ripwire_shim( run_home, ripwire_bin ):
     """Return a path to a logging wrapper around ripwire, and the log file it appends to.
@@ -433,8 +503,8 @@ def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin 
     That last one is not hypothetical here: this repository's own developers keep a ripwire usage
     protocol in ~/.claude/CLAUDE.md. Without this isolation the BASELINE arm is briefed on ripwire and
     the experiment measures nothing. test/opencodeisocheck.sh asserts the recipe still holds."""
-    env = os.environ.copy()
-    run_home = pathlib.Path( work_dir ) / "opencode-home" / arm / f"{instance_id}-{seed}"
+    env, run_home, shim = ephemeral_run_home( work_dir, "opencode-home", instance_id, arm, seed,
+                                              ripwire_bin, "config/opencode/skills" )
     for sub in ( "home", "config", "data", "state", "cache" ):
         ( run_home / sub ).mkdir( parents=True, exist_ok=True )
 
@@ -442,13 +512,8 @@ def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin 
     # run can authenticate without the secret being duplicated into the work dir. Same posture as the
     # codex path. If no credential exists, the run must fail loudly rather than fall back to the free
     # hosted model — see build_opencode_command().
-    source_auth = pathlib.Path( env.get( "XDG_DATA_HOME", pathlib.Path.home() / ".local/share" ) ) / "opencode" / "auth.json"
-    if source_auth.exists():
-        dest_dir = run_home / "data" / "opencode"
-        dest_dir.mkdir( parents=True, exist_ok=True )
-        link = dest_dir / "auth.json"
-        if not link.exists():
-            link.symlink_to( source_auth )
+    link_credential( pathlib.Path( os.environ.get( "XDG_DATA_HOME", pathlib.Path.home() / ".local/share" ) )
+                     / "opencode", run_home / "data" / "opencode", "auth.json" )
 
     # NOTE on the rules-file channel: opencode WOULD read an AGENTS.md from the project root, and that
     # is how a real user installs the blurb. It is delivered through the prompt instead (build_prompt),
@@ -457,18 +522,7 @@ def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin 
     # the arms comparable ACROSS harnesses; the cost is that this measures the blurb's content, not
     # opencode's rules-file discovery. That trade is deliberate and belongs in the write-up.
 
-    # the skills tree is the THIRD arm's only difference from the second
-    if arm == "ripwire_skills":
-        source_skills = pathlib.Path( __file__ ).resolve().parents[2] / "skills"
-        run_skills = run_home / "config" / "opencode" / "skills"
-        run_skills.mkdir( parents=True, exist_ok=True )
-        for skill_dir in sorted( source_skills.iterdir() ):
-            if skill_dir.is_dir() and ( skill_dir / "SKILL.md" ).is_file():
-                link = run_skills / skill_dir.name
-                if not link.exists():
-                    link.symlink_to( skill_dir, target_is_directory=True )
-
-    shim, _log = install_ripwire_shim( run_home, ripwire_bin )
+    # the skills tree is the THIRD arm's only difference from the second — ephemeral_run_home() owns it
     env.update(
         HOME                            = str( run_home / "home" ),
         XDG_CONFIG_HOME                 = str( run_home / "config" ),
@@ -479,7 +533,6 @@ def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin 
         OPENCODE_DISABLE_CLAUDE_CODE    = "1",
         OPENCODE_DISABLE_AUTOUPDATE     = "1",
     )
-    env["PATH"] = str( pathlib.Path( shim ).parent ) + os.pathsep + env.get( "PATH", "" )
     return env, run_home, shim
 
 def extract_wrap_blurb( wrap_stdout ):
@@ -509,38 +562,139 @@ def agent_version( harness ):
         return None
     return ( out.stdout or out.stderr or "" ).strip().splitlines()[ 0 ] if ( out.stdout or out.stderr ) else None
 
-def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
-    """Create an auth-preserving but skill-isolated CODEX_HOME for one benchmark run.
+def ephemeral_run_home( work_dir, kind, instance_id, arm, seed, ripwire_bin, skills_subdir ):
+    """The scaffolding all three per-run environments share: an ephemeral home directory, the skills
+    tree for EXACTLY ONE arm, and the logging ripwire shim first on PATH. Returns (env, run_home, shim).
 
-    Baseline gets no skills. The treatment gets only this checkout's ripwire skills, so globally
-    installed skills cannot add hidden tools or retrieval steps to either arm."""
+    Factored out rather than copied a third time: the skills-for-one-arm rule is the whole reason the
+    third arm exists (the 2026-08-04 pilot could not attribute its +80% token cost because the skills
+    tree rode along on `ripwire_cli`), and a rule that matters that much should have one implementation,
+    not one per harness."""
     env = os.environ.copy()
-    source_home = pathlib.Path( env.get( "CODEX_HOME", pathlib.Path.home() / ".codex" ) )
-    run_home = pathlib.Path( work_dir ) / "codex-home" / arm / f"{instance_id}-{seed}"
+    run_home = pathlib.Path( work_dir ) / kind / arm / f"{instance_id}-{seed}"
     run_home.mkdir( parents=True, exist_ok=True )
-    source_auth = source_home / "auth.json"
-    run_auth = run_home / "auth.json"
-    if source_auth.exists() and not run_auth.exists():
-        run_auth.symlink_to( source_auth )
-
-    # v3 CHANGE: the skills tree moved off `ripwire_cli` and onto its own arm. It used to ride along
-    # here, which is why the 2026-08-04 pilot's +80% token cost could not be attributed — see ARMS.
     if arm == "ripwire_skills":
         source_skills = pathlib.Path( __file__ ).resolve().parents[2] / "skills"
-        run_skills = run_home / "skills"
+        run_skills = run_home / skills_subdir
         run_skills.mkdir( parents=True, exist_ok=True )
         for skill_dir in sorted( source_skills.iterdir() ):
             if skill_dir.is_dir() and ( skill_dir / "SKILL.md" ).is_file():
                 link = run_skills / skill_dir.name
                 if not link.exists():
                     link.symlink_to( skill_dir, target_is_directory=True )
+    shim, _log = install_ripwire_shim( run_home, ripwire_bin )
+    env["PATH"] = str( pathlib.Path( shim ).parent ) + os.pathsep + env.get( "PATH", "" )
+    return env, run_home, shim
 
+def link_credential( source_dir, dest_dir, *names ):
+    """Symlink a harness's credential store into its ephemeral home rather than copying it, so a run
+    can authenticate without the secret being duplicated into the work dir. Missing sources are
+    skipped silently — an unauthenticated harness must fail at its own login check with its own
+    message, not here with a confusing one about symlinks."""
+    dest = pathlib.Path( dest_dir )
+    dest.mkdir( parents=True, exist_ok=True )
+    for name in names:
+        source, link = pathlib.Path( source_dir ) / name, dest / name
+        if source.exists() and not link.exists():
+            link.symlink_to( source )
+
+def build_harness_command( harness, prompt, model, arm, tier="" ):
+    """Explicit per-harness command dispatch. `tier` is only ever non-empty for a questions instance,
+    and it is what turns the protocol's pre-registered per-tier ceiling into an enforced one."""
+    if harness == "codex-exec":
+        return build_codex_command( prompt, model )
+    if harness == "opencode":
+        return build_opencode_command( prompt, model )
+    return build_claude_command( prompt, model, arm, max_budget_usd=TIER_BUDGET_USD.get( tier ) )
+
+def question_timeout( task, default_s ):
+    """The row's own wall cap (protocol §8), or the harness default when the row does not state one."""
+    stated = str( task.get( "cap_wall_s", "" ) ).strip()
+    return int( stated ) if stated.isdigit() else default_s
+
+def prepare_environment( harness, work_dir, instance_id, arm, seed, ripwire_bin ):
+    """Explicit per-harness dispatch to the right preparer — never a lookup table, never a
+    fallthrough. A dict of callables hides these call sites from a name-based resolver, which reports
+    the two unselected preparers as dead code; a two-branch ternary silently hands a third harness
+    somebody else's environment. Both mistakes have been made in this file already."""
+    if harness == "codex-exec":
+        return prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin )
+    if harness == "opencode":
+        return prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin )
+    return prepare_claude_environment( work_dir, instance_id, arm, seed, ripwire_bin )
+
+def build_claude_command( prompt, model, arm, allowed_tools=ALLOWED_TOOLS_BASELINE, max_budget_usd=None ):
+    """Build an ISOLATED `claude -p` invocation. The three scrub flags are not optional.
+
+    `--setting-sources ''` excludes the user/project/local settings files. On this project's own
+    machine those files register the ripwire SessionStart primer and PreToolUse nudge hooks, a
+    competitor MCP server, and an `env.PATH` that re-prepends /opt/homebrew/bin — which would put
+    ripwire back on the baseline arm's PATH after the shim was prepended. `--strict-mcp-config` drops
+    both the global and the repo-local `.mcp.json`. `--disable-slash-commands` removes the 18 installed
+    skills from every arm that is not the skills arm — their DESCRIPTIONS alone sit in the system
+    prompt and name ripwire verbs, so leaving them in briefs the control on the tool it controls for."""
+    cmd = [ "claude", "-p", prompt,
+            "--permission-mode", "acceptEdits",
+            "--output-format", "json",
+            "--strict-mcp-config",
+            "--setting-sources", "",
+            "--allowedTools", allowed_tools ]
+    if arm != "ripwire_skills":
+        cmd.append( "--disable-slash-commands" )
+    if max_budget_usd:
+        # The only directly enforceable per-run cost ceiling of the three harnesses (verified present
+        # in Claude Code 2.1.209). codex/opencode have none; for those the wall timeout is the cap.
+        cmd += [ "--max-budget-usd", str( max_budget_usd ) ]
+    if model:
+        cmd += [ "--model", model ]
+    return cmd
+
+def prepare_claude_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
+    """Create an isolated CLAUDE_CONFIG_DIR for one benchmark run, and return (env, run_home, shim).
+
+    THE HOLE THIS CLOSES. codex and opencode have had isolated environments since they were wired;
+    `claude-code-p` — the DEFAULT --harness — ran with `child_env = None` and inherited the operator's
+    `~/.claude` whole: CLAUDE.md, the two ripwire hooks, all 18 skills, and the per-project auto-memory.
+    On this machine 81 of the 84 lines of the global CLAUDE.md are a ripwire use-when protocol, so the
+    baseline arm was briefed by name, verb and reflex on the tool it exists to be a control for — and
+    every such run still reported status=ok. It was the largest control-arm hole on the machine and it
+    was in the instrument, not the environment. test/agentloopclaudecheck.sh asserts the recipe holds.
+
+    Credentials are symlinked, not copied, exactly as the codex path does. NOTE (unresolved, and a
+    Phase-1 blocker rather than a bug here): Claude Code's `--bare` is the cleanest isolation switch
+    but forces ANTHROPIC_API_KEY and never reads OAuth/keychain. This recipe deliberately keeps
+    CLAUDE_CONFIG_DIR + flags instead, on the expectation that OAuth survives a redirected config dir;
+    confirm that with one live --live-one run before funding a matrix."""
+    env, run_home, shim = ephemeral_run_home( work_dir, "claude-home", instance_id, arm, seed,
+                                              ripwire_bin, "skills" )
+    link_credential( os.environ.get( "CLAUDE_CONFIG_DIR", pathlib.Path.home() / ".claude" ),
+                     run_home, ".credentials.json", "credentials.json" )
+    env["CLAUDE_CONFIG_DIR"] = str( run_home )
+    # Benchmark runs must never append to the operator's live substitution telemetry: that log is a
+    # running two-week measurement clock, and poisoning it corrupts the very class weights this round
+    # consumes. Naming a scratch destination is also what makes the hook's arm flag take effect at all.
+    env["RIPWIRE_METER_FIXTURE"] = "1"
+    env["RIPWIRE_HOME"] = str( run_home / "rhome" )
+    env["RIPWIRE_METER_ARM"] = "control" if arm == "baseline" else "treatment"
+    return env, run_home, shim
+
+def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
+    """Create an auth-preserving but skill-isolated CODEX_HOME for one benchmark run.
+
+    Baseline gets no skills. The treatment gets only this checkout's ripwire skills, so globally
+    installed skills cannot add hidden tools or retrieval steps to either arm."""
+    env, run_home, shim = ephemeral_run_home( work_dir, "codex-home", instance_id, arm, seed,
+                                              ripwire_bin, "skills" )
+    link_credential( os.environ.get( "CODEX_HOME", pathlib.Path.home() / ".codex" ), run_home,
+                     "auth.json" )
+
+    # v3 CHANGE: the skills tree moved off `ripwire_cli` and onto its own arm (ephemeral_run_home()
+    # owns that rule now). It used to ride along here, which is why the 2026-08-04 pilot's +80% token
+    # cost could not be attributed — see ARMS.
     agents_home = pathlib.Path( work_dir ) / "agent-home" / arm / f"{instance_id}-{seed}"
     agents_home.mkdir( parents=True, exist_ok=True )
     env["CODEX_HOME"] = str( run_home )
     env["AGENTS_HOME"] = str( agents_home )
-    shim, _log = install_ripwire_shim( run_home, ripwire_bin )
-    env["PATH"] = str( pathlib.Path( shim ).parent ) + os.pathsep + env.get( "PATH", "" )
     return env, run_home, shim
 
 # ── evaluation (--evaluator swebench|none) ─────────────────────────────────────────────────────────────
@@ -630,6 +784,11 @@ def evaluate_patch( task, gold_row, patch, evaluator ):
     evaluator='swebench' -> resolved is computed via the official `swebench` harness (see
                              run_swebench_harness()); an empty candidate patch short-circuits to
                              resolved=False without spending a Docker run (it cannot pass any test)."""
+    # A questions instance (the E1 bank) has no gold patch and no patch outcome at all: its answer is
+    # scored by grade_answers.py from the transcript. Both fields stay None — never a fabricated False,
+    # which would read as "the agent failed" for a task that was never a patch task.
+    if gold_row is None:
+        return None, None
     cand_files = set( patch_files( patch ) ) if patch.strip() else set()
     gold_files = set( patch_files( gold_row.get( "patch", "" ) ) )
     localization_hit = bool( cand_files & gold_files ) if gold_files else None
@@ -695,19 +854,28 @@ def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=
                  ripwire_commands=ripwire_commands, native_read_calls=native_read_calls,
                  events_path=str( events_file ), resolved_model=model_id )
 
-def _claude_metrics( stdout, shim_log=None ):
+def _claude_metrics( stdout, shim_log=None, retain=None ):
     """Parse the `claude -p --output-format json` single-result trailer into record fields.
+
+    `retain` is the path the raw trailer is written to and recorded as events_path. codex and opencode
+    have always retained their transcripts; claude did not, which meant the run's terminal ANSWER —
+    the only thing grade_answers.py can score — was parsed for tokens and then thrown away.
 
     TODO-verify: field names match the documented schema (top-level total_cost_usd;
     usage.input_tokens/usage.output_tokens) as of the Claude Code CLI installed when this was written
     (2.1.209) — re-check against a real trailer (e.g. via --live-one) before trusting these numbers in
     an actual pilot; schema drift degrades accounting to nulls (make_record defaults), not a crash."""
+    out = {}
+    if retain is not None:
+        pathlib.Path( retain ).parent.mkdir( parents=True, exist_ok=True )
+        pathlib.Path( retain ).write_text( stdout or "" )
+        out[ "events_path" ] = str( retain )
     try:
         payload = json.loads( stdout )
     except ValueError:
-        return {}
+        return out
     usage = payload.get( "usage" ) or {}
-    out = dict( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
+    out.update( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
                 cost_usd=payload.get( "total_cost_usd" ) )
     # `claude -p` does not log individual shell commands, so before the shim there was no
     # ripwire-invocation evidence for this harness at all — every claude run recorded
@@ -724,11 +892,13 @@ def _harness_metrics( harness, stdout, work_dir, task, arm, seed, ripwire_bin, s
         return _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
     if harness == "opencode":
         return _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
+    retain = pathlib.Path( work_dir ) / "events" / f"{task['instance_id']}-{arm}-{seed}.json"
     return _claude_metrics( stdout if isinstance( stdout, str ) else ( stdout or b"" ).decode( "utf-8", "replace" ),
-                            shim_log )
+                            shim_log, retain )
 
 def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
-             timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None, lane="" ):
+             timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None, lane="",
+             local_corpus="" ):
     """Execute ONE (task, arm, seed) run through the selected harness and return a filled record.
 
     Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
@@ -746,30 +916,34 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     if arm not in ARMS:
         return _fail( "error", f"unknown arm {arm!r}; expected one of {ARMS}" )
 
-    gold_row = ( gold_rows or {} ).get( task["instance_id"] )
-    if gold_row is None:
-        return _fail( "error", f"no cached SWE-bench row for {task['instance_id']!r} — pass a --work-dir "
-                                f"whose datasets cache load_gold_rows()/select_tasks.fetch_rows() can reach" )
+    # A QUESTIONS row (the E1 bank) carries its own prompt and is scored by grade_answers.py from the
+    # retained transcript, so it needs neither a SWE-bench gold row nor patch evaluation.
+    is_question = bool( task.get( "question" ) )
+    gold_row = None
+    if not is_question:
+        gold_row = ( gold_rows or {} ).get( task["instance_id"] )
+        if gold_row is None:
+            return _fail( "error", f"no cached SWE-bench row for {task['instance_id']!r} — pass a --work-dir "
+                                    f"whose datasets cache load_gold_rows()/select_tasks.fetch_rows() can reach" )
+    if is_question:
+        timeout_s = question_timeout( task, timeout_s )
 
     # Per-worker checkout root. checkout_repo() keeps ONE clone per repo and hard-resets it for every
     # run, so two concurrent runs touching the same repo would clobber each other's working tree
     # mid-agent. Sharding the root by worker is what makes --concurrency safe; the default lane
     # ("") is byte-identical to the old single-threaded path.
     repos_dir = pathlib.Path( work_dir ) / ( f"repos{lane}" if lane else "repos" )
-    repo_dir = checkout_repo( task["repo"], task["base_commit"], repos_dir )
+    repo_dir = ( checkout_local_pin( task, repos_dir, local_corpus ) if is_question and local_corpus
+                 else checkout_repo( task["repo"], task["base_commit"], repos_dir ) )
     if repo_dir is None:
         return _fail( "error", f"checkout failed for {task['repo']}@{task['base_commit']}" )
 
     # The environment is prepared BEFORE the prompt, because it installs the ripwire shim and the
     # prompt must name that shim rather than the bare binary — otherwise an agent invoking ripwire by
     # absolute path walks straight past the counter.
-    child_env, run_home, shim_bin, shim_log = None, None, ripwire_bin, None
-    if harness == "codex-exec":
-        child_env, run_home, shim_bin = prepare_codex_environment( work_dir, task["instance_id"], arm, seed, ripwire_bin )
-    elif harness == "opencode":
-        child_env, run_home, shim_bin = prepare_opencode_environment( work_dir, task["instance_id"], arm, seed, ripwire_bin )
-    if run_home is not None:
-        shim_log = pathlib.Path( run_home ) / "shim" / "ripwire-calls.log"
+    child_env, run_home, shim_bin = prepare_environment( harness, work_dir, task["instance_id"],
+                                                         arm, seed, ripwire_bin )
+    shim_log = pathlib.Path( run_home ) / "shim" / "ripwire-calls.log"
 
     rules_blurb = ""
     if arm in RIPWIRE_ARMS:
@@ -778,18 +952,10 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
                                   capture_output=True, text=True )
         rules_blurb = extract_wrap_blurb( wrapped.stdout )
 
-    prompt = build_prompt( gold_row, seed, arm, shim_bin, rules_blurb )
-    if harness == "claude-code-p":
-        cmd = [ "claude", "-p", prompt,
-                "--permission-mode", "acceptEdits",
-                "--output-format", "json",
-                "--strict-mcp-config", "--allowedTools", ALLOWED_TOOLS_BASELINE ]
-        if model:
-            cmd += [ "--model", model ]
-    elif harness == "codex-exec":
-        cmd = build_codex_command( prompt, model )
-    else:
-        cmd = build_opencode_command( prompt, model )
+    prompt = ( build_question_prompt( task, seed, arm, shim_bin, rules_blurb ) if is_question
+               else build_prompt( gold_row, seed, arm, shim_bin, rules_blurb ) )
+    cmd = build_harness_command( harness, prompt, model, arm,
+                                 task.get( "tier", "" ).strip() if is_question else "" )
 
     t0 = time.perf_counter()
     try:
@@ -831,6 +997,14 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
 def main():
     ap = argparse.ArgumentParser( description="Phase B4 agent-in-the-loop eval runner (scaffolding)" )
     ap.add_argument( "--tasks-lock", default=str( pathlib.Path( __file__ ).parent / "tasks.lock" ) )
+    ap.add_argument( "--questions", default="", metavar="TSV",
+                     help="grade a QUESTIONS bank (the E1 graded TSV) instead of SWE-bench: bypasses "
+                          "tasks.lock and the HuggingFace gold-row fetch entirely. Answers are scored "
+                          "afterwards by bench/agentloop/grade_answers.py, not by this script." )
+    ap.add_argument( "--local-corpus", default="", metavar="DIR",
+                     help="parent dir of the local source repos a --questions bank pins into; each "
+                          "instance gets `git worktree add --detach` checkouts at its pinned sha. "
+                          "Required for bank rows whose repo is a private local tree." )
     ap.add_argument( "--arms", default=",".join( ARMS ) )
     ap.add_argument( "--seeds", default=",".join( str( s ) for s in DEFAULT_SEEDS ) )
     ap.add_argument( "--harness", default="claude-code-p", choices=HARNESSES,
@@ -875,15 +1049,23 @@ def main():
                             "money / real API calls — read README.md's SAFETY NOTE first." )
     a = ap.parse_args()
 
-    lock = load_tasks_lock( a.tasks_lock )
-    tasks = limit_tasks_repo_round_robin( lock["instances"], a.limit )
+    if a.questions:
+        lock = dict( content_sha256=f"questions:{pathlib.Path( a.questions ).name}",
+                     selected_count=0, selected_repo_count=0 )
+        all_tasks = load_questions( a.questions )
+        lock.update( selected_count=len( all_tasks ),
+                     selected_repo_count=len( { t["repo"] for t in all_tasks } ) )
+    else:
+        lock = load_tasks_lock( a.tasks_lock )
+        all_tasks = lock["instances"]
+    tasks = limit_tasks_repo_round_robin( all_tasks, a.limit )
     arms = [ x.strip() for x in a.arms.split( "," ) if x.strip() ]
     seeds = [ int( x ) for x in a.seeds.split( "," ) if x.strip() ]
     for arm in arms:
         if arm not in ARMS: raise SystemExit( f"unknown arm {arm!r}; expected one of {ARMS}" )
     matrix = run_matrix( tasks, arms, seeds )
 
-    print( f"# tasks.lock verified: content_sha256={lock['content_sha256'][:16]}... "
+    print( f"# task source verified: content_sha256={lock['content_sha256'][:16]}... "
            f"({lock['selected_count']} instances, {lock['selected_repo_count']} repos)", file=sys.stderr )
     print( f"# run matrix: {len(tasks)} tasks x {len(arms)} arms x {len(seeds)} seeds = {len(matrix)} runs",
            file=sys.stderr )
@@ -891,6 +1073,15 @@ def main():
              len( tasks ) * len( arms ) * len( seeds ) * COST_HIGH_PER_INSTANCE
     print( f"# projected cost at ${COST_LOW_PER_INSTANCE:.2f}-${COST_HIGH_PER_INSTANCE:.2f}/instance "
            f"(arXiv 2412.21139): ${lo:.0f}-${hi:.0f}", file=sys.stderr )
+    # THIS PROJECTION UNDER-REPORTS, and README.md's SAFETY note makes it the human approval gate.
+    # It is a per-instance literature envelope; this harness's own pilot (results/pilot-6run.json)
+    # recorded a single run at 1,249,026 in + 13,779 out = $3.96 at $3/$15 per Mtok — 2.6x the TOP of
+    # the envelope, on one run. A gate that under-reports the number a human approves is worse than no
+    # gate, so the disclosure travels with the number rather than living only in a memo.
+    print( "# WARNING the line above is a LITERATURE envelope, not this harness's measured cost. The "
+           "recorded pilot exceeded its per-instance top by 2.6x on a single run; the fitted token "
+           "model puts the pre-registered E1 design at 2-5x this range. Do not approve a spend on it "
+           "alone — price the design from a smoke matrix first.", file=sys.stderr )
     by_repo = {}
     for t in tasks: by_repo.setdefault( t["repo"], 0 ); by_repo[t["repo"]] += 1
     print( f"# repo distribution: {dict(sorted(by_repo.items()))}", file=sys.stderr )
@@ -918,9 +1109,10 @@ def main():
         print( f"# --live-one: ONE real run — instance={t['instance_id']} repo={t['repo']} arm={arm} "
                f"seed={seed} harness={a.harness} model={a.model} evaluator={a.evaluator} "
                f"work_dir={a.work_dir}", file=sys.stderr )
-        gold_rows = load_gold_rows( a.work_dir )
+        gold_rows = {} if a.questions else load_gold_rows( a.work_dir )
         rec = run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ripwire_bin=a.ripwire_bin,
-                        timeout_s=a.timeout_seconds, evaluator=a.evaluator, gold_rows=gold_rows )
+                        timeout_s=a.timeout_seconds, evaluator=a.evaluator, gold_rows=gold_rows,
+                        local_corpus=a.local_corpus )
         print( json.dumps( rec, indent=2 ) )
         return 0 if rec["status"] == "ok" else 1
 
@@ -928,7 +1120,7 @@ def main():
     print( "LIVE RUN requested — this spends real money against a real API/agent harness.", file=sys.stderr )
     print( "Read bench/agentloop/README.md's safety note; a live run requires explicit human approval "
            "per task run, not just this flag.", file=sys.stderr )
-    gold_rows = load_gold_rows( a.work_dir )
+    gold_rows = {} if a.questions else load_gold_rows( a.work_dir )
     records = []
     outp = pathlib.Path( a.results_out ) if a.results_out else None
     if outp:
@@ -964,7 +1156,8 @@ def main():
         t, arm, seed = cell
         return run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir,
                         ripwire_bin=a.ripwire_bin, timeout_s=a.timeout_seconds,
-                        evaluator=a.evaluator, gold_rows=gold_rows, lane=lane )
+                        evaluator=a.evaluator, gold_rows=gold_rows, lane=lane,
+                        local_corpus=a.local_corpus )
 
     def _emit( run_index, cell, rec ):
         t, arm, _seed = cell

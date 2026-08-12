@@ -211,6 +211,72 @@ python3 bench/agentloop/analyze.py --self-test
 python3 bench/agentloop/analyze.py --results /tmp/agentloop/dry.json
 ```
 
+## The QUESTIONS mode — scenario instances, graded answers
+
+The section above measures **patches**: a SWE-bench issue in, a diff out, `resolved` scored by Docker.
+The E1 scenario-efficiency bank measures **answers**: one self-contained question at one pinned
+commit, whose outcome is a set of files, symbols, verdicts or an ordering — no patch exists to score.
+Two pieces carry that shape, and they are deliberately additive; nothing above changes.
+
+| piece | what it does |
+| --- | --- |
+| `run_agentloop.py --questions TSV` | a local task source that bypasses `tasks.lock` and the HuggingFace gold-row fetch entirely. Rows come from the graded TSV (id / repo / pin\_ref / tier / grader / question / gt\_command / accept\_rule). `--local-corpus DIR` materializes private trees with `git worktree add --detach` at the pinned sha; the per-tier budget cap and wall timeout come from the row, never from the observed chain. |
+| `grade_answers.py` | grades the retained transcripts against keys **derived at the pin by running each row's `gt_command`**. |
+
+```sh
+# no agent, no cost: what does the bank still owe before it can be run?
+python3 bench/agentloop/grade_answers.py --instances BANK.tsv --audit
+
+# grade a completed run (a results JSON from --questions) against keys derived at the pin
+python3 bench/agentloop/grade_answers.py --instances BANK.tsv --results run.json \
+    --pin-root /tmp/e1-pins --key sealed.json
+```
+
+Four rules in the grader are load-bearing, and `test/agentloopgradercheck.sh` asserts every one:
+
+- **Ground truth is a command, never a list.** Each row's `gt_command` is executed at the pin and the
+  key derived from its stdout. A frozen list rots invisibly; a command makes "the tree changed" loud.
+- **Non-circularity.** No `gt_command` may *invoke* ripwire — a key produced by the instrument under
+  test is not a key — and such a row is `REFUSED_CIRCULAR`, never scored. The distinction is precise:
+  nine rows of the real bank name `ripwire/src` as a **path argument** to grep/ls, which is fine.
+- **Sealed judgement.** Where a key has a judgement half (every `V` row, and any `E` row whose second
+  half is a classification), the grader takes a `--key` file and `REFUSED_NO_KEY`s without it. It
+  never improvises the judgement half.
+- **Honest partials.** An `accept_rule` is prose. A closed clause grammar scores what it recognises;
+  an unrecognised clause **demotes the verdict to `PARTIAL`** and is printed. A row is never `PASS` on
+  the strength of clauses that were silently skipped.
+
+Verdicts: `PASS` · `FAIL` · `PARTIAL` · `HALLUCINATED` (a named path absent at the pin fails the
+instance outright, on every grader type) · `NO_ANSWER` · `GT_EMPTY` · `REFUSED_*` · `UNSUPPORTED`.
+Hitting a budget cap is **`cap=1`, a flag beside the verdict — censored, not failed**: the answer the
+agent held at cap time is still scored, and a control arm that cannot finish inside the budget is a
+reportable result rather than a token ratio. Exit 3 means at least one row was refused.
+
+**One machine dependency worth knowing.** Several `gt_command`s use `**`, which needs bash 4+;
+macOS ships bash 3.2, where `**` silently matches nothing and the key comes back empty — a false zero
+that looks exactly like a legitimate "no results". The grader probes for a globstar-capable shell once
+and `REFUSED_SHELL`s those rows when none exists, rather than deriving a wrong key.
+
+## Control-arm isolation — all three harnesses, not two
+
+Every harness now builds its own child environment; none inherits the operator's shell. This was not
+true until 2026-08-12: `claude-code-p`, the **default** `--harness`, ran with `child_env = None` and
+inherited `~/.claude` whole — CLAUDE.md, both ripwire hooks, all 18 installed skills, the per-project
+auto-memory. On this project's own machine 81 of the 84 lines of the global CLAUDE.md are a ripwire
+use-when protocol, so the **baseline arm was briefed on the tool it is a control for**, and every such
+run still reported `status=ok`. A contaminated A/B is silent by construction, which is why each
+harness's recipe has a canary gate rather than a code review:
+`test/agentloopclaudecheck.sh`, `test/agentloopopencodecheck.sh`, `test/agentloopcodexcheck.sh`.
+
+`prepare_claude_environment()` gives each run a fresh `CLAUDE_CONFIG_DIR` with only credentials
+symlinked in, and `build_claude_command()` adds `--setting-sources ''` (drops the hook block *and* the
+`env.PATH` that would re-prepend the real `ripwire` after the shim), `--strict-mcp-config` (drops the
+global competitor MCP server and the repo-local `.mcp.json`) and `--disable-slash-commands` on every
+arm except `ripwire_skills`. The meter is pointed at per-run scratch so a benchmark can never append
+to the operator's live substitution telemetry. **Unresolved, and a blocker for the first funded claude
+run:** `--bare` is the cleanest switch but forces `ANTHROPIC_API_KEY` and never reads OAuth — confirm
+with one `--live-one` that OAuth survives a redirected `CLAUDE_CONFIG_DIR` before booking a matrix.
+
 ## Running the Codex CLI pilot
 
 Use the Codex harness for the requested comparison. `--limit` selects repositories round-robin, so the
