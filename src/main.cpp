@@ -909,6 +909,7 @@ extern "C"
     const TSLanguage* tree_sitter_c_sharp( void );
     const TSLanguage* tree_sitter_c( void );
     const TSLanguage* tree_sitter_cuda( void );
+    const TSLanguage* tree_sitter_markdown( void );
 }
 
 // This process's own executable path, realpath'd. macOS uses _NSGetExecutablePath and Linux uses
@@ -1021,6 +1022,29 @@ inline std::string doctorGrammarsHint( int loaded, int expected, const std::stri
 // above) all land on a new symbol instead of runDoctor's own complexity.
 struct DoctorGrammarProbe { int loaded = 0; int expected = 0; std::string failedLabels; };
 
+// The probe for a grammar that ships NO tags.scm (markdown — ingest walks its tree directly): the honest
+// health check is the pairing ingest actually uses, set_language + a real parse of a one-line doc.
+inline bool doctorParseProbe( const TSLanguage* ( *grammar )( void ) )
+{
+    bool      ok = false;
+    TSParser* p  = ts_parser_new();
+    if( p != nullptr )
+    {
+        if( ts_parser_set_language( p, grammar() ) )
+        {
+            static constexpr std::string_view kProbeDoc = "# t\n";
+            TSTree* t = ts_parser_parse_string( p, nullptr, kProbeDoc.data(), std::uint32_t( kProbeDoc.size() ) );
+            if( t != nullptr )
+            {
+                ok = !ts_node_is_null( ts_tree_root_node( t ) );
+                ts_tree_delete( t );
+            }
+        }
+        ts_parser_delete( p );
+    }
+    return ok;
+}
+
 inline DoctorGrammarProbe doctorProbeGrammars()
 {
     struct GEntry { const char* querySub; const TSLanguage* (*grammar)( void ); const char* label; };
@@ -1050,19 +1074,29 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         { "csharp",     &tree_sitter_c_sharp,    "csharp"     },
         { "c",          &tree_sitter_c,          "c"          },
         { "cpp",        &tree_sitter_cuda,       "cuda"       },
+        // markdown carries NO tags.scm — ingest extracts sections by a custom tree walk, so the honest
+        // probe is the pairing ingest actually uses: set_language + a real parse, not a query compile.
+        { nullptr,      &tree_sitter_markdown,   "markdown"   },
     };
     DoctorGrammarProbe out;
     out.expected = int( sizeof( kTable ) / sizeof( kTable[0] ) );
     for( const GEntry& g : kTable )
     {
-        const std::string_view scm = rw::embedded_queries::queryFor( g.querySub );
         bool ok = false;
-        if( !scm.empty() )
+        if( g.querySub == nullptr )
         {
-            std::uint32_t errOff  = 0;
-            TSQueryError  errType = TSQueryErrorNone;
-            TSQuery*      q       = ts_query_new( g.grammar(), scm.data(), static_cast<std::uint32_t>( scm.size() ), &errOff, &errType );
-            if( q ) { ok = true; ts_query_delete( q ); }
+            ok = doctorParseProbe( g.grammar );
+        }
+        else
+        {
+            const std::string_view scm = rw::embedded_queries::queryFor( g.querySub );
+            if( !scm.empty() )
+            {
+                std::uint32_t errOff  = 0;
+                TSQueryError  errType = TSQueryErrorNone;
+                TSQuery*      q       = ts_query_new( g.grammar(), scm.data(), static_cast<std::uint32_t>( scm.size() ), &errOff, &errType );
+                if( q ) { ok = true; ts_query_delete( q ); }
+            }
         }
         if( ok )
         {

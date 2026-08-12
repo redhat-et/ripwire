@@ -88,14 +88,19 @@ scoreOf(){ printf '%s' "$1" | grep -o 's="[0-9.]*" n="'"$2"'"' | grep -o '^s="[0
 Q="compute_widget_total"
 
 # ── (i) signal: routed AND --no-route, boost-on score > boost-off score ────────────────────────────────
+# 2026-08-12 markdown section tier (mdsectioncheck): a `backtick` mention now attributes to its
+# enclosing SECTION, so the lift surfaces the SECTION that discusses the symbol ("Order total
+# design"), not the whole-doc file node ("DESIGN_widgetTotals") — strictly more precise, and exactly
+# the tier's deliver-the-section contract. The row this arm scores moved with it, same wave.
+LIFTED="Order total design"
 ON="$( cands "$Q" )";               OFF="$( cands "$Q" --no-doc-mention )"
-sOn="$( scoreOf "$ON" DESIGN_widgetTotals )"; sOff="$( scoreOf "$OFF" DESIGN_widgetTotals )"
+sOn="$( scoreOf "$ON" "$LIFTED" )"; sOff="$( scoreOf "$OFF" "$LIFTED" )"
 awk -v a="${sOn:-0}" -v b="${sOff:-0}" 'BEGIN{exit !(a>b)}' \
-    && ok "routed: mentioning doc score lifted ($sOn vs $sOff off)" \
-    || no "routed: mentioning doc NOT lifted (on=${sOn:-0} off=${sOff:-0})"
+    && ok "routed: mentioning doc's SECTION score lifted ($sOn vs $sOff off)" \
+    || no "routed: mentioning doc's SECTION NOT lifted (on=${sOn:-0} off=${sOff:-0})"
 
 ONnr="$( cands "$Q" --no-route )";   OFFnr="$( cands "$Q" --no-route --no-doc-mention )"
-sOnNr="$( scoreOf "$ONnr" DESIGN_widgetTotals )"; sOffNr="$( scoreOf "$OFFnr" DESIGN_widgetTotals )"
+sOnNr="$( scoreOf "$ONnr" "$LIFTED" )"; sOffNr="$( scoreOf "$OFFnr" "$LIFTED" )"
 awk -v a="${sOnNr:-0}" -v b="${sOffNr:-0}" 'BEGIN{exit !(a>b)}' \
     && ok "--no-route: mentioning doc score lifted ($sOnNr vs $sOffNr off) — routefix/anchorfix WILL drift, expected" \
     || no "--no-route: mentioning doc NOT lifted (on=${sOnNr:-0} off=${sOffNr:-0})"
@@ -110,9 +115,14 @@ sAnchorOn="$( scoreOf "$ON" compute_widget_total )"; sAnchorOff="$( scoreOf "$OF
 [ -n "$sAnchorOn" ] && [ "$sAnchorOn" = "$sAnchorOff" ] \
     && ok "anchor's own score unaffected by the boost ($sAnchorOn)" \
     || no "anchor's score changed: on=$sAnchorOn off=$sAnchorOff"
+# non-vacuity: sOn is the LIFTED section's real score — a 0 here means the row lookup broke, and
+# 0 < anchor would pass green-while-inert.
+awk -v doc="${sOn:-0}" 'BEGIN{exit !(doc > 0)}' \
+    && ok "lifted section's score is a real (non-zero) reading" \
+    || no "lifted section's score reads 0 — the row lookup is broken, the below-anchor arm would be vacuous"
 awk -v doc="${sOn:-0}" -v anc="${sAnchorOn:-0}" 'BEGIN{exit !(doc < anc)}' \
-    && ok "lifted doc stays strictly below the anchor's own score ($sOn < $sAnchorOn)" \
-    || no "lifted doc ($sOn) did not stay below the anchor ($sAnchorOn)"
+    && ok "lifted section stays strictly below the anchor's own score ($sOn < $sAnchorOn)" \
+    || no "lifted section ($sOn) did not stay below the anchor ($sAnchorOn)"
 top1on="$( printf '%s' "$ON"  | grep -o '<cand r="1" [^>]*n="[^"]*"' )"
 top1off="$( printf '%s' "$OFF" | grep -o '<cand r="1" [^>]*n="[^"]*"' )"
 [ -n "$top1on" ] && [ "$top1on" = "$top1off" ] && ok "top-1 identical boost-on vs boost-off" \

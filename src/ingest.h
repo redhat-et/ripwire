@@ -88,6 +88,24 @@ constexpr std::size_t kMaxYamlConfigBytes = 512u * 1024u;          // 512 KB —
 // (each block level wraps ~4 AST nodes: block_node → block_mapping → pair → flow_node).
 constexpr std::uint32_t kMaxYamlNestDepth = 64u;
 
+// Markdown-lane nesting ceiling (companion prescan: mdNestsTooDeep in ingest.cpp) — MEMORY-SAFETY
+// load-bearing, the yaml posture on a WORSE upstream defect. tree-sitter-markdown's external scanner
+// serialize() memcpys open_blocks.size * sizeof(Block) bytes after a 5-byte header with NO bounds
+// check at all against the 1024-byte serialization buffer: the write goes out of bounds at 255 open
+// blocks. Measured standalone on the vendored v0.5.3 (2026-08-12): 300 nested '>' markers — or 300
+// `- ` list markers on ONE line — abort ts_assert(length <= 1024) (rc=134); under NDEBUG the assert
+// is compiled out and the heap is corrupted SILENTLY. The vendored scanner carries the whole-write
+// clamp (third_party/patches/markdown/001-serialize-bounds.patch, drift-gated by vendorpatchcheck
+// arm H class "upfront"), and this prescan refuses such files BEFORE any parse — two independent
+// layers, exactly the yaml pair.
+// The prescan over-approximates the scanner's open-blocks stack per line: one slot per blockquote
+// '>' marker, one per list marker (`-`/`*`/`+`/`N.`/`N)` — CommonMark nests a new list per marker,
+// so `- - - x` on one line opens three), plus leading indent width / 2 (a nested list level costs
+// ~2 columns of indent, so indentation alone can hold that many open blocks across lines). 200 is
+// ~25% under the 255-slot cliff and far above real prose: a thematic break is 3 markers, the
+// deepest real nesting in this repo's own docs is 4.
+constexpr std::uint32_t kMaxMdBlockDepth = 200u;
+
 // The crawl's default directory denylist (a .gitignore-lite): noise/vendor/build subtrees pruned entirely.
 // Shared, not private to ingest.cpp, because a second crawler now exists — darkflags.h walks for CMake files,
 // which ingest deliberately never collects (CMake is not one of the indexed grammars) — and a crawl that

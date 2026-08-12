@@ -1,0 +1,22 @@
+diff --git a/third_party/deps/markdown/src/scanner.c b/third_party/deps/markdown/src/scanner.c
+--- a/third_party/deps/markdown/src/scanner.c
++++ b/third_party/deps/markdown/src/scanner.c
+@@ -244,6 +244,18 @@
+     buffer[size++] = (char)s->column;
+     buffer[size++] = (char)s->fenced_code_block_delimiter_length;
+     size_t blocks_count = s->open_blocks.size;
++    // RIPWIRE_VENDOR_PATCH(markdown/001-serialize-bounds): upstream memcpys
++    // blocks_count * sizeof(Block) bytes with NO bounds check against the runtime's
++    // fixed serialization buffer (TREE_SITTER_SERIALIZATION_BUFFER_SIZE = 1024): with
++    // the 5-byte header the write goes out of bounds at 255 open blocks (~255 nested
++    // blockquotes/lists) — ts_assert catches it only in non-NDEBUG builds; a release
++    // build corrupts the heap silently. Clamp the whole write UP FRONT to what fits;
++    // same truncation-on-overflow semantics the yaml patch (001-serialize-bounds)
++    // established for this defect class.
++    size_t max_blocks = (TREE_SITTER_SERIALIZATION_BUFFER_SIZE - size) / sizeof(Block);
++    if (blocks_count > max_blocks) {
++        blocks_count = max_blocks;
++    }
+     if (blocks_count > 0) {
+         memcpy(&buffer[size], s->open_blocks.items,
+                blocks_count * sizeof(Block));
