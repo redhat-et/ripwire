@@ -200,8 +200,9 @@ inline std::string_view escapeXml( std::string_view s, std::vector<char>& out )
 // `git grep -c 'xmlCommentText(' -- src/` (excluding this definition) and FAILS if it disagrees with the
 // count on the CALL-SITES line below, so the next divergence is a red gate rather than a stale sentence.
 //
-//   CALL-SITES: 11
-//     main.cpp     --for task echo · --exemplar request note · --query route note       (3)
+//   CALL-SITES: 12
+//     main.cpp     --for task echo · --exemplar request note · --query route note
+//                  · --run-trace command echo (runTraceLegendComment)                   (4)
 //     packtask.h   task · mention · co-change-boost · doc-mention notes                 (4)
 //     mcpverbs.h   for/pack-task task · exemplar request note                           (2)
 //     tracelocus.h --from-trace src note                                                (1)

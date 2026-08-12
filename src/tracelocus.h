@@ -378,6 +378,12 @@ struct FromTraceInputs
     // Until then the net is held by test/fixedbufsweep.sh's population sweep, not by the compiler.
     RedactCounts*                      redact = nullptr;
     const notes::NoteIndex*            notes  = nullptr;
+    // VT-1 (--run-trace): pre-rendered XML the caller wants INSIDE the bundle, immediately after the header
+    // comment and before <trace> — the exec verb's <run> record + <lines> view ride here so the run report
+    // and the mapping stay ONE document under ONE budget ledger (the prelude's bytes are charged against the
+    // sigs budget exactly like the header's). Empty (the default, every existing caller) ⇒ byte-identical
+    // output — the G5 inertness contract.
+    std::string_view                   preludeXml;
 };
 
 struct FromTraceResult
@@ -516,11 +522,15 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
     std::string       headerStr = buildTraceHeader( /*withSrcEcho=*/true, {} );
     const std::string traceStr  = renderTraceBlock( ing, dominant, srcNote, part );
 
-    const std::size_t fixedBytes   = headerStr.size() + traceStr.size() + 6;   // + "</ctx>"
+    // VT-1: the caller's prelude (--run-trace's <run> + <lines>) is fixed bytes exactly like the header and
+    // the trace block — charged against the same ledger, so the sigs/bodies section shrinks to make room
+    // rather than the document silently outgrowing its budget.
+    const std::size_t fixedBytes   = headerStr.size() + in.preludeXml.size() + traceStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget   = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
 
     std::string whole;
     whole += headerStr;
+    whole += in.preludeXml;
     whole += traceStr;
     if( !part.suspects.empty() )
     {

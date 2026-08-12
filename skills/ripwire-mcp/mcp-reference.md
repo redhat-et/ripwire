@@ -94,6 +94,16 @@ curl -s -X POST http://127.0.0.1:8765/mcp -H 'Content-Type: application/json' \
   (tree-wide); a `fetch_body` refusal tells you ONE handle's file moved (symbol-scoped) — check `_index`
   when deciding whether to re-run a broad query, check a handle's own staleness when deciding whether to
   re-fetch one body.
+- **`_reingest` tells you what that rebuild COST** — a second envelope sibling, present only on a response
+  whose handling actually brought an existing index up to date: `"_reingest":3` means the pass re-extracted
+  3 files. It is a count, so the three states stay distinct. **Absent** — no incremental pass ran (the warm
+  index answered as-is, or this was the server's first build of that root; an initial build is not an
+  incremental pass). **`0`** — a pass ran and re-extracted nothing: something moved an mtime, or a file was
+  deleted, but no surviving file's content changed. **`N`** — a pass ran and re-extracted exactly N files.
+  The number tracks the DRIFT your session caused, not the tree size: one edit costs one file whatever the
+  corpus, which is what makes "the server rebuilds warm" checkable instead of merely claimed. Deliberately
+  NOT a fact about the tree — two servers at the identical tree state legitimately disagree on it — so never
+  diff it across calls the way you would diff `_index`.
 - **Working-set personalization (Cody-style)**: the PageRank prior is teleport-biased toward files with
   **uncommitted changes** (`git diff --name-only HEAD`) — β=0.7 of the mass on changed-file symbols, same
   weighting `--map-diff` uses. Ranks auto-shift toward what you're actively editing; a clean tree or a
