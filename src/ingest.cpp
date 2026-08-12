@@ -9663,6 +9663,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             }
         }
 
+        // P1-15: the SAME drift count, carried out of the function instead of only to stderr. The MCP
+        // server discloses it per incremental pass (`_reingest`), which it could not do from an env-gated
+        // print. Read once here, after the pool join that orders every worker's increment.
+        result.reparsedFiles = reparsedCount.load( std::memory_order_relaxed );
+
         // A1 (team-index) — drift-proportional observable: report how many files re-parsed vs reused,
         // ONLY when RIPWIRE_CACHE_STATS is set (off by default → no stdout/stderr perturbation on any
         // normal run or gate). A warm restore over a tree with N-of-F files changed prints reparsed=N,
