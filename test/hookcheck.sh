@@ -658,9 +658,161 @@ if [ -f "$REPORT" ]; then
     grep -qiE 'bigram|n-gram|ngram' "$TMP/report.out" \
         && ok "M27b meter: the report prints within-session command-class n-grams (scenario bundles)" \
         || no "M27b meter: the report has no n-gram section"
+fi
+
+# ── T1-T11: §5 terminality by verb, pinned on a SYNTHETIC fixture log  (Track T item T0) ────────────
+#
+# WHY A FIXTURE AND NOT THE GATE'S OWN SINK. Every other meter arm here asserts a property of the
+# HOOK, so the hook's own output is the right input. §5 is an ANALYSIS, and an analysis is gated by
+# feeding it data whose right answer is known by construction — the sink's contents change with every
+# arm anyone adds above, so an assertion against it could only ever be "it did not crash".
+#
+# The fixture below encodes, by hand, one instance of each thing the metric has to get right:
+#
+#   - a TERMINAL --for (t-a: the follow-ups are build/git-misc/shell-misc, none of them a sweep);
+#   - a NON-TERMINAL --for followed by THREE greps (t-b), so the follow-up recorded is the FIRST one;
+#   - a window truncated by the NEXT RIPWIRE CALL (t-a seq4) and by SESSION END (t-a seq6, t-d seq7,
+#     t-e seq1) — the empty-window disclosure counts exactly those;
+#   - the k=5 EDGE, twice and from both sides (t-f, t-g): five non-sweep calls then a grep is TERMINAL
+#     because the grep is out of the window; four then a grep is not. An off-by-one in either
+#     direction reds exactly one of that pair, which is the point of gating the edge rather than the
+#     middle;
+#   - a git-history follow-up (t-b seq8), which counts as a sweep here though it is outside §1's ratio;
+#   - an n<10 verb (--grep, n=3) carrying its NOTE row, and an n>=10 verb (--for, n=12) carrying none;
+#   - an MCP row, whose verb comes from the tool name rather than from a command line;
+#   - the flagless map behind a `cd` prefix and ahead of a pipeline (t-e) — `| grep -n --color foo`
+#     must NOT be read as the verb `--color`.
+#
+# The assertions are on the space-SQUEEZED table rows, so they pin every value the table states while
+# leaving column widths free to be laid out for a reader.
+TERMLOG="$TMP/terminality.jsonl"
+termrow()
+{
+    # termrow SEQ SESSION TOOL CLASS FAMILY DETAIL
+    printf '{"v":2,"ts":"2026-08-12T00:00:00Z","seq":%s,"session":"%s","repo":"/x/repo","tag":"repo","tool":"%s","class":"%s","family":"%s","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"%s"}\n' \
+        "$1" "$2" "$3" "$4" "$5" "$6" >>"$TERMLOG"
+}
+termrip() { termrow "$1" "$2" Bash ripwire-cli ripwire "$3"; }
+termbuild() { termrow "$1" "$2" Bash build other 'cmake --build build -j'; }
+termgrep() { termrow "$1" "$2" Grep grep native 'needle'; }
+termread() { termrow "$1" "$2" Read read native '/x/repo/a.cpp'; }
+
+: >"$TERMLOG"
+# t-a — three TERMINAL --for: non-sweep follow-ups, then a window ended by the next ripwire call, then
+#       a window ended by the session.
+termrip  1 t-a './build/ripwire . --for=alpha'
+termbuild 2 t-a
+termrow  3 t-a Bash git-misc git 'git status'
+termrip  4 t-a './build/ripwire . --for=beta'
+termrow  5 t-a Bash shell-misc other 'ls -la docs/'
+termrip  6 t-a './build/ripwire . --for=gamma'
+# t-b — the sweep case: --for then THREE greps (first one is the recorded follow-up), --for then one
+#       grep, --for then a git-history call.
+termrip  1 t-b 'cd /x/repo && ./build/ripwire . --for=delta'
+termgrep 2 t-b; termgrep 3 t-b; termgrep 4 t-b
+termrip  5 t-b './build/ripwire . --for=epsilon --top-k=3'
+termgrep 6 t-b
+termrip  7 t-b './build/ripwire . --for=zeta'
+termrow  8 t-b Bash git-log git 'git log --oneline -20'
+# t-c — the --grep verb (n<10, two read follow-ups) and the MCP verb.
+termrip  1 t-c './build/ripwire . --grep=needle'
+termread 2 t-c
+termrip  3 t-c './build/ripwire . --grep=needle'
+termread 4 t-c
+termrip  5 t-c './build/ripwire . --grep=needle'
+termbuild 6 t-c
+termrow  7 t-c mcp__ripwire__for ripwire-mcp ripwire 'rank the parser'
+termbuild 8 t-c
+termrow  9 t-c mcp__ripwire__for ripwire-mcp ripwire 'rank the ranker'
+# t-d — four more TERMINAL --for, which is what lifts --for over the small-n floor.
+termrip  1 t-d './build/ripwire . --for=iota'
+termbuild 2 t-d
+termrip  3 t-d './build/ripwire . --for=kappa'
+termrow  4 t-d Bash shell-misc other 'ls -la'
+termrip  5 t-d './build/ripwire . --for=lambda'
+termrow  6 t-d Bash git-misc git 'git status'
+termrip  7 t-d './build/ripwire . --for=mu'
+# t-e — the flagless map, behind a cd prefix, ahead of a pipeline carrying flags of its own.
+termrip  1 t-e 'cd /x/repo && ./build/ripwire . > /tmp/a 2>&1 | grep -n --color foo'
+# t-f/t-g — the k=5 window edge, from both sides. FIVE non-sweep calls put the grep out of the window
+#           (terminal); FOUR leave it inside (not terminal).
+termrip  1 t-f './build/ripwire . --for=nu'
+termbuild 2 t-f; termbuild 3 t-f; termbuild 4 t-f; termbuild 5 t-f; termbuild 6 t-f
+termgrep 7 t-f
+termrip  1 t-g './build/ripwire . --for=xi'
+termbuild 2 t-g; termbuild 3 t-g; termbuild 4 t-g; termbuild 5 t-g
+termgrep 6 t-g
+
+if [ -f "$REPORT" ]; then
+    python3 "$REPORT" "$TERMLOG" >"$TMP/term.out" 2>&1; RCT=$?
+    tr -s ' ' <"$TMP/term.out" >"$TMP/term.sq"
+    echo "-- substitution_report.py §5 on the terminality fixture --"
+    sed -n '/^5\./,$p' "$TMP/term.out"
+    termhas()
+    {
+        # termhas ARMID EXPECTED-SQUEEZED-LINE DESCRIPTION
+        grep -Fqx " $2" "$TMP/term.sq" \
+            && ok "$1 terminality: $3" \
+            || no "$1 terminality: expected the row [$2] — see $TMP/term.out"
+    }
+    [ "$RCT" -eq 0 ] && grep -qi 'terminality by verb' "$TMP/term.out" \
+        && ok "T1 terminality: the report prints a §5 terminality-by-verb section" \
+        || no "T1 terminality: exit=$RCT and/or no §5 section — see $TMP/term.out"
+    # The definitions travel WITH the number: a terminality % read without its window rule is a
+    # number somebody quotes wrong, so the header is gated, not left to the docs.
+    grep -q 'up to the next ripwire call, the session end' "$TMP/term.out" \
+        && grep -q 'or 5 calls' "$TMP/term.out" \
+        && grep -q 'sweep = find git-diff git-log git-show-stat glob grep read' "$TMP/term.out" \
+        && ok "T2 terminality: §5 states its window and its sweep set above the table" \
+        || no "T2 terminality: §5 does not state the window/sweep definitions — see $TMP/term.out"
+    termhas T3  "--for 12 66.7% grep (3)"     "--for: 12 calls, 8 terminal, first follow-up grep x3"
+    termhas T4  "--grep 3 33.3% read (2)"     "--grep: 3 calls, 1 terminal, read x2"
+    termhas T5  "mcp:for 2 100.0% (none)"     "an MCP row takes its verb from the tool name"
+    termhas T6  "(map) 1 100.0% (none)"       "a flagless run behind cd, ahead of a pipeline, is the map"
+    termhas T7  "(all) 18 66.7% grep (3)"     "the (all) row totals every verb"
+    termhas T8  "empty windows: 4 of 18 -- the next observed call was another ripwire call, or the" \
+                "the empty-window count is disclosed, not folded in silently"
+    # n<10 gets a NOTE; n>=10 does not. Three verbs are under the floor (--grep, mcp:for, (map)); --for
+    # and (all) are over it. A NOTE on every row would be as useless as a NOTE on none.
+    NOTES="$( grep -c 'NOTE: n=. (<10)' "$TMP/term.sq" )"; [ -n "$NOTES" ] || NOTES=0
+    [ "$NOTES" -eq 3 ] \
+        && ok "T9 terminality: exactly the three n<10 verbs carry a small-n NOTE row" \
+        || no "T9 terminality: $NOTES NOTE row(s), expected 3 — see $TMP/term.out"
+    # The k=5 edge, asserted as the PAIR. One arm alone passes under an off-by-one in one direction.
+    : >"$TMP/term_f.jsonl"; grep -F '"t-f"' "$TERMLOG" >"$TMP/term_f.jsonl"
+    : >"$TMP/term_g.jsonl"; grep -F '"t-g"' "$TERMLOG" >"$TMP/term_g.jsonl"
+    python3 "$REPORT" "$TMP/term_f.jsonl" 2>&1 | tr -s ' ' | grep -Fqx " --for 1 100.0% (none)" \
+        && python3 "$REPORT" "$TMP/term_g.jsonl" 2>&1 | tr -s ' ' | grep -Fqx " --for 1 0.0% grep (1)" \
+        && ok "T10 terminality: the k=5 window edge holds from both sides (5 calls out, 4 calls in)" \
+        || no "T10 terminality: the window edge is off by one — see $TMP/term_f.jsonl / $TMP/term_g.jsonl"
+    python3 "$REPORT" "$TERMLOG" >"$TMP/term2.out" 2>&1
+    cmp -s "$TMP/term.out" "$TMP/term2.out" \
+        && ok "T11 terminality: two runs over the same log are byte-identical (ties broken by name)" \
+        || no "T11 terminality: the report is not deterministic — diff $TMP/term.out $TMP/term2.out"
+    # T12: the 200-character `detail` cap, which a REAL log hit on its first reading. A line cut
+    # mid-flag must not be filed under the prefix that survived — `--qualit` counted apart from
+    # `--quality-delta` splits one verb's n across two rows and understates both. Cut before any flag
+    # is a different unknown again: the verb may be one character past the cap.
+    TRUNCLOG="$TMP/term_trunc.jsonl"; : >"$TRUNCLOG"
+    TERMLOG_MAIN="$TERMLOG"; TERMLOG="$TRUNCLOG"
+    THEAD='cd /x/'
+    TCUT=0
+    for TTAIL in ' && ./build/ripwire . --qualit' ' && ./build/ripwire /x/repo/src'; do
+        TCUT=$(( TCUT + 1 ))
+        # exactly 200 characters: the cap, reached mid-flag on the first line and mid-path on the second
+        TPAD="$( printf '%*s' "$(( 200 - ${#THEAD} - ${#TTAIL} ))" '' | tr ' ' 'a' )"
+        termrip 1 "t-cut$TCUT" "${THEAD}${TPAD}${TTAIL}"
+    done
+    TERMLOG="$TERMLOG_MAIN"
+    python3 "$REPORT" "$TRUNCLOG" 2>&1 | tr -s ' ' >"$TMP/trunc.sq"
+    grep -Fqx " --qualit... 1 100.0% (none)" "$TMP/trunc.sq" \
+        && grep -Fqx " (truncated) 1 100.0% (none)" "$TMP/trunc.sq" \
+        && ok "T12 terminality: a detail cut at the 200-char cap is labelled truncated, never filed under the surviving prefix" \
+        || no "T12 terminality: the truncation labels are wrong — see $TRUNCLOG and $TMP/trunc.sq"
 else
     no "M26 meter: bench/substitution_report.py does not exist"
     no "M27b meter: bench/substitution_report.py does not exist"
+    no "T1 terminality: bench/substitution_report.py does not exist"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
