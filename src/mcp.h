@@ -193,6 +193,52 @@ inline std::string mcpCanonRoot( const std::string& root )
     return root;
 }
 
+// R2a: resolve the launch cwd as the bare stdio server's assumed root — see McpDispatchPolicy::
+// assumedRoot for the contract. Guarded here, once: "/" and $HOME itself are nobody's workspace (a
+// crawl of either is a mistake, not a smart default), and a getcwd failure degrades to "" — the
+// pre-R2a missing-path refusal, never a guess.
+inline std::string mcpResolveAssumedRoot()
+{
+    char cwdBuf[ PATH_MAX ];
+    if( ::getcwd( cwdBuf, sizeof( cwdBuf ) ) == nullptr )
+    {
+        return {};
+    }
+    const std::string launchCwd = mcpCanonRoot( cwdBuf );
+    const char* const homeEnv   = std::getenv( "HOME" );
+    const std::string homeCanon = homeEnv ? mcpCanonRoot( homeEnv ) : std::string{};
+    if( launchCwd == "/" || ( !homeCanon.empty() && launchCwd == homeCanon ) )
+    {
+        return {};
+    }
+    return launchCwd;
+}
+
+// R2a: rebind an OMITTED `path` to the assumed root (the softest tier — a pre-composed refusal, both
+// harder root tiers, and an explicit path all take precedence). Returns the disclosure sentence for the
+// result envelope's `_assumed_root` sibling, or "" when nothing was assumed — the honesty rule: an
+// assumed answer says it assumed.
+inline std::string mcpAssumeRootIfOmitted( const McpDispatchPolicy& policy, std::string& path, bool priorRefusal )
+{
+    if( priorRefusal || !policy.pinnedRoot.empty() || !policy.defaultRoot.empty() || policy.assumedRoot.empty() || !path.empty() )
+    {
+        return {};
+    }
+    path = policy.assumedRoot;
+    return "[assumed root: " + policy.assumedRoot + " — no path was given, so this answer is about the server's launch directory; pass path= to ask about another tree]";
+}
+
+// R2a: the `_assumed_root` envelope-sibling fragment (the mcpReingestField shape): "" when nothing was
+// assumed, else the JSON field ready to splice — keeps the ternary out of the response assembly.
+inline std::string mcpAssumedRootField( const std::string& note )
+{
+    if( note.empty() )
+    {
+        return {};
+    }
+    return ",\"_assumed_root\":\"" + mcpdetail::jsonEscape( note ) + "\"";
+}
+
 // is `candidatePath` the workspace root itself, or STRICTLY inside it — a path-COMPONENT prefix, so a
 // sibling directory that merely shares a text prefix (root "/repo" vs candidate "/repo-foo") never matches.
 // `canonRoot` must already be canonicalized (mcpCanonRoot); `candidatePath` is canonicalized here so callers
@@ -729,14 +775,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // stamp FIRST, then the pass count: on a verb that never touched the index, building the
                 // stamp is what forces the rebuild, and one `+` chain would not sequence those two reads.
                 const std::string stamp = indexStamp( path );
-                // R2a: `_assumed_root` — a third envelope sibling, emitted ONLY when the request omitted
-                // `path` and the launch-cwd default answered (honesty rule: an assumed answer says it assumed).
-                const std::string assumed = assumedRootNote.empty()
-                                          ? std::string{}
-                                          : ",\"_assumed_root\":\"" + mcpdetail::jsonEscape( assumedRootNote ) + "\"";
+                // R2a: `_assumed_root` — a third envelope sibling (mcpAssumedRootField), emitted ONLY when
+                // the request omitted `path` and the launch-cwd default answered.
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( text ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
-                     + "\"" + mcpReingestField( passesAtEntry ) + assumed + "}}";
+                     + "\"" + mcpReingestField( passesAtEntry ) + mcpAssumedRootField( assumedRootNote ) + "}}";
             };
             const auto errResult = [ & ]( int code, const char* msg )
             { return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + msg + "\"}}"; };
@@ -861,21 +904,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
             }
 
-            // ── R2a: the launch-cwd assumed root (the 2026-08-12 usage mine) ────────────────────────────────
-            // The softest tier, and the dominant-failure fix: a bare `--mcp` server (no startup root, no
-            // pinned workspace — the shipped `ripwire wrap` install) used to refuse every omitted `path`.
-            // It now answers about the directory it was launched in, and SAYS SO: assumedRootNote rides the
-            // result envelope as `_assumed_root` (the `_index` precedent — an envelope sibling can never
-            // corrupt a verb's own JSON/XML payload). Fires only when `path` was omitted outright; an
-            // explicit path, a `paths` workspace, defaultRoot and pinnedRoot all take precedence, and the
-            // startup guard (mcp.h::runMcp) never assumes "/" or $HOME, so those launches keep the explicit
-            // missing-path refusal unchanged.
-            if( !pathsUsageError && policy.pinnedRoot.empty() && policy.defaultRoot.empty()
-                && !policy.assumedRoot.empty() && path.empty() )
-            {
-                path            = policy.assumedRoot;
-                assumedRootNote = "[assumed root: " + policy.assumedRoot + " — no path was given, so this answer is about the server's launch directory; pass path= to ask about another tree]";
-            }
+            // ── R2a (the 2026-08-12 usage mine): a bare server's omitted `path` rebinds to the launch cwd,
+            // disclosed via textResult's `_assumed_root` sibling — precedence + guards live in
+            // mcpAssumeRootIfOmitted / mcpResolveAssumedRoot, the full contract on McpDispatchPolicy.
+            assumedRootNote = mcpAssumeRootIfOmitted( policy, path, pathsUsageError );
 
             // ── §B6 M3: does `path` name a readable DIRECTORY? ONE check, every verb, before dispatch ───────
             //
@@ -1515,22 +1547,11 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
     policy.defaultRoot = defaultRoot;   // "" unless a startup root was given — see the comment above
 
     // R2a (the 2026-08-12 usage mine): with NO startup root, resolve the launch cwd ONCE as the softest
-    // default — see McpDispatchPolicy::assumedRoot for the full contract. Guarded: "/" and $HOME itself
-    // are nobody's workspace (a crawl of either is a mistake, not a smart default), so those launches
-    // keep the pre-R2a missing-path refusal. getcwd failure degrades to the same refusal — never a guess.
+    // default — see McpDispatchPolicy::assumedRoot for the full contract and mcpResolveAssumedRoot for
+    // the guards ("/" and $HOME are nobody's workspace; getcwd failure degrades to the refusal).
     if( defaultRoot.empty() )
     {
-        char cwdBuf[ PATH_MAX ];
-        if( ::getcwd( cwdBuf, sizeof( cwdBuf ) ) != nullptr )
-        {
-            const std::string launchCwd = mcpCanonRoot( cwdBuf );
-            const char* const homeEnv   = std::getenv( "HOME" );
-            const std::string homeCanon = homeEnv ? mcpCanonRoot( homeEnv ) : std::string{};
-            if( launchCwd != "/" && ( homeCanon.empty() || launchCwd != homeCanon ) )
-            {
-                policy.assumedRoot = launchCwd;
-            }
-        }
+        policy.assumedRoot = mcpResolveAssumedRoot();
     }
 
     // R4: readByteSafeLine, NOT std::getline( std::cin, ... ) — libc++'s getline narrows int_type→char on
