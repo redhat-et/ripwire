@@ -504,14 +504,57 @@ case "$( c_inner_text "$TMP/d4d_out" )" in
     && ok "(D-4d) a genuinely unknown tool name is refused as an UNKNOWN TOOL, naming it" \
     || no "(D-4d) unexpected: $( c_inner_text "$TMP/d4d_out" )"
 
-# --- (D-5) pre-X7 behavior unchanged: bare '--mcp' (no startup root) still requires 'path' -------
-mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"symbol":"perimeter"}}}' >"$TMP/d5_out"
+# --- (D-5) R2a (the 2026-08-12 usage mine): bare '--mcp' ASSUMES its launch cwd when 'path' is omitted,
+#     and DISCLOSES the assumption in the envelope. A missing 'path' was the dominant measured MCP failure;
+#     the server always had a root — the directory its host launched it in. Guarded: a launch from "/"
+#     keeps the pre-R2a refusal (D-5c), so "cannot supply a root" still means what it says.
+( cd "$FIX" && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"symbol":"perimeter"}}}' \
+    | "$BIN" --mcp 2>/dev/null ) >"$TMP/d5_out"
 case "$( c_inner_text "$TMP/d5_out" )" in
-    "__ERROR__:missing required field: path"*) d5=ok;; *) d5=no;; esac
+    '{"symbol":{"name":"perimeter"'*) d5=ok;; *) d5=no;; esac
 [ "$d5" = ok ] \
-    && ok "(D-5) bare '--mcp' with no startup root still requires an explicit 'path' (pre-X7 behavior preserved)" \
+    && ok "(D-5) bare '--mcp' with omitted 'path' answers about the launch cwd (the dominant failure is a success)" \
     || no "(D-5) unexpected: $( c_inner_text "$TMP/d5_out" )"
+
+# (D-5b) the assumption is disclosed: the result envelope carries _assumed_root naming the launch cwd
+tail -1 "$TMP/d5_out" | python3 -c '
+import sys, json, os
+r = json.load( sys.stdin )
+a = r.get( "result", {} ).get( "_assumed_root", "" )
+want = os.path.realpath( sys.argv[1] )
+print( "OK" if ( "assumed root" in a and want in a and "pass path=" in a ) else "BAD:" + a )' "$FIX" >"$TMP/d5b_res"
+[ "$( cat "$TMP/d5b_res" )" = OK ] \
+    && ok "(D-5b) the assumed root is DISCLOSED in the envelope (_assumed_root names the cwd + the override)" \
+    || no "(D-5b) no/wrong disclosure: $( cat "$TMP/d5b_res" )"
+
+# (D-5b2) an EXPLICIT path never carries the disclosure (nothing was assumed)
+( cd "$FIX" && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$FIX\",\"symbol\":\"perimeter\"}}}" \
+    | "$BIN" --mcp 2>/dev/null ) | tail -1 | grep -q '_assumed_root' \
+    && no "(D-5b2) an explicit 'path' still carries _assumed_root (false disclosure)" \
+    || ok "(D-5b2) an explicit 'path' carries no _assumed_root (disclosure only when assumed)"
+
+# (D-5c) the guard: a server launched from "/" cannot assume a root — the explicit refusal is preserved
+( cd / && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"symbol":"perimeter"}}}' \
+    | "$BIN" --mcp 2>/dev/null ) >"$TMP/d5c_out"
+case "$( c_inner_text "$TMP/d5c_out" )" in
+    "__ERROR__:missing required field: path"*) d5c=ok;; *) d5c=no;; esac
+[ "$d5c" = ok ] \
+    && ok "(D-5c) a launch from '/' keeps the explicit missing-path refusal (the guard holds)" \
+    || no "(D-5c) unexpected: $( c_inner_text "$TMP/d5c_out" )"
+
+# (D-5d) with 'path' defaulted, the verb-specific missing field finally surfaces (was masked by the path
+#        refusal): grep with neither path nor pattern names PATTERN, with the table's needs + example
+( cd "$FIX" && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{}}}' \
+    | "$BIN" --mcp 2>/dev/null ) >"$TMP/d5d_out"
+case "$( c_inner_text "$TMP/d5d_out" )" in
+    "__ERROR__:missing required field: pattern"*'e.g. pattern='*) d5d=ok;; *) d5d=no;; esac
+[ "$d5d" = ok ] \
+    && ok "(D-5d) with the root assumed, grep{} is refused for PATTERN (the actionable field), with an example" \
+    || no "(D-5d) unexpected: $( c_inner_text "$TMP/d5d_out" )"
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
