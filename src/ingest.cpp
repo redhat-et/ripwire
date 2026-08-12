@@ -1217,7 +1217,26 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 61;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 62;           // bump on any grammar/.scm/extraction change
+                                                      // 62 (2026-08-12 module-constant round, test/moduleconstcheck.sh):
+                                                      //    C/C++ const-qualified module constants index CASE-BLIND —
+                                                      //    a const/constexpr/constinit type_qualifier on an INITIALIZED
+                                                      //    module-scope declaration keeps the binding regardless of
+                                                      //    name case (declarationCarriesConstQualifier; previously the
+                                                      //    r3 q10 SCREAMING-only gate dropped every k-camel constant,
+                                                      //    which made this repo's own kParserVer unfindable by its own
+                                                      //    --for/--uses — the 2026-08-12 census's 21.4% constant-shaped
+                                                      //    lookup family). queries/cpp/tags.scm also gains the
+                                                      //    class-static field_declaration capture (static + const
+                                                      //    qualifier + in-class initializer, fieldConstantCaptureKept —
+                                                      //    NO class-static constant was indexed before, even SCREAMING).
+                                                      //    The extracted SET grows on any C/C++-bearing tree (this repo:
+                                                      //    src/ +~350 rows), so v61 blobs miss rows -> reject.
+                                                      //    Deferred with probe evidence (2026-08-12): enumerators
+                                                      //    (corpus blow-up: >=5000 capture-cap hits on a 2 377-file private ObjC++/C++ validation tree),
+                                                      //    TS/JS non-SCREAMING top-level consts (r3 q10 pinned policy,
+                                                      //    constcheck arm 3), variable templates, `T* const` pointer
+                                                      //    constants, out-of-line static-member definitions.
                                                       // 61 (2026-08-11 YAML config-key tier): .yml/.yaml indexed for
                                                       //    the first time — mapping keys at mdepth<=2 (sequences
                                                       //    transparent) become t="sec" symbols via queries/yaml/
@@ -5529,6 +5548,44 @@ inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexce
     return false;
 }
 
+// The one direct-child token scanner behind the three qualifier tests below (CUDA memory-space,
+// const evidence, static storage). Filters `node`'s DIRECT children to named `namedChildType` nodes
+// — plus, when acceptAnonymousToken, anonymous token children (the CUDA `__device__` shape, which
+// tree-sitter-cuda parses as an anonymous child; see cudaMemorySpaceQualifierOf's contract note) —
+// and returns the first child whose source text is one of `tokens` ("" = none).
+inline std::string_view childTokenAmong( TSNode node, std::string_view src, const char* namedChildType, bool acceptAnonymousToken, std::initializer_list<std::string_view> tokens ) noexcept
+{
+    const std::uint32_t childCount = ts_node_child_count( node );
+    for( std::uint32_t childIx = 0; childIx < childCount; ++childIx )
+    {
+        const TSNode child   = ts_node_child( node, childIx );
+        const bool   isNamed = ts_node_is_named( child );
+        if( isNamed && std::strcmp( ts_node_type( child ), namedChildType ) != 0 )
+        {
+            continue;
+        }
+        if( !isNamed && !acceptAnonymousToken )
+        {
+            continue;
+        }
+        const std::uint32_t beginByte = ts_node_start_byte( child );
+        const std::uint32_t endByte   = ts_node_end_byte( child );
+        if( endByte > src.size() || beginByte >= endByte )
+        {
+            continue;
+        }
+        const std::string_view text = src.substr( beginByte, endByte - beginByte );
+        for( const std::string_view token : tokens )
+        {
+            if( text == token )
+            {
+                return text;
+            }
+        }
+    }
+    return {};
+}
+
 // CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
 // patterns in queries/cpp/tags.scm are STRUCTURAL and unconstrained on purpose — that query also
 // compiles against tree-sitter-cpp (.cpp/.h/.metal), which has no `__constant__` token, so naming it
@@ -5548,28 +5605,38 @@ inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexce
 // started from, never the PATH-installed ripwire, which can predate the r3 q10 patterns entirely.)
 inline std::string_view cudaMemorySpaceQualifierOf( TSNode declNode, std::string_view src ) noexcept
 {
-    const std::uint32_t childCount = ts_node_child_count( declNode );
-    for( std::uint32_t childIx = 0; childIx < childCount; ++childIx )
-    {
-        const TSNode child   = ts_node_child( declNode, childIx );
-        const bool   isNamed = ts_node_is_named( child );
-        if( isNamed && std::strcmp( ts_node_type( child ), "type_qualifier" ) != 0 )
-        {
-            continue;
-        }
-        const std::uint32_t beginByte = ts_node_start_byte( child );
-        const std::uint32_t endByte   = ts_node_end_byte( child );
-        if( endByte > src.size() || beginByte >= endByte )
-        {
-            continue;
-        }
-        const std::string_view text = src.substr( beginByte, endByte - beginByte );
-        if( text == "__constant__" || text == "__device__" || text == "__managed__" )
-        {
-            return text;
-        }
-    }
-    return {};
+    return childTokenAmong( declNode, src, "type_qualifier", /*acceptAnonymousToken=*/true, { "__constant__", "__device__", "__managed__" } );
+}
+
+// Does this C-family declaration (or field_declaration) carry const evidence — a `const` /
+// `constexpr` / `constinit` type_qualifier as a DIRECT child? The keyword, not the name case, is
+// what marks a deliberate module constant (the Rust const_item rationale, already applied to CUDA
+// `__constant__` above), and it is what the 2026-08-12 census said agents actually hunt: 613 of
+// 2 870 symbol-name lookups were constant-shaped, and this repo's own `constexpr std::uint32_t
+// kParserVer` was invisible to its own `--for`/`--uses` because the r3 q10 gate is SCREAMING-only.
+// Direct children only, on purpose: a declaration-level qualifier (`const char* k = …`, east-const
+// `int const k = …`, `static const int k = …`) is the module-constant shape; a qualifier nested
+// inside a pointer_declarator (`char* const k = …`, a const POINTER) stays outside this test and
+// keeps the old SCREAMING-only behavior — a disclosed boundary, not a silent miss. `consteval` is
+// function-only and cannot appear here; `volatile`/`restrict`/`_Atomic` are not const evidence.
+inline bool declarationCarriesConstQualifier( TSNode declNode, std::string_view src ) noexcept
+{
+    return !childTokenAmong( declNode, src, "type_qualifier", /*acceptAnonymousToken=*/false, { "const", "constexpr", "constinit" } ).empty();
+}
+
+// The keep decision for the class-static-constant field_declaration captures (queries/cpp/tags.scm,
+// module-constant round). The pattern is deliberately loose — it matches EVERY default-member-
+// initializer, because tags-pass predicates never run and static/constexpr child order is free — so
+// this is where the real contract lives: keep iff the field carries BOTH a `static`
+// storage_class_specifier AND a const/constexpr/constinit type_qualifier. That keeps
+// `static constexpr int kMaxDepth = 3;` case-blind (one per-class constant, the census target) and
+// drops the two per-instance shapes the fixture pins as negatives: a plain default-initialized
+// member (`int retries = 3;` — no static, no const) and a const NON-static member (`const int x = 1;`
+// — per-instance state that happens to be immutable, not a class constant).
+inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src ) noexcept
+{
+    const bool isStaticMember = !childTokenAmong( fieldDeclNode, src, "storage_class_specifier", /*acceptAnonymousToken=*/false, { "static" } ).empty();
+    return isStaticMember && declarationCarriesConstQualifier( fieldDeclNode, src );
 }
 
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
@@ -5589,29 +5656,44 @@ inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexce
 // memory-space qualifier drops — the extern-const/static/alignas/volatile shape plain C++ produces by the
 // hundred, which reaches here ONLY through the new structural patterns.
 //
-// The C++ narrowing is load-bearing, NOT a restatement of the old gate's language set:
+// The C-family narrowing is load-bearing, NOT a restatement of the old gate's language set:
 // nameBoundByInitDeclarator is a C-family node test, and the other gated languages bind their
 // @definition.constant through variable_declarator (TS/JS), field_declaration (Java/C#) or a bare
 // assignment (Ruby) — every one of them would read "uninitialized" here and, having no memory-space
-// qualifier either, drop WHOLESALE. Lang::C is excluded for the reason it needs no rescue:
-// queries/c/tags.scm has no uninitialized pattern, so nothing reaches this arm that the old decision
-// would not have handled identically. That equivalence is the port's regression-safety proof and was
-// measured, not argued (2026-08-10): byte-identical maps on ripwire's own src/ and 0 added / 0 REMOVED
-// rows on cpython 8463cb5, numpy a905925, meson f0851c9e, xformers 6e10bd2, dgl f0b7cc9 and
-// transformers 343c8cb86 — ~250K symbol rows of C/C++.
+// qualifier either, drop WHOLESALE. Lang::C takes its own arm (module-constant round, 2026-08-12):
+// queries/c/tags.scm still has no uninitialized pattern, so const-evidence-or-SCREAMING on the
+// initialized shape is C's whole decision. (The 2026-08-10 measurement below predates that arm and
+// pinned the CUDA port's zero-regression claim: byte-identical maps on ripwire's own src/ and 0
+// added / 0 REMOVED rows on cpython 8463cb5, numpy a905925, meson f0851c9e, xformers 6e10bd2,
+// dgl f0b7cc9 and transformers 343c8cb86 — ~250K symbol rows of C/C++. The module-constant round
+// deliberately ADDS rows on those trees — const-qualified camel constants — which is the fix, and
+// test/moduleconstcheck.sh is the gate that measures it.)
 inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNode, TSNode roleNode, std::string_view src ) noexcept
 {
+    // MODULE-CONSTANT ROUND (2026-08-12): in the C family, a const/constexpr/constinit qualifier on the
+    // captured declaration keeps the binding CASE-BLIND — the keyword is the evidence, exactly the
+    // `__constant__` / Rust const_item rationale below. C first: its tags.scm binds only initialized
+    // file-scope declarations, so const evidence (or the r3 q10 SCREAMING convention) is the whole test.
+    if( lang == Lang::C )
+    {
+        return !( isScreamingSnakeName( name ) || declarationCarriesConstQualifier( roleNode, src ) );
+    }
     if( lang != Lang::Cpp )
     {
         return constCaptureNeedsScreamingGate( lang ) && !isScreamingSnakeName( name );
     }
-    // Cost ordering: the common plain-C++ case (initialized + SCREAMING) resolves before any node scan,
-    // and the scan below runs only where the old gate would have decided the same way or one of the CUDA
-    // patterns matched.
-    const bool initialized = nameBoundByInitDeclarator( nameNode, roleNode );
-    if( initialized && isScreamingSnakeName( name ) )
+    // Class-static constants bind through a field_declaration (the loose default_value pattern), never
+    // through init_declarator — their whole keep contract lives in fieldConstantCaptureKept.
+    if( std::strcmp( ts_node_type( roleNode ), "field_declaration" ) == 0 )
     {
-        return false;                                                    // the r3 q10 convention keep — no node scan
+        return !fieldConstantCaptureKept( roleNode, src );
+    }
+    // Cost ordering: the common plain-C++ case (initialized + SCREAMING) resolves before any node scan,
+    // and the qualifier/CUDA scans run only for non-SCREAMING names or the uninitialized CUDA patterns.
+    const bool initialized = nameBoundByInitDeclarator( nameNode, roleNode );
+    if( initialized && ( isScreamingSnakeName( name ) || declarationCarriesConstQualifier( roleNode, src ) ) )
+    {
+        return false;                                                    // r3 q10 convention keep, or const-keyword evidence
     }
     const std::string_view memSpace = cudaMemorySpaceQualifierOf( roleNode, src );
     if( memSpace == "__constant__" )
@@ -5620,7 +5702,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
     }
     if( initialized )
     {
-        return true;                                                     // initialized, not SCREAMING, not __constant__
+        return true;                                                     // initialized MUTABLE non-SCREAMING global
     }
     return !( !memSpace.empty() && isScreamingSnakeName( name ) );        // uninitialized: __device__/__managed__ gated
 }

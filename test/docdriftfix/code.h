@@ -24,4 +24,10 @@ inline int movedHelper( int value )
     return value * 2;
 }
 
+// the not-a-definition exemplar (re-armed 2026-08-12, module-constant round: const-qualified module
+// constants like kHoldingLimit became real indexed definitions, so a MUTABLE camel global — captured
+// by the tags pattern, deliberately dropped by the index — is what the reason taxonomy needs now).
+// Appended BELOW every line-anchored body so no NOTES.md line anchor moves.
+inline int ddfixMutableKnob = 3;
+
 }   // namespace ddfix

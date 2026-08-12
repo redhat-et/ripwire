@@ -74,3 +74,4 @@
 --work-tree	git's own pre-subcommand option, same classifier rule as --git-dir above, not a ripwire flag
 --no-pager	git's own pre-subcommand option, same classifier rule as --git-dir above, not a ripwire flag
 --oneline	git's own flag ("git log --oneline"), quoted in docs/SUBSTITUTION_METER.md as the example command line whose leading `echo` must not outrank the nudge chain's git-log verdict, not a ripwire flag
+--ids-only	bench/substitution_scrub.py's own flag ("python3 bench/substitution_scrub.py LOG --out cleaned.jsonl --ids-only"), quoted in docs/SUBSTITUTION_METER.md's fixture-scrub recipe where it restricts removal to the exact hookcheck fixture-id rule — not a ripwire binary flag

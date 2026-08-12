@@ -760,7 +760,12 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 61;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 62;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 62 = 2026-08-12 module-constant round: C/C++ const-qualified
+                                                          // module constants (and class-static constants) index
+                                                          // case-blind — the extracted SET grows on any C/C++ tree,
+                                                          // so a v61 blob misses rows (this file's own
+                                                          // kIngestParserVerMirror is in the newly indexed family).
                                                           // 61 = 2026-08-11 YAML config-key tier: .yml/.yaml mapping
                                                           // keys (mdepth<=2, sequences transparent) indexed as t="sec"
                                                           // for the first time — changes the extracted SET on any

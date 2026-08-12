@@ -18,7 +18,7 @@ reach, so the gate proves TRUE POSITIVES and TRUE NEGATIVES from the same run.
 - DRIFTS (undefined) — `stableHelper` used to hand off to `deletedHelper`, which no longer exists.
 - SILENT (uncorroborated) — a bare mention of `phantomHelper` with no live name beside it.
 - SILENT (foreign-scope) — `otherProject::vanishedThing` belongs to another codebase.
-- SILENT (not-a-definition) — `kHoldingLimit` is a constant the C++ grammar does not tag as a definition.
+- SILENT (not-a-definition) — `ddfixMutableKnob` is a mutable global the index deliberately does not tag as a definition.
 
 ## constants and extents
 

@@ -61,7 +61,8 @@ set -u
 # but runs in whatever repo the session is in, so a single global file with a `tag`/`repo` field is
 # what makes both cross-repo and per-repo analysis possible from the same data. bench/
 # substitution_report.py reads it; docs/SUBSTITUTION_METER.md is the schema and the classifier's
-# rule table.
+# rule table. One log means one contamination risk, so the §FIXTURE guard in meter_init() is part of
+# the design and not a test detail: a gate run must never be able to reach that file.
 #
 # OBSERVE FIRST; THE A/B IS BUILT BUT DORMANT. Default behavior is always-on observation WITH nudges
 # enabled — i.e. exactly what this hook did before, plus counting. The `arm` field and the
@@ -121,6 +122,31 @@ set -u
 # `sweep=0` in meter.conf — a config flip, deliberately, so the decision costs no code).
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §FIXTURE — A TEST RUN MAY NEVER REACH THE OPERATOR'S LOG (2026-08-12)
+#
+# This hook has a gate, test/hookcheck.sh, which drives it with invented PreToolUse payloads by the
+# dozen. Those invocations write rows in the ordinary way, and a fixture row is INDISTINGUISHABLE
+# from a real one at analysis time: same schema, same classes, a plausible session id. Until
+# 2026-08-12 the gate ran with the ambient environment, so the meter resolved the real $HOME and
+# every gate run appended a burst of synthetic rows to the live log.
+#
+# The damage is not noise, it is BIAS, which is why this is a guard and not a cleanup note. A gate
+# run is a burst of nudge-firing NATIVE calls containing no ripwire call at all: it drags the
+# headline rate toward zero, and it lands disproportionately in the nudge-efficacy denominator —
+# the exact quantity docs/EVALS.md §4 pre-registers a band against.
+#
+# Two independent layers now hold the contract, because one layer is a thing a future test forgets:
+#   L1  the gate names a sandbox destination once, exported, so every invocation inherits it;
+#   L2  RIPWIRE_METER_FIXTURE says "a harness is driving this hook". With no destination named, the
+#       only path left is the real one, so meter_dest() writes nothing instead — see the function.
+# Section (13) of the gate asserts both held, by PROVENANCE (no row in the operator's log carries
+# this run's mktemp path) rather than by byte size, which a concurrent real session makes flaky.
+#
+# Repairing a log that was already polluted is a separate job with a separate tool:
+# bench/substitution_scrub.py, documented in docs/SUBSTITUTION_METER.md.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
 # ---- meter state, resolved once per invocation: where the log is, whether counting is on, which arm.
 #      Reading meter.conf uses a shell read loop rather than grep/sed — no subprocess on a path that
 #      runs for every observed tool call. Env wins over the file; the file wins over the defaults. ----
@@ -133,13 +159,33 @@ meter_repo=""
 meter_tag=""
 sweep_on=1
 sweep_n=3
-meter_init()
+# ---- meter_dest — WHERE the log goes. Sets `_mhome` (the config directory) and `meter_file`, and
+#      applies the §FIXTURE guard. `_mexplicit` is the guard's whole input: it records whether the
+#      caller NAMED a destination (RIPWIRE_METER_LOG / RIPWIRE_HOME) or the path was merely INFERRED
+#      from $HOME, which is the only distinction between a harness writing to its sandbox and a
+#      harness writing to the operator's real telemetry. ----
+meter_dest()
 {
+    _mexplicit=0
     _mhome="${RIPWIRE_HOME:-}"
+    [ -n "$_mhome" ] && _mexplicit=1
     [ -n "$_mhome" ] || { [ -n "${HOME:-}" ] && _mhome="$HOME/.ripwire"; }
     meter_file="${RIPWIRE_METER_LOG:-}"
+    [ -n "$meter_file" ] && _mexplicit=1
     [ -n "$meter_file" ] || { [ -n "$_mhome" ] && meter_file="$_mhome/substitution.jsonl"; }
+    # A harness that named nothing gets nothing: not the real log, and not the host's meter.conf
+    # either (clearing `_mhome` is what stops a forgotten arm inheriting the operator's arm and
+    # threshold). Silent, like every other meter failure — see §FIXTURE.
+    if [ -n "${RIPWIRE_METER_FIXTURE:-}" ] && [ "$_mexplicit" = "0" ]
+    then
+        meter_file=""
+        _mhome=""
+    fi
+}
 
+meter_init()
+{
+    meter_dest
     _conf_enabled=""
     _conf_arm=""
     _conf_sweep=""
