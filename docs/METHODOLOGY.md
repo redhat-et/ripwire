@@ -124,6 +124,14 @@ because a tool that only publishes its wins has not told you how to use it.
 A negative result recorded is worth more than a feature shipped on a hunch — and it is the only
 thing that stops the same idea being re-attempted every six months.
 
+**And it must be recorded in the ledger everyone reads, in the same commit as the result.** A
+verdict that lives only in a results directory is a verdict that drifts: this repo once left a
+held-out REJECT in `bench/…/gate_verdict.txt`, never carried it into `docs/EVALS.md`, and five days
+later re-commissioned the same mechanism as "unspent headroom" on the strength of the stale prose —
+caught only because the new round's own §7 free-statistic contradicted the premise before anything
+was spent. The rule: a round's verdict lands in `docs/EVALS.md` in the SAME commit as its results
+directory, or the round is not finished.
+
 ---
 
 ## 6. What the honesty vocabulary buys
