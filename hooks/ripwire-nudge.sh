@@ -86,6 +86,41 @@ set -u
 # nudge working.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §SWEEP — THE SWEEP-ESCALATION NUDGE (Track B §S2b, 2026-08-11)
+#
+# WHY A SECOND NUDGE EXISTS AT ALL. The meter's first 12 hours (2,095 rows, 34 sessions) said two
+# things at once. (1) The one-time nudges above FIRE — 455 of them — and convert at ZERO: substitution
+# after a nudge was 0.8%, indistinguishable from before it. Generic advice at the first grep does not
+# change the next choice. (2) The dominant behaviour is the SAME-CLASS SWEEP: grep→grep→grep occurred
+# 357 times as a trigram, read×3 187 times, git-diff×3 119, and git-log / git-show-stat / glob ×3
+# about 39 each. Cross-class motifs are an order of magnitude smaller.
+#
+# A sweep is trial-and-error retrieval — the agent is paying N round-trips and N outputs for one
+# question, and ripwire already has the one-call answer for every sweep class. So the hypothesis this
+# block ships is narrow and falsifiable: a nudge converts when it arrives AT THE SWEEP MOMENT and
+# carries the EXACT command, built from what was actually observed, rather than a verb name and an
+# ellipsis. The grep escalation quotes the agent's own last patterns back at it inside a runnable
+# `--for="…"`; the read escalation names the directory of the file just read.
+#
+# THE CONTRACT (all four are gated in test/hookcheck.sh, arms S1-S14):
+#   - At most ONE escalation per CLASS per session — the same dedup posture as the base nudges, with
+#     its own marker, so an escalated grep sweep never re-fires and never silences a read sweep.
+#   - Advisory only. Same posture as everything else here: permissionDecision "allow", never deny,
+#     never a rewrite, and any internal failure degrades to silence.
+#   - The escalation is RECORDED — `nudge":"sweep<N>"` on the row it fired on, and `post_sweep` on
+#     every row after it in that session. Without those two fields the efficacy question cannot be
+#     asked, and an unmeasurable nudge is one nobody can ever turn off on evidence.
+#   - It costs a bounded amount per call: one byte appended to a per-class counter file and one
+#     fork-free `$(<file)` read of it, on the nudgeable path only. The control arm and non-git calls
+#     pay nothing.
+#
+# THE VERDICT IS PRE-REGISTERED, NOT ASSUMED. docs/EVALS.md §8 registers the one-week readout: the
+# primary is the substitution rate on calls following a sweep escalation versus the 0.8% baseline,
+# with a stated accept-keep band, and a NULL result DISABLES this block (`RIPWIRE_SWEEP=0`, or
+# `sweep=0` in meter.conf — a config flip, deliberately, so the decision costs no code).
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
 # ---- meter state, resolved once per invocation: where the log is, whether counting is on, which arm.
 #      Reading meter.conf uses a shell read loop rather than grep/sed — no subprocess on a path that
 #      runs for every observed tool call. Env wins over the file; the file wins over the defaults. ----
@@ -93,18 +128,22 @@ meter_enabled=0
 meter_file=""
 meter_arm="treatment"
 meter_post=0
+meter_postsweep=0
 meter_repo=""
 meter_tag=""
+sweep_on=1
+sweep_n=3
 meter_init()
 {
     _mhome="${RIPWIRE_HOME:-}"
     [ -n "$_mhome" ] || { [ -n "${HOME:-}" ] && _mhome="$HOME/.ripwire"; }
     meter_file="${RIPWIRE_METER_LOG:-}"
     [ -n "$meter_file" ] || { [ -n "$_mhome" ] && meter_file="$_mhome/substitution.jsonl"; }
-    [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
 
     _conf_enabled=""
     _conf_arm=""
+    _conf_sweep=""
+    _conf_sweepn=""
     if [ -n "$_mhome" ] && [ -f "$_mhome/meter.conf" ]
     then
         while IFS='=' read -r _ck _cv
@@ -112,9 +151,27 @@ meter_init()
             case "$_ck" in
                 enabled) _conf_enabled="$_cv" ;;
                 arm)     _conf_arm="$_cv" ;;
+                sweep)   _conf_sweep="$_cv" ;;
+                sweep_n) _conf_sweepn="$_cv" ;;
             esac
         done < "$_mhome/meter.conf"
     fi
+
+    # The sweep escalation is resolved even when the LOG is unavailable: it is a nudge, not a
+    # measurement, and it must not silently switch itself off on a machine with no writable HOME.
+    case "${RIPWIRE_SWEEP:-$_conf_sweep}" in
+        0|off|no|false) sweep_on=0 ;;
+        *)              sweep_on=1 ;;
+    esac
+    # An N that is not a plain positive integer reads as the default rather than disabling the
+    # feature by accident or escalating on the first call.
+    case "${RIPWIRE_SWEEP_N:-$_conf_sweepn}" in
+        ''|*[!0-9]*) sweep_n=3 ;;
+        0)           sweep_n=3 ;;
+        *)           sweep_n="${RIPWIRE_SWEEP_N:-$_conf_sweepn}" ;;
+    esac
+
+    [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
 
     case "${RIPWIRE_METER:-$_conf_enabled}" in
         0|off|no|false) meter_enabled=0 ;;
@@ -171,12 +228,13 @@ meter_log()
         _mrow="$( jq -cn --arg ts "$_mts" --argjson seq "$_mseq" --arg session "$session" \
             --arg repo "$meter_repo" --arg tag "$meter_tag" --arg tool "$tool_name" \
             --arg class "$_mclass" --arg family "$_mfamily" --argjson nudged "$_mnudged" \
-            --arg nudge "$_mreason" --argjson post_nudge "$meter_post" --arg arm "$meter_arm" \
+            --arg nudge "$_mreason" --argjson post_nudge "$meter_post" \
+            --argjson post_sweep "$meter_postsweep" --arg arm "$meter_arm" \
             --arg detail "$_mdetail" \
-            '{v:1,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,arm:$arm,detail:($detail|.[0:200])}' \
+            '{v:2,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,detail:($detail|.[0:200])}' \
             2>/dev/null )" || _mrow=""
     else
-        _mrow="{\"v\":1,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"arm\":\"$meter_arm\",\"detail\":\"$( meter_esc "$_mdetail" )\"}"
+        _mrow="{\"v\":2,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"detail\":\"$( meter_esc "$_mdetail" )\"}"
     fi
     [ -n "$_mrow" ] || return 0
     { printf '%s\n' "$_mrow" >>"$meter_file"; } 2>/dev/null || true
@@ -193,8 +251,16 @@ meter_log()
 #      Sets globals rather than echoing: a command substitution is a fork, and this runs on the fast-
 #      bail path that every Bash tool call passes through. A function's positional parameters are its
 #      own in bash, so `set --` here cannot disturb the script's; `set -f` is global and is restored.
+#
+#      2026-08-11 (S2b), from the live log rather than from imagination: 784 of 890 `unclassified`
+#      rows led with `cd`. An agent in a worktree-heavy repo writes `cd <dir> && grep …` constantly,
+#      and every one of those was scored as "a line this tool could not read" when the answer was
+#      sitting two words in. `cd`/`pushd` and their directory operand are therefore stripped like any
+#      other transparent prefix, as are the separators (`&&`, `;`, `||`) that follow. `git`'s own
+#      pre-subcommand options are skipped too, so `git -C /w diff` classifies as `git diff`.
 meter_w1=""
 meter_w2=""
+meter_arg1=""
 meter_lead()
 {
     set -f
@@ -204,8 +270,16 @@ meter_lead()
     while [ "$#" -gt 0 ]
     do
         case "$1" in
+            '&&'|'||'|';'|'&'|'{'|'(')                     shift ;;
             *=*)                                           shift ;;
             sudo|command|env|time|nice|nohup|exec|builtin)  shift ;;
+            cd|pushd)                                      shift
+                                                           # drop the directory operand, unless what
+                                                           # follows is already a separator (`cd &&`)
+                                                           case "${1:-}" in
+                                                               ''|'&&'|'||'|';'|'&') ;;
+                                                               *) shift ;;
+                                                           esac ;;
             rtk)                                           shift
                                                            if [ "${1:-}" = "proxy" ]; then shift; fi ;;
             *)                                             break ;;
@@ -213,12 +287,105 @@ meter_lead()
     done
     meter_w1="${1:-}"
     meter_w1="${meter_w1##*/}"
-    meter_w2="${2:-}"
+    [ "$#" -gt 0 ] && shift
+    if [ "$meter_w1" = "git" ]
+    then
+        while [ "$#" -gt 0 ]
+        do
+            case "$1" in
+                -C|-c)                                    shift; [ "$#" -gt 0 ] && shift ;;
+                --git-dir=*|--work-tree=*|--no-pager|-P)  shift ;;
+                *)                                        break ;;
+            esac
+        done
+    fi
+    meter_w2="${1:-}"
+    # First non-flag operand after the command word — for a grep-family line that is the PATTERN, and
+    # the sweep escalation quotes it back at the agent. Word splitting does not honor quotes, so
+    # `rg "foo bar"` yields `"foo`; the sanitizer strips the stray quote and the disclosure in
+    # docs/SUBSTITUTION_METER.md says so rather than pretending the parse is a shell.
+    meter_arg1=""
+    while [ "$#" -gt 0 ]
+    do
+        case "$1" in
+            -*) ;;
+            *)  meter_arg1="$1"; break ;;
+        esac
+        shift
+    done
 }
 
 # ---- meter_classify_bash CMD — the class of a Bash command line, or empty for "not an observation
 #      this meter makes". Leading word first, then git's subcommand, then a vocabulary scan whose only
 #      verdict is `unclassified` — ambiguity is logged, never dropped. Rules: docs/SUBSTITUTION_METER.md
+#
+#      2026-08-11 (S2b): the non-retrieval classes (`build`, `gate-run`, `git-remote`, `git-misc`,
+#      `shell-misc`) are new. They are NOT part of the substitution rate — their families are
+#      `other`/`meta`/`git`, and §1 of the report divides ripwire by native only. They exist because
+#      Track B §S4 ranks the absorption queue from the command mix an agent ACTUALLY runs, and a
+#      command class that writes no row is a class that survey can never see. The cost of the change
+#      is honest and stated: rows a previous version dropped now appear, so row counts across the
+#      v1/v2 boundary are not comparable and the schema version says which side a row is on.
+
+# ---- meter_classify_git — `git`'s subcommand table. Its own function because git is the one
+#      leading word whose SUBCOMMAND decides the class, and it spans three families: two of its
+#      subcommands are retrieval (`grep`, and `diff`/`log`/`show --stat` as history reads), the rest
+#      are state and plumbing. The state ones are counted but NEVER nudged — that rule predates the
+#      meter and does not change; what changed is that the S4 survey now sees the real git mix
+#      instead of only the three read-only verbs.
+meter_classify_git()
+{
+    case "$_bsub" in
+        grep) mclass="grep" ;;
+        diff) mclass="git-diff" ;;
+        log)  mclass="git-log" ;;
+        push|fetch|pull|clone|remote|ls-remote|submodule)
+              mclass="git-remote" ;;
+        show)
+            mclass="git-misc"
+            case "$_bc" in
+                *--stat*) mclass="git-show-stat" ;;
+            esac ;;
+        *)    mclass="git-misc" ;;          # add/commit/status/checkout/branch/worktree/merge/…
+    esac
+    return 0
+}
+
+# ---- meter_classify_other — the command-MIX classes, read from the same `_blead`/`_bsub` the
+#      retrieval table above read. Kept apart from meter_classify_bash on purpose: these classes
+#      answer a DIFFERENT question for a DIFFERENT consumer (what does the agent's command mix look
+#      like, for the S4 absorption queue) and are excluded from the substitution rate by their
+#      family. Sets `mclass`, or only `_bmisc` for the heads that must defer to the vocabulary scan.
+meter_classify_other()
+{
+    case "$_blead" in
+        gh)
+            mclass="git-remote" ;;
+        make|ninja|xcodebuild|gradle|mvn|bazel|clang|clang++|gcc|g++|c++|cc|swiftc|tsc|rustc|cmake)
+            mclass="build" ;;
+        pytest|ctest|tox|*check.sh|pargates.py|regression.sh)
+            mclass="gate-run" ;;
+        cargo|go|npm|yarn|pnpm|dotnet)
+            case "$_bsub" in
+                test|t)  mclass="gate-run" ;;
+                *)       mclass="build" ;;
+            esac ;;
+        python3|python|bash|sh|zsh)
+            # The repo's own gate discipline is `python3 test/pargates.py …` / `bash test/*check.sh` /
+            # `test/regression.sh`; a bare `python3 -c …` is an ad-hoc script and stays unclassified.
+            case "$_bsub" in
+                test/*|*/test/*|*check.sh|*pargates*|*regression.sh) mclass="gate-run" ;;
+            esac ;;
+        mkdir|rmdir|cp|mv|rm|touch|chmod|chown|echo|printf|pwd|which|date|sleep|wc|df|du|ps|pgrep|kill|export|true|false|jobs|wait|open|mktemp|basename|dirname|source|.)
+            _bmisc=1 ;;
+        '')
+            # Nothing survived the prefix strip: the whole line was `cd …`, an assignment, or a
+            # wrapper with no command after it.
+            mclass="shell-misc" ;;
+    esac
+    return 0
+}
+
 meter_classify_bash()
 {
     _bc="$1"
@@ -226,6 +393,7 @@ meter_classify_bash()
     _blead="$meter_w1"
     _bsub="$meter_w2"
     mclass=""
+    _bmisc=0
     case "$_blead" in
         ripwire)
             mclass="ripwire-cli"; return 0 ;;
@@ -240,7 +408,8 @@ meter_classify_bash()
             if printf '%s' "$_bc" | grep -qE -- '(^|[[:space:]])-[A-Za-z]*R[A-Za-z]*([[:space:]]|$)|--recursive([[:space:]]|$)'
             then
                 mclass="find"; return 0
-            fi ;;
+            fi
+            _bmisc=1 ;;
         awk|gawk|mawk)
             # only a PATTERN program is a search: awk '/needle/ …'. `awk '{print $1}' /tmp/x` is not,
             # which is why the test anchors on a quote immediately followed by the slash.
@@ -255,16 +424,13 @@ meter_classify_bash()
                 mclass="read"; return 0
             fi ;;
         git)
-            case "$_bsub" in
-                grep) mclass="grep";     return 0 ;;
-                diff) mclass="git-diff"; return 0 ;;
-                log)  mclass="git-log";  return 0 ;;
-                show)
-                    case "$_bc" in
-                        *--stat*) mclass="git-show-stat"; return 0 ;;
-                    esac ;;
-            esac ;;
+            meter_classify_git; return 0 ;;
     esac
+    # Not a retrieval verb. The command-MIX classes are a separate job with a separate consumer —
+    # they never touch the substitution rate, they feed the S4 absorption survey — so they live in
+    # their own function rather than lengthening the table above.
+    meter_classify_other
+    [ -n "$mclass" ] && return 0
     # The leading word is not a retrieval verb — but if the LINE names one anywhere (a pipeline, a
     # loop body, xargs, a subshell, a `cd x && grep …`), the call IS an observation and must not
     # vanish from the denominator just because this classifier cannot say which kind it is.
@@ -273,17 +439,24 @@ meter_classify_bash()
     then
         mclass="unclassified"; return 0
     fi
+    # The shell-misc heads are the one family checked AFTER the vocabulary scan, deliberately: `ls
+    # test | grep -i doc` is evidence about a grep, not about `ls`, and a leading-word rule that
+    # returned first would destroy that evidence. A bare `ls -la docs/` has none to destroy.
+    [ "$_bmisc" = "1" ] && mclass="shell-misc"
     return 0
 }
 
-# ---- meter_family CLASS — the coarse bucket the substitution rate is computed over. ----
+# ---- meter_family CLASS — the coarse bucket the substitution rate is computed over. Only `ripwire`
+#      and `native` enter the rate; `git`, `other` and `meta` are context for the S4 absorption
+#      survey and are printed apart, never folded in. ----
 meter_family()
 {
     case "$1" in
         ripwire-cli|ripwire-mcp)        printf 'ripwire' ;;
         grep|find|read|glob)            printf 'native' ;;
         git-diff|git-log|git-show-stat) printf 'git' ;;
-        session-start)                  printf 'meta' ;;
+        git-remote|git-misc)            printf 'git' ;;
+        session-start|gate-run)         printf 'meta' ;;
         *)                              printf 'other' ;;
     esac
 }
@@ -412,29 +585,41 @@ then
     fields3 command
     cmd="$f3_detail"
     [ -n "$cmd" ] || exit 0
+    # ---- undo jq's @tsv escaping, for the READERS only. `fields3` fetches three fields in one jq
+    #      spawn by joining them with tabs, which means jq escapes any newline or tab inside a value
+    #      — so a MULTI-LINE Bash command (`cd <worktree>\ngit diff`, which is most of what an agent
+    #      writes in a worktree-heavy repo) arrives here as one physical line with literal `\n`
+    #      two-character sequences in it. Every reader below then failed on it in the same way:
+    #      `\bgit[[:space:]]+diff\b` never matched across a `\n`, and the classifier's word split gave
+    #      a leading token of `/a/b\ngit` whose basename is `b\ngit`, which matches no rule. That is
+    #      how 742 of the live log's 916 `unclassified` rows were made. Substituting a space is
+    #      enough — every reader below is whitespace-delimited — and it costs no fork. `detail` is
+    #      deliberately NOT rewritten: the log keeps the exact single-line form it always stored.
+    cmdx="${cmd//\\n/ }"
+    cmdx="${cmdx//\\t/ }"
     # Only a RECURSIVE/tree-wide text search counts — a single-file grep or a filter on other output
     # (e.g. `ls | grep foo`) is not the "blind grep over the tree" case this hook targets. Checked
     # first since it is the highest-volume pattern.
-    if printf '%s' "$cmd" | grep -qE '\brg\b'
+    if printf '%s' "$cmdx" | grep -qE '\brg\b'
     then
         category="bash-grep"   # ripgrep invocations are inherently tree-wide
-    elif printf '%s' "$cmd" | grep -qE '\b(grep|egrep|fgrep)\b' \
-        && printf '%s' "$cmd" | grep -qE -- '(-[A-Za-z]*[rR][A-Za-z]*\b|--recursive\b)'
+    elif printf '%s' "$cmdx" | grep -qE '\b(grep|egrep|fgrep)\b' \
+        && printf '%s' "$cmdx" | grep -qE -- '(-[A-Za-z]*[rR][A-Za-z]*\b|--recursive\b)'
     then
         category="bash-grep"   # grep/egrep/fgrep with an explicit recursive flag
     # `git show <sha> --stat` / `git show --stat` — a commit's stat summary; checked before the plain
     # `git diff`/`git log` patterns since "show" is a distinct subcommand from either.
-    elif printf '%s' "$cmd" | grep -qE '\bgit[[:space:]]+show\b' \
-        && printf '%s' "$cmd" | grep -qE -- '--stat\b'
+    elif printf '%s' "$cmdx" | grep -qE '\bgit[[:space:]]+show\b' \
+        && printf '%s' "$cmdx" | grep -qE -- '--stat\b'
     then
         category="git-show-stat"
     # `git diff` (HEAD, --stat, path-limited, ...) — deliberately NOT `git status`/add/commit/push/
     # pull/checkout/branch (state-changing or trivially cheap; nudging those is spam).
-    elif printf '%s' "$cmd" | grep -qE '\bgit[[:space:]]+diff\b'
+    elif printf '%s' "$cmdx" | grep -qE '\bgit[[:space:]]+diff\b'
     then
         category="git-diff"
     # `git log` (-N, --oneline, path-limited, ...)
-    elif printf '%s' "$cmd" | grep -qE '\bgit[[:space:]]+log\b'
+    elif printf '%s' "$cmdx" | grep -qE '\bgit[[:space:]]+log\b'
     then
         category="git-log"
     else
@@ -446,8 +631,11 @@ then
     # single-file grep, a `cat`, a `find`, an `ls -R` are all the native retrieval this tool competes
     # with). Where the classifier declines but the nudge chain matched, the nudge's own verdict is the
     # class: that covers forms like `cd sub && git diff` that lead with neither.
-    meter_classify_bash "$cmd"          # sets mclass, without a fork
-    if [ -z "$mclass" ]
+    meter_classify_bash "$cmdx"         # sets mclass, without a fork
+    # `shell-misc` means only that the LEADING word was a no-op (`echo "=== git log ===" && git log
+    # --oneline`), so the nudge chain's verdict is strictly better evidence and outranks it — the
+    # same deferral the classifier already makes to the vocabulary scan, applied one level up.
+    if [ -z "$mclass" ] || [ "$mclass" = "shell-misc" ]
     then
         case "$category" in
             bash-grep)     mclass="grep" ;;
@@ -461,8 +649,10 @@ then
     # \bgrep\b, and `-grep` clears the [rR]-flag test), so the tool nudged itself.
     [ "$mclass" = "ripwire-cli" ] && category=""
 
-    # Not a retrieval call at all (`cmake --build`, `git status`, `npm test`): out of scope for both
-    # jobs, and the fast bail stays fast — one grep more than before, no subprocess beyond it.
+    # Nothing this meter has a name for (`npx foo`, `python3 -c …` with no retrieval word in it):
+    # out of scope for both jobs, and the fast bail stays fast — one grep more than before, no
+    # subprocess beyond it. Since S2b a build/gate/git/shell command DOES get a row (family other/
+    # meta/git, never in the rate) so the S4 absorption queue can be ranked from the real mix.
     [ -n "$mclass" ] || exit 0
 fi
 
@@ -527,9 +717,130 @@ else
     fi
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §SWEEP — the escalation. Counts calls PER CLASS in this session; at the Nth one, replaces the
+# generic tip with the exact command built from what was observed. See the design block at the top.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+[ -e "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep" ] && meter_postsweep=1
+
+sweep_hit=0
+sweep_count=0
+sweep_q=""
+if [ "$sweep_on" = "1" ] && [ "$nudge_ok" = "1" ] && [ "$meter_arm" != "control" ]
+then
+    case "$mclass" in
+        grep|read|glob|git-diff|git-log|git-show-stat)
+            # One byte per observed call; the file's LENGTH is the count. Read back with `$(<f)`,
+            # which bash serves without forking — the whole per-call cost of this feature is that
+            # append and this read, and the measurement in docs/SUBSTITUTION_METER.md says so.
+            _swf="${TMPDIR:-/tmp}/ripwire-nudge.${session}.sweep-${mclass}"
+            if [ ! -d "${_swf%/*}" ]
+            then
+                mkdir -p "${_swf%/*}" 2>/dev/null || true
+            fi
+            { printf '.' >>"$_swf"; } 2>/dev/null || true
+            _swdots=""
+            { _swdots="$(<"$_swf")"; } 2>/dev/null || _swdots=""
+            sweep_count="${#_swdots}"
+
+            # The grep escalation is the one that can quote the agent's own query back at it, so the
+            # patterns are remembered as they go past. Sanitized HERE, not at emit time: whatever
+            # lands in this file is already safe to interpolate into a double-quoted --for=.
+            if [ "$mclass" = "grep" ]
+            then
+                _swpat="$mdetail"
+                [ "$tool_name" = "Bash" ] && _swpat="$meter_arg1"
+                _swpat="${_swpat//[!A-Za-z0-9_.:-]/ }"
+                while [ "${_swpat}" != "${_swpat//  / }" ]
+                do
+                    _swpat="${_swpat//  / }"
+                done
+                _swpat="${_swpat# }"; _swpat="${_swpat% }"
+                _swpat="${_swpat:0:60}"
+                [ -n "$_swpat" ] && { printf '%s\n' "$_swpat" >>"${_swf}.pat"; } 2>/dev/null
+            fi
+
+            if [ "$sweep_count" -ge "$sweep_n" ] && [ ! -e "${_swf}.esc" ]
+            then
+                { : > "${_swf}.esc"; } 2>/dev/null || true
+                { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep"; } 2>/dev/null || true
+                { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
+                # An escalation retires the weaker one-time tip for the same category: having said
+                # the specific thing, saying the generic thing later would only teach the agent that
+                # this hook repeats itself.
+                [ -n "$category" ] && { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"; } 2>/dev/null
+                sweep_hit=1
+                nudged=1
+                nudge="sweep${sweep_n}"
+            fi
+            ;;
+    esac
+fi
+
 meter_log "$mclass" "$( meter_family "$mclass" )" "$nudged" "$nudge" "$mdetail"
 
 [ "$nudged" = "1" ] || exit 0
+
+if [ "$sweep_hit" = "1" ]
+then
+    # The directory the pasted command should be run against: the repo root, except for a read sweep,
+    # where the directory of the file just read is the tighter and more useful scope. Only an absolute
+    # path is trusted — a relative one would produce a command that is wrong from anywhere else.
+    sweep_dir="$meter_repo"
+    if [ "$mclass" = "read" ]
+    then
+        case "$mdetail" in
+            /*/*) sweep_dir="${mdetail%/*}" ;;
+        esac
+    fi
+
+    if [ "$mclass" = "grep" ] && [ -e "${_swf}.pat" ]
+    then
+        # The last three patterns, oldest first, deduplicated, space-joined — the agent's own words,
+        # which is the whole point: a query it can paste without inventing anything.
+        _swq=""
+        while IFS= read -r _swline
+        do
+            [ -n "$_swline" ] || continue
+            case " $_swq " in
+                *" $_swline "*) continue ;;
+            esac
+            _swq="${_swq:+$_swq }$_swline"
+        done <<EOF3
+$( tail -n 3 "${_swf}.pat" 2>/dev/null )
+EOF3
+        sweep_q="${_swq:0:100}"
+    fi
+
+    case "$mclass" in
+        grep)
+            _swfor="${sweep_q:-<the task, in words>}"
+            msg="ripwire tip (SWEEP, ${sweep_count} search calls this session): a same-class sweep is trial-and-error retrieval — N round-trips and N outputs for one question. ONE call replaces it, paste-ready: \`ripwire ${sweep_dir} --for=\"${_swfor}\"\` — ranked over the WHOLE corpus (it matches doc-comments and bodies, not just the literal string) with signatures attached, so there is no read-the-file-for-context step after it. Want everything in one budgeted bundle instead — ranking + top bodies + callers + tests_to_run? \`ripwire ${sweep_dir} --pack-task=\"${_swfor}\"\`. Still after a literal string? \`ripwire ${sweep_dir} --grep='STR'\` returns each match with its enclosing function. (Escalated once per class per session; advisory only — your command runs either way.)"
+            ;;
+        read)
+            msg="ripwire tip (SWEEP, ${sweep_count} whole-file reads this session): reading files one after another is the largest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --pack-task=\"<what you are trying to do>\"\` — ranking + top bodies + caller signatures + notes + tests_to_run in one bundle under one token budget. Already know the symbol? \`ripwire ${sweep_dir} --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. (Escalated once per class per session; advisory only — your command runs either way.)"
+            ;;
+        glob)
+            msg="ripwire tip (SWEEP, ${sweep_count} filename globs this session): a glob finds files by NAME, which is exactly why it takes several tries. ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` ranks files by what the code actually DOES (doc-comments and bodies, not paths) and hands back signatures instead of a path list you still have to open. Just want the lay of the land? \`ripwire ${sweep_dir}\` with no flags is the whole map. (Escalated once per class per session; advisory only — your command runs either way.)"
+            ;;
+        git-diff|git-log|git-show-stat)
+            msg="ripwire tip (SWEEP, ${sweep_count} raw git-history calls this session): ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --situ\` — the mid-task bundle: the blast radius of what you have changed, tests_to_run, the co-change partners you have forgotten, and a hotspot alert, in one pass. Reviewing someone else's branch instead? \`ripwire ${sweep_dir} --pr-context\`. Want what changed STRUCTURALLY rather than line counts? \`ripwire ${sweep_dir} --map-diff\`. (Escalated once per class per session; advisory only — your command runs either way.)"
+            ;;
+        *)
+            msg="ripwire tip (SWEEP, ${sweep_count} calls this session): \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` answers the whole sweep in one ranked call. (Escalated once per class per session; advisory only — your command runs either way.)"
+            ;;
+    esac
+
+    if command -v jq >/dev/null 2>&1
+    then
+        jq -n --arg m "$msg" \
+            '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",additionalContext:$m}}'
+    else
+        esc=$( printf '%s' "$msg" | tr '\n' ' ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' )
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"%s"}}\n' "$esc"
+    fi
+    exit 0
+fi
 
 # ---- build the one-time suggestion (one short message per category; the git-diff/git-log/
 #      git-show-stat messages each name a SINGLE best verb for the observed form, not a catalog) ----
