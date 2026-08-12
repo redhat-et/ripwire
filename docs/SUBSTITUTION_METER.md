@@ -242,11 +242,17 @@ Resolution order, first match wins:
 0. **Un-escape.** `fields3` fetches `cwd`, `session_id` and the command in one `jq` spawn by joining
    them with tabs, so `jq` escapes every newline inside the value. An agent's Bash command is
    routinely multi-line (`cd <worktree>\ngit diff`), so the literal `\n` sequences are turned back
-   into spaces before anything reads the line. Skipping this step is what made 742 of the first
+   into separators before anything reads the line. Skipping this step is what made 742 of the first
    log's 924 `unclassified` rows: `cd /a/b\ngit` is one word whose basename is `b\ngit`, which
    matches no rule at all. `detail` keeps the un-substituted single-line form.
+
+   The substitute is `;`, not a space. **A newline is a command separator in shell**, and calling it
+   whitespace glued a multi-line command into one unsplittable segment that the walk in step 3 could
+   not read: `cd /w⏎for g in …⏎do bash test/$g.sh⏎done` arrived as one line whose leading word is
+   `for` and whose command is four words further in.
 1. **Strip the prefix, repeatedly.** Leading `VAR=value` assignments, the transparent wrappers
-   `sudo`, `command`, `env`, `time`, `nice`, `nohup`, `exec`, `builtin`, the separators `&&`, `||`,
+   `sudo`, `command`, `env`, `time`, `nice`, `nohup`, `exec`, `builtin`, the compound-statement
+   keywords `do` `then` `else` `elif` `done` `fi` `esac`, the separators `&&`, `||`,
    `;`, `&`, a **`cd`/`pushd` and its directory operand**, and the **rtk unwrap** (below) are removed
    in a loop, in any order and any number of times — `cd x && VAR=y grep …` unwraps to `grep`, and
    `cd x && cd sub && cat f` unwraps to `cat`. `git`'s own pre-subcommand options (`-C DIR`, `-c
@@ -264,7 +270,8 @@ Resolution order, first match wins:
 | `ripwire` | `ripwire-cli` | ripwire |
 | `grep` `egrep` `fgrep` `zgrep` `rg` `ag` `ack` `ack-grep` `ugrep` | `grep` | native |
 | `find` `fd` `fdfind` | `find` | native |
-| `cat` `head` `tail` `less` `more` `bat` `nl` `tac` | `read` | native |
+| `cat` `head` `tail` `less` `more` `bat` `nl` `tac` — **without** a `>` redirect | `read` | native |
+| the same **with** `>` (`cat > f <<EOF`) — a write, not a read | `shell-misc` | other |
 | `ls` **with `-R` (in any cluster) or a recursive long flag** | `find` | native |
 | `awk` `gawk` `mawk` **whose program starts with a `/…/` pattern** | `grep` | native |
 | `sed` **with `-n`** | `read` | native |
@@ -277,17 +284,46 @@ Resolution order, first match wins:
 | `cmake` `make` `ninja` `xcodebuild` `gradle` `mvn` `bazel` `clang` `gcc` `c++` `swiftc` `tsc` `rustc` | `build` | other |
 | `cargo` `go` `npm` `yarn` `pnpm` `dotnet` — with `test` | `gate-run` | meta |
 | the same, with anything else | `build` | other |
-| `pytest` `ctest` `tox`; `python3`/`bash`/`sh` pointed at `test/…`, `*check.sh`, `pargates`, `regression.sh`; those scripts run directly | `gate-run` | meta |
-| `cd` `mkdir` `cp` `mv` `rm` `touch` `chmod` `echo` `wc` `ps` `export` `sleep` … , and `ls` without `-R` | `shell-misc` | other |
+| `pytest` `ctest` `tox`; anything under `test/…`; `python3`/`bash`/`sh` pointed at `test/…`, `*check.sh`, `pargates`, `regression.sh`; those scripts run directly | `gate-run` | meta |
+| `python3` `python` `bash` `sh` `zsh` `node` `ruby` `perl` `osascript` — with **anything else**: an inline program (`-c`, `-e`, `-`, a heredoc) or a non-gate script path | `script-run` | other |
+| `cd` `mkdir` `cp` `mv` `rm` `touch` `chmod` `echo` `wc` `ps` `export` `sleep` `stat` `diff` `cmp` `tr` `sort` `uniq` `cut` `tee` `seq` `realpath` `:` … , and `ls` without `-R` | `shell-misc` | other |
 
-3. **The nudge's own verdict**, when the leading word declined *or* returned `shell-misc` but the
+3. **The segment walk.** A compound line is not one command, and reading only its first word was the
+   largest single source of `unclassified` in the log: the first word is routinely plumbing
+   (`echo "=== x ==="`, `mkdir -p $D`, a `for` header) and the command the agent actually ran is one
+   segment further along. Steps 1–2 are therefore re-run over the **sequenced** segments — `;`,
+   `&&`, `||` — and the first one they decide wins. Three rules govern it:
+
+   - **Pipeline stages are not walked.** `A | B` hands B the output of A, so B filters that output
+     rather than retrieving anything. Descending into it would score every `… | head -40` as a
+     native `read`, filling the rate's denominator with pagers. So `ls test | grep -i doc` keeps the
+     verdict step 5 gives it, and `ls docs/ | head -40` is `shell-misc`.
+   - **A heredoc ends the walk.** Everything past `<<MARKER` is body text — a commit message, a
+     fixture file, a Python program — and an inline program (`python3 -c …`) is not walked at all.
+     Reading the next line of either as a shell command is how a classifier invents observations.
+   - **A retrieval class found by the walk outranks a non-retrieval class found at the head.**
+     `git reset -q HEAD~1 && ./build/ripwire . --quality-delta` is a ripwire call; the v1→v2
+     correction established that undercounting the tool's own invocations is this instrument's most
+     damaging failure mode, and this is the same shape one separator further along. The cost is
+     stated rather than hidden: such a line contributes its retrieval row and *not* a
+     `build`/`git-misc`/`script-run` row, so the S4 command-mix survey sees one fewer of those.
+4. **The nudge's own verdict**, when the leading word declined *or* returned `shell-misc` but the
    nudge chain matched — this covers forms that lead with neither verb, such as
    `echo "=== git log ===" && git log --oneline`.
-4. **Vocabulary scan.** If the leading word is not a retrieval verb but the *line* names one anywhere
-   — a pipeline, a loop body, `xargs`, a subshell — the row is written as `unclassified` / `other`.
-5. **Otherwise, no row.** `npx create-thing`, `brew upgrade`, a bare `python3 -c "…"` with no
-   retrieval word in it: not observations this meter makes, and the hook bails as fast as it did
-   before the meter existed.
+5. **Vocabulary scan.** If neither the head nor the walk named a command this table knows, but the
+   *line* names a retrieval verb anywhere — a pipeline, a loop body, `xargs`, a subshell — the row is
+   written as `unclassified` / `other`. Two exclusions keep that scan from firing on things that are
+   not invocations:
+
+   - **A path component is not a command word.** A `/` immediately after the word disqualifies it:
+     `/opt/homebrew/share/ripwire/hooks/…` names a *directory* called ripwire. A `/` before the word
+     is not disqualifying, so `xargs /usr/bin/grep …` still counts.
+   - **`head` `tail` `less` `more` `bat` `nl` `tac` are not in the scan's vocabulary.** As a leading
+     word the table above already reads them as `read`, and in a later sequenced segment so does the
+     walk; the only position left for the scan to catch them in is a pipeline stage, where they page
+     another command's output. The residue is the rare `$(head -1 f)`, which writes no row.
+6. **Otherwise, no row.** `npx create-thing`, `brew upgrade`: not observations this meter makes, and
+   the hook bails as fast as it did before the meter existed.
 
 Note the deliberate asymmetries. `ls` without a recursive flag is a directory listing, not a search.
 `awk '{print $1}' /tmp/x` is not a search, which is why the awk rule anchors on a quote immediately
@@ -300,10 +336,22 @@ rule that returned first would destroy that evidence. A bare `ls -la docs/` has 
 
 ### Why the non-retrieval classes exist
 
-`build`, `gate-run`, `git-remote`, `git-misc` and `shell-misc` are **not** part of the substitution
-rate — their families are `other`, `meta` and `git`, and §1 of the report divides ripwire by native
-only. They exist because Track B §S4 ranks the rtk-absorption queue from *the command mix an agent
-actually runs*, and a command class that writes no row is a class that survey can never see.
+`build`, `gate-run`, `git-remote`, `git-misc`, `script-run` and `shell-misc` are **not** part of the
+substitution rate — their families are `other`, `meta` and `git`, and §1 of the report divides
+ripwire by native only. They exist because Track B §S4 ranks the rtk-absorption queue from *the
+command mix an agent actually runs*, and a command class that writes no row is a class that survey
+can never see.
+
+`script-run` is the newest of them and the one that needs defending, because it moves rows out of
+`unclassified` and that could be mistaken for tidying the number away. It is a **disclosure, not a
+claim**: a lexical classifier cannot see what a program does, so an interpreter handed an inline
+program or a script path is named as exactly that. The distinction that matters is what the two
+labels *mean to a reader*. `unclassified` means "this table is missing a rule" — the section below
+says so, and a growing count is read as a bug report. A `python3 -c "…"` needs no rule; the rows
+that used to land there did so only because the script's own text happened to contain the word `cat`
+or `sed`, which was never evidence of anything. Both classes are excluded from the rate either way,
+so nothing about this changes the substitution number; when the opacity of the corpus is the
+question being asked, count `unclassified` and `script-run` together.
 
 The cost is stated rather than hidden: commands that used to bail at the fast path now write a row,
 so a v2 log is larger than a v1 log of the same activity, and no logged call became slower (a build
@@ -512,6 +560,21 @@ silent; the classes dedup independently; the row carries `nudge":"sweep3"` and t
 degrades to silence; and the classifier fixtures pin the `cd`-prefix strip (including
 `cd x && VAR=y grep …` and the multi-line form), `build`, `gate-run`, `git-remote`, `git-misc`,
 `shell-misc`, and the still-working rtk unwrap.
+
+Section (12b), arms C4–C11, covers the classifier-gap round. C4 pins
+the segment walk against ten compound shapes read off the live log; C5 the newline-as-separator on a
+multi-line loop; C6 the one that is easy to get wrong — the walk resumes after the segment the
+*prefix strip* handed to the head, not after the first segment, or `cd /w && bash -n f.sh &&
+./build/ripwire …` silently stops counting as a ripwire call; C7 the pipeline pair, where `| head`
+must not become a native read and `| grep` must keep its evidence; C8 the path-component exclusion
+with `xargs /usr/bin/grep` as its counter-case; C9 `script-run`, its family, the un-walked inline
+program, and that four script runs are counted yet never nudged; C10 `cat >` as a write and the
+heredoc stop; C11 that this document carries the contract.
+
+The retired fixture in arm M16 is part of the same round and is worth knowing about: it used to be
+`for f in *.c; do grep needle $f; done`, which the walk now reads correctly. Its replacement puts the
+retrieval inside a command substitution — a place the walk deliberately does not go — so the arm
+still gates what it was written to gate.
 
 Section (13), arms I1–I6, is the fixture-isolation contract: the rows sections (1)–(10) used to leak
 now land in the gate's own sink rather than being dropped (the positive control, without which the

@@ -304,6 +304,13 @@ meter_log()
 #      sitting two words in. `cd`/`pushd` and their directory operand are therefore stripped like any
 #      other transparent prefix, as are the separators (`&&`, `;`, `||`) that follow. `git`'s own
 #      pre-subcommand options are skipped too, so `git -C /w diff` classifies as `git diff`.
+#
+#      2026-08-12 (S2c): the compound-statement keywords `do`/`then`/`else`/`elif`/`done`/`fi`/`esac`
+#      join the strip list. They are prefixes with no operand, and a segment of the form
+#      `do bash test/$g.sh` — every iteration body in this repo's `for g in …check; do …; done`
+#      idiom — is otherwise a line whose leading word is a shell keyword and whose command is one
+#      word further in. `for`/`while`/`if` themselves are NOT stripped: their operands are not a
+#      command, so those segments are meant to decide nothing.
 meter_w1=""
 meter_w2=""
 meter_arg1=""
@@ -317,6 +324,7 @@ meter_lead()
     do
         case "$1" in
             '&&'|'||'|';'|'&'|'{'|'(')                     shift ;;
+            do|then|else|elif|done|fi|esac)                shift ;;
             *=*)                                           shift ;;
             sudo|command|env|time|nice|nohup|exec|builtin)  shift ;;
             cd|pushd)                                      shift
@@ -372,6 +380,30 @@ meter_lead()
 #      command class that writes no row is a class that survey can never see. The cost of the change
 #      is honest and stated: rows a previous version dropped now appear, so row counts across the
 #      v1/v2 boundary are not comparable and the schema version says which side a row is on.
+#
+#      2026-08-12 (S2c — THE CLASSIFIER-GAP ROUND): three structural gaps, all read off the live log's
+#      post-isolation-deploy window rather than imagined, plus one new class:
+#
+#        - THE FIRST WORD IS NOT THE COMMAND. `echo "=== x ==="; grep -n E1 PLAN.md`,
+#          `mkdir -p $D; ls -R $D`, `for g in …check; do bash test/$g.sh; done` — the command the
+#          agent actually ran sits in a LATER segment, and the classifier only ever looked at the
+#          first. `meter_classify_walk` walks the sequenced segments; see the reasoning there for why
+#          pipeline stages are deliberately excluded from that walk.
+#        - A NEWLINE IS A SEPARATOR, NOT A SPACE. The un-escape substituted a space, which glued a
+#          multi-line command into one segment: `cd /w⏎for g in …⏎do …⏎done` became a single
+#          unsplittable line. It now substitutes `;`, which is what a newline actually is in shell.
+#        - A PATH COMPONENT IS NOT A COMMAND WORD. The vocabulary scan fired on `ripwire` inside
+#          `/opt/homebrew/share/ripwire/hooks/…`, so every command that merely NAMED a file under a
+#          directory called `ripwire` was filed `unclassified`. A `/` immediately after the word is
+#          the tell, and the scan now requires its absence.
+#
+#      The new class is `script-run` (family `other`, never in the rate): an interpreter handed an
+#      INLINE program (`python3 -c …`, `python3 - <<EOF`, `node -e`, `bash -c`) or a non-gate script
+#      path. It is a disclosure, not a claim: a lexical classifier cannot see what a script does, so
+#      naming the opacity is more honest than filing it under `unclassified`, which by contract means
+#      "this table is missing a rule" and is read as a bug report. Rows that used to reach
+#      `unclassified` only because the script's TEXT happened to contain the word `cat` or `sed` were
+#      never evidence of a missing rule.
 
 # ---- meter_classify_git — `git`'s subcommand table. Its own function because git is the one
 #      leading word whose SUBCOMMAND decides the class, and it spans three families: two of its
@@ -409,20 +441,47 @@ meter_classify_other()
             mclass="git-remote" ;;
         make|ninja|xcodebuild|gradle|mvn|bazel|clang|clang++|gcc|g++|c++|cc|swiftc|tsc|rustc|cmake)
             mclass="build" ;;
-        pytest|ctest|tox|*check.sh|pargates.py|regression.sh)
+        pytest|ctest|tox|*check.sh|pargates.py|regression.sh|test/*|*/test/*)
+            # `test/*` catches the loop body this repo writes constantly — `for g in …; do
+            # r=$(bash test/$g.sh); done`, where the assignment strip leaves `test/$g.sh` as the
+            # leading word and the unexpanded `$g` defeats the `*check.sh` pattern.
             mclass="gate-run" ;;
         cargo|go|npm|yarn|pnpm|dotnet)
             case "$_bsub" in
                 test|t)  mclass="gate-run" ;;
                 *)       mclass="build" ;;
             esac ;;
-        python3|python|bash|sh|zsh)
+        python3|python|bash|sh|zsh|node|ruby|perl|osascript)
             # The repo's own gate discipline is `python3 test/pargates.py …` / `bash test/*check.sh` /
-            # `test/regression.sh`; a bare `python3 -c …` is an ad-hoc script and stays unclassified.
+            # `test/regression.sh`, and that reading comes first. Everything else an interpreter is
+            # handed is `script-run` — see the class's rationale in the meter_classify_bash header.
+            # The `-` case is `python3 - <<'EOF'`, a heredoc program on stdin; `''` is an interpreter
+            # with no operand at all, which is a REPL and not a script, so it decides nothing.
             case "$_bsub" in
                 test/*|*/test/*|*check.sh|*pargates*|*regression.sh) mclass="gate-run" ;;
+                '')                                                  ;;
+                *)                                                   mclass="script-run" ;;
+            esac
+            # An INLINE program swallows the rest of the line: everything after `-c`, `-e` or a
+            # heredoc marker is program TEXT, not further commands, so the segment walk must not
+            # descend into it and read a Python statement as a shell command. A script PATH
+            # (`python3 bench/x.py`, `bash -n f.sh`) is an ordinary command and stays walkable —
+            # which is the whole reason `bash -n f.sh && ./build/ripwire …` still counts as a
+            # ripwire call.
+            case "$_bsub" in
+                -c|-e|-|--command) _binline=1 ;;
+            esac
+            case "$_bc" in
+                *'<<'*)            _binline=1 ;;
             esac ;;
         mkdir|rmdir|cp|mv|rm|touch|chmod|chown|echo|printf|pwd|which|date|sleep|wc|df|du|ps|pgrep|kill|export|true|false|jobs|wait|open|mktemp|basename|dirname|source|.)
+            _bmisc=1 ;;
+        stat|diff|cmp|tr|sort|uniq|cut|tee|seq|realpath|readlink|:)
+            # 2026-08-12: the second half of the path-component fix. These heads used to reach a row
+            # only because the vocabulary scan false-positived on a path like
+            # `/opt/homebrew/share/ripwire/hooks/…`; with that FP closed they would have gone from a
+            # (wrong) row to NO row, and a dropped observation is the worse of the two errors. They
+            # are plumbing, they are named as plumbing, and the S4 survey keeps seeing them.
             _bmisc=1 ;;
         '')
             # Nothing survived the prefix strip: the whole line was `cd …`, an assignment, or a
@@ -432,14 +491,18 @@ meter_classify_other()
     return 0
 }
 
-meter_classify_bash()
+# ---- meter_classify_head SEGMENT — the leading-word tables applied to ONE command segment. Sets
+#      `mclass` (empty = undecided) and may set `_bmisc`. Split out of meter_classify_bash so that the
+#      segment walk below runs the SAME table the first segment ran, rather than a second copy of it
+#      that would drift. `_bmisc` is deliberately NOT reset here — it belongs to the whole line, and
+#      its owner is the caller.
+meter_classify_head()
 {
     _bc="$1"
     meter_lead "$_bc"
     _blead="$meter_w1"
     _bsub="$meter_w2"
     mclass=""
-    _bmisc=0
     case "$_blead" in
         ripwire)
             mclass="ripwire-cli"; return 0 ;;
@@ -448,7 +511,16 @@ meter_classify_bash()
         find|fd|fdfind)
             mclass="find"; return 0 ;;
         cat|head|tail|less|more|bat|nl|tac)
-            mclass="read"; return 0 ;;
+            # `cat > /tmp/msg.txt <<'EOF'` is a WRITE wearing the same word, and scoring it `read`
+            # puts a file the agent AUTHORED into the native-retrieval denominator, which is the
+            # direction that makes the substitution rate look worse than it is.
+            # `shell-misc` rather than `_bmisc`, deliberately: deferring would hand the line to the
+            # vocabulary scan, which would then see the very `cat` this arm just ruled a write and
+            # answer `unclassified` — the classifier contradicting itself one step later.
+            case "$_bsub" in
+                '>'*) mclass="shell-misc"; return 0 ;;
+                *)    mclass="read";       return 0 ;;
+            esac ;;
         ls)
             # a tree walk, not a directory listing: -R (in any cluster) or --recursive
             if printf '%s' "$_bc" | grep -qE -- '(^|[[:space:]])-[A-Za-z]*R[A-Za-z]*([[:space:]]|$)|--recursive([[:space:]]|$)'
@@ -476,12 +548,141 @@ meter_classify_bash()
     # they never touch the substitution rate, they feed the S4 absorption survey — so they live in
     # their own function rather than lengthening the table above.
     meter_classify_other
-    [ -n "$mclass" ] && return 0
-    # The leading word is not a retrieval verb — but if the LINE names one anywhere (a pipeline, a
-    # loop body, xargs, a subshell, a `cd x && grep …`), the call IS an observation and must not
+    return 0
+}
+
+# ---- meter_classify_walk LINE — THE SEGMENT WALK. A compound command line was classified by its
+#      first word alone, and in the live log's post-isolation-deploy window that was the single
+#      largest source of `unclassified`: the first word is routinely plumbing (`echo "=== x ==="`,
+#      `mkdir -p $D`, `ls -la $f`, a `for` header) and the command the agent actually ran is one
+#      segment further along. This walks the SEQUENCED segments — `;`, `&&`, `||` — and stops at the
+#      first one the leading-word table decides.
+#
+#      PIPELINE STAGES ARE DELIBERATELY NOT WALKED, and that exclusion is the load-bearing half of
+#      the rule. `A | B` hands B the output of A, so B is a filter on that output and not an
+#      independent retrieval; walking into it would score every `… | head -40` as a native `read`
+#      and every `… | wc -l` as retrieval, inflating the rate's denominator with pagers and biasing
+#      the substitution rate DOWN. `ls test | grep -i doc` therefore keeps the verdict
+#      docs/SUBSTITUTION_METER.md already gives it — `unclassified`, the vocabulary scan's honest
+#      "there is grep evidence here and I cannot say whose" — instead of being resolved here.
+#
+#      No fork: `&&`/`||` are folded onto `;` by parameter expansion and the segments are peeled the
+#      same way. Word splitting still does not honour quotes, so a `;` inside a quoted string splits
+#      too — harmless, because a walk only ever ACCEPTS a class the table decided and a fragment of
+#      a string decides nothing.
+meter_classify_walk()
+{
+    _wrest="${1//&&/;}"
+    _wrest="${_wrest//||/;}"
+    case "$_wrest" in
+        *';'*) ;;
+        *)     mclass=""; return 0 ;;       # nothing to walk
+    esac
+    # Which segment did the head path already judge? NOT necessarily the first: the prefix strip
+    # eats whole leading segments (`cd /w &&`, `SP=… ;`), so the head's verdict is about the first
+    # segment that carries a command word at all. The walk therefore skips segments until it has
+    # passed that one, instead of skipping a fixed count — get this wrong and
+    # `cd /w && bash -n f.sh && ./build/ripwire …` re-judges the `bash` segment and never reaches
+    # the ripwire call, which is the exact undercount the v1→v2 correction was about.
+    _wseen=0
+    while [ -n "$_wrest" ]
+    do
+        _wseg="${_wrest%%;*}"
+        case "$_wrest" in
+            *';'*) _wrest="${_wrest#*;}" ;;
+            *)     _wrest="" ;;
+        esac
+        meter_classify_head "$_wseg"
+        if [ "$_wseen" = "0" ]
+        then
+            [ -n "$meter_w1" ] && _wseen=1
+            continue
+        fi
+        # A segment that strips to NOTHING — `cd $D`, a bare `done`, an empty run of separators —
+        # reaches meter_classify_other's empty-lead case and comes back `shell-misc`. Letting that
+        # decide would halt the walk on the plumbing between two real commands, which is precisely
+        # the shape (`mkdir -p $D ; cd $D ; grep -rn x .`) this walk exists to read.
+        case "$mclass" in
+            ''|shell-misc) ;;
+            *)             return 0 ;;
+        esac
+        # A heredoc ends the walk: everything past `<<MARKER` is body text — a commit message, a
+        # fixture file, a Python program — and reading the next line of it as a shell command is how
+        # a classifier invents observations that never happened.
+        case "$_wseg" in
+            *'<<'*) mclass=""; return 0 ;;
+        esac
+    done
+    mclass=""
+    return 0
+}
+
+# ---- meter_classify_bash CMD — the whole resolution order, in one place. Head, then walk, then the
+#      vocabulary scan, then `shell-misc`. The one judgement it makes beyond "first match wins" is
+#      that a RETRIEVAL class found by the walk outranks a non-retrieval class found by the head:
+#      `bash -n hooks/x.sh && ./build/ripwire . --quality-delta` is a ripwire call, and the v1→v2
+#      correction already established that undercounting the tool's own invocations is this
+#      instrument's most damaging failure mode. The cost is stated rather than hidden: such a line
+#      contributes its retrieval row and not a `build`/`script-run` row, so the S4 command-mix survey
+#      sees one fewer of those.
+meter_classify_bash()
+{
+    _bmisc=0
+    _binline=0
+    meter_classify_head "$1"
+    _bhead="$mclass"
+    case "$_bhead" in
+        ripwire-cli|grep|find|read|git-diff|git-log|git-show-stat)
+            return 0 ;;                     # the first command IS the observation
+    esac
+    # An inline program's own text is not a sequence of shell commands — do not walk it.
+    [ "$_binline" = "1" ] && [ -n "$_bhead" ] && return 0
+
+    # `_bmisc` deliberately ACCUMULATES across the walk: a line whose every segment is plumbing
+    # (`D=…; for f in …; do echo "$f"; done`) is plumbing, and labelling it `shell-misc` keeps it in
+    # the S4 command-mix survey instead of dropping it. The family is `other`, so nothing that
+    # happens here can reach the substitution rate.
+    _bw1="$meter_w1"; _bw2="$meter_w2"; _ba1="$meter_arg1"
+    meter_classify_walk "$1"
+    _bwalk="$mclass"
+    if [ -z "$_bwalk" ]
+    then
+        # A walk that decided nothing must leave no trace: the sweep escalation reads `meter_arg1`
+        # for the pattern it quotes back at the agent, and that has to stay the head's operand.
+        meter_w1="$_bw1"; meter_w2="$_bw2"; meter_arg1="$_ba1"
+    fi
+    case "$_bwalk" in
+        ripwire-cli|grep|find|read|git-diff|git-log|git-show-stat)
+            mclass="$_bwalk"; return 0 ;;
+    esac
+    if [ -n "$_bhead" ]
+    then
+        mclass="$_bhead"; return 0          # leftmost non-retrieval verdict wins
+    fi
+    if [ -n "$_bwalk" ]
+    then
+        mclass="$_bwalk"; return 0
+    fi
+
+    # Neither position named a command this table knows — but if the LINE names a retrieval verb
+    # anywhere (a pipeline, a loop body, xargs, a subshell), the call IS an observation and must not
     # vanish from the denominator just because this classifier cannot say which kind it is.
-    if printf '%s' "$_bc" \
-        | grep -qE '(^|[^A-Za-z0-9_.-])(ripwire|grep|egrep|fgrep|rg|ag|ack|ugrep|find|fd|cat|head|tail|less|more|bat|awk|sed)([^A-Za-z0-9_-]|$)'
+    #
+    # A `/` immediately after the word disqualifies it: `/opt/homebrew/share/ripwire/hooks/…` names
+    # a DIRECTORY called ripwire, not an invocation of it, and before this guard every command that
+    # merely mentioned a file under such a path was filed `unclassified`. A `/` BEFORE the word is
+    # not disqualifying — `xargs /usr/bin/grep …` is a real invocation — so only the trailing side
+    # is tightened, and the residue is the rare `xargs /usr/bin/grep` inside a path-shaped line.
+    #
+    # `head` `tail` `less` `more` `bat` `nl` `tac` are NOT in this list, and their absence is a rule
+    # rather than an oversight. As a leading word the head table already reads them as `read`, and in
+    # a later sequenced segment so does the walk; the only position this scan could still catch them
+    # in is a PIPELINE STAGE — `ls docs/ | head -40`, `claude --help | head -80` — where they page
+    # another command's output and retrieve nothing. Counting those was the same pager error the walk
+    # avoids by not descending into pipelines, arriving by the other road. The residue is the rare
+    # `$(head -1 f)` / `xargs tail`, which now writes no row instead of an `unclassified` one.
+    if printf '%s' "$1" \
+        | grep -qE '(^|[^A-Za-z0-9_.-])(ripwire|grep|egrep|fgrep|rg|ag|ack|ugrep|find|fd|cat|awk|sed)([^A-Za-z0-9_/-]|$)'
     then
         mclass="unclassified"; return 0
     fi
@@ -503,6 +704,7 @@ meter_family()
         git-diff|git-log|git-show-stat) printf 'git' ;;
         git-remote|git-misc)            printf 'git' ;;
         session-start|gate-run)         printf 'meta' ;;
+        build|script-run|shell-misc)    printf 'other' ;;
         *)                              printf 'other' ;;
     esac
 }
@@ -638,10 +840,16 @@ then
     #      two-character sequences in it. Every reader below then failed on it in the same way:
     #      `\bgit[[:space:]]+diff\b` never matched across a `\n`, and the classifier's word split gave
     #      a leading token of `/a/b\ngit` whose basename is `b\ngit`, which matches no rule. That is
-    #      how 742 of the live log's 916 `unclassified` rows were made. Substituting a space is
-    #      enough — every reader below is whitespace-delimited — and it costs no fork. `detail` is
-    #      deliberately NOT rewritten: the log keeps the exact single-line form it always stored.
-    cmdx="${cmd//\\n/ }"
+    #      how 742 of the live log's 916 `unclassified` rows were made. `detail` is deliberately NOT
+    #      rewritten: the log keeps the exact single-line form it always stored.
+    #
+    #      2026-08-12 (S2c): the substitute is ` ; `, not a space. A newline IS a command separator
+    #      in shell, and calling it whitespace glued a multi-line command into one unsplittable
+    #      segment — `cd /w⏎for g in …⏎do bash test/$g.sh⏎done` presented as a single line whose
+    #      leading word is `for` and whose real command the segment walk could not reach. Every
+    #      reader below is whitespace-delimited AND separator-tolerant, so the stronger substitution
+    #      costs them nothing; it costs no fork either.
+    cmdx="${cmd//\\n/ ; }"
     cmdx="${cmdx//\\t/ }"
     # Only a RECURSIVE/tree-wide text search counts — a single-file grep or a filter on other output
     # (e.g. `ls | grep foo`) is not the "blind grep over the tree" case this hook targets. Checked
