@@ -2589,6 +2589,66 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
     std::uint64_t idHash = 0, wantContent = 0;
     if( !mcpdetail::parseHandle( handle, idHash, wantContent ) )
     {
+        // R2c (the 2026-08-12 usage mine): a string that is not even handle-SHAPED is tried as a bare
+        // symbol NAME through the SAME lookup path find_symbol uses (resolveAllByNameQualified → lowest-id
+        // pick, i.e. resolveFocus's convention), then served by RECURSING with the freshly-minted real
+        // handle — so every staleness/overload guarantee below applies unchanged, and the result teaches
+        // the handle for next time. Disclosed: resolved_from_name always; name_defs/other_defs when the
+        // name has several distinct defs (the honest sibling of the same-handle overload note in 2b).
+        // A "sym#"-prefixed string is NEVER treated as a name — a corrupt REAL handle must keep the
+        // malformed refusal rather than mis-resolve through a name that happens to match.
+        if( handle.rfind( "sym#", 0 ) != 0 && !handle.empty() )
+        {
+            const McpIndex&           nameIx      = getIndex( root );          // same index a read verb would build
+            const std::vector<NodeId> nameMatches = resolveAllByNameQualified( nameIx.ing, handle );
+            if( nameMatches.empty() )
+            {
+                oc.ok = false; oc.errCode = -32602;
+                oc.message = withDidYouMean( nameIx.ing, handle,
+                                             "'" + handle + "' is neither a handle (sym#<16hex>@<16hex>) nor a known symbol name" )
+                           + " — call find_symbol for the handle, or pass the exact definition name (file:name disambiguates)";
+                return oc;
+            }
+            // distinct HANDLES across the matches (a decl + def in different files mint different ids);
+            // matches ascend by NodeId, so front() is the resolveFocus pick and order is deterministic.
+            std::vector<std::string> distinctHandles;
+            std::vector<NodeId>      distinctIds;
+            for( const NodeId id : nameMatches )
+            {
+                std::string h2 = handleFor( nameIx, id );
+                if( std::find( distinctHandles.begin(), distinctHandles.end(), h2 ) == distinctHandles.end() )
+                {
+                    distinctHandles.push_back( std::move( h2 ) );
+                    distinctIds.push_back( id );
+                }
+            }
+            FetchOutcome byName = fetchBody( root, distinctHandles.front(), startLine, endLine, hasRange, redact );
+            if( byName.ok && !byName.resultJson.empty() && byName.resultJson.front() == '{' )
+            {
+                std::string disclosure = "\"resolved_from_name\":\"" + mcpdetail::jsonEscape( handle ) + "\",";
+                if( distinctHandles.size() > 1 )
+                {
+                    disclosure += "\"name_defs\":" + std::to_string( distinctHandles.size() ) + ",\"other_defs\":[";
+                    constexpr std::size_t kOtherDefCap = 4;   // disclosure, not a listing — cap the tail
+                    bool first = true;
+                    for( std::size_t i = 1; i < distinctIds.size() && i <= kOtherDefCap; ++i )
+                    {
+                        const Symbol& si = nameIx.ing.symbols[ distinctIds[i] ];
+                        if( !first )
+                        {
+                            disclosure += ",";
+                        }
+                        first = false;
+                        disclosure += "{\"file\":\"" + mcpdetail::jsonEscape( nameIx.ing.files[ si.fileId ] )
+                                    + "\",\"line\":" + std::to_string( si.line )
+                                    + ",\"handle\":\"" + mcpdetail::jsonEscape( distinctHandles[i] ) + "\"}";
+                    }
+                    disclosure += "],";
+                }
+                byName.resultJson.insert( 1, disclosure );
+            }
+            return byName;
+        }
         oc.ok = false; oc.errCode = -32602;
         oc.message = "malformed handle '" + handle + "' (expected sym#<16hex>@<16hex>); call a read verb to obtain a valid handle";
         return oc;
