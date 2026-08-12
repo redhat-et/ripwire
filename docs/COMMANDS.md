@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
 
@@ -60,7 +60,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **Answers:** keep the N highest-ranked symbols (default 200) — applies to the default map, plain --query, and --format=candidates (incl.
 
-with --for). --for's OWN signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is INERT there (documented, not fixed — a real fix is a behavior change). --pack-task/--from-trace/--situ self-budget via --token-budget, not --top-k. --top-k=0 emits NO ranked map at all — ONLY the payload you asked for (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the body and not the ~200-symbol map that otherwise rides along with it.
+with --for). --for's OWN signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is INERT there (documented, not fixed — a real fix is a behavior change). --pack-task/--from-trace/--run-trace/--situ self-budget via --token-budget, not --top-k. --top-k=0 emits NO ranked map at all — ONLY the payload you asked for (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the body and not the ~200-symbol map that otherwise rides along with it.
 
 **Try it**
 
@@ -85,7 +85,7 @@ $ ./build/ripwire . --top-k=5
 ... [4 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--token-budget`, `--recall`, `--graph-query`, `--pack-signatures`, `--expand`, `--from-trace`, `--format`, `--json`
+**Shaped by:** `--token-budget`, `--recall`, `--graph-query`, `--pack-signatures`, `--expand`, `--from-trace`, `--run-trace`, `--format`
 
 **Caveats (stated by the binary):**
 
@@ -120,7 +120,7 @@ $ ./build/ripwire . --max-tokens=1500
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--json`
+**Shaped by:** `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -132,7 +132,7 @@ $ ./build/ripwire . --max-tokens=1500
 
 **Answers:** two personalities depending on the verb: - default map / --query / --recall: a CI GATE — exit 3 if the emitted DOCUMENT's est_tokens exceeds N.
 
-That is the map PLUS every block appended after it (<sigs>/<src>/<bodies>/<outline>), each charged from the bytes it actually emits at the calibrated rate for what those bytes are — so --pack-top-n=3 --token-budget=600 gates on the ~67KB it would stream, not on the map alone. (test/tokenbudgetcheck.sh reports the live MAPE vs tiktoken o200k when tiktoken is installed; the estimate is calibrated, never exact — Claude's tokenizer is not public.) Within budget: exit 0, output unchanged. ASSERTS and fails, vs --max-tokens which shapes to fit — composable: set neither, either, or both (e.g. --max-tokens=16000 --token-budget=16K), but see --max-tokens above: the two Ns are measured in different units. Over budget, nothing of the artifact reaches stdout — only a small record naming withheld_est_tokens= vs budget=, the same vocabulary --recall uses, since est_tokens= is normatively about what a run PRINTED. On --recall the check likewise runs BEFORE a byte of the bundle is emitted: stdout gets the header line naming what was withheld, never the artifact just rejected. --json GATES AT A DIFFERENT NUMBER for the same request, and by design: the flag measures the DOCUMENT that was emitted, and the JSON encoding of the same map is smaller than the XML one (MEASURED on src/ --top-k=200: est_tokens 577 XML vs 435 JSON, ~25% apart). So the same N can pass under --json and fail without it — pick the budget for the dialect you emit. - --for / --pack-task / --from-trace: SHAPES instead of gating — overrides that lens's own default payload budget and trims to fit, always exit 0. --for's header reports est_tokens="N" so its fit is checkable; --pack-task/--from-trace report their budget ledger in the header report line instead. Its VERBATIM task echo is bytes no trim can shrink, so past some task length the header floor alone exceeds the ceiling: the lens drops the comment's DUPLICATE echo first (task_echo: dropped (ceiling); task= keeps the verbatim copy), then labels it over_ceiling (--recall: over_ceiling=1) — never a trim it did not actually do.
+That is the map PLUS every block appended after it (<sigs>/<src>/<bodies>/<outline>), each charged from the bytes it actually emits at the calibrated rate for what those bytes are — so --pack-top-n=3 --token-budget=600 gates on the ~67KB it would stream, not on the map alone. (test/tokenbudgetcheck.sh reports the live MAPE vs tiktoken o200k when tiktoken is installed; the estimate is calibrated, never exact — Claude's tokenizer is not public.) Within budget: exit 0, output unchanged. ASSERTS and fails, vs --max-tokens which shapes to fit — composable: set neither, either, or both (e.g. --max-tokens=16000 --token-budget=16K), but see --max-tokens above: the two Ns are measured in different units. Over budget, nothing of the artifact reaches stdout — only a small record naming withheld_est_tokens= vs budget=, the same vocabulary --recall uses, since est_tokens= is normatively about what a run PRINTED. On --recall the check likewise runs BEFORE a byte of the bundle is emitted: stdout gets the header line naming what was withheld, never the artifact just rejected. --json GATES AT A DIFFERENT NUMBER for the same request, and by design: the flag measures the DOCUMENT that was emitted, and the JSON encoding of the same map is smaller than the XML one (MEASURED on src/ --top-k=200: est_tokens 577 XML vs 435 JSON, ~25% apart). So the same N can pass under --json and fail without it — pick the budget for the dialect you emit. - --for / --pack-task / --from-trace / --run-trace: SHAPES instead of gating — overrides that lens's own default payload budget and trims to fit, always exit 0. --for's header reports est_tokens="N" so its fit is checkable; --pack-task/--from-trace report their budget ledger in the header report line instead. Its VERBATIM task echo is bytes no trim can shrink, so past some task length the header floor alone exceeds the ceiling: the lens drops the comment's DUPLICATE echo first (task_echo: dropped (ceiling); task= keeps the verbatim copy), then labels it over_ceiling (--recall: over_ceiling=1) — never a trim it did not actually do.
 
 **Try it**
 
@@ -143,7 +143,7 @@ $ ./build/ripwire . --token-budget=100
 <r withheld_est_tokens="9140" budget="100" withheld="1"/>
 ```
 
-**Shaped by:** `--top-k`, `--max-tokens`, `--for`, `--recall`, `--handoff`, `--from-trace`, `--pack-task`, `--partition`
+**Shaped by:** `--top-k`, `--max-tokens`, `--for`, `--recall`, `--handoff`, `--from-trace`, `--run-trace`, `--pack-task`
 
 **Caveats (stated by the binary):**
 
@@ -1085,7 +1085,7 @@ $ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 ... [14 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--from-trace`, `--notes`, `--json`
+**Shaped by:** `--top-k`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--run-timeout`, `--notes`, `--json`
 
 ### `--compress`
 
@@ -2258,7 +2258,7 @@ $ ./build/ripwire . --doc-drift --with-history
 
 **Answers:** map a stack trace / sanitizer report / compiler-error text ('-'=stdin) onto the indexed symbols: table-driven frame extraction (python / asan / node / compiler / generic), ranked INNERMOST-first over in-corpus frames only (out-of-corpus frames are listed and counted, never ranked).
 
-Each frame binds by its own NAME first (resolved_by="name") and falls back to the def enclosing its line (resolved_by="line") only when the name is absent/unknown/ambiguous — a trace older than the checkout therefore lands on the symbol it names, and a name-vs-line disagreement is disclosed as line_encloses=, never silently rebound. The counters close: in_corpus = suspects + merged + unresolved, with one <unresolved> row per file-matched frame no resolver could place. p= on a frame is the TRACE's own path:line; definition sites are the <sigs> l= values. Emits the same bundle shape as --for — top suspects' signatures + the innermost in-corpus symbol's FULL body; composes with --token-budget, and HONORS --max-tokens=N (it bounds the bodies) — one of the six shapes that do, alongside the default map, --recall, --connect, --pr-context and --for --detail=N. --top-k is NOT read here (the frame order is the trace's, not a rank). Unparseable input refuses loudly (never an empty map). --note-add="TARGET: text"  pin a field note (write-side memory) to TARGET — a canonical id (path::scope::name, as --for/--expand emit it) or a file path — in the committed, sorted .ripwire_notes at the repo root. The date is git's committer clock (HEAD), not wall time, so the line is deterministic; prints the exact written line. Also STAMPS the writing repo's HEAD sha + branch onto the note (a "done"/"fixed" claim is then anchored to the commit it was true at) — a non-git root or an unresolvable HEAD writes the plain unstamped line rather than a wrong sha. MUTATES one file; single-root only. text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
+Each frame binds by its own NAME first (resolved_by="name") and falls back to the def enclosing its line (resolved_by="line") only when the name is absent/unknown/ambiguous — a trace older than the checkout therefore lands on the symbol it names, and a name-vs-line disagreement is disclosed as line_encloses=, never silently rebound. The counters close: in_corpus = suspects + merged + unresolved, with one <unresolved> row per file-matched frame no resolver could place. p= on a frame is the TRACE's own path:line; definition sites are the <sigs> l= values. Emits the same bundle shape as --for — top suspects' signatures + the innermost in-corpus symbol's FULL body; composes with --token-budget, and HONORS --max-tokens=N (it bounds the bodies) — one of the six shapes that do, alongside the default map, --recall, --connect, --pr-context and --for --detail=N. --top-k is NOT read here (the frame order is the trace's, not a rank). Unparseable input refuses loudly (never an empty map).
 
 **Try it**
 
@@ -2277,13 +2277,32 @@ AddressSanitizer:DEADLYSIGNAL
 ==41337==ABORTING
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--json`
+**Shaped by:** `--top-k`, `--token-budget`, `--run-trace`, `--json`
 
 **Caveats (stated by the binary):**
 
 - map a stack trace / sanitizer report / compiler-error text ('-'=stdin) onto the indexed symbols: table-driven frame extraction (python / asan / node / compiler / generic), ranked INNERMOST-first over in-corpus frames only (out-of-corpus frames are listed and counted, never ranked).
 - The counters close: in_corpus = suspects + merged + unresolved, with one <unresolved> row per file-matched frame no resolver could place.
 - --top-k is NOT read here (the frame order is the trace's, not a rank).
+
+### `--run-trace="CMD"`
+
+**Answers:** EXEC-MODE --from-trace — the whole fix-loop entry in ONE call.
+
+Runs CMD under `sh -c` (the make trust model: your user, your environment, stdin=/dev/null, NO sandbox), captures stdout+stderr interleaved, and on a NON-ZERO exit serves the --from-trace bundle for the captured text (frames mapped innermost-first, the innermost in-corpus symbol's FULL body) plus a token-frugal <lines view="relevant"> cut of the error / frame-shaped output lines — shown=/relevant=/total= all disclosed, the cut never silent. The command's own exit code is ALWAYS disclosed on <run exit=>; a command that exits 0 gets a minimal success record (exit, measured duration_ms, a disclosed tail of output) and NO bundle — nothing failed, so there is nothing to map. The <run> record and captured lines are MEASURED (not deterministic, not claimed to be); the MAPPING of the captured text is byte-deterministic, and the document says which part is which. Composes with --token-budget (it bounds the bundle half, like --from-trace); --top-k / --max-tokens are not read here. ripwire's exit: 0 = the command succeeded; 4 = it failed or timed out (the report is on stdout either way); 1 = ripwire itself could not spawn it.
+
+**Shaped by:** `--top-k`, `--token-budget`, `--run-timeout`
+
+### `--run-timeout=SECONDS`
+
+**Answers:** cap for --run-trace's command (default 600 s;
+
+always disclosed as timeout_s=). A command still running at the cap has its whole process group killed and is reported timed_out="1" — an honest TIMEOUT, never an empty success. Modifies --run-trace only; refused loudly alone. --note-add="TARGET: text"  pin a field note (write-side memory) to TARGET — a canonical id (path::scope::name, as --for/--expand emit it) or a file path — in the committed, sorted .ripwire_notes at the repo root. The date is git's committer clock (HEAD), not wall time, so the line is deterministic; prints the exact written line. Also STAMPS the writing repo's HEAD sha + branch onto the note (a "done"/"fixed" claim is then anchored to the commit it was true at) — a non-git root or an unresolvable HEAD writes the plain unstamped line rather than a wrong sha. MUTATES one file; single-root only. text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
+
+**Caveats (stated by the binary):**
+
+- A command still running at the cap has its whole process group killed and is reported timed_out="1" — an honest TIMEOUT, never an empty success.
+- text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
 
 ### `--notes`
 
