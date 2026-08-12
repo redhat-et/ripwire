@@ -1324,11 +1324,28 @@ inline std::optional<std::string> regexCompileError( const std::string& pat )
 // reported hits= is a FLOOR).
 inline constexpr std::size_t kGrepCollectionBudget = 4000000;
 
-// The whole tier-then-path-ordered raw hit list plus the one bit the emitter must disclose. Split from the
+// The whole tier-then-path-ordered raw hit list plus the bits the emitter must disclose. Split from the
 // enrichment (below) because a common pattern collects ~10^6 raw hits over a repo this size: at 12 B each
 // that is cheap, while materializing every hit's matched line, context and enclosing chain is not — and the
 // caller only ever PRINTS a window of them.
-struct GrepCollection { std::vector<GrepRawHit> raw; bool isBudgetReached; };
+//
+// T1 (completeness claims): `unreadableFiles` and `degraded` are the scan's own honesty bits. The emitters
+// may claim complete= (every occurrence in the index is listed) ONLY when the scan provably read every
+// indexed file end to end — a file the worker could not read, or a worker that died mid-scan, makes the
+// hit set a floor, and a floor must never wear the claim. Both are deterministic facts of the corpus/disk
+// state, not of thread timing (the read either succeeds or fails per file, whichever worker draws it).
+struct GrepCollection
+{
+    std::vector<GrepRawHit> raw;
+    bool                    isBudgetReached = false;
+    std::uint32_t           unreadableFiles = 0;
+    bool                    degraded        = false;
+
+    // The scan-side completeness conditions, stated ONCE for both emitters (the CLI XML root and the MCP
+    // JSON payload) so the condition cannot fork between them — each emitter ANDs in only its own arms
+    // (the CLI's regex exclusion, and each dialect's page-covers-everything test).
+    bool cleanScan() const noexcept { return !isBudgetReached && unreadableFiles == 0 && !degraded; }
+};
 
 inline GrepCollection grepCollect( const IngestResult& ing, const std::string& pat, bool regex = false, bool noPrefilter = false )
 {
@@ -1344,7 +1361,9 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     // did not ask; each worker compiles its own copy so no std::regex object is shared.
     if( regex && regexCompileError( pat ) )
     {
-        return {}; // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes
+        // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes. degraded=true
+        // (T1): NOTHING was scanned, so no caller may read this empty set as a complete zero.
+        return { {}, false, 0, true };
     }
 
     // the sound regex→trigram query, computed once and evaluated per file (read-only across workers)
@@ -1353,10 +1372,12 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     // ── pass 1: parallel scan, one worker per hardware thread, one file at a time ──────────────────────
     std::vector<std::vector<GrepMatchSite>> perFileSites( fileCount );   // slot f written by exactly one worker
     std::atomic<std::uint32_t>              nextFileId { 0 };
+    std::atomic<std::uint32_t>              unreadableCount { 0 };       // T1: files the scan could not read
+    std::atomic<bool>                       workerDegraded { false };    // T1: a worker died mid-scan
     const auto                              fileWorker = [ & ]
     {
         std::regex reLocal;
-        if( regex ) { try { reLocal = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); } catch( ... ) { return; } }
+        if( regex ) { try { reLocal = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); } catch( ... ) { workerDegraded.store( true, std::memory_order_relaxed ); return; } }
         std::string text;
         try
         {
@@ -1364,10 +1385,12 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
             {
                 text.clear();
                 // unreadable file ⇒ degrade to empty bytes and keep going (what the index build did too:
-                // it left an empty `contents` entry rather than dropping the file from the corpus).
+                // it left an empty `contents` entry rather than dropping the file from the corpus) — but
+                // COUNT it (T1): a scan that skipped a file's bytes may not claim completeness.
                 if( !docparse::detail::readWholeFile( diskPath( ing, f ), text ) )
                 {
                     text.clear();
+                    unreadableCount.fetch_add( 1, std::memory_order_relaxed );
                 }
                 if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) )
                 {
@@ -1378,6 +1401,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
         }
         catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial hits instead
         {
+            workerDegraded.store( true, std::memory_order_relaxed );     // T1: the hit set is partial now
             DEGRADED_PATH_ALERT( "grep: scan worker degraded (exception swallowed) — partial hit set" );
         }
     };
@@ -1471,7 +1495,8 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     // read the bit BEFORE the move — a braced-init-list is evaluated left to right, so `raw.size()` after
     // `std::move( raw )` would read a moved-from vector and always report "not capped"
     const bool isBudgetReached = raw.size() >= budgetCount;
-    return { std::move( raw ), isBudgetReached };
+    return { std::move( raw ), isBudgetReached, unreadableCount.load( std::memory_order_relaxed ),
+             workerDegraded.load( std::memory_order_relaxed ) };
 }
 
 // Turn a WINDOW of already-collected, already-ordered raw hits into printable rows: enclosing-symbol chain,
