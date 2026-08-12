@@ -64,6 +64,7 @@ struct Config
     std::string_view callees;                              // --callees=SYMBOL (or file:name): what it calls (1-hop out-edges)
     std::string_view usesSym;                              // --uses=SYM (or file:name): the statically resolvable use-sites of SYM (call/read/write/import/extends) + external flag (ABS-3); file: narrows defs= + the call-role sites, other roles stay name-wide (§P10.2/§A6b)
     std::string_view graphQuery;                           // --graph-query=EXPR: composable node-set operators over the call graph (ABS-5)
+    std::string_view verifyClaim;                          // --verify=CLAIM (G4): one structured claim in, a three-valued verdict + inline evidence out (src/verify.h owns the closed grammar)
     bool             externalSurface = false;              // --external-surface: names referenced but never defined in-corpus (stdlib/3p surface)
     int              aroundDepth     = 2;                  // --around-depth=
     int              aroundFanout    = 32;                 // --around-fanout=
@@ -809,6 +810,18 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               indexed function-like #define (t=\"macro\"); a shared name stays a plain call, an unindexed\n"
         "                               macro's site is no edge. Read a 0 as \"none found\", never as \"none exists\". Those five\n"
         "                               verbs also count DISTINCT (caller,callee) pairs, while --uses counts call SITES — see each verb's own legend\n"
+        "    --verify=\"CLAIM\"           VERIFY A CLAIM about the code in ONE call: a CLOSED claim language in, a three-valued verdict out\n"
+        "                               (confirmed / refuted / not-established) with the evidence rows inline — the collapse of the manual\n"
+        "                               verification grep-chain. Shapes: calls(A,B) does A transitively call B; uses(SYM) / unused(SYM) is\n"
+        "                               SYM referenced anywhere / nowhere; contains(FILE, \"LIT\") do FILE's indexed bytes contain the\n"
+        "                               literal; defines(FILE, SYM) does FILE define SYM; reaches(SYM, \"FILE\"|LAYER) does code in that\n"
+        "                               file/layer transitively call SYM (LAYER unquoted: game|infra|render|math|audio|ai|test).\n"
+        "                               refuted appears ONLY with complete evidence: a clean literal-scan absence carries complete=, and an\n"
+        "                               unused claim is refuted by printed witness sites. A graph or reference ZERO can never refute — it\n"
+        "                               yields not-established with limit= naming the floor (call-graph-floor, reference-floor,\n"
+        "                               collection-ceiling, scan-degraded, extraction-floor); see counts_floor above for why. An unknown\n"
+        "                               shape refuses loudly with the whole vocabulary; SYM takes the shared selector grammar (name,\n"
+        "                               file:name, canonical id), FILE is a path substring\n"
         "    --mentions=SYM             markdown docs (plans/designs) that name SYM in a `backtick` (doc↔code)\n"
         "    the pre-PR family — plumbing (--affected) to mid-task report (--situ) to gate (--test-gate):\n"
         "    --affected=F1,F2|SYM       test files that transitively reach the changed files -- or the changed SYMBOL. Each item may be\n"
@@ -1833,6 +1846,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--impact=",      &Config::impactSym       , EmptyValue::Refuse, "a symbol name",                          "--impact=parseArgs" },
     { "--mentions=",    &Config::mentionsSym     , EmptyValue::Refuse, "a symbol name",                          "--mentions=parseArgs" },
     { "--affected=",    &Config::affectedFiles   , EmptyValue::Refuse, "changed files or a symbol name",         "--affected=src/cli.h" },
+    { "--verify=",      &Config::verifyClaim     , EmptyValue::Refuse, "a claim expression",                     "--verify='calls(parseArgs, readFile)'" },
 
     // cache, index, history
     { "--cache=",       &Config::cacheFile       , EmptyValue::Refuse, "a cache file path",                      "--cache=.ripwirecache" },
@@ -2063,7 +2077,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms       = 172;  // +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint)
+inline constexpr std::size_t kTotalFlagArms       = 173;  // +1 G4: --verify= (kViewFlags row, verify-a-claim); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
