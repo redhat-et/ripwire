@@ -592,7 +592,62 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ h.fileId ] ) + "\",\"line\":" + std::to_string( h.line )
              + ",\"in\":\"" + mcpdetail::jsonEscape( h.enclosing ) + "\"}";
     }
-    out += "]}";
+    out += "]";
+
+    // R1b (the 2026-08-12 usage mine), the CLI <enc> block's JSON twin: ONE entry per DISTINCT enclosing
+    // symbol of THIS page, first-appearance order, `callers` off the in-edge CSR the index already holds —
+    // zero new analysis, bounded by the page's own row cap. Appended AFTER "hits" so the historic key
+    // order three other gates read (files,total,shown,capped) is byte-untouched.
+    {
+        const std::vector<GrepEncRow> encRows = grepEnclosingRows( ing, ix.g, std::span<const GrepHit>( hits ) );
+        if( !encRows.empty() )
+        {
+            out += ",\"enclosing\":[";
+            bool encFirst = true;
+            for( const GrepEncRow& row : encRows )
+            {
+                if( !encFirst )
+                {
+                    out += ",";
+                }
+                encFirst = false;
+                out += "{\"n\":\"" + mcpdetail::jsonEscape( row.chain ) + "\",\"callers\":" + std::to_string( row.callerCount );
+                if( row.defCount > 1 )
+                {
+                    out += ",\"defs\":" + std::to_string( row.defCount );
+                }
+                if( row.cx > 0 )
+                {
+                    out += ",\"cx\":" + std::to_string( row.cx );
+                }
+                out += "}";
+            }
+            out += "]";
+        }
+    }
+
+    // R1a, the zero-hit follow-up (shared grepZeroHitSuggestions — the CLI and this verb cannot diverge):
+    // an honest total:0 stays, and a labeled `suggest` object teaches the two next moves in this surface's
+    // own spelling — `near` (did-you-mean) and the `for` verb (the grep→for conversion the mine shows
+    // never happens unprompted). Absent for non-word-like patterns: byte-identical to the pre-R1a answer.
+    if( collected.raw.empty() )
+    {
+        const GrepZeroHitSuggestions sug = grepZeroHitSuggestions( ing, pattern, /*regex=*/false );
+        if( !sug.near.empty() || sug.offerFor )
+        {
+            out += ",\"suggest\":{\"note\":\"suggestions, not matches — hits stays an honest zero\"";
+            if( !sug.near.empty() )
+            {
+                out += ",\"near\":\"" + mcpdetail::jsonEscape( sug.near ) + "\"";
+            }
+            if( sug.offerFor )
+            {
+                out += ",\"next_verb\":\"for\",\"next_task\":\"" + mcpdetail::jsonEscape( pattern ) + "\"";
+            }
+            out += "}";
+        }
+    }
+    out += "}";
     return out;
 }
 
