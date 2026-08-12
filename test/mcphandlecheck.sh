@@ -181,6 +181,100 @@ print("MUT_REFUSED" if ("result" not in r and r.get("error",{}).get("code")==-32
 grep -q MUT_REFUSED "$TMP/mchk" && ok "mutated (non-existent id) handle refused, no body" || no "mutated handle NOT refused: $(cat "$TMP/mchk")"
 
 echo
+echo "=== 6b. R2c (the 2026-08-12 usage mine): a bare symbol NAME is accepted where a handle is expected ==="
+# fetch_body's strict handle parse stays (steps 5/6 above are untouched contracts), but a string that is
+# not even handle-SHAPED is now tried as a symbol name through the same lookup path find_symbol uses
+# (resolveAllByNameQualified, lowest-id pick), DISCLOSED via resolved_from_name + the REAL handle in the
+# result — so the one-shot answer also teaches the handle for next time. A "sym#..."-prefixed string is
+# NEVER treated as a name (a corrupt real handle must keep the malformed refusal — step 6's guard).
+
+# (6b-1) [red] the bare name serves the same body a real handle serves, and disclosure rides the result
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"path":"'"$CORPUS"'","handle":"engineStepA2"}}}' \
+    | tail -1 > "$TMP/byname"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+if "result" not in r: print("NAME_REFUSED:" + r.get("error",{}).get("message","")[:160]); sys.exit(0)
+j = json.loads(r["result"]["content"][0]["text"])
+okBody   = "engineStepA1() + engineStepA1()" in j.get("body","")
+okHandle = str(j.get("handle","")).startswith("sym#")
+okDisc   = j.get("resolved_from_name") == "engineStepA2"
+print("NAME_OK" if (okBody and okHandle and okDisc) else "NAME_BAD:body=%s handle=%s disc=%s" % (okBody, okHandle, j.get("resolved_from_name")))
+' "$TMP/byname" > "$TMP/bynamechk"
+grep -q NAME_OK "$TMP/bynamechk" \
+    && ok "(6b-1) [red] bare name serves the def body + the REAL handle + resolved_from_name disclosure" \
+    || no "(6b-1) [red] $(cat "$TMP/bynamechk")"
+
+# (6b-2) [red] an unknown bare name refuses with a did-you-mean + the find_symbol pointer (one-shot recovery)
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"path":"'"$CORPUS"'","handle":"engineStepA2x"}}}' \
+    | tail -1 > "$TMP/badname"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+m = r.get("error",{}).get("message","")
+okCode = "result" not in r and r.get("error",{}).get("code") == -32602
+print("BADNAME_OK" if (okCode and "did you mean" in m and "engineStepA2" in m and "find_symbol" in m) else "BADNAME_BAD:" + m[:200])
+' "$TMP/badname" > "$TMP/badnamechk"
+grep -q BADNAME_OK "$TMP/badnamechk" \
+    && ok "(6b-2) [red] unknown bare name refused WITH did-you-mean + find_symbol pointer" \
+    || no "(6b-2) [red] $(cat "$TMP/badnamechk")"
+
+# (6b-3) guard: a "sym#"-prefixed corrupt handle keeps the malformed-handle refusal (never a name lookup)
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"path":"'"$CORPUS"'","handle":"sym#garbage"}}}' \
+    | tail -1 > "$TMP/symgarb"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+m = r.get("error",{}).get("message","")
+print("GUARD_OK" if ("result" not in r and "malformed handle" in m) else "GUARD_BAD:" + m[:160])
+' "$TMP/symgarb" > "$TMP/symgarbchk"
+grep -q GUARD_OK "$TMP/symgarbchk" \
+    && ok "(6b-3) 'sym#'-prefixed garbage keeps the malformed-handle refusal (no name fallback)" \
+    || no "(6b-3) $(cat "$TMP/symgarbchk")"
+
+# (6b-4) [red] same-named defs in DIFFERENT files: serve the lowest-id pick, DISCLOSE the others
+#         (name_defs + other_defs with file:line + each one's handle — the honest sibling of step 2b'\''s
+#         overload note, for the name path). A second def is planted in the PRIVATE corpus copy.
+printf 'int dupTwinFn( int x ) { return x + 1; }\n'  > "$CORPUS/core/twin_a.cpp"
+printf 'int dupTwinFn( int x ) { return x + 2; }\n'  > "$CORPUS/util/twin_b.cpp"
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"path":"'"$CORPUS"'","handle":"dupTwinFn"}}}' \
+    | tail -1 > "$TMP/dupname"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+if "result" not in r: print("DUP_REFUSED:" + r.get("error",{}).get("message","")[:160]); sys.exit(0)
+j = json.loads(r["result"]["content"][0]["text"])
+others = j.get("other_defs", [])
+okN    = j.get("name_defs") == 2
+okO    = len(others) == 1 and str(others[0].get("handle","")).startswith("sym#") and "twin_" in others[0].get("file","")
+print("DUP_OK" if (okN and okO) else "DUP_BAD:name_defs=%s others=%s" % (j.get("name_defs"), json.dumps(others)[:160]))
+' "$TMP/dupname" > "$TMP/dupchk"
+grep -q DUP_OK "$TMP/dupchk" \
+    && ok "(6b-4) [red] same-named defs: lowest-id pick served, name_defs + other_defs disclosed" \
+    || no "(6b-4) [red] $(cat "$TMP/dupchk")"
+
+# (6b-5) determinism: the by-name fetch is byte-identical across two server processes. Two FRESH calls
+#         (6b-4 planted the twin files, so the pre-plant capture from 6b-1 is a different corpus state —
+#         comparing against it would measure the plant, not the tool).
+for d in det_n1 det_n2; do
+    mcp_call \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"path":"'"$CORPUS"'","handle":"engineStepA2"}}}' \
+        | tail -1 > "$TMP/$d"
+done
+diff -q "$TMP/det_n1" "$TMP/det_n2" >/dev/null \
+    && ok "(6b-5) by-name fetch byte-identical across processes" \
+    || no "(6b-5) by-name fetch differs across processes"
+
+echo
 echo "=== 7. determinism: two find_symbol calls byte-identical ==="
 mcp_call "${FIND_MSGS[@]}" > "$TMP/det_a"
 mcp_call "${FIND_MSGS[@]}" > "$TMP/det_b"
