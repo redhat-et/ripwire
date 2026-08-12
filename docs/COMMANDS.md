@@ -40,7 +40,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--for`](#for-task) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
 
-**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--match`](#match-query) · [`--query`](#query-terms)
+**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--match`](#match-query) · [`--query`](#query-terms)
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
@@ -724,6 +724,18 @@ $ ./build/ripwire . --impact=rankGraphTeleport
 
 - transitive blast radius — the indexed symbols that reach SYM (a floor, see counts_floor).
 - Read a 0 as "none found", never as "none exists".
+
+### `--verify="CLAIM"`
+
+**Answers:** VERIFY A CLAIM about the code in ONE call: a CLOSED claim language in, a three-valued verdict out (confirmed / refuted / not-established) with the evidence rows inline — the collapse of the manual verification grep-chain.
+
+Shapes: calls(A,B) does A transitively call B; uses(SYM) / unused(SYM) is SYM referenced anywhere / nowhere; contains(FILE, "LIT") do FILE's indexed bytes contain the literal; defines(FILE, SYM) does FILE define SYM; reaches(SYM, "FILE"|LAYER) does code in that file/layer transitively call SYM (LAYER unquoted: game|infra|render|math|audio|ai|test). refuted appears ONLY with complete evidence: a clean literal-scan absence carries complete=, and an unused claim is refuted by printed witness sites. A graph or reference ZERO can never refute — it yields not-established with limit= naming the floor (call-graph-floor, reference-floor, collection-ceiling, scan-degraded, extraction-floor); see counts_floor above for why. An unknown shape refuses loudly with the whole vocabulary; SYM takes the shared selector grammar (name, file:name, canonical id), FILE is a path substring
+
+**Caveats (stated by the binary):**
+
+- A graph or reference ZERO can never refute — it yields not-established with limit= naming the floor (call-graph-floor, reference-floor, collection-ceiling, scan-degraded, extraction-floor);
+- see counts_floor above for why.
+- An unknown shape refuses loudly with the whole vocabulary;
 
 ### `--mentions=SYM`
 
