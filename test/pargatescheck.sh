@@ -44,6 +44,10 @@ grep -qE '"cppbenchcheck\.sh":\s*1200' "$PARGATES" \
     && ok "static: cppbenchcheck.sh has an honest 1200s budget" \
     || no "static: cppbenchcheck.sh missing (or wrong) from GATE_BUDGET_SEC"
 
+grep -qE '"bodydialectcheck\.sh":\s*900' "$PARGATES" \
+    && ok "static: bodydialectcheck.sh has an honest 900s budget (T3 body assembly outgrew the flat cap on plain CI builds)" \
+    || no "static: bodydialectcheck.sh missing (or wrong) from GATE_BUDGET_SEC"
+
 grep -qE '"regexbombcheck\.sh":\s*1200' "$PARGATES" \
     && ok "static: regexbombcheck.sh has an honest 1200s budget" \
     || no "static: regexbombcheck.sh missing (or wrong) from GATE_BUDGET_SEC"
