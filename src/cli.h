@@ -114,6 +114,7 @@ struct Config
     bool             noMentionBoost = false;                // --no-mention-boost (with --for): disable the B8 query-mention anchor — by default, files / dotted modules / Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1 competitor-win bucket; bench/headtohead). Inert when the text names nothing indexed (byte-identical). Env RIPWIRE_NO_MENTION=1 disables everywhere (incl. the MCP `for` verb).
     bool             cochangeBoost = false;                 // --cochange-boost (with --for): OPT-IN, EXPERIMENTAL (the --anchor precedent) — the B3 co-change prior: files that historically change WITH the top-ranked files (git co-change, last 500 commits, support >= 3) get a small bounded score boost into the lower bundle; the top seeds can never be displaced. Honest numbers (B3 held-out record): train multi-file strict@10 +6.4pp but held-out +0.0pp (n=55) at warm p50 +19% — did NOT confirm on the Python LocBench corpus; default stays OFF pending a large-C++-corpus history eval. Env RIPWIRE_COCHANGE=1 enables everywhere (incl. the MCP `for` verb, which has no per-call flags).
     bool             noDocMention = false;                  // --no-doc-mention (with --for): disable the doc-mention surfacing — by default, a doc that names one of the task's top-resolved symbols in a `backtick` (the g.mentions edges `--mentions=SYM` already exposes) is lifted into the bundle, strictly below that symbol's own score. Inert when nothing resolved has a mentioning doc (byte-identical). Route-agnostic (applies under --no-route too). Env RIPWIRE_NO_DOC_MENTION=1 disables everywhere (incl. the MCP `for`/`pack_task` verbs).
+    bool             signaturesOnly = false;                // --signatures-only (with --for): opt OUT of the T3 terminal-by-default bundle — no auto <bodies> section, no bundle="auto" disclosure; restores the pre-T3 signatures-only lens byte-identically. Contradicts --detail=N (the explicit body knob), refused together. Pre-registered: docs/EVALS.md §4, T3 round.
     std::string_view legoType;                             // --lego=TYPE: the interface→impls "Lego" view for ONE named interface/base (signature + method contract + every implementor, own-language only). file:name disambiguates a same-named type across languages.
     std::string_view exemplar;                             // --exemplar=TASK|KIND (Q7): the repo's best-in-class instance of what you're about to write (by ROLE, not text similarity). A plain TASK string infers KIND from the top match; a KIND token selects directly.
     std::string_view recall;                               // --recall=TASK: retrieve the most relevant DOCS (memory/notes) + emit their full bodies
@@ -716,7 +717,16 @@ inline void printUsage( std::FILE* out ) noexcept
         // the last place the dead spelling survived, and a reader grepping their bundle for it finds nothing.
         "                               ~7.5KB default payload budget (tail entries trim first; <sigs capped=\"1\"> marks\n"
         "                               it) — an explicit --token-budget=N overrides the default at the conservative byte rate\n"
-        "                               (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens\n"
+        "                               (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens.\n"
+        "                               TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride\n"
+        "                               inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance —\n"
+        "                               whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx>\n"
+        "                               root discloses it: bundle=\"auto\" bodies=\"N\" (bodies=\"0\" reason=\"budget\" when none fit).\n"
+        "                               An explicit --token-budget=N is a hard ceiling: bodies take only what the signature bundle\n"
+        "                               left over, and the signatures themselves are unchanged either way\n"
+        "    --signatures-only          (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"
+        "                               attribute — the signatures-only lens exactly as before. Contradicts --detail=N (refused\n"
+        "                               together); --detail=N remains the explicit body knob and supersedes the automatic pick\n"
         "    --no-route                 (with --for/--query) force plain subtoken+body BM25. Routing is now the DEFAULT: a deterministic,\n"
         "                               confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier\n"
         "                               syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the\n"
@@ -1779,6 +1789,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--no-mention-boost",   &Config::noMentionBoost     },
     { "--cochange-boost",     &Config::cochangeBoost      },
     { "--no-doc-mention",     &Config::noDocMention       },
+    { "--signatures-only",    &Config::signaturesOnly     },   // T3 opt-out: the pre-terminal signatures-only --for bundle
 
     // graph surface
     { "--external-surface",   &Config::externalSurface    },
@@ -2063,7 +2074,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms       = 172;  // +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint)
+inline constexpr std::size_t kTotalFlagArms       = 173;  // +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2903,6 +2914,21 @@ inline void validateConfig( Config& c ) noexcept
     if( c.noDocMention && c.forTask.empty() )
     {
         std::fprintf( stderr, "ripwire: --no-doc-mention modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-doc-mention)\n" );
+        c.ok = false;
+    }
+
+    // --signatures-only opts out of --for's terminal-by-default bundle (T3); alone it does nothing — refuse loudly.
+    if( c.signaturesOnly && c.forTask.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --signatures-only modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --signatures-only)\n" );
+        c.ok = false;
+    }
+
+    // --signatures-only ("no bodies") and --detail=N ("these bodies, explicitly") contradict each other —
+    // honoring one silently drops the other's effect with no tell, so the pair is refused loudly instead.
+    if( c.signaturesOnly && c.detail > 0 )
+    {
+        std::fprintf( stderr, "ripwire: --signatures-only contradicts --detail=N — pass one (--detail=N is the explicit body knob; --signatures-only means no bodies at all)\n" );
         c.ok = false;
     }
 

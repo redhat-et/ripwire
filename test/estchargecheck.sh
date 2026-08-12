@@ -476,11 +476,37 @@ print( f"{len(d)} {est} {expected}" )
 sys.exit( 0 if est == expected else 1 )
 PY
 }
-if out="$( selfconsistent "$TMP/f_for.out" )"; then
-    ok "#11 A9/A10 --for: est_tokens is self-consistent — bytes/est/expected = $out (its own attributes are charged)"
+# T3 (contract update, same wave): the bare --for is terminal by default and carries auto BODIES at the
+# 3.80 body rate, so the markup-only 2.50 identity now lives on the --signatures-only shape…
+"$BIN" src --for="$FOR_TASK" --signatures-only --no-cache >"$TMP/f_sigonly.out" 2>/dev/null
+if out="$( selfconsistent "$TMP/f_sigonly.out" )"; then
+    ok "#11 A9/A10 --for --signatures-only: est_tokens is self-consistent — bytes/est/expected = $out (its own attributes are charged)"
 else
-    ok_out="$( selfconsistent "$TMP/f_for.out" 2>/dev/null || true )"
-    no "#11 A9/A10 --for: est_tokens != round(bytes/2.50) — bytes/est/expected = ${ok_out:-unreadable} (a header splice is outside the sum)"
+    ok_out="$( selfconsistent "$TMP/f_sigonly.out" 2>/dev/null || true )"
+    no "#11 A9/A10 --for --signatures-only: est_tokens != round(bytes/2.50) — bytes/est/expected = ${ok_out:-unreadable} (a header splice is outside the sum)"
+fi
+# …and the DEFAULT bundle must satisfy the MIXED-rate identity exactly: markup at 2.50 plus the auto
+# <bodies> span at kBytesPerTokenBody=3.80, each rounded the way the emitter rounds them (a wrong-rate or
+# uncharged auto section cannot pass this identity).
+mixedconsistent(){ python3 - "$1" <<'PY'
+import sys, re
+d = open( sys.argv[1], 'rb' ).read()
+m = re.search( rb'est_tokens="(\d+)"', d )
+if not m: sys.exit( 2 )
+est = int( m.group( 1 ) )
+a = d.find( b'<bodies ' ); b = d.find( b'</bodies>' )
+if a < 0 or b < 0: sys.exit( 3 )                       # arm requires the auto section to be present
+span     = ( b + 9 ) - a
+expected = int( ( len( d ) - span ) / 2.50 + 0.5 ) + int( span / 3.80 + 0.5 )
+print( f"{len(d)} {span} {est} {expected}" )
+sys.exit( 0 if est == expected else 1 )
+PY
+}
+if out="$( mixedconsistent "$TMP/f_for.out" )"; then
+    ok "#11 A9/A10 --for (auto bodies): est_tokens matches markup@2.50 + bodies@3.80 — bytes/span/est/expected = $out"
+else
+    mix_out="$( mixedconsistent "$TMP/f_for.out" 2>/dev/null || true )"
+    no "#11 A9/A10 --for (auto bodies): mixed-rate identity broken — bytes/span/est/expected = ${mix_out:-unreadable} (the auto section is mischarged)"
 fi
 # the weak="1" path: a nonsense query trips the weak-score threshold, so the 9-byte attribute is present and
 # the same identity must still hold with it in the document.
