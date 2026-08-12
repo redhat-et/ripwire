@@ -1,0 +1,197 @@
+{
+  "n_single": 203,
+  "n_multi": 51,
+  "control_mismatch": [],
+  "res": {
+    "max": {
+      "single": 144,
+      "multi": 11,
+      "gains": [],
+      "losses": [],
+      "sgains": [],
+      "slosses": []
+    },
+    "sum": {
+      "single": 81,
+      "multi": 8,
+      "gains": [
+        "UXARRAY__uxarray-1117",
+        "NatLibFi__Annif-610"
+      ],
+      "losses": [
+        "vllm-project__vllm-6050",
+        "Bears-R-Us__arkouda-1969",
+        "home-assistant__core-15182",
+        "UXARRAY__uxarray-1151",
+        "spacetelescope__stcal-337"
+      ],
+      "sgains": [
+        "huggingface__optimum-benchmark-266",
+        "prowler-cloud__prowler-5930",
+        "jax-ml__jax-24823",
+        "jax-ml__jax-20862",
+        "yt-dlp__yt-dlp-11734",
+        "yt-dlp__yt-dlp-11711",
+        "yt-dlp__yt-dlp-11667",
+        "yt-dlp__yt-dlp-11645"
+      ],
+      "slosses": [
+        "pypa__pip-13085",
+        "matplotlib__matplotlib-25887",
+        "vllm-project__vllm-9390",
+        "numba__numba-9757",
+        "plone__plone.restapi-859",
+        "rucio__rucio-4930",
+        "PrefectHQ__prefect-16369",
+        "PrefectHQ__prefect-16145",
+        "PrefectHQ__prefect-16117",
+        "PrefectHQ__prefect-15909",
+        "PrefectHQ__prefect-15468",
+        "PrefectHQ__prefect-14693",
+        "PrefectHQ__prefect-14608",
+        "PrefectHQ__prefect-14259",
+        "PrefectHQ__prefect-13756",
+        "PrefectHQ__prefect-12410",
+        "PrefectHQ__prefect-12045",
+        "getmoto__moto-8365",
+        "getmoto__moto-8342",
+        "getmoto__moto-8316",
+        "ray-project__ray-48957",
+        "ray-project__ray-48907",
+        "ray-project__ray-48623",
+        "spotify__luigi-3308",
+        "bridgecrewio__checkov-6895",
+        "stanfordnlp__dspy-1741",
+        "Qiskit__qiskit-12214",
+        "scipy__scipy-21918",
+        "scipy__scipy-21912",
+        "prowler-cloud__prowler-6128",
+        "prowler-cloud__prowler-6119",
+        "prowler-cloud__prowler-6108",
+        "prowler-cloud__prowler-6004",
+        "prowler-cloud__prowler-5933",
+        "modin-project__modin-7189",
+        "iterative__dvc-10641",
+        "jax-ml__jax-25511",
+        "jax-ml__jax-24492",
+        "jax-ml__jax-23020",
+        "jax-ml__jax-19909",
+        "sqlfluff__sqlfluff-6554",
+        "sqlfluff__sqlfluff-6312",
+        "sqlfluff__sqlfluff-5805",
+        "instructor-ai__instructor-1254",
+        "prowler-cloud__prowler-6157",
+        "prowler-cloud__prowler-5811",
+        "vllm-project__vllm-11138",
+        "vllm-project__vllm-9974",
+        "scipy__scipy-22106",
+        "scipy__scipy-22052",
+        "jax-ml__jax-24717",
+        "phidatahq__phidata-1589",
+        "phidatahq__phidata-1563",
+        "bridgecrewio__checkov-6826",
+        "spotify__luigi-3324",
+        "ray-project__ray-49071",
+        "ray-project__ray-48891",
+        "ray-project__ray-48793",
+        "ray-project__ray-48790",
+        "ray-project__ray-48786",
+        "ray-project__ray-48756",
+        "flet-dev__flet-4554",
+        "flet-dev__flet-4384",
+        "flet-dev__flet-4340",
+        "explodinggradients__ragas-1627",
+        "Lightning-AI__pytorch-lightning-20420",
+        "wandb__wandb-9011",
+        "wandb__wandb-8931",
+        "fortra__impacket-1858",
+        "langchain-ai__langgraph-2571",
+        "vllm-project__vllm-11275"
+      ]
+    },
+    "top2sum": {
+      "single": 140,
+      "multi": 11,
+      "gains": [],
+      "losses": [],
+      "sgains": [
+        "bridgecrewio__checkov-6828",
+        "flet-dev__flet-4314"
+      ],
+      "slosses": [
+        "Qiskit__qiskit-12214",
+        "prowler-cloud__prowler-5933",
+        "yt-dlp__yt-dlp-11827",
+        "yt-dlp__yt-dlp-11819",
+        "ray-project__ray-48891",
+        "flet-dev__flet-4384"
+      ]
+    },
+    "top3sum": {
+      "single": 142,
+      "multi": 11,
+      "gains": [
+        "UXARRAY__uxarray-1117"
+      ],
+      "losses": [
+        "UXARRAY__uxarray-1151"
+      ],
+      "sgains": [
+        "PrefectHQ__prefect-16328",
+        "bridgecrewio__checkov-6828",
+        "vllm-project__vllm-11073",
+        "flet-dev__flet-4314"
+      ],
+      "slosses": [
+        "Qiskit__qiskit-12214",
+        "prowler-cloud__prowler-5933",
+        "jax-ml__jax-24492",
+        "phidatahq__phidata-1589",
+        "ray-project__ray-48891",
+        "flet-dev__flet-4384"
+      ]
+    },
+    "cw": {
+      "single": 128,
+      "multi": 9,
+      "gains": [
+        "kedro-org__kedro-4367",
+        "NatLibFi__Annif-610"
+      ],
+      "losses": [
+        "Bears-R-Us__arkouda-1969",
+        "home-assistant__core-15182",
+        "UXARRAY__uxarray-1151",
+        "spacetelescope__stcal-337"
+      ],
+      "sgains": [
+        "PrefectHQ__prefect-16328",
+        "py-pdf__pypdf-2644",
+        "jax-ml__jax-20862",
+        "prowler-cloud__prowler-5961"
+      ],
+      "slosses": [
+        "pypa__pip-13085",
+        "getmoto__moto-8316",
+        "ray-project__ray-48957",
+        "spotify__luigi-3308",
+        "Qiskit__qiskit-12214",
+        "prowler-cloud__prowler-6128",
+        "prowler-cloud__prowler-5933",
+        "iterative__dvc-10641",
+        "jax-ml__jax-24492",
+        "instructor-ai__instructor-1254",
+        "prowler-cloud__prowler-6157",
+        "jax-ml__jax-24717",
+        "phidatahq__phidata-1563",
+        "bridgecrewio__checkov-6826",
+        "ray-project__ray-48891",
+        "ray-project__ray-48793",
+        "flet-dev__flet-4554",
+        "Lightning-AI__pytorch-lightning-20420",
+        "fortra__impacket-1858",
+        "langchain-ai__langgraph-2571"
+      ]
+    }
+  }
+}
