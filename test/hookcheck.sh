@@ -539,7 +539,13 @@ run_meter "$L15" "$( bashjson meter15 'git diff HEAD' )" "$TM15" >/dev/null 2>&1
 
 # ── M16-M17: ambiguity is logged, out-of-scope is not a row ─────────────────────────────────────────
 TM16="$TMP/tm16"; mkdir -p "$TM16"; L16="$TMP/m16.jsonl"
-run_meter "$L16" "$( bashjson meter16 'for f in *.c; do grep needle $f; done' )" "$TM16" >/dev/null 2>&1
+# The fixture changed at S2c (2026-08-12) and the reason is the arm's whole point. It used to be
+# `for f in *.c; do grep needle $f; done`, which the segment walk now READS — the loop body is a
+# grep and calling it ambiguous was the classifier's limitation, not the line's. What must still land
+# as `unclassified` is a line whose retrieval is somewhere the walk deliberately does not go: inside
+# a command substitution. Keeping the retired fixture would have gated a bug as if it were a
+# contract.
+run_meter "$L16" "$( bashjson meter16 'echo \"count: $(grep -c needle f.txt)\"' )" "$TM16" >/dev/null 2>&1
 [ "$( meterrowget "$L16" 1 class )" = "unclassified" ] \
     && ok "M16 meter: an ambiguous search line is logged as unclassified, never silently dropped" \
     || no "M16 meter: ambiguous line classified as [$( meterrowget "$L16" 1 class )], expected unclassified"
@@ -1095,6 +1101,243 @@ if [ -f "$EVALSDOC" ]; then
     grep -Fq 'Nudge sweep-escalation efficacy' "$EVALSDOC" && grep -Fq 'post_sweep' "$EVALSDOC" \
         && ok "C3b docs: EVALS.md carries the pre-registered efficacy readout for the escalation" \
         || no "C3b docs: EVALS.md has no sweep-escalation registration — the verdict is unregistered"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (12b) THE CLASSIFIER-GAP ROUND, and the ARM CONTRACT  (Track B §S2c, 2026-08-12)
+#
+# WHY THIS SECTION EXISTS. docs/EVALS.md §4 registers the sweep-escalation readout with a secondary
+# condition it can fail on: the `unclassified` share must stay under 15%, or the readout was taken
+# with a drifting instrument. On the post-isolation-deploy window it was running at roughly a third
+# of all rows — the readout was compromised before it could be read. Mining those rows' `detail`
+# fields found three structural gaps and one missing class, each pinned below by the shape that
+# produced it:
+#
+#   C4  THE FIRST WORD IS NOT THE COMMAND. `echo "=== x ==="; grep -n E1 f`, `mkdir -p $D; ls -R $D`,
+#       `git reset --soft X && ./build/ripwire . --quality-delta` — the classifier read word one and
+#       gave up. The last of those is the same undercount-the-numerator failure the v1->v2 `cd` fix
+#       was about, one separator further along.
+#   C5  A NEWLINE IS A SEPARATOR, NOT A SPACE. The un-escape substituted a space, gluing a multi-line
+#       command into one unsplittable segment.
+#   C6  THE HEAD DOES NOT ALWAYS JUDGE SEGMENT ONE. The prefix strip eats whole leading segments, so
+#       a walk that skips a fixed count re-judges the segment the head already saw and stops there.
+#   C7  PIPELINE STAGES ARE NOT COMMANDS THE AGENT CHOSE. `… | head -40` pages another command's
+#       output; counting it as a native read inflates the rate's denominator with pagers.
+#   C8  A PATH COMPONENT IS NOT A COMMAND WORD. The vocabulary scan fired on `ripwire` inside
+#       `/opt/homebrew/share/ripwire/hooks/…`.
+#   C9  AN OPAQUE SCRIPT IS NOT A MISSING RULE. `unclassified` means "this table needs a rule" and is
+#       read as a bug report; `python3 -c …` needs no rule, it needs a name — `script-run`.
+#   C10 `cat > f` IS A WRITE. And a heredoc's body is not a command sequence.
+#
+# A1-A4 are a different bug in the same file, reproduced live by the E1 lane: THE DORMANT A/B TOGGLE
+# WAS BROKEN IN EXACTLY THE CONFIGURATION THAT WILL USE IT. `meter_init` resolved the arm AFTER the
+# "no log destination" early return, so a control-arm run with no named log kept the `treatment`
+# default and was nudged anyway; and the SessionStart primer — ~1.6 KB, the largest thing this hook
+# ever says — never consulted the arm at all. Either one would have made the first real A/B measure
+# the nudge it was supposed to be withholding. A control arm that silently does not control is worse
+# than none, because the data it produces looks valid.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# `@@` separates fixture from expectation below, because these fixtures contain `|` on purpose.
+clscase()
+{
+    # clscase LOG TMPDIR INDEX COMMAND -> classifies one line into LOG, prints nothing
+    sweep_run "$1" "$2" "$( bashjson "w_$3" "$( printf '%s' "$4" | sed 's/\\/\\\\/g; s/"/\\"/g' )" )" >/dev/null 2>&1
+}
+
+# ── C4: the SEGMENT WALK. The command is in a later sequenced segment than the first. ───────────────
+TC4="$TMP/tw1"; mkdir -p "$TC4"; LC4="$TMP/w1.jsonl"
+C4BAD=""
+i=0
+for pair in 'echo "=== docs ==="; grep -n E1 PLAN.md@@grep' \
+            'mkdir -p /tmp/d; ls -R /tmp/d@@find' \
+            'D=/tmp/d; cd /tmp/d && cat notes.txt@@read' \
+            'git status --porcelain && git diff --stat@@git-diff' \
+            'git fetch origin; git log --oneline -3@@git-log' \
+            'git reset -q --soft HEAD~1 && ./build/ripwire . --quality-delta@@ripwire-cli' \
+            'bash test/hookcheck.sh > /tmp/hc.out; grep -E "^  FAIL" /tmp/hc.out@@grep' \
+            'mkdir -p /tmp/d ; cd /tmp/d ; grep -rn needle .@@grep' \
+            'for g in acheck bcheck; do bash test/$g.sh; done@@gate-run' \
+            'cmake --build build -j 8 && ls -la build@@build'; do
+    c="${pair%%@@*}"; want="${pair#*@@}"; i=$(( i + 1 ))
+    clscase "$LC4" "$TC4" "$i" "$c"
+    got="$( meterrowget "$LC4" "$i" class )"
+    [ "$got" = "$want" ] || C4BAD="$C4BAD [$c -> $got, want $want]"
+done
+[ -z "$C4BAD" ] \
+    && ok "C4 classifier: the segment walk reads the command out of a later ;/&&/|| segment" \
+    || no "C4 classifier: misclassified:$C4BAD"
+
+# ── C5: a NEWLINE is a command separator. The multi-line worktree idiom, end to end. ────────────────
+TC5="$TMP/tw2"; mkdir -p "$TC5"; LC5="$TMP/w2.jsonl"
+printf '%s' '{"session_id":"w2case","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"cd /w\nfor g in acheck bcheck\ndo\n  bash test/$g.sh\ndone"}}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LC5" PATH="$WITH_RIPWIRE" TMPDIR="$TC5" bash "$HOOK" >/dev/null 2>&1
+[ "$( meterrowget "$LC5" 1 class )" = "gate-run" ] \
+    && ok "C5 classifier: a multi-line loop classifies by its BODY (a newline reads as a separator)" \
+    || no "C5 classifier: multi-line loop classified as [$( meterrowget "$LC5" 1 class )], want gate-run"
+
+# ── C6: the walk must skip the segment the HEAD judged — not a fixed count of segments ──────────────
+# `cd /w &&` is eaten by the prefix strip, so the head's verdict is about segment TWO. A walk that
+# blindly skipped segment one would re-judge `bash -n …`, return script-run, and never see the
+# ripwire call — silently undercounting the numerator, this instrument's worst failure mode.
+TC6="$TMP/tw3"; mkdir -p "$TC6"; LC6="$TMP/w3.jsonl"
+clscase "$LC6" "$TC6" 1 'cd /w && bash -n hooks/x.sh && ./build/ripwire . --for=y'
+[ "$( meterrowget "$LC6" 1 class )" = "ripwire-cli" ] \
+    && ok "C6 classifier: the walk resumes AFTER the head's segment, so a later ripwire call is seen" \
+    || no "C6 classifier: got [$( meterrowget "$LC6" 1 class )], want ripwire-cli"
+
+# ── C7: PIPELINE stages are not walked, and pagers are not retrieval ────────────────────────────────
+# The pair is the point: `| grep` keeps its evidence (unclassified, per C2c) while `| head` does not
+# manufacture a native read. Both errors bias the substitution rate, in opposite directions.
+TC7="$TMP/tw4"; mkdir -p "$TC7"; LC7="$TMP/w4.jsonl"
+C7BAD=""
+i=0
+for pair in 'ls docs/ | head -40@@shell-misc' \
+            'ls test | grep -i doccommand@@unclassified' \
+            'ls -la /tmp/d 2>&1 | head; wc -l /tmp/x@@shell-misc' \
+            'cat src/foo.cpp | head -40@@read'; do
+    c="${pair%%@@*}"; want="${pair#*@@}"; i=$(( i + 1 ))
+    clscase "$LC7" "$TC7" "$i" "$c"
+    got="$( meterrowget "$LC7" "$i" class )"
+    [ "$got" = "$want" ] || C7BAD="$C7BAD [$c -> $got, want $want]"
+done
+[ -z "$C7BAD" ] \
+    && ok "C7 classifier: a piped pager is not a read, and a piped grep still keeps its evidence" \
+    || no "C7 classifier: misclassified:$C7BAD"
+
+# ── C8: a `/` after the word means a PATH COMPONENT, not an invocation ──────────────────────────────
+TC8="$TMP/tw5"; mkdir -p "$TC8"; LC8="$TMP/w5.jsonl"
+C8BAD=""
+i=0
+for pair in 'stat -f %m /opt/homebrew/share/ripwire/hooks/x.sh@@shell-misc' \
+            'diff -q /opt/homebrew/share/ripwire/hooks/x.sh hooks/x.sh@@shell-misc' \
+            'xargs grep needle < filelist@@unclassified'; do
+    c="${pair%%@@*}"; want="${pair#*@@}"; i=$(( i + 1 ))
+    clscase "$LC8" "$TC8" "$i" "$c"
+    got="$( meterrowget "$LC8" "$i" class )"
+    [ "$got" = "$want" ] || C8BAD="$C8BAD [$c -> $got, want $want]"
+done
+[ -z "$C8BAD" ] \
+    && ok "C8 classifier: a directory named ripwire is not a ripwire call; xargs grep still is a grep" \
+    || no "C8 classifier: misclassified:$C8BAD"
+
+# ── C9: `script-run` — an opaque program gets a NAME, and its text is not walked ────────────────────
+TC9="$TMP/tw6"; mkdir -p "$TC9"; LC9="$TMP/w6.jsonl"
+C9BAD=""
+i=0
+for pair in 'python3 -c "import json; print(1)"@@script-run' \
+            'python3 bench/substitution_scrub.py /tmp/log.jsonl@@script-run' \
+            'bash -n hooks/x.sh@@script-run' \
+            'node -e "console.log(1)"@@script-run' \
+            'python3 test/pargates.py . ./build/ripwire -j 6@@gate-run'; do
+    c="${pair%%@@*}"; want="${pair#*@@}"; i=$(( i + 1 ))
+    clscase "$LC9" "$TC9" "$i" "$c"
+    got="$( meterrowget "$LC9" "$i" class )"
+    [ "$got" = "$want" ] || C9BAD="$C9BAD [$c -> $got, want $want]"
+done
+[ -z "$C9BAD" ] && [ "$( meterrowget "$LC9" 1 family )" = "other" ] \
+    && ok "C9 classifier: script-run names the opaque program, family other (never in the rate)" \
+    || no "C9 classifier: misclassified:$C9BAD family=[$( meterrowget "$LC9" 1 family )]"
+# an INLINE program's own text is not a command sequence: a `;` inside it must not be walked
+TC9B="$TMP/tw6b"; mkdir -p "$TC9B"; LC9B="$TMP/w6b.jsonl"
+clscase "$LC9B" "$TC9B" 1 'python3 -c "import os; cat = 1; print(cat)"'
+[ "$( meterrowget "$LC9B" 1 class )" = "script-run" ] \
+    && ok "C9b classifier: the walk does not descend into an inline program and read its text as shell" \
+    || no "C9b classifier: inline program classified as [$( meterrowget "$LC9B" 1 class )], want script-run"
+# and like build, a script-run is counted but never nudged or escalated
+TC9C="$TMP/tw6c"; mkdir -p "$TC9C"; LC9C="$TMP/w6c.jsonl"
+C9CBAD=""
+for i in 1 2 3 4; do
+    O="$( sweep_run "$LC9C" "$TC9C" "$( bashjson scriptsweep 'python3 -c \"print(1)\"' )" )"
+    [ -z "$O" ] || C9CBAD="$C9CBAD [call$i fired]"
+done
+[ -z "$C9CBAD" ] && [ "$( meterrows "$LC9C" )" = "4" ] \
+    && ok "C9c classifier: four script runs are counted and never nudged or escalated" \
+    || no "C9c classifier: script-run nudged$C9CBAD (rows=$( meterrows "$LC9C" ))"
+
+# ── C10: `cat >` is a WRITE, and a heredoc body is not a command sequence ────────────────────────────
+TC10="$TMP/tw7"; mkdir -p "$TC10"; LC10="$TMP/w7.jsonl"
+C10BAD=""
+i=0
+for pair in 'cat > /tmp/msg.txt@@shell-misc' \
+            'cat /tmp/msg.txt@@read' \
+            'git add -A && cat > /tmp/msg.txt <<EOF ; fix(x): grep the thing ; EOF@@git-misc'; do
+    c="${pair%%@@*}"; want="${pair#*@@}"; i=$(( i + 1 ))
+    clscase "$LC10" "$TC10" "$i" "$c"
+    got="$( meterrowget "$LC10" "$i" class )"
+    [ "$got" = "$want" ] || C10BAD="$C10BAD [$c -> $got, want $want]"
+done
+[ -z "$C10BAD" ] \
+    && ok "C10 classifier: a redirect makes it a write, and a heredoc body is never read as commands" \
+    || no "C10 classifier: misclassified:$C10BAD"
+
+# ── A1-A4: THE ARM CONTRACT. The toggle must work in the configuration that will use it. ────────────
+# A1 and A3 are the two live bugs. A1 asserts the ONE configuration a real control arm runs in — the
+# arm named, the fixture guard on, no destination named — because that is exactly the configuration
+# in which it silently did the opposite of the documented thing.
+TA1="$TMP/ta1"; mkdir -p "$TA1"
+ARMHOME="$TMP/armhome"; mkdir -p "$ARMHOME"
+OUTA1="$( printf '%s' "$( grepjson armcase needle )" \
+    | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME HOME="$ARMHOME" RIPWIRE_METER_FIXTURE=1 \
+        RIPWIRE_METER_ARM=control PATH="$WITH_RIPWIRE" TMPDIR="$TA1" bash "$HOOK" )"; RCA1=$?
+[ "$RCA1" -eq 0 ] && [ -z "$OUTA1" ] \
+    && ok "A1 arm: the control arm is silent even with no log destination (the arm resolves first)" \
+    || no "A1 arm: control arm emitted ${#OUTA1} byte(s), exit=$RCA1 — meter_init resolved the arm too late"
+
+TA2="$TMP/ta2"; mkdir -p "$TA2"; LA2="$TMP/a2.jsonl"
+OUTA2="$( sweep_run "$LA2" "$TA2" "$( grepjson armlog needle )" RIPWIRE_METER_ARM=control )"
+TA2B="$TMP/ta2b"; mkdir -p "$TA2B"; LA2B="$TMP/a2b.jsonl"
+OUTA2B="$( sweep_run "$LA2B" "$TA2B" "$( grepjson armlogt needle )" )"
+[ -z "$OUTA2" ] && [ "$( meterrowget "$LA2" 1 arm )" = "control" ] && [ -n "$OUTA2B" ] \
+    && [ "$( meterrowget "$LA2B" 1 arm )" = "treatment" ] \
+    && ok "A2 arm: with a log named, control counts+records+stays silent and treatment still speaks" \
+    || no "A2 arm: control out=[${OUTA2:+set}] arm=[$( meterrowget "$LA2" 1 arm )]; treatment out=[${OUTA2B:+set}] arm=[$( meterrowget "$LA2B" 1 arm )]"
+
+# A3: the SessionStart primer is a nudge — by a wide margin the largest one — so the control arm does
+# not get it. A control arm silent all session that is then handed the whole manual at startup would
+# have made the first A/B measure the primer and call it the nudge.
+#
+# Both arms run against a stub whose `wrap` DOES emit the paste fence. The section's ordinary stub
+# prints one word, so the primer would be empty and A3 would pass on a hook that never consulted the
+# arm at all — the silence has to be attributable to the arm and to nothing else, which is what A4
+# then proves from the other side.
+WRAPBIN="$TMP/wrapbin"; mkdir -p "$WRAPBIN"
+{
+    printf '#!/bin/sh\n'
+    printf 'echo "# --- paste into CLAUDE.md ---"\n'
+    printf 'echo "ripwire: map before you read."\n'
+    printf 'echo "# --- end paste ---"\n'
+} >"$WRAPBIN/ripwire"
+chmod +x "$WRAPBIN/ripwire"
+WRAP_PATH="$WRAPBIN:$PATH"
+TA3="$TMP/ta3"; mkdir -p "$TA3"; LA3="$TMP/a3.jsonl"
+OUTA3="$( printf '%s' '{"session_id":"armss","cwd":"'"$REPO"'","source":"startup"}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LA3" RIPWIRE_METER_FIXTURE=1 RIPWIRE_METER_ARM=control \
+        PATH="$WRAP_PATH" TMPDIR="$TA3" bash "$HOOK" --session-start )"; RCA3=$?
+[ "$RCA3" -eq 0 ] && [ -z "$OUTA3" ] \
+    && ok "A3 arm: the SessionStart primer is suppressed in the control arm" \
+    || no "A3 arm: control-arm primer emitted ${#OUTA3} byte(s), exit=$RCA3"
+[ "$( meterrowget "$LA3" 1 class )" = "session-start" ] && [ "$( meterrowget "$LA3" 1 arm )" = "control" ] \
+    && ok "A3b arm: the control arm is still COUNTED — the session boundary row is written anyway" \
+    || no "A3b arm: control session-start row = [$( meterrowget "$LA3" 1 class )/$( meterrowget "$LA3" 1 arm )]"
+
+# A4: the positive control for A3. Suppressing the primer everywhere would pass A3 for the wrong reason.
+TA4="$TMP/ta4"; mkdir -p "$TA4"; LA4="$TMP/a4.jsonl"
+OUTA4="$( printf '%s' '{"session_id":"armsst","cwd":"'"$REPO"'","source":"startup"}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LA4" RIPWIRE_METER_FIXTURE=1 \
+        PATH="$WRAP_PATH" TMPDIR="$TA4" bash "$HOOK" --session-start )"
+[ -n "$OUTA4" ] && printf '%s' "$OUTA4" | is_valid_json \
+    && ok "A4 arm: the treatment arm still gets the SessionStart primer (A3's positive control)" \
+    || no "A4 arm: treatment primer was empty or invalid: [$OUTA4]"
+
+# ── C11: the docs carry the S2c contract ─────────────────────────────────────────────────────────────
+if [ -f "$SCHEMADOC" ]; then
+    C11MISS=""
+    for needle in 'script-run' 'segment' 'pipeline' 'path component'; do
+        grep -Fqi "$needle" "$SCHEMADOC" || C11MISS="$C11MISS $needle"
+    done
+    [ -z "$C11MISS" ] && ok "C11 docs: SUBSTITUTION_METER.md documents the walk, the pipeline rule and script-run" \
+        || no "C11 docs: SUBSTITUTION_METER.md is missing:$C11MISS"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
