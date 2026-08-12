@@ -51,6 +51,11 @@ highest-leverage, highest-risk files. For most "orient me" asks this one rung is
 **2. Task-relevant code** — `ripwire <dir> --for="<the task in your own words>"`
 Ranked signatures + doc-comments + cx/in metrics by relevance (matches names, docs, AND bodies — not just
 identifiers). This is the rung that answers "where's the code for X".
+**Terminal by default**: the bundle also serves the top-ranked symbols' FULL bodies inline (CDATA + callee
+signatures) under its budget — `bundle="auto" bodies="N"` on the root says how many. **Read those bodies
+here instead of opening the files the map named** — that follow-up read is the cost this default deletes.
+`bodies="0" reason="budget"` means none fit whole; `--signatures-only` opts out; `--detail=N` picks the
+body count explicitly.
 `--for` **auto-routes** (default, no flag needed): a query that *names a symbol* (`--for="buildGraph"`) gets
 name-exact BM25 (recall@1 ~99% vs ~77% generic) — **know the name, query it verbatim**; a conceptual phrase
 uses subtoken+body BM25 instead. The header prints which ranker fired; `--no-route` forces the plain ranker.

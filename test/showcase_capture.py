@@ -139,6 +139,7 @@ add(S1, f"{BIN} . --token-budget=100", "GATE form: exit 3 if the map's own est_t
 add(S1, f'{BIN} . --for="{_batchWord1} {_batchWord2} {_batchWord3} when a file content hash changes"', "The task lens: ranked signatures + quality metrics framed for the task.")   # §A10.9/V2-8: same split as BATCH — no contiguous source quote of the demo phrase
 add(S1, f'{BIN} . --for="rankGraphTeleport"', "Name-shaped query: the router picks name-exact BM25 (header says which/why).")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --no-route', "Same query with routing forced OFF (plain subtoken+body BM25) — contrast with the routed run.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --signatures-only', "T3 opt-out: the signatures-only lens (no auto bodies, no bundle=\"auto\" attribute) — contrast with the terminal default above.")
 add(S1, f'{BIN} . --for="tree-sitter parse of a source file" --adaptive', "Cut the result at the relevance cliff (Adaptive-k).")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25"', "Mention anchoring (default-on): a path and a Symbol literally named in the task get lifted; the header says what anchored.")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost', "Same task with the anchor disabled — the contrast the flag exists for.")
