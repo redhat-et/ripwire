@@ -47,9 +47,12 @@
 ; extends tree-sitter-c): file-scope `static const char* DEFAULT_HOSTS[] = { … }` tables and
 ; namespace-scope `inline constexpr int MAX_DEPTH = 12;`. Two scope wrappers because namespace
 ; (and extern "C") bodies are declaration_list, not translation_unit; class members are
-; field_declaration_list, so member fields never match either pattern. SCREAMING_SNAKE-gated in
-; ingest.cpp (constCaptureNeedsScreamingGate) — kCamelCase constants stay unindexed, matching the
-; house convention that ALL-CAPS marks a settings/config constant.
+; field_declaration_list, so member fields never match either pattern (they get their own capture
+; below, 2026-08-12). Gated in ingest.cpp (dropConstantCapture): SCREAMING_SNAKE keeps (the r3 q10
+; convention), and since the 2026-08-12 module-constant round a const/constexpr/constinit
+; type_qualifier on the declaration ALSO keeps, case-blind — the qualifier keyword is the evidence
+; (the Rust const_item rationale), which is what makes `constexpr std::uint32_t kParserVer = 61;`
+; findable by name. Mutable non-SCREAMING globals still drop.
 
 (translation_unit
   (declaration
@@ -70,6 +73,28 @@
         (array_declarator declarator: (identifier) @name)
         (pointer_declarator declarator: (array_declarator declarator: (identifier) @name))
       ])) @definition.constant)
+
+; ---- class-static constants (ripwire addition — the module-constant round, 2026-08-12) ----
+; `static constexpr int kMaxDepth = 3;` inside a class/struct/union body is a field_declaration
+; (NOT a declaration/init_declarator — in-class member initializers bind through the default_value
+; field), so the module-scope patterns above never see it: pre-fix NO class-static constant was
+; indexed, not even a SCREAMING one (probed 2026-08-12). This pattern is deliberately LOOSE — it
+; also matches every plain default-member-initializer (`int retries = 3;`) — because tags-pass
+; predicates never run (see the cast-keyword note below) and child ORDER between `static` and
+; `constexpr` is not fixed in source. The whole keep decision lives in ingest.cpp
+; (fieldConstantCaptureKept): keep iff the field carries BOTH a `static` storage_class_specifier
+; AND a const/constexpr/constinit type_qualifier — per-instance fields (default-initialized or
+; const non-static) drop. Bitfields bind through bitfield_clause, never default_value, and cannot
+; match. Class-scope variable templates sit under template_declaration, not directly in the
+; field_declaration_list, and are out of scope (disclosed, not captured).
+(field_declaration_list
+  (field_declaration
+    declarator: [
+      (field_identifier) @name
+      (pointer_declarator declarator: (field_identifier) @name)
+      (array_declarator declarator: (field_identifier) @name)
+    ]
+    default_value: (_)) @definition.constant)
 
 ; ---- CUDA memory-space module bindings (ripwire addition — the cudacheck §7b close-out) ----
 ; `__constant__ float rk_scaleTable[ 64 ];` carries NO initializer (host fills it via
