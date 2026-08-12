@@ -1182,18 +1182,67 @@ full one — "is gold inside the top-`maxLifted` of the candidate *ordering*" �
 train for free before a single cell runs, and whose 0/97 would have killed this round before the
 grid.
 
-Two shaped directions survive, each recorded here with its measured obstacle rather than as a plan:
-ordering the fired set by name-match specificity (matched-token IDF or name coverage) — but q07
-shows full-coverage favors generic short names like `View`; and **file-level evidence pooling**,
-which sidesteps per-symbol choice entirely and is the strongest hypothesis anyone has for the
-multi-file stratum. It has now been flagged as the leading candidate by three consecutive rounds and
-**remains UNSPENT — it is recorded as open headroom, not as scheduled work**, and no measurement in
-this document should be read as evidence for or against it.
+Two shaped directions survived this round's post-mortem: ordering the fired set by name-match
+specificity (matched-token IDF or name coverage) — but q07 shows full-coverage favors generic short
+names like `View`; and file-level evidence pooling. **CORRECTION (2026-08-11, same day this entry
+landed): the original text here called pooling "UNSPENT — open headroom". That was false when it was
+written.** Pooling had already been pre-registered, gridded, and **rejected on held-out at +0.00pp**
+five days earlier (2026-08-06, `bench/locbench/results/r5_pooling/gate_verdict.txt`), and its
+successor r6 (structural expansion) had already closed the stratum to ranking-side mechanisms the
+same evening (`r6_expansion/gate_verdict.txt`). Neither verdict had been carried into this document —
+this entry was written from the nameboost archive without checking whether its "surviving directions"
+had since been spent. Both rejections are now recorded in the two entries that follow.
 
 Evidence is archived, not deleted: branch `claude/loving-fermat-6e9614` (tip `ed952ed`) retains the
 pre-registration, the verdict table, the flip ledger, the two targeting-audit dumps, the per-cell
 train scores, the candidate header, and its red-first gate under
 `bench/locbench/results/r5_nameboost/`. None of it is on `main` and no default was flipped.
+
+**File-level evidence pooling does not lift the multi-file stratum — rejected on held-out at +0.00pp
+as a constrained mechanism (2026-08-06), and re-refuted as an unconstrained upper bound before it
+could be re-attempted (2026-08-11).** The constrained round (`bench/locbench/results/r5_pooling/`,
+registered 2026-08-06) implemented `poolScore(f) = Σ top-K symbol scores`, promote-only on the
+mention slot ladder, env-gated as `RIPWIRE_POOL` (scaffolding still on main in `src/filepool.h`,
+inert). Its identity control reproduced baseline exactly, two train cells advanced under its frozen
+rule, and the single permitted held-out run came back **+0.00pp on every stratum** — the entire train
+signal was ONE instance (`UXARRAY__uxarray-1117`). Its verdict also records a methodological defect
+adopted by everything after it: a ±2pp bar on a 43-instance stratum is below single-instance
+granularity, so **stratum thresholds must be stated in instances, floor ≥ 3**.
+
+The 2026-08-11 re-check (VT-2 round, `bench/locbench/results/vt2_pooling_freestat/`) exists because
+this document's stale "UNSPENT" line above nearly caused the idea to be re-attempted from scratch —
+the exact failure §5's "publish the negative results" is meant to prevent. Per the §7 rule the
+nameboost round earned, it computed the free end-to-end statistic FIRST: the full pooled FILE
+ordering (no ladder, no blend — the unconstrained best case any pooling mechanism could emit) from
+the complete routed `--for` scored candidate export, for a fixed family of pooling functions, on the
+A7 train split (n=254; single 203 / multi 51; baseline re-measured on the current binary at 61.0%
+overall, 70.9% single, 21.6% multi — drift from the recorded 61.81/70.73/24.49 explained by the
+resolver and noise-gate work since kParserVer 50, two instances migrated strata). The control
+(`max`, today's behavior) reproduced the recorded per-instance baseline on all 254 instances — then
+no candidate cleared, and most did active harm:
+
+| pooling fn | multi-file strict@10 (n=51) | single-file strict@10 (n=203) | multi net | single net |
+| --- | ---: | ---: | ---: | ---: |
+| `max` (control = shipped) | 11 (21.6%) | 144 (70.9%) | — | — |
+| `sum` (all positive members) | 8 (15.7%) | 81 (39.9%) | **−3** | **−63** |
+| `top2sum` | 11 (21.6%) | 140 (69.0%) | 0 | −4 |
+| `top3sum` | 11 (21.6%) | 142 (70.0%) | 0 | −2 |
+| `count-weighted` (max·(1+log₂(1+n))) | 9 (17.6%) | 128 (63.1%) | −2 | −16 |
+
+The pre-fixed bar (net ≥ +3 multi-file instances, ≤ 2 single-file losses) was never approached; no
+function nets even +1. `sum` is the instructive row: unbounded pooling makes file size the ranking
+signal and destroys the single-file stratum wholesale. And the only recurring multi-file "gain"
+(`sum`/`top3sum`) is `UXARRAY__uxarray-1117` — **the same single instance that laundered the
+constrained round's train advance**, now identified as such on a second instrument. Stage
+attribution, per the rule above: the failure is in the EVIDENCE, not the trigger and not the choice —
+pooling can only aggregate the query-derived per-symbol scores that already buried the sibling
+files, so it either moves nothing (`top2sum`/`top3sum`) or imports the file-size confound
+(`sum`/`cw`). This is the unconstrained confirmation of the constrained round's own diagnosis, and
+of the r6 closure: **the multi-file stratum is closed to ranking-side mechanisms** — five
+pre-registered rounds (anchorhop ×2, siblift, pooling, expansion) plus this upper-bound check, three
+seeds and three edges between them, all rejected. What remains open is candidate GENERATION (11 of
+22 decomposed held-out failures: the sibling never enters the candidate set), query understanding
+(4), and non-symbol gold (3) — different subsystems, recorded in `r6_expansion/gate_verdict.txt`.
 
 **Stripping question words out of prose queries does not fix prose-query recall.** The r7 loss-first
 round (2026-08-08, question sets committed in `bench/r7/`) measured natural-language queries at
